@@ -1,5 +1,4 @@
 #!/bin/bash
-set -xe
 
 # Set up environment
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
@@ -25,4 +24,4 @@ done
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
 xargs ${CLANG_TIDY} -j"$(nproc)" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
--header-filter=".*" -warnings-as-errors='*'
+-header-filter=".*" -quiet -warnings-as-errors='*'
