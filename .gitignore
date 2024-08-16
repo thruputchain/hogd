@@ -1,0 +1,12 @@
+build/**
+bcheck_gcc/**
+bcheck_llvm/**
+Testing/**
+*.d
+*.o
+*.a
+[._]*.sw[a-p]
+*~
+.cproject
+.project
+.vscode
