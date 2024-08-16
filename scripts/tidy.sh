@@ -1,10 +1,11 @@
 #!/bin/bash
+set -xe
 
 # Set up environment
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 ROOT_DIR=${SCRIPT_DIR}/..
-CODE_DIR=${ROOT_DIR}/hogd
-CLANG_TIDY=clang-tidy-18
+CODE_DIR=hogd
+CLANG_TIDY=run-clang-tidy-18.py
 BUILD_DIR=build
 
 print_usage() {
@@ -21,6 +22,7 @@ while getopts 'd:' flag; do
 done
 
 # Run clang-tidy
-find "${CODE_DIR}" -name '*.h' -o -name '*.cc' |\
-xargs ${CLANG_TIDY} -p ${ROOT_DIR}/${BUILD_DIR} -header-filter=".*"\
--extra-arg=-std=gnu++23 --use-color -config-file ${ROOT_DIR}/.clang-tidy -warnings-as-errors='*' 
+cd ${ROOT_DIR}
+find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
+xargs ${CLANG_TIDY} -j"$(nproc)" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
+-header-filter=".*" -warnings-as-errors='*'
