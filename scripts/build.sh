@@ -37,8 +37,15 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 ROOT_DIR=${SCRIPT_DIR}/../
 BUILD_DIR=${ROOT_DIR}/${BUILD_DIR}
 
+# Set nproc
+NPROC=$(nproc)
+#mac compabitibility
+if [ $? -ne 0 ]; then
+	NPROC=$(sysctl -n hw.ncpu)
+fi
+
 # Do the build
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" ..
-make -j "$(nproc)"
+make -j "$NPROC"
