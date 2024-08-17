@@ -14,12 +14,37 @@ namespace hogd {
 // function attributes
 #define ATTRIBUTE_NOINLINE __attribute__((noinline))
 
-// prefetching builtins
-#define prefetch0(x) __builtin_prefetch((x), 0, 3)
-#define prefetch1(x) __builtin_prefetch((x), 0, 2)
-#define prefetch2(x) __builtin_prefetch((x), 0, 1)
-#define prefetchnta(x) __builtin_prefetch((x), 0, 0)
-#define prefetch(x) prefetch0(x)
+//
+// Prefetching support
+//
+
+// Prefetch0 prefetches data into all levels of the cache heirarchy
+inline void Prefetch0(const void *addr)
+{
+  __builtin_prefetch(addr, 0, 3);
+}
+
+// Prefetch1 pretetches data into the L2 or deeper
+inline void Prefetch1(const void *addr)
+{
+  __builtin_prefetch(addr, 0, 2);
+}
+
+// Prefetch2 prefetches data into the L2 or deeper
+inline void Prefetch2(const void *addr)
+{
+  __builtin_prefetch(addr, 0, 1);
+}
+
+// PrefetchNTA prefetches data nontemporally
+inline void PrefetchNTA(const void *addr) {
+  __builtin_prefetch(addr, 0, 0);
+}
+
+// Prefetch prefetches data into the cache at the default level
+inline void Prefetch(const void *addr) {
+  Prefetch0(addr);
+}
 
 // Likely and unlikely (more general than the C++ ones, works with ternaries)
 #ifndef likely
