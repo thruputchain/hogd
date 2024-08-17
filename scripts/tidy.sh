@@ -20,8 +20,15 @@ while getopts 'd:' flag; do
     esac
 done
 
+# Set nproc
+NPROC=$(nproc)
+#mac compabitibility
+if [ $? -ne 0 ]; then
+	NPROC=$(sysctl -n hw.ncpu)
+fi
+
 # Run clang-tidy
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
-xargs ${CLANG_TIDY} -j"$(nproc)" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
+xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
 -header-filter=".*" -quiet -warnings-as-errors='*'
