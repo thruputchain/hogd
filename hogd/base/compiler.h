@@ -18,31 +18,38 @@ namespace hogd {
 // Prefetching support
 //
 
-// Prefetch0 prefetches data into all levels of the cache heirarchy
-inline void Prefetch0(const void *addr)
+// Prefetch0 prefetches data into all levels of the cache hierarchy
+inline void
+Prefetch0(const void *addr)
 {
   __builtin_prefetch(addr, 0, 3);
 }
 
 // Prefetch1 pretetches data into the L2 or deeper
-inline void Prefetch1(const void *addr)
+inline void
+Prefetch1(const void *addr)
 {
   __builtin_prefetch(addr, 0, 2);
 }
 
 // Prefetch2 prefetches data into the L2 or deeper
-inline void Prefetch2(const void *addr)
+inline void
+Prefetch2(const void *addr)
 {
   __builtin_prefetch(addr, 0, 1);
 }
 
 // PrefetchNTA prefetches data nontemporally
-inline void PrefetchNTA(const void *addr) {
+inline void
+PrefetchNTA(const void *addr)
+{
   __builtin_prefetch(addr, 0, 0);
 }
 
 // Prefetch prefetches data into the cache at the default level
-inline void Prefetch(const void *addr) {
+inline void
+Prefetch(const void *addr)
+{
   Prefetch0(addr);
 }
 
@@ -55,7 +62,7 @@ inline void Prefetch(const void *addr) {
 #endif
 
 // is_debug_build returns true if the build is in debug mode. This can be used
-// to conditionally enable additional debugging features in code.
+// to conditionally enable additional debugging features.
 constexpr bool
 is_debug_build()
 {

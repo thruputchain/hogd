@@ -4,6 +4,7 @@
 
 #include <bit>
 #include <cassert>
+#include <compare>
 #include <concepts>
 #include <type_traits>
 
@@ -72,25 +73,19 @@ template<std::unsigned_integral T> struct WrappingSequence {
     val += rhs;
     return *this;
   }
+
+  constexpr std::strong_ordering operator<=>(const WrappingSequence &rhs) const
+  {
+    auto cmp = static_cast<std::make_signed_t<T>>(val - rhs.val);
+    if (cmp < 0)
+      return std::strong_ordering::less;
+    if (cmp == 0)
+      return std::strong_ordering::equivalent;
+    return std::strong_ordering::greater;
+  }
   constexpr bool operator==(const WrappingSequence &rhs) const
   {
     return val == rhs.val;
-  }
-  constexpr bool operator<(const WrappingSequence &rhs) const
-  {
-    return static_cast<std::make_signed_t<T>>(val - rhs.val) < 0;
-  }
-  constexpr bool operator<=(const WrappingSequence &rhs) const
-  {
-    return static_cast<std::make_signed_t<T>>(val - rhs.val) <= 0;
-  }
-  constexpr bool operator>(const WrappingSequence &rhs) const
-  {
-    return static_cast<std::make_signed_t<T>>(rhs.val - val) < 0;
-  }
-  constexpr bool operator>=(const WrappingSequence &rhs) const
-  {
-    return static_cast<std::make_signed_t<T>>(rhs.val - val) <= 0;
   }
 };
 
