@@ -11,22 +11,22 @@ TEST(BitsTest, Alignment)
 {
   // cases without an aligned val
   uint64_t val = 0x1234;
-  EXPECT_EQ(AlignUp(val, 0x1000), 0x2000);
-  EXPECT_EQ(AlignDown(val, 0x1000), 0x1000);
-  EXPECT_EQ(AlignUp(val, 0x200), 0x1400);
-  EXPECT_EQ(AlignDown(val, 0x200), 0x1200);
+  EXPECT_EQ(align_up(val, 0x1000), 0x2000);
+  EXPECT_EQ(align_down(val, 0x1000), 0x1000);
+  EXPECT_EQ(align_up(val, 0x200), 0x1400);
+  EXPECT_EQ(align_down(val, 0x200), 0x1200);
 
   // cases with an already aligned val
   val = 0x1000;
-  EXPECT_EQ(AlignUp(val, 0x200), 0x1000);
-  EXPECT_EQ(AlignDown(val, 0x200), 0x1000);
+  EXPECT_EQ(align_up(val, 0x200), 0x1000);
+  EXPECT_EQ(align_down(val, 0x200), 0x1000);
 }
 
 TEST(BitsTest, DivideUp)
 {
-  EXPECT_EQ(DivideUp(10, 8), 2);
-  EXPECT_EQ(DivideUp(16, 8), 2);
-  EXPECT_EQ(DivideUp(17, 8), 3);
+  EXPECT_EQ(divide_up(10, 8), 2);
+  EXPECT_EQ(divide_up(16, 8), 2);
+  EXPECT_EQ(divide_up(17, 8), 3);
 }
 
 TEST(BitsTest, WrappingSequence)

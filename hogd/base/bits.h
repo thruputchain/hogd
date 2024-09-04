@@ -15,30 +15,30 @@ namespace hogd {
 
 inline constexpr size_t kBitsPerByte = 8;
 
-// AlignUp returns a value that is aligned upward to the nearest power of two.
+// align_up returns a value that is aligned upward to the nearest power of two.
 template<std::unsigned_integral T>
 constexpr T
-AlignUp(T val, size_t align) noexcept
+align_up(T val, size_t align) noexcept
 {
   ASSERT_CONSTEXPR(std::has_single_bit(align));
   return ((val + static_cast<T>(align) - 1) & ~static_cast<T>(align - 1));
 }
 
-// AlignDown returns a value that is aligned downward to the nearest power of
+// align_down returns a value that is aligned downward to the nearest power of
 // two.
 template<std::unsigned_integral T>
 constexpr T
-AlignDown(T val, size_t align) noexcept
+align_down(T val, size_t align) noexcept
 {
   ASSERT_CONSTEXPR(std::has_single_bit(align));
   return (val & ~static_cast<T>(align - 1));
 }
 
-// DivideUp performs division but rounds up to the next highest integer when
+// divide_up performs division but rounds up to the next highest integer when
 // there is a remainder.
 template<std::integral T>
 constexpr T
-DivideUp(T dividend, T divisor) noexcept
+divide_up(T dividend, T divisor) noexcept
 {
   return (dividend + divisor - 1) / divisor;
 }

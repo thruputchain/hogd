@@ -10,7 +10,7 @@ namespace hogd {
 TEST(StringTest, BasicSplitting)
 {
   std::string str("/foo/bar/baz/");
-  std::vector<std::string_view> tokens = Split(str, '/');
+  std::vector<std::string_view> tokens = split(str, '/');
   EXPECT_EQ(tokens.size(), 5);
   EXPECT_EQ(tokens[0], "");
   EXPECT_EQ(tokens[1], "foo");
@@ -19,7 +19,7 @@ TEST(StringTest, BasicSplitting)
   EXPECT_EQ(tokens[4], "");
 
   str = "foo.bar.baz";
-  tokens = Split(str, '.');
+  tokens = split(str, '.');
   EXPECT_EQ(tokens.size(), 3);
   EXPECT_EQ(tokens[0], "foo");
   EXPECT_EQ(tokens[1], "bar");
@@ -29,7 +29,7 @@ TEST(StringTest, BasicSplitting)
 TEST(StringTest, LimitSplitting)
 {
   std::string str("the quick brown fox jumped over the moon");
-  std::vector<std::string_view> tokens = Split(str, ' ', 3);
+  std::vector<std::string_view> tokens = split(str, ' ', 3);
   EXPECT_EQ(tokens.size(), 4);
   EXPECT_EQ(tokens[0], "the");
   EXPECT_EQ(tokens[1], "quick");
