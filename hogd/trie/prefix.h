@@ -95,7 +95,7 @@ public:
 
         // count number of trailing zeros, rounding down to nearest kBranchBits
         // units equivalent: word_offset -= (word_offset % kBranchBits);
-        uint16_t word_offset = __builtin_ctzll(local) & 0xFFFC;
+        uint16_t word_offset = std::countr_zero(local) & 0xFFFC;
 
         res = std::min<uint16_t>((i * 64) + word_offset, res);
         break;
