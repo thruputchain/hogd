@@ -18,6 +18,7 @@ Checks: >
   -modernize-return-braced-init-list,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
+  -modernize-use-nodiscard,
   -performance-move-const-arg,
   -readability-braces-around-statements,
   -readability-identifier-length,

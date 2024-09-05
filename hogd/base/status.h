@@ -20,7 +20,7 @@ namespace hogd {
 // library's error handling. It can also be thrown as a std::system_error via
 // raise().
 //
-// ErrorBase uses the CRTP idiom, so it doesn't add any vtable overhead.
+// ErrorBase uses explicit object parameters to avoid the overhead of a vtable.
 //
 // The error class must inherit ErrorBase and provide the following methods:
 // 1. int raw_code()
@@ -38,7 +38,7 @@ public:
   }
 
   // error_code converts the derived error into a std::error_code.
-  [[nodiscard]] std::error_code error_code(this const auto &self)
+  std::error_code error_code(this const auto &self)
   {
     return std::error_code(self.raw_code(), self.category());
   }
@@ -79,6 +79,25 @@ make_error_condition(const std::derived_from<ErrorBase> auto &e)
   return make_error_code(e).default_error_condition();
 }
 
+} // namespace hogd
+
+// make everything that inherits ErrorBase an error_code_enum
+template<std::derived_from<hogd::ErrorBase> E>
+struct std::is_error_code_enum<E> : std::true_type {};
+
+// provide format support for everything that inherits ErrorBase
+template<std::derived_from<hogd::ErrorBase> E>
+class std::formatter<E> : public std::formatter<std::string> {
+public:
+  using super = std::formatter<std::string>;
+  auto format(const E &e, auto &ctx) const
+  {
+    return super::format(make_error_code(e).message(), ctx);
+  }
+};
+
+namespace hogd {
+
 // Errno provides a wrapper around errno.
 //
 // Example:
@@ -92,7 +111,7 @@ public:
   Errno() noexcept : err_(errno) {}
   explicit Errno(int err) noexcept : err_(err) {}
 
-  [[nodiscard]] int raw_code() const { return err_; }
+  int raw_code() const { return err_; }
   static const std::error_category &category()
   {
     return std::system_category();
@@ -123,12 +142,9 @@ public:
   explicit EnumError(Enum code) : code_(code) {}
 
   // code returns the enum error code.
-  [[nodiscard]] Enum code() const { return code_; }
+  Enum code() const { return code_; }
   // raw_code returns the error code as an int.
-  [[nodiscard]] int raw_code() const
-  {
-    return static_cast<int>(std::to_underlying(code_));
-  }
+  int raw_code() const { return static_cast<int>(std::to_underlying(code_)); }
   // category returns the std::error_category for this error type.
   static const std::error_category &category()
   {
@@ -153,6 +169,13 @@ inline bool
 operator==(const EnumError<E, Category> &lhs, const E &rhs)
 {
   return lhs.code() == rhs;
+}
+// Enable comparisons between EnumError and std::error_code.
+template<typename E, typename Category> requires std::is_scoped_enum_v<E>
+inline bool
+operator==(const EnumError<E, Category> &lhs, const std::error_code &rhs)
+{
+  return lhs.category() == rhs.category() && lhs.raw_code() == rhs.value();
 }
 
 // GCode is an enum of the GRPC error codes. They are especially useful for
@@ -213,50 +236,19 @@ enum class GCode : uint8_t {
 // GCategory provides an error category for GRPC errors.
 class GCategory : public std::error_category {
 public:
-  [[nodiscard]] const char *name() const noexcept override { return "grpc"; }
-  [[nodiscard]] std::string message(int code) const override
-  {
-    switch (static_cast<GCode>(code)) {
-    case GCode::kCancelled:
-      return "CANCELLED";
-    case GCode::kUnknown:
-      return "UNKNOWN";
-    case GCode::kInvalidArgument:
-      return "INVALID_ARGUMENT";
-    case GCode::kDeadlineExceeded:
-      return "DEADLINE_EXCEEDED";
-    case GCode::kNotFound:
-      return "NOT_FOUND";
-    case GCode::kAlreadyExists:
-      return "ALREADY_EXISTS";
-    case GCode::kPermissionDenied:
-      return "PERMISSION_DENIED";
-    case GCode::kResourceExhausted:
-      return "RESOURCE_EXHAUSTED";
-    case GCode::kFailedPrecondition:
-      return "FAILED_PRECONDITION";
-    case GCode::kAborted:
-      return "ABORTED";
-    case GCode::kOutOfRange:
-      return "OUT_OF_RANGE";
-    case GCode::kUnimplemented:
-      return "UNIMPLEMENTED";
-    case GCode::kInternal:
-      return "INTERNAL";
-    case GCode::kUnavailable:
-      return "UNAVAILABLE";
-    case GCode::kDataLoss:
-      return "DATA_LOSS";
-    case GCode::kUnauthorized:
-      return "UNAUTHORIZED";
-    default:
-      return "";
-    }
-  }
+  const char *name() const noexcept override { return "grpc"; }
+  std::string message(int code) const override;
 };
 
 // GError is the error object for GRPC errors.
 using GError = EnumError<GCode, GCategory>;
+
+// Enable comparisons between GCode and std::error_code.
+inline bool
+operator==(const GCode &lhs, const std::error_code &rhs)
+{
+  return GError{lhs} == rhs;
+}
 
 // GStatus is the return type for a function that can return a GRPC error.
 //
@@ -271,18 +263,3 @@ using GError = EnumError<GCode, GCategory>;
 template<typename T> using GStatus = std::expected<T, GError>;
 
 } // namespace hogd
-
-// make everything that inherits ErrorBase an error_code_enum
-template<std::derived_from<hogd::ErrorBase> E>
-struct std::is_error_code_enum<E> : std::true_type {};
-
-// provide format support for everything that inherits ErrorBase
-template<std::derived_from<hogd::ErrorBase> E>
-class std::formatter<E> : public std::formatter<std::string> {
-public:
-  using super = std::formatter<std::string>;
-  auto format(const E &e, auto &ctx) const
-  {
-    return super::format(make_error_code(e).message(), ctx);
-  }
-};

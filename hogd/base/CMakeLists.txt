@@ -1,3 +1,8 @@
+add_library(
+  base
+  status.cc
+)
+
 add_executable(
   base_test
   bits_test.cc
@@ -7,6 +12,7 @@ add_executable(
 )
 target_link_libraries(
   base_test
+  base
   GTest::gtest_main
 )
 gtest_discover_tests(base_test)

@@ -1,5 +1,6 @@
 #include <cerrno>
 #include <format>
+#include <system_error>
 
 #include "hogd/base/status.h"
 
@@ -32,6 +33,13 @@ TEST(StatusTest, EnumError)
   EXPECT_FALSE(ret);
   EXPECT_EQ(ret.error(), GCode::kInvalidArgument);
   EXPECT_EQ(std::format("{}", ret.error()), "INVALID_ARGUMENT");
+
+  try {
+    ret.error().raise();
+  } catch (const std::system_error &e) {
+    EXPECT_EQ(e.code(), ret.error());
+    EXPECT_EQ(e.code(), GCode::kInvalidArgument);
+  }
 }
 
 TEST(StatusTest, Errno)
