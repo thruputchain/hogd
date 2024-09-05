@@ -11,12 +11,14 @@ Checks: >
   readability-*,
   -google-readability-braces-around-statements,
   -google-readability-namespace-comments,
+  -google-explicit-constructor,
   -google-runtime-references,
   -misc-non-private-member-variables-in-classes,
   -misc-const-correctness,
   -modernize-return-braced-init-list,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
+  -modernize-use-nodiscard,
   -performance-move-const-arg,
   -readability-braces-around-statements,
   -readability-identifier-length,
@@ -44,12 +46,6 @@ CheckOptions:
   - { key: readability-identifier-naming.EnumConstantPrefix,     value: k          }
   - { key: readability-identifier-naming.ConstexprVariableCase,  value: CamelCase  }
   - { key: readability-identifier-naming.ConstexprVariablePrefix,value: k          }
-  - { key: readability-identifier-naming.GlobalConstantCase,     value: CamelCase  }
-  - { key: readability-identifier-naming.GlobalConstantPrefix,   value: k          }
-  - { key: readability-identifier-naming.MemberConstantCase,     value: CamelCase  }
-  - { key: readability-identifier-naming.MemberConstantPrefix,   value: k          }
-  - { key: readability-identifier-naming.StaticConstantCase,     value: CamelCase  }
-  - { key: readability-identifier-naming.StaticConstantPrefix,   value: k          }
   - { key: readability-identifier-naming.ConceptCase,            value: lower_case }
   - { key: readability-implicit-bool-conversion.AllowIntegerConditions,  value: 1  }
   - { key: readability-implicit-bool-conversion.AllowPointerConditions,  value: 1  }
