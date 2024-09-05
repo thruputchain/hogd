@@ -35,6 +35,12 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 include(GoogleTest)
 
+find_package(PkgConfig REQUIRED)
+
+pkg_check_modules(sodium REQUIRED libsodium)
+link_libraries(${sodium_LINK_LIBRARIES})
+include_directories(PUBLIC ${sodium_INCLUDE_DIRS})
+
 # Add code directories
 include_directories(${CMAKE_SOURCE_DIR})
 add_subdirectory(hogd)

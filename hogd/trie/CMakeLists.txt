@@ -1,0 +1,16 @@
+add_executable(
+  trie_test
+  prefix_test.cc
+  hashset_trie_test.cc
+)
+add_library(
+  trie
+  hashset_trie.cc
+)
+target_link_libraries(
+  trie_test
+  crypto
+  trie
+  GTest::gtest_main
+)
+gtest_discover_tests(trie_test)
