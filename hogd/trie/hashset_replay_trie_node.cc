@@ -129,50 +129,5 @@ ReplayTrieNode::~ReplayTrieNode()
   delete element.load(std::memory_order_relaxed);
 }
 
-/*
-
-bool
-SimpleReplayTreeNode::remove(element_t const &elt, hash_t const &hash,
-                             allocator_t &allocator, bool element_is_real)
-{
-  if (prefix_len == MAX_HASH_LEN) {
-    if (element_is_real) {
-      return element.load(std::memory_order_relaxed)->remove(elt);
-    }
-    else {
-      return element.load(std::memory_order_relaxed)->is_empty();
-    }
-  }
-
-  uint8_t bb = get_branch_bits(hash);
-
-  uint32_t child = get_child(bb);
-
-  if (child == 0) {
-    throw std::runtime_error("impossible");
-  }
-
-  auto *child_ptr = allocator.get(child);
-
-  auto deletion_res = child_ptr->remove(elt, hash, allocator, element_is_real);
-
-  if (deletion_res) {
-    uint8_t prev_num_active_children =
-        num_active_children.fetch_sub(1, std::memory_order_relaxed);
-
-    if (!try_atomic_swap(bb, child, 0)) {
-      throw std::runtime_error("impossible: only one thread can reach 0 active "
-                               "children during deletion");
-    }
-
-    child_ptr->~SimpleReplayTreeNode();
-    allocator.free(child);
-
-    if (prev_num_active_children == 1) {
-      return true;
-    }
-  }
-  return false;
-}  */
 
 } // namespace hog
