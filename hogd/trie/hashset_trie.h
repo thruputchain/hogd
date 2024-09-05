@@ -15,12 +15,6 @@ using Hash = std::array<uint8_t, 32>;
 
 namespace hog {
 
-namespace detail {
-// This should be somewhere else, but that can be moved later
-void __attribute__((constructor)) assert_sodium_init();
-
-} // namespace detail
-
 class HashsetTrieNode {
 public:
   struct NodeMetadata {
