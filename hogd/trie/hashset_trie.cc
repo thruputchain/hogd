@@ -362,41 +362,6 @@ HashsetTrie::remove_clear_threshold(
   return out;
 }
 
-/*
-  assert(prefix_len_.len < 64);
-
-  clear_hash();
-
-  uint8_t bb = get_branch_bits(clear_threshold);
-
-  auto *match_child = children_[bb].load(std::memory_order_relaxed);
-
-  std::vector<std::unique_ptr<HashsetTrieNode>> out;
-  if (match_child != nullptr) {
-    if (match_child->prefix_len_.len < 64) {
-      out = match_child->remove_clear_threshold(clear_threshold); // NOLINT
-
-      auto extract = match_child->maybe_extract_singlechild();
-
-      if (extract) {
-        children_[bb].store(extract.get(), std::memory_order_relaxed);
-        extract.release(); // NOLINT
-      }
-    }
-    else {
-      prefix_t truncate = match_child->prefix_;
-      truncate.truncate(64);
-      if (truncate <= clear_threshold) {
-        children_[bb].store(nullptr, std::memory_order_relaxed);
-        out.emplace_back(match_child);
-      }
-    }
-  }
-
-  return out;
-}
-*/
-
 std::unique_ptr<HashsetTrieNode>
 HashsetTrieNode::maybe_extract_singlechild()
 {
