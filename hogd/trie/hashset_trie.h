@@ -49,20 +49,6 @@ public:
 
   PrefixLenBits get_prefix_match_len(prefix_t const &other) const;
 
-  // TODO(geoff): figure out if there's a way to shortcircuit the way back to
-  // parent We can tell if current thread was the one to set the current node,
-  // but it's unclear how to take advantage.  Mainly, what happens if you
-  // shortcircuit but then an earlier level in the recursion needs the value?
-  // (and other threads expect it to be responsible for that value?)
-
-  // target is purely a guiding heuristic.  We recurse down towards that prefix
-  // first, and then branch out to fill in the rest of the tree.  This hopefully
-  // spreads out the work across concurrent threads (since we generally know
-  // which prefixes are modified in a current round, but we don't need 100%
-  // accuracy on that).
-  /*const NodeMetadata *rehash_and_get(prefix_t const &target,
-                                     std::vector<uint8_t> &workspace); */
-
   // Can only be called if child nodes all have metadata already computed
   const NodeMetadata *rehash(std::vector<uint8_t> &workspace);
 
@@ -88,6 +74,17 @@ public:
         HashsetTrieNode::make_prefix(clear_threshold, Hash()));
   }
 
+  // TODO(geoff): figure out if there's a way to shortcircuit the way back to
+  // parent We can tell if current thread was the one to set the current node,
+  // but it's unclear how to take advantage.  Mainly, what happens if you
+  // shortcircuit but then an earlier level in the recursion needs the value?
+  // (and other threads expect it to be responsible for that value?)
+
+  // target is purely a guiding heuristic.  We recurse down towards that prefix
+  // first, and then branch out to fill in the rest of the tree.  This hopefully
+  // spreads out the work across concurrent threads (since we generally know
+  // which prefixes are modified in a current round, but we don't need 100%
+  // accuracy on that).
   const HashsetTrieNode::NodeMetadata *
   guided_rehash(HashsetTrieNode::prefix_t const &target)
   {
