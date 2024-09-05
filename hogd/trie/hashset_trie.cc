@@ -8,6 +8,7 @@
 #include <cstring>
 #include <memory>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "hogd/crypto/blake2b.h"
@@ -309,10 +310,11 @@ HashsetTrie::remove_clear_threshold(
     uint8_t bb = current_node_visitor->get_branch_bits(clear_threshold);
 
     for (uint8_t i = 0; i < bb; i++) {
-      auto *extract_child = current_node_visitor->children_[i].exchange(
-          nullptr, std::memory_order_relaxed);
-      if (extract_child != nullptr) {
-        out.emplace_back(extract_child);
+      auto extract_child = std::unique_ptr<HashsetTrieNode>(
+          current_node_visitor->children_[i].exchange(
+              nullptr, std::memory_order_relaxed));
+      if (extract_child) {
+        out.emplace_back(std::move(extract_child));
       }
     }
 
@@ -362,6 +364,8 @@ HashsetTrie::remove_clear_threshold(
   return out;
 }
 
+// extracts child node if current node has only one child
+// otherwise returns nullptr
 std::unique_ptr<HashsetTrieNode>
 HashsetTrieNode::maybe_extract_singlechild()
 {
@@ -375,6 +379,7 @@ HashsetTrieNode::maybe_extract_singlechild()
         idx = i;
       }
       else {
+        // found a second child, so not returning anything
         return nullptr;
       }
     }
