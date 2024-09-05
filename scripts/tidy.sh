@@ -2,9 +2,10 @@
 
 # Set up environment
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+source ${SCRIPT_DIR}/env.sh 2>/dev/null
 ROOT_DIR=${SCRIPT_DIR}/..
 CODE_DIR=hogd
-CLANG_TIDY=run-clang-tidy-18.py
+if [ -z ${CLANG_TIDY+x} ]; then CLANG_TIDY=run-clang-tidy-18.py; fi
 BUILD_DIR=build
 
 print_usage() {
@@ -31,4 +32,4 @@ fi
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
 xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
--header-filter=".*" -quiet -warnings-as-errors='*'
+-header-filter=".*hogd/.*" -quiet -warnings-as-errors='*'

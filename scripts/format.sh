@@ -23,9 +23,10 @@ fi
 
 # Set up environment
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+source ${SCRIPT_DIR}/env.sh 2>/dev/null
 ROOT_DIR=${SCRIPT_DIR}/..
 CODE_DIR=${ROOT_DIR}/hogd
-CLANG_FORMAT=clang-format-18
+if [ -z ${CLANG_FORMAT+x} ]; then CLANG_FORMAT=clang-format-18; fi
 
 # Run clang-format
 find "${CODE_DIR}" -name '*.h' -o -name '*.cc' |\
