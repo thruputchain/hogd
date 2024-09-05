@@ -125,4 +125,19 @@ write_once(T &p, const T &val)
   static_cast<T volatile &>(p) = val;
 }
 
+// cpu_relax hints to the CPU that it is in a spin loop.
+//
+// Example:
+// while (condition)
+//   cpu_relax();
+inline void
+cpu_relax()
+{
+#if HAVE_BUILTIN_IA32_PAUSE
+  __builtin_ia32_pause();
+#endif
+  // TODO(amb): figure out what is appropriate on arm and figure out if there
+  // are cases where we want UMWAIT/TPAUSE on x86.
+}
+
 } // namespace hogd
