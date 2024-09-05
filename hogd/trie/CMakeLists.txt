@@ -6,6 +6,8 @@ add_executable(
 add_library(
   trie
   hashset_trie.cc
+  short_allocator.cc
+  hashset_replay_trie_node.cc
 )
 target_link_libraries(
   trie_test
