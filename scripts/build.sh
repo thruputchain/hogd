@@ -38,7 +38,7 @@ ROOT_DIR=${SCRIPT_DIR}/../
 BUILD_DIR=${ROOT_DIR}/${BUILD_DIR}
 
 # Set nproc
-NPROC=$(nproc)
+NPROC=$(nproc 2>/dev/null)
 #mac compabitibility
 if [ $? -ne 0 ]; then
 	NPROC=$(sysctl -n hw.ncpu)
@@ -47,5 +47,10 @@ fi
 # Do the build
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
-CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" ..
+CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
+  -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+  ${CMAKE_INJECT} ..
+ # -DCMAKE_OSX_SYSROOT="" \
+ # -DCMAKE_EXE_LINKER_FLAGS="-L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++" \
+#..
 make -j "$NPROC"
