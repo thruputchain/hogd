@@ -62,6 +62,7 @@ public:
 
   InvokeResult invoke(std::string const &method_name, uint64_t gas_limit);
 
+  // Returns FALSE if gas consumption failed
   [[nodiscard]]
   bool consume_gas(uint64_t gas);
 

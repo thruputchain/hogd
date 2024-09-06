@@ -10,6 +10,7 @@ add_executable(
   instantiate_test.cc
   error_handling_test.cc
   invoke_arity_test.cc
+  gas_api_test.cc
 )
 target_link_libraries(
   runtime_test

@@ -350,10 +350,10 @@ pub extern "C" fn wasmi_consume_gas(runtime: *mut WasmiRuntime, gas_consumed: u6
     let cur_fuel: u64 = r.store.get_fuel().unwrap();
     if cur_fuel > gas_consumed {
         r.store.set_fuel(cur_fuel - gas_consumed).unwrap();
-        return false;
+        return true;
     }
     r.store.set_fuel(0).unwrap();
-    return true;
+    return false;
 }
 
 #[no_mangle]

@@ -37,6 +37,7 @@ enum class WasmiInvokeError : uint32_t {
 enum class HostFnErrorCode : uint8_t {
   kUnrecoverableUnknown = 1,
   kRecoverableUnknown = 2,
+
   // replicating WasmiInvokeError
   kWasmiLinkError = 3,
   kWasmiFnNExist = 4,
@@ -44,7 +45,10 @@ enum class HostFnErrorCode : uint8_t {
   kWasmiReturnTypeError = 6,
   kWasmiCallError = 7,
   kWasmiHostError = 8,
-  kWasmiUnrecoverableSystemError = 9
+  kWasmiUnrecoverableSystemError = 9,
+
+  //
+  kOutOfGas = 10,
 };
 
 HostFnErrorCode wasmi_to_host_fn_error(WasmiInvokeError wasmi_error);
