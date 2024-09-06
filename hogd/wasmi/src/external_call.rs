@@ -28,7 +28,10 @@ pub struct TrampolineResult {
 }
 
 extern "C" {
-    pub fn c_call_0args(fn_pointer: *mut c_void, userctx: *mut c_void) -> TrampolineResult;
+    pub fn c_call_0args(
+        fn_pointer: *mut c_void,
+        userctx: *mut c_void,
+    ) -> TrampolineResult;
     pub fn c_call_1args(
         fn_pointer: *mut c_void,
         userctx: *mut c_void,

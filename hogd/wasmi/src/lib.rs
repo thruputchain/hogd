@@ -1,5 +1,6 @@
 use wasmi::{
-    Caller, Config, Engine, Error, Func, Instance, Linker, Module, StackLimits, Store, Val,
+    Caller, Config, Engine, Error, Func, Instance, Linker, Module, StackLimits,
+    Store, Val,
 };
 
 use core::ffi::c_void;
@@ -50,16 +51,20 @@ impl WasmiRuntime {
             Some(_) => {
                 return Ok(());
             }
-            None => match self.linker.instantiate(&mut self.store, &self.module) {
-                Ok(inst_pre) => match inst_pre.ensure_no_start(&mut self.store) {
-                    Ok(inst) => {
-                        self.instance = Some(inst);
-                        Ok(())
+            None => {
+                match self.linker.instantiate(&mut self.store, &self.module) {
+                    Ok(inst_pre) => {
+                        match inst_pre.ensure_no_start(&mut self.store) {
+                            Ok(inst) => {
+                                self.instance = Some(inst);
+                                Ok(())
+                            }
+                            Err(x) => Err(x.into()),
+                        }
                     }
-                    Err(x) => Err(x.into()),
-                },
-                Err(x) => Err(x),
-            },
+                    Err(x) => Err(x),
+                }
+            }
         }
     }
 
@@ -103,12 +108,18 @@ impl WasmiRuntime {
 
         let func = Func::wrap(
             &mut self.store,
-            move |caller: Caller<'_, *mut c_void>, arg1: u64| -> Result<u64, wasmi::Error> {
+            move |caller: Caller<'_, *mut c_void>,
+                  arg1: u64|
+                  -> Result<u64, wasmi::Error> {
                 // This is necessary to stop some part of rust
                 // from complaining
                 let _y = x.clone();
                 let res = unsafe {
-                    external_call::c_call_1args(x.fn_pointer, caller.data().clone(), arg1)
+                    external_call::c_call_1args(
+                        x.fn_pointer,
+                        caller.data().clone(),
+                        arg1,
+                    )
                 };
                 return external_call::handle_trampoline_error(res);
             },
@@ -140,7 +151,12 @@ impl WasmiRuntime {
                 // from complaining
                 let _y = x.clone();
                 let res = unsafe {
-                    external_call::c_call_2args(x.fn_pointer, caller.data().clone(), arg1, arg2)
+                    external_call::c_call_2args(
+                        x.fn_pointer,
+                        caller.data().clone(),
+                        arg1,
+                        arg2,
+                    )
                 };
                 return external_call::handle_trampoline_error(res);
             },
@@ -342,7 +358,10 @@ pub extern "C" fn wasmi_get_memory(runtime: *mut WasmiRuntime) -> MemorySlice {
 }
 
 #[no_mangle]
-pub extern "C" fn wasmi_consume_gas(runtime: *mut WasmiRuntime, gas_consumed: u64) -> bool {
+pub extern "C" fn wasmi_consume_gas(
+    runtime: *mut WasmiRuntime,
+    gas_consumed: u64,
+) -> bool {
     assert_runtime_not_null(runtime);
 
     let r = unsafe { &mut *runtime };
@@ -364,7 +383,10 @@ pub extern "C" fn wasmi_get_available_gas(runtime: *const WasmiRuntime) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn wasmi_set_available_gas(runtime: *mut WasmiRuntime, gas: u64) {
+pub extern "C" fn wasmi_set_available_gas(
+    runtime: *mut WasmiRuntime,
+    gas: u64,
+) {
     assert_runtime_not_null(runtime);
     let r = unsafe { &mut *runtime };
     r.store.set_fuel(gas).unwrap();
@@ -445,7 +467,8 @@ pub extern "C" fn wasmi_invoke(
         };
     }
 
-    let method_name_slice = unsafe { slice::from_raw_parts(method_name, method_name_len as usize) };
+    let method_name_slice =
+        unsafe { slice::from_raw_parts(method_name, method_name_len as usize) };
 
     let string = match std::str::from_utf8(&method_name_slice) {
         Ok(v) => v,
