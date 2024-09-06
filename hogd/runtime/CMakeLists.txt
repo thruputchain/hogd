@@ -24,7 +24,14 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_call_simple.wasm
 )
 
+wat2wasm_target(
+  test_invoke_wasm
+  wat/test_invoke.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_invoke.wasm
+)
+
 add_dependencies(
   runtime_test
   test_call_simple_wasm
+  test_invoke_wasm
 )
