@@ -15,3 +15,16 @@ target_link_libraries(
   GTest::gtest_main
 )
 gtest_discover_tests(runtime_test)
+
+include(../cmake/wat2wasm.cmake)
+
+wat2wasm_target(
+  test_call_simple_wasm
+  wat/test_call_simple.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_call_simple.wasm
+)
+
+add_dependencies(
+  runtime_test
+  test_call_simple_wasm
+)
