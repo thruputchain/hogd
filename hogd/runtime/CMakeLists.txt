@@ -11,6 +11,7 @@ add_executable(
   error_handling_test.cc
   invoke_arity_test.cc
   gas_api_test.cc
+  memory_access_test.cc
 )
 target_link_libraries(
   runtime_test
@@ -40,9 +41,16 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_invoke_arity.wasm
 )
 
+wat2wasm_target(
+  test_set_memory_wasm
+  wat/test_set_memory.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_set_memory.wasm
+)
+
 add_dependencies(
   runtime_test
   test_invoke_wasm
   test_error_handling_wasm
   test_invoke_arity_wasm
+  test_set_memory_wasm
 )
