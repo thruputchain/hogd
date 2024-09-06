@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
+#include "hogd/base/types.h"
 #include "hogd/runtime/host_fn_status.h"
 #include "hogd/runtime/test_load_wasm.h"
 #include "hogd/runtime/wasmi_runtime.h"
-#include "hogd/base/types.h"
 #include <cstdint>
 
 namespace hogd {

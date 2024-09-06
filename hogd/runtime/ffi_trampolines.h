@@ -4,7 +4,6 @@
 
 namespace hogd::detail {
 
-
 extern "C" {
 struct TrampolineResult {
   uint64_t result;
@@ -29,4 +28,4 @@ TrampolineResult c_call_5args(void *function_pointer, void *host_call_context,
                               uint64_t arg4, uint64_t arg5) noexcept;
 }
 
-} // namespace hogd
+} // namespace hogd::detail

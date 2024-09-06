@@ -13,9 +13,8 @@ enum WasmiInvokeError {
   FuncNExist = 2,
   InputError = 3, // input validation fails
   ReturnTypeError = 4,
-  CallError = 5, // TODO(geoff) confirm, but I believe this means the wasm internall hit an `unreachable`
-  HostError = 6,
-  UnrecoverableSystemError = 7,
+  CallError = 5, // TODO(geoff) confirm, but I believe this means the wasm
+internall hit an `unreachable` HostError = 6, UnrecoverableSystemError = 7,
 } */
 
 // NOLINTNEXTLINE(performance-enum-size)

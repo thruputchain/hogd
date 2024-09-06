@@ -29,9 +29,8 @@ template<> struct ArgsCounter<> {
   constexpr static uint8_t kNArgs = 0;
 };
 
-template<typename... T>
-struct ArgsCounter<uint64_t, T...> {
-    constexpr static uint8_t kNArgs = 1 + ArgsCounter<T...>::kNArgs;
+template<typename... T> struct ArgsCounter<uint64_t, T...> {
+  constexpr static uint8_t kNArgs = 1 + ArgsCounter<T...>::kNArgs;
 };
 
 template<typename... Args>
@@ -44,8 +43,8 @@ get_n_args(HostFnStatus<uint64_t> (*)(HostCallContext *, Args...))
 } // namespace detail
 
 struct InvokeResult {
-    HostFnStatus<uint64_t> result;
-    uint64_t gas_consumed;
+  HostFnStatus<uint64_t> result;
+  uint64_t gas_consumed;
 };
 
 class WasmiRuntime : NonMovableOrCopyable {
@@ -59,8 +58,7 @@ public:
                          detail::get_n_args(F));
   }
 
-  InvokeResult invoke(std::string const& method_name,
-    uint64_t gas_limit);
+  InvokeResult invoke(std::string const &method_name, uint64_t gas_limit);
 
   [[nodiscard]]
   bool consume_gas(uint64_t gas);

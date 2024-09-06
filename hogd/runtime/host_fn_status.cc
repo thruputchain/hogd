@@ -32,11 +32,10 @@ HostFnError::recoverable() const
   }
 }
 
-HostFnErrorCode 
+HostFnErrorCode
 wasmi_to_host_fn_error(WasmiInvokeError wasmi_error)
 {
-  switch (wasmi_error)
-  {
+  switch (wasmi_error) {
   case WasmiInvokeError::kWasmiLinkError:
     return HostFnErrorCode::kWasmiLinkError;
   case WasmiInvokeError::kWasmiFnNExist:

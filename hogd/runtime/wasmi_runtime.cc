@@ -4,9 +4,9 @@
 
 #include "hogd/runtime/host_fn_status.h"
 
+#include <cassert>
 #include <span>
 #include <string>
-#include <cassert>
 
 namespace hogd {
 
@@ -114,10 +114,9 @@ pub extern "C" fn wasmi_invoke(
 ) -> WasmiInvokeResult
 */
 
-WasmiInvokeResult
-wasmi_invoke(void* wasmi_runtime_ptr,
-  const uint8_t* method_name,
-  uint32_t method_name_len);
+WasmiInvokeResult wasmi_invoke(void *wasmi_runtime_ptr,
+                               const uint8_t *method_name,
+                               uint32_t method_name_len);
 
 } // extern C
 
@@ -149,18 +148,17 @@ WasmiRuntime::link_fn_nargs(std::string const &module_name,
       fn_name.size(), fn_ptr, nargs);
 }
 
-InvokeResult 
-WasmiRuntime::invoke(std::string const& method_name,
-    uint64_t gas_limit)
+InvokeResult
+WasmiRuntime::invoke(std::string const &method_name, uint64_t gas_limit)
 {
   uint64_t prev_gas_limit = detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
   detail::wasmi_set_available_gas(wasmi_runtime_ptr_, gas_limit);
 
-  detail::WasmiInvokeResult res = detail::wasmi_invoke(
-    wasmi_runtime_ptr_,
-    reinterpret_cast<const uint8_t*>(method_name.c_str()),
-    method_name.size());
-
+  detail::WasmiInvokeResult res =
+      detail::wasmi_invoke(wasmi_runtime_ptr_,
+                           reinterpret_cast<const uint8_t *>(
+                               method_name.c_str()),
+                           method_name.size());
 
   uint64_t gas_remaining = detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
 
@@ -172,17 +170,12 @@ WasmiRuntime::invoke(std::string const& method_name,
 
   WasmiInvokeError wasmi_error{res.error};
 
-  if (wasmi_error != WasmiInvokeError::kWasmiNone)
-  {
-    return InvokeResult {
-      .result = HostFnError{wasmi_to_host_fn_error(wasmi_error)},
-      .gas_consumed = gas_consumed
-    };
+  if (wasmi_error != WasmiInvokeError::kWasmiNone) {
+    return InvokeResult{.result =
+                            HostFnError{wasmi_to_host_fn_error(wasmi_error)},
+                        .gas_consumed = gas_consumed};
   }
-  return InvokeResult{
-    .result = res.result,
-    .gas_consumed = gas_consumed
-  };
+  return InvokeResult{.result = res.result, .gas_consumed = gas_consumed};
 }
 
 WasmiRuntime::WasmiRuntime(Contract const &contract, void *user_ctx_ptr)

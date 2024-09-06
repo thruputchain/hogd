@@ -5,8 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace hogd :: test {
-
+namespace hogd ::test {
 
 [[maybe_unused]]
 static std::vector<uint8_t>
@@ -36,4 +35,4 @@ load_wasm_from_file(const char *filename)
   return contents;
 }
 
-} // namespace hogd
+} // namespace hogd::test

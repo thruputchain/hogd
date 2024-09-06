@@ -31,8 +31,7 @@ TrampolineResult
 c_call_0args(void *function_pointer, void *host_call_context) noexcept
 {
   try {
-    auto *user_ctx =
-        reinterpret_cast<HostCallContext *>(host_call_context);
+    auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr =
         (HostFnStatus<uint64_t>(*)(HostCallContext *))(function_pointer);
     HostFnStatus<uint64_t> res = (*ptr)(user_ctx);
@@ -40,11 +39,11 @@ c_call_0args(void *function_pointer, void *host_call_context) noexcept
     if (res) {
       return detail::success(res.value());
     }
-      if (res.error().recoverable()) {
-        return detail::error(kTrampolineErrorHOSTERROR);
-      }
-      return detail::error(kTrampolineErrorUNRECOVERABLE);
-    
+    if (res.error().recoverable()) {
+      return detail::error(kTrampolineErrorHOSTERROR);
+    }
+    return detail::error(kTrampolineErrorUNRECOVERABLE);
+
   } catch (...) {
     // UB to pass errors across FFI boundaries
     return detail::error(kTrampolineErrorUNRECOVERABLE);
@@ -56,8 +55,7 @@ c_call_1args(void *function_pointer, void *host_call_context,
              uint64_t arg1) noexcept
 {
   try {
-    auto *user_ctx =
-        reinterpret_cast<HostCallContext *>(host_call_context);
+    auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr = (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t))(
         function_pointer);
     HostFnStatus<uint64_t> res = (*ptr)(user_ctx, arg1);
@@ -65,11 +63,11 @@ c_call_1args(void *function_pointer, void *host_call_context,
     if (res) {
       return detail::success(res.value());
     }
-      if (res.error().recoverable()) {
-        return detail::error(kTrampolineErrorHOSTERROR);
-      }
-      return detail::error(kTrampolineErrorUNRECOVERABLE);
-    
+    if (res.error().recoverable()) {
+      return detail::error(kTrampolineErrorHOSTERROR);
+    }
+    return detail::error(kTrampolineErrorUNRECOVERABLE);
+
   } catch (...) {
     // UB to pass errors across FFI boundaries
     return detail::error(kTrampolineErrorUNRECOVERABLE);
@@ -81,8 +79,7 @@ c_call_2args(void *function_pointer, void *host_call_context, uint64_t arg1,
              uint64_t arg2) noexcept
 {
   try {
-    auto *user_ctx =
-        reinterpret_cast<HostCallContext *>(host_call_context);
+    auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr = (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t,
                                            uint64_t))(function_pointer);
     HostFnStatus<uint64_t> res = (*ptr)(user_ctx, arg1, arg2);
@@ -90,10 +87,10 @@ c_call_2args(void *function_pointer, void *host_call_context, uint64_t arg1,
     if (res) {
       return detail::success(res.value());
     }
-  if (res.error().recoverable()) {
-    return detail::error(kTrampolineErrorHOSTERROR);
-  }
-  return detail::error(kTrampolineErrorUNRECOVERABLE);
+    if (res.error().recoverable()) {
+      return detail::error(kTrampolineErrorHOSTERROR);
+    }
+    return detail::error(kTrampolineErrorUNRECOVERABLE);
 
   } catch (...) {
     // UB to pass errors across FFI boundaries
@@ -106,8 +103,7 @@ c_call_3args(void *function_pointer, void *host_call_context, uint64_t arg1,
              uint64_t arg2, uint64_t arg3) noexcept
 {
   try {
-    auto *user_ctx =
-        reinterpret_cast<HostCallContext *>(host_call_context);
+    auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr =
         (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t, uint64_t,
                                    uint64_t))(function_pointer);
@@ -116,11 +112,11 @@ c_call_3args(void *function_pointer, void *host_call_context, uint64_t arg1,
     if (res) {
       return detail::success(res.value());
     }
-      if (res.error().recoverable()) {
-        return detail::error(kTrampolineErrorHOSTERROR);
-      }
-      return detail::error(kTrampolineErrorUNRECOVERABLE);
-    
+    if (res.error().recoverable()) {
+      return detail::error(kTrampolineErrorHOSTERROR);
+    }
+    return detail::error(kTrampolineErrorUNRECOVERABLE);
+
   } catch (...) {
     // UB to pass errors across FFI boundaries
     return detail::error(kTrampolineErrorUNRECOVERABLE);
@@ -132,8 +128,7 @@ c_call_4args(void *function_pointer, void *host_call_context, uint64_t arg1,
              uint64_t arg2, uint64_t arg3, uint64_t arg4) noexcept
 {
   try {
-    auto *user_ctx =
-        reinterpret_cast<HostCallContext *>(host_call_context);
+    auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr =
         (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t, uint64_t,
                                    uint64_t, uint64_t))(function_pointer);
@@ -142,11 +137,11 @@ c_call_4args(void *function_pointer, void *host_call_context, uint64_t arg1,
     if (res) {
       return detail::success(res.value());
     }
-      if (res.error().recoverable()) {
-        return detail::error(kTrampolineErrorHOSTERROR);
-      }
-      return detail::error(kTrampolineErrorUNRECOVERABLE);
-    
+    if (res.error().recoverable()) {
+      return detail::error(kTrampolineErrorHOSTERROR);
+    }
+    return detail::error(kTrampolineErrorUNRECOVERABLE);
+
   } catch (...) {
     // UB to pass errors across FFI boundaries
     return detail::error(kTrampolineErrorUNRECOVERABLE);
@@ -159,8 +154,7 @@ c_call_5args(void *function_pointer, void *host_call_context, uint64_t arg1,
              uint64_t arg5) noexcept
 {
   try {
-    auto *user_ctx =
-        reinterpret_cast<HostCallContext *>(host_call_context);
+    auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr = (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t))(function_pointer);
@@ -169,11 +163,11 @@ c_call_5args(void *function_pointer, void *host_call_context, uint64_t arg1,
     if (res) {
       return detail::success(res.value());
     }
-      if (res.error().recoverable()) {
-        return detail::error(kTrampolineErrorHOSTERROR);
-      }
-      return detail::error(kTrampolineErrorUNRECOVERABLE);
-    
+    if (res.error().recoverable()) {
+      return detail::error(kTrampolineErrorHOSTERROR);
+    }
+    return detail::error(kTrampolineErrorUNRECOVERABLE);
+
   } catch (...) {
     // UB to pass errors across FFI boundaries
     return detail::error(kTrampolineErrorUNRECOVERABLE);

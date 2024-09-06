@@ -1,14 +1,13 @@
 #include <gtest/gtest.h>
 
-#include "hogd/runtime/wasmi_runtime.h"
 #include "hogd/runtime/host_fn_status.h"
+#include "hogd/runtime/wasmi_runtime.h"
 
 #include "hogd/runtime/test_load_wasm.h"
 
 #include <cstdint>
 
-namespace hogd
-{
+namespace hogd {
 
 TEST(WasmRuntimeTest, MissingImportFail)
 {
@@ -21,5 +20,4 @@ TEST(WasmRuntimeTest, MissingImportFail)
   EXPECT_EQ(res.result.error(), HostFnError{HostFnErrorCode::kWasmiLinkError});
 }
 
-
-} /* wasm_api */
+} // namespace hogd
