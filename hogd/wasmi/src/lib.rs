@@ -256,7 +256,7 @@ impl WasmiRuntime {
 
 enum WasmiInvokeError {
     None = 0,
-    WasmiError = 1,
+    LinkError = 1,
     FuncNExist = 2,
     InputError = 3, // input validation fails
     ReturnTypeError = 4,
@@ -269,7 +269,6 @@ enum WasmiInvokeError {
 pub struct WasmiInvokeResult {
     result: u64,
     error: u32,
-    gas_consumed: u64,
 }
 
 #[repr(C)]
@@ -392,14 +391,11 @@ pub extern "C" fn wasmi_link_nargs(
     }
 }
 
-/*
-
 #[no_mangle]
 pub extern "C" fn wasmi_invoke(
-    runtime: *mut Wasmi_WasmRuntime,
+    runtime: *mut WasmiRuntime,
     bytes: *const u8,
     bytes_len: u32,
-    gas_limit: u64,
 ) -> WasmiInvokeResult {
     let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
 
@@ -409,7 +405,6 @@ pub extern "C" fn wasmi_invoke(
             return WasmiInvokeResult {
                 result: 0,
                 error: WasmiInvokeError::InputError as u32,
-                gas_consumed: 0,
             }
         }
     };
@@ -421,13 +416,10 @@ pub extern "C" fn wasmi_invoke(
         Err(_) => {
             return WasmiInvokeResult {
                 result: 0,
-                error: WasmiInvokeError::WasmiError as u32,
-                gas_consumed: 0,
+                error: WasmiInvokeError::LinkError as u32,
             };
         }
     };
-
-    r.store.set_fuel(gas_limit).unwrap();
 
     let func = match r
         .instance
@@ -440,7 +432,6 @@ pub extern "C" fn wasmi_invoke(
             return WasmiInvokeResult {
                 result: 0,
                 error: WasmiInvokeError::FuncNExist as u32,
-                gas_consumed: 0,
             };
         }
     };
@@ -449,22 +440,18 @@ pub extern "C" fn wasmi_invoke(
 
     let func_res = func.call(&mut r.store, &[], &mut res);
 
-    let gas_remaining: u64 = r.store.get_fuel().unwrap();
-
     match func_res {
         Ok(_) => match res[0].i64() {
             Some(v) => {
                 return WasmiInvokeResult {
                     result: v as u64,
                     error: WasmiInvokeError::None as u32,
-                    gas_consumed: gas_limit - gas_remaining,
                 };
             }
             _ => {
                 return WasmiInvokeResult {
                     result: 0,
                     error: WasmiInvokeError::ReturnTypeError as u32,
-                    gas_consumed: gas_limit - gas_remaining,
                 };
             }
         },
@@ -475,24 +462,21 @@ pub extern "C" fn wasmi_invoke(
                 return WasmiInvokeResult {
                     result: 0,
                     error: WasmiInvokeError::HostError as u32,
-                    gas_consumed: gas_limit - gas_remaining,
                 };
             }
             if errstr == "UnrecoverableSystemError" {
                 return WasmiInvokeResult {
                     result: 0,
                     error: WasmiInvokeError::UnrecoverableSystemError as u32,
-                    gas_consumed: gas_limit - gas_remaining,
                 };
             }
             return WasmiInvokeResult {
                 result: 0,
                 error: WasmiInvokeError::CallError as u32,
-                gas_consumed: gas_limit - gas_remaining,
             };
         }
     };
-}*/
+}
 
 #[no_mangle]
 pub fn new_wasmi_runtime(

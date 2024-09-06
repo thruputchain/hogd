@@ -6,14 +6,49 @@
 
 namespace hogd {
 
+
+/*
+enum WasmiInvokeError {
+  None = 0,
+  LinkError = 1, // module requests fn that was not linked
+  FuncNExist = 2,
+  InputError = 3, // input validation fails
+  ReturnTypeError = 4,
+  CallError = 5, // TODO(geoff) confirm, but I believe this means the wasm internall hit an `unreachable`
+  HostError = 6,
+  UnrecoverableSystemError = 7,
+} */
+// NOLINTNEXTLINE(performance-enum-size)
+enum class WasmiInvokeError : uint32_t {
+  kWasmiNone = 0,
+  kWasmiLinkError = 1,
+  kWasmiFnNExist = 2,
+  kWasmiInputError = 3,
+  kWasmiReturnTypeError = 4,
+  kWasmiCallError = 5,
+  kWasmiHostError = 6,
+  kWasmiUnrecoverableSystemError = 7
+};
+
 // Host fn calls have two types of errors:
 // 1) Recoverable (possibly handled by the caller contract,
 // must generate deterministically -- e.g. accessing a nonexistent key)
 // 2) Everything else (Unrecoverable)
+// We must be very deliberate about what errors we mark in the first category.
 enum class HostFnErrorCode : uint8_t {
   kUnrecoverableUnknown = 1,
   kRecoverableUnknown = 2,
+  // replicating WasmiInvokeError
+  kWasmiLinkError = 3,
+  kWasmiFnNExist = 4,
+  kWasmiInputError = 5,
+  kWasmiReturnTypeError = 6,
+  kWasmiCallError = 7,
+  kWasmiHostError = 8,
+  kWasmiUnrecoverableSystemError = 9
 };
+
+HostFnErrorCode wasmi_to_host_fn_error(WasmiInvokeError wasmi_error);
 
 class HostFnErrorCategory : public std::error_category {
 public:

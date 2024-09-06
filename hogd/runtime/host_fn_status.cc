@@ -32,4 +32,29 @@ HostFnError::recoverable() const
   }
 }
 
+HostFnErrorCode 
+wasmi_to_host_fn_error(WasmiInvokeError wasmi_error)
+{
+  switch (wasmi_error)
+  {
+  case WasmiInvokeError::kWasmiLinkError:
+    return HostFnErrorCode::kWasmiLinkError;
+  case WasmiInvokeError::kWasmiFnNExist:
+    return HostFnErrorCode::kWasmiFnNExist;
+  case WasmiInvokeError::kWasmiInputError:
+    return HostFnErrorCode::kWasmiInputError;
+  case WasmiInvokeError::kWasmiReturnTypeError:
+    return HostFnErrorCode::kWasmiReturnTypeError;
+  case WasmiInvokeError::kWasmiCallError:
+    return HostFnErrorCode::kWasmiCallError;
+  case WasmiInvokeError::kWasmiHostError:
+    return HostFnErrorCode::kWasmiHostError;
+  case WasmiInvokeError::kWasmiUnrecoverableSystemError:
+    return HostFnErrorCode::kWasmiUnrecoverableSystemError;
+  default:
+    return HostFnErrorCode::kUnrecoverableUnknown;
+  }
+}
+
+
 } // namespace hogd

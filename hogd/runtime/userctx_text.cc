@@ -5,6 +5,8 @@
 #include "hogd/runtime/wasmi_runtime.h"
 #include "hogd/base/types.h"
 
+#include <cstdint>
+
 namespace hogd {
 
 void *ctx_check = reinterpret_cast<void *>(0xAABBCCDD'EEFF0011);
@@ -24,9 +26,9 @@ TEST(UserCtxTest, CheckCtxCorrect)
   WasmiRuntime runtime(c, ctx_check);
 
   runtime.template link_fn<&foo>("test", "redir_call");
-  // auto res = runtime->template invoke<uint32_t>("calltest");
-  // EXPECT_EQ(res.panic, wasm_api::ErrorType::None);
-  // EXPECT_EQ(res.out, 15u);
+  auto res = runtime.invoke("calltest", UINT64_MAX);
+  EXPECT_TRUE(!!res.result);
+  EXPECT_EQ(*res.result, 15U);
 }
 
 } // namespace hogd

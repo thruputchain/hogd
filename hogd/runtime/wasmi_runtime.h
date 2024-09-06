@@ -43,6 +43,11 @@ get_n_args(HostFnStatus<uint64_t> (*)(HostCallContext *, Args...))
 
 } // namespace detail
 
+struct InvokeResult {
+    HostFnStatus<uint64_t> result;
+    uint64_t gas_consumed;
+};
+
 class WasmiRuntime : NonMovableOrCopyable {
 public:
   WasmiRuntime(Contract const &contract, void *user_ctx_ptr);
@@ -69,6 +74,8 @@ public:
   void link_fn(std::string const &module_name, std::string const &fn_name,
                uint64_t (*f)(HostCallContext *, uint64_t, uint64_t, uint64_t,
                              uint64_t, uint64_t)); */
+  InvokeResult invoke(std::string const& method_name,
+    uint64_t gas_limit);
 
   [[nodiscard]]
   bool consume_gas(uint64_t gas);
