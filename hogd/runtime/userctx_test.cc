@@ -18,7 +18,7 @@ foo(HostCallContext *ctx, uint64_t value)
   return 15;
 }
 
-TEST(UserCtxTest, CheckCtxCorrect)
+TEST(WasmRuntimeTest, CheckCtxCorrect)
 {
   auto c = test::load_wasm_from_file("test_invoke.wasm");
 

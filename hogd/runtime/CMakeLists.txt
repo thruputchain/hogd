@@ -6,7 +6,8 @@ add_library(
 )
 add_executable(
   runtime_test
-  userctx_text.cc
+  userctx_test.cc
+  instantiate_test.cc
 )
 target_link_libraries(
   runtime_test

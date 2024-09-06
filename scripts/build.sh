@@ -57,3 +57,4 @@ CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   "${CMAKE_INJECT[@]}" \
   "$ROOT_DIR"
 
+make -j "$NPROC"
