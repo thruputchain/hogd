@@ -5,8 +5,11 @@
 #include "hogd/runtime/wasmi_runtime.h"
 #include "hogd/base/types.h"
 
+<<<<<<< HEAD
 #include <cstdint>
 
+=======
+>>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 namespace hogd {
 
 void *ctx_check = reinterpret_cast<void *>(0xAABBCCDD'EEFF0011);
@@ -21,14 +24,24 @@ foo(HostCallContext *ctx, uint64_t value)
 
 TEST(UserCtxTest, CheckCtxCorrect)
 {
+<<<<<<< HEAD
   auto c = test::load_wasm_from_file("test_invoke.wasm");
+=======
+  auto c = test::load_wasm_from_file("tests/wat/test_invoke.wasm");
+>>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 
   WasmiRuntime runtime(c, ctx_check);
 
   runtime.template link_fn<&foo>("test", "redir_call");
+<<<<<<< HEAD
   auto res = runtime.invoke("calltest", UINT64_MAX);
   EXPECT_TRUE(!!res.result);
   EXPECT_EQ(*res.result, 15U);
+=======
+  // auto res = runtime->template invoke<uint32_t>("calltest");
+  // EXPECT_EQ(res.panic, wasm_api::ErrorType::None);
+  // EXPECT_EQ(res.out, 15u);
+>>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 }
 
 } // namespace hogd
