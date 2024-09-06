@@ -32,7 +32,6 @@ HostFnError::recoverable() const
   }
 }
 
-<<<<<<< HEAD
 HostFnErrorCode 
 wasmi_to_host_fn_error(WasmiInvokeError wasmi_error)
 {
@@ -57,7 +56,4 @@ wasmi_to_host_fn_error(WasmiInvokeError wasmi_error)
   }
 }
 
-
-=======
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 } // namespace hogd

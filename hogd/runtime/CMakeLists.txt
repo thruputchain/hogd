@@ -15,7 +15,6 @@ target_link_libraries(
   GTest::gtest_main
 )
 gtest_discover_tests(runtime_test)
-<<<<<<< HEAD
 
 include(../cmake/wat2wasm.cmake)
 
@@ -36,5 +35,3 @@ add_dependencies(
   test_call_simple_wasm
   test_invoke_wasm
 )
-=======
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)

@@ -43,14 +43,11 @@ get_n_args(HostFnStatus<uint64_t> (*)(HostCallContext *, Args...))
 
 } // namespace detail
 
-<<<<<<< HEAD
 struct InvokeResult {
     HostFnStatus<uint64_t> result;
     uint64_t gas_consumed;
 };
 
-=======
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 class WasmiRuntime : NonMovableOrCopyable {
 public:
   WasmiRuntime(Contract const &contract, void *user_ctx_ptr);
@@ -62,26 +59,8 @@ public:
                          detail::get_n_args(F));
   }
 
-  /*
-  void link_fn(std::string const &module_name, std::string const &fn_name,
-               uint64_t (*f)(HostCallContext *));
-  void link_fn(std::string const &module_name, std::string const &fn_name,
-               uint64_t (*f)(HostCallContext *, uint64_t));
-  void link_fn(std::string const &module_name, std::string const &fn_name,
-               uint64_t (*f)(HostCallContext *, uint64_t, uint64_t));
-  void link_fn(std::string const &module_name, std::string const &fn_name,
-               uint64_t (*f)(HostCallContext *, uint64_t, uint64_t, uint64_t));
-  void link_fn(std::string const &module_name, std::string const &fn_name,
-               uint64_t (*f)(HostCallContext *, uint64_t, uint64_t, uint64_t,
-                             uint64_t));
-  void link_fn(std::string const &module_name, std::string const &fn_name,
-               uint64_t (*f)(HostCallContext *, uint64_t, uint64_t, uint64_t,
-                             uint64_t, uint64_t)); */
-<<<<<<< HEAD
   InvokeResult invoke(std::string const& method_name,
     uint64_t gas_limit);
-=======
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 
   [[nodiscard]]
   bool consume_gas(uint64_t gas);
@@ -102,62 +81,5 @@ private:
   // manipulated in rust
   void *wasmi_runtime_ptr_;
 };
-
-/*
-
-class Wasmi_WasmRuntime : public detail::WasmRuntimeImpl
-{
-public:
-    Wasmi_WasmRuntime(Script const& data,
-                      void* context_pointer,
-                      HostCallContext* host_call_context);
-
-    ~Wasmi_WasmRuntime();
-
-    std::pair<uint8_t*, uint32_t> get_memory() override;
-    std::pair<const uint8_t*, uint32_t> get_memory() const override;
-
-    void link_fn(std::string const& module_name,
-                 std::string const& fn_name,
-                 uint64_t (*f)(HostCallContext*)) override;
-    void link_fn(std::string const& module_name,
-                 std::string const& fn_name,
-                 uint64_t (*f)(HostCallContext*, uint64_t)) override;
-    void link_fn(std::string const& module_name,
-                 std::string const& fn_name,
-                 uint64_t (*f)(HostCallContext*, uint64_t, uint64_t)) override;
-    void link_fn(
-        std::string const& module_name,
-        std::string const& fn_name,
-        uint64_t (*f)(HostCallContext*, uint64_t, uint64_t, uint64_t)) override;
-    void link_fn(std::string const& module_name,
-                 std::string const& fn_name,
-                 uint64_t (*f)(HostCallContext*,
-                               uint64_t,
-                               uint64_t,
-                               uint64_t,
-                               uint64_t)) override;
-    void link_fn(std::string const& module_name,
-                 std::string const& fn_name,
-                 uint64_t (*f)(HostCallContext*,
-                               uint64_t,
-                               uint64_t,
-                               uint64_t,
-                               uint64_t,
-                               uint64_t)) override;
-
-    detail::MeteredReturn<uint64_t> invoke(std::string const& method_name,
-                                           const uint64_t gas_limit) override
-final;
-
-    bool
-    __attribute__((warn_unused_result))
-    consume_gas(uint64_t gas) override;
-    uint64_t get_available_gas() const override;
-    void set_available_gas(uint64_t gas) override;
-
-private:
-    void* runtime_pointer;
-}; */
 
 } // namespace hogd

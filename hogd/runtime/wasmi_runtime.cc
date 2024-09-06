@@ -2,16 +2,11 @@
 
 #include "hogd/base/types.h"
 
-<<<<<<< HEAD
 #include "hogd/runtime/host_fn_status.h"
 
 #include <span>
 #include <string>
 #include <cassert>
-=======
-#include <span>
-#include <string>
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 
 namespace hogd {
 
@@ -60,7 +55,6 @@ struct MemorySlice {
 };
 
 /*
-<<<<<<< HEAD
 #[repr(C)]
 pub struct WasmiInvokeResult {
     result: u64,
@@ -72,8 +66,6 @@ struct WasmiInvokeResult {
 };
 
 /*
-=======
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 #[no_mangle]
 pub extern "C" fn wasmi_get_memory(runtime: *mut WasmiRuntime) -> MemorySlice;
 */
@@ -113,8 +105,6 @@ pub extern "C" fn wasmi_link_nargs(
 bool wasmi_link_nargs(void *wasmi_runtime_ptr, const uint8_t *module_name,
                       uint32_t module_name_len, const uint8_t *method_name,
                       uint32_t method_name_len, void *fn_ptr, uint8_t n_args);
-<<<<<<< HEAD
-
 /*
 #[no_mangle]
 pub extern "C" fn wasmi_invoke(
@@ -130,9 +120,6 @@ wasmi_invoke(void* wasmi_runtime_ptr,
   uint32_t method_name_len);
 
 } // extern C
-=======
-}
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 
 } // namespace detail
 
@@ -162,7 +149,6 @@ WasmiRuntime::link_fn_nargs(std::string const &module_name,
       fn_name.size(), fn_ptr, nargs);
 }
 
-<<<<<<< HEAD
 InvokeResult 
 WasmiRuntime::invoke(std::string const& method_name,
     uint64_t gas_limit)
@@ -199,8 +185,6 @@ WasmiRuntime::invoke(std::string const& method_name,
   };
 }
 
-=======
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 WasmiRuntime::WasmiRuntime(Contract const &contract, void *user_ctx_ptr)
   : host_call_context_(this, user_ctx_ptr),
     wasmi_runtime_ptr_(detail::new_wasmi_runtime(contract.data(),

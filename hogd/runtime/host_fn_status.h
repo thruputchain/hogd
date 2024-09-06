@@ -6,8 +6,6 @@
 
 namespace hogd {
 
-<<<<<<< HEAD
-
 /*
 enum WasmiInvokeError {
   None = 0,
@@ -19,6 +17,7 @@ enum WasmiInvokeError {
   HostError = 6,
   UnrecoverableSystemError = 7,
 } */
+
 // NOLINTNEXTLINE(performance-enum-size)
 enum class WasmiInvokeError : uint32_t {
   kWasmiNone = 0,
@@ -31,13 +30,10 @@ enum class WasmiInvokeError : uint32_t {
   kWasmiUnrecoverableSystemError = 7
 };
 
-=======
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 // Host fn calls have two types of errors:
 // 1) Recoverable (possibly handled by the caller contract,
 // must generate deterministically -- e.g. accessing a nonexistent key)
 // 2) Everything else (Unrecoverable)
-<<<<<<< HEAD
 // We must be very deliberate about what errors we mark in the first category.
 enum class HostFnErrorCode : uint8_t {
   kUnrecoverableUnknown = 1,
@@ -54,13 +50,6 @@ enum class HostFnErrorCode : uint8_t {
 
 HostFnErrorCode wasmi_to_host_fn_error(WasmiInvokeError wasmi_error);
 
-=======
-enum class HostFnErrorCode : uint8_t {
-  kUnrecoverableUnknown = 1,
-  kRecoverableUnknown = 2,
-};
-
->>>>>>> ff18635 (initial draft wasmi runtime no invoke() or wat2wasm yet)
 class HostFnErrorCategory : public std::error_category {
 public:
   const char *name() const noexcept override { return "hostfn"; }
