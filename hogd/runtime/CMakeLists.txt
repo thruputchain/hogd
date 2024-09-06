@@ -1,0 +1,17 @@
+add_library(
+  runtime
+  wasmi_runtime.cc
+  ffi_trampolines.cc
+  host_fn_status.cc
+)
+add_executable(
+  runtime_test
+  userctx_text.cc
+)
+target_link_libraries(
+  runtime_test
+  runtime
+  wasmi_lib
+  GTest::gtest_main
+)
+gtest_discover_tests(runtime_test)
