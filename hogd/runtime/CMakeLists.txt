@@ -9,6 +9,7 @@ add_executable(
   userctx_test.cc
   instantiate_test.cc
   error_handling_test.cc
+  invoke_arity_test.cc
 )
 target_link_libraries(
   runtime_test
@@ -38,9 +39,16 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_error_handling.wasm
 )
 
+wat2wasm_target(
+  test_invoke_arity_wasm
+  wat/test_invoke_arity.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_invoke_arity.wasm
+)
+
 add_dependencies(
   runtime_test
   test_call_simple_wasm
   test_invoke_wasm
   test_error_handling_wasm
+  test_invoke_arity_wasm
 )

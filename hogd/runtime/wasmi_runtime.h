@@ -43,6 +43,8 @@ get_n_args(HostFnStatus<uint64_t> (*)(HostCallContext *, Args...))
 } // namespace detail
 
 struct InvokeResult {
+  // topic for debate: should result be a different error status type
+  // or does it not matter
   HostFnStatus<uint64_t> result;
   uint64_t gas_consumed;
 };
