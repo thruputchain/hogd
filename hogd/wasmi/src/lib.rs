@@ -287,6 +287,10 @@ enum WasmiInvokeError {
     UnrecoverableSystemError = 7,
 }
 
+pub fn assert_runtime_not_null(runtime: *const WasmiRuntime) {
+    assert!(runtime != core::ptr::null());
+}
+
 #[repr(C)]
 pub struct WasmiInvokeResult {
     result: u64,
@@ -301,6 +305,8 @@ pub struct MemorySlice {
 
 #[no_mangle]
 pub extern "C" fn wasmi_get_memory(runtime: *mut WasmiRuntime) -> MemorySlice {
+    assert_runtime_not_null(runtime);
+
     let r = unsafe { &mut *runtime };
 
     match r.lazy_link() {
@@ -337,6 +343,8 @@ pub extern "C" fn wasmi_get_memory(runtime: *mut WasmiRuntime) -> MemorySlice {
 
 #[no_mangle]
 pub extern "C" fn wasmi_consume_gas(runtime: *mut WasmiRuntime, gas_consumed: u64) -> bool {
+    assert_runtime_not_null(runtime);
+
     let r = unsafe { &mut *runtime };
 
     let cur_fuel: u64 = r.store.get_fuel().unwrap();
@@ -350,12 +358,14 @@ pub extern "C" fn wasmi_consume_gas(runtime: *mut WasmiRuntime, gas_consumed: u6
 
 #[no_mangle]
 pub extern "C" fn wasmi_get_available_gas(runtime: *const WasmiRuntime) -> u64 {
+    assert_runtime_not_null(runtime);
     let r = unsafe { &*runtime };
     return r.store.get_fuel().unwrap();
 }
 
 #[no_mangle]
 pub extern "C" fn wasmi_set_available_gas(runtime: *mut WasmiRuntime, gas: u64) {
+    assert_runtime_not_null(runtime);
     let r = unsafe { &mut *runtime };
     r.store.set_fuel(gas).unwrap();
 }
@@ -379,6 +389,13 @@ pub extern "C" fn wasmi_link_nargs(
     nargs: u8,
 ) -> bool // true if success
 {
+    assert_runtime_not_null(runtime);
+
+    assert!(module_name != core::ptr::null());
+    assert!(method_name != core::ptr::null());
+
+    // assert module name & method_name nonzero
+
     let module = match string_from_parts(module_name, module_name_len) {
         Ok(x) => x,
         _ => {
@@ -416,12 +433,21 @@ pub extern "C" fn wasmi_link_nargs(
 #[no_mangle]
 pub extern "C" fn wasmi_invoke(
     runtime: *mut WasmiRuntime,
-    bytes: *const u8,
-    bytes_len: u32,
+    method_name: *const u8,
+    method_name_len: u32,
 ) -> WasmiInvokeResult {
-    let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
+    assert_runtime_not_null(runtime);
 
-    let string = match std::str::from_utf8(&slice) {
+    if method_name == core::ptr::null() {
+        return WasmiInvokeResult {
+            result: 0,
+            error: WasmiInvokeError::InputError as u32,
+        };
+    }
+
+    let method_name_slice = unsafe { slice::from_raw_parts(method_name, method_name_len as usize) };
+
+    let string = match std::str::from_utf8(&method_name_slice) {
         Ok(v) => v,
         _ => {
             return WasmiInvokeResult {
@@ -506,6 +532,10 @@ pub fn new_wasmi_runtime(
     bytes_len: u32,
     userctx: *mut c_void,
 ) -> *mut WasmiRuntime {
+    if bytes == core::ptr::null() {
+        return core::ptr::null_mut();
+    }
+
     let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
 
     let b = Box::new(WasmiRuntime::new(&slice, userctx));
@@ -515,5 +545,7 @@ pub fn new_wasmi_runtime(
 
 #[no_mangle]
 pub extern "C" fn free_wasmi_runtime(p: *mut WasmiRuntime) {
+    assert_runtime_not_null(p);
+
     unsafe { drop(Box::from_raw(p)) };
 }

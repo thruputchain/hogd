@@ -15,6 +15,13 @@ namespace detail {
 // FFI declarations
 extern "C" {
 
+// *** REQUIREMENT ***
+// These functions are only used in this file, so as to make
+// tracking these invariants easier.
+// Also, big capital letters
+// *** REQUIREMENT ***
+// Argument passed in as wasmi_runtime_ptr is NEVER NULL
+
 /**
  * Key rust FFI rules:
  * 1) exported functions are #[no_mangle]
@@ -109,8 +116,8 @@ bool wasmi_link_nargs(void *wasmi_runtime_ptr, const uint8_t *module_name,
 #[no_mangle]
 pub extern "C" fn wasmi_invoke(
     runtime: *mut Wasmi_WasmRuntime,
-    bytes: *const u8,
-    bytes_len: u32,
+    method_name: *const u8,
+    method_name_len: u32,
 ) -> WasmiInvokeResult
 */
 
@@ -125,6 +132,9 @@ WasmiInvokeResult wasmi_invoke(void *wasmi_runtime_ptr,
 std::span<uint8_t, std::dynamic_extent>
 WasmiRuntime::get_memory()
 {
+  if (!wasmi_runtime_ptr_) {
+    return std::span<uint8_t, std::dynamic_extent>();
+  }
   auto slice = detail::wasmi_get_memory(wasmi_runtime_ptr_);
   return std::span<uint8_t, std::dynamic_extent>(slice.mem, slice.sz);
 }
@@ -132,6 +142,9 @@ WasmiRuntime::get_memory()
 std::span<const uint8_t, std::dynamic_extent>
 WasmiRuntime::get_memory() const
 {
+  if (!wasmi_runtime_ptr_) {
+    return std::span<uint8_t, std::dynamic_extent>();
+  }
   auto slice = detail::wasmi_get_memory(wasmi_runtime_ptr_);
   return std::span<uint8_t, std::dynamic_extent>(slice.mem, slice.sz);
 }
@@ -141,6 +154,9 @@ WasmiRuntime::link_fn_nargs(std::string const &module_name,
                             std::string const &fn_name, void *fn_ptr,
                             uint8_t nargs)
 {
+  if (!wasmi_runtime_ptr_) {
+    return false;
+  }
   return detail::wasmi_link_nargs(
       wasmi_runtime_ptr_,
       reinterpret_cast<const uint8_t *>(module_name.c_str()),
@@ -151,6 +167,12 @@ WasmiRuntime::link_fn_nargs(std::string const &module_name,
 InvokeResult
 WasmiRuntime::invoke(std::string const &method_name, uint64_t gas_limit)
 {
+  if (!wasmi_runtime_ptr_) {
+    return InvokeResult{.result =
+                            HostFnError{HostFnErrorCode::kUnrecoverableUnknown},
+                        .gas_consumed = 0};
+  }
+
   uint64_t prev_gas_limit = detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
   detail::wasmi_set_available_gas(wasmi_runtime_ptr_, gas_limit);
 
@@ -176,6 +198,33 @@ WasmiRuntime::invoke(std::string const &method_name, uint64_t gas_limit)
                         .gas_consumed = gas_consumed};
   }
   return InvokeResult{.result = res.result, .gas_consumed = gas_consumed};
+}
+
+bool
+WasmiRuntime::consume_gas(uint64_t gas)
+{
+  if (!wasmi_runtime_ptr_) {
+    return false;
+  }
+  return detail::wasmi_consume_gas(wasmi_runtime_ptr_, gas);
+}
+
+uint64_t
+WasmiRuntime::get_available_gas() const
+{
+  if (!wasmi_runtime_ptr_) {
+    return 0;
+  }
+  return detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
+}
+
+void
+WasmiRuntime::set_available_gas(uint64_t gas)
+{
+  if (!wasmi_runtime_ptr_) {
+    return;
+  }
+  detail::wasmi_set_available_gas(wasmi_runtime_ptr_, gas);
 }
 
 WasmiRuntime::WasmiRuntime(Contract const &contract, void *user_ctx_ptr)
