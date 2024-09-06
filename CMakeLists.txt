@@ -38,3 +38,24 @@ include(GoogleTest)
 # Add code directories
 include_directories(${CMAKE_SOURCE_DIR})
 add_subdirectory(hogd)
+
+include(ExternalProject)
+
+# Define an external project for the 3rd-party product
+ExternalProject_Add(libsodium
+    SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
+    CONFIGURE_COMMAND
+      ${CMAKE_SOURCE_DIR}/external/libsodium/configure
+      --prefix=${CMAKE_INSTALL_PREFIX}
+      CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
+      CFLAGS=${CMAKE_C_FLAGS} CXXFLAGS=${CMAKE_CXX_FLAGS}
+    BUILD_COMMAND make
+    INSTALL_COMMAND ""  # Skip installation step
+)
+
+ExternalProject_Get_Property(libsodium binary_dir)
+set(LIBSODIUM_UNINSTALLED_PKGCONFIG_DIR "${binary_dir}")
+set(ENV{PKG_CONFIG_PATH} "${LIBSODIUM_UNINSTALLED_PKGCONFIG_DIR}:$ENV{PKG_CONFIG_PATH}")
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBSODIUM REQUIRED libsodium-uninstalled)
