@@ -1,4 +1,3 @@
-
 use core::ffi::c_void;
 use wasmi::Error;
 
@@ -7,7 +6,7 @@ use wasmi::Error;
  * This does not implement transferral of errors
  * from the syscall to the wasm runtime in the full granularity
  * of the rest of the hogd codebase.
- * 
+ *
  * There are two types of errors that we are concerned with here.
  * 1) Those that should be returned to the Wasm runtime (and that could
  * be handled there, by a contract)
@@ -30,7 +29,11 @@ pub struct TrampolineResult {
 
 extern "C" {
     pub fn c_call_0args(fn_pointer: *mut c_void, userctx: *mut c_void) -> TrampolineResult;
-    pub fn c_call_1args(fn_pointer: *mut c_void, userctx: *mut c_void, arg1: u64) -> TrampolineResult;
+    pub fn c_call_1args(
+        fn_pointer: *mut c_void,
+        userctx: *mut c_void,
+        arg1: u64,
+    ) -> TrampolineResult;
     pub fn c_call_2args(
         fn_pointer: *mut c_void,
         userctx: *mut c_void,
@@ -68,7 +71,7 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<u64, Error> {
     let err: TrampolineError = unsafe { std::mem::transmute(result.panic) };
     match err {
         TrampolineError::None => Ok(result.result),
-        TrampolineError::HostError => { Err(Error::new("HostError")) },
-        _ => { Err(Error::new("UnrecoverableSystemError")) },
+        TrampolineError::HostError => Err(Error::new("HostError")),
+        _ => Err(Error::new("UnrecoverableSystemError")),
     }
 }

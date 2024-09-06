@@ -1,4 +1,6 @@
-use wasmi::{Caller, Config, Engine, Error, Func, Instance, Linker, Module, Store, Val, StackLimits};
+use wasmi::{
+    Caller, Config, Engine, Error, Func, Instance, Linker, Module, StackLimits, Store, Val,
+};
 
 use core::ffi::c_void;
 use std::slice;
@@ -23,14 +25,15 @@ unsafe impl Send for BorrowBypass {}
 unsafe impl Sync for BorrowBypass {}
 
 impl WasmiRuntime {
-    pub fn new(
-        bytes: &[u8],
-        userctx: *mut c_void,
-    ) -> WasmiRuntime {
-
+    pub fn new(bytes: &[u8], userctx: *mut c_void) -> WasmiRuntime {
         let stack_limit = StackLimits::default();
 
-        let engine = Engine::new(&Config::default().consume_fuel(true).floats(false).set_stack_limits(stack_limit));
+        let engine = Engine::new(
+            &Config::default()
+                .consume_fuel(true)
+                .floats(false)
+                .set_stack_limits(stack_limit),
+        );
 
         let store = Store::new(&engine, userctx);
         let module = Module::new(&engine, &bytes).unwrap();
@@ -76,7 +79,8 @@ impl WasmiRuntime {
                 // This is necessary to stop some part of rust
                 // from complaining
                 let _y = x.clone();
-                let res = unsafe { external_call::c_call_0args(x.fn_pointer, caller.data().clone()) };
+                let res =
+                    unsafe { external_call::c_call_0args(x.fn_pointer, caller.data().clone()) };
                 return external_call::handle_trampoline_error(res);
             },
         );
@@ -103,7 +107,9 @@ impl WasmiRuntime {
                 // This is necessary to stop some part of rust
                 // from complaining
                 let _y = x.clone();
-                let res = unsafe { external_call::c_call_1args(x.fn_pointer, caller.data().clone(), arg1) };
+                let res = unsafe {
+                    external_call::c_call_1args(x.fn_pointer, caller.data().clone(), arg1)
+                };
                 return external_call::handle_trampoline_error(res);
             },
         );
@@ -133,7 +139,9 @@ impl WasmiRuntime {
                 // This is necessary to stop some part of rust
                 // from complaining
                 let _y = x.clone();
-                let res = unsafe { external_call::c_call_2args(x.fn_pointer, caller.data().clone(), arg1, arg2) };
+                let res = unsafe {
+                    external_call::c_call_2args(x.fn_pointer, caller.data().clone(), arg1, arg2)
+                };
                 return external_call::handle_trampoline_error(res);
             },
         );
@@ -164,8 +172,15 @@ impl WasmiRuntime {
                 // This is necessary to stop some part of rust
                 // from complaining
                 let _y = x.clone();
-                let res =
-                    unsafe { external_call::c_call_3args(x.fn_pointer, caller.data().clone(), arg1, arg2, arg3) };
+                let res = unsafe {
+                    external_call::c_call_3args(
+                        x.fn_pointer,
+                        caller.data().clone(),
+                        arg1,
+                        arg2,
+                        arg3,
+                    )
+                };
                 return external_call::handle_trampoline_error(res);
             },
         );
@@ -198,7 +213,14 @@ impl WasmiRuntime {
                 // from complaining
                 let _y = x.clone();
                 let res = unsafe {
-                    external_call::c_call_4args(x.fn_pointer, caller.data().clone(), arg1, arg2, arg3, arg4)
+                    external_call::c_call_4args(
+                        x.fn_pointer,
+                        caller.data().clone(),
+                        arg1,
+                        arg2,
+                        arg3,
+                        arg4,
+                    )
                 };
                 return external_call::handle_trampoline_error(res);
             },
@@ -252,7 +274,7 @@ impl WasmiRuntime {
             Err(err) => Err(err.into()),
         }
     }
-} 
+}
 
 enum WasmiInvokeError {
     None = 0,
@@ -333,7 +355,7 @@ pub extern "C" fn wasmi_get_available_gas(runtime: *const WasmiRuntime) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn wasmi_set_available_gas(runtime: *mut WasmiRuntime, gas : u64) {
+pub extern "C" fn wasmi_set_available_gas(runtime: *mut WasmiRuntime, gas: u64) {
     let r = unsafe { &mut *runtime };
     r.store.set_fuel(gas).unwrap();
 }
@@ -462,14 +484,12 @@ pub extern "C" fn wasmi_invoke(
                 return WasmiInvokeResult {
                     result: 0,
                     error: WasmiInvokeError::HostError as u32,
-
                 };
             }
             if errstr == "UnrecoverableSystemError" {
                 return WasmiInvokeResult {
                     result: 0,
                     error: WasmiInvokeError::UnrecoverableSystemError as u32,
-
                 };
             }
             return WasmiInvokeResult {
@@ -488,10 +508,7 @@ pub fn new_wasmi_runtime(
 ) -> *mut WasmiRuntime {
     let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
 
-    let b = Box::new(WasmiRuntime::new(
-        &slice,
-        userctx,
-    ));
+    let b = Box::new(WasmiRuntime::new(&slice, userctx));
 
     return Box::into_raw(b);
 }
