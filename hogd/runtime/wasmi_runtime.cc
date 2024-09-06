@@ -130,7 +130,7 @@ WasmiInvokeResult wasmi_invoke(void *wasmi_runtime_ptr,
 } // namespace detail
 
 std::span<uint8_t, std::dynamic_extent>
-WasmiRuntime::get_memory()
+WasmiRuntime::get_memory() noexcept
 {
   if (!wasmi_runtime_ptr_) {
     return std::span<uint8_t, std::dynamic_extent>();
@@ -140,7 +140,7 @@ WasmiRuntime::get_memory()
 }
 
 std::span<const uint8_t, std::dynamic_extent>
-WasmiRuntime::get_memory() const
+WasmiRuntime::get_memory() const noexcept
 {
   if (!wasmi_runtime_ptr_) {
     return std::span<uint8_t, std::dynamic_extent>();
@@ -201,7 +201,7 @@ WasmiRuntime::invoke(std::string const &method_name, uint64_t gas_limit)
 }
 
 bool
-WasmiRuntime::consume_gas(uint64_t gas)
+WasmiRuntime::consume_gas(uint64_t gas) noexcept
 {
   if (!wasmi_runtime_ptr_) {
     return false;

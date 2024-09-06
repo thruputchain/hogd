@@ -64,13 +64,13 @@ public:
 
   // Returns FALSE if gas consumption failed
   [[nodiscard]]
-  bool consume_gas(uint64_t gas);
+  bool consume_gas(uint64_t gas) noexcept;
 
   [[nodiscard]] uint64_t get_available_gas() const;
   void set_available_gas(uint64_t gas);
 
-  std::span<uint8_t, std::dynamic_extent> get_memory();
-  std::span<const uint8_t, std::dynamic_extent> get_memory() const;
+  std::span<uint8_t, std::dynamic_extent> get_memory() noexcept;
+  std::span<const uint8_t, std::dynamic_extent> get_memory() const noexcept;
 
   ~WasmiRuntime();
 
