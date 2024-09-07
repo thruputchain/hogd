@@ -8,7 +8,6 @@
 
 namespace hogd {
 
-
 class SyscallErrorCategory : public std::error_category {
 public:
   const char *name() const noexcept override { return "syscall"; }

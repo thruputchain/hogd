@@ -20,7 +20,6 @@ enum class SyscallNo : uint64_t { // NOLINT
   // general storage
   kHasKey           = 0x3000'0000,
   kDeleteLast       = 0x3000'0001,
-
 };
 
 } // namespace hogd

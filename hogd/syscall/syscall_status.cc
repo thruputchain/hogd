@@ -20,13 +20,10 @@ SyscallErrorCategory::message(int code) const
   	return "kStorageKeyNExist";
   case kStorageKeyAlreadyDeleted:
   	return "kStorageKeyAlreadyDeleted";
-
   case kNonnegativeInt64SetValueMismatch:
   	return "kNonnegativeInt64SetValueMismatch";
-
   case kDoubleReturn:
   	return "kDoubleReturn";
-
   case kInvalidPtrError:
   	return "kInvalidPtrError";
 

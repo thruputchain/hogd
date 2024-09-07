@@ -1,0 +1,51 @@
+#include "hogd/syscall/syscall_handler.h"
+
+#include "hogd/syscall/gas_schedule.h"
+
+#include <cstring>
+
+namespace hogd
+{
+
+MeteredResult<uint64_t> 
+SyscallHandler::get_block_number() const
+{
+	return {0, kSyscallGetBlockNumberCost};
+}
+
+MeteredResult<Hash> 
+SyscallHandler::get_prev_block_hash() const
+{
+	return {Hash{}, kSyscallGetPrevBlockHashCost};
+}
+
+SyscallStatus<AddressAndKey> 
+SyscallHandler::get_addrkey(StorageKey const& key)
+{
+	Address current_address = Address();  // Change, pending invocationstack impl which is pending x23c
+	AddressAndKey out;
+
+	static_assert(sizeof(Address) + sizeof(StorageKey) == sizeof(AddressAndKey), "type size error");
+	std::memcpy(out.data(), current_address.data(), current_address.size());
+	std::memcpy(out.data() + current_address.size(), key.data(), key.size());
+
+	return out;
+}
+
+MeteredResult<ProxyApplicator *> 
+SyscallHandler::get_applicator(StorageKey const &key)
+{
+	auto addrkey = get_addrkey(key);
+	if (!addrkey) {
+		return {addrkey.error(), 0};
+	}
+
+	auto it = storage_proxies_.find(*addrkey);
+	if (it != storage_proxies_.end()) {
+		return {it -> second.get(),  kSyscallProxyLookupFoundCost };
+	}
+
+	throw std::runtime_error("unimplemented");
+}
+
+}
