@@ -1,49 +1,48 @@
 #include "hogd/syscall/syscall_status.h"
 
-#include <string>
-#include <utility>
 #include <concepts>
+#include <string>
 #include <type_traits>
+#include <utility>
 
 #include "hogd/syscall/syscall_error_code.h"
 
-namespace hogd
-{
-
+namespace hogd {
 
 std::string
 SyscallErrorCategory::message(int code) const
 {
   using enum SyscallErrorCode;
-  static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int>, 
-  	"Slightly too strong, but potential for UB or dropped errors otherwise (CWG defects 1766)");
+  static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int>,
+                "Slightly too strong, but potential for UB or dropped errors "
+                "otherwise (CWG defects 1766)");
 
   switch (static_cast<SyscallErrorCode>(code)) {
   case kIsRootTransaction:
-  	return "kIsRootTransaction";
+    return "kIsRootTransaction";
   case kStorageObjectTypeMismatch:
-  	return "kStorageObjectTypeMismatch";
+    return "kStorageObjectTypeMismatch";
   case kStorageKeyNExist:
-  	return "kStorageKeyNExist";
+    return "kStorageKeyNExist";
   case kStorageKeyAlreadyDeleted:
-  	return "kStorageKeyAlreadyDeleted";
+    return "kStorageKeyAlreadyDeleted";
   case kNonnegativeInt64SetValueMismatch:
-  	return "kNonnegativeInt64SetValueMismatch";
+    return "kNonnegativeInt64SetValueMismatch";
   case kDoubleReturn:
-  	return "kDoubleReturn";
+    return "kDoubleReturn";
   case kInvalidPtrError:
-  	return "kInvalidPtrError";
+    return "kInvalidPtrError";
 
   case kUnrecoverableUnknown:
-  	return "kUnrecoverableUnknown";
+    return "kUnrecoverableUnknown";
   }
   return "unknown";
 }
 
-
 bool
-SyscallError::recoverable() const {
-	return (std::to_underlying(code()) >= 0);
+SyscallError::recoverable() const
+{
+  return (std::to_underlying(code()) >= 0);
 }
 
-}
+} // namespace hogd

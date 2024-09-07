@@ -2,8 +2,7 @@
 
 #include <cstdint>
 
-namespace hogd
-{
+namespace hogd {
 
 /**
  * As specified in designdocs/syscall.md
@@ -12,9 +11,9 @@ namespace hogd
  * within contracts.
  */
 enum class KeyStatus : uint64_t { // NOLINT
-  kKeyExists = 0,
-  kKeyNExist = 1,
+  kKeyExists         = 0,
+  kKeyNExist         = 1,
   kKeyAlreadyDeleted = 2
 };
 
-}
+} // namespace hogd

@@ -26,7 +26,7 @@ enum class SyscallErrorCode : int32_t { // NOLINT
 
   // anything negative is unrecoverable,
   // and should not be passed back to the runtime
-  kUnrecoverableUnknown                    = INT32_MIN,
+  kUnrecoverableUnknown             = INT32_MIN,
 };
 
 } // namespace hogd
