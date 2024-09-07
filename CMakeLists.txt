@@ -57,11 +57,10 @@ set(LIBSODIUM_INCLUDE_DIRS
     "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include"
     "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include/sodium"
 )
-set(LIBSODIUM_LIBDIR "${LIBSODIUM_PCFILEDIR}/src/libsodium")
-set(LIBSODIUM_LIBRARIES "-lsodium")
+set(LIBSODIUM_LIBRARIES
+"${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium.a")
 
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
-link_directories(${LIBSODIUM_LIBDIR})
 
 # Add code directories
 include_directories(${CMAKE_SOURCE_DIR})
