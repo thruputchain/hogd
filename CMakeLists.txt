@@ -35,10 +35,6 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 include(GoogleTest)
 
-# Add code directories
-include_directories(${CMAKE_SOURCE_DIR})
-add_subdirectory(hogd)
-
 include(ExternalProject)
 
 # Define an external project for the 3rd-party product
@@ -54,8 +50,20 @@ ExternalProject_Add(libsodium
 )
 
 ExternalProject_Get_Property(libsodium binary_dir)
-set(LIBSODIUM_UNINSTALLED_PKGCONFIG_DIR "${binary_dir}")
-set(ENV{PKG_CONFIG_PATH} "${LIBSODIUM_UNINSTALLED_PKGCONFIG_DIR}:$ENV{PKG_CONFIG_PATH}")
+set(LIBSODIUM_PCFILEDIR "${binary_dir}")
+set(LIBSODIUM_TOP_SRCDIR "${CMAKE_SOURCE_DIR}/external/libsodium")
+set(LIBSODIUM_INCLUDE_DIRS
+    "${LIBSODIUM_PCFILEDIR}/src/libsodium/include"
+    "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include"
+    "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include/sodium"
+)
+set(LIBSODIUM_LIBDIR "${LIBSODIUM_PCFILEDIR}/src/libsodium")
+set(LIBSODIUM_LIBRARIES "-lsodium")
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBSODIUM REQUIRED libsodium-uninstalled)
+include_directories(${LIBSODIUM_INCLUDE_DIRS})
+link_directories(${LIBSODIUM_LIBDIR})
+
+# Add code directories
+include_directories(${CMAKE_SOURCE_DIR})
+add_subdirectory(hogd)
+

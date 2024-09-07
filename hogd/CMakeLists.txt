@@ -4,13 +4,7 @@ add_executable(hello
   hello.cc
 )
 
-target_compile_options(hello
-  PRIVATE ${LIBSODIUM_CFLAGS_OTHER}
-)
-
-target_include_directories(hello
-  PRIVATE ${LIBSODIUM_INCLUDE_DIRS}
-)
+add_dependencies(hello libsodium)
 
 target_link_libraries(hello
   base
