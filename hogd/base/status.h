@@ -200,52 +200,52 @@ operator==(const EnumError<E, Category> &lhs, const std::error_code &rhs)
 // More documentation here: https://grpc.io/docs/guides/status-codes/
 enum class GCode : uint8_t {
   // Operation was cancelled (typically by the caller)
-  kCancelled = 1,
+  kCancelled          = 1,
 
   // Unknown error
-  kUnknown = 2,
+  kUnknown            = 2,
 
   // Invalid argument from caller
-  kInvalidArgument = 3,
+  kInvalidArgument    = 3,
 
   // Deadline exceeded
-  kDeadlineExceeded = 4,
+  kDeadlineExceeded   = 4,
 
   // A requested entity (e.g., file or directory) was not found
-  kNotFound = 5,
+  kNotFound           = 5,
 
   // The entity that the caller attempted to create exists
-  kAlreadyExists = 6,
+  kAlreadyExists      = 6,
 
   // Permission denied
-  kPermissionDenied = 7,
+  kPermissionDenied   = 7,
 
   // Resource exhausted (e.g., quota or disk out of space)
-  kResourceExhausted = 8,
+  kResourceExhausted  = 8,
 
   // Failed precondition (e.g., the directory to be deleted was not empty)
   kFailedPrecondition = 9,
 
   // The operation was aborted (typically a failed transaction)
-  kAborted = 10,
+  kAborted            = 10,
 
   // The operation was attempted past the valid range
-  kOutOfRange = 11,
+  kOutOfRange         = 11,
 
   // The operation is not implemented or the feature is not supported
-  kUnimplemented = 12,
+  kUnimplemented      = 12,
 
   // Internal error. An invariant in the underlying system was broken
-  kInternal = 13,
+  kInternal           = 13,
 
   // Resource is unavailable. Try again (generally after exponential backoff)
-  kUnavailable = 14,
+  kUnavailable        = 14,
 
   // Unrecoverable data loss or corruption
-  kDataLoss = 15,
+  kDataLoss           = 15,
 
   // Caller does not have valid authentication tokens to complete the operation
-  kUnauthorized = 16,
+  kUnauthorized       = 16,
 };
 
 // GCategory provides an error category for GRPC errors.

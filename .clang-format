@@ -28,4 +28,5 @@ SpaceBeforeParensOptions:
   AfterRequiresInClause: true
 DerivePointerAlignment: false
 PointerAlignment: Right
+AlignConsecutiveAssignments: AcrossEmptyLinesAndComments
 ...

@@ -18,7 +18,7 @@ TEST(StringTest, BasicSplitting)
   EXPECT_EQ(tokens[3], "baz");
   EXPECT_EQ(tokens[4], "");
 
-  str = "foo.bar.baz";
+  str    = "foo.bar.baz";
   tokens = split(str, '.');
   EXPECT_EQ(tokens.size(), 3);
   EXPECT_EQ(tokens[0], "foo");
