@@ -1,8 +1,14 @@
 #include "hogd/syscall/syscall_handler.h"
 
 #include "hogd/syscall/gas_schedule.h"
+#include "hogd/base/types.h"
+#include "hogd/syscall/proxy_applicator.h"
+#include "hogd/syscall/syscall_status.h"
+#include "hogd/syscall/metered_result.h"
+#include "hogd/syscall/key_status.h"
 
 #include <cstring>
+
 
 namespace hogd
 {
@@ -47,5 +53,14 @@ SyscallHandler::get_applicator(StorageKey const &key)
 
 	throw std::runtime_error("unimplemented");
 }
+
+MeteredResult<KeyStatus> 
+SyscallHandler::has_key(StorageKey const &key)
+{
+	return get_applicator(key) >> [] (auto* app) -> MeteredResult<KeyStatus> {
+		return app -> has_key();
+	};
+}
+
 
 }

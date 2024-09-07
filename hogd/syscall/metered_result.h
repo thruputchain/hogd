@@ -6,12 +6,11 @@
 #include <stdexcept>
 #include <utility>
 
-#include <cstdint>
-
 #include "hogd/syscall/syscall_status.h"
 
 namespace hogd {
 
+//like std expected, but metered
 template<typename T> 
 struct MeteredResult
 {
@@ -19,9 +18,13 @@ struct MeteredResult
   uint64_t gas_consumed;
 
   auto chain(auto lambda) {
-    auto res = result.and_then(lambda);
-    res.gas_consumed += gas_consumed;
-    return res;
+    using ret_t = decltype(lambda(*result).result)::value_type;
+    if (result) {
+      auto res = lambda(*result);
+      res.gas_consumed += gas_consumed;
+      return MeteredResult<ret_t>(std::move(res.result), gas_consumed + res.gas_consumed);
+    }
+    return MeteredResult<ret_t>{result.error(), gas_consumed};
   }
 
   friend auto operator>>(MeteredResult<T>&& base, auto lambda)

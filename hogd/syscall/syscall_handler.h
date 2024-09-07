@@ -2,6 +2,7 @@
 
 #include "hogd/syscall/metered_result.h"
 #include "hogd/syscall/key_status.h"
+#include "hogd/syscall/proxy_applicator.h"
 
 #include <cstdint>
 #include <array>
@@ -15,8 +16,6 @@ using Address = std::array<uint8_t, 32>;
 using AddressAndKey = std::array<uint8_t, 64>;
 using StorageKey = std::array<uint8_t, 32>;
 using Hash = std::array<uint8_t, 32>;
-
-class ProxyApplicator;
 
 class SyscallHandler  {
 public:

@@ -1,5 +1,12 @@
 #include "hogd/syscall/syscall_status.h"
 
+#include <string>
+#include <utility>
+#include <concepts>
+#include <type_traits>
+
+#include "hogd/syscall/syscall_error_code.h"
+
 namespace hogd
 {
 
