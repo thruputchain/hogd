@@ -8,7 +8,7 @@ add_executable(hello
 
 add_dependencies(hello libsodium)
 
-#target_link_libraries(hello
-#  base
-#  ${LIBSODIUM_LIBRARIES}
-#)
+target_link_libraries(hello
+  base
+  ${LIBSODIUM_LIBRARIES}
+)
