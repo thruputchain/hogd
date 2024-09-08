@@ -57,7 +57,7 @@ SyscallHandler::get_applicator(StorageKey const &key)
 MeteredResult<KeyStatus>
 SyscallHandler::has_key(StorageKey const &key)
 {
-  return get_applicator(key) >> [](auto *app) -> MeteredResult<KeyStatus> {
+  return get_applicator(key) >> [] (auto *app) {
     return app->has_key();
   };
 }
