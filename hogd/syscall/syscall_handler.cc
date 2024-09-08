@@ -43,7 +43,7 @@ SyscallHandler::get_applicator(StorageKey const &key)
 {
   auto addrkey = get_addrkey(key);
   if (!addrkey) {
-    return {0, addrkey.error()};
+    return {0_gas, addrkey.error()};
   }
 
   auto it = storage_proxies_.find(*addrkey);

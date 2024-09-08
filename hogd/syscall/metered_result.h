@@ -10,13 +10,32 @@
 
 namespace hogd {
 
+struct GasAmount {
+  uint64_t gas;
+  constexpr explicit GasAmount(uint64_t amt) : gas(amt) {}
+
+  auto &operator+=(this auto &self, GasAmount const &other)
+  {
+    self.gas += other.gas;
+    return self;
+  }
+
+  bool operator==(GasAmount const &other) const = default;
+};
+
+constexpr GasAmount
+operator""_gas(uint64_t input)
+{
+  return GasAmount{input};
+};
+
 // like std expected, but metered
 template<typename T> struct MeteredResult {
-  uint64_t gas_consumed;
+  GasAmount gas_consumed;
   SyscallStatus<T> result;
 
   template<typename... Args>
-  MeteredResult(uint64_t gas, Args... args)
+  MeteredResult(GasAmount gas, Args... args)
     : gas_consumed(gas), result(std::forward<Args>(args)...)
   {}
 

@@ -9,17 +9,17 @@ MeteredResult<KeyStatus>
 ProxyApplicator::has_key() const
 {
   if (is_deleted_) {
-    return {0, KeyStatus::kKeyAlreadyDeleted};
+    return {0_gas, KeyStatus::kKeyAlreadyDeleted};
   }
   // exists case unimplemented, pending x23c
-  return {0, KeyStatus::kKeyNExist};
+  return {0_gas, KeyStatus::kKeyNExist};
 }
 
 MeteredResult<void>
 ProxyApplicator::delete_last()
 {
   is_deleted_ = true;
-  return {0};
+  return {0_gas};
 }
 
 } // namespace hogd
