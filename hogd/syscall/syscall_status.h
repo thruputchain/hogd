@@ -17,6 +17,7 @@ public:
 struct SyscallError : public EnumError<SyscallErrorCode, SyscallErrorCategory> {
   explicit SyscallError(SyscallErrorCode err) : EnumError(err) {}
 
+  // Can the error be passed back to the smart contract
   bool recoverable() const;
 };
 

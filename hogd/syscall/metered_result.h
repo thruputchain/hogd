@@ -35,7 +35,7 @@ template<typename T> struct MeteredResult {
   SyscallStatus<T> result;
 
   template<typename... Args>
-  MeteredResult(GasAmount gas, Args... args)
+  MeteredResult(GasAmount gas, Args &&...args)
     : gas_consumed(gas), result(std::forward<Args>(args)...)
   {}
 
