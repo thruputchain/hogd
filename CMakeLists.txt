@@ -45,7 +45,7 @@ ExternalProject_Add(libsodium
       --prefix=${CMAKE_INSTALL_PREFIX}
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
       CFLAGS=${CMAKE_C_FLAGS} CXXFLAGS=${CMAKE_CXX_FLAGS}
-    BUILD_COMMAND make
+    BUILD_COMMAND make -j16
     INSTALL_COMMAND ""  # Skip installation step
 )
 

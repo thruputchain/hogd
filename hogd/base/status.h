@@ -2,13 +2,15 @@
 
 #pragma once
 
+extern "C" {
+#include <errno.h>
+}
+
 #include <expected>
 #include <format>
 #include <system_error>
 #include <type_traits>
 #include <utility>
-
-#include <errno.h>
 
 #include "hogd/base/types.h"
 
@@ -134,6 +136,19 @@ operator==(const Errno &lhs, const int &rhs)
   return lhs.raw_code() == rhs;
 }
 
+// ErrnoStatus is the return type for a function that can return a legacy errno.
+//
+// Example:
+// ErrnoStatus<void> Foo()
+// {
+//   if (fstat(fd, &sb) == -1)
+//     return Errno();
+// }
+//
+// ErrnoStatus<void> ret = Foo();
+// if (!foo) // handle error
+template<typename T> using ErrnoStatus = std::expected<T, Errno>;
+
 // EnumError turns a scoped enumeration into an error class.
 template<typename Enum, std::derived_from<std::error_category> Category>
 requires std::is_scoped_enum_v<Enum>
@@ -258,7 +273,7 @@ operator==(const GCode &lhs, const std::error_code &rhs)
 //   return GError(GCode::kUnimplemented);
 // }
 //
-// Gstatus<void> ret = Foo();
+// GStatus<void> ret = Foo();
 // if (!foo) // handle error
 template<typename T> using GStatus = std::expected<T, GError>;
 
