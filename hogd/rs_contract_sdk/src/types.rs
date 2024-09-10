@@ -2,3 +2,4 @@
 
 pub type Address = [u8; 32];
 pub type StorageKey = [u8; 32];
+pub type Hash = [u8; 32];

@@ -4,3 +4,6 @@
 
 clean:
 	cargo clean
+
+# rustup toolchain install nightly
+# rustup target install wasm32-unknown-unknown
