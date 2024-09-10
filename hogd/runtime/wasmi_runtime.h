@@ -1,7 +1,5 @@
 #pragma once
 
-#include "hogd/base/non_movable.h"
-
 #include "hogd/runtime/host_fn_status.h"
 
 #include <cstdint>
@@ -49,9 +47,11 @@ struct InvokeResult {
   uint64_t gas_consumed;
 };
 
-class WasmiRuntime : NonMovableOrCopyable {
+class WasmiRuntime  {
 public:
   WasmiRuntime(Contract const &contract, void *user_ctx_ptr);
+
+  WasmiRuntime(WasmiRuntime const&) = delete;
 
   template<auto F>
   bool link_fn(std::string const &module_name, std::string const &fn_name)
