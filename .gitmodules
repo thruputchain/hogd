@@ -1,3 +1,7 @@
 [submodule "external/libsodium"]
 	path = external/libsodium
 	url = https://github.com/jedisct1/libsodium.git
+[submodule "external/corrosion"]
+	path = external/corrosion
+	url = https://github.com/corrosion-rs/corrosion.git
+
