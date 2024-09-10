@@ -17,7 +17,7 @@ namespace hogd {
 
 // LogLevel indicates the severity of the log message.
 //
-// Release builds will include kFatal, kError, kWarn, and kInfo.
+// Release builds will include kCritical, kError, kWarn, and kInfo.
 // Debug builds will additionally include kDebug and kTrace.
 enum class LogLevel : int {
   kCritical, // Serious errors that are not recoverable.
@@ -207,7 +207,7 @@ trace(std::format_string<Args...>, Args &&...) -> trace<Args...>;
 // log_init initializes the logging subsystem.
 //
 // logger can be whatever type of logging sink you would like. This function
-// must be calling before using logging.
+// must be called before using logging.
 inline void
 log_init(std::unique_ptr<Logger> logger)
 {
