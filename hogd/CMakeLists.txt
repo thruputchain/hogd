@@ -1,4 +1,5 @@
 add_subdirectory(base)
+add_subdirectory(rs_contracts)
 
 add_executable(hello
   hello.cc
