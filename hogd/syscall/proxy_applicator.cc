@@ -1,25 +1,28 @@
 #include "hogd/syscall/proxy_applicator.h"
 
 #include "hogd/syscall/key_status.h"
-#include "hogd/syscall/metered_result.h"
+#include "hogd/syscall/syscall_status.h"
 
 namespace hogd {
 
-MeteredResult<KeyStatus>
+KeyStatus
 ProxyApplicator::has_key() const
 {
   if (is_deleted_) {
-    return {0_gas, KeyStatus::kKeyAlreadyDeleted};
+    return KeyStatus::kKeyAlreadyDeleted;
   }
   // exists case unimplemented, pending x23c
-  return {0_gas, KeyStatus::kKeyNExist};
+  return KeyStatus::kKeyNExist;
 }
 
-MeteredResult<void>
+SyscallStatus<void>
 ProxyApplicator::delete_last()
 {
+  if (is_deleted_) {
+    return SyscallError{SyscallErrorCode::kStorageKeyAlreadyDeleted};
+  }
   is_deleted_ = true;
-  return {0_gas};
+  return {};
 }
 
 } // namespace hogd

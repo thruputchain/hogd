@@ -2,9 +2,26 @@
 
 #include <cstdint>
 
-#include "hogd/syscall/metered_result.h"
-
 namespace hogd {
+
+struct GasAmount {
+  uint64_t gas;
+  constexpr explicit GasAmount(uint64_t amt) : gas(amt) {}
+
+  auto &operator+=(this auto &self, GasAmount const &other)
+  {
+    self.gas += other.gas;
+    return self;
+  }
+
+  bool operator==(GasAmount const &other) const = default;
+};
+
+constexpr GasAmount
+operator""_gas(uint64_t input)
+{
+  return GasAmount{input};
+};
 
 /**
  * Table of gas costs for various operations.

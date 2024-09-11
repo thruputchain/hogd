@@ -1,7 +1,7 @@
 #pragma once
 
 #include "hogd/syscall/key_status.h"
-#include "hogd/syscall/metered_result.h"
+#include "hogd/syscall/syscall_status.h"
 
 namespace hogd {
 
@@ -16,9 +16,9 @@ namespace hogd {
  */
 class ProxyApplicator {
 public:
-  MeteredResult<KeyStatus> has_key() const;
+  KeyStatus has_key() const;
 
-  MeteredResult<void> delete_last();
+  SyscallStatus<void> delete_last();
 
 private:
   bool is_deleted_ = false;
