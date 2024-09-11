@@ -4,9 +4,8 @@
 #include <span>
 #include <vector>
 
-#include "hogd/crypto/siphash24.h"
-
 #include "hogd/crypto/initialize.h"
+#include "hogd/crypto/siphash24.h"
 
 namespace hogd {
 
