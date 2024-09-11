@@ -18,7 +18,6 @@ using SHA256Hash = std::array<uint8_t, 32>;
 
 // This function has to be called before
 // any functions within libsodium are called.
-
 GStatus<void> inline initialize_crypto()
 {
   if (sodium_init() == -1) {
