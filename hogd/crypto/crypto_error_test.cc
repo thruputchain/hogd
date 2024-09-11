@@ -5,8 +5,6 @@
 
 #include <format>
 
-#include <sodium.h> // IWYU pragma: keep
-
 namespace hogd {
 
 TEST(CryptoError, OutOfRange)
