@@ -4,8 +4,7 @@
 #include <span>
 #include <vector>
 
-#include "hogd/crypto/initialize.h"
-#include "hogd/crypto/sha256.h"
+#include "hogd/crypto/crypto.h"
 
 namespace hogd {
 
