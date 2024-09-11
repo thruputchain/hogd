@@ -1,0 +1,21 @@
+add_library(
+  crypto
+  crypto_error.cc
+  siphash24.cc
+  sha256.cc
+  initialize.cc
+)
+
+add_executable(
+  crypto_test
+  crypto_error_test.cc
+  siphash_test.cc
+  sha256_test.cc
+)
+target_link_libraries(
+  crypto_test
+  crypto
+  ${LIBSODIUM_LIBRARIES}
+  GTest::gtest_main
+)
+gtest_discover_tests(crypto_test)

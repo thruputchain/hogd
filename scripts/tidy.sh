@@ -32,4 +32,4 @@ fi
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
 xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
--header-filter=".*hogd/.*" -quiet -warnings-as-errors='*'
+-header-filter=".*hogd/hogd/.*" -quiet -warnings-as-errors='*'
