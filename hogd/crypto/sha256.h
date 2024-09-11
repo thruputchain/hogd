@@ -5,20 +5,17 @@
 #include <cstdint>
 #include <span>
 
-#include "hogd/crypto/crypto_error.h"
-
 namespace hogd {
 
 // TODO(geoff): replace when x23 ready
-using Hash = std::array<uint8_t, 32>;
+using SHA256Hash = std::array<uint8_t, 32>;
 
 /**
- * SHA256
+ * Returns SHA256 of the input span.
  *
- * libsodium supports a multipart hashing API, should we need
- * hashes of very long inputs.
+ * Libsodium's version of sha256, on current release (1.20) does not return
+ * errors.
  */
-CryptoStatus<Hash>
-sha256(std::span<const std::byte, std::dynamic_extent> const &input);
+SHA256Hash sha256(std::span<const std::byte> input);
 
 } // namespace hogd

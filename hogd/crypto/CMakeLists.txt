@@ -1,6 +1,5 @@
 add_library(
   crypto
-  crypto_error.cc
   siphash24.cc
   sha256.cc
   initialize.cc
@@ -10,7 +9,6 @@ add_dependencies(crypto libsodium)
 
 add_executable(
   crypto_test
-  crypto_error_test.cc
   siphash_test.cc
   sha256_test.cc
 )

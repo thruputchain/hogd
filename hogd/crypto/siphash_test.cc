@@ -6,29 +6,31 @@
 
 #include "hogd/crypto/siphash24.h"
 
+#include "hogd/crypto/initialize.h"
+
 namespace hogd {
 
 TEST(Siphash24, NullInput)
 {
-  std::span<std::byte, std::dynamic_extent> null_input{};
+  ASSERT_TRUE(initialize_crypto());
+
+  std::span<std::byte> null_input{};
 
   auto key = siphash24_keygen();
 
-  ASSERT_TRUE(key);
+  auto res = siphash24(null_input, key);
 
-  auto res = siphash24(null_input, key.value());
-
-  EXPECT_TRUE(res);
-
-  EXPECT_EQ(res.value(), siphash24(null_input, key.value()).value());
+  EXPECT_EQ(res, siphash24(null_input, key));
 
   auto key2 = siphash24_keygen();
 
-  EXPECT_NE(res.value(), siphash24(null_input, key2.value()).value());
+  EXPECT_NE(res, siphash24(null_input, key2));
 }
 
 TEST(Siphash24, SomeInput)
 {
+  ASSERT_TRUE(initialize_crypto());
+
   std::vector<std::byte> bytes = {std::byte{0}, std::byte{1}, std::byte{2},
                                   std::byte{3}};
   std::vector<std::byte> bytes2 = {std::byte{3}, std::byte{2}, std::byte{1},
@@ -40,18 +42,12 @@ TEST(Siphash24, SomeInput)
 
   auto key = siphash24_keygen();
 
-  ASSERT_TRUE(key);
-
-  auto res = siphash24(input, key.value());
-
-  EXPECT_TRUE(res);
-
-  EXPECT_EQ(res.value(), siphash24(input, key.value()).value());
-  EXPECT_NE(res.value(), siphash24(input2, key.value()).value());
+  EXPECT_EQ(siphash24(input, key), siphash24(input, key));
+  EXPECT_NE(siphash24(input, key), siphash24(input2, key));
 
   auto key2 = siphash24_keygen();
 
-  EXPECT_NE(res.value(), siphash24(input, key2.value()).value());
+  EXPECT_NE(siphash24(input, key), siphash24(input, key2));
 }
 
 } // namespace hogd

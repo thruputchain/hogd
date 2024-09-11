@@ -2,24 +2,17 @@
 
 #include <sodium.h> // IWYU pragma: keep
 
+#include <cassert>
 #include <cstddef>
 #include <span>
 
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto_error.h"
-#include "hogd/crypto/initialize.h"
 
 namespace hogd {
 
-CryptoStatus<uint64_t>
-siphash24(std::span<const std::byte, std::dynamic_extent> const &input,
-          Siphash24Key const &key)
+uint64_t
+siphash24(std::span<const std::byte> input, Siphash24Key const &key)
 {
-  auto init_res = initialize_crypto();
-  if (unlikely(!init_res)) {
-    return init_res.error();
-  }
 
   // NOLINTBEGIN(misc-include-cleaner)
   static_assert(sizeof(Siphash24Key) == crypto_shorthash_siphash24_KEYBYTES);
@@ -34,25 +27,21 @@ siphash24(std::span<const std::byte, std::dynamic_extent> const &input,
   // This function also never returns anything other than 0, so the error check
   // is redundant.
 
-  // NOLINTNEXTLINE(misc-include-cleaner)
-  if (unlikely(crypto_shorthash_siphash24(reinterpret_cast<uint8_t *>(&out),
-                                          reinterpret_cast<const uint8_t *>(
-                                              input.data()),
-                                          input.size(), key.data()) != 0)) {
-    return CryptoError{CryptoErrorCode::kSiphash24Error};
-  }
+  // NOLINTBEGIN(misc-include-cleaner)
+  [[maybe_unused]]
+  int res = crypto_shorthash_siphash24(reinterpret_cast<uint8_t *>(&out),
+                                       reinterpret_cast<const uint8_t *>(
+                                           input.data()),
+                                       input.size(), key.data());
+  // NOLINTEND(misc-include-cleaner)
+  assert(res == 0);
 
   return out;
 }
 
-CryptoStatus<Siphash24Key>
+Siphash24Key
 siphash24_keygen()
 {
-  auto init_res = initialize_crypto();
-  if (unlikely(!init_res)) {
-    return init_res.error();
-  }
-
   Siphash24Key out;
   // Both siphash24 and siphash24x in libsodium use a 16-byte key,
   // and use the same keygen method.
