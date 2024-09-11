@@ -16,10 +16,10 @@ initialize_crypto()
 {
   // It's safe to call sodium_init concurrently.
   // But on all non-wasm platforms (where wasm is singlethreaded, at least at
-  // the moment) this acquires a writelock (which is unnecessary). Relaxed
-  // atomics because sodium internally takes care of everything important
-  // regarding synchronization
-  if (likely(initialized_flag.load(std::memory_order_relaxed))) {
+  // the moment) this acquires a writelock (which is unnecessary).
+  // Release-acquire: If we read true here, it must be because some other thread
+  // completely finished sodium_init() and wrote true later.
+  if (likely(initialized_flag.load(std::memory_order_acquire))) {
     return {};
   }
 
@@ -33,7 +33,7 @@ initialize_crypto()
   }
   // NOLINTEND(misc-include-cleaner)
 
-  initialized_flag.store(true, std::memory_order_relaxed);
+  initialized_flag.store(true, std::memory_order_release);
 
   return {};
 }
