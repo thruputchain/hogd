@@ -1,3 +1,5 @@
+// crypto.h - cryptographic utilities
+
 #pragma once
 
 #include <array>
@@ -13,44 +15,39 @@
 namespace hogd {
 
 using Siphash24Key = std::array<uint8_t, 16>;
-// TODO(geoff): replace when x23 ready
 using SHA256Hash = std::array<uint8_t, 32>;
 
-// This function has to be called before
-// any functions within libsodium are called.
-GStatus<void> inline initialize_crypto()
+// crypto_init must be called before using any crypto functions.
+inline GStatus<void>
+crypto_init()
 {
-  if (sodium_init() == -1) {
-    // failed to initialize libsodium
+  if (sodium_init() == -1)
     return GError{GCode::kUnknown};
-  }
-
   return {};
 }
 
-// Returns SHA256 of the input span.
-SHA256Hash inline sha256(std::span<const std::byte> input)
+// sha256 returns a SHA256 hash of the input.
+inline SHA256Hash
+sha256(std::span<const std::byte> input)
 {
   SHA256Hash out;
+
   [[maybe_unused]]
   int res = crypto_hash_sha256(out.data(),
                                reinterpret_cast<const uint8_t *>(input.data()),
                                input.size());
 
-  // Libsodium's version of sha256, on current release (1.20) does not return
-  // errors.
+  // libsodium's version of sha256 (on release 1.20) never returns errors.
   assert(res == 0);
-
   return out;
 }
 
-// SipHash computes a 64-bit message authentication code from a variable-length
-// message and 128-bit secret key (Wikipedia) This function implements the
-// version with parameters 2-4 (industry standard) Output length is 64 bits.
-uint64_t inline siphash24(std::span<const std::byte> input,
-                          Siphash24Key const &key)
+// siphash24 returns a 64-bit message authentication code from a
+// variable-length message and 128-bit secret key. This function implements the
+// version with parameters 2-4.
+inline uint64_t
+siphash24(std::span<const std::byte> input, const Siphash24Key &key)
 {
-
   static_assert(sizeof(Siphash24Key) == crypto_shorthash_siphash24_KEYBYTES);
   static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
 
@@ -67,12 +64,14 @@ uint64_t inline siphash24(std::span<const std::byte> input,
                                        reinterpret_cast<const uint8_t *>(
                                            input.data()),
                                        input.size(), key.data());
+  // libsodium's version of siphash24 (on release 1.20) never returns errors.
   assert(res == 0);
-
   return out;
 }
 
-Siphash24Key inline siphash24_keygen()
+// siphash24_keygen generates a key for use with siphash24.
+inline Siphash24Key
+siphash24_keygen()
 {
   Siphash24Key out;
   // Both siphash24 and siphash24x in libsodium use a 16-byte key,
