@@ -29,8 +29,8 @@ TEST(SHA256, SomeInput)
   std::vector<std::byte> bytes2 = {std::byte{3}, std::byte{2}, std::byte{1},
                                    std::byte{0}};
 
-  std::span<std::byte> input(bytes.begin(), bytes.end());
-  std::span<std::byte> input2(bytes2.begin(), bytes2.end());
+  std::span<std::byte> input(bytes);
+  std::span<std::byte> input2(bytes2);
 
   EXPECT_NE(sha256(input), sha256(input2));
 }
