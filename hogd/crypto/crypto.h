@@ -29,7 +29,6 @@ GStatus<void> inline initialize_crypto()
   return {};
 }
 
-
 // Returns SHA256 of the input span.
 SHA256Hash inline sha256(std::span<const std::byte> input)
 {
@@ -39,15 +38,16 @@ SHA256Hash inline sha256(std::span<const std::byte> input)
                                reinterpret_cast<const uint8_t *>(input.data()),
                                input.size());
 
-  // Libsodium's version of sha256, on current release (1.20) does not return errors.
+  // Libsodium's version of sha256, on current release (1.20) does not return
+  // errors.
   assert(res == 0);
 
   return out;
 }
 
-// SipHash computes a 64-bit message authentication code from a variable-length message and 128-bit secret key (Wikipedia)
-// This function implements the version with parameters 2-4 (industry standard)
-// Output length is 64 bits.
+// SipHash computes a 64-bit message authentication code from a variable-length
+// message and 128-bit secret key (Wikipedia) This function implements the
+// version with parameters 2-4 (industry standard) Output length is 64 bits.
 uint64_t inline siphash24(std::span<const std::byte> input,
                           Siphash24Key const &key)
 {

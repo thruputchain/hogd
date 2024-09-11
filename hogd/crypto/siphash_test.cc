@@ -4,8 +4,8 @@
 #include <span>
 #include <vector>
 
-#include "hogd/crypto/crypto.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 
 namespace hogd {
 
@@ -30,8 +30,8 @@ TEST(Siphash24, SomeInput)
 {
   ASSERT_TRUE(initialize_crypto());
 
-  std::vector<uint8_t> bytes = {0,1,2,3};
-  std::vector<uint8_t> bytes2 = {3,2,1,0};
+  std::vector<uint8_t> bytes = {0, 1, 2, 3};
+  std::vector<uint8_t> bytes2 = {3, 2, 1, 0};
 
   auto input = std::as_bytes(std::span(bytes));
   auto input2 = std::as_bytes(std::span(bytes2));
