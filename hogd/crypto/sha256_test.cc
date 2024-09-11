@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "hogd/crypto/crypto.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 
