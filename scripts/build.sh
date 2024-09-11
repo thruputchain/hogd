@@ -50,7 +50,5 @@ cd "$BUILD_DIR"
 CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
   ${CMAKE_INJECT} ..
- # -DCMAKE_OSX_SYSROOT="" \
- # -DCMAKE_EXE_LINKER_FLAGS="-L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++" \
-#..
+
 make -j "$NPROC"
