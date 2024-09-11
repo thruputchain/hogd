@@ -70,8 +70,6 @@ public:
 
 private:
   LogLevel max_level_;
-  const std::chrono::steady_clock::time_point start_ts_ =
-      std::chrono::steady_clock::now();
 };
 
 namespace detail {

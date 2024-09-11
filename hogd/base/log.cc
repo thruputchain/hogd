@@ -55,11 +55,8 @@ ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
   if (level > max_level_)
     return;
 
-  // calculate the current timestamp
-  auto now = std::chrono::steady_clock::now();
-  auto elapsed =
-      std::chrono::duration_cast<std::chrono::microseconds>(now - start_ts_);
-  float sec = static_cast<float>(elapsed.count()) / 1000000;
+  // record the current timestamp
+  const auto now = std::chrono::system_clock::now();
 
   // extract the filename
   std::vector<std::string_view> tokens = split(loc.file_name(), '/');
@@ -67,8 +64,8 @@ ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
 
   // generate the log message
   std::string buf;
-  std::format_to(std::back_inserter(buf), "{} {:<8.6f} {}:{}] ",
-                 log_level_to_char(level), sec, filename, loc.line());
+  std::format_to(std::back_inserter(buf), "{}{:%m%d %H:%M:%OS} {}:{}] ",
+                 log_level_to_char(level), now, filename, loc.line());
   std::vformat_to(std::back_inserter(buf), fmt, args);
   std::format_to(std::back_inserter(buf), "\n");
 
