@@ -2,11 +2,8 @@
 
 #pragma once
 
-extern "C" {
-#include <stdlib.h>
-}
-
 #include <chrono>
+#include <exception>
 #include <format>
 #include <memory>
 #include <source_location>
@@ -19,7 +16,7 @@ namespace hogd {
 //
 // Release builds will include kCritical, kError, kWarn, and kInfo.
 // Debug builds will additionally include kDebug and kTrace.
-enum class LogLevel : int {
+enum class LogLevel {
   kCritical, // Serious errors that are not recoverable.
   kError,    // Serious errors that are recoverable.
   kWarn,     // Warning messages.
@@ -45,6 +42,7 @@ should_log(LogLevel level)
 // they are printed to.
 class Logger {
 public:
+  // available just in case a Logger wants to do some teardown.
   virtual ~Logger() = default;
 
   // vlog appends a log message.
@@ -62,11 +60,9 @@ public:
                                                   : LogLevel::kInfo)
     : max_level_(level)
   {}
-  ~ConsoleLogger() override = default;
 
   void vlog(LogLevel level, std::string_view fmt,
             const std::source_location &loc, std::format_args &&args) override;
-
   void flush() override;
 
   // set_log_level adjusts the maximum severity level to print at runtime
@@ -87,10 +83,9 @@ void
 do_log(std::string_view fmt, const std::source_location &loc,
        std::format_args &&args)
 {
-  if constexpr (!should_log(Level))
-    return;
-
-  logger->vlog(Level, fmt, loc, std::move(args));
+  if constexpr (should_log(Level)) {
+    logger->vlog(Level, fmt, loc, std::move(args));
+  }
 }
 
 } // namespace detail
@@ -122,7 +117,7 @@ template<typename... Args> struct panic {
                                         std::make_format_args(args...));
     detail::logger->flush();
     // TODO(amb): do more to cleanup safely (e.g., flush to disk?)
-    exit(EXIT_FAILURE);
+    std::terminate();
   }
 };
 
@@ -134,73 +129,30 @@ panic(LogLevel, std::format_string<Args...>, Args &&...) -> panic<Args...>;
 //
 // These versions will automatically compile out depending on the build type.
 //
+// Example:
+// warn("foo={}, too large", foo);
+//
 
-template<typename... Args> struct critical {
-  critical(std::format_string<Args...> fmt, Args &&...args,
-           const std::source_location &loc = std::source_location::current())
-  {
-    detail::do_log<LogLevel::kCritical>(fmt.get(), loc,
-                                        std::make_format_args(args...));
-  }
-};
+#define MAKE_LOG_FUNC(func, level)                                             \
+  template<typename... Args> struct func {                                     \
+    func(std::format_string<Args...> fmt, Args &&...args,                      \
+         const std::source_location &loc = std::source_location::current())    \
+    {                                                                          \
+      detail::do_log<LogLevel::level>(fmt.get(), loc,                          \
+                                      std::make_format_args(args...));         \
+    }                                                                          \
+  };                                                                           \
+  template<typename... Args>                                                   \
+  func(std::format_string<Args...>, Args &&...)->func<Args...>
 
-template<typename... Args> struct error {
-  error(std::format_string<Args...> fmt, Args &&...args,
-        const std::source_location &loc = std::source_location::current())
-  {
-    detail::do_log<LogLevel::kError>(fmt.get(), loc,
-                                     std::make_format_args(args...));
-  }
-};
+MAKE_LOG_FUNC(critical, kCritical);
+MAKE_LOG_FUNC(error, kError);
+MAKE_LOG_FUNC(warn, kWarn);
+MAKE_LOG_FUNC(info, kInfo);
+MAKE_LOG_FUNC(debug, kDebug);
+MAKE_LOG_FUNC(trace, kTrace);
 
-template<typename... Args> struct warn {
-  warn(std::format_string<Args...> fmt, Args &&...args,
-       const std::source_location &loc = std::source_location::current())
-  {
-    detail::do_log<LogLevel::kWarn>(fmt.get(), loc,
-                                    std::make_format_args(args...));
-  }
-};
-
-template<typename... Args> struct info {
-  info(std::format_string<Args...> fmt, Args &&...args,
-       const std::source_location &loc = std::source_location::current())
-  {
-    detail::do_log<LogLevel::kInfo>(fmt.get(), loc,
-                                    std::make_format_args(args...));
-  }
-};
-
-template<typename... Args> struct debug {
-  debug(std::format_string<Args...> fmt, Args &&...args,
-        const std::source_location &loc = std::source_location::current())
-  {
-    detail::do_log<LogLevel::kDebug>(fmt.get(), loc,
-                                     std::make_format_args(args...));
-  }
-};
-
-template<typename... Args> struct trace {
-  trace(std::format_string<Args...> fmt, Args &&...args,
-        const std::source_location &loc = std::source_location::current())
-  {
-    detail::do_log<LogLevel::kTrace>(fmt.get(), loc,
-                                     std::make_format_args(args...));
-  }
-};
-
-template<typename... Args>
-critical(std::format_string<Args...>, Args &&...) -> critical<Args...>;
-template<typename... Args>
-error(std::format_string<Args...>, Args &&...) -> error<Args...>;
-template<typename... Args>
-warn(std::format_string<Args...>, Args &&...) -> warn<Args...>;
-template<typename... Args>
-info(std::format_string<Args...>, Args &&...) -> info<Args...>;
-template<typename... Args>
-debug(std::format_string<Args...>, Args &&...) -> debug<Args...>;
-template<typename... Args>
-trace(std::format_string<Args...>, Args &&...) -> trace<Args...>;
+#undef MAKE_LOG_FUNC
 
 // NOLINTEND(readability-identifier-naming)
 

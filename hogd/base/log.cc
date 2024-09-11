@@ -4,6 +4,7 @@
 #include <iterator>
 #include <memory>
 #include <source_location>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -64,12 +65,16 @@ ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
   std::vector<std::string_view> tokens = split(loc.file_name(), '/');
   std::string_view filename = tokens.back();
 
-  // print the log message to stderr
-  std::ostream_iterator<char> it(std::cerr);
-  std::format_to(it, "{} {:<8.6f} {}:{}] ", log_level_to_char(level), sec,
-                 filename, loc.line());
-  std::vformat_to(it, fmt, args);
-  std::format_to(it, "\n");
+  // generate the log message
+  std::string buf;
+  std::format_to(std::back_inserter(buf), "{} {:<8.6f} {}:{}] ",
+                 log_level_to_char(level), sec, filename, loc.line());
+  std::vformat_to(std::back_inserter(buf), fmt, args);
+  std::format_to(std::back_inserter(buf), "\n");
+
+  // write to stderr
+  // todo(amb): maybe write to the fd directly.
+  std::cerr << buf;
 }
 
 void
