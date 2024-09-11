@@ -6,6 +6,8 @@ add_library(
   initialize.cc
 )
 
+add_dependencies(crypto libsodium)
+
 add_executable(
   crypto_test
   crypto_error_test.cc
