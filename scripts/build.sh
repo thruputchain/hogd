@@ -37,6 +37,8 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 ROOT_DIR=${SCRIPT_DIR}/../
 BUILD_DIR=${ROOT_DIR}/${BUILD_DIR}
 
+source ${SCRIPT_DIR}/env.sh
+
 # Set nproc
 NPROC=$(nproc 2>/dev/null)
 #mac compabitibility
@@ -49,6 +51,7 @@ mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-  ${CMAKE_INJECT} ..
+  $(eval echo $CMAKE_INJECT) \
+  ..
 
 make -j "$NPROC"
