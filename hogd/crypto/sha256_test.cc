@@ -23,15 +23,10 @@ TEST(SHA256, SomeInput)
 {
   ASSERT_TRUE(initialize_crypto());
 
-  std::vector<std::byte> bytes = {std::byte{0}, std::byte{1}, std::byte{2},
-                                  std::byte{3}};
-  std::vector<std::byte> bytes2 = {std::byte{3}, std::byte{2}, std::byte{1},
-                                   std::byte{0}};
+  std::vector<uint8_t> bytes = {0,1,2,3};
+  std::vector<uint8_t> bytes2 = {3,2,1,0};
 
-  std::span<std::byte> input(bytes);
-  std::span<std::byte> input2(bytes2);
-
-  EXPECT_NE(sha256(input), sha256(input2));
+  EXPECT_NE(sha256(std::as_bytes(std::span(bytes))), sha256(std::as_bytes(std::span(bytes2))));
 }
 
 } // namespace hogd

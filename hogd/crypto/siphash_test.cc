@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "hogd/crypto/crypto.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 
@@ -29,13 +30,11 @@ TEST(Siphash24, SomeInput)
 {
   ASSERT_TRUE(initialize_crypto());
 
-  std::vector<std::byte> bytes = {std::byte{0}, std::byte{1}, std::byte{2},
-                                  std::byte{3}};
-  std::vector<std::byte> bytes2 = {std::byte{3}, std::byte{2}, std::byte{1},
-                                   std::byte{0}};
+  std::vector<uint8_t> bytes = {0,1,2,3};
+  std::vector<uint8_t> bytes2 = {3,2,1,0};
 
-  std::span<std::byte> input(bytes);
-  std::span<std::byte> input2(bytes2);
+  auto input = std::as_bytes(std::span(bytes));
+  auto input2 = std::as_bytes(std::span(bytes2));
 
   auto key = siphash24_keygen();
 
