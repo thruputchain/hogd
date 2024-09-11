@@ -37,7 +37,7 @@ should_log(LogLevel level)
   return level <= kMaxLogLevel;
 }
 
-// Logger provides an interface for custom logging skings. This allows for
+// Logger provides an interface for custom logging sinks. This allows for
 // customization of both the format in which logs are printed and the output
 // they are printed to.
 class Logger {
