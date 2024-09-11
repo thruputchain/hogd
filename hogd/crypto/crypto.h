@@ -54,9 +54,9 @@ SHA256Hash inline sha256(std::span<const std::byte> input)
 }
 
 /**
- * Keyed (random) hash function (SipHash-2-4)
+ * SipHash computes a 64-bit message authentication code from a variable-length message and 128-bit secret key (Wikipedia)
+ * This function implements the version with parameters 2-4 (industry standard)
  * Output length is 64 bits.
- * (There is a longer, 128-bit version we could use, if necessary).
  */
 uint64_t inline siphash24(std::span<const std::byte> input,
                           Siphash24Key const &key)
