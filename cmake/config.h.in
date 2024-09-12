@@ -1,0 +1,15 @@
+#pragma once
+
+#define PROJECT_NAME "@PROJECT_NAME@"
+#define PROJECT_VERSION "@PROJECT_VERSION@"
+
+#define PACKAGE_STRING PROJECT_NAME " " PROJECT_VERSION
+
+// Set to 1 if you can't call consteval functions from inside if consteval
+#cmakedefine01 HAVE_BROKEN_P2564R3
+
+// Set to 1 if you are on x86 and the compiler supports __builtin_ia32_pause
+#cmakedefine01 HAVE_BUILTIN_IA32_PAUSE
+
+// Set to 1 if you are on arm and the compiler supports __builtin_arm_yield
+#cmakedefine01 HAVE_BUILTIN_ARM_YIELD
