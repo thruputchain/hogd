@@ -18,7 +18,7 @@ pub struct WasmiRuntime {
 }
 
 #[derive(Clone)]
-pub struct BorrowBypass {
+struct BorrowBypass {
     fn_pointer: *mut c_void,
 }
 
@@ -26,7 +26,7 @@ unsafe impl Send for BorrowBypass {}
 unsafe impl Sync for BorrowBypass {}
 
 impl WasmiRuntime {
-    pub fn new(bytes: &[u8], userctx: *mut c_void) -> WasmiRuntime {
+    fn new(bytes: &[u8], userctx: *mut c_void) -> WasmiRuntime {
         let stack_limit = StackLimits::default();
 
         let engine = Engine::new(
@@ -46,7 +46,7 @@ impl WasmiRuntime {
             instance: None,
         }
     }
-    pub fn lazy_link(&mut self) -> Result<(), wasmi::Error> {
+    fn lazy_link(&mut self) -> Result<(), wasmi::Error> {
         match self.instance {
             Some(_) => {
                 return Ok(());
@@ -68,7 +68,7 @@ impl WasmiRuntime {
         }
     }
 
-    pub fn link_function_0args(
+    fn link_function_0args(
         &mut self,
         fn_pointer: *mut c_void,
         import_name: &str,
@@ -96,7 +96,7 @@ impl WasmiRuntime {
         }
     }
 
-    pub fn link_function_1args(
+    fn link_function_1args(
         &mut self,
         fn_pointer: *mut c_void,
         import_name: &str,
@@ -131,7 +131,7 @@ impl WasmiRuntime {
         }
     }
 
-    pub fn link_function_2args(
+    fn link_function_2args(
         &mut self,
         fn_pointer: *mut c_void,
         import_name: &str,
@@ -168,7 +168,7 @@ impl WasmiRuntime {
         }
     }
 
-    pub fn link_function_3args(
+    fn link_function_3args(
         &mut self,
         fn_pointer: *mut c_void,
         import_name: &str,
@@ -207,7 +207,7 @@ impl WasmiRuntime {
         }
     }
 
-    pub fn link_function_4args(
+    fn link_function_4args(
         &mut self,
         fn_pointer: *mut c_void,
         import_name: &str,
@@ -248,7 +248,7 @@ impl WasmiRuntime {
         }
     }
 
-    pub fn link_function_5args(
+    fn link_function_5args(
         &mut self,
         fn_pointer: *mut c_void,
         import_name: &str,
@@ -303,7 +303,7 @@ enum WasmiInvokeError {
     UnrecoverableSystemError = 7,
 }
 
-pub fn assert_runtime_not_null(runtime: *const WasmiRuntime) {
+fn assert_runtime_not_null(runtime: *const WasmiRuntime) {
     assert!(runtime != core::ptr::null());
 }
 
@@ -311,6 +311,15 @@ pub fn assert_runtime_not_null(runtime: *const WasmiRuntime) {
 pub struct WasmiInvokeResult {
     result: u64,
     error: u32,
+}
+
+impl WasmiInvokeResult {
+    fn error(err : WasmiInvokeError) -> WasmiInvokeResult {
+        Self {
+            result : 0,
+            error : err as u32
+        }
+    }
 }
 
 #[repr(C)]
@@ -452,26 +461,16 @@ pub extern "C" fn wasmi_link_nargs(
     }
 }
 
-fn deterministic_call_error() -> WasmiInvokeResult {
-    return WasmiInvokeResult {
-        result: 0,
-        error: WasmiInvokeError::DeterministicCallError as u32,
-    };
-}
-
 fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
     // all of the wasmi trap codes, in version 0.36,
     // are raised deterministically.
     // For now, at least, we handle all as deterministic errors.
     match code {
         wasmi::core::TrapCode::OutOfFuel => {
-            return WasmiInvokeResult {
-                result: 0,
-                error: WasmiInvokeError::OutOfGasError as u32,
-            };
+            return WasmiInvokeResult::error(WasmiInvokeError::OutOfGasError);
         }
         _ => {
-            return deterministic_call_error();
+            return WasmiInvokeResult::error(WasmiInvokeError::DeterministicCallError);
         }
     }
 }
@@ -485,10 +484,7 @@ pub extern "C" fn wasmi_invoke(
     assert_runtime_not_null(runtime);
 
     if method_name == core::ptr::null() {
-        return WasmiInvokeResult {
-            result: 0,
-            error: WasmiInvokeError::InputError as u32,
-        };
+        return WasmiInvokeResult::error(WasmiInvokeError::InputError);
     }
 
     let method_name_slice =
@@ -497,10 +493,7 @@ pub extern "C" fn wasmi_invoke(
     let string = match std::str::from_utf8(&method_name_slice) {
         Ok(v) => v,
         _ => {
-            return WasmiInvokeResult {
-                result: 0,
-                error: WasmiInvokeError::InputError as u32,
-            }
+            return WasmiInvokeResult::error(WasmiInvokeError::InputError)
         }
     };
 
@@ -509,10 +502,7 @@ pub extern "C" fn wasmi_invoke(
     match r.lazy_link() {
         Ok(_) => {}
         Err(_) => {
-            return WasmiInvokeResult {
-                result: 0,
-                error: WasmiInvokeError::LinkError as u32,
-            };
+            return WasmiInvokeResult::error(WasmiInvokeError::LinkError);
         }
     };
 
@@ -524,10 +514,7 @@ pub extern "C" fn wasmi_invoke(
     {
         Some(v) => v,
         _ => {
-            return WasmiInvokeResult {
-                result: 0,
-                error: WasmiInvokeError::FuncNExist as u32,
-            };
+            return WasmiInvokeResult::error(WasmiInvokeError::FuncNExist);
         }
     };
 
@@ -544,10 +531,7 @@ pub extern "C" fn wasmi_invoke(
                 };
             }
             _ => {
-                return WasmiInvokeResult {
-                    result: 0,
-                    error: WasmiInvokeError::ReturnTypeError as u32,
-                };
+                return WasmiInvokeResult::error(WasmiInvokeError::ReturnTypeError);
             }
         },
         Err(err) => {
@@ -561,24 +545,14 @@ pub extern "C" fn wasmi_invoke(
                 match err.downcast_ref::<external_call::TrampolineError>() {
                     Some(trampoline_error) => trampoline_error.clone(),
                     None => {
-                        return WasmiInvokeResult {
-                            result: 0,
-                            error: WasmiInvokeError::UnrecoverableSystemError
-                                as u32,
-                        }
+                        return WasmiInvokeResult::error(WasmiInvokeError::UnrecoverableSystemError);
                     }
                 };
 
             if my_error.recoverable {
-                return WasmiInvokeResult {
-                    result: 0,
-                    error: WasmiInvokeError::OutOfGasError as u32,
-                };
+                 return WasmiInvokeResult::error(WasmiInvokeError::OutOfGasError);
             }
-            return WasmiInvokeResult {
-                result: 0,
-                error: WasmiInvokeError::UnrecoverableSystemError as u32,
-            };
+            return WasmiInvokeResult::error(WasmiInvokeError::UnrecoverableSystemError);
         }
     };
 }
