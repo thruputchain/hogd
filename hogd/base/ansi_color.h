@@ -36,7 +36,7 @@ enum class AnsiStyle {
   kUnderline = 4,
 };
 
-// ansi_color generates an ansi code that sets a style.
+// ansi_color returns an ansi code that sets a style.
 constexpr std::string
 ansi_color(AnsiStyle style)
 {
