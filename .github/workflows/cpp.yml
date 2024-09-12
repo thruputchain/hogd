@@ -1,0 +1,22 @@
+name: C++ CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: "recursive"
+    - name: install packages
+      run: sudo apt-get install -y git g++-14 clang-18 clang-format-18 clang-tidy-18 libsodium pkg-config wabt
+    - name: check
+      run: ./scripts/check.sh
+
