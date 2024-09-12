@@ -13,3 +13,16 @@ target_link_libraries(
   GTest::gtest_main
 )
 gtest_discover_tests(crypto_test)
+
+add_executable(
+  crypto_bench
+  crypto_bench.cc
+)
+
+target_link_libraries(
+  crypto_bench
+  ${LIBSODIUM_LIBRARIES}
+  benchmark::benchmark
+)
+
+add_dependencies(crypto_bench libsodium)
