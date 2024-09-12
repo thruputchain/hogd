@@ -36,6 +36,10 @@ include(GoogleTest)
 option(BENCHMARK_ENABLE_TESTING "" OFF)
 add_subdirectory(external/benchmark)
 
+# Detect number of cores - only needed for make-based ExternalProject
+include(ProcessorCount)
+ProcessorCount(N)
+
 # Enable libsodium
 include(ExternalProject)
 ExternalProject_Add(libsodium
@@ -45,7 +49,7 @@ ExternalProject_Add(libsodium
       --prefix=${CMAKE_INSTALL_PREFIX}
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
       CFLAGS=${CMAKE_C_FLAGS} CXXFLAGS=${CMAKE_CXX_FLAGS}
-    BUILD_COMMAND make -j16
+    BUILD_COMMAND make -j${N}
     INSTALL_COMMAND ""  # Skip installation step
 )
 
