@@ -17,10 +17,12 @@ jobs:
         submodules: "recursive"
     - name: update
       run: sudo apt-get update
+    - name: clang install
+      run: wget https://apt.llvm.org/llvm.sh && chmod u+x llvm.sh && sudo ./llvm.sh 18
   #  - name: setup llvm repo
   #    run: wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
     - name: install packages
-      run: sudo apt-get install -y git g++-14 clang-18 clang-format-18 clang-tidy-18 pkg-config wabt
+      run: sudo apt-get install -y git g++-14 cmake pkg-config wabt
     - name: check
       run: ./scripts/check.sh
 
