@@ -66,9 +66,9 @@ ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
   // generate the log message
   std::string buf;
   std::format_to(std::back_inserter(buf), "{}{}{}{:%m%d %H:%M:%OS} {}:{}]{} ",
-                 ansi_color(AnsiStyle::kBold), log_level_to_char(level),
-                 ansi_color(AnsiStyle::kNormal, AnsiColor::kBlue), now,
-                 filename, loc.line(), ansi_reset());
+                 ansi_color(Style::kBold), log_level_to_char(level),
+                 ansi_color(Style::kNormal, Color::kBlue), now, filename,
+                 loc.line(), ansi_reset());
   std::vformat_to(std::back_inserter(buf), fmt, args);
   std::format_to(std::back_inserter(buf), "\n");
 

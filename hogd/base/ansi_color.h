@@ -11,11 +11,10 @@ namespace detail {
 
 inline constexpr int kColorOffset = 30;
 inline constexpr int kBackgroundOffset = 40;
-inline constexpr int kBrightOffset = 90;
 
 } // namespace detail
 
-enum class AnsiColor {
+enum class Color {
   kBlack = 0,
   kRed = 1,
   kGreen = 2,
@@ -24,9 +23,17 @@ enum class AnsiColor {
   kPurple = 5,
   kCyan = 6,
   kWhite = 7,
+  kBrightBlack = 60,
+  kBrightRed = 61,
+  kBrightGreen = 62,
+  kBrightYellow = 63,
+  kBrightBlue = 64,
+  kBrightPurple = 65,
+  kBrightCyan = 66,
+  kBrightWhite = 67,
 };
 
-enum class AnsiStyle {
+enum class Style {
   kNormal = 0,
   kBold = 1,
   kItalic = 3,
@@ -35,7 +42,7 @@ enum class AnsiStyle {
 
 // ansi_color returns an ansi code that sets a style.
 constexpr std::string
-ansi_color(AnsiStyle style)
+ansi_color(Style style)
 {
   auto style_n = static_cast<int>(style);
   return std::format("\e[{}m", style_n);
@@ -43,7 +50,7 @@ ansi_color(AnsiStyle style)
 
 // ansi_color returns an ansi code that sets a style and foreground color.
 constexpr std::string
-ansi_color(AnsiStyle style, AnsiColor fg)
+ansi_color(Style style, Color fg)
 {
   auto style_n = static_cast<int>(style);
   auto fg_n = static_cast<int>(fg) + detail::kColorOffset;
@@ -53,22 +60,12 @@ ansi_color(AnsiStyle style, AnsiColor fg)
 // ansi_color returns an ansi code that sets a style, foreground color, and
 // background color.
 constexpr std::string
-ansi_color(AnsiStyle style, AnsiColor fg, AnsiColor bg)
+ansi_color(Style style, Color fg, Color bg)
 {
   auto style_n = static_cast<int>(style);
   auto fg_n = static_cast<int>(fg) + detail::kColorOffset;
   auto bg_n = static_cast<int>(bg) + detail::kBackgroundOffset;
   return std::format("\e[{};{};{}m", style_n, fg_n, bg_n);
-}
-
-// ansi_color returns an ansi code that sets a style and bright foreground
-// color.
-constexpr std::string
-ansi_bright_color(AnsiStyle style, AnsiColor fg)
-{
-  auto style_n = static_cast<int>(style);
-  auto fg_n = static_cast<int>(fg) + detail::kBrightOffset;
-  return std::format("\e[{};{}m", style_n, fg_n);
 }
 
 // ansi_reset returns an ansi code that sets the style and color to normal.
