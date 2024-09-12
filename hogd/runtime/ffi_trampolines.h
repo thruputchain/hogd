@@ -26,6 +26,6 @@ TrampolineResult c_call_4args(void *function_pointer, void *host_call_context,
 TrampolineResult c_call_5args(void *function_pointer, void *host_call_context,
                               uint64_t arg1, uint64_t arg2, uint64_t arg3,
                               uint64_t arg4, uint64_t arg5) noexcept;
-}
+} // extern C
 
 } // namespace hogd::detail
