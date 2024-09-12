@@ -1,15 +1,52 @@
 
+#include <random>
+
 #include <gtest/gtest.h>
 #include <x23/format.h>
 
 #include "tests/xdrtest.hh"
 #include "x23/serialize.h"
 
+std::default_random_engine rnd;
+
 // This causes googletest to pretty-print XDR structures
 void
 PrintTo(const x23::is_xdr_type auto &obj, std::ostream *os)
 {
   *os << x23::show(obj);
+}
+
+x23::Buf
+random_buf()
+{
+  std::uniform_int_distribution<std::uint8_t> gen;
+  x23::Buf ret(size_t(gen(rnd)));
+  for (auto &b : ret)
+    b = gen(rnd);
+  return ret;
+}
+
+TEST(Deserialize, Fuzz)
+{
+  for (int i = 0; i < 100'000; ++i) {
+    x23::Buf input = random_buf();
+    input.resize(input.size() - input.size() % 4);
+    test_recursive r;
+    try {
+      deserialize_from(&r, input);
+    } catch (const x23::XdrException &) {
+    }
+    x23::Str s;
+    try {
+      deserialize_from(&s, input);
+    } catch (const x23::XdrException &) {
+    }
+    uunion uu;
+    try {
+      deserialize_from(&uu, input);
+    } catch (const x23::XdrException &) {
+    }
+  }
 }
 
 TEST(CompareStructs, BasicAssertions)

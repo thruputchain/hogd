@@ -308,8 +308,9 @@ public:
     if (int n = index(d); n <= 0)
       return true;
     else
-      return with_n<union_size, 1, bool>(
-          n, [&a, &b](auto i) { return a.*fieldptr<i>() == b.*fieldptr<i>(); });
+      return with_n<union_size, 1, bool>(n, [&a, &b](auto i) {
+        return a.*fieldptr<i>() == b.*fieldptr<i>();
+      });
   }
 
   static auto cmp(const union_type &a, const union_type &b)
@@ -337,10 +338,11 @@ private:
 
   static void destroy(union_type &u)
   {
-    with_n<union_size>(index(u), [&u](auto n) {
-      if constexpr (n > 0)
-        std::destroy_at(&unsafe_get<n>(u));
-    });
+    if (int n = index(u); n > 0)
+      with_n<union_size, 1>(n, [&u](auto n) {
+        if constexpr (n > 0)
+          std::destroy_at(&unsafe_get<n>(u));
+      });
   }
 
   template<typename... Args>
@@ -446,8 +448,9 @@ union_visit_arm(F &&f, U &&u)
 {
   using ops = union_ops<std::remove_cvref_t<U>>;
   if (int n = ops::index(u); n > 0)
-    with_n<ops::union_size, 1>(
-        n, [&](auto i) { f(std::forward_like<U>(get<i>(u))); });
+    with_n<ops::union_size, 1>(n, [&](auto i) {
+      f(std::forward_like<U>(get<i>(u)));
+    });
 }
 
 // Apply a function object f to the active arm of a union and return
@@ -458,8 +461,9 @@ union_visit_arm(F &&f, U &&u, R void_result)
 {
   using ops = union_ops<std::remove_cvref_t<U>>;
   if (int n = ops::index(u); n > 0)
-    return with_n<ops::union_size, 1, R>(
-        n, [&](auto i) -> R { return f(std::forward_like<U>(get<i>(u))); });
+    return with_n<ops::union_size, 1, R>(n, [&](auto i) -> R {
+      return f(std::forward_like<U>(get<i>(u)));
+    });
   else
     return void_result;
 }
