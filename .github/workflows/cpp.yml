@@ -9,25 +9,25 @@ on:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: "recursive"
-    - name: update
-      run: sudo apt-get update
-    - name: install gcc-14
-      run: sudo apt-get install -y gcc-14
-    - name: clang install
-      run: wget https://apt.llvm.org/llvm.sh && chmod u+x llvm.sh && sudo ./llvm.sh 18
+ #   - name: update
+ #     run: sudo apt-get update
+ #   - name: install gcc-14
+ #     run: sudo apt-get install -y gcc-14
+ #   - name: clang install
+#      run: wget https://apt.llvm.org/llvm.sh && chmod u+x llvm.sh && sudo ./llvm.sh 18
   #  - name: setup llvm repo
   #    run: wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
     - name: install packages
       run: sudo apt-get install -y git cmake pkg-config wabt
-    - name: set gcc-14 default
-      run: sudo update-alternatives --install /usr/bin/g++ g++ /usr/local/gcc-14.1.0/bin/g++14.1.0 14 &&\
-           sudo update-alternatives --install /usr/bin/gcc gcc /usr/local/gcc-14.1.0/bin/gcc14.1.0 14
+#    - name: set gcc-14 default
+ #     run: sudo update-alternatives --install /usr/bin/g++ g++ /usr/local/gcc-14.1.0/bin/g++14.1.0 14 &&\
+  #         sudo update-alternatives --install /usr/bin/gcc gcc /usr/local/gcc-14.1.0/bin/gcc14.1.0 14
     - name: check
       run: ./scripts/check.sh
 
