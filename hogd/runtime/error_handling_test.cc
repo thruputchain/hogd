@@ -21,9 +21,9 @@ throw_runtime_error(HostCallContext *)
 }
 
 HostFnStatus<uint64_t>
-throw_host_error(HostCallContext *)
+throw_unrecoverable_host_error(HostCallContext *)
 {
-  return HostFnError{HostFnErrorCode::kRecoverableUnknown};
+  return HostFnError{HostFnErrorCode::kUnrecoverableUnknown};
 }
 
 HostFnStatus<uint64_t>
@@ -35,7 +35,17 @@ throw_bad_alloc(HostCallContext *)
 HostFnStatus<uint64_t>
 good_call(HostCallContext *)
 {
-  return 0;
+  return 10;
+}
+
+// Wasmi doesn't necessarily insert a "consume gas" instruction into its
+// internal bytecode at the end of a call instruction. So if a host function
+// uses all gas, it has to return kOutOfGas.
+HostFnStatus<uint64_t>
+consume_too_much_gas(HostCallContext *context)
+{
+  bool _ = context->runtime->consume_gas(context->runtime->get_available_gas());
+  return HostFnError{HostFnErrorCode::kOutOfGas};
 }
 
 namespace {
@@ -49,7 +59,10 @@ reentrance(HostCallContext *)
   reentrance_hit = true;
 
   auto res = s_runtime->invoke("unreachable", UINT64_MAX);
-  return res.result; // rethrow
+  if (!res.result.has_value()) {
+    return HostFnError{HostFnErrorCode::kUnrecoverableUnknown};
+  }
+  return {0};
 }
 
 } // namespace test
@@ -70,7 +83,8 @@ TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 {
   auto res = runtime_->invoke("call1", UINT64_MAX);
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), HostFnError{HostFnErrorCode::kWasmiLinkError});
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiLinkError});
 }
 
 // make sure we don't break if errors do get thrown
@@ -82,16 +96,20 @@ TEST_F(WasmiErrorHandlingTest, RuntimeError)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            HostFnError{HostFnErrorCode::kWasmiUnrecoverableSystemError});
+            WasmiInvokeError{
+                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
 }
 
 TEST_F(WasmiErrorHandlingTest, HostError)
 {
-  runtime_->template link_fn<&test::throw_host_error>("test", "external_call");
+  runtime_->template link_fn<&test::throw_unrecoverable_host_error>(
+      "test", "external_call");
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_EQ(res.result.error(), HostFnError{HostFnErrorCode::kWasmiHostError});
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{
+                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
 }
 
 TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
@@ -102,7 +120,8 @@ TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            HostFnError{HostFnErrorCode::kWasmiUnrecoverableSystemError});
+            WasmiInvokeError{
+                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
 }
 
 TEST_F(WasmiErrorHandlingTest, WasmError)
@@ -113,11 +132,14 @@ TEST_F(WasmiErrorHandlingTest, WasmError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_TRUE(!!res.result);
+  EXPECT_EQ(*res.result, 0);
 
   res = runtime_->invoke("unreachable", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), HostFnError{HostFnErrorCode::kWasmiCallError});
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{
+                WasmiInvokeErrorCode::kWasmiDeterministicCallError});
 }
 
 TEST_F(WasmiErrorHandlingTest, NonexistFn)
@@ -132,17 +154,21 @@ TEST_F(WasmiErrorHandlingTest, NonexistFn)
   res = runtime_->invoke("blah", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), HostFnError{HostFnErrorCode::kWasmiFnNExist});
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiFnNExist});
 }
 
 TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
 {
-  runtime_->template link_fn<&test::throw_host_error>("test", "external_call");
+  runtime_->template link_fn<&test::throw_unrecoverable_host_error>(
+      "test", "external_call");
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), HostFnError{HostFnErrorCode::kWasmiHostError});
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{
+                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
@@ -157,7 +183,8 @@ TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            HostFnError{HostFnErrorCode::kWasmiUnrecoverableSystemError});
+            WasmiInvokeError{
+                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
@@ -207,6 +234,45 @@ TEST_F(WasmiErrorHandlingTest, NullLinkHandling)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
+}
+
+TEST_F(WasmiErrorHandlingTest, OutOfGas)
+{
+  runtime_->link_fn<&test::consume_too_much_gas>("test", "external_call");
+
+  auto res = runtime_->invoke("call1", UINT64_MAX);
+
+  EXPECT_FALSE(!!res.result);
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiOutOfGasError});
+
+  res = runtime_->invoke("call1", 1);
+
+  EXPECT_FALSE(!!res.result);
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiOutOfGasError});
+}
+
+TEST_F(WasmiErrorHandlingTest, NoGas)
+{
+  runtime_->link_fn<&test::good_call>("test", "external_call");
+
+  auto res = runtime_->invoke("call1", 1);
+
+  EXPECT_FALSE(!!res.result);
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiOutOfGasError});
+}
+
+TEST_F(WasmiErrorHandlingTest, Spin)
+{
+  runtime_->link_fn<&test::good_call>("test", "external_call");
+
+  auto res = runtime_->invoke("spin", 10000);
+
+  EXPECT_FALSE(!!res.result);
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiOutOfGasError});
 }
 
 } // namespace hogd

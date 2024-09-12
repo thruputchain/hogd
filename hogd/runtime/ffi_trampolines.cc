@@ -26,7 +26,9 @@ error(uint8_t error)
   return TrampolineResult{0, error};
 }
 
-TrampolineResult handle_result(HostFnStatus<uint64_t> const& res) {
+TrampolineResult
+handle_result(HostFnStatus<uint64_t> const &res)
+{
   if (res) {
     return success(res.value());
   }
@@ -38,6 +40,7 @@ TrampolineResult handle_result(HostFnStatus<uint64_t> const& res) {
 }
 
 extern "C" {
+
 TrampolineResult
 c_call_0args(void *function_pointer, void *host_call_context) noexcept
 {
@@ -79,7 +82,7 @@ c_call_2args(void *function_pointer, void *host_call_context, uint64_t arg1,
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr = (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t,
                                            uint64_t))(function_pointer);
-    
+
     return handle_result((*ptr)(user_ctx, arg1, arg2));
 
   } catch (...) {
@@ -133,7 +136,7 @@ c_call_5args(void *function_pointer, void *host_call_context, uint64_t arg1,
     auto *ptr = (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t))(function_pointer);
-    
+
     return handle_result((*ptr)(user_ctx, arg1, arg2, arg3, arg4, arg5));
 
   } catch (...) {
@@ -141,6 +144,8 @@ c_call_5args(void *function_pointer, void *host_call_context, uint64_t arg1,
     return error(kTrampolineErrorUNRECOVERABLE);
   }
 }
+
+} // extern C
 
 } // namespace detail
 

@@ -1,6 +1,6 @@
 use core::ffi::c_void;
-use wasmi::Error;
 use wasmi::core::HostError;
+use wasmi::Error;
 
 use core::fmt;
 
@@ -9,7 +9,7 @@ use core::fmt;
  * Syscalls should not be handled as "errors" returned from the syscall;
  * instead, syscalls return a uint64 that acts as the error code
  * (which the SDK can then check and call `unreachable`).
- * 
+ *
  * There are two types of errors that we are concerned with here.
  * 1) System errors (which could be nondeterministic, i.e. malloc fail)
  * at which point we need to abort the whole transaction.
@@ -21,7 +21,7 @@ use core::fmt;
  * However, we do not have a guarantee that another instruction will execute
  * before the wasm function that called the syscall returns).
  * I'm using Wasmi's HostError API for this extra type of error.
- * 
+ *
  */
 
 #[allow(dead_code)]
@@ -40,17 +40,16 @@ pub struct TrampolineResult {
 
 #[derive(Debug, Copy, Clone)]
 pub struct TrampolineError {
-    pub recoverable : bool
+    pub recoverable: bool,
 }
 
 impl fmt::Display for TrampolineError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TrampolineError recoverable={}" , self.recoverable)
+        write!(f, "TrampolineError recoverable={}", self.recoverable)
     }
 }
 
-impl HostError for TrampolineError { }
-
+impl HostError for TrampolineError {}
 
 extern "C" {
     pub fn c_call_0args(
@@ -99,7 +98,9 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<u64, Error> {
     let err: TrampolineErrorEnum = unsafe { std::mem::transmute(result.panic) };
     match err {
         TrampolineErrorEnum::None => Ok(result.result),
-        TrampolineErrorEnum::OutOfGasError => Err(Error::host(TrampolineError{ recoverable : true })),
-        _ => Err(Error::host(TrampolineError {recoverable : false})),
+        TrampolineErrorEnum::OutOfGasError => {
+            Err(Error::host(TrampolineError { recoverable: true }))
+        }
+        _ => Err(Error::host(TrampolineError { recoverable: false })),
     }
 }

@@ -17,7 +17,8 @@ TEST(WasmRuntimeTest, MissingImportFail)
 
   EXPECT_FALSE(!!res.result);
 
-  EXPECT_EQ(res.result.error(), HostFnError{HostFnErrorCode::kWasmiLinkError});
+  EXPECT_EQ(res.result.error(),
+            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiLinkError});
 }
 
 } // namespace hogd

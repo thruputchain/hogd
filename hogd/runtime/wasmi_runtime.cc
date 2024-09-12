@@ -5,6 +5,7 @@
 #include "hogd/runtime/host_fn_status.h"
 
 #include <cassert>
+#include <cstddef>
 #include <span>
 #include <string>
 
@@ -129,24 +130,24 @@ WasmiInvokeResult wasmi_invoke(void *wasmi_runtime_ptr,
 
 } // namespace detail
 
-std::span<uint8_t, std::dynamic_extent>
+std::span<std::byte>
 WasmiRuntime::get_memory() noexcept
 {
   if (!wasmi_runtime_ptr_) {
-    return std::span<uint8_t, std::dynamic_extent>();
+    return std::span<std::byte>();
   }
   auto slice = detail::wasmi_get_memory(wasmi_runtime_ptr_);
-  return std::span<uint8_t, std::dynamic_extent>(slice.mem, slice.sz);
+  return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
 }
 
-std::span<const uint8_t, std::dynamic_extent>
+std::span<const std::byte>
 WasmiRuntime::get_memory() const noexcept
 {
   if (!wasmi_runtime_ptr_) {
-    return std::span<uint8_t, std::dynamic_extent>();
+    return std::span<const std::byte>();
   }
   auto slice = detail::wasmi_get_memory(wasmi_runtime_ptr_);
-  return std::span<uint8_t, std::dynamic_extent>(slice.mem, slice.sz);
+  return std::as_bytes(std::span<const uint8_t>(slice.mem, slice.sz));
 }
 
 bool
@@ -168,9 +169,10 @@ InvokeResult
 WasmiRuntime::invoke(std::string const &method_name, uint64_t gas_limit)
 {
   if (!wasmi_runtime_ptr_) {
-    return InvokeResult{.result =
-                            HostFnError{HostFnErrorCode::kUnrecoverableUnknown},
-                        .gas_consumed = 0};
+    return InvokeResult{
+        .result = {WasmiInvokeError{
+            WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError}},
+        .gas_consumed = 0};
   }
 
   uint64_t prev_gas_limit = detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
@@ -190,11 +192,10 @@ WasmiRuntime::invoke(std::string const &method_name, uint64_t gas_limit)
 
   detail::wasmi_set_available_gas(wasmi_runtime_ptr_, prev_gas_limit);
 
-  WasmiInvokeError wasmi_error{res.error};
+  WasmiInvokeErrorCode wasmi_error{res.error};
 
-  if (wasmi_error != WasmiInvokeError::kWasmiNone) {
-    return InvokeResult{.result =
-                            HostFnError{wasmi_to_host_fn_error(wasmi_error)},
+  if (wasmi_error != WasmiInvokeErrorCode::kWasmiNone) {
+    return InvokeResult{.result = {WasmiInvokeError{wasmi_error}},
                         .gas_consumed = gas_consumed};
   }
   return InvokeResult{.result = res.result, .gas_consumed = gas_consumed};

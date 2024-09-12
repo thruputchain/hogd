@@ -6,20 +6,19 @@
 
 namespace hogd {
 
-
 // enum WasmiInvokeError {
 //  None = 0,
 //  LinkError = 1, // module requests fn that was not linked
 //  FuncNExist = 2,
 //  InputError = 3, // input validation fails
 //  ReturnTypeError = 4,
-//  DeterministicCallError = 5, 
-//  OutOfGasError = 6, 
+//  DeterministicCallError = 5,
+//  OutOfGasError = 6,
 //  UnrecoverableSystemError = 7,
 //}
 
 // NOLINTNEXTLINE(performance-enum-size)
-enum class WasmiInvokeError : uint32_t {
+enum class WasmiInvokeErrorCode : uint32_t {
   kWasmiNone = 0,
   kWasmiLinkError = 1,
   kWasmiFnNExist = 2,
@@ -59,5 +58,26 @@ operator==(const HostFnErrorCode &lhs, const std::error_code &rhs)
 }
 
 template<typename T> using HostFnStatus = std::expected<T, HostFnError>;
+
+class WasmiInvokeErrorCategory : public std::error_category {
+public:
+  const char *name() const noexcept override { return "wasmi invoke"; }
+  std::string message(int code) const override;
+};
+
+struct WasmiInvokeError
+  : public EnumError<WasmiInvokeErrorCode, WasmiInvokeErrorCategory> {
+  explicit WasmiInvokeError(WasmiInvokeErrorCode err) : EnumError(err) {}
+};
+
+// Enable comparisons between WasmiInvokeErrorCode and std::error_code.
+inline bool
+operator==(const WasmiInvokeErrorCode &lhs, const std::error_code &rhs)
+{
+  return WasmiInvokeError{lhs} == rhs;
+}
+
+template<typename T>
+using WasmiInvokeStatus = std::expected<T, WasmiInvokeError>;
 
 } // namespace hogd

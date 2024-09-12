@@ -2,6 +2,7 @@
 
 #include "hogd/runtime/host_fn_status.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -41,17 +42,15 @@ get_n_args(HostFnStatus<uint64_t> (*)(HostCallContext *, Args...))
 } // namespace detail
 
 struct InvokeResult {
-  // topic for debate: should result be a different error status type
-  // or does it not matter
-  HostFnStatus<uint64_t> result;
+  WasmiInvokeStatus<uint64_t> result;
   uint64_t gas_consumed;
 };
 
-class WasmiRuntime  {
+class WasmiRuntime {
 public:
   WasmiRuntime(Contract const &contract, void *user_ctx_ptr);
 
-  WasmiRuntime(WasmiRuntime const&) = delete;
+  WasmiRuntime(WasmiRuntime const &) = delete;
 
   template<auto F>
   bool link_fn(std::string const &module_name, std::string const &fn_name)
@@ -69,8 +68,8 @@ public:
   [[nodiscard]] uint64_t get_available_gas() const;
   void set_available_gas(uint64_t gas);
 
-  std::span<uint8_t, std::dynamic_extent> get_memory() noexcept;
-  std::span<const uint8_t, std::dynamic_extent> get_memory() const noexcept;
+  std::span<std::byte> get_memory() noexcept;
+  std::span<const std::byte> get_memory() const noexcept;
 
   ~WasmiRuntime();
 

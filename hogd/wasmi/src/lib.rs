@@ -455,11 +455,11 @@ pub extern "C" fn wasmi_link_nargs(
 fn deterministic_call_error() -> WasmiInvokeResult {
     return WasmiInvokeResult {
         result: 0,
-        error : WasmiInvokeError::DeterministicCallError as u32
+        error: WasmiInvokeError::DeterministicCallError as u32,
     };
 }
 
-fn handle_trap_code(code : wasmi::core::TrapCode) -> WasmiInvokeResult {
+fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
     // all of the wasmi trap codes, in version 0.36,
     // are raised deterministically.
     // For now, at least, we handle all as deterministic errors.
@@ -467,9 +467,9 @@ fn handle_trap_code(code : wasmi::core::TrapCode) -> WasmiInvokeResult {
         wasmi::core::TrapCode::OutOfFuel => {
             return WasmiInvokeResult {
                 result: 0,
-                error : WasmiInvokeError::OutOfGasError as u32
+                error: WasmiInvokeError::OutOfGasError as u32,
             };
-        },
+        }
         _ => {
             return deterministic_call_error();
         }
@@ -554,28 +554,31 @@ pub extern "C" fn wasmi_invoke(
             match err.as_trap_code() {
                 Some(trap_code) => {
                     return handle_trap_code(trap_code);
-                },
-                _ => {},
+                }
+                _ => {}
             };
-            let my_error = match err.downcast_ref::<external_call::TrampolineError>() {
-                Some(trampoline_error) => trampoline_error.clone(),
-                None => { return WasmiInvokeResult {
-                    result : 0,
-                    error : WasmiInvokeError::UnrecoverableSystemError as u32
+            let my_error =
+                match err.downcast_ref::<external_call::TrampolineError>() {
+                    Some(trampoline_error) => trampoline_error.clone(),
+                    None => {
+                        return WasmiInvokeResult {
+                            result: 0,
+                            error: WasmiInvokeError::UnrecoverableSystemError
+                                as u32,
+                        }
                     }
-                },
-            };
+                };
 
             if my_error.recoverable {
                 return WasmiInvokeResult {
-                    result : 0,
-                    error : WasmiInvokeError::OutOfGasError as u32,
-                }
+                    result: 0,
+                    error: WasmiInvokeError::OutOfGasError as u32,
+                };
             }
             return WasmiInvokeResult {
-                result : 0,
-                error : WasmiInvokeError::UnrecoverableSystemError as u32
-            }
+                result: 0,
+                error: WasmiInvokeError::UnrecoverableSystemError as u32,
+            };
         }
     };
 }

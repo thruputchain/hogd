@@ -5,6 +5,7 @@
 #include "hogd/runtime/test_load_wasm.h"
 #include "hogd/runtime/wasmi_runtime.h"
 
+#include <cstdint>
 #include <memory>
 
 namespace hogd {
@@ -39,7 +40,7 @@ TEST_F(MemoryAccessTest, ReadWrites)
 
   auto mem = runtime_->get_memory();
 
-  ASSERT_FALSE(mem.size() == 0);
+  ASSERT_FALSE(mem.empty());
 
   // magic constants set in wat/test_set_memory.wat
   uint32_t read_val = *reinterpret_cast<uint32_t *>((mem.data() + 12));
