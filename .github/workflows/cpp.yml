@@ -2,7 +2,7 @@ name: C++ CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "geoff/ci_setup" ]
   pull_request:
     branches: [ "main" ]
 
