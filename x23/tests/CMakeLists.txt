@@ -1,7 +1,8 @@
 
 set(TEST_EXECUTABLES)
 macro(add_x23_test TEST_NAME)
-  add_executable(test_${TEST_NAME} EXCLUDE_FROM_ALL ${TEST_NAME}.cc xdrtest.x)
+  add_executable(test_${TEST_NAME} EXCLUDE_FROM_ALL ${TEST_NAME}.cc
+    xdrtest.x ${ARGN})
   target_link_libraries(test_${TEST_NAME} x23)
   use_x23(test_${TEST_NAME})
   add_test(NAME ${TEST_NAME} COMMAND test_${TEST_NAME})
@@ -15,5 +16,21 @@ add_x23_test(format)
 add_x23_test(marshal)
 add_x23_test(rpc)
 add_x23_test(uvec)
+
+if(GOOGLETEST_DIR)
+include_directories(${GOOGLETEST_DIR}/googletest/include)
+set(GTEST_ALL ${GOOGLETEST_DIR}/googletest/src/gtest-all.cc)
+set_source_files_properties(${GTEST_ALL} PROPERTIES
+  INCLUDE_DIRECTORIES "${GOOGLETEST_DIR}/googletest")
+macro(add_x23_gtest TEST_NAME)
+  add_x23_test(${TEST_NAME}
+    ${GTEST_ALL} ${GOOGLETEST_DIR}/googletest/src/gtest_main.cc)
+endmacro()
+else()
+macro(add_x23_gtest TEST_NAME)
+endmacro()
+endif()
+
+add_x23_gtest(xdr)
 
 add_custom_target(build_tests DEPENDS ${TEST_EXECUTABLES})
