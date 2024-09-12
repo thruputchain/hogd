@@ -17,8 +17,8 @@ jobs:
         submodules: "recursive"
  #   - name: update
  #     run: sudo apt-get update
- #   - name: install gcc-14
- #     run: sudo apt-get install -y gcc-14
+     - name: install gcc-14
+       run: sudo apt-get install -y gcc-14 && gcc --version
  #   - name: clang install
 #      run: wget https://apt.llvm.org/llvm.sh && chmod u+x llvm.sh && sudo ./llvm.sh 18
   #  - name: setup llvm repo
