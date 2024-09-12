@@ -388,7 +388,7 @@ public:
                        flags);
       if (fd >= 0)
         co_return fd;
-      if (Errno err{}; err.err_ != EAGAIN)
+      if (Errno err{}; err != EAGAIN)
         co_return err;
       if (auto err = co_await read_wait(lfd))
         co_return err;

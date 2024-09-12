@@ -255,7 +255,7 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full)
       if (*res == 0 || !full)
         break;
     }
-    else if (res.error().err_ == EAGAIN) {
+    else if (res.error() == EAGAIN) {
       if (Errno err = co_await read_wait(fd.get()))
         co_return err;
     }
@@ -333,7 +333,7 @@ CoroPoll::tcpconnect(sockaddr *sa, socklen_t len)
   write_clear(fd);
   if (::connect(fd.get(), sa, len) == -1) {
     Errno err{};
-    if (err.err_ != EINPROGRESS)
+    if (err != EINPROGRESS)
       co_return err;
     if ((err = co_await write_wait(fd.get())))
       co_return err;

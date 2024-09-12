@@ -37,7 +37,9 @@ configure_file(
 )
 
 set(X23_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(X23_SOURCE_DIR ${X23_SOURCE_DIR} PARENT_SCOPE)
 set(X23_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
+set(X23_BINARY_DIR ${X23_BINARY_DIR} PARENT_SCOPE)
 
 function(use_x23 target)
   get_target_property(target_sources ${target} SOURCES)

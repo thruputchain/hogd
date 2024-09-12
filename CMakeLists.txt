@@ -72,6 +72,8 @@ set(LIBSODIUM_LIBRARIES
 
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
+add_subdirectory(x23)
+
 # Add code directories
-include_directories(${CMAKE_SOURCE_DIR})
+include_directories(${CMAKE_SOURCE_DIR} ${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 add_subdirectory(hogd)
