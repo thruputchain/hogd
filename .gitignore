@@ -1,6 +1,5 @@
 build/**
-bcheck_gcc/**
-bcheck_llvm/**
+bcheck/**
 Testing/**
 *.d
 *.o
