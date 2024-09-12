@@ -314,10 +314,10 @@ pub struct WasmiInvokeResult {
 }
 
 impl WasmiInvokeResult {
-    fn error(err : WasmiInvokeError) -> WasmiInvokeResult {
+    fn error(err: WasmiInvokeError) -> WasmiInvokeResult {
         Self {
-            result : 0,
-            error : err as u32
+            result: 0,
+            error: err as u32,
         }
     }
 }
@@ -470,7 +470,9 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
             return WasmiInvokeResult::error(WasmiInvokeError::OutOfGasError);
         }
         _ => {
-            return WasmiInvokeResult::error(WasmiInvokeError::DeterministicCallError);
+            return WasmiInvokeResult::error(
+                WasmiInvokeError::DeterministicCallError,
+            );
         }
     }
 }
@@ -492,9 +494,7 @@ pub extern "C" fn wasmi_invoke(
 
     let string = match std::str::from_utf8(&method_name_slice) {
         Ok(v) => v,
-        _ => {
-            return WasmiInvokeResult::error(WasmiInvokeError::InputError)
-        }
+        _ => return WasmiInvokeResult::error(WasmiInvokeError::InputError),
     };
 
     let r = unsafe { &mut *runtime };
@@ -531,7 +531,9 @@ pub extern "C" fn wasmi_invoke(
                 };
             }
             _ => {
-                return WasmiInvokeResult::error(WasmiInvokeError::ReturnTypeError);
+                return WasmiInvokeResult::error(
+                    WasmiInvokeError::ReturnTypeError,
+                );
             }
         },
         Err(err) => {
@@ -545,14 +547,20 @@ pub extern "C" fn wasmi_invoke(
                 match err.downcast_ref::<external_call::TrampolineError>() {
                     Some(trampoline_error) => trampoline_error.clone(),
                     None => {
-                        return WasmiInvokeResult::error(WasmiInvokeError::UnrecoverableSystemError);
+                        return WasmiInvokeResult::error(
+                            WasmiInvokeError::UnrecoverableSystemError,
+                        );
                     }
                 };
 
             if my_error.recoverable {
-                 return WasmiInvokeResult::error(WasmiInvokeError::OutOfGasError);
+                return WasmiInvokeResult::error(
+                    WasmiInvokeError::OutOfGasError,
+                );
             }
-            return WasmiInvokeResult::error(WasmiInvokeError::UnrecoverableSystemError);
+            return WasmiInvokeResult::error(
+                WasmiInvokeError::UnrecoverableSystemError,
+            );
         }
     };
 }
