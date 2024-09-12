@@ -24,7 +24,7 @@ jobs:
     - name: install packages
       run: sudo apt-get install -y git cmake pkg-config wabt
     - name: install gcc-14
-      run: sudo apt-get install -y g++-14 &&\
+      run: sudo apt-get install -y gcc-14 &&\
            sudo update-alternatives --install /usr/bin/g++ g++ /usr/local/gcc-14.1.0/bin/g++14.1.0 14 &&\
            sudo update-alternatives --install /usr/bin/gcc gcc /usr/local/gcc-14.1.0/bin/gcc14.1.0 14
     - name: check
