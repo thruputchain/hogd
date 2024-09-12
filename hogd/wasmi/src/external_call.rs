@@ -1,23 +1,34 @@
 use core::ffi::c_void;
 use wasmi::Error;
+use wasmi::core::HostError;
+
+use core::fmt;
 
 /**
  * Error policy:
- * This does not implement transferral of errors
- * from the syscall to the wasm runtime in the full granularity
- * of the rest of the hogd codebase.
- *
+ * Syscalls should not be handled as "errors" returned from the syscall;
+ * instead, syscalls return a uint64 that acts as the error code
+ * (which the SDK can then check and call `unreachable`).
+ * 
  * There are two types of errors that we are concerned with here.
- * 1) Those that should be returned to the Wasm runtime (and that could
- * be handled there, by a contract)
- * 2) All other errors
+ * 1) System errors (which could be nondeterministic, i.e. malloc fail)
+ * at which point we need to abort the whole transaction.
+ * 2) OutOfGas errors, within the syscall.  We'd like to just return
+ * an OutOfGas exception into wasmi, but wasmi does not expose
+ * that as a public API, so we return a different error instead if
+ * a syscall causes an OutOfGas error.
+ * (The syscall will set the fuel to zero before returning in that case.
+ * However, we do not have a guarantee that another instruction will execute
+ * before the wasm function that called the syscall returns).
+ * I'm using Wasmi's HostError API for this extra type of error.
+ * 
  */
 
 #[allow(dead_code)]
 #[repr(u8)]
-enum TrampolineError {
+enum TrampolineErrorEnum {
     None = 0,
-    HostError = 1,
+    OutOfGasError = 1,
     UnrecoverableSystemError = 2,
 }
 
@@ -26,6 +37,20 @@ pub struct TrampolineResult {
     result: u64,
     panic: u8,
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct TrampolineError {
+    pub recoverable : bool
+}
+
+impl fmt::Display for TrampolineError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "TrampolineError recoverable={}" , self.recoverable)
+    }
+}
+
+impl HostError for TrampolineError { }
+
 
 extern "C" {
     pub fn c_call_0args(
@@ -71,10 +96,10 @@ extern "C" {
 
 // This is annoying, but I'm not sure how better to deal with this
 pub fn handle_trampoline_error(result: TrampolineResult) -> Result<u64, Error> {
-    let err: TrampolineError = unsafe { std::mem::transmute(result.panic) };
+    let err: TrampolineErrorEnum = unsafe { std::mem::transmute(result.panic) };
     match err {
-        TrampolineError::None => Ok(result.result),
-        TrampolineError::HostError => Err(Error::new("HostError")),
-        _ => Err(Error::new("UnrecoverableSystemError")),
+        TrampolineErrorEnum::None => Ok(result.result),
+        TrampolineErrorEnum::OutOfGasError => Err(Error::host(TrampolineError{ recoverable : true })),
+        _ => Err(Error::host(TrampolineError {recoverable : false})),
     }
 }

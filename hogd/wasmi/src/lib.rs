@@ -298,8 +298,8 @@ enum WasmiInvokeError {
     FuncNExist = 2,
     InputError = 3, // input validation fails
     ReturnTypeError = 4,
-    CallError = 5,
-    HostError = 6,
+    DeterministicCallError = 5,
+    OutOfGasError = 6,
     UnrecoverableSystemError = 7,
 }
 
@@ -452,6 +452,30 @@ pub extern "C" fn wasmi_link_nargs(
     }
 }
 
+fn deterministic_call_error() -> WasmiInvokeResult {
+    return WasmiInvokeResult {
+        result: 0,
+        error : WasmiInvokeError::DeterministicCallError as u32
+    };
+}
+
+fn handle_trap_code(code : wasmi::core::TrapCode) -> WasmiInvokeResult {
+    // all of the wasmi trap codes, in version 0.36,
+    // are raised deterministically.
+    // For now, at least, we handle all as deterministic errors.
+    match code {
+        wasmi::core::TrapCode::OutOfFuel => {
+            return WasmiInvokeResult {
+                result: 0,
+                error : WasmiInvokeError::OutOfGasError as u32
+            };
+        },
+        _ => {
+            return deterministic_call_error();
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn wasmi_invoke(
     runtime: *mut WasmiRuntime,
@@ -527,24 +551,31 @@ pub extern "C" fn wasmi_invoke(
             }
         },
         Err(err) => {
-            let errstr = err.to_string();
-            //janky but it works
-            if errstr == "HostError" {
+            match err.as_trap_code() {
+                Some(trap_code) => {
+                    return handle_trap_code(trap_code);
+                },
+                _ => {},
+            };
+            let my_error = match err.downcast_ref::<external_call::TrampolineError>() {
+                Some(trampoline_error) => trampoline_error.clone(),
+                None => { return WasmiInvokeResult {
+                    result : 0,
+                    error : WasmiInvokeError::UnrecoverableSystemError as u32
+                    }
+                },
+            };
+
+            if my_error.recoverable {
                 return WasmiInvokeResult {
-                    result: 0,
-                    error: WasmiInvokeError::HostError as u32,
-                };
-            }
-            if errstr == "UnrecoverableSystemError" {
-                return WasmiInvokeResult {
-                    result: 0,
-                    error: WasmiInvokeError::UnrecoverableSystemError as u32,
-                };
+                    result : 0,
+                    error : WasmiInvokeError::OutOfGasError as u32,
+                }
             }
             return WasmiInvokeResult {
-                result: 0,
-                error: WasmiInvokeError::CallError as u32,
-            };
+                result : 0,
+                error : WasmiInvokeError::UnrecoverableSystemError as u32
+            }
         }
     };
 }
