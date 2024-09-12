@@ -3,10 +3,7 @@
 #pragma once
 
 #include <format>
-#include <optional>
 #include <string>
-
-#include "hogd/base/string.h"
 
 namespace hogd {
 
