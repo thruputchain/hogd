@@ -23,21 +23,31 @@ endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
-# Fetch and enable GoogleTest
 include(FetchContent)
+
+# Enable GoogleTest (google's unit testing library)
 FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG v1.15.2
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+option(INSTALL_GTEST "" OFF)
 FetchContent_MakeAvailable(googletest)
 enable_testing()
 include(GoogleTest)
 
-include(ExternalProject)
+# Enable performance (google's benchmarking library)
+FetchContent_Declare(
+  benchmark
+  GIT_REPOSITORY https://github.com/google/benchmark.git
+  GIT_TAG v1.9.0
+)
+option(BENCHMARK_ENABLE_TESTING "" OFF)
+FetchContent_MakeAvailable(benchmark)
 
-# Define an external project for the 3rd-party product
+# Enable libsodium
+include(ExternalProject)
 ExternalProject_Add(libsodium
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
     CONFIGURE_COMMAND
@@ -65,4 +75,3 @@ include_directories(${LIBSODIUM_INCLUDE_DIRS})
 # Add code directories
 include_directories(${CMAKE_SOURCE_DIR})
 add_subdirectory(hogd)
-
