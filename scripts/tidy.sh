@@ -2,7 +2,6 @@
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source ${SCRIPT_DIR}/env.sh
-ROOT_DIR=$(realpath ${SCRIPT_DIR}/..)
 CODE_DIR=hogd
 BUILD_DIR=build
 
