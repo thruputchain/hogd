@@ -31,7 +31,12 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ env.CACHED_PATHS }}
-        key: ${{ runner.os }}
+        # Cmake should handle rebuilding any changed files across commits
+        key: ${{ runner.os }}-${{ github.ref_name }}
     - name: check
       run: ./scripts/check.sh
+    - uses: actions/cache/save@v4
+      with:
+        path: ${{ env.CACHED_PATHS }}
+        key: ${{ steps.cache.outputs.cache-primary-key }}
 
