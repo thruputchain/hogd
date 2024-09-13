@@ -17,14 +17,14 @@ add_x23_test(marshal)
 add_x23_test(rpc)
 add_x23_test(uvec)
 
-if(GOOGLETEST_DIR)
-include_directories(${GOOGLETEST_DIR}/googletest/include)
-set(GTEST_ALL ${GOOGLETEST_DIR}/googletest/src/gtest-all.cc)
+if(GOOGLETEST_PATH)
+include_directories(${GOOGLETEST_PATH}/googletest/include)
+set(GTEST_ALL ${GOOGLETEST_PATH}/googletest/src/gtest-all.cc)
 set_source_files_properties(${GTEST_ALL} PROPERTIES
-  INCLUDE_DIRECTORIES "${GOOGLETEST_DIR}/googletest")
+  INCLUDE_DIRECTORIES "${GOOGLETEST_PATH}/googletest")
 macro(add_x23_gtest TEST_NAME)
   add_x23_test(${TEST_NAME}
-    ${GTEST_ALL} ${GOOGLETEST_DIR}/googletest/src/gtest_main.cc)
+    ${GTEST_ALL} ${GOOGLETEST_PATH}/googletest/src/gtest_main.cc)
 endmacro()
 else()
 macro(add_x23_gtest TEST_NAME)
@@ -32,5 +32,11 @@ endmacro()
 endif()
 
 add_x23_gtest(xdr)
+
+if(BENCHMARK_PATH)
+add_executable(bench bench.cc xdrtest.x)
+use_x23(bench)
+target_link_libraries(bench x23 benchmark::benchmark)
+endif()
 
 add_custom_target(build_tests DEPENDS ${TEST_EXECUTABLES})
