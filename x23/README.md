@@ -15,7 +15,7 @@ XDR/RPC system you can get.
 ## Installation
 
 X23 uses cmake.  To install it, you need flex, bison, and either gcc
-14.1 or later or clang and libc++ 18.1 or later.  Run the following
+14.2 or later or clang and libc++ 18.1 or later.  Run the following
 commands from a fresh checkout:
 
 ```

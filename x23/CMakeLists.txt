@@ -27,7 +27,6 @@ if(X23_IS_TOP_LEVEL)
   endif()
 endif()
 
-include(cmake/p2564r3.cmake)
 include(cmake/pause.cmake)
 
 configure_file(
