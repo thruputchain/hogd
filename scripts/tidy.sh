@@ -2,6 +2,7 @@
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source ${SCRIPT_DIR}/env.sh
+ROOT_DIR=$(realpath ${SCRIPT_DIR}/..)
 CODE_DIR=hogd
 BUILD_DIR=build
 
@@ -22,4 +23,4 @@ done
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
 xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
--header-filter=".*hogd/hogd/.*" -quiet -warnings-as-errors='*'
+-header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*'
