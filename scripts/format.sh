@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+source ${SCRIPT_DIR}/env.sh
+
 function usage() {
     echo "usage: scripts/format.sh [-c|--check]" >&2
     exit 2
@@ -23,13 +26,7 @@ else
     CF_FLAGS=""
 fi
 
-# Set up environment
-SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-source ${SCRIPT_DIR}/env.sh
-
-ROOT_DIR=${SCRIPT_DIR}/..
 CODE_DIR=${ROOT_DIR}/hogd
-if [ -z ${CLANG_FORMAT+x} ]; then CLANG_FORMAT=clang-format-18; fi
 
 # Run clang-format
 find "${CODE_DIR}" -name '*.h' -o -name '*.cc' |\

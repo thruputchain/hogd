@@ -1,14 +1,15 @@
 #!/bin/bash
 
-CMAKE=cmake
-CXX=
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+source ${SCRIPT_DIR}/env.sh
+
 CXX_FLAGS=
 BUILD_DIR=build
 BUILD_TYPE=Release
 
 print_usage() {
   printf "usage: scripts/build.sh [OPTION]...\n"
-  printf -- "-c sets the compiler (e.g., 'g++', 'clang++')\n"
+  printf -- "-c sets the compiler (e.g., 'gcc', 'clang')\n"
   printf -- "-f sets compiler flags (e.g., '-Werror')\n"
   printf -- "-d sets the build directory (default is 'build')\n"
   printf -- "-t sets the build type (can be 'Release' or 'Debug')\n"
@@ -16,7 +17,14 @@ print_usage() {
 
 while getopts 'c:f:d:t:' flag; do
   case "${flag}" in
-    c) CXX="${OPTARG}" ;;
+    c) if [[ "${OPTARG}" == "gcc" ]]; then
+         CC="${GCC_CC}"
+         CXX="${GCC_CXX}"
+       elif [[ "${OPTARG}" == "clang" ]]; then
+         CC="${CLANG_CC}"
+         CXX="${CLANG_CXX}"
+       fi
+       ;;
     f) CXX_FLAGS="${OPTARG}" ;;
     d) BUILD_DIR="${OPTARG}" ;;
     t) if [[ "${OPTARG}" == "Debug" || "${OPTARG}" == "Release" ]]
@@ -32,26 +40,21 @@ while getopts 'c:f:d:t:' flag; do
     esac
 done
 
-# Find paths
-SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-ROOT_DIR=${SCRIPT_DIR}/../
+# Find build path
 BUILD_DIR=${ROOT_DIR}/${BUILD_DIR}
 
-source ${SCRIPT_DIR}/env.sh
-
-# Set nproc
-NPROC=$(nproc 2>/dev/null)
-#mac compabitibility
-if [ $? -ne 0 ]; then
-	NPROC=$(sysctl -n hw.ncpu)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  if [ "$CXX" = "clang++" ]; then
+    CMAKE_INJECT=(-DCMAKE_OSX_SYSROOT=)
+  fi
 fi
 
 # Do the build
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
-CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
+CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-  $(eval echo $CMAKE_INJECT) \
-  ..
+  "${CMAKE_INJECT[@]}" \
+  "$ROOT_DIR"
 
 make -j "$NPROC"
