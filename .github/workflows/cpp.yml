@@ -13,7 +13,7 @@ jobs:
 
     env:
       CACHED_PATHS: |
-        ~/bcheck
+        bcheck
     
     steps:
     - uses: actions/checkout@v4
