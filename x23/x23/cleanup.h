@@ -1,4 +1,4 @@
-// -*- C++ -*-
+// -*-C++-*-
 
 #pragma once
 
@@ -14,59 +14,55 @@
 
 namespace x23 {
 
+// Invalid file descriptor number returned by system calls on error.
+constexpr int kInvalidFd = -1;
+
 // Self-closing file descriptor will be closed as soon as it goes out
 // of scope.
 class UniqueFd {
 public:
-  constexpr UniqueFd() = default;
-  constexpr explicit UniqueFd(int fd) : fd_(fd) {}
-  UniqueFd(UniqueFd &&uf) : fd_(uf.release()) {}
-  ~UniqueFd() { clear(); }
-  UniqueFd &operator=(UniqueFd &&uf)
+  constexpr UniqueFd() noexcept = default;
+  constexpr explicit UniqueFd(int fd) noexcept : fd_(fd) {}
+  UniqueFd(UniqueFd &&uf) noexcept : fd_(uf.release()) {}
+  ~UniqueFd() { reset(); }
+  UniqueFd &operator=(UniqueFd &&uf) noexcept
   {
     reset(uf.release());
     return *this;
   }
 
   // Return the file descriptor number, but maintain ownership.
-  int get() const { return fd_; }
-  // True if the file descriptor is not -1.
-  explicit operator bool() const { return fd_ != -1; }
-  // Return the file descriptor number, relinquishing ownership of
-  // it.  The \c unique_fd will have file descriptor -1 after this
-  // method returns.
-  int release()
+  int get() const noexcept { return fd_; }
+
+  // True if UniqueFd is managing a file descriptor.
+  explicit operator bool() const noexcept { return fd_ != kInvalidFd; }
+
+  // Return the file descriptor number, relinquishing ownership of it.
+  // On return, the UniqueFd no longer manages a file descriptor.
+  int release() noexcept { return std::exchange(fd_, kInvalidFd); }
+
+  // Close the managed file descriptor and replace it with fd (or
+  // replace it with no file descriptor by default).
+  void reset(int fd = kInvalidFd) noexcept
   {
-    int ret = fd_;
-    fd_ = -1;
-    return ret;
-  }
-  void clear()
-  {
-    if (fd_ != -1) {
+    if (fd_ != kInvalidFd)
       close(fd_);
-      fd_ = -1;
-    }
-  }
-  void reset(int fd)
-  {
-    clear();
     fd_ = fd;
   }
 
 private:
-  int fd_{-1};
+  int fd_{kInvalidFd};
 };
 
 // For functions that can take either a UniqueFd or just an integer.
 class BorrowedFd {
 public:
-  BorrowedFd(int fd) : fd_(fd) {}
-  BorrowedFd(const UniqueFd &uf) : fd_(uf.get()) {}
-  int get() const { return fd_; }
+  BorrowedFd(int fd) noexcept : fd_(fd) {}
+  BorrowedFd(const UniqueFd &uf) noexcept : fd_(uf.get()) {}
+  int get() const noexcept { return fd_; }
 
 private:
-  int fd_{-1};
+  int fd_{kInvalidFd};
 };
 
 // Managed pointers for C data structures that have an explicit free
@@ -92,7 +88,6 @@ public:
 
   ManagedPtr(std::nullptr_t) noexcept {}
   explicit ManagedPtr(pointer p) noexcept : p_(p) {}
-  ManagedPtr(const ManagedPtr &) = delete;
   ManagedPtr(ManagedPtr &&other) noexcept : p_(other.release()) {}
   ~ManagedPtr()
   {
@@ -100,7 +95,7 @@ public:
       deleter(p_);
   }
 
-  ManagedPtr &operator=(std::nullptr_t)
+  ManagedPtr &operator=(std::nullptr_t) noexcept
   {
     reset(nullptr);
     return *this;
@@ -118,26 +113,19 @@ public:
   pointer operator->() const noexcept { return p_; }
   element_type &operator*() const noexcept { return *p_; }
 
-  pointer release() noexcept
+  pointer release() noexcept { return std::exchange(p_, nullptr); }
+  void reset(pointer p) noexcept
   {
-    auto r = p_;
-    p_ = nullptr;
-    return r;
-  }
-  void reset(pointer p)
-  {
-    auto old = p_;
-    p_ = p;
-    if (old)
+    if (auto old = std::exchange(p_, p))
       deleter(old);
   }
 
-  struct ptrptr_t {
+  struct PtrPtr {
     ManagedPtr *mp_;
     operator pointer *() const { return &mp_->p_; }
     operator ManagedPtr *() const { return mp_; }
   };
-  ptrptr_t operator&() noexcept { return {this}; }
+  PtrPtr operator&() noexcept { return {this}; }
 
   void swap(ManagedPtr &other) noexcept { std::swap(p_, other.p_); }
 
@@ -186,11 +174,12 @@ public:
   [[nodiscard]] Defer(Defer &&other) noexcept : action_(other.release()) {}
 
   [[nodiscard]] Defer(std::convertible_to<action_type> auto &&a)
-    : Defer(action_type{FORWARD(a)})
+      noexcept(noexcept(action_type{std::forward<decltype(a)>(a)}))
+    : Defer(action_type{std::forward<decltype(a)>(a)})
   {}
 
   template<std::convertible_to<action_type> T>
-  [[nodiscard]] Defer(Defer<T> &&other)
+  [[nodiscard]] Defer(Defer<T> &&other) noexcept
   {
     if (auto a = std::move(other).release())
       action_ = get_action(std::move(a));
@@ -198,9 +187,13 @@ public:
 
   ~Defer() { invoke(std::move(action_)); }
 
-  Defer &operator=(Defer &&other) { return reset(other.release()), *this; }
+  Defer &operator=(Defer &&other) noexcept
+  {
+    reset(other.release());
+    return *this;
+  }
 
-  nullable_type release()
+  nullable_type release() noexcept
   {
     if constexpr (std::same_as<nullable_type, action_type>)
       return std::exchange(action_, nullable_type{nullptr});
@@ -211,17 +204,17 @@ public:
   void reset() { invoke(release()); }
   void reset(action_type a) { invoke(std::exchange(action_, std::move(a))); };
 
-  explicit operator bool() const { return bool(action_); }
+  explicit operator bool() const noexcept { return bool(action_); }
 
 private:
   nullable_type action_{};
 
-  static decltype(auto) get_action(auto &&a)
+  static decltype(auto) get_action(auto &&a) noexcept
   {
     if constexpr (requires { a(); })
       return a;
     else
-      return *FORWARD(a);
+      return *std::forward<decltype(a)>(a);
   }
 
   static void invoke(nullable_type &&a)
