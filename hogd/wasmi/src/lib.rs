@@ -17,6 +17,8 @@ pub struct WasmiRuntime {
     instance: Option<Instance>,
 }
 
+// Tells rust that it is safe to send this c_void pointer
+// across lambda boundaries
 #[derive(Clone)]
 struct BorrowBypass {
     fn_pointer: *mut c_void,
@@ -302,6 +304,13 @@ impl WasmiInvokeResult {
             error: err as u32,
         }
     }
+
+    fn success(res : u64) -> WasmiInvokeResult {
+        Self {
+            result : res,
+            error : WasmiInvokeError::None as u32
+        }
+    }
 }
 
 #[repr(C)]
@@ -507,11 +516,8 @@ pub extern "C" fn wasmi_invoke(
     match func_res {
         Ok(_) => match res[0].i64() {
             Some(v) => {
-                return WasmiInvokeResult {
-                    result: v as u64,
-                    error: WasmiInvokeError::None as u32,
-                };
-            }
+                return WasmiInvokeResult::success(v as u64);
+            },
             _ => {
                 return WasmiInvokeResult::error(
                     WasmiInvokeError::ReturnTypeError,
