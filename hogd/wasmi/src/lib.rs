@@ -81,11 +81,8 @@ impl WasmiRuntime {
         let func = Func::wrap(
             &mut self.store,
             move |caller: Caller<'_, *mut c_void>| -> Result<u64, wasmi::Error> {
-                // This is necessary to stop some part of rust
-                // from complaining
-                let _y = x.clone();
                 let res =
-                    unsafe { external_call::c_call_0args(x.fn_pointer, caller.data().clone()) };
+                    unsafe { external_call::c_call_0args(x.clone().fn_pointer, caller.data().clone()) };
                 return external_call::handle_trampoline_error(res);
             },
         );
@@ -111,12 +108,9 @@ impl WasmiRuntime {
             move |caller: Caller<'_, *mut c_void>,
                   arg1: u64|
                   -> Result<u64, wasmi::Error> {
-                // This is necessary to stop some part of rust
-                // from complaining
-                let _y = x.clone();
                 let res = unsafe {
                     external_call::c_call_1args(
-                        x.fn_pointer,
+                        x.clone().fn_pointer,
                         caller.data().clone(),
                         arg1,
                     )
@@ -147,12 +141,9 @@ impl WasmiRuntime {
                   arg1: u64,
                   arg2: u64|
                   -> Result<u64, wasmi::Error> {
-                // This is necessary to stop some part of rust
-                // from complaining
-                let _y = x.clone();
                 let res = unsafe {
                     external_call::c_call_2args(
-                        x.fn_pointer,
+                        x.clone().fn_pointer,
                         caller.data().clone(),
                         arg1,
                         arg2,
@@ -185,12 +176,9 @@ impl WasmiRuntime {
                   arg2: u64,
                   arg3: u64|
                   -> Result<u64, wasmi::Error> {
-                // This is necessary to stop some part of rust
-                // from complaining
-                let _y = x.clone();
                 let res = unsafe {
                     external_call::c_call_3args(
-                        x.fn_pointer,
+                        x.clone().fn_pointer,
                         caller.data().clone(),
                         arg1,
                         arg2,
@@ -225,12 +213,9 @@ impl WasmiRuntime {
                   arg3: u64,
                   arg4: u64|
                   -> Result<u64, wasmi::Error> {
-                // This is necessary to stop some part of rust
-                // from complaining
-                let _y = x.clone();
                 let res = unsafe {
                     external_call::c_call_4args(
-                        x.fn_pointer,
+                        x.clone().fn_pointer,
                         caller.data().clone(),
                         arg1,
                         arg2,
@@ -267,12 +252,9 @@ impl WasmiRuntime {
                   arg4: u64,
                   arg5: u64|
                   -> Result<u64, wasmi::Error> {
-                // This is necessary to stop some part of rust
-                // from complaining
-                let _y = x.clone();
                 let res = unsafe {
                     external_call::c_call_5args(
-                        x.fn_pointer,
+                        x.clone().fn_pointer,
                         caller.data().clone(),
                         arg1,
                         arg2,
