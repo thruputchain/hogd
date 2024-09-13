@@ -15,7 +15,7 @@
 namespace x23 {
 
 // Invalid file descriptor number returned by system calls on error.
-constexpr int kInvalidFd = -1;
+constexpr inline int kInvalidFd = -1;
 
 // Self-closing file descriptor will be closed as soon as it goes out
 // of scope.
