@@ -43,12 +43,18 @@ done
 # Find build path
 BUILD_DIR=${ROOT_DIR}/${BUILD_DIR}
 
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  if [ "$CXX" = "clang++" ]; then
+    CMAKE_INJECT=(-DCMAKE_OSX_SYSROOT=)
+  fi
+fi
+
 # Do the build
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 CC="${CC}" CXX="${CXX}" $CMAKE -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-  $(eval echo $CMAKE_INJECT) \
+  "${CMAKE_INJECT[@]}" \
   "$ROOT_DIR"
 
 make -j "$NPROC"
