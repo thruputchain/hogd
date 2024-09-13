@@ -82,9 +82,13 @@ function(use_x23 target)
   endif()
 endfunction()
 
+set(GOOGLETEST_PATH "" CACHE PATH "Path to googletest")
+set(BENCHMARK_PATH "" CACHE PATH "Path to Google benchmark")
+
 if(NOT GOOGLETEST_PATH)
   if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/googletest)
-    set(GOOGLETEST_PATH ${CMAKE_SOURCE_DIR}/googletest)
+    set(GOOGLETEST_PATH ${CMAKE_SOURCE_DIR}/googletest
+      CACHE PATH "Path to googletest" FORCE)
   endif()
 endif()
 
@@ -94,15 +98,18 @@ if(NOT GOOGLETEST_PATH)
 else()
   if(NOT BENCHMARK_PATH)
     if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/benchmark)
-      set(BENCHMARK_PATH ${CMAKE_SOURCE_DIR}/benchmark)
+      set(BENCHMARK_PATH ${CMAKE_SOURCE_DIR}/benchmark
+	CACHE PATH "Path to Google benchmark" FORCE)
     endif()
   endif()
 endif()
 
-if(BENCHMARK_PATH)
-  message(STATUS "Enabling benchmark")
-  set(GOOGLETEST_PATH ${GOOGLETEST_PATH} CACHE PATH "Path to GoogleTest" FORCE)
-  add_subdirectory(${BENCHMARK_PATH})
+if(X23_IS_TOP_LEVEL)
+  if(BENCHMARK_PATH)
+    message(STATUS "Enabling benchmark")
+    set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "use test benchmark" FORCE)
+    add_subdirectory(${BENCHMARK_PATH} ${CMAKE_BINARY_DIR}/benchmark)
+  endif()
 endif()
 
 enable_testing()

@@ -5,35 +5,45 @@
 #include <benchmark/benchmark.h>
 
 void
-BM_empty_function(benchmark::State &state)
+empty_function(benchmark::State &state)
 {
-  static constexpr auto empty = +[] {};
+  void (*volatile empty)() = +[] {};
   for (auto _ : state)
     empty();
 }
-BENCHMARK(BM_empty_function);
+BENCHMARK(empty_function);
 
 void
-BM_empty_coro(benchmark::State &state)
+synchronous_empty_coro(benchmark::State &state)
 {
   static constexpr auto empty = +[] -> x23::Async<void> { co_return; };
   for (auto _ : state)
     empty()();
 }
-BENCHMARK(BM_empty_coro);
+BENCHMARK(synchronous_empty_coro);
+
+void
+coawait_empty_async(benchmark::State &state)
+{
+  static constexpr auto empty = +[] -> x23::Async<void> { co_return; };
+  [&]->x23::Async<void> {
+    for (auto _ : state)
+      co_await empty();
+    co_return;
+  }()();
+}
+BENCHMARK(coawait_empty_async);
 
 x23::ThreadPool pool;
 void
-BM_migrate(benchmark::State &state)
+migrate_coro(benchmark::State &state)
 {
-  auto mka = [&] -> x23::Async<void> {
+  [&] -> x23::Async<void> {
     for(auto _ : state)
       co_await pool.bg();
     co_return;
-  };
-  auto a = mka();
-  a();
+  }()();
 }
-BENCHMARK(BM_migrate);
+BENCHMARK(migrate_coro);
 
 BENCHMARK_MAIN();
