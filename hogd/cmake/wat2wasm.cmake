@@ -36,12 +36,6 @@ macro(WAT2WASM_TARGET Name Input Output)
       endif()
       set(_wat2wasm_TARGET_OUTPUTS "${_wat2wasm_OUTPUT}")
 
-    #  set(_wat2wasm_EXE_OPTS "")
-    #  if(NOT "${WAT2WASM_TARGET_ARG_COMPILE_FLAGS}" STREQUAL "")
-    #    set(_wat2wasm_EXE_OPTS "${WAT2WASM_TARGET_ARG_COMPILE_FLAGS}")
-    #    separate_arguments(_wat2wasm_EXE_OPTS)
-    #  endif()
-
       set(_wat2wasm_OUTPUT_HEADER "")
       if(NOT "${WAT2WASM_TARGET_ARG_DEFINES_FILE}" STREQUAL "")
         set(_wat2wasm_OUTPUT_HEADER "${WAT2WASM_TARGET_ARG_DEFINES_FILE}")
