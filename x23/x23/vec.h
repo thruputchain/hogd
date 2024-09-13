@@ -805,13 +805,13 @@ public:
 
     if constexpr (std::convertible_to<Self, BoundedStr &&>) {
       if (pos == 0) {
-        self.resize(std::min(new_size));
+        self.resize(new_size);
         return std::move(self);
       }
-      else if constexpr (std::is_trivial_v<typename Self::value_type>) {
+      if constexpr (std::is_trivial_v<typename Self::value_type>) {
         memmove(self.data(), self.data() + pos,
                 new_size * sizeof(typename Self::value_type));
-        self.resize(std::min(new_size));
+        self.resize(new_size);
         return std::move(self);
       }
     }
