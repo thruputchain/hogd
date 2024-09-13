@@ -11,7 +11,7 @@ use core::str::Utf8Error;
 mod external_call;
 mod invoke_result;
 
-pub use crate::invoke_result::{WasmiInvokeResult, WasmiInvokeError};
+pub use crate::invoke_result::{WasmiInvokeError, WasmiInvokeResult};
 
 pub struct WasmiRuntime {
     store: Store<*mut c_void>,
@@ -29,6 +29,18 @@ struct BorrowBypass {
 
 unsafe impl Send for BorrowBypass {}
 unsafe impl Sync for BorrowBypass {}
+
+fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
+    let slice = unsafe { slice::from_raw_parts(bytes, len as usize) };
+    match std::str::from_utf8(&slice) {
+        Ok(s) => Ok(s.to_owned()),
+        Err(x) => Err(x),
+    }
+}
+
+fn assert_runtime_not_null(runtime: *const WasmiRuntime) {
+    assert!(runtime != core::ptr::null());
+}
 
 impl WasmiRuntime {
     fn new(bytes: &[u8], userctx: *mut c_void) -> WasmiRuntime {
@@ -279,10 +291,6 @@ impl WasmiRuntime {
     }
 }
 
-fn assert_runtime_not_null(runtime: *const WasmiRuntime) {
-    assert!(runtime != core::ptr::null());
-}
-
 #[repr(C)]
 pub struct MemorySlice {
     mem: *mut u8,
@@ -291,8 +299,8 @@ pub struct MemorySlice {
 
 #[no_mangle]
 pub extern "C" fn wasmi_get_memory(runtime_void: *mut c_void) -> MemorySlice {
-
-    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute (runtime_void) };
+    let runtime: *mut WasmiRuntime =
+        unsafe { core::mem::transmute(runtime_void) };
     assert_runtime_not_null(runtime);
 
     let r = unsafe { &mut *runtime };
@@ -334,8 +342,8 @@ pub extern "C" fn wasmi_consume_gas(
     runtime_void: *mut c_void,
     gas_consumed: u64,
 ) -> bool {
-
-    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(runtime_void) };
+    let runtime: *mut WasmiRuntime =
+        unsafe { core::mem::transmute(runtime_void) };
     assert_runtime_not_null(runtime);
 
     let r = unsafe { &mut *runtime };
@@ -351,7 +359,6 @@ pub extern "C" fn wasmi_consume_gas(
 
 #[no_mangle]
 pub extern "C" fn wasmi_get_available_gas(runtime_void: *const c_void) -> u64 {
-
     let runtime = unsafe { core::mem::transmute(runtime_void) };
     assert_runtime_not_null(runtime);
     let r = unsafe { &*runtime };
@@ -359,22 +366,12 @@ pub extern "C" fn wasmi_get_available_gas(runtime_void: *const c_void) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn wasmi_set_available_gas(
-    runtime_void: *mut c_void,
-    gas: u64,
-) {
-    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(runtime_void) };
+pub extern "C" fn wasmi_set_available_gas(runtime_void: *mut c_void, gas: u64) {
+    let runtime: *mut WasmiRuntime =
+        unsafe { core::mem::transmute(runtime_void) };
     assert_runtime_not_null(runtime);
     let r = unsafe { &mut *runtime };
     r.store.set_fuel(gas).unwrap();
-}
-
-fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
-    let slice = unsafe { slice::from_raw_parts(bytes, len as usize) };
-    match std::str::from_utf8(&slice) {
-        Ok(s) => Ok(s.to_owned()),
-        Err(x) => Err(x),
-    }
 }
 
 #[no_mangle]
@@ -388,7 +385,8 @@ pub extern "C" fn wasmi_link_nargs(
     nargs: u8,
 ) -> bool // true if success
 {
-    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(runtime_void) };
+    let runtime: *mut WasmiRuntime =
+        unsafe { core::mem::transmute(runtime_void) };
     assert_runtime_not_null(runtime);
 
     assert!(module_name != core::ptr::null());
@@ -452,7 +450,8 @@ pub extern "C" fn wasmi_invoke(
     method_name: *const u8,
     method_name_len: u32,
 ) -> WasmiInvokeResult {
-    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(runtime_void) };
+    let runtime: *mut WasmiRuntime =
+        unsafe { core::mem::transmute(runtime_void) };
 
     assert_runtime_not_null(runtime);
 
@@ -497,7 +496,7 @@ pub extern "C" fn wasmi_invoke(
         Ok(_) => match res[0].i64() {
             Some(v) => {
                 return WasmiInvokeResult::success(v as u64);
-            },
+            }
             _ => {
                 return WasmiInvokeResult::error(
                     WasmiInvokeError::ReturnTypeError,
@@ -547,12 +546,12 @@ pub extern "C" fn new_wasmi_runtime(
 
     let b = Box::new(WasmiRuntime::new(&slice, userctx));
 
-    return unsafe {core::mem::transmute(Box::into_raw(b)) };
+    return unsafe { core::mem::transmute(Box::into_raw(b)) };
 }
 
 #[no_mangle]
 pub extern "C" fn free_wasmi_runtime(p: *mut c_void) {
-    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(p) };
+    let runtime: *mut WasmiRuntime = unsafe { core::mem::transmute(p) };
 
     assert_runtime_not_null(runtime);
 

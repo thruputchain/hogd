@@ -23,10 +23,10 @@ impl WasmiInvokeResult {
         }
     }
 
-    pub fn success(res : u64) -> WasmiInvokeResult {
+    pub fn success(res: u64) -> WasmiInvokeResult {
         Self {
-            result : res,
-            error : WasmiInvokeError::None as u32
+            result: res,
+            error: WasmiInvokeError::None as u32,
         }
     }
 }
