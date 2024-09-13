@@ -9,6 +9,9 @@ use std::slice;
 use core::str::Utf8Error;
 
 mod external_call;
+mod invoke_result;
+
+pub use crate::invoke_result::{WasmiInvokeResult, WasmiInvokeError};
 
 pub struct WasmiRuntime {
     store: Store<*mut c_void>,
@@ -276,41 +279,8 @@ impl WasmiRuntime {
     }
 }
 
-enum WasmiInvokeError {
-    None = 0,
-    LinkError = 1,
-    FuncNExist = 2,
-    InputError = 3, // input validation fails
-    ReturnTypeError = 4,
-    DeterministicCallError = 5,
-    OutOfGasError = 6,
-    UnrecoverableSystemError = 7,
-}
-
 fn assert_runtime_not_null(runtime: *const WasmiRuntime) {
     assert!(runtime != core::ptr::null());
-}
-
-#[repr(C)]
-pub struct WasmiInvokeResult {
-    result: u64,
-    error: u32,
-}
-
-impl WasmiInvokeResult {
-    fn error(err: WasmiInvokeError) -> WasmiInvokeResult {
-        Self {
-            result: 0,
-            error: err as u32,
-        }
-    }
-
-    fn success(res : u64) -> WasmiInvokeResult {
-        Self {
-            result : res,
-            error : WasmiInvokeError::None as u32
-        }
-    }
 }
 
 #[repr(C)]
@@ -320,7 +290,9 @@ pub struct MemorySlice {
 }
 
 #[no_mangle]
-pub extern "C" fn wasmi_get_memory(runtime: *mut WasmiRuntime) -> MemorySlice {
+pub extern "C" fn wasmi_get_memory(runtime_void: *mut c_void) -> MemorySlice {
+
+    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute (runtime_void) };
     assert_runtime_not_null(runtime);
 
     let r = unsafe { &mut *runtime };
@@ -359,9 +331,11 @@ pub extern "C" fn wasmi_get_memory(runtime: *mut WasmiRuntime) -> MemorySlice {
 
 #[no_mangle]
 pub extern "C" fn wasmi_consume_gas(
-    runtime: *mut WasmiRuntime,
+    runtime_void: *mut c_void,
     gas_consumed: u64,
 ) -> bool {
+
+    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(runtime_void) };
     assert_runtime_not_null(runtime);
 
     let r = unsafe { &mut *runtime };
@@ -376,7 +350,9 @@ pub extern "C" fn wasmi_consume_gas(
 }
 
 #[no_mangle]
-pub extern "C" fn wasmi_get_available_gas(runtime: *const WasmiRuntime) -> u64 {
+pub extern "C" fn wasmi_get_available_gas(runtime_void: *const c_void) -> u64 {
+
+    let runtime = unsafe { core::mem::transmute(runtime_void) };
     assert_runtime_not_null(runtime);
     let r = unsafe { &*runtime };
     return r.store.get_fuel().unwrap();
@@ -384,9 +360,10 @@ pub extern "C" fn wasmi_get_available_gas(runtime: *const WasmiRuntime) -> u64 {
 
 #[no_mangle]
 pub extern "C" fn wasmi_set_available_gas(
-    runtime: *mut WasmiRuntime,
+    runtime_void: *mut c_void,
     gas: u64,
 ) {
+    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(runtime_void) };
     assert_runtime_not_null(runtime);
     let r = unsafe { &mut *runtime };
     r.store.set_fuel(gas).unwrap();
@@ -402,7 +379,7 @@ fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
 
 #[no_mangle]
 pub extern "C" fn wasmi_link_nargs(
-    runtime: *mut WasmiRuntime,
+    runtime_void: *mut c_void,
     module_name: *const u8,
     module_name_len: u32,
     method_name: *const u8,
@@ -411,6 +388,7 @@ pub extern "C" fn wasmi_link_nargs(
     nargs: u8,
 ) -> bool // true if success
 {
+    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(runtime_void) };
     assert_runtime_not_null(runtime);
 
     assert!(module_name != core::ptr::null());
@@ -470,10 +448,12 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
 
 #[no_mangle]
 pub extern "C" fn wasmi_invoke(
-    runtime: *mut WasmiRuntime,
+    runtime_void: *mut c_void,
     method_name: *const u8,
     method_name_len: u32,
 ) -> WasmiInvokeResult {
+    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(runtime_void) };
+
     assert_runtime_not_null(runtime);
 
     if method_name == core::ptr::null() {
@@ -554,11 +534,11 @@ pub extern "C" fn wasmi_invoke(
 }
 
 #[no_mangle]
-pub fn new_wasmi_runtime(
+pub extern "C" fn new_wasmi_runtime(
     bytes: *const u8,
     bytes_len: u32,
     userctx: *mut c_void,
-) -> *mut WasmiRuntime {
+) -> *mut c_void {
     if bytes == core::ptr::null() {
         return core::ptr::null_mut();
     }
@@ -567,12 +547,14 @@ pub fn new_wasmi_runtime(
 
     let b = Box::new(WasmiRuntime::new(&slice, userctx));
 
-    return Box::into_raw(b);
+    return unsafe {core::mem::transmute(Box::into_raw(b)) };
 }
 
 #[no_mangle]
-pub extern "C" fn free_wasmi_runtime(p: *mut WasmiRuntime) {
-    assert_runtime_not_null(p);
+pub extern "C" fn free_wasmi_runtime(p: *mut c_void) {
+    let runtime : *mut WasmiRuntime = unsafe { core::mem::transmute(p) };
 
-    unsafe { drop(Box::from_raw(p)) };
+    assert_runtime_not_null(runtime);
+
+    unsafe { drop(Box::from_raw(runtime)) };
 }
