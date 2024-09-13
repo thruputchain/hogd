@@ -543,7 +543,7 @@ public:
       new_size = std::min(new_size - offset, count);
     if (new_size == 0)
       return {};
-    return { data() + offset, new_size };
+    return {data() + offset, new_size};
   }
 
   // Clear the current Uvec and return a new Uvec (or derived type
@@ -662,38 +662,38 @@ protected:
   constexpr void realloc(size_type n)
   {
     check_size(n);
-#if !BROKEN_P2564R3
     if consteval {
       constexpr_realloc(n);
-      return;
     }
-#endif // HAVE_P2564R3
-    Buf newb{};
-    if (n) {
-      if constexpr (requires { a_.allocate_at_least(n); }) {
-        auto ar = a_.allocate_at_least(n);
-        newb.end = newb.begin = reinterpret_cast<value_type *>(ar.ptr);
-        newb.bufend = newb.begin + ar.count;
+    else {
+      Buf newb{};
+      if (n) {
+        if constexpr (requires { a_.allocate_at_least(n); }) {
+          auto ar = a_.allocate_at_least(n);
+          newb.end = newb.begin = reinterpret_cast<value_type *>(ar.ptr);
+          newb.bufend = newb.begin + ar.count;
+        }
+        else {
+          newb.end = newb.begin =
+              reinterpret_cast<value_type *>(a_.allocate(n));
+          newb.bufend = newb.begin + n;
+        }
       }
-      else {
-        newb.end = newb.begin = reinterpret_cast<value_type *>(a_.allocate(n));
-        newb.bufend = newb.begin + n;
+
+      if (b_.begin) {
+        size_t new_size = std::min(size(), n);
+        newb.end = newb.begin + new_size;
+        [&] noexcept {
+          // for simplicity, use noexcept lambda to crash if move throws
+          std::uninitialized_move_n(b_.begin, new_size, newb.begin);
+        }();
+        std::destroy(b_.begin, b_.end);
+        a_.deallocate(reinterpret_cast<allocator_type::value_type *>(b_.begin),
+                      b_.bufend - b_.begin);
       }
-    }
 
-    if (b_.begin) {
-      size_t new_size = std::min(size(), n);
-      newb.end = newb.begin + new_size;
-      [&] noexcept {
-        // for simplicity, use noexcept lambda to crash if move throws
-        std::uninitialized_move_n(b_.begin, new_size, newb.begin);
-      }();
-      std::destroy(b_.begin, b_.end);
-      a_.deallocate(reinterpret_cast<allocator_type::value_type *>(b_.begin),
-                    b_.bufend - b_.begin);
+      b_ = newb;
     }
-
-    b_ = newb;
   }
 
   constexpr void check_size(size_type n)
@@ -743,15 +743,17 @@ struct BufView : std::span<const std::uint8_t> {
     : super(reinterpret_cast<const std::uint8_t *>(s.data()), s.size())
   {}
   BufView(const void *buf, size_t len) noexcept
-    : super(static_cast<const std::uint8_t *>(buf), len) {}
+    : super(static_cast<const std::uint8_t *>(buf), len)
+  {}
   BufView &operator=(is_bytespan auto s)
   {
     super::operator=(
         span{reinterpret_cast<const std::uint8_t *>(s.data()), s.size()});
     return *this;
   }
-  std::string_view string_view() const {
-    return { reinterpret_cast<const char *>(data()), size() };
+  std::string_view string_view() const
+  {
+    return {reinterpret_cast<const char *>(data()), size()};
   }
 };
 
@@ -901,8 +903,9 @@ void
 uformat_to(Out *s, std::format_string<Args...> fmt, Args &&...args)
 {
   size_t old_size = s->size();
-  size_t new_size = old_size + detail::vformatted_size(
-                                   fmt.get(), std::make_format_args(args...));
+  size_t new_size =
+      old_size +
+      detail::vformatted_size(fmt.get(), std::make_format_args(args...));
   s->resize_and_overwrite(new_size, [&](auto *p0, size_t count) {
     char *p = reinterpret_cast<char *>(p0);
     char *p2 = std::vformat_to(p + old_size, fmt.get(),
