@@ -2,7 +2,7 @@ name: C++ CI
 
 on:
   push:
-    branches: [ "geoff/ci_setup" ]
+  
   pull_request:
     branches: [ "main" ]
 
@@ -17,10 +17,6 @@ jobs:
         submodules: "recursive"
     - name: install gcc-14
       run: sudo apt-get install -y gcc-14 build-essential libc++-dev && gcc --version
- #   - name: clang install
-#      run: wget https://apt.llvm.org/llvm.sh && chmod u+x llvm.sh && sudo ./llvm.sh 18
-  #  - name: setup llvm repo
-  #    run: wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
     - name: install packages
       run: sudo apt-get install -y git cmake pkg-config wabt
     - name: set gcc-14 default
