@@ -253,30 +253,36 @@ serialize(const is_xdr_type auto &...x)
   return ret;
 }
 
-template<is_xdr_type Xout>
-size_t
-deserialize_from(Xout *out, BufView buf)
-{
-  if (buf.size() % 4)
-    throw XdrBadInput("input not multiple of 4 bytes deserializing {}",
-                      xdr_type_name<Xout>());
+namespace detail {
 
-  const std::uint8_t *p = buf.data();
-  const std::uint8_t *const e = p + buf.size();
+struct Deserializer {
+  const std::uint8_t *p;
+  const std::uint8_t *const e;
 
-#define NEED(n)                                                                \
-  do {                                                                         \
-    if (size_t(e - p) < (n)) [[unlikely]]                                      \
-      throw XdrBadInput("buffer overrun deserializing {} in {}",               \
-                        xdr_type_name<X>(), xdr_type_name<Xout>());            \
-  } while (0)
+  Deserializer(BufView bv) noexcept : p(bv.data()), e(p + bv.size()) {}
+  ~Deserializer()
+  {
+    if (p > e) {
+      static const char msg[] = "x23::Deserializer: buffer overrun";
+      write(2, msg, sizeof(msg) - 1);
+      std::terminate();
+    }
+  }
 
-  auto go = [&p, e]<typename X>(this auto &&go, X &x) -> void {
+  void need(size_t n) const
+  {
+    if (size_t(e - p) < n) [[unlikely]]
+      throw XdrBadInput("x23::Deserializer: input too short");
+  }
+
+  template<bool Safe = true, is_xdr_type X> void go(X &x)
+  {
     using enum XdrCategory;
     if constexpr (category<X> & FlagSet{kPrimitive, kEnum}) {
       using uint_type =
           std::conditional_t<sizeof(X) <= 4, std::uint32_t, std::uint64_t>;
-      NEED(sizeof(uint_type));
+      if constexpr (Safe)
+        need(sizeof(uint_type));
       auto val = getbe<uint_type>(p);
       p += sizeof(uint_type);
       if constexpr (sizeof(x) == sizeof(val))
@@ -284,8 +290,8 @@ deserialize_from(Xout *out, BufView buf)
       else {                       // works for bool, maybe some enums?
         if constexpr (std::same_as<X, bool>)
           if (val > 1)
-            throw XdrBadInput("illegal bool value {} deserializing {} in {}",
-                              val, xdr_type_name<X>(), xdr_type_name<Xout>());
+            throw XdrBadInput("illegal bool value {} deserializing {}", val,
+                              xdr_type_name<X>());
         x = X(val);
       }
     }
@@ -295,13 +301,14 @@ deserialize_from(Xout *out, BufView buf)
       if constexpr (category<X> == kOpaqueArray)
         memlen = x.size();
       else {
-        go(memlen);
+        go<Safe>(memlen);
         if (memlen > x.max_size()) [[unlikely]]
           throw XdrBadInput("length {} exceeds maximum deserializing {}",
                             memlen, xdr_type_name<X>());
       }
       std::size_t binlen = (memlen + 3UZ) & ~3UZ;
-      NEED(binlen);
+      if (Safe)
+        need(binlen);
       if constexpr (category<X> != kOpaqueArray)
         x.resize_uninitialized(memlen);
       for (size_t i = memlen; i < binlen; ++i)
@@ -313,46 +320,72 @@ deserialize_from(Xout *out, BufView buf)
     }
     else if constexpr (category<X> & FlagSet{kVec, kPtr}) {
       std::uint32_t len;
-      go(len);
+      go<Safe>(len);
       if (len > x.max_size()) [[unlikely]]
         throw XdrBadInput("length {} exceeds maximum deserializing {}", len,
                           xdr_type_name<X>());
       x.resize(0);
-      // don't let bad input exhaust memory
-      x.reserve(std::min<std::uint32_t>(len, 100));
-      for (size_t i = 0; i < len; ++i) {
-        x.resize(i + 1);
-        go(x.back());
-      }
+      // Don't let bad input exhaust memory, but 64kB should be plenty
+      // for most cases.
+      x.reserve(
+          std::min<std::uint32_t>(len,
+                                  0x10000 / sizeof(typename X::value_type)));
+      if (Safe &&
+          (detail::xdr_size_bounds<typename X::value_type>() * len).max_ >
+              e - p)
+        for (size_t i = 0; i < len; ++i) {
+          x.resize(i + 1);
+          go(x.back());
+        }
+      else
+        for (size_t i = 0; i < len; ++i) {
+          x.resize(i + 1);
+          go<false>(x.back());
+        }
     }
-    else if constexpr (category<X> == kArray)
-      for (auto &e : x)
-        go(e);
+    else if constexpr (category<X> == kArray) {
+      if (Safe && detail::xdr_size_bounds<X>().max_ > e - p)
+        for (auto &e : x)
+          go(e);
+      else
+        for (auto &e : x)
+          go<false>(e);
+    }
     else if constexpr (category<X> == kStruct) {
       with_index_sequence<std::tuple_size_v<X>>(
-          [&go, &x](auto... i) { (go(get<i>(x)), ...); });
+          [this, &x](auto... i) { (this->go<Safe>(get<i>(x)), ...); });
     }
     else if constexpr (category<X> == kUnion) {
       using ops = union_ops<X>;
       typename ops::discriminant_type d;
-      go(d);
+      go<Safe>(d);
       union_set_discriminant(x, d);
       if (ops::index(d) == -1) [[unlikely]]
         throw XdrBadInput("Bad discriminant {} deserializing {}", d,
                           ops::meta::type_name);
-      union_visit_arm(go, x);
+      union_visit_arm([this](auto &x) { this->go<Safe>(x); }, x);
     }
-  };
-#undef NEED
+  }
+};
 
-  go(*out);
-  return p - buf.data();
+} // namespace detail
+
+template<is_xdr_type Xout>
+size_t
+deserialize_from(Xout *out, BufView buf)
+{
+  detail::Deserializer d(buf);
+  d.go(*out);
+  return d.p - buf.data();
 }
 
 template<is_xdr_type Xout>
 inline void
 deserialize(Xout *out, BufView buf)
 {
+  if (buf.size() % 4)
+    throw XdrBadInput("input not multiple of 4 bytes deserializing {}",
+                      xdr_type_name<Xout>());
   if (deserialize_from(out, buf) != buf.size())
     throw XdrBadInput("leftover bytes deserializing {}", xdr_type_name<Xout>());
 }
