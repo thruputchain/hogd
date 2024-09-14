@@ -2,7 +2,7 @@ add_library(
   runtime
   wasmi_runtime.cc
   ffi_trampolines.cc
-  host_fn_status.cc
+  status.cc
 )
 add_executable(
   runtime_test

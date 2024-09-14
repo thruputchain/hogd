@@ -7,7 +7,7 @@
  */
 
 #include "hogd/base/types.h"
-#include "hogd/runtime/host_fn_status.h"
+#include "hogd/runtime/status.h"
 #include "hogd/runtime/test_load_wasm.h"
 #include "hogd/runtime/wasmi_runtime.h"
 
@@ -81,14 +81,16 @@ protected:
   {
     auto c = test::load_wasm_from_file("test_invoke_arity.wasm");
 
-    runtime_ = std::make_unique<WasmiRuntime>(c, nullptr);
+    WasmiContext context;
 
-    runtime_->template link_fn<&test::arity0>("test", "arg0");
-    runtime_->template link_fn<&test::arity1>("test", "arg1");
-    runtime_->template link_fn<&test::arity2>("test", "arg2");
-    runtime_->template link_fn<&test::arity3>("test", "arg3");
-    runtime_->template link_fn<&test::arity4>("test", "arg4");
-    runtime_->template link_fn<&test::arity5>("test", "arg5");
+    context.link_fn("test", "arg0", &test::arity0);
+    context.link_fn("test", "arg1", &test::arity1);
+    context.link_fn("test", "arg2", &test::arity2);
+    context.link_fn("test", "arg3", &test::arity3);
+    context.link_fn("test", "arg4", &test::arity4);
+    context.link_fn("test", "arg5", &test::arity5);
+    runtime_ = context.make_new_runtime(c, nullptr);
+    ASSERT_TRUE(!!runtime_);
   }
 
   std::unique_ptr<WasmiRuntime> runtime_;

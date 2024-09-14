@@ -1,4 +1,4 @@
-#include "hogd/runtime/host_fn_status.h"
+#include "hogd/runtime/status.h"
 
 #include <string>
 
@@ -31,8 +31,6 @@ WasmiInvokeErrorCategory::message(int code) const
   switch (static_cast<WasmiInvokeErrorCode>(code)) {
   case kWasmiNone:
     return "kWasmiNone";
-  case kWasmiLinkError:
-    return "kWasmiLinkError";
   case kWasmiFnNExist:
     return "kWasmiFnNExist";
   case kWasmiInputError:

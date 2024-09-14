@@ -10,7 +10,9 @@ struct TrampolineResult {
   uint8_t panic;
 };
 
-// trampolines
+// These functions get called (from within Wasmi)
+// as wrappers around
+// the functions given as arguments to WasmiContext::link_fn.
 TrampolineResult c_call_0args(void *function_pointer,
                               void *host_call_context) noexcept;
 TrampolineResult c_call_1args(void *function_pointer, void *host_call_context,

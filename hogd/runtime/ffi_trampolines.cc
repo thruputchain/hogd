@@ -1,6 +1,6 @@
 #include "hogd/runtime/ffi_trampolines.h"
 
-#include "hogd/runtime/host_fn_status.h"
+#include "hogd/runtime/status.h"
 
 #include "hogd/base/types.h"
 
@@ -41,6 +41,9 @@ handle_result(HostFnStatus<uint64_t> const &res)
 
 extern "C" {
 
+// These functions catch all errors, just in case our code throws an exception.
+// It is UB to pass errors across FFI boundaries, so they're all declared
+// noexcept.
 TrampolineResult
 c_call_0args(void *function_pointer, void *host_call_context) noexcept
 {
@@ -52,7 +55,6 @@ c_call_0args(void *function_pointer, void *host_call_context) noexcept
     return handle_result((*ptr)(user_ctx));
 
   } catch (...) {
-    // UB to pass errors across FFI boundaries
     return error(kTrampolineErrorUNRECOVERABLE);
   }
 }
@@ -69,7 +71,6 @@ c_call_1args(void *function_pointer, void *host_call_context,
     return handle_result((*ptr)(user_ctx, arg1));
 
   } catch (...) {
-    // UB to pass errors across FFI boundaries
     return error(kTrampolineErrorUNRECOVERABLE);
   }
 }
@@ -86,7 +87,6 @@ c_call_2args(void *function_pointer, void *host_call_context, uint64_t arg1,
     return handle_result((*ptr)(user_ctx, arg1, arg2));
 
   } catch (...) {
-    // UB to pass errors across FFI boundaries
     return error(kTrampolineErrorUNRECOVERABLE);
   }
 }
@@ -103,7 +103,6 @@ c_call_3args(void *function_pointer, void *host_call_context, uint64_t arg1,
     return handle_result((*ptr)(user_ctx, arg1, arg2, arg3));
 
   } catch (...) {
-    // UB to pass errors across FFI boundaries
     return error(kTrampolineErrorUNRECOVERABLE);
   }
 }
@@ -121,7 +120,6 @@ c_call_4args(void *function_pointer, void *host_call_context, uint64_t arg1,
     return handle_result((*ptr)(user_ctx, arg1, arg2, arg3, arg4));
 
   } catch (...) {
-    // UB to pass errors across FFI boundaries
     return error(kTrampolineErrorUNRECOVERABLE);
   }
 }
@@ -140,7 +138,6 @@ c_call_5args(void *function_pointer, void *host_call_context, uint64_t arg1,
     return handle_result((*ptr)(user_ctx, arg1, arg2, arg3, arg4, arg5));
 
   } catch (...) {
-    // UB to pass errors across FFI boundaries
     return error(kTrampolineErrorUNRECOVERABLE);
   }
 }

@@ -1,13 +1,14 @@
 #include "hogd/runtime/wasmi_runtime.h"
 
 #include "hogd/base/types.h"
-
-#include "hogd/runtime/host_fn_status.h"
+#include "hogd/runtime/status.h"
 
 #include <cassert>
 #include <cstddef>
+#include <memory>
 #include <span>
-#include <string>
+#include <string_view>
+#include <utility>
 
 namespace hogd {
 
@@ -23,12 +24,30 @@ extern "C" {
 // *** REQUIREMENT ***
 // Argument passed in as wasmi_runtime_ptr is NEVER NULL
 
-/**
+/*
  * Key rust FFI rules:
  * 1) exported functions are #[no_mangle]
  * 2) exported types are #[repr(C)]
  * 3) void* -> *mut c_void, const void* -> *const c_void
  */
+
+// Stellar-core uses cxx::bindgen.  That would be a good package
+// to use if this gets significantly more complicated,
+// or we find ourselves constantly adjusting this API.
+
+/*
+#[no_mangle]
+pub extern "C" fn new_wasmi_context() -> *mut c_void;
+*/
+
+void *new_wasmi_context();
+
+/*
+#[no_mangle]
+pub extern "C" fn free_wasmi_context(p: *mut c_void);
+*/
+
+void free_wasmi_context(void *wasmi_context_ptr);
 
 /*
 #[no_mangle]
@@ -36,11 +55,12 @@ pub fn new_wasmi_runtime(
     bytes: *const u8,
     bytes_len: u32,
     userctx: *mut c_void,
+    wasmi_context_ptr: *const c_void
 ) -> *mut WasmiRuntime;
 */
 
 void *new_wasmi_runtime(const uint8_t *script_ptr, uint32_t script_len,
-                        void *user_ctx_ptr);
+                        void *user_ctx_ptr, void *wasmi_context_ptr);
 
 /*
 #[no_mangle]
@@ -88,20 +108,20 @@ u64) -> bool;
 bool wasmi_consume_gas(void *wasmi_runtime_ptr, uint64_t gas_consumed);
 /*
 #[no_mangle]
-pub extern "C" fn wasmi_get_available_gas(runtime: *const WasmiRuntime) -> u64
+pub extern "C" fn wasmi_get_available_gas(runtime: *const c_void) -> u64
 */
 uint64_t wasmi_get_available_gas(const void *wasmi_runtime_ptr);
 
 /*
 #[no_mangle]
-pub extern "C" fn wasmi_set_available_gas(runtime: *mut WasmiRuntime, gas : u64)
+pub extern "C" fn wasmi_set_available_gas(runtime: *mut c_void, gas : u64)
 */
 void wasmi_set_available_gas(void *wasmi_runtime_ptr, uint64_t gas);
 
 /*
 #[no_mangle]
 pub extern "C" fn wasmi_link_nargs(
-    runtime: *mut WasmiRuntime,
+    context: *mut c_void,
     module_name: *const u8,
     module_name_len: u32,
     method_name: *const u8,
@@ -110,7 +130,7 @@ pub extern "C" fn wasmi_link_nargs(
     nargs: u8,
 ) -> bool;
 */
-bool wasmi_link_nargs(void *wasmi_runtime_ptr, const uint8_t *module_name,
+bool wasmi_link_nargs(void *wasmi_context_ptr, const uint8_t *module_name,
                       uint32_t module_name_len, const uint8_t *method_name,
                       uint32_t method_name_len, void *fn_ptr, uint8_t n_args);
 /*
@@ -130,12 +150,50 @@ WasmiInvokeResult wasmi_invoke(void *wasmi_runtime_ptr,
 
 } // namespace detail
 
+WasmiContext::WasmiContext() : wasmi_context_ptr_(detail::new_wasmi_context())
+{}
+
+WasmiContext::~WasmiContext()
+{
+  detail::free_wasmi_context(wasmi_context_ptr_);
+}
+
+std::unique_ptr<WasmiRuntime>
+WasmiContext::make_new_runtime(Contract const &contract,
+                               SystemCallHandler *syscall_handler)
+{
+  std::unique_ptr<HostCallContext> host_call_context =
+      std::make_unique<HostCallContext>();
+  host_call_context->syscall_handler = syscall_handler;
+
+  void *wasmi_runtime_ptr =
+      detail::new_wasmi_runtime(contract.data(), contract.size(),
+                                host_call_context.get(), wasmi_context_ptr_);
+
+  if (wasmi_runtime_ptr == nullptr) {
+    return {};
+  }
+
+  return std::make_unique<WasmiRuntime>(std::move(host_call_context),
+                                        wasmi_runtime_ptr);
+}
+
+bool
+WasmiContext::link_fn_nargs(std::string_view module_name,
+                            std::string_view fn_name, void *fn_ptr,
+                            uint8_t nargs)
+{
+  assert(!!wasmi_context_ptr_);
+  return detail::wasmi_link_nargs(
+      wasmi_context_ptr_, reinterpret_cast<const uint8_t *>(module_name.data()),
+      module_name.size(), reinterpret_cast<const uint8_t *>(fn_name.data()),
+      fn_name.size(), fn_ptr, nargs);
+}
+
 std::span<std::byte>
 WasmiRuntime::get_memory() noexcept
 {
-  if (!wasmi_runtime_ptr_) {
-    return std::span<std::byte>();
-  }
+  assert(!!wasmi_runtime_ptr_);
   auto slice = detail::wasmi_get_memory(wasmi_runtime_ptr_);
   return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
 }
@@ -143,46 +201,22 @@ WasmiRuntime::get_memory() noexcept
 std::span<const std::byte>
 WasmiRuntime::get_memory() const noexcept
 {
-  if (!wasmi_runtime_ptr_) {
-    return std::span<const std::byte>();
-  }
+  assert(!!wasmi_runtime_ptr_);
   auto slice = detail::wasmi_get_memory(wasmi_runtime_ptr_);
   return std::as_bytes(std::span<const uint8_t>(slice.mem, slice.sz));
 }
 
-bool
-WasmiRuntime::link_fn_nargs(std::string const &module_name,
-                            std::string const &fn_name, void *fn_ptr,
-                            uint8_t nargs)
-{
-  if (!wasmi_runtime_ptr_) {
-    return false;
-  }
-  return detail::wasmi_link_nargs(
-      wasmi_runtime_ptr_,
-      reinterpret_cast<const uint8_t *>(module_name.c_str()),
-      module_name.size(), reinterpret_cast<const uint8_t *>(fn_name.c_str()),
-      fn_name.size(), fn_ptr, nargs);
-}
-
 InvokeResult
-WasmiRuntime::invoke(std::string const &method_name, uint64_t gas_limit)
+WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
-  if (!wasmi_runtime_ptr_) {
-    return InvokeResult{
-        .result = {WasmiInvokeError{
-            WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError}},
-        .gas_consumed = 0};
-  }
+  assert(!!wasmi_runtime_ptr_);
 
   uint64_t prev_gas_limit = detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
   detail::wasmi_set_available_gas(wasmi_runtime_ptr_, gas_limit);
 
-  detail::WasmiInvokeResult res =
-      detail::wasmi_invoke(wasmi_runtime_ptr_,
-                           reinterpret_cast<const uint8_t *>(
-                               method_name.c_str()),
-                           method_name.size());
+  detail::WasmiInvokeResult res = detail::wasmi_invoke(
+      wasmi_runtime_ptr_, reinterpret_cast<const uint8_t *>(method_name.data()),
+      method_name.size());
 
   uint64_t gas_remaining = detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
 
@@ -204,40 +238,35 @@ WasmiRuntime::invoke(std::string const &method_name, uint64_t gas_limit)
 bool
 WasmiRuntime::consume_gas(uint64_t gas) noexcept
 {
-  if (!wasmi_runtime_ptr_) {
-    return false;
-  }
+  assert(!!wasmi_runtime_ptr_);
   return detail::wasmi_consume_gas(wasmi_runtime_ptr_, gas);
 }
 
 uint64_t
 WasmiRuntime::get_available_gas() const
 {
-  if (!wasmi_runtime_ptr_) {
-    return 0;
-  }
+  assert(!!wasmi_runtime_ptr_);
   return detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
 }
 
 void
 WasmiRuntime::set_available_gas(uint64_t gas)
 {
-  if (!wasmi_runtime_ptr_) {
-    return;
-  }
+  assert(!!wasmi_runtime_ptr_);
   detail::wasmi_set_available_gas(wasmi_runtime_ptr_, gas);
 }
 
-WasmiRuntime::WasmiRuntime(Contract const &contract, void *user_ctx_ptr)
-  : host_call_context_(this, user_ctx_ptr),
-    wasmi_runtime_ptr_(detail::new_wasmi_runtime(contract.data(),
-                                                 contract.size(),
-                                                 &host_call_context_))
-{}
+WasmiRuntime::WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,
+                           void *wasmi_runtime_ptr)
+  : host_call_context_(host_call_context.release()),
+    wasmi_runtime_ptr_(wasmi_runtime_ptr)
+{
+  host_call_context_->runtime = this;
+}
 
 WasmiRuntime::~WasmiRuntime()
 {
-  if (wasmi_runtime_ptr_) {
+  if (wasmi_runtime_ptr_ != nullptr) {
     detail::free_wasmi_runtime(wasmi_runtime_ptr_);
   }
 }

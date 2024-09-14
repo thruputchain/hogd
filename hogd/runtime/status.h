@@ -6,27 +6,25 @@
 
 namespace hogd {
 
-// enum WasmiInvokeError {
-//  None = 0,
-//  LinkError = 1, // module requests fn that was not linked
-//  FuncNExist = 2,
-//  InputError = 3, // input validation fails
-//  ReturnTypeError = 4,
-//  DeterministicCallError = 5,
-//  OutOfGasError = 6,
-//  UnrecoverableSystemError = 7,
-//}
+// pub enum WasmiInvokeError {
+//     None = 0,
+//     FuncNExist = 1, // invoked function does not exist
+//     InputError = 2, // input validation fails
+//     ReturnTypeError = 3, // invoked function did not return expected type
+//     DeterministicCallError = 4, // some other error, i.e. OOB access in WASM
+//     OutOfGasError = 5, // out of gas
+//     UnrecoverableSystemError = 6,
+// }
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class WasmiInvokeErrorCode : uint32_t {
   kWasmiNone = 0,
-  kWasmiLinkError = 1,
-  kWasmiFnNExist = 2,
-  kWasmiInputError = 3,
-  kWasmiReturnTypeError = 4,
-  kWasmiDeterministicCallError = 5,
-  kWasmiOutOfGasError = 6,
-  kWasmiUnrecoverableSystemError = 7
+  kWasmiFnNExist = 1,
+  kWasmiInputError = 2,
+  kWasmiReturnTypeError = 3,
+  kWasmiDeterministicCallError = 4,
+  kWasmiOutOfGasError = 5,
+  kWasmiUnrecoverableSystemError = 6
 };
 
 // Host fn calls have two types of errors:

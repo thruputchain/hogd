@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "hogd/base/types.h"
-#include "hogd/runtime/host_fn_status.h"
+#include "hogd/runtime/status.h"
 #include "hogd/runtime/test_load_wasm.h"
 #include "hogd/runtime/wasmi_runtime.h"
 
@@ -71,27 +71,26 @@ class WasmiErrorHandlingTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    auto c = test::load_wasm_from_file("test_error_handling.wasm");
-    runtime_ = std::make_unique<WasmiRuntime>(c, nullptr);
-    runtime_->template link_fn<&test::good_call>("test", "good_call");
+    contract_ = test::load_wasm_from_file("test_error_handling.wasm");
+    context_.link_fn("test", "good_call", &test::good_call);
   }
-
+  std::vector<uint8_t> contract_;
+  WasmiContext context_;
   std::unique_ptr<WasmiRuntime> runtime_;
 };
 
 TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 {
-  auto res = runtime_->invoke("call1", UINT64_MAX);
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiLinkError});
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  EXPECT_FALSE(!!runtime_);
 }
 
 // make sure we don't break if errors do get thrown
 TEST_F(WasmiErrorHandlingTest, RuntimeError)
 {
-  runtime_->template link_fn<&test::throw_runtime_error>("test",
-                                                         "external_call");
+  context_.link_fn("test", "external_call", &test::throw_runtime_error);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
+
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
@@ -102,8 +101,9 @@ TEST_F(WasmiErrorHandlingTest, RuntimeError)
 
 TEST_F(WasmiErrorHandlingTest, HostError)
 {
-  runtime_->template link_fn<&test::throw_unrecoverable_host_error>(
-      "test", "external_call");
+  context_.link_fn("test", "external_call",
+                   &test::throw_unrecoverable_host_error);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
@@ -114,7 +114,8 @@ TEST_F(WasmiErrorHandlingTest, HostError)
 
 TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
 {
-  runtime_->template link_fn<&test::throw_bad_alloc>("test", "external_call");
+  context_.link_fn("test", "external_call", &test::throw_bad_alloc);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
@@ -127,7 +128,8 @@ TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
 TEST_F(WasmiErrorHandlingTest, WasmError)
 {
   // must link all the fns, required for linking
-  runtime_->template link_fn<&test::good_call>("test", "external_call");
+  context_.link_fn("test", "external_call", &test::good_call);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
@@ -145,7 +147,8 @@ TEST_F(WasmiErrorHandlingTest, WasmError)
 TEST_F(WasmiErrorHandlingTest, NonexistFn)
 {
   // must link all the fns, required for linking
-  runtime_->template link_fn<&test::good_call>("test", "external_call");
+  context_.link_fn("test", "external_call", &test::good_call);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
@@ -160,8 +163,9 @@ TEST_F(WasmiErrorHandlingTest, NonexistFn)
 
 TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
 {
-  runtime_->template link_fn<&test::throw_unrecoverable_host_error>(
-      "test", "external_call");
+  context_.link_fn("test", "external_call",
+                   &test::throw_unrecoverable_host_error);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
@@ -177,7 +181,8 @@ TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
 
 TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 {
-  runtime_->template link_fn<&test::throw_bad_alloc>("test", "external_call");
+  context_.link_fn("test", "external_call", &test::throw_bad_alloc);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
@@ -193,7 +198,9 @@ TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 
 TEST_F(WasmiErrorHandlingTest, Reentrance)
 {
-  runtime_->link_fn<&test::reentrance>("test", "external_call");
+  context_.link_fn("test", "external_call", &test::reentrance);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
+
   test::s_runtime = runtime_.get();
   test::reentrance_hit = false;
 
@@ -207,38 +214,29 @@ TEST_F(WasmiErrorHandlingTest, Reentrance)
 TEST_F(WasmiErrorHandlingTest, NullHandling)
 {
   std::vector<uint8_t> null_contract;
-  runtime_ = std::make_unique<WasmiRuntime>(null_contract, nullptr);
+  runtime_ = context_.make_new_runtime(null_contract, nullptr);
 
-  // linker would require linking all fns before invoke worked anyways
-  runtime_->template link_fn<&test::good_call>("test", "good_call");
-  runtime_->template link_fn<&test::good_call>("test", "external_call");
-
-  auto res = runtime_->invoke("bad", UINT64_MAX);
-
-  EXPECT_FALSE(!!res.result);
-
-  res = runtime_->invoke("", UINT64_MAX);
-
-  EXPECT_FALSE(!!res.result);
+  EXPECT_FALSE(!!runtime_);
 }
 
 TEST_F(WasmiErrorHandlingTest, NullLinkHandling)
 {
-  std::vector<uint8_t> null_contract;
-  runtime_ = std::make_unique<WasmiRuntime>(null_contract, nullptr);
+  // Apparently WASM accepts module/fn names of empty strings
+  EXPECT_TRUE(context_.link_fn("", "good_call", &test::good_call));
+  EXPECT_TRUE(context_.link_fn("test", "", &test::good_call));
+  EXPECT_TRUE(context_.link_fn("foo", "good_call", &test::good_call));
 
-  // linker would require linking all fns before invoke worked anyways
-  runtime_->template link_fn<&test::good_call>("", "good_call");
-  runtime_->template link_fn<&test::good_call>("test", "");
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
 
-  auto res = runtime_->invoke("call1", UINT64_MAX);
-
-  EXPECT_FALSE(!!res.result);
+  EXPECT_FALSE(!!runtime_);
 }
 
 TEST_F(WasmiErrorHandlingTest, OutOfGas)
 {
-  runtime_->link_fn<&test::consume_too_much_gas>("test", "external_call");
+  context_.link_fn("test", "external_call", &test::consume_too_much_gas);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
+
+  ASSERT_TRUE(!!runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
@@ -255,7 +253,8 @@ TEST_F(WasmiErrorHandlingTest, OutOfGas)
 
 TEST_F(WasmiErrorHandlingTest, NoGas)
 {
-  runtime_->link_fn<&test::good_call>("test", "external_call");
+  context_.link_fn("test", "external_call", &test::good_call);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
 
   auto res = runtime_->invoke("call1", 1);
 
@@ -266,7 +265,8 @@ TEST_F(WasmiErrorHandlingTest, NoGas)
 
 TEST_F(WasmiErrorHandlingTest, Spin)
 {
-  runtime_->link_fn<&test::good_call>("test", "external_call");
+  context_.link_fn("test", "external_call", &test::good_call);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
 
   auto res = runtime_->invoke("spin", 10000);
 
