@@ -113,6 +113,7 @@ constexpr XdrCategory category = [] {
 
 template<typename T> concept is_xdr_type = category<T> != XdrCategory::kInvalid;
 
+// Matches XDR types that match one of the categories
 template<typename T, XdrCategory...C>
 concept is_xdr_cat = is_xdr_type<T> && ((category<T> == C) || ...);
 // redundant is_xdr_type<T> makes it more specific than is_xdr_type

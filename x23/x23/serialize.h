@@ -165,24 +165,28 @@ xdr_size(const X &x)
   using enum XdrCategory;
   if constexpr (detail::has_fixed_size<X>())
     return detail::size_of_fixed<X>();
-  else if constexpr (category<X> & FlagSet{kString, kOpaqueVec})
+  else if constexpr (is_xdr_cat<X, kString, kOpaqueVec>)
     return (x.size() + 7UZ) & ~3UZ;
-  else if constexpr (category<X> & FlagSet{kPtr, kVec, kArray}) {
-    const size_t sizesize = category<X> == kArray ? 0UZ : 4UZ;
+  else if constexpr (is_xdr_cat<X, kPtr, kVec, kArray>) {
+    constexpr size_t sizesize = category<X> == kArray ? 0UZ : 4UZ;
     if constexpr (detail::has_fixed_size<typename X::value_type>())
       return sizesize +
              x.size() * detail::size_of_fixed<typename X::value_type>();
-    else
-      return std::ranges::fold_left(
-          x | std::views::transform([](const auto &x) { return xdr_size(x); }),
-          sizesize, std::plus<size_t>{});
+    else {
+      size_t size = sizesize;
+      for (const auto &e : x)
+        size += xdr_size(x);
+      return size;
+    }
   }
-  else if constexpr (category<X> == kUnion)
+  else if constexpr (is_xdr_union<X>)
     return 4 +
            union_visit_arm([](const auto &a) { return xdr_size(a); }, x, 0UZ);
-  else if constexpr (category<X> == kStruct)
-    return with_index_sequence<std::tuple_size_v<X>>(
-        [&x](auto... i) { return (xdr_size(get<i>(x)) + ...); });
+  else if constexpr (is_xdr_struct<X>) {
+    size_t size = 0;
+    visit_fields([&size](const auto &x) { size += xdr_size(x); }, x);
+    return size;
+  }
 }
 
 namespace detail {
@@ -380,10 +384,8 @@ struct Deserializer {
         for (auto &e : x)
           go<false>(e);
     }
-    else if constexpr (category<X> == kStruct) {
-      with_index_sequence<std::tuple_size_v<X>>(
-          [this, &x](auto... i) { (this->go<Safe>(get<i>(x)), ...); });
-    }
+    else if constexpr (category<X> == kStruct)
+      visit_fields([this](auto &x) { this->go<Safe>(x); }, x);
     else if constexpr (category<X> == kUnion) {
       using ops = union_ops<X>;
       typename ops::discriminant_type d;
