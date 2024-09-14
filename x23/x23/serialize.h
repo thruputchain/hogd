@@ -122,7 +122,7 @@ xdr_size_bounds()
            4;
   else if constexpr (category<X> == kStruct)
     return with_index_sequence<std::tuple_size_v<X>>([](auto... i) {
-      return (... +
+      return (SizeBounds{0} + ... +
               xdr_size_bounds<std::tuple_element_t<i, X>, Blacklist..., X>());
     });
   else if constexpr (category<X> == kUnion) {
