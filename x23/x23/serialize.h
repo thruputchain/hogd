@@ -2,8 +2,11 @@
 
 #pragma once
 
+#include "x23/utility.h"
 #include <algorithm>
 
+#include <initializer_list>
+#include <utility>
 #include <x23/x23.h>
 
 namespace x23 {
@@ -46,41 +49,110 @@ pushbe(C *out, T val)
 
 namespace detail {
 
+constexpr size_t kNoBound = std::numeric_limits<size_t>::max();
+
+struct SizeBounds {
+  size_t min_;
+  size_t max_;
+
+  constexpr SizeBounds(size_t both) noexcept : min_(both), max_(both) {}
+  constexpr SizeBounds(size_t min, size_t max) noexcept : min_(min), max_(max)
+  {}
+
+  constexpr SizeBounds operator+(size_t n) const noexcept
+  {
+    return {min_ + n, uplus(max_, n)};
+  }
+  constexpr SizeBounds operator+(const SizeBounds &other) const noexcept
+  {
+    return {min_ + other.min_, uplus(max_, other.max_)};
+  }
+  constexpr SizeBounds operator*(size_t n) const noexcept
+  {
+    return {umul(min_, n), umul(max_, n)};
+  }
+  constexpr SizeBounds zero_to(size_t n) const noexcept
+  {
+    return {0, n >= 0xffffffff ? kNoBound : umul(n, max_)};
+  }
+
+  constexpr bool operator==(const SizeBounds &) const noexcept = default;
+
+  static constexpr size_t umul(size_t a, size_t b) noexcept
+  {
+    if (b == 0)
+      return 0;
+    if (a > kNoBound / b)
+      return kNoBound;
+    return a * b;
+  }
+  static constexpr size_t uplus(size_t a, size_t b) noexcept
+  {
+    if (b > kNoBound - a)
+      return kNoBound;
+    return a + b;
+  }
+};
+
+template<is_xdr_type X, typename... Blacklist>
+consteval SizeBounds
+xdr_size_bounds()
+{
+  using enum XdrCategory;
+  if constexpr (is_one_of<X, Blacklist...>)
+    // This means we have a recursive or mutually-recursive type, so
+    // it could go on forever.  (min doesn't matter because in any
+    // recursive type there's a Ptr already determining min.)
+    return {0, kNoBound};
+  else if constexpr (category<X> & FlagSet{kPrimitive, kEnum})
+    return sizeof(X) <= 4 ? 4 : 8;
+  else if constexpr (category<X> == kOpaqueArray)
+    return (std::tuple_size<X>::value + 3UZ) & ~3UZ;
+  else if constexpr (category<X> & FlagSet{kString, kOpaqueVec})
+    return SizeBounds{0, X::kMaxSize >= 0xffffffff
+                             ? kNoBound
+                             : (X::kMaxSize + 3UZ) & ~3UZ} +
+           4;
+  else if constexpr (category<X> == kArray)
+    return xdr_size_bounds<typename X::value_type, Blacklist..., X>() *
+           std::tuple_size<X>::value;
+  else if constexpr (category<X> & FlagSet{kVec, kPtr})
+    return xdr_size_bounds<typename X::value_type, Blacklist..., X>().zero_to(
+               X::max_size()) +
+           4;
+  else if constexpr (category<X> == kStruct)
+    return with_index_sequence<std::tuple_size_v<X>>([](auto... i) {
+      return (... +
+              xdr_size_bounds<std::tuple_element_t<i, X>, Blacklist..., X>());
+    });
+  else if constexpr (category<X> == kUnion) {
+    using ops = union_ops<X>;
+    return with_index_sequence<ops::union_size, 1>([](auto... i) {
+      SizeBounds ret{ops::meta::has_void ? 0 : kNoBound, 0};
+      for (auto b : {xdr_size_bounds<typename ops::template union_element_t<i>,
+                                     Blacklist..., X>()...}) {
+        ret.min_ = std::min(ret.min_, b.min_);
+        ret.max_ = std::max(ret.max_, b.max_);
+      }
+      return ret + 4;
+    });
+  }
+}
+
 // True if the size of a marshaled X is independent of its value.
 template<is_xdr_type X>
 consteval bool
 has_fixed_size()
 {
-  using enum XdrCategory;
-  if constexpr (category<X> & FlagSet{kPrimitive, kEnum, kOpaqueArray})
-    return true;
-  else if constexpr (category<X> &
-                     FlagSet{kString, kOpaqueVec, kPtr, kVec, kUnion})
-    return false;
-  else if constexpr (category<X> == kArray)
-    return has_fixed_size<typename X::value_type>();
-  else if constexpr (category<X> == kStruct)
-    return with_index_sequence<std::tuple_size_v<X>>([](auto... i) -> bool {
-      return (has_fixed_size<std::tuple_element_t<i, X>>() && ...);
-    });
+  SizeBounds b = xdr_size_bounds<X>();
+  return b.min_ == b.max_;
 }
 
-// Marshaled size of fixed-size types
 template<is_xdr_type X> requires (has_fixed_size<X>())
 consteval size_t
 size_of_fixed()
 {
-  using enum XdrCategory;
-  if constexpr (category<X> & FlagSet{kPrimitive, kEnum})
-    return sizeof(X) <= 4 ? 4 : 8;
-  else if constexpr (category<X> == kOpaqueArray)
-    return (std::tuple_size<X>::value + 3uz) & ~3uz;
-  else if constexpr (category<X> == kArray)
-    return std::tuple_size<X>::value * size_of_fixed<typename X::value_type>();
-  else if constexpr (category<X> == kStruct)
-    return with_index_sequence<std::tuple_size_v<X>>([](auto... i) {
-      return (size_of_fixed<std::tuple_element_t<i, X>>() + ... + 0);
-    });
+  return xdr_size_bounds<X>().max_;
 }
 
 } // namespace detail
@@ -94,9 +166,9 @@ xdr_size(const X &x)
   if constexpr (detail::has_fixed_size<X>())
     return detail::size_of_fixed<X>();
   else if constexpr (category<X> & FlagSet{kString, kOpaqueVec})
-    return (x.size() + 7uz) & ~3uz;
+    return (x.size() + 7UZ) & ~3UZ;
   else if constexpr (category<X> & FlagSet{kPtr, kVec, kArray}) {
-    const size_t sizesize = category<X> == kArray ? 0uz : 4uz;
+    const size_t sizesize = category<X> == kArray ? 0UZ : 4UZ;
     if constexpr (detail::has_fixed_size<typename X::value_type>())
       return sizesize +
              x.size() * detail::size_of_fixed<typename X::value_type>();
@@ -107,7 +179,7 @@ xdr_size(const X &x)
   }
   else if constexpr (category<X> == kUnion)
     return 4 +
-           union_visit_arm([](const auto &a) { return xdr_size(a); }, x, 0uz);
+           union_visit_arm([](const auto &a) { return xdr_size(a); }, x, 0UZ);
   else if constexpr (category<X> == kStruct)
     return with_index_sequence<std::tuple_size_v<X>>(
         [&x](auto... i) { return (xdr_size(get<i>(x)) + ...); });
@@ -228,7 +300,7 @@ deserialize_from(Xout *out, BufView buf)
           throw XdrBadInput("length {} exceeds maximum deserializing {}",
                             memlen, xdr_type_name<X>());
       }
-      std::size_t binlen = (memlen + 3uz) & ~3uz;
+      std::size_t binlen = (memlen + 3UZ) & ~3UZ;
       NEED(binlen);
       if constexpr (category<X> != kOpaqueArray)
         x.resize_uninitialized(memlen);

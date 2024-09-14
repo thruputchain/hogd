@@ -13,6 +13,13 @@ union sunion switch (senum d) {
     void;
 };
 
+union sunion_no_void switch (senum d) {
+  case SE_NEGATIVE:
+    bool neg;
+  case SE_POSITIVE:
+    int pos;
+};
+
 union uunion switch (unsigned int d) {
   case 1:
     bool one;

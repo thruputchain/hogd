@@ -12,6 +12,11 @@ using std::uint8_t;
 static_assert(detail::has_fixed_size<fix_4>());
 static_assert(detail::has_fixed_size<fix_12>());
 static_assert(detail::has_fixed_size<fix_16>());
+static_assert(detail::has_fixed_size<sunion_no_void>());
+static_assert(!detail::has_fixed_size<sunion>());
+static_assert(detail::xdr_size_bounds<sunion>() == detail::SizeBounds{4,8});
+static_assert(detail::xdr_size_bounds<test_recursive>() ==
+	      detail::SizeBounds{12,detail::kNoBound});
 static_assert(xdr_size(fix_4{}) == 4);
 static_assert(xdr_size(fix_12{}) == 12);
 static_assert(xdr_size(fix_16{}) == 16);
