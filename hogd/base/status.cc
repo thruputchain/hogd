@@ -7,6 +7,10 @@ namespace hogd {
 std::string
 GCategory::message(int code) const
 {
+  if (!GError::in_enum_range(code)) {
+    return "";
+  }
+  
   using enum GCode;
   switch (static_cast<GCode>(code)) {
   case kCancelled:

@@ -160,6 +160,21 @@ public:
   Enum code() const { return code_; }
   // raw_code returns the error code as an int.
   int raw_code() const { return static_cast<int>(std::to_underlying(code_)); }
+
+  // It is UB to cast raw_code to an enum, if
+  // raw_code is outside the range of the enum and the enum has no specified backing type
+  // (where [dcl.enum] the range is the set of integers expressible in a hypothetical M-bit integral type,
+  // for M as small as possible).  There's no good way in the standard to get this M,
+  // and in practice, a compiler will probably just round up to underlying_type_t.
+  // If the enum has a specified type, raw_code is converted to that type and then cast
+  // (which is not UB but still potentially bizarre for the case of enum errors).
+  constexpr static bool in_enum_range(int raw_code)
+  {
+    using underlying_enum = std::underlying_type_t<Enum>;
+    return (raw_code >= std::numeric_limits<underlying_enum>::min() &&
+            raw_code <= std::numeric_limits<underlying_enum>::max());
+  }
+  
   // category returns the std::error_category for this error type.
   static const std::error_category &category()
   {
