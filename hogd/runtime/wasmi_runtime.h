@@ -15,6 +15,8 @@ namespace hogd {
 class SystemCallHandler;
 class WasmiRuntime;
 
+// Passed in as the argument to functions invoked from Wasmi.
+// The WasmiRuntime argument allows a syscall to consume gas.
 struct HostCallContext {
   WasmiRuntime *runtime = nullptr;
   SystemCallHandler *syscall_handler = nullptr;
@@ -47,6 +49,20 @@ public:
   WasmiContext(WasmiContext const &) = delete;
   ~WasmiContext();
 
+  // Provide the functions that are made available to wasm modules (as function
+  // imports). Imports in wasm are identified by "module name" and "function
+  // name". For simplicity, this API implements only u64 arguments (between 0
+  // and 5) and expects imported functions to return a u64 (i.e. an error code
+  // from the syscall).
+  //
+  // These functions have a signature of
+  // HostFnStatus<uint64_t>
+  // function(HostCallContext* context, uint64_t arg0,...);
+  //
+  // Context is the object contained in a WasmiRuntime.
+  // If the HostFnStatus is not an error, then the uint64 is returned to the
+  // wasm module. Otherwise, Wasmi unwinds the current invocation and returns a
+  // nonzero WasmiInvokeError.
   template<std::same_as<uint64_t>... Args>
   bool link_fn(std::string_view module_name, std::string_view fn_name,
                HostFnStatus<uint64_t> (*f)(HostCallContext *, Args...))
