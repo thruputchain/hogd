@@ -15,6 +15,7 @@ add_library(x23
   utility.h
   vec.h
   x23.h
+  ${CMAKE_CURRENT_BINARY_DIR}/config.h
 )
 
 use_x23(x23)
