@@ -36,9 +36,27 @@ struct InvokeResult {
 // WasmiContext.  Role is to link syscall trampolines
 // and provide new runtime instances.
 //
+// The intent with this API is to abstract away most of the details
+// of wasmi, so that later switching to a different engine, should we so choose,
+// should not require significant redesign work.
+//
+// This should NOT be used across multiple concurrent transactions.
 // The internal wasmi::EngineInner has shared state,
-// which appears to be appropriately protected so as to be
+// which (appears to be) appropriately protected so as to be
 // threadsafe.
+// HOWEVER, contention on this structure could produce weird performance
+// artifacts, (every access is protected by a mutex, and I'm not convinced it
+// doesn't hold this mutex for too long sometimes: see
+// https://github.com/wasmi-labs/wasmi/pull/1122) and crucially, in lazy
+// compilation/translation mode, there are code artifacts that get put into the
+// internal engine structure and checks for these structures affect gas
+// metering. From the changelog: ``Note that CompilationMode::Lazy can lead to
+// partially validated Wasm modules which can introduce non-determinism when
+// using different Wasm implementations. Therefore users should know what they
+// are doing when using CompilationMode::Lazy if this is a concern.'' I suspect
+// that this would be ok, if we used a separately instantiated wasmi::Module for
+// each module.  But I would rather not worry about the internals of wasmi this
+// much.
 //
 // Wasmi internally manages its own lifetimes, so it is safe to
 // have this be destructed before all WasmiRuntimes that it created
