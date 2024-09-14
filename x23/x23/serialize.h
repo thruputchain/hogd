@@ -344,7 +344,7 @@ struct Deserializer {
         }
     }
     else if constexpr (category<X> == kArray) {
-      if (Safe && detail::xdr_size_bounds<X>().max_ > e - p)
+      if (Safe && detail::xdr_size_bounds<X>().max_ > size_t(e - p))
         for (auto &e : x)
           go(e);
       else
