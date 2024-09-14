@@ -22,6 +22,7 @@ LineEnding: LF
 PenaltyBreakTemplateDeclaration: 0
 PenaltyBreakBeforeFirstCallParameter: 100
 RequiresClausePosition: WithPreceding
+ShortNamespaceLines: 0
 SpaceAfterTemplateKeyword: false
 SpaceBeforeParens: Custom
 SpaceBeforeParensOptions:

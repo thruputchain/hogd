@@ -113,12 +113,16 @@ constexpr XdrCategory category = [] {
 
 template<typename T> concept is_xdr_type = category<T> != XdrCategory::kInvalid;
 
-template<typename T> concept is_xdr_enum = category<T> == XdrCategory::kEnum;
+template<typename T, XdrCategory...C>
+concept is_xdr_cat = is_xdr_type<T> && ((category<T> == C) || ...);
+// redundant is_xdr_type<T> makes it more specific than is_xdr_type
+
+template<typename T> concept is_xdr_enum = is_xdr_cat<T, XdrCategory::kEnum>;
 
 template<typename T>
-concept is_xdr_struct = category<T> == XdrCategory::kStruct;
+concept is_xdr_struct = is_xdr_cat<T, XdrCategory::kStruct>;
 
-template<typename T> concept is_xdr_union = category<T> == XdrCategory::kUnion;
+template<typename T> concept is_xdr_union = is_xdr_cat<T, XdrCategory::kUnion>;
 
 template<typename... T>
 using common_twc_result =
@@ -464,8 +468,19 @@ union_visit_arm(F &&f, U &&u, R void_result)
     return with_n<ops::union_size, 1, R>(n, [&](auto i) -> R {
       return f(std::forward_like<U>(get<i>(u)));
     });
-  else
-    return void_result;
+  return void_result;
+}
+
+// Apply a function object to every field of a struct or tuple.
+template<typename T> requires requires {
+  { std::tuple_size_v<std::remove_cvref_t<T>> } -> decays_to<size_t>;
+}
+inline void
+visit_fields(auto &&f, T &&t)
+{
+  [&]<size_t... I>(std::index_sequence<I...>) {
+    (f(get<I>(t)), ...);
+  }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<T>>>{});
 }
 
 template<is_xdr_type X>
@@ -548,7 +563,7 @@ unbool(T b)
 
 namespace detail {
 enum EmptyEnum {};
-}
+} // namespace detail
 
 // Used to check version concepts
 struct VacuousSendCall {

@@ -351,7 +351,7 @@ Gen::show_type(const StructBody &s, string t)
   if (!namespaces_.empty())
     bottom_ += format("\nnamespace {} {{", ns());
   bottom_ += std::format(R"(
-template<size_t I, x23::references<const struct {1}&> T>
+template<size_t I, x23::references<struct {1}> T>
 requires (I < {0})
 decltype(auto)
 get(T &&t)

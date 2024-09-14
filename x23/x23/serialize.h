@@ -185,64 +185,93 @@ xdr_size(const X &x)
         [&x](auto... i) { return (xdr_size(get<i>(x)) + ...); });
 }
 
+namespace detail {
+struct Serializer {
+  std::uint8_t *p;
+
+  void put32(std::uint32_t v)
+  {
+    putbe(p, v);
+    p += 4;
+  }
+  void put64(std::uint64_t v)
+  {
+    putbe(p, v);
+    p += 8;
+  }
+  void putbytes(const void *buf, size_t len)
+  {
+    if (size_t rem = len % 4) {
+      *reinterpret_cast<uint32_t *>(p + len - rem) = 0;
+      memcpy(p, buf, len);
+      p += len + (4 - rem);
+    }
+    else {
+      memcpy(p, buf, len);
+      p += len;
+    }
+  }
+
+  void operator()(bool b) { put32(b); }
+  void operator()(is_xdr_cat<XdrCategory::kPrimitive> auto x)
+      requires (sizeof(x) == 4)
+  {
+    put32(std::bit_cast<std::uint32_t>(x));
+  }
+  void operator()(is_xdr_cat<XdrCategory::kPrimitive> auto x)
+      requires (sizeof(x) == 8)
+  {
+    put64(std::bit_cast<std::uint64_t>(x));
+  }
+  void operator()(is_xdr_enum auto e) { put32(std::uint32_t(3)); }
+
+  template<is_xdr_cat<XdrCategory::kOpaqueVec, XdrCategory::kString> X>
+  void operator()(const X &s)
+  {
+    size_t len = s.size();
+    put32(len);
+    putbytes(s.data(), len);
+  }
+  template<is_xdr_cat<XdrCategory::kOpaqueArray> X> void operator()(const X &s)
+  {
+    putbytes(s.data(), s.size());
+  }
+
+  template<is_xdr_cat<XdrCategory::kVec, XdrCategory::kPtr> X>
+  void operator()(const X &v)
+  {
+    put32(v.size());
+    for (const auto &e : v)
+      (*this)(e);
+  }
+  void operator()(const is_xdr_cat<XdrCategory::kArray> auto &a)
+  {
+    for (const auto &e : a)
+      (*this)(e);
+  }
+
+  template<is_xdr_struct X> void operator()(const X &x)
+  {
+    visit_fields(*this, x);
+  }
+  template<is_xdr_union X> void operator()(const X &u)
+  {
+    if (!union_valid(u)) [[unlikely]]
+      throw XdrBadUnionAccess(
+          "Attempt to serialize {} with invalid discrminant {}",
+          xdr_meta<X>::type_name, get<0>(u));
+    put32(std::uint32_t(get<0>(u)));
+    union_visit_arm(*this, u);
+  }
+};
+} // namespace detail
+
 void
 serialize_to(Buf *bufp, const is_xdr_type auto &x)
 {
-  decltype(bufp->data()) p;
-  auto go = [&p]<is_xdr_type X>(this auto &&go, const X &x) -> void {
-    using enum XdrCategory;
-    using std::uint32_t;
-    if constexpr (category<X> & FlagSet{kPrimitive, kEnum}) {
-      using type = std::conditional_t<sizeof(X) <= 4, uint32_t, std::uint64_t>;
-      putbe(p, type(x));
-      p += sizeof(type);
-    }
-    else if constexpr (category<X> &
-                       FlagSet{kString, kOpaqueVec, kOpaqueArray}) {
-      uint32_t sz = x.size();
-      if constexpr (category<X> != kOpaqueArray)
-        go(sz);
-      memcpy(p, x.data(), sz);
-      p += sz;
-      if ((sz = sz % 4)) {
-        sz = 4 - sz;
-        memset(p, '\0', sz);
-        p += sz;
-      }
-    }
-    else if constexpr (category<X> == kPtr) {
-      go(bool(x));
-      if (x)
-        go(*x);
-    }
-    else if constexpr (category<X> & FlagSet{kVec, kArray}) {
-      if (category<X> == kVec)
-        go(uint32_t(x.size()));
-      for (const auto &y : x)
-        go(y);
-    }
-    else if constexpr (category<X> == kStruct) {
-      with_index_sequence<std::tuple_size_v<X>>(
-          [&go, &x](auto... i) { (go(get<i>(x)), ...); });
-    }
-    else if constexpr (category<X> == kUnion) {
-      if (!union_valid(x))
-        throw XdrBadUnionAccess(
-            "Attempt to serialize {} with invalid discrminant {}",
-            xdr_meta<X>::type_name, get<0>(x));
-      go(get<0>(x));
-      union_visit_arm(go, x);
-    }
-  };
-
-  size_t old_size = bufp->size(), new_size = old_size + xdr_size(x);
-  bufp->resize_and_overwrite(new_size,
-                             [&go, &x, &p, old_size](auto *data, size_t count) {
-                               p = data + old_size;
-                               go(x);
-                               assert(p == data + count);
-                               return count;
-                             });
+  size_t old_size = bufp->size(), xsize = xdr_size(x);
+  bufp->resize_uninitialized(old_size + xsize);
+  detail::Serializer{.p = bufp->data() + old_size}(x);
 }
 
 Buf
