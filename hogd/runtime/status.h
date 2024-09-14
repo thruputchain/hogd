@@ -15,9 +15,7 @@ namespace hogd {
 //     OutOfGasError = 5, // out of gas
 //     UnrecoverableSystemError = 6,
 // }
-
-// NOLINTNEXTLINE(performance-enum-size)
-enum class WasmiInvokeErrorCode : uint32_t {
+enum class WasmiInvokeErrorCode : uint8_t {
   kWasmiNone = 0,
   kWasmiFnNExist = 1,
   kWasmiInputError = 2,

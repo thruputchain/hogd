@@ -1,6 +1,8 @@
 #include "hogd/runtime/status.h"
 
+#include <limits>
 #include <string>
+#include <type_traits>
 
 namespace hogd {
 
@@ -8,6 +10,12 @@ std::string
 HostFnErrorCategory::message(int code) const
 {
   using enum HostFnErrorCode;
+
+  using enum_backing_t = std::underlying_type_t<HostFnErrorCode>;
+  if (code < std::numeric_limits<enum_backing_t>::min() ||
+      code > std::numeric_limits<enum_backing_t>::max()) {
+    return "HostFnErrorCode OOB";
+  }
   // TODO(geoff) check on enum limits
 
   switch (static_cast<HostFnErrorCode>(code)) {

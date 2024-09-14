@@ -86,11 +86,11 @@ struct MemorySlice {
 #[repr(C)]
 pub struct WasmiInvokeResult {
     result: u64,
-    error: u32,
+    error: u8,
 } */
 struct WasmiInvokeResult {
   uint64_t result;
-  uint32_t error;
+  uint8_t error;
 };
 
 /*

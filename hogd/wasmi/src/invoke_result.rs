@@ -1,6 +1,7 @@
 // Everything but UnrecoverableSystemError
 // is a deterministic error that can be handled by a smart
 // contract (i.e. in a try-catch handler).
+#[repr(u8)]
 pub enum WasmiInvokeError {
     None = 0,
     FuncNExist = 1,             // invoked function does not exist
@@ -14,21 +15,21 @@ pub enum WasmiInvokeError {
 #[repr(C)]
 pub struct WasmiInvokeResult {
     result: u64,
-    error: u32, // WasmiInvokeError
+    error: u8, // WasmiInvokeError
 }
 
 impl WasmiInvokeResult {
     pub fn error(err: WasmiInvokeError) -> WasmiInvokeResult {
         Self {
             result: 0,
-            error: err as u32,
+            error: err as u8,
         }
     }
 
     pub fn success(res: u64) -> WasmiInvokeResult {
         Self {
             result: res,
-            error: WasmiInvokeError::None as u32,
+            error: WasmiInvokeError::None as u8,
         }
     }
 }
