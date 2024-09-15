@@ -14,9 +14,9 @@ static_assert(detail::has_fixed_size<fix_12>());
 static_assert(detail::has_fixed_size<fix_16>());
 static_assert(detail::has_fixed_size<sunion_no_void>());
 static_assert(!detail::has_fixed_size<sunion>());
-static_assert(detail::xdr_size_bounds<sunion>() == detail::SizeBounds{4,8});
+static_assert(detail::xdr_size_bounds<sunion>() == detail::SizeBounds{4, 8});
 static_assert(detail::xdr_size_bounds<test_recursive>() ==
-	      detail::SizeBounds{12,detail::kNoBound});
+              detail::SizeBounds{12, detail::kNoBound});
 static_assert(xdr_size(fix_4{}) == 4);
 static_assert(xdr_size(fix_12{}) == 12);
 static_assert(xdr_size(fix_16{}) == 16);
@@ -50,7 +50,7 @@ check_sizes()
 void
 round_trip()
 {
-  fix_4 f4 { .i = 99 };
+  fix_4 f4{.i = 99};
   auto buf = serialize(f4);
   assert(buf.size() == 4);
 
@@ -64,6 +64,19 @@ round_trip()
   assert(buf.size() == 8);
   deserialize(&uprime, buf);
   assert(u == uprime);
+
+  test_recursive r, r2;
+  r.elem = "outer element";
+  r.nextvec.resize(1);
+  r.nextvec[0].elem = "vec element";
+  buf = serialize(r);
+  deserialize(&r2, buf);
+  assert(r == r2);
+
+  fix_12 f12{.i = 99, .d = 95.3}, f12b;
+  buf = serialize(f12);
+  deserialize(&f12b, buf);
+  assert(f12 == f12b);
 }
 
 int
