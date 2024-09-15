@@ -1,6 +1,5 @@
 build/**
-bcheck_gcc/**
-bcheck_llvm/**
+bcheck/**
 Testing/**
 *.d
 *.o
@@ -10,3 +9,4 @@ Testing/**
 .cproject
 .project
 .vscode
+**/.DS_STORE

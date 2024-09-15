@@ -44,7 +44,7 @@ TEST(StatusTest, EnumError)
 
 TEST(StatusTest, Errno)
 {
-  int ret = open("/", O_RDWR);
+  int ret = open("/", O_RDWR); // NOLINT(misc-include-cleaner)
   EXPECT_EQ(ret, -1);
   Errno err;
   EXPECT_EQ(err, EISDIR);

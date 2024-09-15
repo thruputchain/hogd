@@ -1,5 +1,6 @@
 add_library(
   base
+  log.cc
   status.cc
 )
 
@@ -10,6 +11,7 @@ add_executable(
   status_test.cc
   string_test.cc
 )
+
 target_link_libraries(
   base_test
   base

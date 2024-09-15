@@ -23,21 +23,25 @@ endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
-# Fetch and enable GoogleTest
 include(FetchContent)
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG v1.15.2
-)
+
+# Enable GoogleTest (google's unit testing library)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+option(INSTALL_GTEST "" OFF)
+add_subdirectory(external/googletest)
 enable_testing()
 include(GoogleTest)
 
-include(ExternalProject)
+# Enable performance (google's benchmarking library)
+option(BENCHMARK_ENABLE_TESTING "" OFF)
+add_subdirectory(external/benchmark)
 
-# Define an external project for the 3rd-party product
+# Detect number of cores - only needed for make-based ExternalProject
+include(ProcessorCount)
+ProcessorCount(N)
+
+# Enable libsodium
+include(ExternalProject)
 ExternalProject_Add(libsodium
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
     CONFIGURE_COMMAND
@@ -45,7 +49,7 @@ ExternalProject_Add(libsodium
       --prefix=${CMAKE_INSTALL_PREFIX}
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
       CFLAGS=${CMAKE_C_FLAGS} CXXFLAGS=${CMAKE_CXX_FLAGS}
-    BUILD_COMMAND make
+    BUILD_COMMAND make -j${N}
     INSTALL_COMMAND ""  # Skip installation step
 )
 
@@ -65,4 +69,3 @@ include_directories(${LIBSODIUM_INCLUDE_DIRS})
 # Add code directories
 include_directories(${CMAKE_SOURCE_DIR})
 add_subdirectory(hogd)
-
