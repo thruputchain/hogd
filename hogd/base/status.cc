@@ -1,3 +1,4 @@
+#include <cassert>
 #include <string>
 
 #include "hogd/base/status.h"
@@ -7,9 +8,7 @@ namespace hogd {
 std::string
 GCategory::message(int code) const
 {
-  if (!GError::in_enum_range(code)) {
-    return "";
-  }
+  assert(GError::in_enum_range(code));
 
   using enum GCode;
   switch (static_cast<GCode>(code)) {
