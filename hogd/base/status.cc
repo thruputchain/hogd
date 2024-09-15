@@ -8,7 +8,7 @@ namespace hogd {
 std::string
 GCategory::message(int code) const
 {
-  assert(GError::in_enum_range(code));
+  assert(GError::is_in_enum_range(code));
 
   using enum GCode;
   switch (static_cast<GCode>(code)) {
