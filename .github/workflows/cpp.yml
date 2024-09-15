@@ -9,7 +9,7 @@ on:
 jobs:
   build:
 
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04.1
 
     env:
       CACHED_PATHS: |
@@ -20,7 +20,7 @@ jobs:
       with:
         submodules: "recursive"
     - name: install gcc-14
-      run: sudo apt-get install -y gcc-14 build-essential libc++-dev
+      run: sudo apt-get update && sudo apt-get install -y gcc-14 build-essential libc++-dev
     - name: install packages
       run: sudo apt-get install -y git cmake pkg-config wabt
     - name: set gcc-14 default
