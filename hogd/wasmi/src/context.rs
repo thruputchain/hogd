@@ -284,6 +284,7 @@ pub extern "C" fn wasmi_link_nargs(
     assert!(method_name != core::ptr::null());
 
     // assert module name & method_name nonzero
+    // WASMI (and apparently the wasm standard) will accept modules with no names,
 
     let module = match string_from_parts(module_name, module_name_len) {
         Ok(x) => x,
@@ -298,10 +299,6 @@ pub extern "C" fn wasmi_link_nargs(
             return false;
         }
     };
-
-    // WASMI will accept modules with no names,
-
-    println!("{} {}", module, method);
 
     let c = unsafe { &mut *context };
 
