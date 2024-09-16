@@ -37,6 +37,8 @@ jobs:
         key: ${{ runner.os }}-${{ github.ref_name }}
     - name: check
       run: ./scripts/check.sh
+    - name: debug
+      run: objdump -D bcheck/gcc/hogd/runtime/libruntime.a
     - uses: actions/cache/save@v4
       with:
         path: ${{ env.CACHED_PATHS }}
