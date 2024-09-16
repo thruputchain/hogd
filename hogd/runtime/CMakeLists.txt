@@ -53,5 +53,4 @@ add_dependencies(
   test_error_handling_wasm
   test_invoke_arity_wasm
   test_set_memory_wasm
-  wasmi_lib
 )

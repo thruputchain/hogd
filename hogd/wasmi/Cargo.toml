@@ -7,7 +7,7 @@ edition = "2021"
 wasmi = "0.36.0"
 
 [lib]
-crate-type = ["staticlib", "rlib"]
+crate-type = ["staticlib"]
 
 # As recommended by wasmi docs
 [profile.release]
