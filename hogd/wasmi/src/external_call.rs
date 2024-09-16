@@ -52,10 +52,12 @@ impl fmt::Display for TrampolineError {
 impl HostError for TrampolineError {}
 
 extern "C" {
+    #[link_name="c_call_0args"]
     pub fn c_call_0args(
         fn_pointer: *mut c_void,
         userctx: *mut c_void,
     ) -> TrampolineResult;
+    #[link_name="_c_call_1args"]
     pub fn c_call_1args(
         fn_pointer: *mut c_void,
         userctx: *mut c_void,
