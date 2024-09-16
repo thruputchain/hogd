@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # set up paths
-ROOT_DIR=${SCRIPT_DIR}/../
+ROOT_DIR=$(realpath ${SCRIPT_DIR}/../)
 
 # define tools
 CMAKE=cmake
