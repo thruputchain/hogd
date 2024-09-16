@@ -1,9 +1,7 @@
 #include "hogd/runtime/status.h"
 
 #include <cassert>
-#include <limits>
 #include <string>
-#include <type_traits>
 
 namespace hogd {
 
