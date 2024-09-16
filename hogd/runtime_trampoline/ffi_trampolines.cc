@@ -1,4 +1,4 @@
-#include "hogd/runtime/ffi_trampolines.h"
+#include "hogd/runtime_trampoline/ffi_trampolines.h"
 
 #include "hogd/runtime/status.h"
 

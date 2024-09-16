@@ -1,7 +1,6 @@
 add_library(
   runtime
   wasmi_runtime.cc
-  ffi_trampolines.cc
   status.cc
 )
 add_executable(

@@ -4,5 +4,5 @@ corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATE_TYPES staticlib)
 target_link_libraries(
   wasmi_lib
   INTERFACE
-  runtime
+  runtime_trampoline
 )
