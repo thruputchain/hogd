@@ -14,9 +14,12 @@ add_executable(
   memory_access_test.cc
 )
 target_link_libraries(
-  runtime_test
   runtime
   wasmi_lib
+)
+target_link_libraries(
+  runtime_test
+  runtime
   GTest::gtest_main
 )
 gtest_discover_tests(runtime_test)
