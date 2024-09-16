@@ -235,4 +235,19 @@ with_n(size_t n, F &&f)
   }(std::make_index_sequence<Max - Min>{});
 }
 
+namespace detail {
+// What you should do when spinning (e.g., to give other hardware
+// threads priority).
+inline void
+pause_instruction()
+{
+#if HAVE_BUILTIN_IA32_PAUSE
+  __builtin_ia32_pause();
+#elif HAVE_BUILTIN_ARM_YIELD
+  // XXX - only works on clang?
+  __builtin_arm_yield();
+#endif // HAVE_BUILTIN_ARM_YIELD
+}
+} // namespace detail
+
 } // namespace x23

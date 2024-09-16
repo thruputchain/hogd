@@ -30,6 +30,7 @@ if(X23_IS_TOP_LEVEL)
 endif()
 
 include(cmake/pause.cmake)
+include(cmake/interference_size.cmake)
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in

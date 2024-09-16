@@ -8,10 +8,13 @@ add_library(x23
   fileio.h
   format.h
   mvar.h
+  refcnt.h
   rpc.cc
   rpc.h
   rpc_msg.x
   serialize.h
+  threadpool.cc
+  threadpool.h
   utility.h
   vec.h
   x23.h

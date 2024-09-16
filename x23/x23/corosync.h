@@ -257,26 +257,4 @@ struct CoroGuard : CoroLock::LockerState {
   }
 };
 
-struct DestroyTrigger {
-  std::atomic<unsigned> refcnt_{0};
-  Callback<void> destructor_;
-  std::stop_token st_;
-
-  DestroyTrigger(std::stop_token st, Callback<void> destructor)
-    : destructor_(std::move(destructor)), st_(std::move(st))
-  {}
-
-  void incref() noexcept { refcnt_.fetch_add(1, std::memory_order_relaxed); }
-  void decref() noexcept
-  {
-    // Note: you must hold a reference when setting request_stop()
-    if (refcnt_.fetch_sub(1, std::memory_order_release) == 1 &&
-        st_.stop_requested()) {
-      // Must ensure all other decrefs synchronize with the destructor.
-      refcnt_.load(std::memory_order_acquire);
-      destructor_();
-    }
-  }
-};
-
 } // namespace x23

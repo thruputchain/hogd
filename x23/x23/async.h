@@ -209,20 +209,6 @@ using atomic_coroutine_handle = std::atomic<std::coroutine_handle<>>;
 
 namespace detail {
 
-// What you should do when spinning (e.g., to give other hardware
-// threads priority).
-inline void
-pause_instruction()
-{
-#if HAVE_BUILTIN_IA32_PAUSE
-  // XXX - should use TPAUSE instead of PAUSE?
-  __builtin_ia32_pause();
-#elif HAVE_BUILTIN_ARM_YIELD
-  // XXX - only works on clang?
-  __builtin_arm_yield();
-#endif // HAVE_BUILTIN_ARM_YIELD
-}
-
 // Supertype of Awaitable so Awaitable can be specialized for void
 // without duplicating a lot of code.
 template<typename R> class AwaitableImpl {
