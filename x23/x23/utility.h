@@ -193,23 +193,6 @@ constexpr size_t variant_index =
       throw std::logic_error("type not in argument list");
     }(static_cast<U *>(nullptr));
 
-// Call an invocable object f with arguments representing the compile
-// time constants Min, Min+1, ..., Max-1.  Example usage to print a
-// tuple:
-//
-//   with_index_sequence<std::tuple_size<decltype(auto(t))>>([&t](auto...i) {
-//     // comma fold over all tuple elements
-//     (std::println("{} = {}", i.value, get<i>(t)), ...);
-//   });
-template<size_t Max, size_t Min = 0, typename F> requires (Max >= Min)
-constexpr decltype(auto)
-with_index_sequence(F &&f)
-{
-  return []<size_t... I>(F &&f, std::index_sequence<I...>) -> decltype(auto) {
-    return std::forward<F>(f)(std::integral_constant<size_t, Min + I>{}...);
-  }(std::forward<F>(f), std::make_index_sequence<Max - Min>{});
-}
-
 // Try to find a common return type for a bunch of functions, but fall
 // back to void if any of the types are void or they otherwise don't
 // have a common type.

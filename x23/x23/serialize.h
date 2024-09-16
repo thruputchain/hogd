@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <initializer_list>
 #include <utility>
 
 #include <x23/utility.h>
@@ -37,20 +36,9 @@ putbe(void *p, T val)
   }(std::make_index_sequence<sizeof(T)>{});
 }
 
-template<std::integral T, is_bytevec C>
-inline void
-pushbe(C *out, T val)
-{
-  out->resize_and_overwrite(out->size() + sizeof(T),
-                            [val](typename C::value_type *p, size_t count) {
-                              putbe(p + count - sizeof(T), val);
-                              return count;
-                            });
-}
-
 namespace detail {
 
-constexpr size_t kNoBound = std::numeric_limits<size_t>::max();
+constexpr size_t kNoBound = std::numeric_limits<std::ptrdiff_t>::max();
 
 struct SizeBounds {
   size_t min_;
@@ -70,20 +58,20 @@ struct SizeBounds {
   }
   constexpr SizeBounds operator*(size_t n) const noexcept
   {
-    return {umul(min_, n), umul(max_, n)};
+    return {min_ * n, umul(max_, n)};
   }
   constexpr SizeBounds zero_to(size_t n) const noexcept
   {
-    return {0, n >= 0xffffffff ? kNoBound : umul(n, max_)};
+    return {0, umul(n, max_)};
   }
 
   constexpr bool operator==(const SizeBounds &) const noexcept = default;
 
   static constexpr size_t umul(size_t a, size_t b) noexcept
   {
-    if (b == 0)
+    if (a == 0)
       return 0;
-    if (a > kNoBound / b)
+    if (b > kNoBound / a)
       return kNoBound;
     return a * b;
   }
@@ -103,40 +91,41 @@ xdr_size_bounds()
   if constexpr (is_one_of<X, Blacklist...>)
     // This means we have a recursive or mutually-recursive type, so
     // it could go on forever.  (min doesn't matter because in any
-    // recursive type there's a Ptr already determining min.)
+    // recursive type there's a Ptr or Vec already determining min.)
     return {0, kNoBound};
-  else if constexpr (category<X> & FlagSet{kPrimitive, kEnum})
+  else if constexpr (is_xdr_cat<X, kPrimitive, kEnum>)
     return sizeof(X) <= 4 ? 4 : 8;
-  else if constexpr (category<X> == kOpaqueArray)
+  else if constexpr (is_xdr_cat<X, kOpaqueArray>)
     return (std::tuple_size<X>::value + 3UZ) & ~3UZ;
-  else if constexpr (category<X> & FlagSet{kString, kOpaqueVec})
-    return SizeBounds{0, X::kMaxSize >= 0xffffffff
+  else if constexpr (is_xdr_cat<X, kString, kOpaqueVec>)
+    return SizeBounds{0, X::kMaxSize >= std::min<size_t>(0xfffffffd, kNoBound)
                              ? kNoBound
                              : (X::kMaxSize + 3UZ) & ~3UZ} +
            4;
-  else if constexpr (category<X> == kArray)
+  else if constexpr (is_xdr_cat<X, kArray>)
     return xdr_size_bounds<typename X::value_type, Blacklist..., X>() *
            std::tuple_size<X>::value;
-  else if constexpr (category<X> & FlagSet{kVec, kPtr})
+  else if constexpr (is_xdr_cat<X, kVec, kPtr>)
     return xdr_size_bounds<typename X::value_type, Blacklist..., X>().zero_to(
                X::max_size()) +
            4;
-  else if constexpr (category<X> == kStruct)
-    return with_index_sequence<std::tuple_size_v<X>>([](auto... i) {
+  else if constexpr (is_xdr_struct<X>)
+    return []<size_t... I>(std::index_sequence<I...>) {
       return (SizeBounds{0} + ... +
-              xdr_size_bounds<std::tuple_element_t<i, X>, Blacklist..., X>());
-    });
-  else if constexpr (category<X> == kUnion) {
+              xdr_size_bounds<std::tuple_element_t<I, X>, Blacklist..., X>());
+    }(std::make_index_sequence<std::tuple_size_v<X>>{});
+  else if constexpr (is_xdr_union<X>) {
     using ops = union_ops<X>;
-    return with_index_sequence<ops::union_size, 1>([](auto... i) {
+    return []<size_t... I>(std::index_sequence<I...>) {
       SizeBounds ret{ops::meta::has_void ? 0 : kNoBound, 0};
-      for (auto b : {xdr_size_bounds<typename ops::template union_element_t<i>,
-                                     Blacklist..., X>()...}) {
+      for (auto b :
+           {xdr_size_bounds<typename ops::template union_element_t<I + 1>,
+                            Blacklist..., X>()...}) {
         ret.min_ = std::min(ret.min_, b.min_);
         ret.max_ = std::max(ret.max_, b.max_);
       }
       return ret + 4;
-    });
+    }(std::make_index_sequence<ops::union_size - 1>{});
   }
 }
 
@@ -228,7 +217,7 @@ struct Serializer {
   {
     put64(std::bit_cast<std::uint64_t>(x));
   }
-  void operator()(is_xdr_enum auto e) { put32(std::uint32_t(3)); }
+  void operator()(is_xdr_enum auto e) { put32(std::uint32_t(e)); }
 
   template<is_xdr_cat<XdrCategory::kOpaqueVec, XdrCategory::kString> X>
   void operator()(const X &s)
@@ -242,12 +231,20 @@ struct Serializer {
     putbytes(s.data(), s.size());
   }
 
-  template<is_xdr_cat<XdrCategory::kVec, XdrCategory::kPtr> X>
-  void operator()(const X &v)
+  template<is_xdr_cat<XdrCategory::kVec> X> void operator()(const X &v)
   {
     put32(v.size());
     for (const auto &e : v)
       (*this)(e);
+  }
+  template<is_xdr_cat<XdrCategory::kPtr> X> void operator()(const X &v)
+  {
+    if (v) {
+      put32(1);
+      (*this)(*v);
+    }
+    else
+      put32(0);
   }
   void operator()(const is_xdr_cat<XdrCategory::kArray> auto &a)
   {
@@ -298,9 +295,15 @@ struct Deserializer {
   Deserializer(const Buf &b) noexcept
     : p(b.data()), e(p + b.size()), ee(p + b.capacity())
   {}
+  Deserializer(const std::uint8_t *p0, const std::uint8_t *e0,
+               const std::uint8_t *ee0) noexcept
+    : p(p0), e(e0), ee(ee0)
+  {}
 
-  // Check for buffer overrun--must not use Deserializer without calling this
-  void check()
+  // Check for buffer overrun at end of deserialization--must not use
+  // Deserializer without eventually calling this.  (Since it throws,
+  // we don't want to put it in the destructor.)
+  void check() const
   {
     if (p > e) [[unlikely]] {
       if (p > ee) {
@@ -362,8 +365,8 @@ struct Deserializer {
     constexpr auto swaple = [](std::uint32_t v) consteval -> std::uint32_t {
       return std::endian::native == std::endian::little ? std::byteswap(v) : v;
     };
-    constexpr std::array masks = {swaple(0), swaple(0xffffff), swaple(0xffff),
-                                  swaple(0xff)};
+    constexpr std::array masks{swaple(0), swaple(0xffffff), swaple(0xffff),
+                               swaple(0xff)};
     if (reinterpret_cast<const std::uint32_t *>(p)[-1] & masks[rem])
         [[unlikely]]
       throw XdrBadInput("padding bytes are not zero deserializing XDR");
@@ -415,11 +418,7 @@ struct Deserializer {
 
   bool unsafe_ok(const SizeBounds &b) const
   {
-    return ee - p >= b.max_;
-  }
-  bool unsafe_ok(const SizeBounds &b, size_t mul) const
-  {
-    return ee - p >= SizeBounds::umul(b.max_, mul);
+    return ee - p >= std::ptrdiff_t(b.max_);
   }
 
   template<bool Safe, is_xdr_cat<XdrCategory::kArray> X> void go(X &x)
@@ -440,15 +439,16 @@ struct Deserializer {
     x.reserve(
         std::min<std::uint32_t>(size,
                                 0x10000 / sizeof(typename X::value_type)));
-    if (!Safe || unsafe_ok(xdr_size_bounds<typename X::value_type>(), size))
+    if (!Safe ||
+        unsafe_ok(xdr_size_bounds<typename X::value_type>().zero_to(size)))
       for (size_t i = 0; i < size; ++i) {
         x.resize_uninitialized(i + 1);
-        go<false>(x.back());
+        go<false>(x[i]);
       }
     else
       for (size_t i = 0; i < size; ++i) {
         x.resize_uninitialized(i + 1);
-        go<true>(x.back());
+        go<true>(x[i]);
       }
   }
   template<bool Safe, is_xdr_cat<XdrCategory::kPtr> X> void go(X &x)

@@ -57,12 +57,12 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
       uformat_to(out, "{}", x);
     else if constexpr (category<X> == kStruct) {
       auto _g = opengroup("{}");
-      with_index_sequence<std::tuple_size_v<X>>([&](auto... i) {
+      [&]<size_t... I>(std::index_sequence<I...>) {
         ((uformat_to(out, "\n{:{}}{} = ", "", 2 * indent,
-                     x23::xdr_meta<X>::field_names[i]),
-          go(out, get<i>(x), indent), *out += ','),
+                     x23::xdr_meta<X>::field_names[I]),
+          go(out, get<I>(x), indent), *out += ','),
          ...);
-      });
+      }(std::make_index_sequence<std::tuple_size_v<X>>{});
     }
     else if constexpr (category<X> & FlagSet{kArray, kVec}) {
       auto _g = opengroup("[]");
@@ -80,8 +80,9 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
       if (int n = ops::index(x); n > 0) {
         uformat_to(out, "\n{:{}}{} = ", "", 2 * indent,
                    ops::meta::field_names[n]);
-        union_visit_arm(
-            [&go, out, indent](const auto &a) { go(out, a, indent); }, x);
+        union_visit_arm([&go, out,
+                         indent](const auto &a) { go(out, a, indent); },
+                        x);
         *out += ',';
       }
     }
