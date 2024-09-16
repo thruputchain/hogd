@@ -428,9 +428,9 @@ private:
 };
 
 // Set the discriminant of a union.  Note:  you can always get the
-// value of a discriminant u with get<0>(u).  But since setting the
-// union requires additional logic for changing the active arm, we
-// need a different function.
+// value of a discriminant of union u with get<0>(u).  But since
+// setting the union requires additional logic for changing the active
+// arm, we need a different function.
 template<is_xdr_union U>
 inline void
 union_set_discriminant(U &u, typename xdr_meta<U>::discriminant_type d)

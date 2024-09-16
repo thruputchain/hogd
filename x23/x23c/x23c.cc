@@ -147,7 +147,7 @@ main(int argc, char **argv)
       break;
     }
     else if (opt == "--version") {
-      std::println("{}", PACKAGE_STRING);
+      std::println("{}", X23_PACKAGE_STRING);
       exit(0);
     }
     else if (opt == "--strict")
