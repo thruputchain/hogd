@@ -11,7 +11,8 @@ namespace hogd ::test {
 static std::vector<uint8_t>
 load_wasm_from_file(const char *filename)
 {
-  std::string file(filename);
+  std::string file = std::string(CMAKE_ROOT_BINARY_DIR) + "/hogd/runtime/" +
+                     std::string(filename);
   FILE *f = std::fopen(file.c_str(), "r");
 
   if (f == nullptr) {
