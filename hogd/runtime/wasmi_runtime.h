@@ -126,7 +126,13 @@ public:
   // get_available_gas()))
   InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
 
-  // Returns FALSE if gas consumption failed
+  // Returns FALSE if gas consumption failed.
+  // 
+  // Wasmi maintains the gas counter internally, which it updates while 
+  // running a wasm contract.  It also exposes a set/get API, which this function 
+  // uses.  This should, e.g., be called from within a syscall.
+  // This function returns false if and only if the amount of gas
+  // left in the counter at the time of call is less than the input parameter.
   [[nodiscard]]
   bool consume_gas(uint64_t gas) noexcept;
 
