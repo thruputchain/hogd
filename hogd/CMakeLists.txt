@@ -1,13 +1,36 @@
+# Build each module
 add_subdirectory(base)
 add_subdirectory(crypto)
 
-add_executable(hello
-  hello.cc
+# Build the main hogd library
+add_library(
+  hogd
+  init.cc
+)
+target_link_libraries(
+  hogd
+  base
+  crypto
+  ${LIBSODIUM_LIBRARIES}
+)
+add_dependencies(hogd libsodium)
+
+# Build the backend database (hogdb) executable
+add_executable(
+  hogdb
+  hogdb.cc
+)
+target_link_libraries(
+  hogdb
+  hogd
 )
 
-add_dependencies(hello libsodium)
-
-target_link_libraries(hello
-  base
-  ${LIBSODIUM_LIBRARIES}
+# Build the frontend executor (hogexec) executable
+add_executable(
+  hogexec
+  hogexec.cc
+)
+target_link_libraries(
+  hogexec
+  hogd
 )
