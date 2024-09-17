@@ -145,7 +145,7 @@ Buf
 make_record(const rpc_msg &msg, const is_xdr_type auto &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
-  assert(ret.size() <= 0x80000003uz);
+  assert(ret.size() <= 0x80000003UZ);
   putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
   return ret;
 }
@@ -181,8 +181,8 @@ struct RpcLogger {
   std::string peername_;
 
   RpcLogger() noexcept = default;
-  RpcLogger(const std::string &peername, int logfd = default_logfd) noexcept
-    : logfd_(logfd), peername_(peername)
+  RpcLogger(std::string peername, int logfd = default_logfd) noexcept
+    : logfd_(logfd), peername_(std::move(peername))
   {}
   RpcLogger(int peerfd, int logfd = default_logfd) noexcept;
 
@@ -192,10 +192,10 @@ struct RpcLogger {
                    const rpc_msg &msg, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
   {
-    std::string ret = std::format(
-        "{} {} xid={} {}", peername,
-        am_server == (msg.body.mtype() == CALL) ? "==>" : "<==", msg.xid,
-        msg.body.mtype());
+    std::string ret =
+        std::format("{} {} xid={} {}", peername,
+                    am_server == (msg.body.mtype() == CALL) ? "==>" : "<==",
+                    msg.xid, msg.body.mtype());
     if (msg.body.mtype() == CALL) {
       if constexpr (requires {
                       { Meta::proc_name } -> decays_to<const char *>;
@@ -244,8 +244,8 @@ struct RpcLogger {
 
 struct RpcNoLogger {
   RpcNoLogger() noexcept = default;
-  RpcNoLogger(const std::string &, int = 2) noexcept {}
-  RpcNoLogger(int, int = 2) noexcept {}
+  RpcNoLogger(const std::string &, int = RpcLogger::default_logfd) noexcept {}
+  RpcNoLogger(int, int = RpcLogger::default_logfd) noexcept {}
   template<typename = void>
   void log_client(const rpc_msg &msg, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
@@ -265,7 +265,7 @@ void_to_empty(Async<R> a)
 inline auto
 void_to_empty(Async<void> a)
 {
-  struct VoidToTuple {
+  struct VoidToEmpty {
     Async<void> a_;
     Awaitable<void> &a() { return a_.operator co_await(); }
     bool await_ready() noexcept { return a().await_ready(); }
@@ -279,7 +279,7 @@ void_to_empty(Async<void> a)
       return {};
     }
   };
-  return VoidToTuple{std::move(a)};
+  return VoidToEmpty{std::move(a)};
 }
 
 template<typename VersMeta, typename Impl, typename Logger = RpcNoLogger,
@@ -296,19 +296,17 @@ struct RpcDispatcher : RpcService {
     : impl_(impl), logger_(log), ea_(std::move(ea)...)
   {}
 
-  std::uint32_t program() const override final { return version_meta::program; }
-  virtual std::uint32_t version() const override final
-  {
-    return version_meta::version;
-  }
+  std::uint32_t program() const final { return version_meta::program; }
+  std::uint32_t version() const final { return version_meta::version; }
 
   Async<Buf> serve(const rpc_msg &msg, BufView argdata) override
   {
     assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
            msg.body.cbody().prog == program() &&
            msg.body.cbody().vers == version());
-    return with_proc_meta<version_meta, Async<Buf>>(
-        msg.body.cbody().proc, Executor{*this, msg, argdata});
+    return with_proc_meta<version_meta, Async<Buf>>(msg.body.cbody().proc,
+                                                    Executor{*this, msg,
+                                                             argdata});
   }
 
 private:
@@ -367,9 +365,9 @@ template<typename T, typename VersMeta, typename... ExtraArgs>
 concept implements_async_rpc = implements_rpc<T, VersMeta, Async, ExtraArgs...>;
 
 namespace detail {
-class RpcStreamImpl {
+class RpcStreamImpl : public std::enable_shared_from_this<RpcStreamImpl> {
 public:
-  static inline size_t max_record_size = 1uz << 24;
+  static inline size_t max_record_size = 1UZ << 24;
   RefPtr<CoroPoll> cp_;
 
   void fail();
@@ -378,7 +376,6 @@ protected:
   UniqueFd fd_;
   std::stop_source ss_;
   CoroLock sendlock_;
-  DestroyTrigger dt_;
   std::atomic<unsigned> nclients_{0};
   std::map<ProgVers, std::unique_ptr<RpcService>> srvmap_;
 
@@ -460,8 +457,23 @@ struct RpcStream : public detail::RpcStreamImpl {
       co_return ret;
   }
 
-  using ClientRef = RefPtr<RpcStream>;
-  friend ClientRef;
+  std::shared_ptr<RpcStream> get_ref()
+  {
+    return static_pointer_cast<RpcStream>(shared_from_this());
+  }
+
+  struct ClientRef : std::shared_ptr<RpcStream> {
+    using super = std::shared_ptr<RpcStream>;
+    ClientRef(RpcStream &s) : super(s.get_ref())
+    {
+      this->get()->nclients_.fetch_add(1, std::memory_order_relaxed);
+    }
+    ~ClientRef()
+    {
+      if (this->get()->nclients_.fetch_sub(1, std::memory_order_relaxed) == 1)
+        this->get()->fail();
+    }
+  };
 
   template<typename VersMeta> requires requires { typename VersMeta::client; }
   typename VersMeta::template client<ClientRef> client(VersMeta = {})
@@ -470,13 +482,9 @@ struct RpcStream : public detail::RpcStreamImpl {
   }
 
   struct Configurator {
-    Configurator(RpcStream &s) noexcept : s_(&s) { s_->dt_.incref(); }
+    Configurator(std::shared_ptr<RpcStream> s) noexcept : s_(std::move(s)) {}
     Configurator(const Configurator &) = delete;
-    ~Configurator()
-    {
-      go();
-      s_->dt_.decref();
-    }
+    ~Configurator() { go(); }
 
     template<typename Server,
              typename VersMeta = typename std::remove_cvref_t<
@@ -496,8 +504,9 @@ struct RpcStream : public detail::RpcStreamImpl {
     requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
     Configurator &server(Server srvr, ExtraArgs &&...ea)
     {
-      return server<Server, VersMeta, ExtraArgs...>(
-          srvr, {}, std::forward<ExtraArgs>(ea)...);
+      return server<Server, VersMeta, ExtraArgs...>(srvr, {},
+                                                    std::forward<ExtraArgs>(
+                                                        ea)...);
     }
 
     template<typename VersMeta>
@@ -517,31 +526,22 @@ struct RpcStream : public detail::RpcStreamImpl {
 
   private:
     bool reader_running_{false};
-    RpcStream *const s_;
+    std::shared_ptr<RpcStream> s_;
   };
 
   static Configurator make(CoroPoll &cp, UniqueFd fd, Logger logger = {})
   {
-    return *new RpcStream{cp, std::move(fd), std::move(logger)};
+    return std::make_shared<RpcStream>(cp, std::move(fd), std::move(logger),
+				       ConstructorKey{});
   }
 
 protected:
+  struct ConstructorKey {};
+public:
   using super::super;
-  RpcStream(CoroPoll &cp, UniqueFd fd, Logger logger)
+  RpcStream(CoroPoll &cp, UniqueFd fd, Logger logger, ConstructorKey)
     : super(cp, std::move(fd)), logger_(std::move(logger))
   {}
-  void incref()
-  {
-    dt_.incref();
-    nclients_.fetch_add(1, std::memory_order_relaxed);
-  }
-  void decref()
-  {
-    // Will synchronize through dt_, so nclients_ access can be relaxed.
-    if (nclients_.fetch_sub(1, std::memory_order_relaxed) == 1)
-      fail();
-    dt_.decref();
-  }
 };
 
 // Create an RPC Stream attached to a file descriptor.  Returns a

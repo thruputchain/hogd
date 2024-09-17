@@ -1,4 +1,5 @@
 
+#include <memory>
 #include <sys/socket.h>
 
 #include "x23/rpc.h"
@@ -35,7 +36,7 @@ msg_show_stat(const rpc_msg &msg)
 
 namespace detail {
 RpcStreamImpl::RpcStreamImpl(CoroPoll &cp, UniqueFd fd)
-  : cp_(cp), fd_(std::move(fd)), dt_(ss_.get_token(), [this] { delete this; })
+  : cp_(cp), fd_(std::move(fd))
 {
   set_nonblock(fd_);
 }
@@ -62,7 +63,7 @@ RpcStreamImpl::write_record(Buf b)
 {
   if (ss_.stop_requested())
     co_return;
-  auto _r = RefPtr(dt_);
+  auto _r = shared_from_this();
   CoroGuard g;
   co_await g(sendlock_);
   if (!ss_.stop_requested())
@@ -112,7 +113,7 @@ RpcStreamImpl::gen_call_xid(CoroCB<Buf> cb)
 Detached
 RpcStreamImpl::reader()
 {
-  auto _r = RefPtr(dt_);
+  auto _r = shared_from_this();
   Buf b;
   while (!ss_.stop_requested()) {
     if (auto r = co_await read_record(); !r) {
@@ -147,7 +148,7 @@ RpcStreamImpl::reader()
 Detached
 RpcStreamImpl::serve_call(const rpc_msg &call, BufView args)
 {
-  auto _r = RefPtr(dt_);
+  auto _r = shared_from_this();
   const call_body &cb = call.body.cbody();
   rpc_msg res{.xid = call.xid};
   msg_set_reply_stat(&res, SUCCESS);
@@ -180,44 +181,4 @@ RpcStreamImpl::serve_call(const rpc_msg &call, BufView args)
   co_return;
 }
 } // namespace detail
-
-#if 0
-std::expected<std::uint32_t, Errno>
-read_uint(BorrowedFd fd)
-{
-  char buf[4];
-  size_t size = 0;
-  while (size < sizeof(buf)) {
-    ssize_t n = ::read(fd.get(), buf + size, 4 - size);
-    if (n < 0)
-      return Errno{};
-    else if (n == 0)
-      return Errno{ECONNRESET};
-    size += n;
-  }
-  return getbe<std::uint32_t>(buf);
-}
-
-std::expected<Buf, Errno>
-read_record(BorrowedFd fd, size_t max_size)
-{
-  Buf ret;
-  bool last;
-  do {
-    std::uint32_t len;
-    if (auto hdr = read_uint(fd); !hdr)
-      return hdr.error();
-    else
-      len = *hdr;
-    last = len & 0x80000000;
-    len &= 0x7fffffff;
-    if (ret.size() + len > max_size)
-      return Errno{EFBIG};
-    if (auto r = fullread(fd, &ret, len); !r)
-      return r.error();
-  } while (!last);
-  return ret;
-}
-#endif
-
 } // namespace x23

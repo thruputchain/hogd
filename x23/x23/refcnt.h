@@ -5,8 +5,6 @@
 #include <atomic>
 #include <cassert>
 #include <cstddef>
-#include <functional>
-#include <stop_token>
 #include <utility>
 
 #include <x23/utility.h>
@@ -110,32 +108,6 @@ private:
   // refcnt_ to be <= 1, then spins until it reaches 0 before
   // returning.
   std::atomic<unsigned> refcnt_{0};
-};
-
-// Calls a destructor function when the reference count hits zero and
-// a stop has been requested on a std::stop_token.
-struct DestroyTrigger {
-  std::atomic<unsigned> refcnt_{0};
-  std::function<void()> destructor_;
-  std::stop_token st_;
-
-  DestroyTrigger(std::stop_token st,
-                 std::convertible_to<std::function<void()>> auto &&destructor)
-    : destructor_(std::forward<decltype(destructor)>(destructor)),
-      st_(std::move(st))
-  {}
-
-  void incref() noexcept { refcnt_.fetch_add(1, std::memory_order_relaxed); }
-  void decref() noexcept
-  {
-    // Note: you must hold a reference when setting request_stop()
-    if (refcnt_.fetch_sub(1, std::memory_order_release) == 1 &&
-        st_.stop_requested()) {
-      // Must ensure all other decrefs synchronize with the destructor.
-      refcnt_.load(std::memory_order_acquire);
-      destructor_();
-    }
-  }
 };
 
 } // namespace x23
