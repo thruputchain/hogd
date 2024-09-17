@@ -1,6 +1,9 @@
 # Build each module
 add_subdirectory(base)
 add_subdirectory(crypto)
+add_subdirectory(runtime_trampoline)
+add_subdirectory(wasmi)
+add_subdirectory(runtime)
 
 # Build the main hogd library
 add_library(

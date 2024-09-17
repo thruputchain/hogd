@@ -76,6 +76,12 @@ set(LIBSODIUM_LIBRARIES
 
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
+add_subdirectory(external/corrosion)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
+include(Corrosion)
+
 # Add code directories
 include_directories(${CMAKE_SOURCE_DIR})
+
 add_subdirectory(hogd)
+
