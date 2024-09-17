@@ -16,6 +16,14 @@ struct XdrBadInput : XdrException {
   using XdrException::XdrException;
 };
 
+// Load an integral from memory in big-endian order.  Makes no
+// assumptions about the alignment of p.  gcc and clang can often
+// compile this to a single movebe instruction on x86, or else a load
+// followed by a bswap.  So this is at least as good as doing
+// std::byteswap(*static_cast<T*>(p)) on endian x86, while also being
+// correct on architectures with greater pointer-alignment
+// constraints.  (As a bonus, we don't need a separate, untested
+// version of the code for big-endian machines.)
 template<std::integral T>
 inline T
 getbe(const void *p)
@@ -26,6 +34,8 @@ getbe(const void *p)
   }(std::make_index_sequence<sizeof(T)>{});
 }
 
+// Store an integral into memory in big-endian order, with no
+// assumptions about pointer alignment.  See the comment on getbe.
 template<std::integral T>
 inline void
 putbe(void *p, T val)
