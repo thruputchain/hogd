@@ -12,7 +12,7 @@
 
 namespace hogd {
 
-namespace detail {
+namespace {
 
 // FFI declarations
 extern "C" {
@@ -148,14 +148,14 @@ WasmiInvokeResult wasmi_invoke(void *wasmi_runtime_ptr,
 
 } // extern C
 
-} // namespace detail
+} // namespace
 
-WasmiContext::WasmiContext() : wasmi_context_ptr_(detail::new_wasmi_context())
+WasmiContext::WasmiContext() : wasmi_context_ptr_(new_wasmi_context())
 {}
 
 WasmiContext::~WasmiContext()
 {
-  detail::free_wasmi_context(wasmi_context_ptr_);
+  free_wasmi_context(wasmi_context_ptr_);
 }
 
 std::unique_ptr<WasmiRuntime>
@@ -167,8 +167,8 @@ WasmiContext::make_new_runtime(Contract const &contract,
   host_call_context->syscall_handler = syscall_handler;
 
   void *wasmi_runtime_ptr =
-      detail::new_wasmi_runtime(contract.data(), contract.size(),
-                                host_call_context.get(), wasmi_context_ptr_);
+      new_wasmi_runtime(contract.data(), contract.size(),
+                        host_call_context.get(), wasmi_context_ptr_);
 
   if (wasmi_runtime_ptr == nullptr) {
     return {};
@@ -183,48 +183,50 @@ WasmiContext::link_fn_nargs(std::string_view module_name,
                             std::string_view fn_name, void *fn_ptr,
                             uint8_t nargs)
 {
-  assert(!!wasmi_context_ptr_);
-  return detail::wasmi_link_nargs(
-      wasmi_context_ptr_, reinterpret_cast<const uint8_t *>(module_name.data()),
-      module_name.size(), reinterpret_cast<const uint8_t *>(fn_name.data()),
-      fn_name.size(), fn_ptr, nargs);
+  assert(wasmi_context_ptr_ != nullptr);
+  return wasmi_link_nargs(wasmi_context_ptr_,
+                          reinterpret_cast<const uint8_t *>(module_name.data()),
+                          module_name.size(),
+                          reinterpret_cast<const uint8_t *>(fn_name.data()),
+                          fn_name.size(), fn_ptr, nargs);
 }
 
 std::span<std::byte>
 WasmiRuntime::get_memory() noexcept
 {
-  assert(!!wasmi_runtime_ptr_);
-  auto slice = detail::wasmi_get_memory(wasmi_runtime_ptr_);
+  assert(wasmi_runtime_ptr_ != nullptr);
+  auto slice = wasmi_get_memory(wasmi_runtime_ptr_);
   return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
 }
 
 std::span<const std::byte>
 WasmiRuntime::get_memory() const noexcept
 {
-  assert(!!wasmi_runtime_ptr_);
-  auto slice = detail::wasmi_get_memory(wasmi_runtime_ptr_);
+  assert(wasmi_runtime_ptr_ != nullptr);
+  auto slice = wasmi_get_memory(wasmi_runtime_ptr_);
   return std::as_bytes(std::span<const uint8_t>(slice.mem, slice.sz));
 }
 
 InvokeResult
 WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
-  assert(!!wasmi_runtime_ptr_);
+  assert(wasmi_runtime_ptr_ != nullptr);
 
-  uint64_t prev_gas_limit = detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
-  detail::wasmi_set_available_gas(wasmi_runtime_ptr_, gas_limit);
+  uint64_t prev_gas_limit = wasmi_get_available_gas(wasmi_runtime_ptr_);
+  wasmi_set_available_gas(wasmi_runtime_ptr_, gas_limit);
 
-  detail::WasmiInvokeResult res = detail::wasmi_invoke(
-      wasmi_runtime_ptr_, reinterpret_cast<const uint8_t *>(method_name.data()),
-      method_name.size());
+  WasmiInvokeResult res =
+      wasmi_invoke(wasmi_runtime_ptr_,
+                   reinterpret_cast<const uint8_t *>(method_name.data()),
+                   method_name.size());
 
-  uint64_t gas_remaining = detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
+  uint64_t gas_remaining = wasmi_get_available_gas(wasmi_runtime_ptr_);
 
   assert(gas_remaining <= gas_limit);
 
   uint64_t gas_consumed = gas_limit - gas_remaining;
 
-  detail::wasmi_set_available_gas(wasmi_runtime_ptr_, prev_gas_limit);
+  wasmi_set_available_gas(wasmi_runtime_ptr_, prev_gas_limit);
 
   WasmiInvokeErrorCode wasmi_error{res.error};
 
@@ -238,22 +240,22 @@ WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
 bool
 WasmiRuntime::consume_gas(uint64_t gas) noexcept
 {
-  assert(!!wasmi_runtime_ptr_);
-  return detail::wasmi_consume_gas(wasmi_runtime_ptr_, gas);
+  assert(wasmi_runtime_ptr_ != nullptr);
+  return wasmi_consume_gas(wasmi_runtime_ptr_, gas);
 }
 
 uint64_t
 WasmiRuntime::get_available_gas() const
 {
-  assert(!!wasmi_runtime_ptr_);
-  return detail::wasmi_get_available_gas(wasmi_runtime_ptr_);
+  assert(wasmi_runtime_ptr_ != nullptr);
+  return wasmi_get_available_gas(wasmi_runtime_ptr_);
 }
 
 void
 WasmiRuntime::set_available_gas(uint64_t gas)
 {
-  assert(!!wasmi_runtime_ptr_);
-  detail::wasmi_set_available_gas(wasmi_runtime_ptr_, gas);
+  assert(wasmi_runtime_ptr_ != nullptr);
+  wasmi_set_available_gas(wasmi_runtime_ptr_, gas);
 }
 
 WasmiRuntime::WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,
@@ -267,7 +269,7 @@ WasmiRuntime::WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,
 WasmiRuntime::~WasmiRuntime()
 {
   if (wasmi_runtime_ptr_ != nullptr) {
-    detail::free_wasmi_runtime(wasmi_runtime_ptr_);
+    free_wasmi_runtime(wasmi_runtime_ptr_);
   }
 }
 
