@@ -9,22 +9,12 @@
 
 #include <sodium.h>
 
-#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
 
 using Siphash24Key = std::array<uint8_t, 16>;
 using SHA256Hash = std::array<uint8_t, 32>;
-
-// crypto_init must be called before using any crypto functions.
-inline GStatus<void>
-crypto_init()
-{
-  if (sodium_init() == -1)
-    return GError{GCode::kUnknown};
-  return {};
-}
 
 // sha256 returns a SHA256 hash of the input.
 inline SHA256Hash

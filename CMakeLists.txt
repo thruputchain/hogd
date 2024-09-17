@@ -20,8 +20,18 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-stdlib=libc++ -fexperimental-library)
 endif()
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  link_libraries(stdc++exp) # needed for C++23 stacktrace library
+endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
+
+# check for C++23 stacktrace library
+include(CheckIncludeFileCXX)
+CHECK_INCLUDE_FILE_CXX(stacktrace STACKTRACE_INCLUDE)
+IF(STACKTRACE_INCLUDE)
+   add_definitions(-DHAVE_CXX_STACKTRACE)
+ENDIF(STACKTRACE_INCLUDE)
 
 include(FetchContent)
 
