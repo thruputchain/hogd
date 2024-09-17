@@ -6,8 +6,8 @@
 
 #include <sys/socket.h>
 
-#include "x23/corosync.h"
 #include "x23/event.h"
+#include "x23/fileio.h"
 
 using namespace x23;
 using std::string_literals::operator""s;

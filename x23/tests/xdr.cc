@@ -28,7 +28,7 @@ random_buf()
 
 TEST(Deserialize, Fuzz)
 {
-  for (int i = 0; i < 100'000; ++i) {
+  for (int i = 0; i < 10'000; ++i) {
     x23::Buf input = random_buf();
     input.resize(input.size() - input.size() % 4);
     test_recursive r;

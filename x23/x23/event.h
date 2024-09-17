@@ -180,8 +180,6 @@ private:
   }
 };
 
-void set_nonblock(BorrowedFd fd, bool on = true);
-
 UniqueFd tcplisten(std::uint16_t port);
 
 } // namespace x23

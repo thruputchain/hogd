@@ -310,22 +310,6 @@ CoroPoll::tcpconnect(std::string host, std::string port)
     co_return std::unexpected{std::system_error{res.error(), host}};
 }
 
-void
-set_nonblock(BorrowedFd fd, bool on)
-{
-  int n = fcntl(fd.get(), F_GETFL);
-  if (n == -1)
-    Errno{}.raise("F_GETFL");
-  if (bool(n & O_NONBLOCK) == on)
-    return;
-  if (on)
-    n |= O_NONBLOCK;
-  else
-    n &= ~O_NONBLOCK;
-  if (fcntl(fd.get(), F_SETFL, n) == -1)
-    Errno{}.raise("F_SETFL");
-}
-
 UniqueFd
 tcplisten(std::uint16_t port)
 {

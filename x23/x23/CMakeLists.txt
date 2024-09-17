@@ -5,6 +5,7 @@ add_library(x23
   err.h
   event.cc
   event.h
+  fileio.cc
   fileio.h
   format.h
   mvar.h
