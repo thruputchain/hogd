@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.28)
 project(x23
   VERSION 0.0.0
   DESCRIPTION "C++23 XDR/RPC compiler and library"
