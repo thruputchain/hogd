@@ -8,7 +8,12 @@
 #include <sys/socket.h>
 #include <thread>
 
+#if HAVE_EPOLL
 #include <sys/epoll.h>
+#else // !HAVE_EPOLL
+#include <unordered_map>
+#include <poll.h>
+#endif // !HAVE_EPOLL
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
@@ -20,13 +25,16 @@
 
 namespace x23 {
 
-class CoroPoll : private DestroyInhibit {
+namespace detail {
+
+#if HAVE_EPOLL
+
+class CoroPollImpl : public DestroyInhibit {
 public:
-  using WorkItem = CoroCB<Errno>;
   ThreadPool &pool_;
 
-  CoroPoll(ThreadPool &pool);
-  ~CoroPoll();
+  CoroPollImpl(ThreadPool &pool);
+  ~CoroPollImpl();
 
   void read_clear(BorrowedFd fd) { clear(fd, false); }
 
@@ -68,6 +76,151 @@ public:
   // may still be running after poison() returns.
   void poison(BorrowedFd fd) { setmode(getfd(fd), FdState::Mode::kPoisoned); }
 
+protected:
+  void check(int timeout = -1);
+  bool stop_requested() { return ss_.stop_requested(); }
+  void request_stop()
+  {
+    ss_.request_stop();
+    wake();
+  }
+  bool time_to_stop();
+
+private:
+  using WorkItem = CoroCB<Errno>;
+
+  static inline constexpr std::uint32_t epflags[2] = {EPOLLIN | EPOLLHUP |
+                                                          EPOLLERR,
+                                                      EPOLLOUT | EPOLLERR};
+
+  struct FdState {
+    enum Mode { kFree, kActive, kPoisoned };
+    std::atomic<Mode> mode{kFree};
+    std::atomic<std::uint32_t> ready{0};
+    // callbacks: [0] = reader, [1] = writer
+    std::array<std::atomic<WorkItem>, 2> callbacks{};
+
+    FdState() noexcept = default;
+    FdState(const FdState &other) { *this = other; }
+    FdState &operator=(const FdState &other)
+    {
+      mode = other.mode.load();
+      ready = other.ready.load();
+      for (size_t i = 0; i < callbacks.size(); ++i)
+        callbacks[i] = other.callbacks[i].load();
+      return *this;
+    }
+  };
+
+  std::stop_source ss_;
+  UniqueFd epollfd_;
+
+  std::shared_mutex resize_lock_;
+  std::atomic<FdState *> state_{nullptr};
+  std::atomic_size_t state_size_{0};
+  std::atomic_uint want_resize_{0};
+  std::atomic_uint numcoro_{0};
+
+  std::stop_token st_;
+  std::jthread pollthread_;
+
+  struct FdPtr {
+    FdState *p_;
+    std::shared_lock<std::shared_mutex> lk_;
+    FdState *get() const { return p_; }
+    FdState *operator->() const { return p_; }
+  };
+  FdPtr getfd(BorrowedFd fd);
+
+  static BorrowedFd always_eof();
+  void wake();
+  void clear(BorrowedFd fd, bool write);
+  void setcb(BorrowedFd fd, bool write, WorkItem h);
+  void setmode(const FdPtr &fd, FdState::Mode mode);
+  void docb(const FdPtr &fdp, bool write)
+  {
+    using enum FdState::Mode;
+    FdState::Mode mode = fdp->mode;
+    if ((fdp->ready & epflags[write]) || mode != kActive)
+      if (WorkItem wi = fdp->callbacks[write].exchange(nullptr)) {
+        --numcoro_;
+        wi(mode == kActive ? 0 : EBADF);
+      }
+  }
+  void docbs(const FdPtr &fdp)
+  {
+    docb(fdp, false);
+    docb(fdp, true);
+  }
+};
+
+#else // !HAVE_EPOLL
+
+class CoroPollImpl : public DestroyInhibit {
+public:
+  using WorkItem = CoroCB<Errno>;
+  ThreadPool &pool_;
+
+  CoroPollImpl(ThreadPool &pool);
+  ~CoroPollImpl();
+
+  void read_clear(BorrowedFd fd) { clear(fd, false); }
+  Async<Errno> read_wait(BorrowedFd fd)
+  {
+    auto [async, cb] = make_async<Errno>();
+    setcb(fd, false, cb);
+    return std::move(async);
+  }
+  void write_clear(BorrowedFd fd) { clear(fd, true); }
+  Async<Errno> write_wait(BorrowedFd fd)
+  {
+    auto [async, cb] = make_async<Errno>();
+    setcb(fd, true, cb);
+    return std::move(async);
+  }
+
+  void poison(BorrowedFd fd);
+  void reset(BorrowedFd fd);
+
+protected:
+  void check(int timeout = -1);
+  bool stop_requested() { return ss_.stop_requested(); }
+  void request_stop() { ss_.request_stop(); }
+  bool time_to_stop() { return ss_.stop_requested(); }
+
+private:
+  static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
+                                                POLLOUT | POLLERR};
+  struct FdState {
+    bool poisoned{false};
+    std::array<WorkItem, 2> callbacks;
+    short events() const {
+      short ret = 0;
+      for (size_t write = 0; write < 2; ++write)
+	if (callbacks[write])
+	  ret |= pollflags[write];
+      return ret;
+    }
+  };
+  MVar<std::unordered_map<int, FdState>> state_;
+  UniqueFd selfpipe_[2];
+  std::stop_source ss_;
+
+  std::vector<std::coroutine_handle<>> report_badfd(FdState &fds);
+  void clear(BorrowedFd fd, bool write);
+  void setcb(BorrowedFd fd, bool write, WorkItem cb);
+  void wake();
+};
+
+#endif // !HAVE_EPOLL
+
+} // namespace detail
+
+class CoroPoll : public detail::CoroPollImpl {
+public:
+  CoroPoll(ThreadPool &pool);
+  ~CoroPoll();
+
   // Read len bytes from fd and append them to *out.  If full is true,
   // will only read less than n bytes if there is an EOF.  Otherwise,
   // if full is false, it will return however many bytes it got from
@@ -88,7 +241,7 @@ public:
   accept(BorrowedFd lfd, Addr *addr = nullptr, socklen_t *addrlen = nullptr,
          int flags = SOCK_NONBLOCK | SOCK_CLOEXEC)
   {
-    while (!st_.stop_requested()) {
+    while (!stop_requested()) {
       if constexpr (!std::same_as<decltype(addr), std::nullptr_t>)
         if (addrlen)
           *addrlen = sizeof(*addr);
@@ -111,75 +264,10 @@ public:
   Async<std::expected<int, std::system_error>> tcpconnect(std::string host,
                                                           std::string port);
 
-  friend class RefPtr<CoroPoll>;
-
-protected:
-  void loop();
-  void check(int timeout = -1);
-  static BorrowedFd always_eof();
-  void wake();
-
 private:
-  static inline constexpr std::uint32_t epflags[2] = {EPOLLIN, EPOLLOUT};
+  void loop();
 
-  struct FdState {
-    enum Mode { kFree, kActive, kPoisoned };
-    std::atomic<Mode> mode{kFree};
-    std::atomic<std::uint32_t> ready{0};
-    // callbacks: [0] = reader, [1] = writer
-    std::array<std::atomic<WorkItem>, 2> callbacks{};
-
-    FdState() noexcept = default;
-    FdState(const FdState &other) { *this = other; }
-    FdState &operator=(const FdState &other)
-    {
-      mode = other.mode.load();
-      ready = other.ready.load();
-      for (size_t i = 0; i < callbacks.size(); ++i)
-        callbacks[i] = other.callbacks[i].load();
-      return *this;
-    }
-  };
-
-  UniqueFd epollfd_;
-
-  std::shared_mutex resize_lock_;
-  std::atomic<FdState *> state_{nullptr};
-  std::atomic_size_t state_size_{0};
-  std::atomic_uint want_resize_{0};
-  std::atomic_uint numcoro_{0};
-
-  std::stop_token st_;
-  std::jthread pollthread_;
-
-  struct FdPtr {
-    FdState *p_;
-    std::shared_lock<std::shared_mutex> lk_;
-    FdState *get() const { return p_; }
-    FdState *operator->() const { return p_; }
-  };
-  FdPtr getfd(BorrowedFd fd);
-
-  void clear(BorrowedFd fd, bool write);
-  void setcb(BorrowedFd fd, bool write, WorkItem h);
-  void setmode(const FdPtr &fd, FdState::Mode mode);
-  void docb(const FdPtr &fdp, bool write)
-  {
-    using enum FdState::Mode;
-    FdState::Mode mode = fdp->mode;
-    if ((fdp->ready & epflags[write]) || mode != kActive)
-      if (WorkItem wi = fdp->callbacks[write].exchange(nullptr)) {
-        --numcoro_;
-        wi(mode == kActive ? 0 : EBADF);
-      }
-  }
-  void docbs(const FdPtr &fdp)
-  {
-    docb(fdp, false);
-    docb(fdp, true);
-  }
+  std::thread pollthread_;
 };
-
-UniqueFd tcplisten(std::uint16_t port);
 
 } // namespace x23

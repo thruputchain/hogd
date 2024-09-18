@@ -93,7 +93,10 @@ std::expected<void, Errno> writefile(const std::filesystem::path &p,
                                      BufView buf, bool sync = false,
                                      int mode = 0666);
 
-// Set (on) or clear (!on) the O_NONBLOCK flag on a file descriptor.
+// Set (on) or clear (!on) the O_NONBLOCK flag on a file descriptor
 void set_nonblock(BorrowedFd fd, bool on = true);
+
+// Listen on a TCP port on any IP address (allowing IPv4 and IPv6)
+UniqueFd tcplisten(std::uint16_t port);
 
 } // namespace x23

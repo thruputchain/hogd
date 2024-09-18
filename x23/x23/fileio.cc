@@ -1,4 +1,7 @@
 
+#include <netinet/in.h>
+#include <sys/socket.h>
+
 #include "x23/fileio.h"
 
 namespace x23 {
@@ -56,6 +59,35 @@ set_nonblock(BorrowedFd fd, bool on)
     n &= ~O_NONBLOCK;
   if (fcntl(fd.get(), F_SETFL, n) == -1)
     Errno{}.raise("F_SETFL");
+}
+
+UniqueFd
+tcplisten(std::uint16_t port)
+{
+  UniqueFd lfd(socket(AF_INET6, SOCK_STREAM, 0));
+  if (!lfd)
+    Errno{}.raise("socket");
+  if (int flags = fcntl(lfd.get(), F_GETFD);
+      flags == -1 || fcntl(lfd.get(), F_SETFD, flags | FD_CLOEXEC) == -1)
+    Errno{}.raise("F_SETFD");
+
+  int opt = 0;
+  if (setsockopt(lfd.get(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
+    Errno{}.raise("IPV6_V6ONLY");
+
+  struct sockaddr_in6 addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin6_family = AF_INET6;
+  addr.sin6_port = htons(port);
+  addr.sin6_addr = in6addr_any;
+  if (bind(lfd.get(), reinterpret_cast<struct sockaddr *>(&addr),
+           sizeof(addr)) < 0)
+    Errno{}.raise("bind in6addr_any");
+
+  if (listen(lfd.get(), 5) < 0)
+    Errno{}.raise("listen");
+  set_nonblock(lfd.get());
+  return lfd;
 }
 
 } // namespace x23

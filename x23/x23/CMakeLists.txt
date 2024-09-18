@@ -1,10 +1,12 @@
 add_library(x23
+  ${CMAKE_CURRENT_BINARY_DIR}/config.h
   async.h
   cleanup.h
   corosync.h
   err.h
   event.cc
   event.h
+  event_impl.cc
   fileio.cc
   fileio.h
   format.h
@@ -19,7 +21,6 @@ add_library(x23
   utility.h
   vec.h
   x23.h
-  ${CMAKE_CURRENT_BINARY_DIR}/config.h
 )
 
 use_x23(x23)
