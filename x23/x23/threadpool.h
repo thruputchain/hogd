@@ -7,11 +7,8 @@
 #include <queue>
 #include <ranges>
 #include <stop_token>
-#include <sys/socket.h>
 #include <thread>
 #include <vector>
-
-#include <sys/epoll.h>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
