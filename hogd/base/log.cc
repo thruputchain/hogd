@@ -5,12 +5,15 @@
 #include <iterator>
 #include <memory>
 #include <source_location>
-#ifdef HAVE_CXX_STACKTRACE
-#include <stacktrace>
-#endif // HAVE_CXX_STACKTRACE
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "hogd/config.h"
+
+#if HAVE_CXX_STACKTRACE
+#include <stacktrace>
+#endif // HAVE_CXX_STACKTRACE
 
 #include "hogd/base/ansi_color.h"
 #include "hogd/base/log.h"
@@ -57,7 +60,7 @@ do_panic(std::string_view fmt, const std::source_location &loc,
   std::string buf;
   std::vformat_to(std::back_inserter(buf), fmt, args);
 
-#ifdef HAVE_CXX_STACKTRACE
+#if HAVE_CXX_STACKTRACE
   auto trace = std::stacktrace::current();
   std::format_to(std::back_inserter(buf), "\n{}",
                  ansi_color(Style::kNormal, Color::kGreen));

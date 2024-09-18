@@ -23,9 +23,6 @@ target_link_libraries(
 )
 gtest_discover_tests(runtime_test)
 
-
-include(../cmake/wat2wasm.cmake)
-
 wat2wasm_target(
   test_invoke_wasm
   wat/test_invoke.wat
