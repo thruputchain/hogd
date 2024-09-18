@@ -1,14 +1,11 @@
 include(CheckCXXSourceCompiles)
 
-list(APPEND CMAKE_REQUIRED_LINK_OPTIONS "-lstdc++exp")
-
 check_cxx_source_compiles([=[
 #include <stacktrace>
 
 int
 main()
 {
-  auto st = std::stacktrace::current();
-  return 0;
+  static_assert(__cpp_lib_stacktrace >= 202011L, "missing stacktrace");
 }
 ]=] HAVE_CXX_STACKTRACE)
