@@ -203,8 +203,6 @@ CoroPollImpl::~CoroPollImpl()
 bool
 CoroPollImpl::time_to_stop()
 {
-  std::println("time_to_stop");
-  std::println("time_to_stop {}", state_->size());
   if (!stop_requested() || !state_->empty())
     return false;
   pool_.drain();
