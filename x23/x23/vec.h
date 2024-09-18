@@ -662,38 +662,38 @@ protected:
   constexpr void realloc(size_type n)
   {
     check_size(n);
+#if !BROKEN_P2564R3
     if consteval {
       constexpr_realloc(n);
+      return;
     }
-    else {
-      Buf newb{};
-      if (n) {
-        if constexpr (requires { a_.allocate_at_least(n); }) {
-          auto ar = a_.allocate_at_least(n);
-          newb.end = newb.begin = reinterpret_cast<value_type *>(ar.ptr);
-          newb.bufend = newb.begin + ar.count;
-        }
-        else {
-          newb.end = newb.begin =
-              reinterpret_cast<value_type *>(a_.allocate(n));
-          newb.bufend = newb.begin + n;
-        }
+#endif // !BROKEN_P2564R3
+    Buf newb{};
+    if (n) {
+      if constexpr (requires { a_.allocate_at_least(n); }) {
+        auto ar = a_.allocate_at_least(n);
+        newb.end = newb.begin = reinterpret_cast<value_type *>(ar.ptr);
+        newb.bufend = newb.begin + ar.count;
       }
-
-      if (b_.begin) {
-        size_t new_size = std::min(size(), n);
-        newb.end = newb.begin + new_size;
-        [&] noexcept {
-          // for simplicity, use noexcept lambda to crash if move throws
-          std::uninitialized_move_n(b_.begin, new_size, newb.begin);
-        }();
-        std::destroy(b_.begin, b_.end);
-        a_.deallocate(reinterpret_cast<allocator_type::value_type *>(b_.begin),
-                      b_.bufend - b_.begin);
+      else {
+        newb.end = newb.begin = reinterpret_cast<value_type *>(a_.allocate(n));
+        newb.bufend = newb.begin + n;
       }
-
-      b_ = newb;
     }
+
+    if (b_.begin) {
+      size_t new_size = std::min(size(), n);
+      newb.end = newb.begin + new_size;
+      [&] noexcept {
+        // for simplicity, use noexcept lambda to crash if move throws
+        std::uninitialized_move_n(b_.begin, new_size, newb.begin);
+      }();
+      std::destroy(b_.begin, b_.end);
+      a_.deallocate(reinterpret_cast<allocator_type::value_type *>(b_.begin),
+                    b_.bufend - b_.begin);
+    }
+
+    b_ = newb;
   }
 
   constexpr void check_size(size_type n)
