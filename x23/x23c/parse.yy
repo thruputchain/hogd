@@ -2,6 +2,11 @@
 %require "3.8"
 
 %code requires {
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__OPTIMIZE__)
+// https://gcc.gnu.org/bugzilla/show_bug.cgi?id=98753
+#pragma GCC diagnostic ignored "-Wfree-nonheap-object"
+#endif
+
 #include <print>
 
 #include "x23c/defs.h"

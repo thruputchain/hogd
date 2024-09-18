@@ -8,6 +8,7 @@
 .project
 .vscode
 /compile_commands.json
+Cargo.lock
 Testing/**
 Testing/**
 [._]*.sw[a-p]
