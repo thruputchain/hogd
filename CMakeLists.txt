@@ -26,10 +26,11 @@ endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
-include(hogd/cmake/stacktrace.cmake)
+include(cmake/stacktrace.cmake)
+include(cmake/wat2wasm.cmake)
 
 configure_file(
-  ${CMAKE_CURRENT_SOURCE_DIR}/hogd/cmake/config.h.in
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
   ${CMAKE_CURRENT_BINARY_DIR}/built_headers/hogd/config.h
   @ONLY
 )
