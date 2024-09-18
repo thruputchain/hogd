@@ -1,5 +1,7 @@
 include(CheckCXXSourceCompiles)
 
+list(APPEND CMAKE_REQUIRED_LINK_OPTIONS "-lstdc++exp")
+
 check_cxx_source_compiles([=[
 #include <stacktrace>
 
