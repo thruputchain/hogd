@@ -9,7 +9,10 @@
 .vscode
 /compile_commands.json
 Testing/**
+Testing/**
 [._]*.sw[a-p]
+bcheck/**
 bcheck_gcc/**
 bcheck_llvm/**
+build/**
 build/**

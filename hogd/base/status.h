@@ -46,6 +46,19 @@ public:
   Enum code() const { return code_; }
   // raw_code returns the error code as an int.
   int raw_code() const { return static_cast<int>(std::to_underlying(code_)); }
+
+  // In narrow cases, is UB to cast raw_code to an enum, or
+  // if the enum has a specified type, raw_code is converted to that type and
+  // then cast. That's not UB but still potentially bizarre for the case of enum
+  // errors. Essentially, anything not satisfying is_in_enum_range() indicates a
+  // serious bug.
+  constexpr static bool is_in_enum_range(int raw_code)
+  {
+    using underlying_enum = std::underlying_type_t<Enum>;
+    return (raw_code >= std::numeric_limits<underlying_enum>::min() &&
+            raw_code <= std::numeric_limits<underlying_enum>::max());
+  }
+
   // category returns the std::error_category for this error type.
   static const std::error_category &category()
   {

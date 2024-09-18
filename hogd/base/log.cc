@@ -1,13 +1,18 @@
 #include <chrono>
+#include <exception>
 #include <format>
 #include <iostream>
 #include <iterator>
 #include <memory>
 #include <source_location>
+#ifdef HAVE_CXX_STACKTRACE
+#include <stacktrace>
+#endif // HAVE_CXX_STACKTRACE
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "hogd/base/ansi_color.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 
@@ -45,6 +50,29 @@ namespace detail {
 // logger is the logging implementation currently in use.
 std::unique_ptr<Logger> logger;
 
+[[noreturn]] void
+do_panic(std::string_view fmt, const std::source_location &loc,
+         std::format_args &&args)
+{
+  std::string buf;
+  std::vformat_to(std::back_inserter(buf), fmt, args);
+
+#ifdef HAVE_CXX_STACKTRACE
+  auto trace = std::stacktrace::current();
+  std::format_to(std::back_inserter(buf), "\n{}",
+                 ansi_color(Style::kNormal, Color::kGreen));
+  for (const auto &entry : trace) {
+    std::format_to(std::back_inserter(buf), "{}\n", entry);
+  }
+  std::format_to(std::back_inserter(buf), "{}", ansi_reset());
+#endif // HAVE_CXX_STACKTRACE
+
+  logger->vlog(LogLevel::kCritical, "{}", loc, std::make_format_args(buf));
+  detail::logger->flush();
+  // TODO(amb): do more to cleanup safely (e.g., flush to disk?)
+  std::terminate();
+}
+
 } // namespace detail
 
 void
@@ -64,8 +92,10 @@ ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
 
   // generate the log message
   std::string buf;
-  std::format_to(std::back_inserter(buf), "{}{:%m%d %H:%M:%OS} {}:{}] ",
-                 log_level_to_char(level), now, filename, loc.line());
+  std::format_to(std::back_inserter(buf), "{}{}{}{:%m%d %H:%M:%OS} {}:{}]{} ",
+                 ansi_color(Style::kBold), log_level_to_char(level),
+                 ansi_color(Style::kNormal, Color::kBlue), now, filename,
+                 loc.line(), ansi_reset());
   std::vformat_to(std::back_inserter(buf), fmt, args);
   std::format_to(std::back_inserter(buf), "\n");
 

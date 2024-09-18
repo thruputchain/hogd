@@ -1,18 +1,34 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdlib>
 #include <span>
 #include <vector>
 
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/init.h"
 
 namespace hogd {
 
+TEST(SHA256, NullInput)
+{
+  std::span<std::byte> null_input{};
+  SHA256Hash hash = sha256(null_input);
+  EXPECT_NE(hash, SHA256Hash{});
+}
+
+TEST(SHA256, SomeInput)
+{
+  std::vector<uint8_t> bytes = {0, 1, 2, 3};
+  std::vector<uint8_t> bytes2 = {3, 2, 1, 0};
+  EXPECT_NE(sha256(std::as_bytes(std::span(bytes))),
+            sha256(std::as_bytes(std::span(bytes2))));
+}
+
 TEST(Siphash24, NullInput)
 {
-  ASSERT_TRUE(crypto_init());
-
   std::span<std::byte> null_input{};
   Siphash24Key key = siphash24_keygen();
   uint64_t mac = siphash24(null_input, key);
@@ -24,8 +40,6 @@ TEST(Siphash24, NullInput)
 
 TEST(Siphash24, SomeInput)
 {
-  ASSERT_TRUE(crypto_init());
-
   std::vector<uint8_t> bytes = {0, 1, 2, 3};
   std::vector<uint8_t> bytes2 = {3, 2, 1, 0};
 
@@ -43,3 +57,14 @@ TEST(Siphash24, SomeInput)
 }
 
 } // namespace hogd
+
+int
+main(int argc, char *argv[])
+{
+  using hogd::GStatus;
+  GStatus<void> ret = hogd::crypto_init();
+  if (!ret)
+    return EXIT_FAILURE;
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

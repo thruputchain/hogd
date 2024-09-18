@@ -1,9 +1,11 @@
+# create base module library
 add_library(
   base
   log.cc
   status.cc
 )
 
+# create base module test binary
 add_executable(
   base_test
   bits_test.cc
@@ -11,7 +13,6 @@ add_executable(
   status_test.cc
   string_test.cc
 )
-
 target_link_libraries(
   base_test
   base

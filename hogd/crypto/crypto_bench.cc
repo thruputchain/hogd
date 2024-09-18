@@ -1,11 +1,14 @@
 #include <benchmark/benchmark.h>
 
 #include <cstddef>
+#include <cstdlib>
 #include <exception>
 #include <vector>
 
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/init.h"
 
 namespace hogd {
 
@@ -38,4 +41,13 @@ BENCHMARK(bm_siphash24)->RangeMultiplier(2)->Range(8, 8 << 10); // NOLINT
 
 } // namespace hogd
 
-BENCHMARK_MAIN();
+int
+main(int argc, char *argv[])
+{
+  using hogd::GStatus;
+  GStatus<void> ret = hogd::crypto_init();
+  if (!ret)
+    return EXIT_FAILURE;
+  benchmark::Initialize(&argc, argv);
+  benchmark::RunSpecifiedBenchmarks();
+}

@@ -2,13 +2,14 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
-#include <exception>
 #include <format>
 #include <memory>
 #include <source_location>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/sync.h"
 
 namespace hogd {
 
@@ -86,6 +87,53 @@ do_log(std::string_view fmt, const std::source_location &loc,
   }
 }
 
+[[noreturn]] void do_panic(std::string_view fmt,
+                           const std::source_location &loc,
+                           std::format_args &&args);
+
+template<typename Tag>
+bool
+should_log_first_n(int n)
+{
+  static LossyCounter<int> c;
+  if (c >= n)
+    return false;
+  c.inc();
+  return true;
+}
+
+template<typename Tag>
+bool
+should_log_every_n(int n)
+{
+  static LossyCounter<uint32_t> c;
+  return c.inc() % static_cast<uint32_t>(n) == 0;
+}
+
+template<typename Tag>
+bool
+should_log_every_n_sec(float n)
+{
+  // check if timeout has expired
+  int64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count();
+  static std::atomic<int64_t> next_ts{0};
+  int64_t next = next_ts.load(std::memory_order_relaxed);
+  if (now < next)
+    return false;
+
+  // timeout has expired; update next_ts
+  while (true) {
+    if (next_ts.compare_exchange_weak(next, now + static_cast<int64_t>(n * 1e6),
+                                      std::memory_order_relaxed,
+                                      std::memory_order_relaxed)) {
+      break;
+    }
+  }
+  return true;
+}
+
 } // namespace detail
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -111,11 +159,7 @@ template<typename... Args> struct panic {
       std::format_string<Args...> fmt, Args &&...args,
       const std::source_location &loc = std::source_location::current())
   {
-    detail::do_log<LogLevel::kCritical>(fmt.get(), loc,
-                                        std::make_format_args(args...));
-    detail::logger->flush();
-    // TODO(amb): do more to cleanup safely (e.g., flush to disk?)
-    std::terminate();
+    detail::do_panic(fmt.get(), loc, std::make_format_args(args...));
   }
 };
 
@@ -151,6 +195,60 @@ MAKE_LOG_FUNC(debug, kDebug);
 MAKE_LOG_FUNC(trace, kTrace);
 
 #undef MAKE_LOG_FUNC
+
+//
+// Convenient logging functions for each severity level with extended
+// functionality.
+//
+// These versions will also automatically compile out depending on the build
+// type.
+//
+// Example:
+// warn_first_n(1, "foo={}, too large", foo); // only warns once
+//
+
+#define MAKE_LOG_FUNC_EX(func, should_type, should_fn, level)                  \
+  template<typename Tag, typename... Args> struct func {                       \
+    func(should_type n, std::format_string<Args...> fmt, Args &&...args,       \
+         const std::source_location &loc = std::source_location::current())    \
+    {                                                                          \
+      if constexpr (LogLevel::level <= kMaxLogLevel) {                         \
+        if (!detail::should_log_##should_fn<Tag>(n))                           \
+          return;                                                              \
+        detail::logger->vlog(LogLevel::level, fmt.get(), loc,                  \
+                             std::make_format_args(args...));                  \
+      }                                                                        \
+    }                                                                          \
+  };                                                                           \
+  template<typename Tag = decltype([] {}), typename... Args>                   \
+  func(should_type n, std::format_string<Args...>, Args &&...)                 \
+      ->func<Tag, Args...>
+
+// first_n - stops logging after n invocations at the call site
+MAKE_LOG_FUNC_EX(critical_first_n, int, first_n, kCritical);
+MAKE_LOG_FUNC_EX(error_first_n, int, first_n, kError);
+MAKE_LOG_FUNC_EX(warn_first_n, int, first_n, kWarn);
+MAKE_LOG_FUNC_EX(info_first_n, int, first_n, kInfo);
+MAKE_LOG_FUNC_EX(debug_first_n, int, first_n, kDebug);
+MAKE_LOG_FUNC_EX(trace_first_n, int, first_n, kTrace);
+
+// every_n - logs once after each n invocations at the call site
+MAKE_LOG_FUNC_EX(critical_every_n, int, every_n, kCritical);
+MAKE_LOG_FUNC_EX(error_every_n, int, every_n, kError);
+MAKE_LOG_FUNC_EX(warn_every_n, int, every_n, kWarn);
+MAKE_LOG_FUNC_EX(info_every_n, int, every_n, kInfo);
+MAKE_LOG_FUNC_EX(debug_every_n, int, every_n, kDebug);
+MAKE_LOG_FUNC_EX(trace_every_n, int, every_n, kTrace);
+
+// every_n_sec - logs after at least n seconds have elapsed at the call site
+MAKE_LOG_FUNC_EX(critical_every_n_sec, float, every_n_sec, kCritical);
+MAKE_LOG_FUNC_EX(error_every_n_sec, float, every_n_sec, kError);
+MAKE_LOG_FUNC_EX(warn_every_n_sec, float, every_n_sec, kWarn);
+MAKE_LOG_FUNC_EX(info_every_n_sec, float, every_n_sec, kInfo);
+MAKE_LOG_FUNC_EX(debug_every_n_sec, float, every_n_sec, kDebug);
+MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
+
+#undef MAKE_LOG_FUNC_EX
 
 // NOLINTEND(readability-identifier-naming)
 

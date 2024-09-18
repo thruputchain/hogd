@@ -20,31 +20,35 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-stdlib=libc++ -fexperimental-library)
 endif()
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  link_libraries(stdc++exp) # needed for C++23 stacktrace library
+endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
+
+# check for C++23 stacktrace library
+include(CheckIncludeFileCXX)
+CHECK_INCLUDE_FILE_CXX(stacktrace STACKTRACE_INCLUDE)
+IF(STACKTRACE_INCLUDE)
+   add_definitions(-DHAVE_CXX_STACKTRACE)
+ENDIF(STACKTRACE_INCLUDE)
 
 include(FetchContent)
 
 # Enable GoogleTest (google's unit testing library)
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG v1.15.2
-)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 option(INSTALL_GTEST "" OFF)
-FetchContent_MakeAvailable(googletest)
+add_subdirectory(external/googletest)
 enable_testing()
 include(GoogleTest)
 
 # Enable performance (google's benchmarking library)
-FetchContent_Declare(
-  benchmark
-  GIT_REPOSITORY https://github.com/google/benchmark.git
-  GIT_TAG v1.9.0
-)
 option(BENCHMARK_ENABLE_TESTING "" OFF)
-FetchContent_MakeAvailable(benchmark)
+add_subdirectory(external/benchmark)
+
+# Detect number of cores - only needed for make-based ExternalProject
+include(ProcessorCount)
+ProcessorCount(N)
 
 # Enable libsodium
 include(ExternalProject)
@@ -55,7 +59,7 @@ ExternalProject_Add(libsodium
       --prefix=${CMAKE_INSTALL_PREFIX}
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
       CFLAGS=${CMAKE_C_FLAGS} CXXFLAGS=${CMAKE_CXX_FLAGS}
-    BUILD_COMMAND make -j16
+    BUILD_COMMAND make -j${N}
     INSTALL_COMMAND ""  # Skip installation step
 )
 
@@ -76,4 +80,15 @@ add_subdirectory(x23)
 
 # Add code directories
 include_directories(${CMAKE_SOURCE_DIR} ${X23_SOURCE_DIR} ${X23_BINARY_DIR})
+
+add_subdirectory(external/corrosion)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
+include(Corrosion)
+
+add_definitions(-DCMAKE_ROOT_BINARY_DIR=\"${CMAKE_BINARY_DIR}\")
+
+# Add code directories
+include_directories(${CMAKE_SOURCE_DIR})
+
 add_subdirectory(hogd)
+
