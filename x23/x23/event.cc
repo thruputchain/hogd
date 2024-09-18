@@ -1,12 +1,9 @@
 
-#include <atomic>
 #include <cerrno>
-#include <mutex>
 
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <sys/epoll.h>
 #include <sys/socket.h>
 
 #include "x23/async.h"
@@ -17,8 +14,7 @@
 
 namespace x23 {
 
-CoroPoll::CoroPoll(ThreadPool &pool)
-  : CoroPollImpl(pool)
+CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
 {
   pollthread_ = std::thread(&CoroPoll::loop, this);
 }
