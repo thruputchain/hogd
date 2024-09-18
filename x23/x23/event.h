@@ -8,20 +8,22 @@
 #include <sys/socket.h>
 #include <thread>
 
-#if HAVE_EPOLL
-#include <sys/epoll.h>
-#else // !HAVE_EPOLL
-#include <unordered_map>
-#include <poll.h>
-#endif // !HAVE_EPOLL
-
 #include <x23/async.h>
 #include <x23/cleanup.h>
+#include <x23/config.h>
 #include <x23/err.h>
+#include <x23/fileio.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
 #include <x23/threadpool.h>
 #include <x23/vec.h>
+
+#if HAVE_EPOLL
+#include <sys/epoll.h>
+#else // !HAVE_EPOLL
+#include <poll.h>
+#include <unordered_map>
+#endif // !HAVE_EPOLL
 
 namespace x23 {
 
@@ -194,11 +196,12 @@ private:
   struct FdState {
     bool poisoned{false};
     std::array<WorkItem, 2> callbacks;
-    short events() const {
+    short events() const
+    {
       short ret = 0;
       for (size_t write = 0; write < 2; ++write)
-	if (callbacks[write])
-	  ret |= pollflags[write];
+        if (callbacks[write])
+          ret |= pollflags[write];
       return ret;
     }
   };
@@ -237,17 +240,26 @@ public:
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
   template<typename Addr = sockaddr>
-  Async<std::expected<int, Errno>>
-  accept(BorrowedFd lfd, Addr *addr = nullptr, socklen_t *addrlen = nullptr,
-         int flags = SOCK_NONBLOCK | SOCK_CLOEXEC)
+  Async<std::expected<int, Errno>> accept(BorrowedFd lfd, Addr *addr = nullptr,
+                                          socklen_t *addrlen = nullptr,
+                                          bool close_on_exec = true)
   {
     while (!stop_requested()) {
       if constexpr (!std::same_as<decltype(addr), std::nullptr_t>)
         if (addrlen)
           *addrlen = sizeof(*addr);
       read_clear(lfd);
-      int fd = accept4(lfd.get(), reinterpret_cast<sockaddr *>(addr), addrlen,
-                       flags);
+#if HAVE_ACCEPT4
+      int fd =
+          accept4(lfd.get(), reinterpret_cast<sockaddr *>(addr), addrlen,
+                  close_on_exec ? SOCK_NONBLOCK | SOCK_CLOEXEC : SOCK_NONBLOCK);
+#else  // !HAVE_ACCEPT4
+      int fd = ::accept(lfd.get(), reinterpret_cast<sockaddr *>(addr), addrlen);
+      if (fd >= 0) {
+        fcntl(fd, F_SETFD, 1);
+        fcntl(fd, F_SETFD, O_NONBLOCK);
+      }
+#endif // !HAVE_ACCEPT4
       if (fd >= 0)
         co_return fd;
       if (Errno err{}; err != EAGAIN)

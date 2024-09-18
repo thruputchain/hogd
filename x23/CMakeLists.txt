@@ -32,6 +32,7 @@ endif()
 include(cmake/pause.cmake)
 include(cmake/interference_size.cmake)
 include(cmake/epoll.cmake)
+include(cmake/accept4.cmake)
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
