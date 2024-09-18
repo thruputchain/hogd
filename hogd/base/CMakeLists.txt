@@ -3,7 +3,11 @@ add_library(
   base
   log.cc
   status.cc
+  ../xdr/types.x
 )
+
+use_x23(base)
+target_include_directories(base PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 # create base module test binary
 add_executable(
