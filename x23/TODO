@@ -1,0 +1,16 @@
+
+* parsing comments
+
+* parsing % literals
+
+* emplace variants with std::in_place_index_t or similar
+
+* RPC programs
+
+* RFC5531 runtime support (rpc_msg.x in library, TCP message processing)
+
+* Real tests...
+
+* Benchmarks
+
+* Man page
