@@ -12,15 +12,15 @@ extern "C" {
 #include <type_traits>
 #include <utility>
 
-#include "x23/err.h"
 #include "hogd/base/types.h"
+#include "x23/err.h"
 
 namespace hogd {
 
+using x23::Errno;
 using x23::ErrorBase;
 using x23::make_error_code;
 using x23::make_error_condition;
-using x23::Errno;
 
 // ErrnoStatus is the return type for a function that can return a legacy errno.
 //
