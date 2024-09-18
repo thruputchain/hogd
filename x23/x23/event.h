@@ -187,8 +187,12 @@ public:
 protected:
   void check(int timeout = -1);
   bool stop_requested() { return ss_.stop_requested(); }
-  void request_stop() { ss_.request_stop(); }
-  bool time_to_stop() { return ss_.stop_requested(); }
+  void request_stop()
+  {
+    ss_.request_stop();
+    wake();
+  }
+  bool time_to_stop();
 
 private:
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,

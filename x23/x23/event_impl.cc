@@ -83,7 +83,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode)
 bool
 CoroPollImpl::time_to_stop()
 {
-  if (!ss_.stop_requested() || numcoro_)
+  if (!stop_requested() || numcoro_)
     return false;
   pool_.drain();
   return !numcoro_;
@@ -200,6 +200,17 @@ CoroPollImpl::CoroPollImpl(ThreadPool &pool_) : pool_(pool_)
 CoroPollImpl::~CoroPollImpl()
 {}
 
+bool
+CoroPollImpl::time_to_stop()
+{
+  std::println("time_to_stop");
+  std::println("time_to_stop {}", state_->size());
+  if (!stop_requested() || !state_->empty())
+    return false;
+  pool_.drain();
+  return state_->empty();
+}
+
 void
 CoroPollImpl::check(int timeout)
 {
@@ -244,6 +255,8 @@ CoroPollImpl::check(int timeout)
         if (auto h = std::exchange(f.callbacks[write], nullptr)
                          .set_result_without_resuming(0))
           cbs.push_back(h);
+    if (!f.callbacks[0] && !f.callbacks[1])
+      ptr->erase(it);
   }
   ptr.reset();
   pool_.go(cbs);
@@ -287,8 +300,6 @@ CoroPollImpl::reset(BorrowedFd fd)
 void
 CoroPollImpl::clear(BorrowedFd fd, bool)
 {
-  // Just create if it doesn't exist
-  state_->operator[](fd.get());
 }
 
 void
@@ -299,13 +310,13 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem cb)
     return;
   }
   auto ptr = state_.take();
-  auto it = ptr->find(fd.get());
-  assert(it != ptr->end() && !it->second.callbacks[write]);
-  if (it->second.poisoned) {
+  auto &f = (*ptr)[fd.get()];
+  assert(!f.callbacks[write]);
+  if (f.poisoned) {
     pool_.make_callback(cb, EBADF);
     return;
   }
-  it->second.callbacks[write] = cb;
+  f.callbacks[write] = cb;
   wake();
 }
 
@@ -313,7 +324,7 @@ void
 CoroPollImpl::wake()
 {
   char z = '\0';
-  ::write(selfpipe_[1].get(), &z, 1);
+  write(selfpipe_[1].get(), &z, 1);
 }
 
 #endif // !HAVE_EPOLL
