@@ -1,7 +1,14 @@
 
+if(X23_MAKE_ALL_DEPEND_ON_TESTS)
+  set(EXCLUDE_TOKEN)
+else()
+  set(EXCLUDE_TOKEN EXCLUDE_FROM_ALL)
+endif()
+
+
 set(TEST_EXECUTABLES)
 macro(add_x23_test TEST_NAME)
-  add_executable(test_${TEST_NAME} EXCLUDE_FROM_ALL ${TEST_NAME}.cc
+  add_executable(test_${TEST_NAME} ${EXCLUDE_TOKEN} ${TEST_NAME}.cc
     xdrtest.x ${ARGN})
   target_link_libraries(test_${TEST_NAME} x23)
   use_x23(test_${TEST_NAME})

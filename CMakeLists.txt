@@ -39,12 +39,18 @@ include(FetchContent)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 option(INSTALL_GTEST "" OFF)
 add_subdirectory(external/googletest)
+set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest"
+  CACHE PATH "Path to googletest" FORCE)
 enable_testing()
 include(GoogleTest)
 
 # Enable performance (google's benchmarking library)
 option(BENCHMARK_ENABLE_TESTING "" OFF)
 add_subdirectory(external/benchmark)
+if(BENCHMARK_ENABLE_TESTING)
+set(BENCHMARK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/benchmark"
+  CACHE PATH "Path to Google benchmark" FORCE)
+endif()
 
 # Detect number of cores - only needed for make-based ExternalProject
 include(ProcessorCount)
@@ -76,6 +82,7 @@ set(LIBSODIUM_LIBRARIES
 
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
+set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
 add_subdirectory(x23)
 
 # Add code directories
