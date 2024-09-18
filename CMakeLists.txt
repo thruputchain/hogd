@@ -26,14 +26,16 @@ endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
-# check for C++23 stacktrace library
-include(CheckIncludeFileCXX)
-CHECK_INCLUDE_FILE_CXX(stacktrace STACKTRACE_INCLUDE)
-IF(STACKTRACE_INCLUDE)
-   add_definitions(-DHAVE_CXX_STACKTRACE)
-ENDIF(STACKTRACE_INCLUDE)
+include(cmake/stacktrace.cmake)
+include(cmake/wat2wasm.cmake)
 
-include(FetchContent)
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
+  ${CMAKE_CURRENT_BINARY_DIR}/built_headers/hogd/config.h
+  @ONLY
+)
+
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/built_headers)
 
 # Enable GoogleTest (google's unit testing library)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)

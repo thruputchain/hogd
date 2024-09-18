@@ -1,0 +1,4 @@
+#pragma once
+
+// Set to 1 if <stacktrace> is included and enabled
+#cmakedefine01 HAVE_CXX_STACKTRACE

@@ -44,9 +44,7 @@ done
 BUILD_DIR=${ROOT_DIR}/${BUILD_DIR}
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  if [ "$CXX" = "clang++" ]; then
-    CMAKE_INJECT=(-DCMAKE_OSX_SYSROOT=)
-  fi
+  CMAKE_INJECT=(-DCMAKE_OSX_SYSROOT=)
 fi
 
 # Do the build
