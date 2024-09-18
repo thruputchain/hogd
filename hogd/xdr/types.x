@@ -20,7 +20,7 @@ typedef opaque ContractAddress[32]; // 256 bit contract addresses
 typedef opaque StorageKey[32]; // arbitrary 32 bytes.
 
 // in global storage:
-// [contract address + invariant key] = 64 bytes
+// [contract address + storage key] = 64 bytes
 // Contracts are free to set their own conventions for keys.
 typedef opaque AddressAndKey[64];
 
