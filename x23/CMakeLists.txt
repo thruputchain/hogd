@@ -133,8 +133,7 @@ configure_package_config_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/x23Config.cmake.in
   "${CMAKE_CURRENT_BINARY_DIR}/x23Config.cmake"
   INSTALL_DESTINATION lib/cmake/x23
-  NO_SET_AND_CHECK_MACRO
-  NO_CHECK_REQUIRED_COMPONENTS_MACRO
+  PATH_VARS CMAKE_INSTALL_PREFIX
 )
 
 # Generate the version file for the config file
@@ -154,7 +153,6 @@ if(X23_IS_TOP_LEVEL)
   # Install the export file
   install(EXPORT x23Targets
     FILE x23Targets.cmake
-    NAMESPACE x23::
     DESTINATION lib/cmake/x23
   )
 endif()
