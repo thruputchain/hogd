@@ -86,13 +86,13 @@ if ! ASAN_OPTIONS=alloc_dealloc_mismatch=0 ctest --test-dir ${ROOT_DIR}/${BUILD_
     exit 1
 fi
 
-printf "${COLOR}\nSTEP 9: Check usan\n${NC}"
-if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_usan -t Debug -c clang -f "-Werror -fsanitize=undefined" ; then
-    printf "usan build failed!\n"
+printf "${COLOR}\nSTEP 9: Check ubsan\n${NC}"
+if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_ubsan -t Debug -c clang -f "-Werror -fsanitize=undefined" ; then
+    printf "ubsan build failed!\n"
     exit 1
 fi
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_usan --output-on-failure; then
-    printf "usan tests failed!\n"
+if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_ubsan --output-on-failure; then
+    printf "ubsan tests failed!\n"
     exit 1
 fi
 

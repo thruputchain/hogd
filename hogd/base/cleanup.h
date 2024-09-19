@@ -1,3 +1,4 @@
+// cleanup.h - utilities for managing the lifetime of resources
 
 #pragma once
 
