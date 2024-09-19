@@ -219,9 +219,23 @@ GenRs::show_type(const UnionBody &b, string t)
   const string switch_type = map_type(b.switch_type);
 
   const bool is_enum = (switch_type == b.switch_type);
+  const bool is_bool = (switch_type == "bool");
 
-  auto enum_qualified_typename = [&] (std::string c) {
+  auto bool_map = [] (std::string b) -> std::string {
+    if (b == "TRUE") {
+      return "true";
+    }
+    if (b == "FALSE") {
+      return "false";
+    }
+    throw std::runtime_error("unexpected boolean");
+  };
+
+  auto qualified_typename = [&] (std::string c) {
     if (is_enum) {
+      if (is_bool) {
+        return bool_map(c);
+      }
       return b.switch_type + "::" + c;
     } else {
       return c;
@@ -234,23 +248,19 @@ GenRs::show_type(const UnionBody &b, string t)
     }
     return c;
   };
-  bool has_default = false;
-  bool has_void = false;
   std::string default_decl = "";
   for (const auto &a : b.arms) {
     for (const auto &c : a.cases) {
       prtop("// case {}:\n", c);
     }
     if (a.has_default) {
-      has_default = true;
       prtop("// default:\n");
     }
     show_comment(a.decl.comment, false, "//   ");
     if (a.decl.qual == Declaration::kVoid) {
-      has_void = true;
       prtop("//   void;\n");
       for (const auto& c : a.cases) {
-        prtop("{} = {} as i32,\n", int_qualified_declname(c), enum_qualified_typename(c));
+        prtop("{} = {} as i32,\n", int_qualified_declname(c), qualified_typename(c));
       }
       if (a.has_default) {
         default_decl = "DEFAULT,\n";
@@ -264,7 +274,7 @@ GenRs::show_type(const UnionBody &b, string t)
       }
 
       for (const auto& c : a.cases) {
-        prtop("{} {{ {}: {} }} = {} as i32,\n", int_qualified_declname(c),  a.decl.id, name_prefix + type_name(a.decl, false), enum_qualified_typename(c));
+        prtop("{} {{ {}: {} }} = {} as i32,\n", int_qualified_declname(c),  a.decl.id, name_prefix + type_name(a.decl, false), qualified_typename(c));
       }
       if (a.has_default) {
         std::format_to(
