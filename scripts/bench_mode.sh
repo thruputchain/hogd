@@ -8,7 +8,7 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
 if [[ "$OSTYPE" != "linux-gnu"* ]]; then
-  echo "Machine type unsupperted"
+  echo "Machine type unsupported"
   exit 1
 fi
 
