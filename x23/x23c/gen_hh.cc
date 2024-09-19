@@ -9,21 +9,6 @@ using namespace x23;
 
 using std::string_literals::operator""s;
 
-struct Join {
-  string str_;
-  bool first_ = true;
-
-  Join(string str) : str_(std::move(str)) {}
-  string get()
-  {
-    if (!first_)
-      return str_;
-    first_ = false;
-    return {};
-  }
-  void reset() { first_ = true; }
-};
-
 struct Gen {
   string top_;
   string bottom_;

@@ -38,6 +38,7 @@ add_executable(x23c
   ${CMAKE_CURRENT_BINARY_DIR}/parse.cc
   ${CMAKE_CURRENT_BINARY_DIR}/lex.cc
   gen_hh.cc
+  gen_rs.cc
   x23c.cc
 )
 
