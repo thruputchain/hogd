@@ -273,6 +273,8 @@ GenRs::show_type(const UnionBody &b, string t)
         name_prefix = "";
       }
 
+      prtop("//   {} {};\n", type_name(a.decl, false), a.decl.id);
+
       for (const auto& c : a.cases) {
         prtop("{} {{ {}: {} }} = {} as i32,\n", int_qualified_declname(c),  a.decl.id, name_prefix + type_name(a.decl, false), qualified_typename(c));
       }
