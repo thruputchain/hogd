@@ -34,10 +34,79 @@ x23c file.x
 
 `x23c` will create a `file.hh` containing the C++23 representation of
 your XDR types.  To compile source that includes `file.hh`, you will
-want to add `` `pkgconf --cflags x23` `` (including the backticks) to
-your `CXXFLAGS`, and `` `pkgconf --libs x23` `` to your `LIBS` or
-`LDADD`.
+want to make sure you have a C++23 compiler and add
+`-I/usr/local/include` to your `CXXFLAGS` as well as `-L/usr/local/lib
+-lx23` to your `LIBS` or `LDADD`.
 
+To ensure you have a C++23 compiler, you will likely want to use
+either `g++ -std=c++23` or `clang++ -std=c++23 -stdlib=libc++
+-fexperimental-library`.  (It does not work to use `clang++` with
+GCC's `libstdc++` or `g++` with LLVM's `libc++`.)
+
+### Integration with cmake
+
+There are two ways to integrate X23 with a cmake-based project.
+
+1. You can add X23 as a submodule to your project, in a subdirectory
+   of your project root called `x23`.  In that case, your top-level
+   `CMakeLists.txt` should start something like this:
+
+    ```
+    cmake_minimum_required(VERSION 3.28)
+    project(myproj)
+
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+    set(CMAKE_CXX_STANDARD 23)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(STATUS "Using Clang, setting libc++")
+        add_compile_options(-stdlib=libc++ -fexperimental-library)
+        add_link_options(-stdlib=libc++ -fexperimental-library)
+    endif()
+
+    add_subdirectory(x23)
+    ```
+
+1. The other way to use X23 is assuming it has been installed on your
+   system, in which case your top-level `CMakeLists.txt` file can look
+   like this:
+
+    ```
+    cmake_minimum_required(VERSION 3.30)
+    project(cmktest)
+
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+    # Only necessary if you installed x23 someplace non-standard
+    # list(APPEND CMAKE_PREFIX_PATH "/usr/local")
+
+    find_package(x23)
+    ```
+
+To compile XDR-format files ending `.x` into header files, you also
+have two options.
+
+1. The first option is to list `.x` files like normal source files in
+   the sources of an executable or library, and then to apply the
+   function `use_x23` to the target.  For example:
+
+    ```
+    add_executable(test test.cc myprot.x)
+    use_x23(test)
+    ```
+
+1. The other option is to use the `add_xdr` function to create an
+   "interface library" out of one or more `.x` files, and then to link
+   against this library.  The interface library does not actually
+   produce any object code, but linking against it will appropriately
+   adjust your include path and add the X23 library.  For example:
+
+    ```
+    add_xdr(protocol myprot.x)
+    add_executable(test test.cc)
+    target_link_libraries(test protocol)
+    ```
 
 ## XDR types
 
