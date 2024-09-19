@@ -4,6 +4,7 @@ add_subdirectory(crypto)
 add_subdirectory(runtime_trampoline)
 add_subdirectory(wasmi)
 add_subdirectory(runtime)
+add_subdirectory(xdr)
 
 # Build the main hogd library
 add_library(
