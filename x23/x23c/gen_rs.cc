@@ -266,8 +266,8 @@ GenRs::show_type(const UnionBody &b, string t)
         prtop("{} = {} as i32,\n", int_qualified_declname(c), qualified_typename(c));
       }
       if (a.has_default) {
-        default_decl = "default { _discriminant: i32 },";
-        default_match = std::format("{}::default{{_discriminant}} => *_discriminant,\n", t);
+        default_decl = std::format("default {{ {}: i32 }},", b.switch_id);
+        default_match = std::format("{0}::default{{ {1} }} => *{1} ,\n", t, b.switch_id);
       }
     }
     else
@@ -285,8 +285,8 @@ GenRs::show_type(const UnionBody &b, string t)
       if (a.has_default) {
         std::format_to(
           std::back_inserter(default_decl),
-          "default {{ _discriminant: i32, {}: {} }},", a.decl.id, type_name(a.decl, false));
-        default_match = std::format("{}::default{{_discriminant,..}} => *_discriminant,\n", t);
+          "default {{ {}: i32, {}: {} }},", b.switch_id, a.decl.id, type_name(a.decl, false));
+        default_match = std::format("{0}::default{{ {1},..}} => *{1},\n", t, b.switch_id);
 
       }
     }
@@ -295,7 +295,7 @@ GenRs::show_type(const UnionBody &b, string t)
   top_ += default_decl;
   top_ += "\n";
   bottom_ += std::format(R"(impl {0} {{
-    pub fn discriminant(&self) -> i32 {{
+    pub fn {2}(&self) -> i32 {{
         match self {{
             {1}
             _ => unsafe {{ *(self as *const Self as *const i32) }},
@@ -303,7 +303,7 @@ GenRs::show_type(const UnionBody &b, string t)
     }}
 }}
 
-)", t, default_match);
+)", t, default_match, b.switch_id);
 }
 
 void
