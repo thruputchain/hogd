@@ -1,0 +1,421 @@
+#include <map>
+#include <print>
+#include <ranges>
+
+#include "x23/cleanup.h"
+#include "x23c/defs.h"
+
+using namespace x23;
+
+using std::string_literals::operator""s;
+
+struct GenRs {
+  string top_;
+  string bottom_;
+  std::size_t indent_{};
+  vector<string> namespaces_;
+  vector<string> scopes_;
+
+  void process(const vector<Definition> &defs);
+
+  void show_def(const ConstDef &c)
+  {
+    show_comment(c.comment, true);
+    prtop("pub const {} : u32 = {};\n", c.id, c.val);
+  }
+  void show_def(const Typedef &d)
+  {
+    prtop("pub type {} = {};\n", d.id, type_name(d, true));
+  }
+  void show_def(const EnumDecl &t)
+  {
+    show_typespec(t.body, t.id);
+    prtop("\n");
+  }
+  void show_def(const StructDecl &t)
+  {
+    show_typespec(t.body, t.id);
+    prtop("\n");
+  }
+  void show_def(const UnionDecl &t)
+  {
+    show_typespec(t.body, t.id);
+    prtop("\n");
+  }
+  void show_def(const OpenNS &ns)
+  {
+    // Ignore
+  }
+  void show_def(const CloseNS &ns)
+  {
+    // Ignore
+  }
+  void show_def(const Literal &l) { top_ += l.lines; }
+  void show_def(const ProgDef &prog);
+
+  void show_decl(const Declaration &d, std::string name_prefix)
+  {
+    show_comment(d.comment, false);
+    if (holds_alternative<string>(d.type)) {
+      prtop("pub {} : {},\n", d.id, type_name(d, false));
+    } else {
+      prtop("pub {} : {},\n", d.id, name_prefix + "_" + type_name(d, false));
+    }
+  }
+
+  void
+  do_generations(std::string name_prefix, const TypeSpecifier &type);
+
+  void show_typespec(const TypeSpecifier &ts, string t)
+  {
+    visit([this, &t](const auto &v) { show_type(v, t); }, ts);
+  }
+
+  void show_type(const string &s, string) { prtop("{}", map_type(s)); }
+  void show_type(const EnumBody &e, string);
+  void show_type(const StructBody &s, string);
+  void show_type(const UnionBody &b, string);
+
+  void show_comment(std::string_view comment, bool chomp, string prefix = {});
+
+  static const string &map_type(const string &);
+  static const string &map_case(const string &);
+  static const string &map_bound(const string &);
+  string type_name(const Declaration &d, bool generate);
+
+  template<typename... Args>
+  void prtop(std::format_string<Args...> fmt, Args &&...args)
+  {
+    if (top_.empty() || top_.back() == '\n')
+      top_ += std::string(2 * indent_, ' ');
+    top_ += std::vformat(fmt.get(), std::make_format_args(args...));
+  }
+
+  auto open_scope(string close = {})
+  {
+    return Defer([this, indent = indent_, nsdepth = namespaces_.size(),
+                  sdepth = scopes_.size(), close = std::move(close)] {
+      indent_ = indent;
+      namespaces_.resize(nsdepth);
+      scopes_.resize(sdepth);
+      if (!close.empty())
+        prtop("{}", close);
+    });
+  }
+
+  auto open_brace()
+  {
+    prtop("{{\n");
+    auto ret = open_scope("}"s);
+    ++indent_;
+    return ret;
+  }
+
+  string join(auto &&v, string with)
+  {
+    string ret;
+    Join j(with);
+    for (const auto &n : v) {
+      ret += j.get();
+      ret += n;
+    }
+    return ret;
+  }
+
+  string ns() { return join(namespaces_, "::"); }
+
+  string scope(bool qualified = false)
+  {
+    string ret = qualified ? ns() + "::"s : ""s;
+    ret += join(scopes_, "::");
+    return ret;
+  }
+};
+
+void
+GenRs::process(const vector<Definition> &defs)
+{
+  for (const auto &d : defs) {
+    show_comment(d.comment, true);
+    visit(
+        [this](const auto &d) {
+          prtop("\n");
+          show_def(d);
+        },
+        d);
+  }
+}
+
+void
+GenRs::show_def(const ProgDef &prog)
+{
+  // unimplemented
+}
+
+void
+GenRs::show_type(const StructBody &s, string t)
+{
+  for (const auto &d : s) {
+    do_generations(t + "_" + d.id, d.type);
+  }
+
+  prtop("#[repr(C)]\n");
+  prtop("pub struct {} ", t);
+  auto _close = open_brace();
+  scopes_.push_back(t);
+  for (const auto &d : s) {
+    show_decl(d, t);
+  }
+}
+
+void
+GenRs::show_type(const EnumBody &e, string t)
+{
+  prtop("#[derive(Clone,PartialEq)]\n#[repr(i32)]\npub enum {} ", t);
+  auto _close = open_brace();
+  scopes_.push_back(t);
+  
+  bool first = true, skip_anyway = false;
+  for (const auto &cd : e) {
+    if (!cd.comment.empty()) {
+      if (!first)
+        top_ += '\n';
+      skip_anyway = true;
+      show_comment(cd.comment, false);
+    }
+    else if (skip_anyway) {
+      top_ += '\n';
+      skip_anyway = false;
+    }
+    first = false;
+    prtop("{} = {},\n", cd.id, cd.val);
+  }
+
+  bottom_ += std::format(R"(impl {0} {{
+  pub fn discriminant(self : {0}) -> i32 {{
+    self as i32
+  }}
+}})", t);
+
+}
+
+
+void
+GenRs::show_type(const UnionBody &b, string t)
+{
+  for (const auto& a : b.arms) {
+    auto const& d = a.decl;
+    do_generations(t + "_" + d.id, d.type);
+  }
+
+  prtop("#[repr(i32)]\n");
+  prtop("#[repr(C)]\n");
+  prtop("pub enum {}\n", t);
+  auto _close = open_brace();
+  scopes_.push_back(t);
+
+  const string switch_type = map_type(b.switch_type);
+
+  const bool is_enum = (switch_type == b.switch_type);
+
+  auto enum_qualified_typename = [&] (std::string c) {
+    if (is_enum) {
+      return b.switch_type + "::" + c;
+    } else {
+      return c;
+    }
+  };
+
+  auto int_qualified_declname = [&] (std::string c) {
+    if (!is_enum) {
+      return std::string("NUM") + c;
+    }
+    return c;
+  };
+  bool has_default = false;
+  bool has_void = false;
+  std::string default_decl = "";
+  for (const auto &a : b.arms) {
+    for (const auto &c : a.cases) {
+      prtop("// case {}:\n", c);
+    }
+    if (a.has_default) {
+      has_default = true;
+      prtop("// default:\n");
+    }
+    show_comment(a.decl.comment, false, "//   ");
+    if (a.decl.qual == Declaration::kVoid) {
+      has_void = true;
+      prtop("//   void;\n");
+      for (const auto& c : a.cases) {
+        prtop("{} = {} as i32,\n", int_qualified_declname(c), enum_qualified_typename(c));
+      }
+      if (a.has_default) {
+        default_decl = "DEFAULT,\n";
+      }
+    }
+    else
+    {
+      std::string name_prefix = t + "_";
+      if (holds_alternative<string>(a.decl.type)) {
+        name_prefix = "";
+      }
+
+      for (const auto& c : a.cases) {
+        prtop("{} {{ {} : {} }} = {} as i32,\n", int_qualified_declname(c),  a.decl.id, name_prefix + type_name(a.decl, false), enum_qualified_typename(c));
+      }
+      if (a.has_default) {
+        std::format_to(
+          std::back_inserter(default_decl),
+          "DEFAULT {{ {} : {} }},\n", a.decl.id, type_name(a.decl, false));
+      }
+    }
+  }
+  top_ += std::string(2 * indent_, ' ');
+  top_ += default_decl;
+}
+
+void
+GenRs::show_comment(std::string_view comment, bool chomp, string prefix)
+{
+  constexpr auto split = [](std::string_view sv) {
+    if (auto pos = sv.find('\n'); pos != sv.npos)
+      return std::pair{sv.substr(0, pos + 1), sv.substr(pos + 1)};
+    return std::pair{sv, std::string_view{}};
+  };
+  constexpr auto startcol = [](std::string_view sv) {
+    size_t pos = 0, col = 1;
+    for (; pos < sv.size(); ++pos) {
+      if (sv[pos] == '\t')
+        col += 8 - ((col - 1) % 8);
+      else if (sv[pos] == ' ')
+        ++col;
+      else
+        break;
+    }
+    return std::pair{col, sv.substr(pos)};
+  };
+
+  if (comment.empty())
+    return;
+
+  if (chomp) {
+    if (comment.back() == '\n') {
+      top_ += '\n';
+      comment = comment.substr(0, comment.size() - 1);
+    }
+  }
+
+  auto [first, rest] = split(comment);
+  size_t left;
+  tie(left, first) = startcol(first);
+  prtop("{}{}", prefix, first);
+  while (!rest.empty()) {
+    tie(first, rest) = split(rest);
+    std::string_view::size_type col;
+    tie(col, first) = startcol(first);
+    prtop("{}{}{}", prefix, col <= left ? ""s : std::string(col - left, ' '),
+          first);
+  }
+}
+
+const string &
+GenRs::map_type(const string &t)
+{
+  static const std::map<string, string> type_map{
+      {"int", "i32"},    {"unsigned int", "u32"},
+      {"hyper", "i64"},  {"unsigned hyper", "u64"},
+      {"opaque", "u8"},
+  };
+  if (auto it = type_map.find(t); it != type_map.end())
+    return it->second;
+  else
+    return t;
+}
+
+const string &
+GenRs::map_case(const string &c)
+{
+  static const std::map<string, string> case_map{
+      {"TRUE", "true"},
+      {"FALSE", "false"},
+  };
+  if (auto it = case_map.find(c); it != case_map.end())
+    return it->second;
+  else
+    return c;
+}
+
+const string &
+GenRs::map_bound(const string &b)
+{
+  static const string defbound = "0xffffffff";
+  if (b.empty())
+    return defbound;
+  return b;
+}
+
+void 
+GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
+{
+  if (holds_alternative<string>(type)) {
+    return;
+  }
+  show_typespec(type, name_prefix);
+  top_ += "\n\n";
+}
+
+string
+GenRs::type_name(const Declaration &d, bool generate)
+{
+  using enum Declaration::Qual;
+
+  if (d.qual == kVoid)
+    return "()";
+
+  string tname;
+  if (holds_alternative<string>(d.type))
+    tname = map_type(get<string>(d.type));
+  else {
+    if (holds_alternative<EnumBody>(d.type))
+      tname = d.id;
+    else
+      tname = d.id;
+    if (generate) {
+      show_typespec(d.type, d.id);
+    }
+  }
+
+  switch (d.qual) {
+  case kScalar:
+    return tname;
+  case kPtr:
+    return std::format("alloc::boxed::Box<{}>", tname);
+  case kArray:
+    return std::format("[{}; {}]", tname, d.bound);
+  case kVec:
+    if (tname == "string"s)
+      return std::format("alloc::boxed::Box<[u8]>");// ignoring bounds, for now : map_bound(d.bound));
+    return std::format("alloc::boxed::Box<[{}]>", tname); // Ignoring bounds, for nowmap_bound(d.bound));
+  default:
+    return {}; // suppress warnings
+  }
+}
+
+string
+gen_rs(vector<Definition> *defs)
+{
+  GenRs gs;
+  gs.prtop(R"(// -*-Rust-*-
+
+#![allow(non_camel_case_types)]
+
+)");
+  gs.process(*defs);
+  return gs.top_ + R"(
+//
+// XDR internals below this point
+//
+
+)" + gs.bottom_;
+}

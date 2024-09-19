@@ -206,6 +206,22 @@ void yyerror(YYLTYPE *loc, XdrCtx *, string, bool warn_only = false);
                  yyscan_t yyscanner, XdrCtx *xc)
 
 std::string gen_hh(vector<Definition> *defs);
+std::string gen_rs(vector<Definition> *defs);
+
+struct Join {
+  string str_;
+  bool first_ = true;
+
+  Join(string str) : str_(std::move(str)) {}
+  string get()
+  {
+    if (!first_)
+      return str_;
+    first_ = false;
+    return {};
+  }
+  void reset() { first_ = true; }
+};
 
 #ifndef FLEX_SCANNER
 #include "x23c/lex.hh"
