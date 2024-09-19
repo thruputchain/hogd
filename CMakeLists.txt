@@ -70,7 +70,6 @@ ExternalProject_Add(libsodium
     BUILD_COMMAND make -j${N}
     INSTALL_COMMAND ""  # Skip installation step
 )
-
 ExternalProject_Get_Property(libsodium binary_dir)
 set(LIBSODIUM_PCFILEDIR "${binary_dir}")
 set(LIBSODIUM_TOP_SRCDIR "${CMAKE_SOURCE_DIR}/external/libsodium")
@@ -81,23 +80,19 @@ set(LIBSODIUM_INCLUDE_DIRS
 )
 set(LIBSODIUM_LIBRARIES
 "${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium.a")
-
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
+# Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
 add_subdirectory(x23)
+include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 
-# Add code directories
-include_directories(${CMAKE_SOURCE_DIR} ${X23_SOURCE_DIR} ${X23_BINARY_DIR})
-
+# Enable corrosion
 add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)
 
-add_definitions(-DCMAKE_ROOT_BINARY_DIR=\"${CMAKE_BINARY_DIR}\")
-
-# Add code directories
+# Finally, enable hogd's own code
 include_directories(${CMAKE_SOURCE_DIR})
-
+add_definitions(-DCMAKE_ROOT_BINARY_DIR=\"${CMAKE_BINARY_DIR}\")
 add_subdirectory(hogd)
-
