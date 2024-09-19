@@ -13,6 +13,7 @@ namespace {
 
 // add your init functions here
 const std::pair<InitFunc, std::string_view> init_tbl[] = {
+    {base_init, "base"},
     {crypto_init, "crypto"},
 };
 
