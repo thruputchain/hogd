@@ -367,7 +367,7 @@ concept implements_async_rpc = implements_rpc<T, VersMeta, Async, ExtraArgs...>;
 namespace detail {
 class RpcStreamImpl : public std::enable_shared_from_this<RpcStreamImpl> {
 public:
-  static inline size_t max_record_size = 1UZ << 24;
+  size_t max_record_size = 1UZ << 24;
   RefPtr<CoroPoll> cp_;
 
   void fail();
