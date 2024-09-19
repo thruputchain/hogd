@@ -16,12 +16,14 @@ struct GenRs {
   vector<string> namespaces_;
   vector<string> scopes_;
 
+  constexpr static int INDENT_WIDTH = 4;
+
   void process(const vector<Definition> &defs);
 
   void show_def(const ConstDef &c)
   {
     show_comment(c.comment, true);
-    prtop("pub const {} : u32 = {};\n", c.id, c.val);
+    prtop("pub const {}: u32 = {};\n", c.id, c.val);
   }
   void show_def(const Typedef &d)
   {
@@ -57,9 +59,9 @@ struct GenRs {
   {
     show_comment(d.comment, false);
     if (holds_alternative<string>(d.type)) {
-      prtop("pub {} : {},\n", d.id, type_name(d, false));
+      prtop("pub {}: {},\n", d.id, type_name(d, false));
     } else {
-      prtop("pub {} : {},\n", d.id, name_prefix + "_" + type_name(d, false));
+      prtop("pub {}: {},\n", d.id, name_prefix + "_" + type_name(d, false));
     }
   }
 
@@ -87,7 +89,7 @@ struct GenRs {
   void prtop(std::format_string<Args...> fmt, Args &&...args)
   {
     if (top_.empty() || top_.back() == '\n')
-      top_ += std::string(2 * indent_, ' ');
+      top_ += std::string(INDENT_WIDTH * indent_, ' ');
     top_ += std::vformat(fmt.get(), std::make_format_args(args...));
   }
 
@@ -171,7 +173,7 @@ GenRs::show_type(const StructBody &s, string t)
 void
 GenRs::show_type(const EnumBody &e, string t)
 {
-  prtop("#[derive(Clone,PartialEq)]\n#[repr(i32)]\npub enum {} ", t);
+  prtop("#[derive(Clone, PartialEq)]\n#[repr(i32)]\npub enum {} ", t);
   auto _close = open_brace();
   scopes_.push_back(t);
   
@@ -192,9 +194,9 @@ GenRs::show_type(const EnumBody &e, string t)
   }
 
   bottom_ += std::format(R"(impl {0} {{
-  pub fn discriminant(self : {0}) -> i32 {{
-    self as i32
-  }}
+    pub fn discriminant(self: {0}) -> i32 {{
+        self as i32
+    }}
 }})", t);
 
 }
@@ -210,7 +212,7 @@ GenRs::show_type(const UnionBody &b, string t)
 
   prtop("#[repr(i32)]\n");
   prtop("#[repr(C)]\n");
-  prtop("pub enum {}\n", t);
+  prtop("pub enum {} ", t);
   auto _close = open_brace();
   scopes_.push_back(t);
 
@@ -262,16 +264,16 @@ GenRs::show_type(const UnionBody &b, string t)
       }
 
       for (const auto& c : a.cases) {
-        prtop("{} {{ {} : {} }} = {} as i32,\n", int_qualified_declname(c),  a.decl.id, name_prefix + type_name(a.decl, false), enum_qualified_typename(c));
+        prtop("{} {{ {}: {} }} = {} as i32,\n", int_qualified_declname(c),  a.decl.id, name_prefix + type_name(a.decl, false), enum_qualified_typename(c));
       }
       if (a.has_default) {
         std::format_to(
           std::back_inserter(default_decl),
-          "DEFAULT {{ {} : {} }},\n", a.decl.id, type_name(a.decl, false));
+          "DEFAULT {{ {}: {} }},\n", a.decl.id, type_name(a.decl, false));
       }
     }
   }
-  top_ += std::string(2 * indent_, ' ');
+  top_ += std::string(INDENT_WIDTH * indent_, ' ');
   top_ += default_decl;
 }
 
@@ -409,7 +411,6 @@ gen_rs(vector<Definition> *defs)
   gs.prtop(R"(// -*-Rust-*-
 
 #![allow(non_camel_case_types)]
-
 )");
   gs.process(*defs);
   return gs.top_ + R"(
@@ -417,5 +418,5 @@ gen_rs(vector<Definition> *defs)
 // XDR internals below this point
 //
 
-)" + gs.bottom_;
+)" + gs.bottom_ + "\n";
 }
