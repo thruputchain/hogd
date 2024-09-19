@@ -6,7 +6,6 @@ check_cxx_source_compiles([=[
 int
 main()
 {
-  auto st = std::stacktrace::current();
-  return 0;
+  static_assert(__cpp_lib_stacktrace >= 202011L, "missing stacktrace");
 }
 ]=] HAVE_CXX_STACKTRACE)
