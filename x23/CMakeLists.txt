@@ -43,16 +43,18 @@ configure_file(
 set(X23_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(X23_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
-if(NOT X23_IS_TOP_LEVEL)
-  set(X23_SOURCE_DIR ${X23_SOURCE_DIR} PARENT_SCOPE)
-  set(X23_BINARY_DIR ${X23_BINARY_DIR} PARENT_SCOPE)
-endif()
-
 # Determine the x23c executable
 if(CMAKE_CROSSCOMPILING)
   find_program(X23C_EXECUTABLE x23c REQUIRED)
 else()
-  set(X23C_EXECUTABLE $<TARGET_FILE:x23c>)
+  set(X23C_EXECUTABLE "$<TARGET_FILE:x23c>")
+endif()
+message(STATUS "X23C_EXECUTABLE is ${X23C_EXECUTABLE}")
+
+if(NOT X23_IS_TOP_LEVEL)
+  set(X23_SOURCE_DIR ${X23_SOURCE_DIR} PARENT_SCOPE)
+  set(X23_BINARY_DIR ${X23_BINARY_DIR} PARENT_SCOPE)
+  set(X23C_EXECUTABLE ${X23C_EXECUTABLE} PARENT_SCOPE)
 endif()
 
 function(add_xdr target_name)
@@ -64,7 +66,7 @@ function(add_xdr target_name)
     add_custom_command(
       OUTPUT ${output_file}
       COMMAND ${X23C_EXECUTABLE} -o ${output_file} ${xdr_file}
-      DEPENDS ${xdr_file}
+      DEPENDS ${xdr_file} ${X23C_EXECUTABLE}
       COMMENT "Generating ${output_file} from ${xdr_file}"
     )
     list(APPEND xdr_headers ${output_file})

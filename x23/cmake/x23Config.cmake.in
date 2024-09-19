@@ -3,13 +3,24 @@
 if (NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 23)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(STATUS "Using Clang, setting libc++")
+    add_compile_options(-stdlib=libc++ -fexperimental-library)
+    add_link_options(-stdlib=libc++ -fexperimental-library)
+  endif()
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/x23Targets.cmake")
 
 get_target_property(x23_INCLUDE_DIRS x23 INTERFACE_INCLUDE_DIRECTORIES)
 
-set_and_check(X23C_EXECUTABLE "${PACKAGE_PREFIX_DIR}/bin/x23c")
+if(CMAKE_CROSSCOMPILING)
+  find_program(X23C_EXECUTABLE x23c REQUIRED)
+else()
+  set_and_check(X23C_EXECUTABLE
+    "${PACKAGE_PREFIX_DIR}/bin/x23c${CMAKE_EXECUTABLE_SUFFIX}")
+endif()
+message(STATUS "X23C_EXECUTABLE is ${X23C_EXECUTABLE}")
 
 #
 # Creates a header-only interface library from one or more .x files.
