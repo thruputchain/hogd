@@ -48,16 +48,40 @@ if(NOT X23_IS_TOP_LEVEL)
   set(X23_BINARY_DIR ${X23_BINARY_DIR} PARENT_SCOPE)
 endif()
 
+# Determine the x23c executable
+if(CMAKE_CROSSCOMPILING)
+  find_program(X23C_EXECUTABLE x23c REQUIRED)
+else()
+  set(X23C_EXECUTABLE $<TARGET_FILE:x23c>)
+endif()
+
+function(add_xdr target_name)
+  set(xdr_headers)
+  foreach(xdr_file IN LISTS ARGN)
+    set(xdr_file "${CMAKE_CURRENT_SOURCE_DIR}/${xdr_file}")
+    get_filename_component(base_name ${xdr_file} NAME_WLE)
+    set(output_file "${CMAKE_CURRENT_BINARY_DIR}/${base_name}.hh")
+    add_custom_command(
+      OUTPUT ${output_file}
+      COMMAND ${X23C_EXECUTABLE} -o ${output_file} ${xdr_file}
+      DEPENDS ${xdr_file}
+      COMMENT "Generating ${output_file} from ${xdr_file}"
+    )
+    list(APPEND xdr_headers ${output_file})
+  endforeach()
+
+  add_library(${target_name} INTERFACE)
+  target_include_directories(${target_name}
+    INTERFACE "${CMAKE_CURRENT_BINARY_DIR}")
+  target_link_libraries(${target_name} INTERFACE x23)
+
+  add_custom_target(build_${target_name} ALL DEPENDS ${xdr_headers})
+  add_dependencies(${target_name} build_${target_name})
+endfunction()
+
 function(use_x23 target)
   get_target_property(target_sources ${target} SOURCES)
   set(generated_headers)
-
-  # Determine the x23c executable
-  if(CMAKE_CROSSCOMPILING)
-    find_program(X23C_EXECUTABLE x23c REQUIRED)
-  else()
-    set(X23C_EXECUTABLE $<TARGET_FILE:x23c>)
-  endif()
 
   foreach(source ${target_sources})
     if(${source} MATCHES ".*\\.x$")
