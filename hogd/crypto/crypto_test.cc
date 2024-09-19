@@ -56,6 +56,45 @@ TEST(Siphash24, SomeInput)
   EXPECT_NE(siphash24(input, key), siphash24(input, key2));
 }
 
+TEST(LtHash, Commutes)
+{
+  std::vector<uint8_t> bytes = {0, 1, 2, 3};
+  std::vector<uint8_t> bytes2 = {3, 2, 1, 0};
+  std::vector<uint8_t> bytes3 = {3, 2, 0, 1};
+
+  auto input = std::as_bytes(std::span(bytes));
+  auto input2 = std::as_bytes(std::span(bytes2));
+  auto input3 = std::as_bytes(std::span(bytes3));
+
+  const LtHash16 zero{}, a(input), b(input2), c(input3);
+
+  LtHash16 x = a;
+  x += zero;
+
+  EXPECT_NE(zero, a);
+  EXPECT_NE(a, b);
+  EXPECT_NE(b, c);
+
+  EXPECT_EQ(x, a);
+
+  x += b;
+  EXPECT_NE(x, a);
+
+  LtHash16 xp = b;
+  xp += a;
+  EXPECT_EQ(x, xp);
+
+  xp -= c;
+
+  LtHash16 xpp = a;
+  xpp -= c;
+  xpp += b;
+
+  EXPECT_EQ(xpp, xp);
+
+  EXPECT_NE(xpp, a);
+}
+
 } // namespace hogd
 
 int

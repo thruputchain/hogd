@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -11,10 +12,66 @@
 
 #include "hogd/base/types.h"
 
+#include "hogd/crypto/blake2xb.h"
+
 namespace hogd {
 
 using Siphash24Key = std::array<uint8_t, 16>;
 using SHA256Hash = std::array<uint8_t, 32>;
+
+// Implementation of LtHash, the homomorphic hash function
+// described and analyzed in:
+// https://eprint.iacr.org/2019/227.pdf
+// Securing Update Propagation with Homomorphic Hashing
+// Kevin Lewi, Wonho Kim, Ilya Maykov, Stephen Weis
+//
+// Not collision-resistant for multisets, due to the relatively
+// low modulus (2^16 or 2^32).
+//
+// The hash function hashes an input element to a bitstring of length
+// N * # of bits in the modulus (here, 16 or 32)
+// This is interpreted as N elements in Z mod 2^modulus (QType)
+// Addition/subtraction follows coordinatewise.
+namespace detail {
+template<uint16_t N, std::unsigned_integral QType> struct LtHash {
+  std::array<QType, N> data_;
+
+  constexpr static uint32_t kByteLen = N * (sizeof(QType));
+
+  // ctor for a set containing one element
+  LtHash(std::span<const std::byte> input)
+  {
+    blake2xb<kByteLen>(input, std::as_writable_bytes(std::span(data_)));
+  }
+
+  // ctor for the empty set
+  LtHash() = default;
+
+  // clang and gcc both seem to compile to SIMD here
+  LtHash &operator+=(LtHash const &other)
+  {
+    for (uint16_t i = 0; i < N; i++) {
+      data_[i] += other.data_[i];
+    }
+    return *this;
+  }
+
+  LtHash &operator-=(LtHash const &other)
+  {
+    for (uint16_t i = 0; i < N; i++) {
+      data_[i] -= other.data_[i];
+    }
+    return *this;
+  }
+
+  bool operator==(const LtHash &other) const = default;
+};
+
+} // namespace detail
+
+using LtHash16 = detail::LtHash<1024, uint16_t>;
+// LtHash20 not implemented -- that requires an extra modulo step
+using LtHash32 = detail::LtHash<1024, uint32_t>;
 
 // sha256 returns a SHA256 hash of the input.
 inline SHA256Hash

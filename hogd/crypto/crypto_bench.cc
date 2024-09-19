@@ -39,6 +39,32 @@ bm_siphash24(benchmark::State &state)
 }
 BENCHMARK(bm_siphash24)->RangeMultiplier(2)->Range(8, 8 << 10); // NOLINT
 
+void
+bm_lthash16(benchmark::State &state)
+{
+  if (!crypto_init())
+    std::terminate();
+  std::vector<std::byte> in(state.range(0));
+  for (auto _ : state)
+    LtHash16 x(in);
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
+                          static_cast<int64_t>(state.range(0)));
+}
+BENCHMARK(bm_lthash16)->RangeMultiplier(2)->Range(8, 8 << 10); // NOLINT
+
+void
+bm_lthash32(benchmark::State &state)
+{
+  if (!crypto_init())
+    std::terminate();
+  std::vector<std::byte> in(state.range(0));
+  for (auto _ : state)
+    LtHash32 x(in);
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
+                          static_cast<int64_t>(state.range(0)));
+}
+BENCHMARK(bm_lthash32)->RangeMultiplier(2)->Range(8, 8 << 10); // NOLINT
+
 } // namespace hogd
 
 int
