@@ -47,11 +47,10 @@ public:
   // raw_code returns the error code as an int.
   int raw_code() const { return static_cast<int>(std::to_underlying(code_)); }
 
-  // In narrow cases, is UB to cast raw_code to an enum, or
-  // if the enum has a specified type, raw_code is converted to that type and
-  // then cast. That's not UB but still potentially bizarre for the case of enum
-  // errors. Essentially, anything not satisfying is_in_enum_range() indicates a
-  // serious bug.
+  // is_in_enum_range returns true if a raw code lands within the enumeration.
+  //
+  // This is a good thing to check or assert since it is undefined behavior to
+  // cast a value to an enum class if it is outside the range.
   constexpr static bool is_in_enum_range(int raw_code)
   {
     using underlying_enum = std::underlying_type_t<Enum>;

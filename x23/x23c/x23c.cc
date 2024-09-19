@@ -137,6 +137,8 @@ main(int argc, char **argv)
   bool strict = false;
   std::filesystem::path outfile;
 
+  bool rust_module = false;
+
   int optind;
   for (optind = 1; optind < argc; ++optind) {
     std::string opt{argv[optind]};
@@ -149,6 +151,9 @@ main(int argc, char **argv)
     else if (opt == "--version") {
       std::println("{}", X23_PACKAGE_STRING);
       exit(0);
+    }
+    else if (opt == "--rust") {
+      rust_module = true;
     }
     else if (opt == "--strict")
       strict = true;
@@ -180,9 +185,19 @@ main(int argc, char **argv)
   if (outfile.empty()) {
     outfile = infile.filename();
     if (outfile.extension() == ".x")
-      outfile.replace_extension(".hh");
+      if (rust_module) {
+        outfile.replace_extension(".rs");
+      } 
+      else {
+        outfile.replace_extension(".hh");
+      }
     else
-      outfile += ".hh";
+      if (rust_module) {
+        outfile += ".rs";
+      }
+      else {
+        outfile += ".hh";
+      }
   }
 
   XdrCtx ctx{.file = infile};
@@ -199,7 +214,13 @@ main(int argc, char **argv)
     exit(1);
   }
 
-  auto res = gen_hh(&ctx.defs);
+  std::string res;
+
+  if (rust_module) {
+    res = gen_rs(&ctx.defs);
+  } else {
+    res = gen_hh(&ctx.defs);
+  }
 
   int outfd = outfile == "-"
                   ? 1
