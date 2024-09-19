@@ -352,7 +352,7 @@ private:
         msg_set_reply_stat(&rmsg, SYSTEM_ERR);
         std::println(stderr, "{}::{}: {}", ProcMeta::version_meta::version_name,
                      ProcMeta::proc_name, e.what());
-        if (!std::same_as<Logger, RpcNoLogger>)
+        if constexpr (!std::same_as<Logger, RpcNoLogger>)
           d_.logger_.template log_server<ProcMeta>(rmsg,
                                                    uformat(" {}", e.what()));
         co_return make_record(rmsg);

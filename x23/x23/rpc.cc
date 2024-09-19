@@ -151,9 +151,8 @@ RpcStreamImpl::serve_call(const rpc_msg &call, BufView args)
   auto _r = shared_from_this();
   const call_body &cb = call.body.cbody();
   rpc_msg res{.xid = call.xid};
-  msg_set_reply_stat(&res, SUCCESS);
 
-  if (cb.rpcvers != 2) {
+  if (cb.rpcvers != 2) [[unlikely]] {
     msg_set_reply_stat(&res, RPC_MISMATCH);
     send_msg(res);
     co_return;
