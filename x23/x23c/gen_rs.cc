@@ -197,7 +197,9 @@ GenRs::show_type(const EnumBody &e, string t)
     pub fn discriminant(self: {0}) -> i32 {{
         self as i32
     }}
-}})", t);
+}}
+
+)", t);
 
 }
 
@@ -244,11 +246,12 @@ GenRs::show_type(const UnionBody &b, string t)
 
   auto int_qualified_declname = [&] (std::string c) {
     if (!is_enum) {
-      return std::string("NUM") + c;
+      return std::string("_") + c;
     }
     return c;
   };
   std::string default_decl = "";
+  std::string default_match = "";
   for (const auto &a : b.arms) {
     for (const auto &c : a.cases) {
       prtop("// case {}:\n", c);
@@ -263,7 +266,8 @@ GenRs::show_type(const UnionBody &b, string t)
         prtop("{} = {} as i32,\n", int_qualified_declname(c), qualified_typename(c));
       }
       if (a.has_default) {
-        default_decl = "DEFAULT,\n";
+        default_decl = "default { _discriminant: i32 },";
+        default_match = std::format("{}::default{{_discriminant}} => *_discriminant,\n", t);
       }
     }
     else
@@ -281,12 +285,25 @@ GenRs::show_type(const UnionBody &b, string t)
       if (a.has_default) {
         std::format_to(
           std::back_inserter(default_decl),
-          "DEFAULT {{ {}: {} }},\n", a.decl.id, type_name(a.decl, false));
+          "default {{ _discriminant: i32, {}: {} }},", a.decl.id, type_name(a.decl, false));
+        default_match = std::format("{}::default{{_discriminant,..}} => *_discriminant,\n", t);
+
       }
     }
   }
   top_ += std::string(INDENT_WIDTH * indent_, ' ');
   top_ += default_decl;
+  top_ += "\n";
+  bottom_ += std::format(R"(impl {0} {{
+    pub fn discriminant(&self) -> i32 {{
+        match self {{
+            {1}
+            _ => unsafe {{ *(self as *const Self as *const i32) }},
+        }}
+    }}
+}}
+
+)", t, default_match);
 }
 
 void
