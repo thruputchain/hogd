@@ -15,25 +15,25 @@ namespace hogd {
 namespace test {
 
 HostFnStatus<uint64_t>
-throw_runtime_error(HostCallContext *)
+throw_runtime_error(HostCallContext * /*unused*/)
 {
   throw std::runtime_error("bad fn\n");
 }
 
 HostFnStatus<uint64_t>
-throw_unrecoverable_host_error(HostCallContext *)
+throw_unrecoverable_host_error(HostCallContext * /*unused*/)
 {
   return HostFnError{HostFnErrorCode::kUnrecoverableUnknown};
 }
 
 HostFnStatus<uint64_t>
-throw_bad_alloc(HostCallContext *)
+throw_bad_alloc(HostCallContext * /*unused*/)
 {
   throw std::bad_alloc();
 }
 
 HostFnStatus<uint64_t>
-good_call(HostCallContext *)
+good_call(HostCallContext * /*unused*/)
 {
   return 10;
 }
@@ -54,7 +54,7 @@ bool reentrance_hit = false;
 } // namespace
 
 HostFnStatus<uint64_t>
-reentrance(HostCallContext *)
+reentrance(HostCallContext * /*unused*/)
 {
   reentrance_hit = true;
 

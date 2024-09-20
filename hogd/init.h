@@ -7,9 +7,6 @@
 
 namespace hogd {
 
-// must be called before using logging
-extern void log_init(std::unique_ptr<Logger> logger);
-
 // InitFunc is the type for each initialization function
 using InitFunc = GStatus<void> (*)();
 

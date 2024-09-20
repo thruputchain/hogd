@@ -20,13 +20,13 @@ namespace hogd {
 namespace test {
 
 HostFnStatus<uint64_t>
-arity0(HostCallContext *)
+arity0(HostCallContext * /*unused*/)
 {
   return 100;
 }
 
 HostFnStatus<uint64_t>
-arity1(HostCallContext *, uint64_t arg0)
+arity1(HostCallContext * /*unused*/, uint64_t arg0)
 {
   if (arg0 != 1) {
     throw std::runtime_error("invalid arity check");
@@ -35,7 +35,7 @@ arity1(HostCallContext *, uint64_t arg0)
 }
 
 HostFnStatus<uint64_t>
-arity2(HostCallContext *, uint64_t arg0, uint64_t arg1)
+arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1)
 {
   if (arg0 != 1 || arg1 != 2) {
     throw std::runtime_error("invalid arity check");
@@ -44,7 +44,8 @@ arity2(HostCallContext *, uint64_t arg0, uint64_t arg1)
 }
 
 HostFnStatus<uint64_t>
-arity3(HostCallContext *, uint64_t arg0, uint64_t arg1, uint64_t arg2)
+arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
     throw std::runtime_error("invalid arity check");
@@ -53,8 +54,8 @@ arity3(HostCallContext *, uint64_t arg0, uint64_t arg1, uint64_t arg2)
 }
 
 HostFnStatus<uint64_t>
-arity4(HostCallContext *, uint64_t arg0, uint64_t arg1, uint64_t arg2,
-       uint64_t arg3)
+arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2, uint64_t arg3)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
     throw std::runtime_error("invalid arity check");
@@ -63,8 +64,8 @@ arity4(HostCallContext *, uint64_t arg0, uint64_t arg1, uint64_t arg2,
 }
 
 HostFnStatus<uint64_t>
-arity5(HostCallContext *, uint64_t arg0, uint64_t arg1, uint64_t arg2,
-       uint64_t arg3, uint64_t arg4)
+arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2, uint64_t arg3, uint64_t arg4)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5) {
     throw std::runtime_error("invalid arity check");
