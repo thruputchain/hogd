@@ -103,8 +103,10 @@ struct DeferredResolutionSetEntry {
 	uint64 escrowed_coins;
 };
 
-// Not how this would be stored on disk, probably
-// Materializing this could be expensive
+// This is a logical description of the object,
+// not how it would (likely) be stored on disk.
+// As per discussion, HashSet might be much larger than other objects,
+// and/or divided over multiple shards
 struct StorageObject
 {
 	union switch (StorageObjectType type)
@@ -132,9 +134,34 @@ struct StorageObject
 	uint64 escrowed_coins;
 };
 
-program StorageInterface {
-	version StorageInterfaceV1 {
+// StorageObject, restricted to the fields
+// that have bounded, static size
+// and can reasonably(?) be stored as a single
+// DB entry on one shard
+struct StaticStorageObject {
+	union switch (StorageObjectType type)
+	{
+	case BYTESTRING:
+		Bytestring bytestring;
 
-	} = 1;
-} = 0x11111113;
+	case NONNEGATIVE_INT64:
+		int64 nonnegative_int64;
+	case NONNEGATIVE_INT128:
+		int128 nonnegative_int128;
+	// ... others
+
+	case ASSET_128:
+		int128 asset_128;
+
+	case HASH_SET:
+		void;
+
+	case DEFERRED_RESOLUTION_SET:
+		void;
+
+	} body;
+
+	uint64 escrowed_coins;
+};
+
 
