@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <assert>
 #include <cstddef>
 #include <cstdint>
 #include <span>
