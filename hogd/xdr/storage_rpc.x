@@ -17,6 +17,11 @@ union ExpectedStaticStorageObject switch(StorageRPCError error)
 		void;
 };
 
+struct StorageDeltaVec {
+	AddressAndKey addr_key;
+	StorageDelta deltas<>;
+};
+
 program StorageInterface {
 	version StorageInterfaceV1 {
 
@@ -31,7 +36,7 @@ program StorageInterface {
 		//   WRONG_SHARD if _any_ of the input deltas are to the wrong shard
 		//   Then, APPLY_FAILED if _any_ of the deltas fail
 		// No-op whenever error is not NONE
-		StorageRPCError try_commit_deltas(StorageDelta<>, SHA256Hash, SHA256Hash) = 0;
+		StorageRPCError try_commit_deltas(StorageDeltaVec<>, SHA256Hash, SHA256Hash) = 0;
 
 		// Rollback all of the StorageDeltas sent by a transaction in the current block.
 		// Arguments:
