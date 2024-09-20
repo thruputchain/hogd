@@ -50,18 +50,43 @@ class UnionPrinter:
         return result
 
 class StrPrinter:
-    "Print x23::Str"
+    "Print x23::Str, and x23::BoundedStr types"
 
-    def __init__ (self, val):
+    def __init__(self, val):
         self.__val = val
 
-    def to_string (self):
+    def to_string(self):
         s = self.__val['b_']['begin']
         l = self.__val['b_']['end'] - s
         return s.lazy_string(length = l)
 
     def display_hint(self):
         return 'string'
+
+class VecPrinter:
+    "Print x23::Vec types"
+
+    def __init__(self, val):
+        self.__val = val
+
+    def to_string(self):
+        begin = self.__val['b_']['begin']
+        end = self.__val['b_']['end']
+        length = int(end-begin)
+        return f"x23::Vec of length {length}"
+
+    def display_hint(self):
+        return 'array'
+
+    def children(self):
+        begin = self.__val['b_']['begin']
+        end = self.__val['b_']['end']
+        count = 0
+
+        while begin != end:
+            yield f'[{count}]', begin.dereference()
+            begin = begin + 1
+            count = count + 1
 
 class Constants:
     "A cache for constant values, such as enum tags"
@@ -88,8 +113,11 @@ def xdr_category(val):
         return None
 
 def x23_lookup_function(val):
-    if re.match(r'^x23::BoundedStr<', val.type.strip_typedefs().name):
+    typename = val.type.strip_typedefs().name
+    if re.match(r'^x23::BoundedStr<', typename):
         return StrPrinter(val)
+    elif re.match(r'^x23::Vec<', typename):
+        return VecPrinter(val)
     cat = xdr_category(val)
     if cat == None:
         return None
