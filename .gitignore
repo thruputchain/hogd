@@ -10,10 +10,6 @@
 /compile_commands.json
 Cargo.lock
 Testing/**
-Testing/**
 [._]*.sw[a-p]
 bcheck/**
-bcheck_gcc/**
-bcheck_llvm/**
-build/**
 build/**

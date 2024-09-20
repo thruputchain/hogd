@@ -1,19 +1,16 @@
-#include <gtest/gtest.h>
-
-/**
- * Fairly uninteresting as test cases go
- * but this behavior is critical to exactly maintain,
- * and very easy to mess up with a copy-paste bug
- */
-
-#include "hogd/base/types.h"
-#include "hogd/runtime/status.h"
-#include "hogd/runtime/test_load_wasm.h"
-#include "hogd/runtime/wasmi_runtime.h"
+// Fairly uninteresting as test cases go but this behavior is critical to
+// exactly maintain, and very easy to mess up with a copy-paste bug.
 
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+
+#include <gtest/gtest.h>
+
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 namespace hogd {
 
