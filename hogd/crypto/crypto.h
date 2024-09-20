@@ -21,12 +21,14 @@ using SHA256Hash = std::array<uint8_t, 32>;
 
 // Implementation of LtHash, the homomorphic hash function
 // described and analyzed in:
-// https://eprint.iacr.org/2019/227.pdf
+//
 // Securing Update Propagation with Homomorphic Hashing
 // Kevin Lewi, Wonho Kim, Ilya Maykov, Stephen Weis
+// https://eprint.iacr.org/2019/227.pdf
 //
 // Not collision-resistant for multisets, due to the relatively
-// low modulus (2^16 or 2^32).
+// low modulus (2^16 or 2^32).  But applied to hashsets with unique elements,
+// this is not a problem.
 //
 // The hash function hashes an input element to a bitstring of length
 // N * # of bits in the modulus (here, 16 or 32)
@@ -50,6 +52,8 @@ template<uint16_t N, std::unsigned_integral QType> struct LtHash {
   // clang and gcc both seem to compile to SIMD here
   LtHash &operator+=(LtHash const &other)
   {
+    // The folly implementation uses explicit AVX instructions.
+    // TODO(geoff) check whether that brings noticeable performance improvement
     for (uint16_t i = 0; i < N; i++) {
       data_[i] += other.data_[i];
     }
@@ -69,8 +73,11 @@ template<uint16_t N, std::unsigned_integral QType> struct LtHash {
 
 } // namespace detail
 
+// Parameter settings chosen as in https://eprint.iacr.org/2019/227.pdf,
+// Table 1
 using LtHash16 = detail::LtHash<1024, uint16_t>;
-// LtHash20 not implemented -- that requires an extra modulo step
+// LtHash20 = detail::LtHash<1008, uint20_t> not implemented -- that requires an extra modulo step,
+// and bit tricks to make a hypothetical uint20_t type efficient
 using LtHash32 = detail::LtHash<1024, uint32_t>;
 
 // sha256 returns a SHA256 hash of the input.
