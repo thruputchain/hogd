@@ -284,11 +284,13 @@ public:
   template<size_t MS>
   constexpr Vec(Vec<value_type, MS, allocator_type> &&other)
       noexcept(max_size() >= Vec<value_type, MS, allocator_type>::max_size())
-    : b_(other.b_)
   {
     if constexpr (other.max_size() > max_size())
       // Okay to throw, other will still delete memory
       check_size(other.size());
+    b_.begin = other.b_.begin;
+    b_.end = other.b_.end;
+    b_.bufend = other.b_.bufend;
     a_ = std::move(other.a_);
     other.b_ = {};
   }
@@ -583,6 +585,8 @@ public:
   }
 
 protected:
+  template<typename, size_t, typename> friend class Vec;
+
   static constexpr const char *tname() { return typeid(T).name(); }
 
   constexpr void shrink(size_type new_size) noexcept
