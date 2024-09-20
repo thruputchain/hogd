@@ -38,3 +38,6 @@ for CARGO_DIR in $CARGO_DIRS; do
     cargo fmt ${CF_FLAGS} --manifest-path=${CARGO_DIR} --message-format human
 done
 
+# xdr format
+find "${CODE_DIR}" -name '*.x' |\
+xargs ${CLANG_FORMAT} -i ${FFLAGS}
