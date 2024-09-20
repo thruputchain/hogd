@@ -16,7 +16,6 @@ add_executable(
 target_link_libraries(
   base_test
   base
-  protocol
   GTest::gtest_main
 )
 gtest_discover_tests(base_test)
