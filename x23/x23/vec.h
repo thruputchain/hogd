@@ -285,7 +285,7 @@ public:
   constexpr Vec(Vec<value_type, MS, allocator_type> &&other)
       noexcept(max_size() >= Vec<value_type, MS, allocator_type>::max_size())
   {
-    if constexpr (other.max_size() > max_size())
+    if constexpr (Vec<value_type, MS, allocator_type>::max_size() > max_size())
       // Okay to throw, other will still delete memory
       check_size(other.size());
     b_.begin = other.b_.begin;
