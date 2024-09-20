@@ -18,12 +18,21 @@ class UnionPrinter:
         return self.val[self.fields[fieldno]]
 
     def active_arm(self):
-         expression = '({}::__xdr_union_arm_number({}))'.format(
-             self.val.type.name, str(self.get(0)))
-         try:
-             return int(gdb.parse_and_eval(expression))
-         except gdb.error:
-             return -1
+        discriminant = self.get(0);
+        cases_expr = "x23::xdr_meta<{}>::cases".format(self.val.type.name)
+        try:
+            cases = gdb.parse_and_eval(cases_expr)
+            # Need to convert std::array to C array
+            cases = cases[cases.type.fields()[0].name]
+            for i in cases.type.strip_typedefs().range():
+                if cases[i]['first'] == discriminant:
+                    return int(cases[i]['second'])
+            def_expr = "x23::xdr_meta<{}>::default_field".format(self.val.type)
+            print(def_expr)
+            return int(gdb.parse_and_eval(def_expr))
+        except gdb.error as e:
+            print(str(e))
+            return -1
 
     def to_string(self):
         return None
@@ -34,6 +43,8 @@ class UnionPrinter:
         if n > 0:
             result.append((self.fields[n].removeprefix(self.fieldprefix),
                            self.get(n)))
+        elif n == -1:
+            result.append(("<no arm for invalid discriminant>", ""))
         return result
 
 class StrPrinter:
