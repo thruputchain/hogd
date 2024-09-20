@@ -33,7 +33,7 @@ GStatus<int>
 get_available_cores()
 {
   // TODO(amb): support other targets
-  return GError(GCode::kUnsupported);
+  return GError(GCode::kUnimplemented);
 }
 #endif // defined(__linux__)
 
