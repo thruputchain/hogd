@@ -8,27 +8,31 @@ typedef opaque Ed25519PublicKey[32]; // ed25519 key len is 256 bits
 typedef opaque Ed25519SecretKey[64]; // ed25519 secret key len is 64 bytes
 
 enum CryptographicScheme {
-	Ed25519 = 0,
+  Ed25519 = 0,
 };
 
-union Signature switch (SignatureType type) {
-	case Ed25519:
-		Ed25519Signature ed25519_signature;
+union Signature switch (CryptographicScheme type)
+{
+case Ed25519:
+  Ed25519Signature ed25519_signature;
 };
 
-union PublicKey switch (SignatureType type) {
-	case Ed25519:
-		Ed25519PublicKey ed25519_publickey;
+union PublicKey switch (CryptographicScheme type)
+{
+case Ed25519:
+  Ed25519PublicKey ed25519_publickey;
 };
 
-union SecretKey switch (SignatureType type) {
-	case Ed25519:
-		Ed25519SecretKey ed25519_secretkey;
+union SecretKey switch (CryptographicScheme type)
+{
+case Ed25519:
+  Ed25519SecretKey ed25519_secretkey;
 };
 
-union ExtensionPoint switch(int v) {
-	case 0:
-		void;
+union ExtensionPoint switch (int v)
+{
+case 0:
+  void;
 };
 
 typedef opaque SHA256Hash[32]; // 256 bit hash
