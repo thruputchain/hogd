@@ -16,13 +16,30 @@ namespace hogd {
 bool
 check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
 {
-  if (__builtin_add_overflow_p(base, len, static_cast<uint64_t>(0))) {
+  uint64_t base_end = 0;
+  if (__builtin_add_overflow(base, len, &base_end)) {
     return false;
   }
-  if (base + len >= memory_len) {
+  if (base_end >= memory_len) {
     return false;
   }
   return true;
+}
+
+std::optional<std::span<std::byte>>
+get_memory_range(std::span<std::byte> memory, uint64_t offset, uint64_t len) {
+  if (!check_memory_range(memory.size(), offset, len)) {
+    return std::nullopt;
+  }
+  return memory.subspan(offset, len);
+}
+
+template<size_t length>
+void
+write_argument(std::span<std::byte> target, std::span<const std::byte, length> source)
+{
+  assert(target.size() >= source.size());
+  std::memcpy(target.data(), source.data(), source.size());
 }
 
 // returns gas_consumed, syscall error>
@@ -47,24 +64,16 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
 
     auto memory = call_context->runtime->get_memory();
 
-    if (!check_memory_range(memory.size(), arg1, arg2)) {
+    auto input_range = get_memory_range(memory, arg1, arg2);
+    auto output_range = get_memory_range(memory, arg3, 32);
+
+    if (!input_range || !output_range) {
       return {kGenericBadSyscallCost, SyscallErrorCode::kInvalidPtrError};
     }
-
-    auto input_range = memory.subspan(arg1, arg2);
-
-    if (!check_memory_range(memory.size(), arg3, 32)) {
-      return {kGenericBadSyscallCost, SyscallErrorCode::kInvalidPtrError};
-    }
-
-    auto output_range = memory.subspan(arg3, 32);
 
     SHA256Hash sha256_result = sha256(input_range);
 
-    static_assert(sha256_result.size() == 32);
-
-    std::memcpy(output_range.data(), sha256_result.data(),
-                sha256_result.size());
+    write_argument(output_range, std::as_bytes(std::span(sha256_result)));
 
     return {kSHA256Cost(input_range.size()), SyscallErrorCode::kNone};
   }
