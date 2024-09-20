@@ -1,19 +1,13 @@
 namespace hogd {
 
-typedef unsigned int uint32;
-typedef int int32;
-
-typedef unsigned hyper uint64;
-typedef hyper int64;
-
-typedef opaque uint128[16];
-typedef opaque uint256[32];
+typedef opaque uint128_xdr[16];
+typedef opaque uint256_xdr[32];
 
 typedef opaque Ed25519Signature[64]; // ed25519 sig len is 512 bits
 typedef opaque Ed25519PublicKey[32]; // ed25519 key len is 256 bits
 typedef opaque Ed25519SecretKey[64]; // ed25519 secret key len is 64 bytes
 
-enum SignatureType {
+enum CryptographicScheme {
 	Ed25519 = 0,
 };
 
@@ -30,6 +24,11 @@ union PublicKey switch (SignatureType type) {
 union SecretKey switch (SignatureType type) {
 	case Ed25519:
 		Ed25519SecretKey ed25519_secretkey;
+};
+
+union ExtensionPoint switch(int v) {
+	case 0:
+		void;
 };
 
 typedef opaque SHA256Hash[32]; // 256 bit hash
