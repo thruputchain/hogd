@@ -11,19 +11,19 @@ enum CryptographicScheme {
   Ed25519 = 0,
 };
 
-union Signature switch (SignatureType type)
+union Signature switch (CryptographicScheme type)
 {
 case Ed25519:
   Ed25519Signature ed25519_signature;
 };
 
-union PublicKey switch (SignatureType type)
+union PublicKey switch (CryptographicScheme type)
 {
 case Ed25519:
   Ed25519PublicKey ed25519_publickey;
 };
 
-union SecretKey switch (SignatureType type)
+union SecretKey switch (CryptographicScheme type)
 {
 case Ed25519:
   Ed25519SecretKey ed25519_secretkey;
