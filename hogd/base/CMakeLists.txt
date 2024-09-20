@@ -1,6 +1,7 @@
 # create base module library
 add_library(
   base
+  init.cc
   log.cc
   status.cc
 )

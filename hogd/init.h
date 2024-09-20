@@ -14,6 +14,7 @@ extern void log_init(std::unique_ptr<Logger> logger);
 using InitFunc = GStatus<void> (*)();
 
 // List your initialization functions here
+extern GStatus<void> base_init();
 extern GStatus<void> crypto_init();
 
 // hogd_init must be called first before using code in hogd.
