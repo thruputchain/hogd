@@ -113,6 +113,12 @@ struct merged_allocator<T> {
   using type = std::allocator<AlignedStorage<sizeof(T), alignof(T)>>;
 };
 
+template<typename T> struct VecBuf {
+  T *begin;
+  T *end;
+  T *bufend;
+};
+
 // Like std::strlen, but constexpr
 constexpr size_t
 strlen(const char *s)
@@ -261,11 +267,7 @@ public:
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
   using allocator_type = Allocator;
 
-  struct Buf {
-    T *begin;
-    T *end;
-    T *bufend;
-  };
+  using Buf = detail::VecBuf<T>;
 
   static constexpr size_type kMaxSize = MaxSize;
 
@@ -288,9 +290,7 @@ public:
     if constexpr (Vec<value_type, MS, allocator_type>::max_size() > max_size())
       // Okay to throw, other will still delete memory
       check_size(other.size());
-    b_.begin = other.b_.begin;
-    b_.end = other.b_.end;
-    b_.bufend = other.b_.bufend;
+    b_ = other.b_;
     a_ = std::move(other.a_);
     other.b_ = {};
   }

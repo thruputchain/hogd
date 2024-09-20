@@ -4,22 +4,22 @@ import re
 class UnionPrinter:
     "Print union types compiled by x23"
 
-    fieldprefix = "__xdr_union_field_"
+    __fieldprefix = "__xdr_union_field_"
 
     def __init__(self, val):
-        self.val = val
+        self.__val = val
         fields = val.type.fields()
-        self.fields = [fields[0].name]
+        self.__fields = [fields[0].name]
         if len(fields) > 1:
             for f in fields[1].type.fields():
-                self.fields.append(f.name)
+                self.__fields.append(f.name)
 
     def get(self, fieldno):
-        return self.val[self.fields[fieldno]]
+        return self.__val[self.__fields[fieldno]]
 
     def active_arm(self):
         discriminant = self.get(0);
-        cases_expr = "x23::xdr_meta<{}>::cases".format(self.val.type.name)
+        cases_expr = "x23::xdr_meta<{}>::cases".format(self.__val.type.name)
         try:
             cases = gdb.parse_and_eval(cases_expr)
             # Need to convert std::array to C array
@@ -27,8 +27,8 @@ class UnionPrinter:
             for i in cases.type.strip_typedefs().range():
                 if cases[i]['first'] == discriminant:
                     return int(cases[i]['second'])
-            def_expr = "x23::xdr_meta<{}>::default_field".format(self.val.type)
-            print(def_expr)
+            def_expr = "x23::xdr_meta<{}>::default_field".format(
+                self.__val.type.name)
             return int(gdb.parse_and_eval(def_expr))
         except gdb.error as e:
             print(str(e))
@@ -38,10 +38,11 @@ class UnionPrinter:
         return None
 
     def children(self):
-        result = [(self.fields[0].removeprefix(self.fieldprefix), self.get(0))]
+        result = [(self.__fields[0].removeprefix(self.__fieldprefix),
+                   self.get(0))]
         n = self.active_arm()
         if n > 0:
-            result.append((self.fields[n].removeprefix(self.fieldprefix),
+            result.append((self.__fields[n].removeprefix(self.__fieldprefix),
                            self.get(n)))
         elif n == -1:
             result.append(("<no arm for invalid discriminant>", ""))
@@ -51,11 +52,11 @@ class StrPrinter:
     "Print x23::Str"
 
     def __init__ (self, val):
-        self.val = val
+        self.__val = val
 
     def to_string (self):
-        s = self.val['b_']['begin']
-        l = self.val['b_']['end'] - s
+        s = self.__val['b_']['begin']
+        l = self.__val['b_']['end'] - s
         return s.lazy_string(length = l)
 
     def display_hint(self):
@@ -85,7 +86,7 @@ def xdr_category(val):
     except gdb.error:
         return None
 
-def lookup_function(val):
+def x23_lookup_function(val):
     if re.match(r'^x23::BoundedStr<', val.type.strip_typedefs().name):
         return StrPrinter(val)
     cat = xdr_category(val)
@@ -96,4 +97,4 @@ def lookup_function(val):
     else:
         return None
 
-gdb.printing.register_pretty_printer(gdb.current_objfile(), lookup_function)
+gdb.printing.register_pretty_printer(gdb.current_objfile(), x23_lookup_function)
