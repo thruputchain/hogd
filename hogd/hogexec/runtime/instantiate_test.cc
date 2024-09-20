@@ -1,8 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "hogd/runtime/wasmi_runtime.h"
-
-#include "hogd/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 namespace hogd {
 
