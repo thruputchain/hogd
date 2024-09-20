@@ -22,6 +22,9 @@ typedef opaque StorageKey[32]; // arbitrary 32 bytes.
 // in global storage:
 // [contract address + storage key] = 64 bytes
 // Contracts are free to set their own conventions for keys.
-typedef opaque AddressAndKey[64];
+struct AddressAndKey {
+  ContractAddress address;
+  StorageKey key;
+};
 
 } // namespace hogd
