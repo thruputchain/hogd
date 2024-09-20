@@ -27,5 +27,4 @@ struct AddressAndKey {
   StorageKey key;
 };
 
-
 } // namespace hogd
