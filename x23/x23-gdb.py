@@ -1,3 +1,11 @@
+
+#
+# This python script ensures that gdb prints XDR types properly.  To
+# use it, place the following in your .gdbinit file:
+#
+# source /path/to/x23/x32-gdb.py
+#
+
 import gdb
 import re
 
@@ -18,24 +26,17 @@ class UnionPrinter:
         return self.__val[self.__fields[fieldno]]
 
     def active_arm(self):
+        # This assumes the __xdr_union_arm_number static method
+        # doesn't get optimized away, which can be ensured via the
+        # [[gnu::used]] attribute.
         discriminant = self.get(0);
-        cases_expr = "x23::xdr_meta<{}>::cases".format(self.__val.type.name)
+        arm_expr = "{}::__xdr_union_arm_number({})".format(
+            self.__val.type.name, str(discriminant))
         try:
-            cases = gdb.parse_and_eval(cases_expr)
-            # Need to convert std::array to C array
-            cases = cases[cases.type.fields()[0].name]
-            for i in cases.type.strip_typedefs().range():
-                if cases[i]['first'] == discriminant:
-                    return int(cases[i]['second'])
-            def_expr = "x23::xdr_meta<{}>::default_field".format(
-                self.__val.type.name)
-            return int(gdb.parse_and_eval(def_expr))
+            return int(gdb.parse_and_eval(arm_expr))
         except gdb.error as e:
             print(str(e))
             return -1
-
-    def to_string(self):
-        return None
 
     def children(self):
         result = [(self.__fields[0].removeprefix(self.__fieldprefix),
