@@ -13,6 +13,7 @@ add_dependencies(crypto_test libsodium)
 target_link_libraries(
   crypto_test
   crypto
+  protocol
   ${LIBSODIUM_LIBRARIES}
   GTest::gtest_main
 )
@@ -26,6 +27,7 @@ add_executable(
 target_link_libraries(
   crypto_bench
   crypto
+  protocol
   ${LIBSODIUM_LIBRARIES}
   benchmark::benchmark
 )

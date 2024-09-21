@@ -10,11 +10,11 @@
 #include <sodium.h>
 
 #include "hogd/base/types.h"
+#include "types.hh"
 
 namespace hogd {
 
 using Siphash24Key = std::array<uint8_t, 16>;
-using SHA256Hash = std::array<uint8_t, 32>;
 
 // sha256 returns a SHA256 hash of the input.
 inline SHA256Hash
