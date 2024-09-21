@@ -43,9 +43,8 @@ check_user_span_argument(std::span<std::byte> contract_memory,
 }
 
 std::pair<uint64_t, SyscallErrorCode>
-syscall_SHA256_inner(std::span<std::byte> hash_input, SHA256Hash &hash_out)
+syscall_SHA256_inner(std::span<const std::byte> hash_input, SHA256Hash &hash_out)
 {
-
   hash_out = sha256(hash_input);
   return {SHA256HashCost(hash_input.size()), SyscallErrorCode::kNone};
 }
@@ -64,11 +63,11 @@ syscall_SHA256_outer(std::span<std::byte> contract_memory,
                                user_input_buffer_len);
 
   if (!output_hash) {
-    return {kGenericBadSyscallCost, SyscallErrorCode::kInvalidPtrError};
+    return {kGenericBadSyscallCost, SyscallErrorCode::kFault};
   }
 
   if (!input_buffer) {
-    return {kGenericBadSyscallCost, SyscallErrorCode::kInvalidPtrError};
+    return {kGenericBadSyscallCost, SyscallErrorCode::kFault};
   }
 
   return syscall_SHA256_inner(*input_buffer, *output_hash);
