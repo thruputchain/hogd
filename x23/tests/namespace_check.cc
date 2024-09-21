@@ -1,6 +1,8 @@
 
 #include "tests/xdr_namespace_test2.hh"
 
+#include "tests/xdr_namespace_test3.hh"
+
 using namespace xdr_namespace_test_2;
 
 int
