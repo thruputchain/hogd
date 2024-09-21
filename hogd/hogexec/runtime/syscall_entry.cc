@@ -116,4 +116,4 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   return static_cast<uint64_t>(err_code);
 }
 
-}; // namespace hogd
+} // namespace hogd
