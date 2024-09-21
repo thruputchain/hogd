@@ -1,45 +1,71 @@
-#include "hogd/syscall/syscall_entry.h"
+#include <cstring>
+#include <utility>
 
+#include "hogd/syscall/syscall_entry.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/runtime/status.h"
 #include "hogd/runtime/wasmi_runtime.h"
 #include "hogd/syscall/gas_cost_table.h"
-
-#include <cstring>
-#include <utility>
-
 #include "syscall.hh"
 
 namespace hogd {
 
 bool
-check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
+check_memory_range(uint64_t memory_len, uintptr_t base, size_t len)
 {
   uint64_t base_end = 0;
-  if (__builtin_add_overflow(base, len, &base_end)) {
+  if (__builtin_add_overflow(base, len, &base_end))
     return false;
+  return (base_end <= memory_len)
+}
+
+template<typename T> requires std::is_trivially_copyable_v<T>
+T*
+check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset, uint64_t user_len)
+{
+  if (!check_memory_range(contract_memory.size()), user_offset, user_len) {
+    return nullptr;
   }
-  if (base_end >= memory_len) {
-    return false;
-  }
-  return true;
+  return static_cast<T*>(contract_memory.data() + user_offset);
 }
 
 std::optional<std::span<std::byte>>
-get_memory_range(std::span<std::byte> memory, uint64_t offset, uint64_t len) {
-  if (!check_memory_range(memory.size(), offset, len)) {
+check_user_span_argument(std::span<std::byte> contract_memory, uint64_t user_offset, uint64_t user_len)
+{
+  if (!check_memory_range(contract_memory.size()), user_offset, user_len) {
     return std::nullopt;
   }
-  return memory.subspan(offset, len);
+  return contract_memory.subspan(user_offset, user_len);
 }
 
-template<size_t length>
-void
-write_argument(std::span<std::byte> target, std::span<const std::byte, length> source)
+std::pair<uint64_t, SyscallErrorCode>
+syscall_SHA256_inner(std::span<std::byte> hash_input, SHA256Hash* hash_out) {
+
+  *hash_out = sha256(hash_input);
+  return {SHA256HashCost(input_range.size()), SyscallErrorCode::kNone};
+}
+
+std::pair<uint64_t, SyscallErrorCode>
+syscall_SHA256_outer(std::span<std::byte> contract_memory, 
+  uint64_t user_input_buffer, uint64_t user_input_buffer_len,
+  uint64_t user_output_hash, uint64_t)
 {
-  assert(target.size() >= source.size());
-  std::memcpy(target.data(), source.data(), source.size());
+  SHA256Hash* output_hash = check_user_argument<SHA256Hash>(
+    contract_memory, user_output_hash_buf, sizeof(SHA256Hash));
+
+  std::span<std::byte> input_buffer 
+    = check_user_span_argument(contract_memory, user_input_buffer, user_input_buffer_len);
+
+  if (!output_hash) {
+    return {kGenericBadSyscallCost, SyscallErrorCode::kInvalidPtrError};
+  }
+
+  if (!input_buffer) {
+    return {kGenericBadSyscallCost, SyscallErrorCode::kInvalidPtrError};
+  }
+
+  return syscall_SHA256_inner(input_buffer, output_hash);
 }
 
 // returns gas_consumed, syscall error>
@@ -55,31 +81,13 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   auto syscall = static_cast<SyscallNo>(arg0);
   using enum SyscallNo;
 
+  std::span<std::byte> contract_memory = call_context->runtime->get_memory();
+
   switch (syscall) {
   case kSHA256:
-  {
-    // arg1: memory offset
-    // arg2: memory length
-    // arg3: hash output offset
-
-    auto memory = call_context->runtime->get_memory();
-
-    auto input_range = get_memory_range(memory, arg1, arg2);
-    auto output_range = get_memory_range(memory, arg3, 32);
-
-    if (!input_range || !output_range) {
-      return {kGenericBadSyscallCost, SyscallErrorCode::kInvalidPtrError};
-    }
-
-    SHA256Hash sha256_result = sha256(input_range);
-
-    write_argument(output_range, std::as_bytes(std::span(sha256_result)));
-
-    return {kSHA256Cost(input_range.size()), SyscallErrorCode::kNone};
+    return syscall_SHA256_outer(arg1, arg2, arg3, arg4);
   }
-  default:
-    return {kUnknownSyscallCost, SyscallErrorCode::kUnknownSyscall};
-  }
+  return {kUnknownSyscallCost, SyscallErrorCode::kUnknownSyscall};
 }
 
 HostFnStatus<uint64_t>

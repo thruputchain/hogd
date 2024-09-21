@@ -12,7 +12,7 @@ namespace hogd {
 constexpr static uint64_t kSyscallGetBlockNumberCost = 1;
 constexpr static uint64_t kSyscallGetPrevBlockHashCost = 10;
 
-constexpr static auto kSHA256Cost = [](uint64_t bytes_len) -> uint64_t {
+constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
   return bytes_len * 100 + 500;
 };
 

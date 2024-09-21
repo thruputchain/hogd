@@ -40,12 +40,10 @@ enum SyscallErrorCode {
   kNonnegativeInt64SetValueMismatch = 5,
 
   // Invocation Errors
-  // Call return twice in one function
-  kDoubleReturn = 6,
 
   // Call get_msg_sender on root transaction
-  kIsRootTransaction = 7,
-  kUnknownSyscall = 8,
+  kIsRootTransaction = 6,
+  kUnknownSyscall = 7,
 };
 
 } // namespace hogd
