@@ -51,4 +51,8 @@ if(X23_IS_TOP_LEVEL)
     RUNTIME DESTINATION bin
     PUBLIC_HEADER DESTINATION include/x23
   )
+
+  install(FILES x23_gdb.py
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/share/gdb/python"
+  )
 endif()

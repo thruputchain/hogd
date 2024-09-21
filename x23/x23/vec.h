@@ -113,6 +113,12 @@ struct merged_allocator<T> {
   using type = std::allocator<AlignedStorage<sizeof(T), alignof(T)>>;
 };
 
+template<typename T> struct VecBuf {
+  T *begin;
+  T *end;
+  T *bufend;
+};
+
 // Like std::strlen, but constexpr
 constexpr size_t
 strlen(const char *s)
@@ -261,11 +267,7 @@ public:
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
   using allocator_type = Allocator;
 
-  struct Buf {
-    T *begin;
-    T *end;
-    T *bufend;
-  };
+  using Buf = detail::VecBuf<T>;
 
   static constexpr size_type kMaxSize = MaxSize;
 
@@ -284,11 +286,11 @@ public:
   template<size_t MS>
   constexpr Vec(Vec<value_type, MS, allocator_type> &&other)
       noexcept(max_size() >= Vec<value_type, MS, allocator_type>::max_size())
-    : b_(other.b_)
   {
-    if constexpr (other.max_size() > max_size())
+    if constexpr (Vec<value_type, MS, allocator_type>::max_size() > max_size())
       // Okay to throw, other will still delete memory
       check_size(other.size());
+    b_ = other.b_;
     a_ = std::move(other.a_);
     other.b_ = {};
   }
@@ -583,6 +585,8 @@ public:
   }
 
 protected:
+  template<typename, size_t, typename> friend class Vec;
+
   static constexpr const char *tname() { return typeid(T).name(); }
 
   constexpr void shrink(size_type new_size) noexcept

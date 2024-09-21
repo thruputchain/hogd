@@ -467,7 +467,11 @@ Gen::show_type(const UnionBody &b, string t)
   prtop("friend bool operator==(const {0} &, const {0} &);\n", t);
   prtop("friend {}\n", scopes_.size() > 1 ? "auto"s : "std::partial_ordering"s);
   prtop("operator<=>(const {0} &, const {0} &);\n", t);
-  prtop("static constexpr int __xdr_union_arm_number({});\n\n", switch_type);
+  // Note __xdr_union_arm_number is used by the gdb python scripts to
+  // print the active arm.  We tag it gnu::used so it doesn't get
+  // optimized away.
+  prtop("[[gnu::used]] static constexpr int __xdr_union_arm_number({});\n\n",
+	switch_type);
   top_ += string(2 * (indent_ - 1), ' ') + "private:\n"s;
   prtop("{} __xdr_union_field_{};\n", switch_type, b.switch_id);
   if (num_non_void) {
@@ -512,12 +516,14 @@ struct x23::xdr_meta<struct {0}> {{
       R"(  using discriminant_type =
     decltype(std::declval<struct {0}>().{1}());
   using enum x23::AlwaysEnum<discriminant_type>::type;
-  static constexpr std::array<discriminant_type, {2}> cases{{
+  static constexpr
+  std::array<std::pair<discriminant_type, int>, {2}> cases{{
 )",
       scope(true), b.switch_id, ncases);
-  for (const auto &a : b.arms)
-    for (const auto &c : a.cases)
-      bottom_ += format("    {},\n", map_case(c));
+  for (const auto &ai : aiv)
+    for (const auto &c : ai.arm->cases)
+      bottom_ += format("    std::pair{{{}, {}}},\n",
+			map_case(c), ai.variant_index);
   bottom_ += "  };\n";
   bottom_ += "};\n";
 
