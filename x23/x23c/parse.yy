@@ -97,18 +97,22 @@ definition:
 
 type_def:
   T_TYPEDEF declaration ';'[semicolon] {
+    checkliterals(xc);
     $$ = Typedef($declaration.get());
     $$->comment = combine($1->block_comment, $semicolon->eol_comment);
   }
 | T_ENUM T_ID[id] enum_body[type] ';'[semicolon] {
+    checkliterals(xc);
     $$ = EnumDecl{ .id = $id->text, .body = $type};
     $$->comment = $1->block_comment;
   }
 | T_STRUCT T_ID[id] struct_body[type] ';'[semicolon] {
+    checkliterals(xc);
     $$ = StructDecl{ .id = $id->text, .body = $type};
     $$->comment = $1->block_comment;
   }
 | T_UNION T_ID[id] union_body[type] ';'[semicolon] {
+    checkliterals(xc);
     $$ = UnionDecl{ .id = $id->text, .body = $type};
     $$->comment = $1->block_comment;
   }

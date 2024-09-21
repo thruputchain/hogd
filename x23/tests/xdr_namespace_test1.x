@@ -1,7 +1,7 @@
 
 namespace xdr_namespace_test_1 {
 
-struct a {
+struct ns_1_struct {
 	unsigned int b;
 };
 
