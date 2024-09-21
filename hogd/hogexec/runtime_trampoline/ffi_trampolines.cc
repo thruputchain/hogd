@@ -1,8 +1,6 @@
-#include "hogd/runtime_trampoline/ffi_trampolines.h"
-
-#include "hogd/runtime/status.h"
-
+#include "hogd/hogexec/runtime_trampoline/ffi_trampolines.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
 
