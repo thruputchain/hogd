@@ -498,7 +498,7 @@ Gen::show_type(const UnionBody &b, string t)
 struct x23::xdr_meta<struct {0}> {{
   static constexpr x23::XdrCategory category = x23::XdrCategory::kUnion;
   static constexpr const char *type_name = "{2}";
-  static inline constexpr int default_field = {3};
+  static constexpr int default_field = {3};
   static constexpr bool has_void = {4:s};
   static constexpr std::array field_names{{
     "{1}", // discriminant
@@ -516,7 +516,7 @@ struct x23::xdr_meta<struct {0}> {{
       R"(  using discriminant_type =
     decltype(std::declval<struct {0}>().{1}());
   using enum x23::AlwaysEnum<discriminant_type>::type;
-  static inline constexpr
+  static constexpr
   std::array<std::pair<discriminant_type, int>, {2}> cases{{
 )",
       scope(true), b.switch_id, ncases);
