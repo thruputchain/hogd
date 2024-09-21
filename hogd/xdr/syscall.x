@@ -30,7 +30,7 @@ enum SyscallErrorCode {
 
   // an argument passed to the syscall is an invalid
   // ptr into wasm memory
-  kInvalidPtrError = 1,
+  kFault = 1,
 
   // General State Access Errors
   kStorageObjectTypeMismatch = 2,
