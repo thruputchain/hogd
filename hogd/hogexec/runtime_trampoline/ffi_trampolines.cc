@@ -11,6 +11,7 @@ namespace detail {
 constexpr static uint8_t kTrampolineErrorNONE = 0;
 constexpr static uint8_t kTrampolineErrorOUTOFGAS = 1;
 constexpr static uint8_t kTrampolineErrorUNRECOVERABLE = 2;
+constexpr static uint8_t kTrampolineErrorRETURN = 3;
 
 TrampolineResult
 success(uint64_t res)
@@ -33,6 +34,9 @@ handle_result(HostFnStatus<uint64_t> const &res)
 
   if (res.error().code() == HostFnErrorCode::kOutOfGas) {
     return error(kTrampolineErrorOUTOFGAS);
+  }
+  if (res.error().code() == HostFnErrorCode::kReturn) {
+    return error(kTrampolineErrorRETURN);
   }
   return error(kTrampolineErrorUNRECOVERABLE);
 }
