@@ -5,9 +5,9 @@
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "syscall.hh"
 
 namespace hogd {
@@ -43,7 +43,8 @@ check_user_span_argument(std::span<std::byte> contract_memory,
 }
 
 std::pair<uint64_t, SyscallErrorCode>
-syscall_SHA256_inner(std::span<const std::byte> hash_input, SHA256Hash &hash_out)
+syscall_SHA256_inner(std::span<const std::byte> hash_input,
+                     SHA256Hash &hash_out)
 {
   hash_out = sha256(hash_input);
   return {SHA256HashCost(hash_input.size()), SyscallErrorCode::kNone};
