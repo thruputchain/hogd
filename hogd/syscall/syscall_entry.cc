@@ -12,38 +12,38 @@
 namespace hogd {
 
 bool
-check_memory_range(uint64_t memory_len, uintptr_t base, size_t len)
+check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
 {
   uint64_t base_end = 0;
   if (__builtin_add_overflow(base, len, &base_end))
     return false;
-  return (base_end <= memory_len)
+  return (base_end <= memory_len);
 }
 
 template<typename T> requires std::is_trivially_copyable_v<T>
 T*
 check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset, uint64_t user_len)
 {
-  if (!check_memory_range(contract_memory.size()), user_offset, user_len) {
+  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
     return nullptr;
   }
-  return static_cast<T*>(contract_memory.data() + user_offset);
+  return reinterpret_cast<T*>(contract_memory.data() + user_offset);
 }
 
 std::optional<std::span<std::byte>>
 check_user_span_argument(std::span<std::byte> contract_memory, uint64_t user_offset, uint64_t user_len)
 {
-  if (!check_memory_range(contract_memory.size()), user_offset, user_len) {
+  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
     return std::nullopt;
   }
   return contract_memory.subspan(user_offset, user_len);
 }
 
 std::pair<uint64_t, SyscallErrorCode>
-syscall_SHA256_inner(std::span<std::byte> hash_input, SHA256Hash* hash_out) {
+syscall_SHA256_inner(std::span<std::byte> hash_input, SHA256Hash& hash_out) {
 
-  *hash_out = sha256(hash_input);
-  return {SHA256HashCost(input_range.size()), SyscallErrorCode::kNone};
+  hash_out = sha256(hash_input);
+  return {SHA256HashCost(hash_input.size()), SyscallErrorCode::kNone};
 }
 
 std::pair<uint64_t, SyscallErrorCode>
@@ -52,9 +52,9 @@ syscall_SHA256_outer(std::span<std::byte> contract_memory,
   uint64_t user_output_hash, uint64_t)
 {
   SHA256Hash* output_hash = check_user_argument<SHA256Hash>(
-    contract_memory, user_output_hash_buf, sizeof(SHA256Hash));
+    contract_memory, user_output_hash, sizeof(SHA256Hash));
 
-  std::span<std::byte> input_buffer 
+  std::optional<std::span<std::byte>> input_buffer 
     = check_user_span_argument(contract_memory, user_input_buffer, user_input_buffer_len);
 
   if (!output_hash) {
@@ -65,7 +65,7 @@ syscall_SHA256_outer(std::span<std::byte> contract_memory,
     return {kGenericBadSyscallCost, SyscallErrorCode::kInvalidPtrError};
   }
 
-  return syscall_SHA256_inner(input_buffer, output_hash);
+  return syscall_SHA256_inner(*input_buffer, *output_hash);
 }
 
 // returns gas_consumed, syscall error>
@@ -85,7 +85,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
 
   switch (syscall) {
   case kSHA256:
-    return syscall_SHA256_outer(arg1, arg2, arg3, arg4);
+    return syscall_SHA256_outer(contract_memory, arg1, arg2, arg3, arg4);
   }
   return {kUnknownSyscallCost, SyscallErrorCode::kUnknownSyscall};
 }
