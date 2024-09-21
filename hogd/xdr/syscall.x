@@ -1,49 +1,41 @@
+
+%#include "types.hh"
+
 namespace hogd {
 
-// Documentation in designdocs/syscall.md
 enum SyscallNo {
   kSHA256 = 0,
   kGetMsgSender = 1,
-
-  // storage obj read/write
-  kHasKey = 2,
-  kDeleteLast = 3,
-
+  kBytestringGetLen = 2,
+  kBytestringGet = 3,
   kBytestringSet = 4,
-  kBytestringGet = 5,
-  kBytestringGetLen = 6,
-
-  kNNInt64SetAdd = 7,
-  kNNInt64Get = 8,
-  kNNInt64GetBase = 9,
-
-  // invoke
-  kGetCalldata = 10,
-  kGetCalldataLen = 11,
-  kReturn = 12,
-  kInvoke = 13,
-  kGetFullReturn = 14,
+  kHasKey = 5,
 };
 
 enum SyscallErrorCode {
+  // No error
   kNone = 0,
 
-  // an argument passed to the syscall is an invalid
-  // ptr into wasm memory
+  // Out of bounds pointer to wasm memory passed to syscall
   kFault = 1,
 
-  // General State Access Errors
+  // Syscall's expected type does not match object type at provided key
   kStorageObjectTypeMismatch = 2,
+
+  // Access to storage element that does not exist. Writes to this key can be
+  // accepted in the current transaction.
   kStorageKeyNExist = 3,
-  kStorageKeyAlreadyDeleted = 4,
 
-  kNonnegativeInt64SetValueMismatch = 5,
+  // Access to storage element that has already been deleted in the current
+  // transaction. Further writes to this key will never be accepted within the
+  // current transaction.
+  kStorageKeyAlreadyDeletedInCurrentTransaction = 4,
 
-  // Invocation Errors
+  // Unknown syscall number
+  kUnknownSyscall = 5,
 
-  // Call get_msg_sender on root transaction
-  kIsRootTransaction = 6,
-  kUnknownSyscall = 7,
+  // Cannot set a nonnegative int to different values in the same transaction
+  kNonnegativeIntSetValueMismatch = 6,
 };
 
 } // namespace hogd

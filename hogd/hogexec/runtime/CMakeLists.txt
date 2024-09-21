@@ -3,6 +3,7 @@ add_library(
   wasmi_runtime.cc
   status.cc
   syscall_entry.cc
+  syscall_crypto.cc
 )
 add_executable(
   runtime_test
