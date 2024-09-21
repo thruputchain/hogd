@@ -3,10 +3,10 @@
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/runtime/status.h"
-#include "hogd/runtime/wasmi_runtime.h"
-#include "hogd/syscall/gas_cost_table.h"
-#include "hogd/syscall/syscall_entry.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/gas_cost_table.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "syscall.hh"
 
 namespace hogd {

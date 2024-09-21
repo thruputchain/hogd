@@ -2,6 +2,7 @@ add_library(
   runtime
   wasmi_runtime.cc
   status.cc
+  syscall_entry.cc
 )
 add_executable(
   runtime_test
@@ -15,6 +16,7 @@ add_executable(
 target_link_libraries(
   runtime
   wasmi_lib
+  protocol
 )
 target_link_libraries(
   runtime_test
