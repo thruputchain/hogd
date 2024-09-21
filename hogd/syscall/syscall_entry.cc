@@ -85,7 +85,7 @@ std::pair<uint64_t, SyscallErrorCode>
 syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
                     uint64_t arg2, uint64_t arg3, uint64_t arg4)
 {
-  if (arg0 > syscall_table.size()) {
+  if (arg0 >= syscall_table.size()) {
     // invalid syscall
     return {kUnknownSyscallCost, SyscallErrorCode::kUnknownSyscall};
   }
