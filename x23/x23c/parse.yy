@@ -82,6 +82,7 @@ specification:
     checkliterals(xc);
   }
 | specification T_NAMESPACE T_ID[ns] {
+    checkliterals(xc);
     if (!$T_NAMESPACE->block_comment.empty())
       xc->defs.push_back(Literal{ .lines = $T_NAMESPACE->block_comment });
     xc->defs.push_back(OpenNS{$ns->text});
