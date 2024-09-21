@@ -38,12 +38,6 @@ good_call(HostCallContext * /*unused*/)
   return 10;
 }
 
-HostFnStatus<uint64_t>
-return_syscall(HostCallContext * /*unused*/)
-{
-  return HostFnError{HostFnErrorCode::kReturn};
-}
-
 // Wasmi doesn't necessarily insert a "consume gas" instruction into its
 // internal bytecode at the end of a call instruction. So if a host function
 // uses all gas, it has to return kOutOfGas.
@@ -181,16 +175,6 @@ TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
                 WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
 
   res = runtime_->invoke("call2", UINT64_MAX);
-
-  EXPECT_TRUE(!!res.result);
-}
-
-TEST_F(WasmiErrorHandlingTest, CheckReturn)
-{
-  context_.link_fn("test", "external_call", &test::return_syscall);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
-
-  auto res = runtime_->invoke("call_then_unreachable", UINT64_MAX);
 
   EXPECT_TRUE(!!res.result);
 }

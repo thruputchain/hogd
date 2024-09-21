@@ -95,8 +95,6 @@ impl WasmiRuntime {
         match func_res {
             Ok(_) => match res[0].i64() {
                 Some(v) => {
-                    // TODO(geoff): figure out when, or if,
-                    // this "error code/result" is visible in the syscall API.
                     return WasmiInvokeResult::success(v as u64);
                 }
                 _ => {
@@ -123,22 +121,14 @@ impl WasmiRuntime {
                     }
                 };
 
-                match my_error.error {
-                    external_call::TrampolineErrorEnum::OutOfGasError => {
-                        return WasmiInvokeResult::error(
-                            WasmiInvokeError::OutOfGasError,
-                        );
-                    }
-                    external_call::TrampolineErrorEnum::Return => {
-                        // Return no error code if successful return
-                        return WasmiInvokeResult::success(0);
-                    }
-                    _ => {
-                        return WasmiInvokeResult::error(
-                            WasmiInvokeError::UnrecoverableSystemError,
-                        );
-                    }
+                if my_error.recoverable {
+                    return WasmiInvokeResult::error(
+                        WasmiInvokeError::OutOfGasError,
+                    );
                 }
+                return WasmiInvokeResult::error(
+                    WasmiInvokeError::UnrecoverableSystemError,
+                );
             }
         };
     }

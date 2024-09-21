@@ -1,5 +1,3 @@
-#![allow(non_upper_case_globals)]
-
 use core::ffi::c_void;
 use wasmi::core::HostError;
 use wasmi::Error;
@@ -28,17 +26,11 @@ use core::fmt;
 
 #[allow(dead_code)]
 #[repr(u8)]
-#[derive(Clone, Copy, Debug)]
-pub enum TrampolineErrorEnum {
+enum TrampolineErrorEnum {
+    None = 0,
     OutOfGasError = 1,
     UnrecoverableSystemError = 2,
-    Return = 3,
 }
-const TrampolineErrorNONE: u8 = 0;
-const TrampolineErrorOUTOFGAS: u8 = 1;
-#[allow(dead_code)]
-const TrampolineErrorUNRECOVERABLE: u8 = 2;
-const TrampolineErrorRETURN: u8 = 3;
 
 #[repr(C)]
 pub struct TrampolineResult {
@@ -48,12 +40,12 @@ pub struct TrampolineResult {
 
 #[derive(Debug, Copy, Clone)]
 pub struct TrampolineError {
-    pub error: TrampolineErrorEnum,
+    pub recoverable: bool,
 }
 
 impl fmt::Display for TrampolineError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TrampolineError error={}", self.error as u8)
+        write!(f, "TrampolineError recoverable={}", self.recoverable)
     }
 }
 
@@ -103,18 +95,12 @@ extern "C" {
 
 // This is annoying, but I'm not sure how better to deal with this
 pub fn handle_trampoline_error(result: TrampolineResult) -> Result<u64, Error> {
-    match result.panic {
-        x if x == TrampolineErrorNONE => Ok(result.result),
-        x if x == TrampolineErrorOUTOFGAS => {
-            Err(Error::host(TrampolineError {
-                error: TrampolineErrorEnum::OutOfGasError,
-            }))
+    let err: TrampolineErrorEnum = unsafe { std::mem::transmute(result.panic) };
+    match err {
+        TrampolineErrorEnum::None => Ok(result.result),
+        TrampolineErrorEnum::OutOfGasError => {
+            Err(Error::host(TrampolineError { recoverable: true }))
         }
-        x if x == TrampolineErrorRETURN => Err(Error::host(TrampolineError {
-            error: TrampolineErrorEnum::Return,
-        })),
-        _ => Err(Error::host(TrampolineError {
-            error: TrampolineErrorEnum::UnrecoverableSystemError,
-        })),
+        _ => Err(Error::host(TrampolineError { recoverable: false })),
     }
 }

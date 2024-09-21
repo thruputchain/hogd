@@ -34,7 +34,6 @@ enum class HostFnErrorCode : uint8_t {
   kNoneOrRecoverable = 0,
   kOutOfGas = 1,
   kUnrecoverableUnknown = 2,
-  kReturn = 3,
 };
 
 class HostFnErrorCategory : public std::error_category {
