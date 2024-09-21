@@ -2,27 +2,27 @@ namespace hogd {
 
 // Documentation in designdocs/syscall.md
 enum SyscallNo {
-  kGetMsgSender = 0,
-  kSHA256 = 1,
+  kSHA256 = 0,
+  kGetMsgSender = 1,
 
   // storage obj read/write
-  kHasKey = 1000,
-  kDeleteLast = 1001,
+  kHasKey = 2,
+  kDeleteLast = 3,
 
-  kBytestringSet = 1100,
-  kBytestringGet = 1101,
-  kBytestringGetLen = 1102,
+  kBytestringSet = 4,
+  kBytestringGet = 5,
+  kBytestringGetLen = 6,
 
-  kNNInt64SetAdd = 1200,
-  kNNInt64Get = 1201,
-  kNNInt64GetBase = 1202,
+  kNNInt64SetAdd = 7,
+  kNNInt64Get = 8,
+  kNNInt64GetBase = 9,
 
   // invoke
-  kGetCalldata = 2000,
-  kGetCalldataLen = 2001,
-  kReturn = 2002,
-  kInvoke = 2003,
-  kGetFullReturn = 2004,
+  kGetCalldata = 10,
+  kGetCalldataLen = 11,
+  kReturn = 12,
+  kInvoke = 13,
+  kGetFullReturn = 14,
 };
 
 enum SyscallErrorCode {
