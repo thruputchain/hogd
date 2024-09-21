@@ -13,6 +13,11 @@
     drop
     i64.const 1)
 
+  (func (export "call_then_unreachable") (result i64)
+    call 0
+    unreachable
+    i64.const 1)
+
   (func (export "spin") (result i64)
     (loop $spinloop
       i64.const 1
