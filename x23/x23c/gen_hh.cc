@@ -45,7 +45,6 @@ struct Gen {
   void show_def(const OpenNS &ns)
   {
     namespaces_.push_back(ns.id);
-    std::printf("pushed namespace\n");
     prtop("namespace {} {{\n", ns.id);
   }
   void show_def(const CloseNS &ns)
@@ -53,7 +52,7 @@ struct Gen {
     namespaces_.pop_back();
     prtop("}} // namespace {}\n", ns.id);
   }
-  void show_def(const Literal &l) { top_ += l.lines; std::printf("added literal\n"); }
+  void show_def(const Literal &l) { top_ += l.lines; }
   void show_def(const ProgDef &prog);
 
   void show_decl(const Declaration &d)
