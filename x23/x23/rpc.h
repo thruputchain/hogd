@@ -97,12 +97,14 @@
 namespace x23 {
 
 struct XdrCallFailed : XdrException {
+  using enum msg_type;
   const rpc_msg m_;
   XdrCallFailed(const rpc_msg &m) : XdrException("{}", make_message(m)), m_(m)
   {}
 
   static std::string make_message(const rpc_msg &m)
   {
+    using enum reply_stat;
     assert(m.body.mtype() == REPLY);
     if (m.body.rbody().stat() == MSG_ACCEPTED) {
       auto stat = m.body.rbody().areply().reply_data.stat();
@@ -118,6 +120,8 @@ struct XdrCallFailed : XdrException {
 inline void
 msg_set_reply_stat(rpc_msg *msg, accept_stat stat)
 {
+  using enum msg_type;
+  using enum reply_stat;
   msg->body.mtype(REPLY);
   msg->body.rbody().stat(MSG_ACCEPTED);
   msg->body.rbody().areply().reply_data.stat(stat);
@@ -125,6 +129,9 @@ msg_set_reply_stat(rpc_msg *msg, accept_stat stat)
 inline void
 msg_set_reply_stat(rpc_msg *msg, reject_stat stat)
 {
+  using enum reply_stat;
+  using enum reject_stat;
+  using enum msg_type;
   msg->body.mtype(REPLY);
   msg->body.rbody().stat(MSG_DENIED);
   msg->body.rbody().rreply().stat(stat);
@@ -135,6 +142,7 @@ msg_set_reply_stat(rpc_msg *msg, reject_stat stat)
 inline void
 msg_set_reply_stat(rpc_msg *msg, auth_stat stat)
 {
+  using enum reject_stat;
   msg_set_reply_stat(msg, AUTH_ERROR);
   msg->body.rbody().rreply().rj_why() = stat;
 }
@@ -153,6 +161,9 @@ make_record(const rpc_msg &msg, const is_xdr_type auto &...x)
 inline bool
 rpc_is_success(const rpc_msg &m)
 {
+  using enum accept_stat;
+  using enum reply_stat;
+  using enum msg_type;
   return m.body.mtype() == REPLY && m.body.rbody().stat() == MSG_ACCEPTED &&
          m.body.rbody().areply().reply_data.stat() == SUCCESS;
 }
@@ -192,6 +203,7 @@ struct RpcLogger {
                    const rpc_msg &msg, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
   {
+    using enum msg_type;
     std::string ret =
         std::format("{} {} xid={} {}", peername,
                     am_server == (msg.body.mtype() == CALL) ? "==>" : "<==",
@@ -317,6 +329,7 @@ private:
 
     template<std::same_as<void>> Async<Buf> operator()() const
     {
+      using enum accept_stat;
       rpc_msg err{.xid = callmsg_.xid};
       msg_set_reply_stat(&err, PROC_UNAVAIL);
       d_.logger_.template log_server<VersMeta>(callmsg_);
@@ -325,6 +338,7 @@ private:
     }
     template<typename ProcMeta> Async<Buf> operator()() const
     {
+      using enum accept_stat;
       typename ProcMeta::arg_type args;
       rpc_msg rmsg{.xid = callmsg_.xid};
       try {
@@ -414,6 +428,8 @@ struct RpcStream : public detail::RpcStreamImpl {
   Async<typename ProcMeta::return_type>
   send_call(const is_xdr_type auto &...args)
   {
+    using enum msg_type;
+    using enum auth_flavor;
     rpc_msg msg{};
     msg.body.mtype(CALL);
     msg.body.cbody().rpcvers = 2;

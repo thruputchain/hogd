@@ -38,7 +38,7 @@ struct Impl {
   {
     std::println("serving takes_recursive");
     coloru ret;
-    ret.c(RED);
+    ret.c(color::RED);
     ret.r() = "This is the string in the result";
     co_return ret;
   }
