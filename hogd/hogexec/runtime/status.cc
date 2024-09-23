@@ -47,4 +47,16 @@ WasmiInvokeErrorCategory::message(int code) const
   }
 }
 
+std::string 
+SyscallErrorCategory::message(int code) const {
+  using enum SyscallErrorCode;
+  assert(SyscallError::is_in_enum_range(code));
+  switch (static_cast<SyscallErrorCode>(code)) {
+    // TODO(geoff) unimpl
+  default:
+    return "SyscallErrorCode Unknown";
+  }
+}
+
+
 } // namespace hogd

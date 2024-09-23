@@ -158,7 +158,7 @@ WasmiContext::~WasmiContext()
 }
 
 std::unique_ptr<WasmiRuntime>
-WasmiContext::make_new_runtime(Contract const &contract,
+WasmiContext::make_new_runtime(ContractBlob const &contract,
                                SystemCallHandler *syscall_handler)
 {
   std::unique_ptr<HostCallContext> host_call_context =
