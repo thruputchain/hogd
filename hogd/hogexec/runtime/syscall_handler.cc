@@ -62,6 +62,8 @@ SystemCallHandler::invoke(Invocation invocation)
     }
     call_frame_stack_.pop_back();
 
+    call_frame_stack_.back().commit_failed_child_call();
+
     switch (result.result.error().code()) {
     case kWasmiFnNExist:
     case kWasmiInputError:
@@ -93,6 +95,18 @@ SystemCallHandler::invoke(Invocation invocation)
   call_frame_stack_.pop_back();
 
   return {SyscallErrorCode::kNone, result.gas_consumed};
+}
+
+SyscallStatus<const ReturnBuffer>
+SystemCallHandler::get_return_buffer() const {
+  assert(!call_frame_stack_.empty());
+
+  if (!call_frame_stack_.back().child_return_buffer_.has_value())
+  {
+    return SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
+  }
+
+  return *call_frame_stack_.back().child_return_buffer_;
 }
 
 WasmiRuntime *

@@ -14,6 +14,14 @@ CallFrame::commit_successful_child_call(CallFrame &&frame)
   }
   visited_runtimes_.insert(frame.visited_runtimes_.begin(),
                            frame.visited_runtimes_.end());
+
+  child_return_buffer_ = frame.to_return_;
+}
+
+void
+CallFrame::commit_failed_child_call()
+{
+	child_return_buffer_ = std::nullopt;
 }
 
 void

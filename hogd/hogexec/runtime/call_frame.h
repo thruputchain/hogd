@@ -17,6 +17,7 @@ public:
   CallFrame(ContractAddress const &addr, WasmiRuntime &runtime);
 
   void commit_successful_child_call(CallFrame &&frame);
+  void commit_failed_child_call();
 
   const bool unwind_catch_boundary_ = false;
   const ContractAddress active_address_;
@@ -33,10 +34,16 @@ public:
   // variable here.
   std::set<ContractAddress> visited_runtimes_;
 
-  ReturnBuffer last_return_buffer;
+  // The value of the last _child_ call frame's returned string.
+  // Set to nullopt on failed calls, or before any child call happens.
+  std::optional<ReturnBuffer> child_return_buffer_;
+
+  void set_call_return(std::span<const std::byte> return_span);
 
 private:
   WasmiRuntime &active_runtime_;
+
+  ReturnBuffer to_return_;
 
   // Cached here separately from the primary SystemCallHandler
   // in order to (in later PR) support subcall unwinding
