@@ -13,7 +13,19 @@ StorageProxy::delete_last()
 bool
 StorageProxy::exists() const
 {
-  return ((base_object_) || (!!set_bytestring_arg_));
+  return get_object_type().has_value();
+}
+
+std::optional<StorageObjectType>
+StorageProxy::get_object_type() const
+{
+  if (base_object_) {
+    return base_object_->type();
+  }
+  if (!!set_bytestring_arg_) {
+    return StorageObjectType::kBytestring;
+  }
+  return std::nullopt;
 }
 
 SyscallStatus<void>

@@ -16,6 +16,7 @@ public:
   void delete_last();
 
   bool exists() const;
+  std::optional<StorageObjectType> get_object_type() const;
 
   SyscallStatus<Bytestring> get_bytestring() const;
   SyscallStatus<uint64_t> get_bytestring_len() const;

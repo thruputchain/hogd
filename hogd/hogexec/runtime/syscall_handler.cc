@@ -137,6 +137,27 @@ SystemCallHandler::resolve_storage_proxy(StorageKey const &key)
   return *call_frame_stack_.back().try_get_storage_proxy(query);
 }
 
+void
+SystemCallHandler::delete_last(StorageKey const &key)
+{
+  AddressAndKey query(get_current_address(), key);
+  auto &proxy = resolve_storage_proxy(key);
+  proxy.delete_last();
+}
+
+SyscallStatus<StorageObjectType>
+SystemCallHandler::get_object_type(StorageKey const &key)
+{
+  AddressAndKey query(get_current_address(), key);
+  auto &proxy = resolve_storage_proxy(key);
+  std::optional<StorageObjectType> result = proxy.get_object_type();
+
+  if (!result) {
+    return SyscallError{SyscallErrorCode::kStorageKeyNExist};
+  }
+  return *result;
+}
+
 SyscallStatus<const Bytestring>
 SystemCallHandler::get_bytestring(StorageKey const &key)
 {

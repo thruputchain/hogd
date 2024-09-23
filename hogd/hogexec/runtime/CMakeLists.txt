@@ -5,6 +5,7 @@ add_library(
   syscall_entry.cc
   syscall_bytestring.cc
   syscall_crypto.cc
+  syscall_general_storage.cc
   call_frame.cc
   syscall_handler.cc
   storage_proxy.cc

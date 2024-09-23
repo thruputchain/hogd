@@ -30,6 +30,11 @@ public:
 
   SyscallStatus<ContractAddress> get_msg_sender() const;
 
+  // general storage
+  void delete_last(StorageKey const &key);
+  SyscallStatus<StorageObjectType> get_object_type(StorageKey const &key);
+
+  // bytestring
   SyscallStatus<const Bytestring> get_bytestring(StorageKey const &key);
   SyscallStatus<uint64_t> get_bytestring_len(StorageKey const &key);
   SyscallStatus<void>
