@@ -2,13 +2,13 @@
 
 #include <array>
 #include <cstdint>
-#include <unordered_map>
-#include <optional>
 #include <memory>
+#include <optional>
+#include <unordered_map>
 
-#include "x23/mvar.h"
-#include "types.hh"
 #include "storage_object.hh"
+#include "types.hh"
+#include "x23/mvar.h"
 
 namespace hogd {
 
@@ -18,12 +18,15 @@ namespace hogd {
 class StorageSnapshotCache {
 public:
   std::optional<StorageObject> try_get_object(AddressAndKey const &addrkey);
-  std::shared_ptr<Contract> try_get_contract_by_addr(ContractAddress const& addr);
+  std::shared_ptr<Contract>
+  try_get_contract_by_addr(ContractAddress const &addr);
 
 private:
   // nullopt to cache "does not exist" results
-  x23::MVar<std::unordered_map<AddressAndKey, std::optional<StorageObject>>> storage_cache_;
-  x23::MVar<std::unordered_map<ContractAddress, std::shared_ptr<Contract>>> contract_cache_;
+  x23::MVar<std::unordered_map<AddressAndKey, std::optional<StorageObject>>>
+      storage_cache_;
+  x23::MVar<std::unordered_map<ContractAddress, std::shared_ptr<Contract>>>
+      contract_cache_;
 };
 
 } // namespace hogd

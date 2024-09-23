@@ -3,9 +3,9 @@
 %#include "types.hh"
 
 namespace hogd {
-// clang-format on
+  // clang-format on
 
-enum SyscallNo {
+  enum SyscallNo {
     kSHA256 = 0,
     kGetMsgSender = 1,
     kBytestringGetLen = 2,
@@ -13,9 +13,9 @@ enum SyscallNo {
     kBytestringSet = 4,
     kHasKey = 5,
     kDeleteLast = 6,
-};
+  };
 
-enum SyscallErrorCode {
+  enum SyscallErrorCode {
     // No error
     kNone = 0,
 
@@ -25,7 +25,11 @@ enum SyscallErrorCode {
     // Syscall's expected type does not match object type at provided key
     kStorageObjectTypeMismatch = 2,
 
-    // Access to storage objet that does not logically exist. An object exists if it exists at the start of a transaction (in the ledger snapshot), or if it is created by an operation in that transaction.  The DeleteLast syscall is not factored into this calculation, as those deletions are only applied at the end of a block.
+    // Access to storage objet that does not logically exist. An object exists
+    // if it exists at the start of a transaction (in the ledger snapshot), or
+    // if it is created by an operation in that transaction.  The DeleteLast
+    // syscall is not factored into this calculation, as those deletions are
+    // only applied at the end of a block.
     kStorageKeyNExist = 3,
 
     // Unknown syscall number
@@ -39,9 +43,12 @@ enum SyscallErrorCode {
 
     // Failed to find contract
     kContractLookupFailed = 7,
-    
-    // Deterministic error within a smart contract
-    kDeterministicWasmError = 8,
-};
+
+    // Input to set_bytestring is too long for one bytestring
+    kBytestringTooLong = 8,
+
+    // Deterministic error within called wasm (i.e. trap)
+    kDeterministicWasmError = 9,
+  };
 
 } // namespace hogd

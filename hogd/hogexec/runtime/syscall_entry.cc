@@ -46,12 +46,10 @@ check_user_span_argument(std::span<std::byte> contract_memory,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-syscall_SHA256_outer(SystemCallHandler& syscall_handler,
+syscall_SHA256_outer(SystemCallHandler &syscall_handler,
                      std::span<std::byte> contract_memory,
-                     uint64_t user_input_buffer, 
-                     uint64_t user_input_buffer_len,
-                     uint64_t user_output_hash, 
-                     uint64_t /*unused*/)
+                     uint64_t user_input_buffer, uint64_t user_input_buffer_len,
+                     uint64_t user_output_hash, uint64_t /*unused*/)
 {
   std::optional<std::span<const std::byte>> input_buffer =
       check_user_span_argument(contract_memory, user_input_buffer,
@@ -72,16 +70,14 @@ syscall_SHA256_outer(SystemCallHandler& syscall_handler,
   return syscall_SHA256_inner(syscall_handler, *input_buffer, *output_hash);
 }
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-syscall_GetMsgSender_outer(SystemCallHandler& syscall_handler,
-                     std::span<std::byte> contract_memory,
-                     uint64_t user_output_sender, 
-                     uint64_t /*unused*/,
-                     uint64_t /*unused*/, 
-                     uint64_t /*unused*/)
+syscall_GetMsgSender_outer(SystemCallHandler &syscall_handler,
+                           std::span<std::byte> contract_memory,
+                           uint64_t user_output_sender, uint64_t /*unused*/,
+                           uint64_t /*unused*/, uint64_t /*unused*/)
 {
   ContractAddress *output_sender =
       check_user_argument<ContractAddress>(contract_memory, user_output_sender,
-                                      sizeof(ContractAddress));
+                                           sizeof(ContractAddress));
 
   if (!output_sender) {
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
@@ -90,16 +86,15 @@ syscall_GetMsgSender_outer(SystemCallHandler& syscall_handler,
   return syscall_GetMsgSender_inner(syscall_handler, *output_sender);
 }
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-syscall_BytestringGetLen_outer(SystemCallHandler& syscall_handler,
-                     std::span<std::byte> contract_memory,
-                     uint64_t user_input_key, 
-                     uint64_t user_output_length,
-                     uint64_t /*unused*/, 
-                     uint64_t /*unused*/)
+syscall_BytestringGetLen_outer(SystemCallHandler &syscall_handler,
+                               std::span<std::byte> contract_memory,
+                               uint64_t user_input_key,
+                               uint64_t user_output_length, uint64_t /*unused*/,
+                               uint64_t /*unused*/)
 {
   const StorageKey *input_key =
       check_user_argument<const StorageKey>(contract_memory, user_input_key,
-                                      sizeof(StorageKey));
+                                            sizeof(StorageKey));
 
   if (!input_key) {
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
@@ -107,25 +102,26 @@ syscall_BytestringGetLen_outer(SystemCallHandler& syscall_handler,
 
   uint64_t *output_length =
       check_user_argument<uint64_t>(contract_memory, user_output_length,
-                                      sizeof(uint64_t));
+                                    sizeof(uint64_t));
 
   if (!output_length) {
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
   }
 
-  return syscall_BytestringGetLen_inner(syscall_handler, *input_key, *output_length);
+  return syscall_BytestringGetLen_inner(syscall_handler, *input_key,
+                                        *output_length);
 }
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-syscall_BytestringGet_outer(SystemCallHandler& syscall_handler,
-                     std::span<std::byte> contract_memory,
-                     uint64_t user_input_key, 
-                     uint64_t user_output_bytestring,
-                     uint64_t user_output_bytestring_len, 
-                     uint64_t user_output_written_len)
+syscall_BytestringGet_outer(SystemCallHandler &syscall_handler,
+                            std::span<std::byte> contract_memory,
+                            uint64_t user_input_key,
+                            uint64_t user_output_bytestring,
+                            uint64_t user_output_bytestring_len,
+                            uint64_t user_output_written_len)
 {
   const StorageKey *input_key =
       check_user_argument<const StorageKey>(contract_memory, user_input_key,
-                                      sizeof(StorageKey));
+                                            sizeof(StorageKey));
 
   if (!input_key) {
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
@@ -141,25 +137,26 @@ syscall_BytestringGet_outer(SystemCallHandler& syscall_handler,
 
   uint64_t *output_written_len =
       check_user_argument<uint64_t>(contract_memory, user_output_written_len,
-                                      sizeof(uint64_t));
+                                    sizeof(uint64_t));
 
   if (!output_written_len) {
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
   }
 
-  return syscall_BytestringGet_inner(syscall_handler, *input_key, *output_bytestring, *output_written_len);
+  return syscall_BytestringGet_inner(syscall_handler, *input_key,
+                                     *output_bytestring, *output_written_len);
 }
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-syscall_BytestringSet_outer(SystemCallHandler& syscall_handler,
-                     std::span<std::byte> contract_memory,
-                     uint64_t user_input_key, 
-                     uint64_t user_input_bytestring,
-                     uint64_t user_input_bytestring_len, 
-                     uint64_t /*unused*/)
+syscall_BytestringSet_outer(SystemCallHandler &syscall_handler,
+                            std::span<std::byte> contract_memory,
+                            uint64_t user_input_key,
+                            uint64_t user_input_bytestring,
+                            uint64_t user_input_bytestring_len,
+                            uint64_t /*unused*/)
 {
   const StorageKey *input_key =
       check_user_argument<const StorageKey>(contract_memory, user_input_key,
-                                      sizeof(StorageKey));
+                                            sizeof(StorageKey));
 
   if (!input_key) {
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
@@ -173,27 +170,27 @@ syscall_BytestringSet_outer(SystemCallHandler& syscall_handler,
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
   }
 
-  return syscall_BytestringSet_inner(syscall_handler, *input_key, *input_bytestring);
+  return syscall_BytestringSet_inner(syscall_handler, *input_key,
+                                     *input_bytestring);
 }
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-syscall_HasKey_outer(SystemCallHandler& syscall_handler,
+syscall_HasKey_outer(SystemCallHandler &syscall_handler,
                      std::span<std::byte> contract_memory,
-                     uint64_t user_input_key, 
-                     uint64_t user_output_status,
-                     uint64_t /*unused*/, 
-                     uint64_t /*unused*/)
+                     uint64_t user_input_key, uint64_t user_output_status,
+                     uint64_t /*unused*/, uint64_t /*unused*/)
 {
   const StorageKey *input_key =
       check_user_argument<const StorageKey>(contract_memory, user_input_key,
-                                      sizeof(StorageKey));
+                                            sizeof(StorageKey));
 
   if (!input_key) {
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
   }
 
   StorageObjectType *output_status =
-      check_user_argument<StorageObjectType>(contract_memory, user_output_status,
-                                      sizeof(StorageObjectType));
+      check_user_argument<StorageObjectType>(contract_memory,
+                                             user_output_status,
+                                             sizeof(StorageObjectType));
 
   if (!output_status) {
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
@@ -202,16 +199,14 @@ syscall_HasKey_outer(SystemCallHandler& syscall_handler,
   return syscall_HasKey_inner(syscall_handler, *input_key, *output_status);
 }
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-syscall_DeleteLast_outer(SystemCallHandler& syscall_handler,
-                     std::span<std::byte> contract_memory,
-                     uint64_t user_input_key, 
-                     uint64_t /*unused*/,
-                     uint64_t /*unused*/, 
-                     uint64_t /*unused*/)
+syscall_DeleteLast_outer(SystemCallHandler &syscall_handler,
+                         std::span<std::byte> contract_memory,
+                         uint64_t user_input_key, uint64_t /*unused*/,
+                         uint64_t /*unused*/, uint64_t /*unused*/)
 {
   const StorageKey *input_key =
       check_user_argument<const StorageKey>(contract_memory, user_input_key,
-                                      sizeof(StorageKey));
+                                            sizeof(StorageKey));
 
   if (!input_key) {
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
@@ -220,9 +215,9 @@ syscall_DeleteLast_outer(SystemCallHandler& syscall_handler,
   return syscall_DeleteLast_inner(syscall_handler, *input_key);
 }
 
-
 using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> (*)(
-    SystemCallHandler&, std::span<std::byte>, uint64_t, uint64_t, uint64_t, uint64_t);
+    SystemCallHandler &, std::span<std::byte>, uint64_t, uint64_t, uint64_t,
+    uint64_t);
 
 const std::array<std::pair<SyscallNo, SyscallFunc>, 7> syscall_table = {
     std::pair{SyscallNo::kSHA256, &syscall_SHA256_outer},
@@ -253,9 +248,10 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
 
   std::span<std::byte> contract_memory = call_context->runtime->get_memory();
 
-  assert(call_context -> syscall_handler);
+  assert(call_context->syscall_handler);
 
-  return syscall_fn_outer(*call_context->syscall_handler, contract_memory, arg1, arg2, arg3, arg4);
+  return syscall_fn_outer(*call_context->syscall_handler, contract_memory, arg1,
+                          arg2, arg3, arg4);
 }
 
 HostFnStatus<uint64_t>
@@ -268,7 +264,9 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   if (!call_context->runtime->consume_gas(gas_consumed)) {
     return HostFnError{HostFnErrorCode::kOutOfGas};
   }
-  return err.and_then([](SyscallErrorCode err) -> HostFnStatus<uint64_t> { return static_cast<uint64_t>(err); });
+  return err.and_then([](SyscallErrorCode err) -> HostFnStatus<uint64_t> {
+    return static_cast<uint64_t>(err);
+  });
 }
 
 } // namespace hogd

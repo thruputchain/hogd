@@ -83,9 +83,8 @@ public:
   std::string message(int code) const override;
 };
 
-struct SyscallError 
-  : public EnumError<SyscallErrorCode, SyscallErrorCategory> {
-    explicit SyscallError(SyscallErrorCode err) : EnumError(err) {}
+struct SyscallError : public EnumError<SyscallErrorCode, SyscallErrorCategory> {
+  explicit SyscallError(SyscallErrorCode err) : EnumError(err) {}
 };
 
 // Enable comparisons between SyscallErrorCode and std::error_code.
@@ -95,7 +94,6 @@ operator==(const SyscallErrorCode &lhs, const std::error_code &rhs)
   return SyscallError{lhs} == rhs;
 }
 
-template<typename T>
-using SyscallStatus = std::expected<T, SyscallError>;
+template<typename T> using SyscallStatus = std::expected<T, SyscallError>;
 
 } // namespace hogd

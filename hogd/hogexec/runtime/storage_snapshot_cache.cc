@@ -6,7 +6,7 @@
 
 namespace hogd {
 
-std::optional<StorageObject> 
+std::optional<StorageObject>
 StorageSnapshotCache::try_get_object(AddressAndKey const &addrkey)
 {
   {
@@ -28,7 +28,7 @@ StorageSnapshotCache::try_get_object(AddressAndKey const &addrkey)
 }
 
 std::shared_ptr<Contract>
-StorageSnapshotCache::try_get_contract_by_addr(ContractAddress const& addr)
+StorageSnapshotCache::try_get_contract_by_addr(ContractAddress const &addr)
 {
   {
     auto cache = contract_cache_.take();
@@ -48,6 +48,4 @@ StorageSnapshotCache::try_get_contract_by_addr(ContractAddress const& addr)
   return contract_from_db;
 }
 
-
-
-}
+} // namespace hogd
