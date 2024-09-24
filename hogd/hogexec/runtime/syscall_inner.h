@@ -12,6 +12,7 @@ namespace hogd {
 
 class SystemCallHandler;
 
+
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_SHA256_inner(std::span<const std::byte> input_buffer,
                      SHA256Hash &output_hash);
@@ -41,6 +42,6 @@ syscall_HasKey_inner(SystemCallHandler &syscall_handler,
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_DeleteLast_inner(SystemCallHandler &syscall_handler,
-                         const StorageKey &input_key);
+                         const StorageKey &input_key); 
 
 } // namespace hogd

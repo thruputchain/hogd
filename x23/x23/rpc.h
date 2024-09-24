@@ -313,6 +313,7 @@ struct RpcDispatcher : RpcService {
 
   Async<Buf> serve(const rpc_msg &msg, BufView argdata) override
   {
+    using enum msg_type;
     assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
            msg.body.cbody().prog == program() &&
            msg.body.cbody().vers == version());
