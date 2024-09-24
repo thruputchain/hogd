@@ -1,14 +1,15 @@
 add_library(
   runtime
-  wasmi_runtime.cc
+  call_frame.cc
   status.cc
+  storage_proxy.cc
   syscall_entry.cc
   syscall_bytestring.cc
   syscall_crypto.cc
   syscall_general_storage.cc
-  call_frame.cc
+  syscall_invoke.cc
   syscall_handler.cc
-  storage_proxy.cc
+  wasmi_runtime.cc
 )
 add_executable(
   runtime_test

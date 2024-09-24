@@ -21,7 +21,7 @@ CallFrame::commit_successful_child_call(CallFrame &&frame)
 void
 CallFrame::commit_failed_child_call()
 {
-	child_return_buffer_ = std::nullopt;
+  child_return_buffer_ = std::nullopt;
 }
 
 void

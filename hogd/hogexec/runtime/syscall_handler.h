@@ -41,8 +41,7 @@ public:
   set_bytestring(StorageKey const &key,
                  std::span<const std::byte> input_bytestring);
 
-  SyscallStatus<const ReturnBuffer>
-  get_return_buffer() const;
+  SyscallStatus<const ReturnBuffer> get_return_buffer() const;
 
 private:
   struct RuntimeCacheEntry {

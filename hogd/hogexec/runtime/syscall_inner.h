@@ -13,8 +13,7 @@ namespace hogd {
 class SystemCallHandler;
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-syscall_SHA256_inner(SystemCallHandler &syscall_handler,
-                     std::span<const std::byte> input_buffer,
+syscall_SHA256_inner(std::span<const std::byte> input_buffer,
                      SHA256Hash &output_hash);
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>

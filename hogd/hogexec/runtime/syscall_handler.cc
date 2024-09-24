@@ -98,11 +98,11 @@ SystemCallHandler::invoke(Invocation invocation)
 }
 
 SyscallStatus<const ReturnBuffer>
-SystemCallHandler::get_return_buffer() const {
+SystemCallHandler::get_return_buffer() const
+{
   assert(!call_frame_stack_.empty());
 
-  if (!call_frame_stack_.back().child_return_buffer_.has_value())
-  {
+  if (!call_frame_stack_.back().child_return_buffer_.has_value()) {
     return SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
   }
 

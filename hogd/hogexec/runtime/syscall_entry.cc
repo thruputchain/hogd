@@ -67,7 +67,7 @@ syscall_SHA256_outer(SystemCallHandler &syscall_handler,
     return {SyscallErrorCode::kFault, kGenericBadSyscallCost};
   }
 
-  return syscall_SHA256_inner(syscall_handler, *input_buffer, *output_hash);
+  return syscall_SHA256_inner(*input_buffer, *output_hash);
 }
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_GetMsgSender_outer(SystemCallHandler &syscall_handler,
