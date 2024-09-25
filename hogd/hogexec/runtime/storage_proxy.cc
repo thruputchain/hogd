@@ -1,6 +1,13 @@
 #include "hogd/hogexec/runtime/storage_proxy.h"
 
+#include <cstddef>
+#include <optional>
+#include <span>
+
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "storage_object.hh"
+#include "syscall.hh"
 
 namespace hogd {
 

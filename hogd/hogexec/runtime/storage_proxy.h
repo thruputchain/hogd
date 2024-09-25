@@ -11,7 +11,8 @@ namespace hogd {
 
 class StorageProxy {
 public:
-  StorageProxy(std::optional<StorageObject> obj) : base_object_(obj) {}
+  StorageProxy(std::optional<StorageObject> obj) : base_object_(std::move(obj))
+  {}
 
   void delete_last();
 

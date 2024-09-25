@@ -3,9 +3,10 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "storage_object.hh"
 #include "syscall.hh"
 #include "types.hh"
 
@@ -19,7 +20,7 @@ syscall_HasKey_inner(SystemCallHandler &syscall_handler,
   SyscallStatus<StorageObjectType> status =
       syscall_handler.get_object_type(input_key);
   if (!status) {
-    return {status.error().code(), 0};
+    return {status.error().code(), kHasKeyCost};
   }
 
   output_status = *status;

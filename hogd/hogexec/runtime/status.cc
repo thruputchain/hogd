@@ -2,6 +2,7 @@
 #include <string>
 
 #include "hogd/hogexec/runtime/status.h"
+#include "syscall.hh"
 
 namespace hogd {
 

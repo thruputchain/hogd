@@ -1,18 +1,30 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 
 #include <cassert>
+#include <cstddef>
+#include <format>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <utility>
 
-#include "hogd/hogexec/runtime/call_frame.h"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "storage_object.hh"
 #include "syscall.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
 SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
                                      StorageSnapshotCache &snapshot_cache)
-  : signed_tx_(signed_tx), snapshot_cache_(snapshot_cache)
+  : signed_tx_(std::move(signed_tx)), snapshot_cache_(snapshot_cache)
 {
   wasmi_context_.link_fn("hogd", "syscall", &syscall_entry);
 }
@@ -70,6 +82,7 @@ SystemCallHandler::invoke(Invocation invocation)
     case kWasmiReturnTypeError:
       // We control the inputs to wasmi.  These types of errors should never
       // occur.
+    case kWasmiUnrecoverableSystemError:
       return {HostFnError{HostFnErrorCode::kUnrecoverableUnknown},
               result.gas_consumed};
     case kWasmiDeterministicCallError:
@@ -77,9 +90,6 @@ SystemCallHandler::invoke(Invocation invocation)
       return {SyscallErrorCode::kDeterministicWasmError, result.gas_consumed};
     case kWasmiOutOfGasError:
       return {HostFnError{HostFnErrorCode::kOutOfGas}, result.gas_consumed};
-    case kWasmiUnrecoverableSystemError:
-      return {HostFnError{HostFnErrorCode::kUnrecoverableUnknown},
-              result.gas_consumed};
     default:
       return {HostFnError{HostFnErrorCode::kUnrecoverableUnknown},
               result.gas_consumed};
@@ -102,11 +112,14 @@ SystemCallHandler::get_return_buffer() const
 {
   assert(!call_frame_stack_.empty());
 
-  if (!call_frame_stack_.back().child_return_buffer_.has_value()) {
+  auto const& top_frame = call_frame_stack_.back();
+
+
+  if (!top_frame.child_return_buffer_.has_value()) {
     return SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
   }
 
-  return *call_frame_stack_.back().child_return_buffer_;
+  return *top_frame.child_return_buffer_;
 }
 
 WasmiRuntime *
@@ -154,7 +167,6 @@ SystemCallHandler::resolve_storage_proxy(StorageKey const &key)
 void
 SystemCallHandler::delete_last(StorageKey const &key)
 {
-  AddressAndKey query(get_current_address(), key);
   auto &proxy = resolve_storage_proxy(key);
   proxy.delete_last();
 }
@@ -162,7 +174,6 @@ SystemCallHandler::delete_last(StorageKey const &key)
 SyscallStatus<StorageObjectType>
 SystemCallHandler::get_object_type(StorageKey const &key)
 {
-  AddressAndKey query(get_current_address(), key);
   auto &proxy = resolve_storage_proxy(key);
   std::optional<StorageObjectType> result = proxy.get_object_type();
 
@@ -175,7 +186,6 @@ SystemCallHandler::get_object_type(StorageKey const &key)
 SyscallStatus<const Bytestring>
 SystemCallHandler::get_bytestring(StorageKey const &key)
 {
-  AddressAndKey query(get_current_address(), key);
   auto &proxy = resolve_storage_proxy(key);
   return proxy.get_bytestring();
 }
@@ -183,7 +193,6 @@ SystemCallHandler::get_bytestring(StorageKey const &key)
 SyscallStatus<uint64_t>
 SystemCallHandler::get_bytestring_len(StorageKey const &key)
 {
-  AddressAndKey query(get_current_address(), key);
   auto &proxy = resolve_storage_proxy(key);
   return proxy.get_bytestring_len();
 }
@@ -192,7 +201,6 @@ SyscallStatus<void>
 SystemCallHandler::set_bytestring(StorageKey const &key,
                                   std::span<const std::byte> input_bytestring)
 {
-  AddressAndKey query(get_current_address(), key);
   auto &proxy = resolve_storage_proxy(key);
   return proxy.set_bytestring(input_bytestring);
 }

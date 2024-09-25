@@ -1,14 +1,13 @@
-#include <cstdint>
 #include <cstring>
-#include <memory>
-#include <stdexcept>
+#include <optional>
+#include <span>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "storage_object.hh"
-#include "types.hh"
 
 namespace hogd {
 

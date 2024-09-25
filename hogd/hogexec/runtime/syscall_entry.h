@@ -4,7 +4,7 @@
 
 namespace hogd {
 
-class HostCallContext;
+struct HostCallContext;
 
 HostFnStatus<uint64_t> syscall_entry(HostCallContext *call_context,
                                      uint64_t arg0, uint64_t arg1,

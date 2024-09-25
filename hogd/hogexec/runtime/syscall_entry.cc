@@ -1,6 +1,11 @@
 #include "hogd/hogexec/runtime/syscall_entry.h"
 
+#include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstring>
+#include <optional>
+#include <span>
 #include <utility>
 
 #include "hogd/base/types.h"

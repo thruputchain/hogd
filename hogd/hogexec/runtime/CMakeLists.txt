@@ -24,6 +24,7 @@ add_executable(
 target_link_libraries(
   runtime
   wasmi_lib
+  crypto
   protocol
 )
 target_link_libraries(

@@ -1,7 +1,12 @@
 #include "hogd/hogexec/runtime/call_frame.h"
 
 #include <cassert>
-#include <unordered_map>
+#include <memory>
+#include <optional>
+#include <utility>
+
+#include "hogd/hogexec/runtime/storage_proxy.h"
+#include "types.hh"
 
 namespace hogd {
 
