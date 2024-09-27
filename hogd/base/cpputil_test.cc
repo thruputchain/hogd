@@ -1,5 +1,6 @@
-#include "hogd/base/cpputil.h"
 #include <gtest/gtest.h>
+
+#include "hogd/base/cpputil.h"
 
 namespace hogd {
 

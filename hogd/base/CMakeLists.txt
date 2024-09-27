@@ -13,6 +13,7 @@ add_executable(
   cpputil_test.cc
   status_test.cc
   string_test.cc
+  unique_function_test.cc
 )
 target_link_libraries(
   base_test

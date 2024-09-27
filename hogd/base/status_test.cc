@@ -2,10 +2,10 @@
 #include <format>
 #include <system_error>
 
-#include "hogd/base/status.h"
-
 #include <fcntl.h>
 #include <gtest/gtest.h>
+
+#include "hogd/base/status.h"
 
 namespace hogd {
 

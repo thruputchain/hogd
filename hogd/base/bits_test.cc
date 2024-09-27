@@ -1,9 +1,10 @@
 #include <concepts>
 #include <limits>
 
+#include <gtest/gtest.h>
+
 #include "hogd/base/bits.h"
 #include "hogd/base/types.h"
-#include <gtest/gtest.h>
 
 namespace hogd {
 
