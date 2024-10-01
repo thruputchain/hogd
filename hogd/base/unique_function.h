@@ -1,8 +1,8 @@
 // unique_function.h - provides a move-only polymorphic function wrapper
 //
 // This is a temporary measure until std::move_only_function is implemented in
-// libc++ (Clang). This version reasonably fast, but is missing the
-// no heap allocation optimization for small invocables.
+// libc++ (Clang). This version is reasonably fast, but is missing the no heap
+// allocation optimization for small invocables.
 
 #pragma once
 
@@ -96,7 +96,7 @@ private:
 };
 
 template<typename Ret, typename... Args>
-inline bool
+bool
 operator==(const UniqueFunction<Ret, Args...> &f, std::nullptr_t)
 {
   return !!f;
