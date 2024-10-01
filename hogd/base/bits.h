@@ -93,9 +93,10 @@ template<std::unsigned_integral T> struct WrappingSequence {
 // that are ignored during dereferencing. It can be used to store 6 bits per
 // pointer without additional storage overhead.
 //
-// TODO(amb): This class is compliant with Intel's LAM_U57 (6 bits), AMD's UAI
-// (6 bits), and ARM's top-byte ignore (8 bits). On these CPUs, it could be
-// made more efficient if we are willing to target them at compile time.
+// TODO(amb): This class is compliant with Intel's LAM_U57 (6 bits, [62:57]),
+// AMD's UAI (7 bits, [63:57]), and ARM's top-byte ignore (8 bits, [63:56]). On
+// these CPUs, it could be made more efficient if we are willing to target them
+// at compile time.
 template<typename T> requires std::is_same_v<T, std::remove_reference_t<T>>
 class TaggedPointer {
 public:
@@ -137,9 +138,9 @@ public:
   }
 
 private:
-  static constexpr int kAddressTagShift = 58;
+  static constexpr int kAddressTagShift = 57;
   static constexpr int kTagBits = 6;
-  static_assert(kAddressTagShift + kTagBits ==
+  static_assert(kAddressTagShift + kTagBits <=
                 sizeof(uintptr_t) * kBitsPerByte);
   static constexpr uintptr_t kAddressMask = ((1UL << kAddressTagShift) - 1);
   static constexpr uintptr_t kTagMask = ~kAddressMask;
