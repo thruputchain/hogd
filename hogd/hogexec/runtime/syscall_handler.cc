@@ -112,8 +112,7 @@ SystemCallHandler::get_return_buffer() const
 {
   assert(!call_frame_stack_.empty());
 
-  auto const& top_frame = call_frame_stack_.back();
-
+  auto const &top_frame = call_frame_stack_.back();
 
   if (!top_frame.child_return_buffer_.has_value()) {
     return SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
