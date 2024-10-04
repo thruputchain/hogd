@@ -29,10 +29,9 @@ namespace x23 {
 
 namespace detail {
 
-#if HAVE_EPOLL
-
 class CoroPollImpl : public DestroyInhibit {
 public:
+  using WorkItem = CoroCB<Errno>;
   ThreadPool &pool_;
 
   CoroPollImpl(ThreadPool &pool);
@@ -71,12 +70,12 @@ public:
   // there could still be epoll events registered, or if you called
   // poison(), the file descriptor number could still be poisoned when
   // it is recycled by another socket.
-  void reset(BorrowedFd fd) { setmode(getfd(fd), FdState::Mode::kFree); }
+  void reset(BorrowedFd fd);
 
   // Make any pending and future callbacks return with EBADF untill
   // reset() is called.  Pending callbacks are made asynchronously, so
   // may still be running after poison() returns.
-  void poison(BorrowedFd fd) { setmode(getfd(fd), FdState::Mode::kPoisoned); }
+  void poison(BorrowedFd fd);
 
 protected:
   void check(int timeout = -1);
@@ -89,8 +88,12 @@ protected:
   bool time_to_stop();
 
 private:
-  using WorkItem = CoroCB<Errno>;
+  std::stop_source ss_;
+  void wake();
+  void clear(BorrowedFd fd, bool write);
+  void setcb(BorrowedFd fd, bool write, WorkItem h);
 
+#if HAVE_EPOLL
   static inline constexpr std::uint32_t epflags[2] = {EPOLLIN | EPOLLHUP |
                                                           EPOLLERR,
                                                       EPOLLOUT | EPOLLERR};
@@ -114,7 +117,6 @@ private:
     }
   };
 
-  std::stop_source ss_;
   UniqueFd epollfd_;
 
   std::shared_mutex resize_lock_;
@@ -135,9 +137,6 @@ private:
   FdPtr getfd(BorrowedFd fd);
 
   static BorrowedFd always_eof();
-  void wake();
-  void clear(BorrowedFd fd, bool write);
-  void setcb(BorrowedFd fd, bool write, WorkItem h);
   void setmode(const FdPtr &fd, FdState::Mode mode);
   void docb(const FdPtr &fdp, bool write)
   {
@@ -154,47 +153,8 @@ private:
     docb(fdp, false);
     docb(fdp, true);
   }
-};
 
 #else // !HAVE_EPOLL
-
-class CoroPollImpl : public DestroyInhibit {
-public:
-  using WorkItem = CoroCB<Errno>;
-  ThreadPool &pool_;
-
-  CoroPollImpl(ThreadPool &pool);
-  ~CoroPollImpl();
-
-  void read_clear(BorrowedFd fd) { clear(fd, false); }
-  Async<Errno> read_wait(BorrowedFd fd)
-  {
-    auto [async, cb] = make_async<Errno>();
-    setcb(fd, false, cb);
-    return std::move(async);
-  }
-  void write_clear(BorrowedFd fd) { clear(fd, true); }
-  Async<Errno> write_wait(BorrowedFd fd)
-  {
-    auto [async, cb] = make_async<Errno>();
-    setcb(fd, true, cb);
-    return std::move(async);
-  }
-
-  void poison(BorrowedFd fd);
-  void reset(BorrowedFd fd);
-
-protected:
-  void check(int timeout = -1);
-  bool stop_requested() { return ss_.stop_requested(); }
-  void request_stop()
-  {
-    ss_.request_stop();
-    wake();
-  }
-  bool time_to_stop();
-
-private:
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
                                                 POLLOUT | POLLERR};
   struct FdState {
@@ -211,15 +171,10 @@ private:
   };
   MVar<std::unordered_map<int, FdState>> state_;
   UniqueFd selfpipe_[2];
-  std::stop_source ss_;
 
   std::vector<std::coroutine_handle<>> report_badfd(FdState &fds);
-  void clear(BorrowedFd fd, bool write);
-  void setcb(BorrowedFd fd, bool write, WorkItem cb);
-  void wake();
-};
-
 #endif // !HAVE_EPOLL
+};
 
 } // namespace detail
 
