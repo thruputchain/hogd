@@ -24,7 +24,7 @@ struct HostCallContext {
 };
 
 struct InvokeResult {
-  WasmiInvokeStatus<uint64_t> result;
+  InvokeStatus<uint64_t> result;
   uint64_t gas_consumed;
 };
 

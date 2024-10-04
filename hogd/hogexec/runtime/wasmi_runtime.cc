@@ -90,7 +90,7 @@ pub struct WasmiInvokeResult {
 } */
 struct WasmiInvokeResult {
   uint64_t result;
-  uint8_t error;
+  uint8_t error; // InvokeErrorCode
 };
 
 /*
@@ -228,10 +228,10 @@ WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
 
   wasmi_set_available_gas(wasmi_runtime_ptr_, prev_gas_limit);
 
-  WasmiInvokeErrorCode wasmi_error{res.error};
+  InvokeErrorCode wasmi_error{res.error};
 
-  if (wasmi_error != WasmiInvokeErrorCode::kWasmiNone) {
-    return InvokeResult{.result = {WasmiInvokeError{wasmi_error}},
+  if (wasmi_error != InvokeErrorCode::kNone) {
+    return InvokeResult{.result = {InvokeError{wasmi_error}},
                         .gas_consumed = gas_consumed};
   }
   return InvokeResult{.result = res.result, .gas_consumed = gas_consumed};

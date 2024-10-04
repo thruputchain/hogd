@@ -66,8 +66,9 @@ SystemCallHandler::invoke(Invocation invocation)
 
   InvokeResult result = runtime->invoke(method_name, initial_gas_limit);
 
+  // TODO(geoff): an option for the syscall to check the return code
   if (!result.result.has_value()) {
-    using enum WasmiInvokeErrorCode;
+    using enum InvokeErrorCode;
 
     for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
       runtimes_.at(addr).unwind_poisoned = true;
@@ -77,18 +78,13 @@ SystemCallHandler::invoke(Invocation invocation)
     call_frame_stack_.back().commit_failed_child_call();
 
     switch (result.result.error().code()) {
-    case kWasmiFnNExist:
-    case kWasmiInputError:
-    case kWasmiReturnTypeError:
-      // We control the inputs to wasmi.  These types of errors should never
-      // occur.
-    case kWasmiUnrecoverableSystemError:
+    case kUnrecoverableSystemError:
       return {HostFnError{HostFnErrorCode::kUnrecoverableUnknown},
               result.gas_consumed};
-    case kWasmiDeterministicCallError:
+    case kDeterministicError:
       // i.e. trap within Wasmi
       return {SyscallErrorCode::kDeterministicWasmError, result.gas_consumed};
-    case kWasmiOutOfGasError:
+    case kOutOfGasError:
       return {HostFnError{HostFnErrorCode::kOutOfGas}, result.gas_consumed};
     default:
       return {HostFnError{HostFnErrorCode::kUnrecoverableUnknown},
@@ -104,7 +100,10 @@ SystemCallHandler::invoke(Invocation invocation)
   }
   call_frame_stack_.pop_back();
 
-  return {SyscallErrorCode::kNone, result.gas_consumed};
+  // This converts the user-defined return value to a syscall error code.
+  // We could do a check here (i.e. reserve < 2^16 for system, everything else for users)
+  // but this doesn't particularly matter for correctness.
+  return {SyscallErrorCode(*result.result), result.gas_consumed};
 }
 
 SyscallStatus<const ReturnBuffer>
