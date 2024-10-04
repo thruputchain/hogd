@@ -1,0 +1,116 @@
+syscalls:
+  - name: "SHA256"
+    needs_context: no
+    inputs:
+      - name: "buffer"
+        fixed_size: No
+        typename: None
+    outputs:
+      - name: "hash"
+        fixed_size: Yes
+        typename: "SHA256Hash"
+    number: 0
+  - name: "GetMsgSender"
+    needs_context: yes
+    inputs:
+    outputs:
+      - name: "sender"
+        fixed_size: Yes
+        typename: "ContractAddress"
+    number: 1
+  - name: "BytestringGetLen"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        fixed_size: Yes
+        typename: "StorageKey"
+    outputs:
+      - name: "length"
+        fixed_size: Yes
+        typename: "uint64_t"
+    number: 2
+  - name: "BytestringGet"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        fixed_size: Yes
+        typename: "StorageKey"
+    outputs:
+      - name: "bytestring"
+        fixed_size: No
+        typename: None
+      - name: "written_len"
+        fixed_size: Yes
+        typename: "uint64_t"
+    number: 3
+  - name: "BytestringSet"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        fixed_size: Yes
+        typename: "StorageKey"
+      - name: "bytestring"
+        fixed_size: No
+        typename: None
+    outputs:
+    number: 4
+  - name: "HasKey"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        fixed_size: Yes
+        typename: "StorageKey"
+    outputs:
+      - name: "status"
+        fixed_size: Yes
+        typename: "StorageObjectType"
+    number: 5
+  - name: "DeleteLast"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        fixed_size: Yes
+        typename: "StorageKey"
+    outputs:
+    number: 6
+errors:
+  - name: "None"
+    number: 0
+    doc: "No error"
+  - name: "Fault"
+    number: 1
+    doc: "Out of bounds pointer to wasm memory passed to syscall"
+  - name: "StorageObjectTypeMismatch"
+    number: 2
+    doc: "Syscall's expected type does not match object type at provided key"
+  - name: "StorageKeyNExist"
+    number: 3
+    doc: "Access to storage objet that does not logically exist.
+    An object exists if it exists at the start of a transaction (in the ledger snapshot),
+    or if it is created by an operation in that transaction.  The DeleteLast syscall
+    is not factored into this calculation, as those deletions are only applied at the end of a block." 
+  - name: "UnknownSyscall"
+    number: 4
+    doc: "Unknown syscall number"
+  - name: "NonnegativeIntSetValueMismatch"
+    number: 5
+    doc: "Cannot set a nonnegative int to different values in the same transaction"
+  - name: "IsRootTransaction"
+    number: 6
+    doc: "Cannot call get_msg_sender on root invocation"
+  - name: "ContractLookupFailed"
+    number: 7
+    doc: "Failed to find contract"
+  - name: "BytestringTooLong"
+    number: 8
+    doc: "Input to set_bytestring is too long for one bytestring"
+  - name: "DeterministicWasmError"
+    number: 9
+    doc: "Deterministic error within called wasm (i.e. trap)"
+  - name: "NoReturnBufferAvailable"
+    number: 10
+    doc: "No return buffer is available.  Either the most recent subcall failed, or there have been no subcalls within this call frame."
+
+
+
+

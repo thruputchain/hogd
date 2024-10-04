@@ -1,16 +1,37 @@
+set_source_files_properties(
+    ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
+    PROPERTIES GENERATED TRUE)
+
+set_source_files_properties(
+    ${CMAKE_CURRENT_BINARY_DIR}/syscall_inner.h
+    PROPERTIES GENERATED TRUE)
+
 add_library(
   runtime
   call_frame.cc
   status.cc
   storage_proxy.cc
-  syscall_entry.cc
   syscall_bytestring.cc
   syscall_crypto.cc
+  ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
   syscall_general_storage.cc
   syscall_invoke.cc
   syscall_handler.cc
   wasmi_runtime.cc
 )
+
+add_dependencies(
+  runtime
+  generate_syscall_inner_h
+  generate_syscall_entry_cc
+)
+
+target_include_directories(
+  runtime
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
 add_executable(
   runtime_test
   userctx_test.cc
