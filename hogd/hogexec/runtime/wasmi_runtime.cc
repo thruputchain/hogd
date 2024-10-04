@@ -8,6 +8,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -158,7 +159,7 @@ WasmiContext::~WasmiContext()
 }
 
 std::unique_ptr<WasmiRuntime>
-WasmiContext::make_new_runtime(Contract const &contract,
+WasmiContext::make_new_runtime(ContractBlob const &contract,
                                SystemCallHandler *syscall_handler)
 {
   std::unique_ptr<HostCallContext> host_call_context =

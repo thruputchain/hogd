@@ -2,6 +2,7 @@
 #include <string>
 
 #include "hogd/hogexec/runtime/status.h"
+#include "syscall.hh"
 
 namespace hogd {
 
@@ -46,6 +47,18 @@ WasmiInvokeErrorCategory::message(int code) const
     return "kWasmiUnrecoverableSystemError";
   default:
     return "WasmiInvokeErrorCode Unknown";
+  }
+}
+
+std::string
+SyscallErrorCategory::message(int code) const
+{
+  using enum SyscallErrorCode;
+  assert(SyscallError::is_in_enum_range(code));
+  switch (static_cast<SyscallErrorCode>(code)) {
+    // TODO(geoff) unimpl
+  default:
+    return "SyscallErrorCode Unknown";
   }
 }
 

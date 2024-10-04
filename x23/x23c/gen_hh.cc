@@ -1,6 +1,7 @@
 #include <map>
 #include <print>
 #include <ranges>
+#include <set>
 
 #include "x23/cleanup.h"
 #include "x23c/defs.h"
@@ -282,7 +283,7 @@ struct x23::rpc_compatible<Server, {0}, RetTrans, ExtraArgs...>
 void
 Gen::show_type(const EnumBody &e, string t)
 {
-  prtop("enum {} ", t);
+  prtop("enum class {} : int32_t ", t);
   auto _close = open_brace();
   scopes_.push_back(t);
   bottom_ += std::format(R"(template<>
@@ -397,6 +398,13 @@ Gen::show_type(const UnionBody &b, string t)
   string switch_type = map_type(b.switch_type);
   string first_case = b.arms[0].cases.empty() ? switch_type + "{}"
                                               : map_case(b.arms[0].cases[0]);
+  // does not account for typedefs, but that's not the end of the world
+  static std::set<std::string> non_enum_switch_types = 
+    {"int", "unsigned int", "hyper", "unsigned hyper", "bool"};
+
+  if (non_enum_switch_types.find(b.switch_type) == non_enum_switch_types.end()) {
+    prtop("using enum {};", switch_type);
+  }
   prtop("{0}() noexcept : {0}({1}) {{}}\n", t, first_case);
   prtop("inline explicit {0}({1}) noexcept;\n", t, switch_type);
   prtop("inline {0}({0} &&) noexcept;\n", t);

@@ -1,7 +1,15 @@
 add_library(
   runtime
-  wasmi_runtime.cc
+  call_frame.cc
   status.cc
+  storage_proxy.cc
+  syscall_entry.cc
+  syscall_bytestring.cc
+  syscall_crypto.cc
+  syscall_general_storage.cc
+  syscall_invoke.cc
+  syscall_handler.cc
+  wasmi_runtime.cc
 )
 add_executable(
   runtime_test
@@ -11,10 +19,13 @@ add_executable(
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
+  storage_proxy_test.cc
 )
 target_link_libraries(
   runtime
   wasmi_lib
+  crypto
+  protocol
 )
 target_link_libraries(
   runtime_test

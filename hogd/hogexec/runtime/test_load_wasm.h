@@ -5,10 +5,12 @@
 #include <string>
 #include <vector>
 
+#include "types.hh"
+
 namespace hogd ::test {
 
 [[maybe_unused]]
-static std::vector<uint8_t>
+static ContractBlob
 load_wasm_from_file(std::string_view filename)
 {
   std::string file = std::string(CMAKE_ROOT_BINARY_DIR) +
@@ -18,15 +20,16 @@ load_wasm_from_file(std::string_view filename)
   if (f == nullptr)
     throw std::runtime_error("failed to load wasm file: " + file);
 
-  std::vector<uint8_t> contents;
+  ContractBlob contents;
   constexpr size_t kBufferSize = 65536;
   char buf[kBufferSize];
 
   int count = -1;
   while (count != 0) {
     count = std::fread(buf, sizeof(char), kBufferSize, f);
+    std::span<char> buf_span(&buf[0], count);
     if (count > 0)
-      contents.insert(contents.end(), buf, buf + count);
+      contents.append_range(buf_span);
   }
   std::fclose(f);
 

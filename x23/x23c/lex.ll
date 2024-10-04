@@ -4,6 +4,8 @@
 #include "x23c/defs.h"
 #include "x23c/parse.hh"
 
+#pragma GCC diagnostic ignored "-Wsign-compare"
+
 #define YY_USER_ACTION							\
 do {									\
   const std::string &text =						\

@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
-#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -80,7 +79,7 @@ protected:
     contract_ = test::load_wasm_from_file("test_error_handling.wasm");
     context_.link_fn("test", "good_call", &test::good_call);
   }
-  std::vector<uint8_t> contract_;
+  ContractBlob contract_;
   WasmiContext context_;
   std::unique_ptr<WasmiRuntime> runtime_;
 };
@@ -229,7 +228,7 @@ TEST_F(WasmiErrorHandlingTest, Reentrance)
 
 TEST_F(WasmiErrorHandlingTest, NullHandling)
 {
-  std::vector<uint8_t> null_contract;
+  ContractBlob null_contract;
   runtime_ = context_.make_new_runtime(null_contract, nullptr);
 
   EXPECT_FALSE(!!runtime_);
