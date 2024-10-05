@@ -183,6 +183,18 @@ CoroPollImpl::check(int timeout)
   pool_.go(coroqueue);
 }
 
+void
+CoroPollImpl::reset(BorrowedFd fd)
+{
+  setmode(getfd(fd), FdState::Mode::kFree);
+}
+
+void
+CoroPollImpl::poison(BorrowedFd fd)
+{
+  setmode(getfd(fd), FdState::Mode::kPoisoned);
+}
+
 #else // !HAVE_EPOLL
 
 CoroPollImpl::CoroPollImpl(ThreadPool &pool_) : pool_(pool_)
@@ -267,8 +279,8 @@ CoroPollImpl::report_badfd(FdState &f)
   for (unsigned write = 0; write < 2; ++write)
     if (f.callbacks[write])
       if (auto h = std::exchange(f.callbacks[write], nullptr)
-	  .set_result_without_resuming(0))
-	ret.push_back(h);
+                       .set_result_without_resuming(0))
+        ret.push_back(h);
   return ret;
 }
 
@@ -297,8 +309,7 @@ CoroPollImpl::reset(BorrowedFd fd)
 
 void
 CoroPollImpl::clear(BorrowedFd fd, bool)
-{
-}
+{}
 
 void
 CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem cb)
