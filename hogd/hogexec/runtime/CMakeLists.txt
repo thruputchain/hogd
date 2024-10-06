@@ -15,6 +15,7 @@ add_executable(
 target_link_libraries(
   runtime
   wasmi_lib
+  protocol
 )
 target_link_libraries(
   runtime_test

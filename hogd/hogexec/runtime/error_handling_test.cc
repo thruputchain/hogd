@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
-#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -80,7 +79,7 @@ protected:
     contract_ = test::load_wasm_from_file("test_error_handling.wasm");
     context_.link_fn("test", "good_call", &test::good_call);
   }
-  std::vector<uint8_t> contract_;
+  ContractBlob contract_;
   WasmiContext context_;
   std::unique_ptr<WasmiRuntime> runtime_;
 };
@@ -101,8 +100,8 @@ TEST_F(WasmiErrorHandlingTest, RuntimeError)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{
-                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
+            InvokeError{
+                InvokeErrorCode::kUnrecoverableSystemError});
 }
 
 TEST_F(WasmiErrorHandlingTest, HostError)
@@ -114,8 +113,8 @@ TEST_F(WasmiErrorHandlingTest, HostError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{
-                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
+            InvokeError{
+                InvokeErrorCode::kUnrecoverableSystemError});
 }
 
 TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
@@ -127,8 +126,8 @@ TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{
-                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
+            InvokeError{
+                InvokeErrorCode::kUnrecoverableSystemError});
 }
 
 TEST_F(WasmiErrorHandlingTest, WasmError)
@@ -146,8 +145,8 @@ TEST_F(WasmiErrorHandlingTest, WasmError)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{
-                WasmiInvokeErrorCode::kWasmiDeterministicCallError});
+            InvokeError{
+                InvokeErrorCode::kDeterministicError});
 }
 
 TEST_F(WasmiErrorHandlingTest, NonexistFn)
@@ -164,7 +163,7 @@ TEST_F(WasmiErrorHandlingTest, NonexistFn)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiFnNExist});
+            InvokeError{InvokeErrorCode::kDeterministicError});
 }
 
 TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
@@ -177,8 +176,8 @@ TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{
-                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
+            InvokeError{
+                InvokeErrorCode::kUnrecoverableSystemError});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
@@ -204,8 +203,8 @@ TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{
-                WasmiInvokeErrorCode::kWasmiUnrecoverableSystemError});
+            InvokeError{
+                InvokeErrorCode::kUnrecoverableSystemError});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
@@ -229,7 +228,7 @@ TEST_F(WasmiErrorHandlingTest, Reentrance)
 
 TEST_F(WasmiErrorHandlingTest, NullHandling)
 {
-  std::vector<uint8_t> null_contract;
+  ContractBlob null_contract;
   runtime_ = context_.make_new_runtime(null_contract, nullptr);
 
   EXPECT_FALSE(!!runtime_);
@@ -258,13 +257,13 @@ TEST_F(WasmiErrorHandlingTest, OutOfGas)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiOutOfGasError});
+            InvokeError{InvokeErrorCode::kOutOfGasError});
 
   res = runtime_->invoke("call1", 1);
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiOutOfGasError});
+            InvokeError{InvokeErrorCode::kOutOfGasError});
 }
 
 TEST_F(WasmiErrorHandlingTest, NoGas)
@@ -276,7 +275,7 @@ TEST_F(WasmiErrorHandlingTest, NoGas)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiOutOfGasError});
+            InvokeError{InvokeErrorCode::kOutOfGasError});
 }
 
 TEST_F(WasmiErrorHandlingTest, Spin)
@@ -288,7 +287,7 @@ TEST_F(WasmiErrorHandlingTest, Spin)
 
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
-            WasmiInvokeError{WasmiInvokeErrorCode::kWasmiOutOfGasError});
+            InvokeError{InvokeErrorCode::kOutOfGasError});
 }
 
 } // namespace hogd

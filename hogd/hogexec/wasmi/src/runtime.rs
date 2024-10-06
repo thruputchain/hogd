@@ -4,7 +4,7 @@ use wasmi::{Instance, Module, Store, Val};
 
 use crate::context::WasmiContext;
 use crate::external_call;
-use crate::invoke_result::{WasmiInvokeError, WasmiInvokeResult};
+use crate::invoke_result::{InvokeError, WasmiInvokeResult};
 
 // A WasmiRuntime implements a single WebAssembly module,
 // with the ability to invoke exported functions and call
@@ -38,11 +38,11 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
     // For now, at least, we handle all as deterministic errors.
     match code {
         wasmi::core::TrapCode::OutOfFuel => {
-            return WasmiInvokeResult::error(WasmiInvokeError::OutOfGasError);
+            return WasmiInvokeResult::error(InvokeError::OutOfGasError);
         }
         _ => {
             return WasmiInvokeResult::error(
-                WasmiInvokeError::DeterministicCallError,
+                InvokeError::DeterministicError,
             );
         }
     }
@@ -84,7 +84,7 @@ impl WasmiRuntime {
         let func = match self.instance.get_func(&self.store, method) {
             Some(v) => v,
             _ => {
-                return WasmiInvokeResult::error(WasmiInvokeError::FuncNExist);
+                return WasmiInvokeResult::error(InvokeError::DeterministicError);
             }
         };
 
@@ -101,7 +101,7 @@ impl WasmiRuntime {
                 }
                 _ => {
                     return WasmiInvokeResult::error(
-                        WasmiInvokeError::ReturnTypeError,
+                        InvokeError::DeterministicError,
                     );
                 }
             },
@@ -118,7 +118,7 @@ impl WasmiRuntime {
                     Some(trampoline_error) => trampoline_error.clone(),
                     None => {
                         return WasmiInvokeResult::error(
-                            WasmiInvokeError::UnrecoverableSystemError,
+                            InvokeError::UnrecoverableSystemError,
                         );
                     }
                 };
@@ -126,7 +126,7 @@ impl WasmiRuntime {
                 match my_error.error {
                     external_call::TrampolineErrorEnum::OutOfGasError => {
                         return WasmiInvokeResult::error(
-                            WasmiInvokeError::OutOfGasError,
+                            InvokeError::OutOfGasError,
                         );
                     }
                     external_call::TrampolineErrorEnum::Return => {
@@ -135,7 +135,7 @@ impl WasmiRuntime {
                     }
                     _ => {
                         return WasmiInvokeResult::error(
-                            WasmiInvokeError::UnrecoverableSystemError,
+                            InvokeError::UnrecoverableSystemError,
                         );
                     }
                 }
@@ -156,7 +156,7 @@ pub extern "C" fn wasmi_invoke(
     assert_runtime_not_null(runtime);
 
     if method_name == core::ptr::null() {
-        return WasmiInvokeResult::error(WasmiInvokeError::InputError);
+        return WasmiInvokeResult::error(InvokeError::DeterministicError);
     }
 
     let method_name_slice =
@@ -164,7 +164,7 @@ pub extern "C" fn wasmi_invoke(
 
     let string = match std::str::from_utf8(&method_name_slice) {
         Ok(v) => v,
-        _ => return WasmiInvokeResult::error(WasmiInvokeError::InputError),
+        _ => return WasmiInvokeResult::error(InvokeError::DeterministicError),
     };
 
     let r = unsafe { &mut *runtime };
