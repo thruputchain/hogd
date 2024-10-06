@@ -41,9 +41,7 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
             return WasmiInvokeResult::error(InvokeError::OutOfGasError);
         }
         _ => {
-            return WasmiInvokeResult::error(
-                InvokeError::DeterministicError,
-            );
+            return WasmiInvokeResult::error(InvokeError::DeterministicError);
         }
     }
 }
@@ -84,7 +82,9 @@ impl WasmiRuntime {
         let func = match self.instance.get_func(&self.store, method) {
             Some(v) => v,
             _ => {
-                return WasmiInvokeResult::error(InvokeError::DeterministicError);
+                return WasmiInvokeResult::error(
+                    InvokeError::DeterministicError,
+                );
             }
         };
 
