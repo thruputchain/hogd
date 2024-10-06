@@ -109,7 +109,7 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<u64, Error> {
             Err(Error::host(TrampolineError {
                 error: TrampolineErrorEnum::OutOfGasError,
             }))
-        },
+        }
         x if x == TrampolineErrorRETURN => Err(Error::host(TrampolineError {
             error: TrampolineErrorEnum::Return,
         })),
