@@ -6,7 +6,7 @@ namespace hogd::detail {
 
 extern "C" {
 struct TrampolineResult {
-  uint64_t result;
+  int32_t result;
   uint8_t panic;
 };
 

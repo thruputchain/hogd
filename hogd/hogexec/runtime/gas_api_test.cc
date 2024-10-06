@@ -11,7 +11,7 @@ namespace hogd {
 
 namespace test {
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 consume_gas_call(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(100)) {
@@ -20,7 +20,7 @@ consume_gas_call(HostCallContext *ctxp)
   return 0;
 }
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 consume_gas_call2(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(5000)) {

@@ -14,7 +14,7 @@ constexpr static uint8_t kTrampolineErrorUNRECOVERABLE = 2;
 constexpr static uint8_t kTrampolineErrorRETURN = 3;
 
 TrampolineResult
-success(uint64_t res)
+success(int32_t res)
 {
   return TrampolineResult{res, kTrampolineErrorNONE};
 }
@@ -26,7 +26,7 @@ error(uint8_t error)
 }
 
 TrampolineResult
-handle_result(HostFnStatus<uint64_t> const &res)
+handle_result(HostFnStatus<int32_t> const &res)
 {
   if (res) {
     return success(res.value());
@@ -52,7 +52,7 @@ c_call_0args(void *function_pointer, void *host_call_context) noexcept
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr =
-        (HostFnStatus<uint64_t>(*)(HostCallContext *))(function_pointer);
+        (HostFnStatus<int32_t>(*)(HostCallContext *))(function_pointer);
 
     return handle_result((*ptr)(user_ctx));
 
@@ -67,7 +67,7 @@ c_call_1args(void *function_pointer, void *host_call_context,
 {
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
-    auto *ptr = (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t))(
+    auto *ptr = (HostFnStatus<int32_t>(*)(HostCallContext *, uint64_t))(
         function_pointer);
 
     return handle_result((*ptr)(user_ctx, arg1));
@@ -83,7 +83,7 @@ c_call_2args(void *function_pointer, void *host_call_context, uint64_t arg1,
 {
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
-    auto *ptr = (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t,
+    auto *ptr = (HostFnStatus<int32_t>(*)(HostCallContext *, uint64_t,
                                            uint64_t))(function_pointer);
 
     return handle_result((*ptr)(user_ctx, arg1, arg2));
@@ -100,7 +100,7 @@ c_call_3args(void *function_pointer, void *host_call_context, uint64_t arg1,
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr =
-        (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t, uint64_t,
+        (HostFnStatus<int32_t>(*)(HostCallContext *, uint64_t, uint64_t,
                                    uint64_t))(function_pointer);
     return handle_result((*ptr)(user_ctx, arg1, arg2, arg3));
 
@@ -116,7 +116,7 @@ c_call_4args(void *function_pointer, void *host_call_context, uint64_t arg1,
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
     auto *ptr =
-        (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t, uint64_t,
+        (HostFnStatus<int32_t>(*)(HostCallContext *, uint64_t, uint64_t,
                                    uint64_t, uint64_t))(function_pointer);
 
     return handle_result((*ptr)(user_ctx, arg1, arg2, arg3, arg4));
@@ -133,7 +133,7 @@ c_call_5args(void *function_pointer, void *host_call_context, uint64_t arg1,
 {
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
-    auto *ptr = (HostFnStatus<uint64_t>(*)(HostCallContext *, uint64_t,
+    auto *ptr = (HostFnStatus<int32_t>(*)(HostCallContext *, uint64_t,
                                            uint64_t, uint64_t, uint64_t,
                                            uint64_t))(function_pointer);
 

@@ -16,13 +16,13 @@ namespace hogd {
 
 namespace test {
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 arity0(HostCallContext * /*unused*/)
 {
   return 100;
 }
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 arity1(HostCallContext * /*unused*/, uint64_t arg0)
 {
   if (arg0 != 1) {
@@ -31,7 +31,7 @@ arity1(HostCallContext * /*unused*/, uint64_t arg0)
   return 101;
 }
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1)
 {
   if (arg0 != 1 || arg1 != 2) {
@@ -40,7 +40,7 @@ arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1)
   return 102;
 }
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2)
 {
@@ -50,7 +50,7 @@ arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   return 103;
 }
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3)
 {
@@ -60,7 +60,7 @@ arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   return 104;
 }
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4)
 {
