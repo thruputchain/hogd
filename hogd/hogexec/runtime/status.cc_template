@@ -1,17 +1,18 @@
+#include "hogd/hogexec/runtime/status.h"
+
 #include <cassert>
 #include <string>
 
-#include "hogd/hogexec/runtime/status.h"
 #include "syscall.hh"
 
-namespace hogd {
+namespace hogd {{
 
 std::string
 HostFnErrorCategory::message(int code) const
-{
+{{
   using enum HostFnErrorCode;
   assert(HostFnError::is_in_enum_range(code));
-  switch (static_cast<HostFnErrorCode>(code)) {
+  switch (static_cast<HostFnErrorCode>(code)) {{
   case kNoneOrRecoverable:
     return "kNoneOrRecoverable";
   case kOutOfGas:
@@ -22,15 +23,15 @@ HostFnErrorCategory::message(int code) const
     return "kReturn";
   default:
     return "HostFnErrorCode Unknown";
-  }
-}
-
+  }}
+}}
+ 
 std::string
 InvokeErrorCategory::message(int code) const
-{
+{{
   using enum InvokeErrorCode;
   assert(InvokeError::is_in_enum_range(code));
-  switch (static_cast<InvokeErrorCode>(code)) {
+  switch (static_cast<InvokeErrorCode>(code)) {{
   case kNone:
     return "kNone";
   case kDeterministicError:
@@ -39,19 +40,20 @@ InvokeErrorCategory::message(int code) const
     return "kOutOfGasError";
   case kUnrecoverableSystemError:
     return "kUnrecoverableSystemError";
-  }
-}
+  default:
+    return "InvokeErrorCode Unknown";
+  }}
+}}
 
 std::string
 SyscallErrorCategory::message(int code) const
-{
+{{
   using enum SyscallErrorCode;
   assert(SyscallError::is_in_enum_range(code));
-  switch (static_cast<SyscallErrorCode>(code)) {
-    // TODO(geoff) unimpl
-  default:
+  switch (static_cast<SyscallErrorCode>(code)) {{
+{syscall_status_switch_decls}  default:
     return "SyscallErrorCode Unknown";
-  }
-}
+  }}
+}}
 
-} // namespace hogd
+}} // namespace hogd

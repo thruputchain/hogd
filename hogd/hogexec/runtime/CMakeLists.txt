@@ -6,10 +6,14 @@ set_source_files_properties(
     ${CMAKE_CURRENT_BINARY_DIR}/syscall_inner.h
     PROPERTIES GENERATED TRUE)
 
+set_source_files_properties(
+    ${CMAKE_CURRENT_BINARY_DIR}/status.cc
+    PROPERTIES GENERATED TRUE)
+
 add_library(
   runtime
   call_frame.cc
-  status.cc
+  ${CMAKE_CURRENT_BINARY_DIR}/status.cc
   storage_proxy.cc
   syscall_bytestring.cc
   syscall_crypto.cc

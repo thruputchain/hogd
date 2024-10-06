@@ -7,16 +7,16 @@ from yaml import CLoader as Loader, CDumper as Dumper
 import argparse
 
 def gen_validate_arg(inp, *, is_input):
-	arg_name = inp["name"]
-	const = ""
-	in_out = "output"
-	if (is_input):
-		const = "const "
-		in_out = "input"
-	if not inp["fixed_size"]:
-		arg1 = f"{in_out}_{arg_name}"
-		arg2 = f"{in_out}_{arg_name}_len"
-		return f"""
+  arg_name = inp["name"]
+  const = ""
+  in_out = "output"
+  if (is_input):
+    const = "const "
+    in_out = "input"
+  if not inp["fixed_size"]:
+    arg1 = f"{in_out}_{arg_name}"
+    arg2 = f"{in_out}_{arg_name}_len"
+    return f"""
   std::optional<std::span<{const}std::byte>> {arg1} =
       check_user_span_argument(contract_memory, user_{arg1},
                                user_{arg2});
@@ -25,10 +25,10 @@ def gen_validate_arg(inp, *, is_input):
     return {{SyscallErrorCode::kFault, kGenericBadSyscallCost}};
   }}
 """, [f"user_{arg1}", f"user_{arg2}"], arg1, f"std::span<{const}std::byte> {arg1}"
-	# fixed size
-	typename = inp["typename"]
-	arg1 = f"{in_out}_{arg_name}"
-	return f"""
+  # fixed size
+  typename = inp["typename"]
+  arg1 = f"{in_out}_{arg_name}"
+  return f"""
   {const}{typename} *{arg1} =
       check_user_argument<{const}{typename}>(contract_memory, user_{arg1},
                                       sizeof({typename}));
@@ -40,50 +40,50 @@ def gen_validate_arg(inp, *, is_input):
 
 
 def gen_inner_outer(syscall):
-	name = syscall["name"]
-	arg1 = "/*unused*/"
-	arg2 = "/*unused*/"
-	arg3 = "/*unused*/"
-	arg4 = "/*unused*/"
-	inner_body = ""
-	call_arg_strs = []
-	user_args = []
-	inner_arg_decl_strs = []
-	syscall_handler = ""
-	syscall_handler_decl = ""
-	if syscall["inputs"] is not None:
-		for arg in syscall["inputs"]:
-			validate_str, local_user_args, local_arg, inner_arg_decl = gen_validate_arg(arg, is_input = True)
-			inner_body += validate_str
-			user_args += local_user_args
-			call_arg_strs.append(f"*{local_arg}")
-			inner_arg_decl_strs.append(inner_arg_decl)
+  name = syscall["name"]
+  arg1 = "/*unused*/"
+  arg2 = "/*unused*/"
+  arg3 = "/*unused*/"
+  arg4 = "/*unused*/"
+  inner_body = ""
+  call_arg_strs = []
+  user_args = []
+  inner_arg_decl_strs = []
+  syscall_handler = ""
+  syscall_handler_decl = ""
+  if syscall["inputs"] is not None:
+    for arg in syscall["inputs"]:
+      validate_str, local_user_args, local_arg, inner_arg_decl = gen_validate_arg(arg, is_input = True)
+      inner_body += validate_str
+      user_args += local_user_args
+      call_arg_strs.append(f"*{local_arg}")
+      inner_arg_decl_strs.append(inner_arg_decl)
 
-	if syscall["outputs"] is not None:
-		for arg in syscall["outputs"]:
-			validate_str, local_user_args, local_arg, inner_arg_decl = gen_validate_arg(arg, is_input = False)
-			inner_body += validate_str
-			user_args += local_user_args
-			call_arg_strs.append(f"*{local_arg}")
-			inner_arg_decl_strs.append(inner_arg_decl)
+  if syscall["outputs"] is not None:
+    for arg in syscall["outputs"]:
+      validate_str, local_user_args, local_arg, inner_arg_decl = gen_validate_arg(arg, is_input = False)
+      inner_body += validate_str
+      user_args += local_user_args
+      call_arg_strs.append(f"*{local_arg}")
+      inner_arg_decl_strs.append(inner_arg_decl)
 
-	if len(user_args) >= 1:
-		arg1 = user_args[0]
-	if len(user_args) >= 2:
-		arg2 = user_args[1]
-	if len(user_args) >= 3:
-		arg3 = user_args[2]
-	if len(user_args) >= 4:
-		arg4 = user_args[3]	
+  if len(user_args) >= 1:
+    arg1 = user_args[0]
+  if len(user_args) >= 2:
+    arg2 = user_args[1]
+  if len(user_args) >= 3:
+    arg3 = user_args[2]
+  if len(user_args) >= 4:
+    arg4 = user_args[3] 
 
-	if syscall["needs_context"]:
-		syscall_handler = "syscall_handler, "
-		syscall_handler_decl = "SystemCallHandler& syscall_handler, "
+  if syscall["needs_context"]:
+    syscall_handler = "syscall_handler, "
+    syscall_handler_decl = "SystemCallHandler& syscall_handler, "
 
 
-	inner_args = ", ".join(call_arg_strs)
-	inner_arg_decls = ", ".join(inner_arg_decl_strs);
-	outer= f"""std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+  inner_args = ", ".join(call_arg_strs)
+  inner_arg_decls = ", ".join(inner_arg_decl_strs);
+  outer= f"""std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_{name}_outer(SystemCallHandler& syscall_handler,
                      std::span<std::byte> contract_memory,
                      uint64_t {arg1}, 
@@ -94,51 +94,51 @@ syscall_{name}_outer(SystemCallHandler& syscall_handler,
   return syscall_{name}_inner({syscall_handler}{inner_args});
 }}
 """
-	inner = f"""std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+  inner = f"""std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
 
 """
-	return outer, inner
+  return outer, inner
 
 def gen_outer(syscall):
-	return gen_inner_outer(syscall)[0]
+  return gen_inner_outer(syscall)[0]
 
 def gen_inner(syscall):
-	return gen_inner_outer(syscall)[1]
+  return gen_inner_outer(syscall)[1]
 
 
 def gen_syscall_table_entry(syscall):
-	name = syscall["name"]
-	return f"""    std::pair{{SyscallNo::k{name}, &syscall_{name}_outer}},
+  name = syscall["name"]
+  return f"""    std::pair{{SyscallNo::k{name}, &syscall_{name}_outer}},
 """
 
 def gen_syscall_table(spec):
-	counter = 0
-	max_seen = -1
-	syscall_map = {}
-	for syscall in spec:
-		number = syscall["number"]
-		if (number >= max_seen):
-			max_seen = number + 1
-		syscall_map[number] = syscall
+  counter = 0
+  max_seen = -1
+  syscall_map = {}
+  for syscall in spec:
+    number = syscall["number"]
+    if (number >= max_seen):
+      max_seen = number + 1
+    syscall_map[number] = syscall
 
-	if max_seen != len(syscall_map):
-		raise Exception("SyscallNo Gap!")
-	table = f"""const std::array<std::pair<SyscallNo, SyscallFunc>, {max_seen}> syscall_table = {{
+  if max_seen != len(syscall_map):
+    raise Exception("SyscallNo Gap!")
+  table = f"""const std::array<std::pair<SyscallNo, SyscallFunc>, {max_seen}> syscall_table = {{
 """
-	for i in range(0, max_seen):
-		table += gen_syscall_table_entry(syscall_map[i])
-	table += "};"
-	return table
+  for i in range(0, max_seen):
+    table += gen_syscall_table_entry(syscall_map[i])
+  table += "};"
+  return table
 
 def gen_syscall_entry_cc(spec):
-	syscall_outers = ""
-	for syscall in spec:
-		syscall_outers += gen_outer(syscall)
+  syscall_outers = ""
+  for syscall in spec:
+    syscall_outers += gen_outer(syscall)
 
-	syscall_table = gen_syscall_table(spec)
+  syscall_table = gen_syscall_table(spec)
 
-	return f"""#include "hogd/hogexec/runtime/syscall_entry.h"
+  return f"""#include "hogd/hogexec/runtime/syscall_entry.h"
 
 #include <array>
 #include <cassert>
@@ -238,12 +238,12 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
 """
 
 def gen_syscall_inner_h(spec):
-	inner_decls=""
+  inner_decls=""
 
-	for syscall in spec:
-		inner_decls += gen_inner(syscall)
+  for syscall in spec:
+    inner_decls += gen_inner(syscall)
 
-	return f"""#pragma once
+  return f"""#pragma once
 
 #include <utility>
 
@@ -262,32 +262,32 @@ class SystemCallHandler;
 
 
 def gen_syscall_x(spec_full):
-	spec = spec_full["syscalls"]
-	syscalls = {}
-	errors = {}
-	for syscall in spec:
-		syscalls[syscall["number"]]=syscall["name"]
+  spec = spec_full["syscalls"]
+  syscalls = {}
+  errors = {}
+  for syscall in spec:
+    syscalls[syscall["number"]]=syscall["name"]
 
-	enumdecls = ""
+  enumdecls = ""
 
-	for i in range(0, len(syscalls)):
-		name = syscalls[i]
-		enumdecls += f"    k{name} = {i},\n"
+  for i in range(0, len(syscalls)):
+    name = syscalls[i]
+    enumdecls += f"    k{name} = {i},\n"
 
-	error_spec = spec_full["errors"]
+  error_spec = spec_full["errors"]
 
-	for error in error_spec:
-		errors[error["number"]]=error
+  for error in error_spec:
+    errors[error["number"]]=error
 
-	error_enumdecls = ""
+  error_enumdecls = ""
 
-	for i in range(0, len(errors)):
-		name = errors[i]["name"]
-		docstring=errors[i]["doc"]
-		error_enumdecls += f"\n    // {docstring}\n    k{name} = {i},\n"
+  for i in range(0, len(errors)):
+    name = errors[i]["name"]
+    docstring=errors[i]["doc"]
+    error_enumdecls += f"\n    // {docstring}\n    k{name} = {i},\n"
 
 
-	return f"""
+  return f"""
 // clang-format off
 %#include "types.hh"
 
@@ -302,6 +302,17 @@ enum SyscallErrorCode {{{error_enumdecls}}};
 }} // namespace hogd
 """
 
+def gen_runtime_status_cc(template_filename, spec_full):
+  error_spec = spec_full["errors"]
+  syscall_status_switch_decls = ""
+
+  for error in error_spec:
+    errname = error["name"]
+    syscall_status_switch_decls += f"""  case k{errname}:
+    return "k{errname}";
+"""
+  with open(template_filename, 'r') as file:
+    return file.read().format(**locals())
 
 
 parser = argparse.ArgumentParser(description="syscall generator")
@@ -312,6 +323,8 @@ parser.add_argument('--syscall_inner_h', action='store_true', help="gen syscall_
 parser.add_argument('--syscall_entry_cc', action='store_true', help="gen syscall_entry_cc")
 parser.add_argument('--output_dir', type=str, required = True, help = "output folder")
 parser.add_argument('--syscall_yaml', type=str, required = True, help = "input yaml")
+parser.add_argument('--status_cc', action='store_true', help="gen status.cc")
+parser.add_argument('--template_filename', type=str, help = "template filename")
 
 args = parser.parse_args()
 
@@ -319,18 +332,23 @@ spec_full = yaml.load(open(args.syscall_yaml, 'r').read(), Loader=Loader)
 spec = spec_full["syscalls"]
 
 if (args.syscall_x):
-	filename = args.output_dir + "/syscall.x"
-	with open(filename, "w") as f:
-		f.write(gen_syscall_x(spec_full))
+  filename = args.output_dir + "/syscall.x"
+  with open(filename, "w") as f:
+    f.write(gen_syscall_x(spec_full))
 
 if (args.syscall_inner_h):
-	filename = args.output_dir + "/syscall_inner.h"
-	with open(filename, "w") as f:
-		f.write(gen_syscall_inner_h(spec))
+  filename = args.output_dir + "/syscall_inner.h"
+  with open(filename, "w") as f:
+    f.write(gen_syscall_inner_h(spec))
 
 if (args.syscall_entry_cc):
-	filename = args.output_dir + "/syscall_entry.cc"
-	with open(filename, "w") as f:
-		f.write(gen_syscall_entry_cc(spec))
+  filename = args.output_dir + "/syscall_entry.cc"
+  with open(filename, "w") as f:
+    f.write(gen_syscall_entry_cc(spec))
+
+if (args.status_cc):
+  filename = args.output_dir + "/status.cc"
+  with open(filename, "w") as f:
+    f.write(gen_runtime_status_cc(args.template_filename, spec_full))
 
 

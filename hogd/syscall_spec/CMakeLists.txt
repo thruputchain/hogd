@@ -46,3 +46,24 @@ add_custom_target(
     DEPENDS ${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/syscall_entry.cc
 )
 
+add_custom_command(
+    OUTPUT
+        ${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/status.cc
+    DEPENDS 
+        ${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml 
+        ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
+        ${CMAKE_SOURCE_DIR}/hogd/hogexec/runtime/status.cc_template
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py 
+    --output_dir=${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/
+    --syscall_yaml=${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml
+    --template_file=${CMAKE_SOURCE_DIR}/hogd/hogexec/runtime/status.cc_template
+    --status_cc
+    COMMENT
+    "generating status.cc"
+)
+
+add_custom_target(
+    generate_status_cc ALL
+    DEPENDS ${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/status.cc
+)
+
