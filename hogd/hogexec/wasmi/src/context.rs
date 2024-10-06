@@ -74,7 +74,7 @@ impl WasmiContext {
         match self.linker.func_wrap(
             import_name,
             fn_name,
-            move |caller: Caller<'_, *mut c_void>| -> Result<u64, wasmi::Error> {
+            move |caller: Caller<'_, *mut c_void>| -> Result<i32, wasmi::Error> {
 
                 let res = unsafe {
                     external_call::c_call_0args(x.clone().fn_pointer, caller.data().clone())
@@ -102,7 +102,7 @@ impl WasmiContext {
             fn_name,
             move |caller: Caller<'_, *mut c_void>,
                   arg1: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_1args(
                         x.clone().fn_pointer,
@@ -135,7 +135,7 @@ impl WasmiContext {
             move |caller: Caller<'_, *mut c_void>,
                   arg1: u64,
                   arg2: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_2args(
                         x.clone().fn_pointer,
@@ -169,7 +169,7 @@ impl WasmiContext {
                   arg1: u64,
                   arg2: u64,
                   arg3: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_3args(
                         x.clone().fn_pointer,
@@ -205,7 +205,7 @@ impl WasmiContext {
                   arg2: u64,
                   arg3: u64,
                   arg4: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_4args(
                         x.clone().fn_pointer,
@@ -243,7 +243,7 @@ impl WasmiContext {
                   arg3: u64,
                   arg4: u64,
                   arg5: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_5args(
                         x.clone().fn_pointer,
@@ -310,6 +310,7 @@ pub extern "C" fn wasmi_link_nargs(
         4 => c.link_function_4args(function_pointer, &module, &method),
         5 => c.link_function_5args(function_pointer, &module, &method),
         _ => {
+            println!("wtf");
             return false;
         }
     };

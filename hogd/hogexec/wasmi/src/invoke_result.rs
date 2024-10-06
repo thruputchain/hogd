@@ -11,7 +11,7 @@ pub enum InvokeError {
 
 #[repr(C)]
 pub struct WasmiInvokeResult {
-    result: u64,
+    result: i32,
     error: u8, // WasmiInvokeError
 }
 
@@ -23,7 +23,7 @@ impl WasmiInvokeResult {
         }
     }
 
-    pub fn success(res: u64) -> WasmiInvokeResult {
+    pub fn success(res: i32) -> WasmiInvokeResult {
         Self {
             result: res,
             error: InvokeError::None as u8,

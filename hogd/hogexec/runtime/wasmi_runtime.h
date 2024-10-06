@@ -24,7 +24,7 @@ struct HostCallContext {
 };
 
 struct InvokeResult {
-  InvokeStatus<uint64_t> result;
+  InvokeStatus<int32_t> result;
   uint64_t gas_consumed;
 };
 
@@ -72,7 +72,7 @@ public:
   // from the syscall).
   //
   // These functions have a signature of
-  // HostFnStatus<uint64_t>
+  // HostFnStatus<int32_t>
   // function(HostCallContext* context, uint64_t arg0,...);
   //
   // Context is the object contained in a WasmiRuntime.
@@ -81,7 +81,7 @@ public:
   // nonzero WasmiInvokeError.
   template<std::same_as<uint64_t>... Args>
   bool link_fn(std::string_view module_name, std::string_view fn_name,
-               HostFnStatus<uint64_t> (*f)(HostCallContext *, Args...))
+               HostFnStatus<int32_t> (*f)(HostCallContext *, Args...))
   {
     return link_fn_nargs(module_name, fn_name, reinterpret_cast<void *>(f),
                          (kArgCount<Args>() + ... + 0));

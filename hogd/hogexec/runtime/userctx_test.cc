@@ -12,7 +12,7 @@ namespace hogd {
 SystemCallHandler *ctx_check =
     reinterpret_cast<SystemCallHandler *>(0xAABBCCDD'EEFF0011);
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 foo(HostCallContext *ctx, uint64_t value)
 {
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
