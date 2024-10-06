@@ -88,16 +88,16 @@ impl WasmiRuntime {
             }
         };
 
-        let mut res = [Val::I64(0)];
+        let mut res = [Val::I32(0)];
 
         let func_res = func.call(&mut self.store, &[], &mut res);
 
         match func_res {
-            Ok(_) => match res[0].i64() {
+            Ok(_) => match res[0].i32() {
                 Some(v) => {
                     // TODO(geoff): figure out when, or if,
                     // this "error code/result" is visible in the syscall API.
-                    return WasmiInvokeResult::success(v as u64);
+                    return WasmiInvokeResult::success(v as i32);
                 }
                 _ => {
                     return WasmiInvokeResult::error(

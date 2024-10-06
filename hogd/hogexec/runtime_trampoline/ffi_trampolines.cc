@@ -14,7 +14,7 @@ constexpr static uint8_t kTrampolineErrorUNRECOVERABLE = 2;
 constexpr static uint8_t kTrampolineErrorRETURN = 3;
 
 TrampolineResult
-success(uint64_t res)
+success(int32_t res)
 {
   return TrampolineResult{res, kTrampolineErrorNONE};
 }
@@ -26,7 +26,7 @@ error(uint8_t error)
 }
 
 TrampolineResult
-handle_result(HostFnStatus<uint64_t> const &res)
+handle_result(HostFnStatus<int32_t> const &res)
 {
   if (res) {
     return success(res.value());
@@ -47,7 +47,7 @@ c_call_internal(void *function_pointer, void *host_call_context, Args... args)
 {
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
-    auto *ptr = (HostFnStatus<uint64_t>(*)(HostCallContext *, Args...))(
+    auto *ptr = (HostFnStatus<int32_t>(*)(HostCallContext *, Args...))(
         function_pointer);
 
     return handle_result((*ptr)(user_ctx, args...));

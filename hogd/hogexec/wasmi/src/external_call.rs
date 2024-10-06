@@ -42,7 +42,7 @@ const TrampolineErrorRETURN: u8 = 3;
 
 #[repr(C)]
 pub struct TrampolineResult {
-    result: u64,
+    result: i32,
     panic: u8,
 }
 
@@ -102,7 +102,7 @@ extern "C" {
 }
 
 // This is annoying, but I'm not sure how better to deal with this
-pub fn handle_trampoline_error(result: TrampolineResult) -> Result<u64, Error> {
+pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
     match result.panic {
         x if x == TrampolineErrorNONE => Ok(result.result),
         x if x == TrampolineErrorOUTOFGAS => {
