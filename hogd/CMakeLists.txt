@@ -3,6 +3,7 @@ add_subdirectory(base)
 add_subdirectory(crypto)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
+add_subdirectory(rs_contracts)
 
 # Then combine them into the hogd library (used by all executables below)
 add_library(
