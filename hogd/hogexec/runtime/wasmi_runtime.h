@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "hogd/hogexec/runtime/status.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -22,11 +23,8 @@ struct HostCallContext {
   SystemCallHandler *syscall_handler = nullptr;
 };
 
-// placeholder types until XDR gets merged
-using Contract = std::vector<uint8_t>;
-
 struct InvokeResult {
-  WasmiInvokeStatus<uint64_t> result;
+  InvokeStatus<uint64_t> result;
   uint64_t gas_consumed;
 };
 
@@ -90,7 +88,7 @@ public:
   }
 
   std::unique_ptr<WasmiRuntime>
-  make_new_runtime(Contract const &contract,
+  make_new_runtime(ContractBlob const &contract,
                    SystemCallHandler *syscall_handler);
 
 private:

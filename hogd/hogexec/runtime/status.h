@@ -6,23 +6,11 @@
 
 namespace hogd {
 
-// pub enum WasmiInvokeError {
-//     None = 0,
-//     FuncNExist = 1, // invoked function does not exist
-//     InputError = 2, // input validation fails
-//     ReturnTypeError = 3, // invoked function did not return expected type
-//     DeterministicCallError = 4, // some other error, i.e. OOB access in WASM
-//     OutOfGasError = 5, // out of gas
-//     UnrecoverableSystemError = 6,
-// }
-enum class WasmiInvokeErrorCode : uint8_t {
-  kWasmiNone = 0,
-  kWasmiFnNExist = 1,
-  kWasmiInputError = 2,
-  kWasmiReturnTypeError = 3,
-  kWasmiDeterministicCallError = 4,
-  kWasmiOutOfGasError = 5,
-  kWasmiUnrecoverableSystemError = 6
+enum class InvokeErrorCode : uint8_t {
+  kNone = 0,
+  kDeterministicError = 1,
+  kOutOfGasError = 2,
+  kUnrecoverableSystemError = 3,
 };
 
 // Host fn calls have two types of errors:
@@ -56,25 +44,25 @@ operator==(const HostFnErrorCode &lhs, const std::error_code &rhs)
 
 template<typename T> using HostFnStatus = std::expected<T, HostFnError>;
 
-class WasmiInvokeErrorCategory : public std::error_category {
+class InvokeErrorCategory : public std::error_category {
 public:
-  const char *name() const noexcept override { return "wasmi invoke"; }
+  const char *name() const noexcept override { return "invoke"; }
   std::string message(int code) const override;
 };
 
-struct WasmiInvokeError
-  : public EnumError<WasmiInvokeErrorCode, WasmiInvokeErrorCategory> {
-  explicit WasmiInvokeError(WasmiInvokeErrorCode err) : EnumError(err) {}
+struct InvokeError
+  : public EnumError<InvokeErrorCode, InvokeErrorCategory> {
+  explicit InvokeError(InvokeErrorCode err) : EnumError(err) {}
 };
 
-// Enable comparisons between WasmiInvokeErrorCode and std::error_code.
+// Enable comparisons between InvokeErrorCode and std::error_code.
 inline bool
-operator==(const WasmiInvokeErrorCode &lhs, const std::error_code &rhs)
+operator==(const InvokeErrorCode &lhs, const std::error_code &rhs)
 {
-  return WasmiInvokeError{lhs} == rhs;
+  return InvokeError{lhs} == rhs;
 }
 
 template<typename T>
-using WasmiInvokeStatus = std::expected<T, WasmiInvokeError>;
+using InvokeStatus = std::expected<T, InvokeError>;
 
 } // namespace hogd

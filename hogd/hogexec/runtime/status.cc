@@ -25,28 +25,21 @@ HostFnErrorCategory::message(int code) const
 }
 
 std::string
-WasmiInvokeErrorCategory::message(int code) const
+InvokeErrorCategory::message(int code) const
 {
-  using enum WasmiInvokeErrorCode;
-  assert(WasmiInvokeError::is_in_enum_range(code));
-  switch (static_cast<WasmiInvokeErrorCode>(code)) {
-  case kWasmiNone:
-    return "kWasmiNone";
-  case kWasmiFnNExist:
-    return "kWasmiFnNExist";
-  case kWasmiInputError:
-    return "kWasmiInputError";
-  case kWasmiReturnTypeError:
-    return "kWasmiReturnTypeError";
-  case kWasmiDeterministicCallError:
-    return "kWasmiDeterministicCallError";
-  case kWasmiOutOfGasError:
-    return "kWasmiOutOfGasError";
-  case kWasmiUnrecoverableSystemError:
-    return "kWasmiUnrecoverableSystemError";
-  default:
-    return "WasmiInvokeErrorCode Unknown";
+  using enum InvokeErrorCode;
+  assert(InvokeError::is_in_enum_range(code));
+  switch (static_cast<InvokeErrorCode>(code)) {
+  case kNone:
+    return "kNone";
+  case kDeterministicError:
+    return "kDeterministicError";
+  case kOutOfGasError:
+    return "kOutOfGasError";
+  case kUnrecoverableSystemError:
+    return "kUnrecoverableSystemError";
   }
+  return "Unknown";
 }
 
 } // namespace hogd
