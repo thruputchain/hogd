@@ -28,6 +28,7 @@ add_dependencies(
   runtime
   generate_syscall_inner_h
   generate_syscall_entry_cc
+  generate_status_cc
 )
 
 target_include_directories(

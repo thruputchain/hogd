@@ -147,6 +147,7 @@ def gen_syscall_entry_cc(spec):
 #include <optional>
 #include <span>
 #include <utility>
+#include <type_traits>
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -221,7 +222,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   return syscall_fn_outer(*call_context->syscall_handler, contract_memory, arg1, arg2, arg3, arg4);
 }}
 
-HostFnStatus<uint64_t>
+HostFnStatus<int32_t>
 syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
               uint64_t arg2, uint64_t arg3, uint64_t arg4)
 {{
@@ -231,7 +232,10 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   if (!call_context->runtime->consume_gas(gas_consumed)) {{
     return HostFnError{{HostFnErrorCode::kOutOfGas}};
   }}
-  return err.and_then([](SyscallErrorCode err) -> HostFnStatus<uint64_t> {{ return static_cast<uint64_t>(err); }});
+
+  static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>, "mismatch");
+
+  return err.and_then([](SyscallErrorCode err) -> HostFnStatus<int32_t> {{ return static_cast<int32_t>(err); }});
 }}
 
 }} // namespace hogd
