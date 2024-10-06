@@ -317,14 +317,13 @@ def gen_runtime_status_cc(template_filename, spec_full):
 
 parser = argparse.ArgumentParser(description="syscall generator")
 
-# Add arguments
 parser.add_argument('--syscall_x', action='store_true', help="gen syscall.x")
 parser.add_argument('--syscall_inner_h', action='store_true', help="gen syscall_inner.h")
 parser.add_argument('--syscall_entry_cc', action='store_true', help="gen syscall_entry_cc")
-parser.add_argument('--output_dir', type=str, required = True, help = "output folder")
 parser.add_argument('--syscall_yaml', type=str, required = True, help = "input yaml")
 parser.add_argument('--status_cc', action='store_true', help="gen status.cc")
 parser.add_argument('--template_filename', type=str, help = "template filename")
+parser.add_argument('--output_dir', type=str, required = True, help = "output folder")
 
 args = parser.parse_args()
 
