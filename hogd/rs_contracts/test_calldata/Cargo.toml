@@ -1,0 +1,10 @@
+[package]
+name = "test_calldata"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rs_contract_sdk = {path = "../../rs_contract_sdk/", features = ["alloc"]}
+
+[lib]
+crate-type = ["cdylib"]
