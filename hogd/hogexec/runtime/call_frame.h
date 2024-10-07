@@ -19,6 +19,7 @@ public:
   void commit_successful_child_call(CallFrame &&frame);
   void commit_failed_child_call();
 
+  // TODO(geoff) set based on metadata
   const bool unwind_catch_boundary_ = false;
   const ContractAddress active_address_;
 

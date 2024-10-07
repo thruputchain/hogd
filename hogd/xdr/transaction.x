@@ -13,13 +13,12 @@
   struct Invocation {
     ContractAddress invoked_address;
     MethodID method_name;
+    GasAmount gas_limit;
     Calldata calldata;
   };
 
   struct Transaction {
     Invocation invocation;
-
-    GasAmount gas_limit;
 
     Contract contracts_to_deploy<>;
   };

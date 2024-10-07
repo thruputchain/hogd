@@ -21,8 +21,10 @@ public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache);
 
+  InvokeResult root_invoke();
+
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-  invoke(Invocation invocation);
+  invoke(Invocation const& invocation);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -50,6 +52,7 @@ private:
   };
 
   WasmiRuntime *resolve_runtime(ContractAddress const &addr);
+  InvokeResult invoke_unconverted(Invocation const& invocation);
 
   // Can only be called when call_frame_stack_ is nonempty
   StorageProxy &resolve_storage_proxy(StorageKey const &key);

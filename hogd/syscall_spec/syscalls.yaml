@@ -142,7 +142,9 @@ errors:
   - name: "NoReturnBufferAvailable"
     number: 10
     doc: "No return buffer is available.  Either the most recent subcall failed, or there have been no subcalls within this call frame."
-
+  - name: "InsufficientGasForInvocation"
+    number: 11
+    doc: "Insufficient gas in call frame to supply requested gas limit for child invocation"
 
 
 

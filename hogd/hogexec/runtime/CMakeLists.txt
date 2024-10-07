@@ -38,6 +38,14 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
+target_link_libraries(
+  runtime
+  wasmi_lib
+  crypto
+  protocol
+  ${LIBSODIUM_LIBRARIES}
+)
+
 add_executable(
   runtime_test
   userctx_test.cc
@@ -47,13 +55,9 @@ add_executable(
   gas_api_test.cc
   memory_access_test.cc
   storage_proxy_test.cc
+  calldata_test.cc
 )
-target_link_libraries(
-  runtime
-  wasmi_lib
-  crypto
-  protocol
-)
+
 target_link_libraries(
   runtime_test
   runtime
@@ -91,4 +95,5 @@ add_dependencies(
   test_error_handling_wasm
   test_invoke_arity_wasm
   test_set_memory_wasm
+  rs_test_contracts
 )

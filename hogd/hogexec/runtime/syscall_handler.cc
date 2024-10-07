@@ -29,6 +29,19 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
   wasmi_context_.link_fn("hogd", "syscall", &syscall_entry);
 }
 
+InvokeResult 
+SystemCallHandler::root_invoke()
+{
+  auto* runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
+  
+  if (runtime) {
+    runtime -> set_available_gas(signed_tx_.tx.invocation.gas_limit);
+  }
+  
+  return invoke_unconverted(signed_tx_.tx.invocation);
+}
+
+
 // syscall methods: can only be called when call_frame_stack_ is nonempty
 // (i.e. while at least one invoke() is running)
 ContractAddress
@@ -51,31 +64,10 @@ SystemCallHandler::get_msg_sender() const
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke(Invocation invocation)
+convert_invoke_result_to_host_fn_result(InvokeResult const& result)
 {
-  WasmiRuntime *runtime = resolve_runtime(invocation.invoked_address);
-
-  if (!runtime) {
-    return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
-  }
-
-  std::string method_name = std::format("{:x}", invocation.method_name);
-  uint64_t initial_gas_limit = runtime->get_available_gas();
-
-  call_frame_stack_.emplace_back(invocation.invoked_address, *runtime);
-
-  InvokeResult result = runtime->invoke(method_name, initial_gas_limit);
-
-  // TODO(geoff): an option for the syscall to check the return code
   if (!result.result.has_value()) {
     using enum InvokeErrorCode;
-
-    for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
-      runtimes_.at(addr).unwind_poisoned = true;
-    }
-    call_frame_stack_.pop_back();
-
-    call_frame_stack_.back().commit_failed_child_call();
 
     switch (result.result.error().code()) {
     case kUnrecoverableSystemError:
@@ -93,17 +85,79 @@ SystemCallHandler::invoke(Invocation invocation)
     // unreachable
   }
 
-  size_t call_frame_stack_size = call_frame_stack_.size();
-  if (call_frame_stack_size >= 2) {
-    call_frame_stack_[call_frame_stack_size - 2].commit_successful_child_call(
-        std::move(call_frame_stack_.back()));
-  }
-  call_frame_stack_.pop_back();
-
   // This converts the user-defined return value to a syscall error code.
   // We could do a check here (i.e. reserve < 2^16 for system, everything else
   // for users) but this doesn't particularly matter for correctness.
   return {static_cast<SyscallErrorCode>(*result.result), result.gas_consumed};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+SystemCallHandler::invoke(Invocation const& invocation)
+{
+  auto* runtime = resolve_runtime(invocation.invoked_address);
+
+  if (!runtime) {
+    return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
+  }
+
+  const uint64_t initial_gas_limit = runtime->get_available_gas();
+
+  // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
+  if (invocation.gas_limit != UINT64_MAX && invocation.gas_limit > initial_gas_limit) {
+    return std::pair{SyscallErrorCode::kInsufficientGasForInvocation, 0};
+  }
+
+  auto invoke_result = invoke_unconverted(invocation);
+  return convert_invoke_result_to_host_fn_result(invoke_result);
+}
+
+InvokeResult
+SystemCallHandler::invoke_unconverted(Invocation const& invocation)
+{
+  WasmiRuntime *runtime = resolve_runtime(invocation.invoked_address);
+
+  if (!runtime) {
+    return InvokeResult {
+      .result = InvokeError{InvokeErrorCode::kDeterministicError},
+      .gas_consumed = 0
+    };
+  }
+
+  std::string method_name = std::format("{:x}", invocation.method_name);
+
+  const uint64_t initial_gas_limit = runtime->get_available_gas();
+  const uint64_t gas_limit = std::min<uint64_t>(initial_gas_limit, invocation.gas_limit);
+
+  call_frame_stack_.emplace_back(invocation.invoked_address, *runtime);
+
+  InvokeResult result = runtime->invoke(method_name, gas_limit);
+
+  // We choose _not_ to check the return code here, and instead pass it back to the caller.
+  // Implicitly, this is saying that the caller is responsible for checking the return code,
+  // AND that the callee is responsible for cleaning itself up correctly.
+  // I.e. if you pass back a return code, you can be safely called again.
+  if (!result.result.has_value()) {
+
+    for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
+      // TODO(geoff) metadata allowing unwind_safe declarations
+      runtimes_.at(addr).unwind_poisoned = true;
+    }
+    call_frame_stack_.pop_back();
+
+    call_frame_stack_.back().commit_failed_child_call();
+  } 
+  else 
+  {
+    size_t call_frame_stack_size = call_frame_stack_.size();
+    
+    if (call_frame_stack_size >= 2) {
+      call_frame_stack_[call_frame_stack_size - 2].commit_successful_child_call(
+          std::move(call_frame_stack_.back()));
+    }
+    call_frame_stack_.pop_back();
+  }
+
+  return result;
 }
 
 SyscallStatus<const ReturnBuffer>

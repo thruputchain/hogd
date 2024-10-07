@@ -1,5 +1,5 @@
 %.wasm : Makefile $(wildcard $</src/*.rs)
-	cargo rustc --target wasm32-unknown-unknown $(RELEASE) -p $(basename $@) \
+	cargo rustc --target wasm32-unknown-unknown --release -p $(basename $@) \
 	-- -C link-args=-zstack-size=64000
 
 clean:

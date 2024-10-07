@@ -10,6 +10,11 @@
 
 namespace hogd {
 
+CallFrame::CallFrame(ContractAddress const &addr, WasmiRuntime &runtime)
+  : active_address_(addr)
+  , active_runtime_(runtime)
+  {}
+
 void
 CallFrame::commit_successful_child_call(CallFrame &&frame)
 {
