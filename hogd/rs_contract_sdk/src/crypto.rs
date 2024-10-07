@@ -1,12 +1,12 @@
 use rs_xdr::{SyscallNo, SyscallErrorCode};
 use crate::syscall::syscall;
 
-use crate::types::Hash;
+use rs_xdr::SHA256Hash;
 use core::mem::MaybeUninit;
 
-pub fn sha256(input : &[u8]) -> Result<Hash, i32> {
+pub fn sha256(input : &[u8]) -> Result<SHA256Hash, i32> {
 
-	let mut out_hash: MaybeUninit<Hash> = MaybeUninit::<Hash>::uninit();
+	let mut out_hash: MaybeUninit<SHA256Hash> = MaybeUninit::<SHA256Hash>::uninit();
 
     // syscall will initialize hash
 	let err =

@@ -1,7 +1,7 @@
 use rs_xdr::{SyscallNo, SyscallErrorCode};
 use crate::syscall::syscall;
 
-use crate::types::Address;
+use rs_xdr::Address;
 use core::mem::MaybeUninit;
 
 pub fn get_msg_sender() -> Result<Address, i32> {

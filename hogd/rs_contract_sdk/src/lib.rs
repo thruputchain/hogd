@@ -14,12 +14,9 @@ pub mod alloc;
 pub mod crypto;
 pub mod syscall;
 pub mod general_storage;
-
-mod types;
+pub mod bytestring;
 
 pub mod rt;
-
-pub use crate::types::{Address, Hash, StorageKey};
 
 
 
