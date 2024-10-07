@@ -18,5 +18,7 @@ pub mod bytestring;
 
 pub mod rt;
 
+pub use rs_xdr::*;
+
 
 
