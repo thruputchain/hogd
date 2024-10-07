@@ -12,7 +12,7 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_HasKey_inner(SystemCallHandler &syscall_handler,
                      const StorageKey &input_key,
                      StorageObjectType &output_status)
@@ -28,7 +28,7 @@ syscall_HasKey_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_DeleteLast_inner(SystemCallHandler &syscall_handler,
                          const StorageKey &input_key)
 {

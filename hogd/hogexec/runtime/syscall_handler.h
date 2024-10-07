@@ -38,12 +38,17 @@ public:
 
   // bytestring
   SyscallStatus<const Bytestring> get_bytestring(StorageKey const &key);
-  SyscallStatus<uint64_t> get_bytestring_len(StorageKey const &key);
+  SyscallStatus<RuntimeMemoryLength> get_bytestring_len(StorageKey const &key);
   SyscallStatus<void>
   set_bytestring(StorageKey const &key,
                  std::span<const std::byte> input_bytestring);
 
+  SyscallStatus<Calldata> get_calldata() const;
+  SyscallStatus<RuntimeMemoryLength> get_calldata_len() const;
+
   SyscallStatus<const ReturnBuffer> get_return_buffer() const;
+
+  SyscallStatus<void> log(std::span<const std::byte> message);
 
 private:
   struct RuntimeCacheEntry {
@@ -61,6 +66,8 @@ private:
   WasmiContext wasmi_context_;
   std::vector<CallFrame> call_frame_stack_;
   std::map<ContractAddress, RuntimeCacheEntry> runtimes_;
+
+  std::vector<LogEntry> logs_;
 
   StorageSnapshotCache &snapshot_cache_;
 };

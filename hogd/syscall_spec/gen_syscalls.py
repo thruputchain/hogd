@@ -83,7 +83,7 @@ def gen_inner_outer(syscall):
 
   inner_args = ", ".join(call_arg_strs)
   inner_arg_decls = ", ".join(inner_arg_decl_strs);
-  outer= f"""std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+  outer= f"""std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_{name}_outer(SystemCallHandler& syscall_handler,
                      std::span<std::byte> contract_memory,
                      uint64_t {arg1}, 
@@ -94,7 +94,7 @@ syscall_{name}_outer(SystemCallHandler& syscall_handler,
   return syscall_{name}_inner({syscall_handler}{inner_args});
 }}
 """
-  inner = f"""std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+  inner = f"""std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
 
 """

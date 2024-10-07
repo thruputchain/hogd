@@ -8,7 +8,6 @@
 
   typedef opaque ReturnBuffer<>;
   typedef unsigned int MethodID;    // uint32_t
-  typedef unsigned hyper GasAmount; // uint64_t
 
   struct Invocation {
     ContractAddress invoked_address;
@@ -28,6 +27,11 @@
   // for a later PR.
   struct SignedTransaction {
     Transaction tx;
+  };
+
+  struct LogEntry {
+    ContractAddress source_address;
+    opaque message<kMaxLogMessageLen>;
   };
 
 } // namespace hogd

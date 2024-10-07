@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "x23/vec.h"
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -49,7 +50,7 @@ SystemCallHandler::get_current_address() const
 {
   assert(!call_frame_stack_.empty());
 
-  return call_frame_stack_.back().active_address_;
+  return call_frame_stack_.back().active_invocation_.invoked_address;
 }
 
 SyscallStatus<ContractAddress>
@@ -60,7 +61,7 @@ SystemCallHandler::get_msg_sender() const
     return SyscallError{SyscallErrorCode::kIsRootTransaction};
   }
 
-  return {call_frame_stack_[call_frame_stack_.size() - 2].active_address_};
+  return {call_frame_stack_[call_frame_stack_.size() - 2].active_invocation_.invoked_address};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
@@ -128,7 +129,7 @@ SystemCallHandler::invoke_unconverted(Invocation const& invocation)
   const uint64_t initial_gas_limit = runtime->get_available_gas();
   const uint64_t gas_limit = std::min<uint64_t>(initial_gas_limit, invocation.gas_limit);
 
-  call_frame_stack_.emplace_back(invocation.invoked_address, *runtime);
+  call_frame_stack_.emplace_back(invocation, *runtime);
 
   InvokeResult result = runtime->invoke(method_name, gas_limit);
 
@@ -249,7 +250,7 @@ SystemCallHandler::get_bytestring(StorageKey const &key)
   return proxy.get_bytestring();
 }
 
-SyscallStatus<uint64_t>
+SyscallStatus<RuntimeMemoryLength>
 SystemCallHandler::get_bytestring_len(StorageKey const &key)
 {
   auto &proxy = resolve_storage_proxy(key);
@@ -263,5 +264,39 @@ SystemCallHandler::set_bytestring(StorageKey const &key,
   auto &proxy = resolve_storage_proxy(key);
   return proxy.set_bytestring(input_bytestring);
 }
+
+
+SyscallStatus<Calldata> 
+SystemCallHandler::get_calldata() const
+{
+  assert(!call_frame_stack_.empty());
+
+  return call_frame_stack_.back().active_invocation_.calldata;
+}
+
+SyscallStatus<RuntimeMemoryLength> 
+SystemCallHandler::get_calldata_len() const
+{
+  assert(!call_frame_stack_.empty());
+  return call_frame_stack_.back().active_invocation_.calldata.size();
+}
+
+SyscallStatus<void> 
+SystemCallHandler::log(std::span<const std::byte> message)
+{
+  if (message.size() > kMaxLogMessageLen) {
+    return SyscallError{SyscallErrorCode::kStringTooLong};
+  }
+
+  std::span<const uint8_t> m = {reinterpret_cast<const uint8_t*>(message.data()), message.size()};
+
+  logs_.emplace_back(
+      get_current_address(),
+      x23::Vec<uint8_t, kMaxLogMessageLen>(m.begin(), m.end())
+    );
+  return {};
+}
+
+
 
 } // namespace hogd

@@ -15,11 +15,11 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             const StorageKey &input_key,
                             std::span<std::byte> output_bytestring,
-                            uint64_t &output_written_len)
+                            RuntimeMemoryLength &output_written_len)
 {
   SyscallStatus<const Bytestring> status =
       syscall_handler.get_bytestring(input_key);
@@ -28,7 +28,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
   }
 
   output_written_len =
-      std::min<uint64_t>(output_bytestring.size(), status->size());
+      std::min<RuntimeMemoryLength>(output_bytestring.size(), status->size());
 
   std::memcpy(reinterpret_cast<uint8_t *>(output_bytestring.data()),
               status->data(), output_written_len);
@@ -36,10 +36,10 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                const StorageKey &input_key,
-                               uint64_t &output_length)
+                               RuntimeMemoryLength &output_length)
 {
   SyscallStatus<uint64_t> status =
       syscall_handler.get_bytestring_len(input_key);
@@ -52,7 +52,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 };
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKey &input_key,
                             std::span<const std::byte> input_bytestring)

@@ -84,7 +84,7 @@ StorageProxy::set_bytestring(std::span<const std::byte> input_bytestring)
   }
 
   if (input_bytestring.size() > kBytestringMaxLen) {
-    return SyscallError{SyscallErrorCode::kBytestringTooLong};
+    return SyscallError{SyscallErrorCode::kStringTooLong};
   }
 
   std::span<const uint8_t> reinterpreted_input = {

@@ -14,19 +14,21 @@ namespace hogd {
 
 class CallFrame {
 public:
-  CallFrame(ContractAddress const &addr, WasmiRuntime &runtime);
+  CallFrame(Invocation const &invocation, WasmiRuntime &runtime);
+
+  CallFrame(CallFrame&& other) noexcept = default;
 
   void commit_successful_child_call(CallFrame &&frame);
   void commit_failed_child_call();
 
   // TODO(geoff) set based on metadata
   const bool unwind_catch_boundary_ = false;
-  const ContractAddress active_address_;
+  const Invocation active_invocation_;
 
   StorageProxy *try_get_storage_proxy(AddressAndKey const &query);
 
   void push_new_storage_proxy(AddressAndKey const &new_addrkey,
-                              StorageProxy const &proxy);
+                              StorageProxy proxy);
 
   // The set of all runtimes visited by the current call frame and _successful_
   // children. Failed calls poison the set of visited runtimes, unless the

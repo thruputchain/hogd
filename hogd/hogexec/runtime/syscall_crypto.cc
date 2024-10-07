@@ -13,7 +13,7 @@
 
 namespace hogd {
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_SHA256_inner(std::span<const std::byte> input_buffer,
                      SHA256Hash &output_hash)
 {

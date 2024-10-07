@@ -442,6 +442,7 @@ gen_rs(vector<Definition> *defs)
   gs.prtop(R"(// -*-Rust-*-
 
 #![allow(non_camel_case_types)]
+#![allow(non_upper_case_globals)]
 )");
   gs.process(*defs);
   return gs.top_ + R"(

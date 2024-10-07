@@ -133,9 +133,9 @@ errors:
   - name: "ContractLookupFailed"
     number: 7
     doc: "Failed to find contract"
-  - name: "BytestringTooLong"
+  - name: "StringTooLong"
     number: 8
-    doc: "Input to set_bytestring is too long for one bytestring"
+    doc: "Input byte span is too long"
   - name: "DeterministicWasmError"
     number: 9
     doc: "Deterministic error within called wasm (i.e. trap)"

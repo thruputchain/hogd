@@ -15,14 +15,15 @@ add_library(
   call_frame.cc
   ${CMAKE_CURRENT_BINARY_DIR}/status.cc
   storage_proxy.cc
+  storage_snapshot_cache.cc
   syscall_bytestring.cc
   syscall_crypto.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
   syscall_general_storage.cc
   syscall_invoke.cc
   syscall_handler.cc
+  syscall_log.cc
   wasmi_runtime.cc
-  storage_snapshot_cache.cc
 )
 
 add_dependencies(
@@ -30,6 +31,7 @@ add_dependencies(
   generate_syscall_inner_h
   generate_syscall_entry_cc
   generate_status_cc
+  protocol
 )
 
 target_include_directories(

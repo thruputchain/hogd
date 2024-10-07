@@ -3,6 +3,8 @@ namespace hogd {
 typedef unsigned int RuntimeMemoryOffset; // uint32_t
 typedef unsigned int RuntimeMemoryLength; // uint32_t
 
+typedef unsigned hyper GasAmount; // uint64_t
+
 enum StorageObjectType { kBytestring = 0, kNonnegativeInt64 = 1 };
 
 typedef opaque uint128_xdr[16];
@@ -44,7 +46,9 @@ typedef opaque SHA256Hash[32]; // 256 bit hash
 
 typedef opaque ContractAddress[32]; // 256 bit contract addresses
 
-typedef opaque StorageKey[32]; // arbitrary 32 bytes.
+typedef opaque StorageKey[32]; // arbitrary 32 bytes
+
+const kMaxLogMessageLen = 1024;
 
 // in global storage:
 // [contract address + storage key] = 64 bytes
