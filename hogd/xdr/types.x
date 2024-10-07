@@ -1,6 +1,6 @@
 namespace hogd {
 
-typedef unsigned int RuntimeMemoryOffset;  // uint32_t
+typedef unsigned int RuntimeMemoryOffset; // uint32_t
 typedef unsigned int RuntimeMemoryLength; // uint32_t
 
 enum StorageObjectType { kBytestring = 0, kNonnegativeInt64 = 1 };

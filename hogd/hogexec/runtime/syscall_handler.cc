@@ -101,8 +101,8 @@ SystemCallHandler::invoke(Invocation invocation)
   call_frame_stack_.pop_back();
 
   // This converts the user-defined return value to a syscall error code.
-  // We could do a check here (i.e. reserve < 2^16 for system, everything else for users)
-  // but this doesn't particularly matter for correctness.
+  // We could do a check here (i.e. reserve < 2^16 for system, everything else
+  // for users) but this doesn't particularly matter for correctness.
   return {static_cast<SyscallErrorCode>(*result.result), result.gas_consumed};
 }
 

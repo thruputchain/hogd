@@ -51,8 +51,7 @@ public:
   std::string message(int code) const override;
 };
 
-struct InvokeError
-  : public EnumError<InvokeErrorCode, InvokeErrorCategory> {
+struct InvokeError : public EnumError<InvokeErrorCode, InvokeErrorCategory> {
   explicit InvokeError(InvokeErrorCode err) : EnumError(err) {}
 };
 
@@ -63,8 +62,7 @@ operator==(const InvokeErrorCode &lhs, const std::error_code &rhs)
   return InvokeError{lhs} == rhs;
 }
 
-template<typename T>
-using InvokeStatus = std::expected<T, InvokeError>;
+template<typename T> using InvokeStatus = std::expected<T, InvokeError>;
 
 class SyscallErrorCategory : public std::error_category {
 public:

@@ -7,9 +7,9 @@
 #include <string_view>
 #include <vector>
 
+#include "contract.hh"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
-#include "contract.hh"
 
 namespace hogd {
 

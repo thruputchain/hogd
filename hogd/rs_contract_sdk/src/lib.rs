@@ -11,15 +11,12 @@
 #[cfg(feature = "alloc")]
 pub mod alloc;
 
+pub mod bytestring;
 pub mod crypto;
 mod syscall;
-pub mod bytestring;
 
 pub mod syscall_bindings;
 
 pub mod rt;
 
 pub use rs_xdr::*;
-
-
-

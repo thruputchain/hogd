@@ -39,7 +39,8 @@ impl BumpPointerLocal {
             // This is a slight over-estimate and ideally we would use __heap_base
             // but that seems not to be easy to access and in any case it is just a
             // convention whereas this is more guaranteed by the wasm spec to work.
-            self.cursor = (core::arch::wasm32::memory_size(Self::MEM) * Self::PAGE_SIZE) as _;
+            self.cursor = (core::arch::wasm32::memory_size(Self::MEM)
+                * Self::PAGE_SIZE) as _;
             self.limit = self.cursor;
         }
     }

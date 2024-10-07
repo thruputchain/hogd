@@ -1,13 +1,13 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 
-#include <optional>
 #include <cassert>
+#include <optional>
 
-#include "x23/serialize.h"
 #include "hogd/crypto/crypto.h"
+#include "x23/serialize.h"
 
-#include "types.hh"
 #include "contract.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -33,7 +33,8 @@ StorageSnapshotCache::try_get_object(AddressAndKey const &addrkey)
 }
 
 std::optional<SHA256Hash>
-StorageSnapshotCache::try_get_deployed_contract_hash(ContractAddress const& addr)
+StorageSnapshotCache::try_get_deployed_contract_hash(
+    ContractAddress const &addr)
 {
   {
     auto cache = deployment_cache_.take();
@@ -75,7 +76,7 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 }
 
 namespace test {
-SHA256Hash 
+SHA256Hash
 LocalMockStorageSnapshot::register_contract(std::shared_ptr<Contract> contract)
 {
   assert(!!contract);
@@ -88,13 +89,13 @@ LocalMockStorageSnapshot::register_contract(std::shared_ptr<Contract> contract)
   return hash;
 }
 
-void 
-LocalMockStorageSnapshot::deploy_contract(ContractAddress const& addr, SHA256Hash const& hash)
+void
+LocalMockStorageSnapshot::deploy_contract(ContractAddress const &addr,
+                                          SHA256Hash const &hash)
 {
   deployment_cache_->emplace(addr, hash);
 }
 
-
-}
+} // namespace test
 
 } // namespace hogd

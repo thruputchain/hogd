@@ -1,26 +1,25 @@
 #include <benchmark/benchmark.h>
 
+#include <barrier>
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
 #include <vector>
-#include <barrier>
 
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
-#include "hogd/softstate/hashset_deduplicate.h"
 #include "hogd/init.h"
+#include "hogd/softstate/hashset_deduplicate.h"
 
 namespace hogd {
-
 
 template<typename Deduplicator>
 void
 bm_deduplicate(benchmark::State &state)
 {
-  static Deduplicator* deduplicator;
+  static Deduplicator *deduplicator;
 
-  static std::barrier<>* sync_point;
+  static std::barrier<> *sync_point;
 
   if (state.thread_index() == 0) {
     sync_point = new std::barrier(state.threads());
@@ -39,7 +38,7 @@ bm_deduplicate(benchmark::State &state)
       SHA256Hash hash;
       uint64_t val = i + (state.thread_index() * work_amount);
       std::memcpy(hash.data(), &val, sizeof(uint64_t));
-    
+
       if (!deduplicator->try_insert(hash)) {
         std::terminate();
       }
@@ -47,7 +46,7 @@ bm_deduplicate(benchmark::State &state)
 
     sync_point->arrive_and_wait();
     state.PauseTiming();
-    
+
     if (state.thread_index() == 0) {
       delete deduplicator;
     }
@@ -58,9 +57,18 @@ bm_deduplicate(benchmark::State &state)
   }
 }
 
-BENCHMARK(bm_deduplicate<AtomicHashsetDeduplicator>)->RangeMultiplier(4)->Range(32, 32 << 8) -> ThreadRange(1, 32); // NOLINT
-BENCHMARK(bm_deduplicate<HashsetDeduplicatorSimple>)->RangeMultiplier(4)->Range(32, 32 << 8) -> ThreadRange(1, 32); // NOLINT
-BENCHMARK(bm_deduplicate<HashsetDeduplicatorSimpleV2>)->RangeMultiplier(4)->Range(32, 32 << 8) -> ThreadRange(1, 32); // NOLINT
+BENCHMARK(bm_deduplicate<AtomicHashsetDeduplicator>)
+    ->RangeMultiplier(4)
+    ->Range(32, 32 << 8)
+    ->ThreadRange(1, 32); // NOLINT
+BENCHMARK(bm_deduplicate<HashsetDeduplicatorSimple>)
+    ->RangeMultiplier(4)
+    ->Range(32, 32 << 8)
+    ->ThreadRange(1, 32); // NOLINT
+BENCHMARK(bm_deduplicate<HashsetDeduplicatorSimpleV2>)
+    ->RangeMultiplier(4)
+    ->Range(32, 32 << 8)
+    ->ThreadRange(1, 32); // NOLINT
 
 } // namespace hogd
 

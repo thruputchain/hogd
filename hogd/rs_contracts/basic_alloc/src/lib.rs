@@ -14,4 +14,3 @@ pub extern "C" fn test_basic() -> i32 {
     let _x = format!("{}", "foo");
     return 0;
 }
-

@@ -17,7 +17,7 @@ TEST(Hashset, SimpleDeDuplicate)
 {
   HashsetDeduplicatorSimple deduplicator;
 
-  auto make_entry = [] (uint64_t value) -> SHA256Hash {
+  auto make_entry = [](uint64_t value) -> SHA256Hash {
     SHA256Hash out;
     std::memcpy(out.data(), &value, sizeof(uint64_t));
     return out;
@@ -40,7 +40,7 @@ TEST(Hashset, SimpleDeDuplicate2)
 {
   HashsetDeduplicatorSimpleV2 deduplicator;
 
-  auto make_entry = [] (uint64_t value) -> SHA256Hash {
+  auto make_entry = [](uint64_t value) -> SHA256Hash {
     SHA256Hash out;
     std::memcpy(out.data(), &value, sizeof(uint64_t));
     return out;
@@ -63,7 +63,7 @@ TEST(Hashset, AtomicDeduplicate)
 {
   AtomicHashsetDeduplicator deduplicator;
 
-  auto make_entry = [] (uint64_t value) -> SHA256Hash {
+  auto make_entry = [](uint64_t value) -> SHA256Hash {
     SHA256Hash out;
     std::memcpy(out.data(), &value, sizeof(uint64_t));
     return out;
@@ -82,8 +82,7 @@ TEST(Hashset, AtomicDeduplicate)
   EXPECT_TRUE(deduplicator.try_insert(make_entry(0)));
 }
 
-
-}
+} // namespace hogd
 
 int
 main(int argc, char *argv[])

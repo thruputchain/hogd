@@ -7,4 +7,4 @@ struct Contract {
   // metadata for a future PR
 };
 
-}
+} // namespace hogd

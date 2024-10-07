@@ -2,46 +2,42 @@
 
 namespace hogd {
 
-
-bool 
-LeafCollisionHandler::try_insert(SHA256Hash const& entry)
+bool
+LeafCollisionHandler::try_insert(SHA256Hash const &entry)
 {
-	auto vec = hashes_.take();
-	for (auto const& value : *vec) {
-		if (entry == value) {
-			return false;
-		}
-	}
-	vec->emplace_back(entry);
-	return true;
+  auto vec = hashes_.take();
+  for (auto const &value : *vec) {
+    if (entry == value) {
+      return false;
+    }
+  }
+  vec->emplace_back(entry);
+  return true;
 }
 
-void 
-LeafCollisionHandler::remove(SHA256Hash const& entry)
+void
+LeafCollisionHandler::remove(SHA256Hash const &entry)
 {
-	auto vec = hashes_.take();
+  auto vec = hashes_.take();
 
-	for (auto it = vec->begin(); it != vec->end(); it++) {
-		if (entry == *it) {
-			vec->erase(it);
-			return;
-		}
-	}
-	throw std::runtime_error("invalid remove");
+  for (auto it = vec->begin(); it != vec->end(); it++) {
+    if (entry == *it) {
+      vec->erase(it);
+      return;
+    }
+  }
+  throw std::runtime_error("invalid remove");
 }
 
 AtomicHashsetNode::AtomicHashsetNode(uint64_t prefix, uint8_t prefix_len)
-	: prefix_(prefix)
-	, prefix_len_(prefix_len)
-	, owning_(false)
+  : prefix_(prefix), prefix_len_(prefix_len), owning_(false)
 {
-	if (prefix_len_ == kMaxPrefixLen) {
-		leaf_handler_ = std::make_unique<LeafCollisionHandler>();
-	}
+  if (prefix_len_ == kMaxPrefixLen) {
+    leaf_handler_ = std::make_unique<LeafCollisionHandler>();
+  }
 }
 
-
-uint8_t 
+uint8_t
 AtomicHashsetNode::get_prefix_match_len(uint64_t other_prefix) const
 {
   uint64_t diff = other_prefix ^ prefix_;
@@ -56,20 +52,19 @@ AtomicHashsetNode::get_prefix_match_len(uint64_t other_prefix) const
   return out;
 }
 
-
-uint8_t 
-AtomicHashsetNode::get_branch_bits(uint64_t other_prefix) const {
-	return (other_prefix >> prefix_len_) & 0xF;
+uint8_t
+AtomicHashsetNode::get_branch_bits(uint64_t other_prefix) const
+{
+  return (other_prefix >> prefix_len_) & 0xF;
 }
 
-
-AtomicHashsetNode::~AtomicHashsetNode() {
-	if (owning_) {
-		for (auto& ptr : children_) {
-			delete ptr;
-		}
-	}
+AtomicHashsetNode::~AtomicHashsetNode()
+{
+  if (owning_) {
+    for (auto &ptr : children_) {
+      delete ptr;
+    }
+  }
 }
 
-}
-
+} // namespace hogd
