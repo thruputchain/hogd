@@ -9,6 +9,7 @@
 
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
+#include "contract.hh"
 
 namespace hogd {
 

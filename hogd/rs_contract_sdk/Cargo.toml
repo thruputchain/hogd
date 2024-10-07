@@ -9,6 +9,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+rs_xdr = {path = "../xdr/rs_xdr/"}
 
 [features]
 alloc = []

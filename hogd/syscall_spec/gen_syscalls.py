@@ -292,11 +292,9 @@ def gen_syscall_x(spec_full):
 
 
   return f"""
-// clang-format off
 %#include "types.hh"
 
 namespace hogd {{
-// clang-format on
 
 enum SyscallNo {{
 {enumdecls}}};

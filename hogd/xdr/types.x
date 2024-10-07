@@ -11,19 +11,19 @@ enum CryptographicScheme {
   Ed25519 = 0,
 };
 
-union Signature switch (CryptographicScheme type)
+union Signature switch (CryptographicScheme scheme)
 {
 case Ed25519:
   Ed25519Signature ed25519_signature;
 };
 
-union PublicKey switch (CryptographicScheme type)
+union PublicKey switch (CryptographicScheme scheme)
 {
 case Ed25519:
   Ed25519PublicKey ed25519_publickey;
 };
 
-union SecretKey switch (CryptographicScheme type)
+union SecretKey switch (CryptographicScheme scheme)
 {
 case Ed25519:
   Ed25519SecretKey ed25519_secretkey;
@@ -47,13 +47,6 @@ typedef opaque StorageKey[32]; // arbitrary 32 bytes.
 struct AddressAndKey {
   ContractAddress address;
   StorageKey key;
-};
-
-typedef opaque ContractBlob<>;
-
-struct Contract {
-  ContractBlob contract_data;
-  // metadata for a future PR
 };
 
 } // namespace hogd

@@ -52,7 +52,10 @@ struct GenRs {
   {
     // Ignore
   }
-  void show_def(const Literal &l) { top_ += l.lines; }
+  void show_def(const Literal &l)
+  { 
+    // ignore
+  }
   void show_def(const ProgDef &prog);
 
   void show_decl(const Declaration &d, std::string name_prefix)
@@ -213,7 +216,6 @@ GenRs::show_type(const UnionBody &b, string t)
   }
 
   prtop("#[repr(i32)]\n");
-  prtop("#[repr(C)]\n");
   prtop("pub enum {} ", t);
   auto _close = open_brace();
   scopes_.push_back(t);
