@@ -88,15 +88,23 @@ syscalls:
   - name: "GetCalldata"
     needs_context: yes
     inputs:
+    outputs:
       - name: "buffer"
         fixed_size: no
         typename: None
-    outputs:
       - name: "written_len"
         fixed_size: yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
     number: 8
+  - name: "Log"
+    needs_context: yes
+    inputs:
+      - name: "buffer"
+        fixed_size: no
+        typename: None
+    outputs:
+    number: 9
 errors:
   - name: "None"
     number: 0

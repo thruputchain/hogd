@@ -128,11 +128,18 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     return it->second.runtime.get();
   }
 
-  auto load_contract = snapshot_cache_.try_get_contract_by_addr(addr);
+  auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
+
+  if (!deployed_hash) {
+    return nullptr;
+  }
+
+  auto load_contract = snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
 
   if (!load_contract) {
     return nullptr;
   }
+
   std::unique_ptr<WasmiRuntime> new_runtime =
       wasmi_context_.make_new_runtime(load_contract->contract_data, this);
 

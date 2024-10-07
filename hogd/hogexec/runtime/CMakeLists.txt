@@ -22,6 +22,7 @@ add_library(
   syscall_invoke.cc
   syscall_handler.cc
   wasmi_runtime.cc
+  storage_snapshot_cache.cc
 )
 
 add_dependencies(

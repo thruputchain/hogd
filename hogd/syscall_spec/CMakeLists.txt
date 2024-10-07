@@ -74,7 +74,7 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml 
         ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py 
-    --output_dir=${CMAKE_BINARY_DIR}/hogd/rs_contract_sdk/src/
+    --output_dir=${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/
     --syscall_yaml=${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml
     --syscall_rs
     COMMENT

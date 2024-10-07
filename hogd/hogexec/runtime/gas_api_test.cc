@@ -1,6 +1,6 @@
-#include <memory>
-
 #include <gtest/gtest.h>
+
+#include <memory>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
