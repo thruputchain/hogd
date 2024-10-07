@@ -50,6 +50,10 @@ public:
 
   SyscallStatus<void> log(std::span<const std::byte> message);
 
+  std::vector<LogEntry> const& get_logs() const {
+    return logs_;
+  }
+
 private:
   struct RuntimeCacheEntry {
     std::unique_ptr<WasmiRuntime> runtime;

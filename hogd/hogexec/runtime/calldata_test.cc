@@ -27,6 +27,11 @@ protected:
 
   test::LocalMockStorageSnapshot storage_snapshot_;
   ContractAddress addr_ = ContractAddress{};
+
+  void check_log_eq(LogEntry const& entry, x23::Vec<uint8_t> const& calldata) {
+    ASSERT_EQ(entry.message.size(), calldata.size());
+    EXPECT_EQ(0, std::memcmp(entry.message.data(), calldata.data(), calldata.size()));
+  }
 };
 
 TEST_F(CalldataTest, NoCalldata)
@@ -39,8 +44,60 @@ TEST_F(CalldataTest, NoCalldata)
 
   SystemCallHandler handler(stx, storage_snapshot_);
 
-  handler.root_invoke();
+  auto res = handler.root_invoke();
+
+  EXPECT_TRUE(!!res.result);
+
+  auto const& logs = handler.get_logs();
+
+  ASSERT_EQ(logs.size(), 1);
+
+  EXPECT_EQ(logs[0].source_address, addr_);
+  check_log_eq(logs[0], stx.tx.invocation.calldata);
 }
+
+TEST_F(CalldataTest, SomeCalldata)
+{
+
+  SignedTransaction stx;
+  stx.tx.invocation.invoked_address = addr_;
+  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.gas_limit = UINT64_MAX;
+  stx.tx.invocation.calldata = {0, 1, 2, 3, 4, 5};
+
+  SystemCallHandler handler(stx, storage_snapshot_);
+
+  auto res = handler.root_invoke();
+
+  EXPECT_TRUE(!!res.result);
+
+  auto const& logs = handler.get_logs();
+
+  ASSERT_EQ(logs.size(), 1);
+
+  EXPECT_EQ(logs[0].source_address, addr_);
+  check_log_eq(logs[0], stx.tx.invocation.calldata);
+}
+
+TEST_F(CalldataTest, TooMuchCalldata)
+{
+  SignedTransaction stx;
+  stx.tx.invocation.invoked_address = addr_;
+  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.gas_limit = UINT64_MAX;
+  stx.tx.invocation.calldata = x23::Vec<uint8_t>(kMaxLogMessageLen + 1, 12);
+
+  SystemCallHandler handler(stx, storage_snapshot_);
+
+  auto res = handler.root_invoke();
+
+  EXPECT_TRUE(!res.result);
+
+  auto const& logs = handler.get_logs();
+
+  ASSERT_EQ(logs.size(), 0);
+}
+
 
 
 }

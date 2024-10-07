@@ -23,5 +23,5 @@ pub fn syscall(
 }
 
 pub(crate) fn to_offset_mut<T>(obj: &mut T) -> *mut u8 {
-    unsafe { core::mem::transmute(&obj) }
+    unsafe { core::mem::transmute(obj) }
 }

@@ -13,7 +13,7 @@ pub mod alloc;
 
 pub mod bytestring;
 pub mod crypto;
-mod syscall;
+pub mod syscall;
 
 pub mod syscall_bindings;
 

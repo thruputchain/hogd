@@ -27,7 +27,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
                                      StorageSnapshotCache &snapshot_cache)
   : signed_tx_(std::move(signed_tx)), snapshot_cache_(snapshot_cache)
 {
-  wasmi_context_.link_fn("hogd", "syscall", &syscall_entry);
+  wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
 }
 
 InvokeResult 

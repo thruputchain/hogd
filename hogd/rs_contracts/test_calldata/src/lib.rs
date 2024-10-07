@@ -9,7 +9,8 @@ use alloc::vec::Vec;
 #[cfg_attr(target_family = "wasm", export_name = "0")]
 #[no_mangle]
 pub extern "C" fn test_calldata_noalloc() -> i32 {
-    let mut len: sdk::RuntimeMemoryLength = 0;
+    let mut len: sdk::RuntimeMemoryLength = 100;
+
     sdk::syscall_bindings::GetCalldataLen(&mut len).unwrap();
 
     let mut vec_mu = Vec::with_capacity(len as usize);
