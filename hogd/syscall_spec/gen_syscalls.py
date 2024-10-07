@@ -316,6 +316,102 @@ def gen_runtime_status_cc(template_filename, spec_full):
   with open(template_filename, 'r') as file:
     return file.read().format(**locals())
 
+def gen_rs_syscall_binding(syscall):
+  name = syscall["name"]
+  inputdecls = []
+  syscallargs = []
+  uninit_args = []
+  if syscall["inputs"] is not None:
+    for inp in syscall["inputs"]:
+      input_name = inp["name"]
+      input_type = "[u8]"
+      if inp["fixed_size"]:
+        input_type = inp["typename"]
+        syscallargs.append(f"""{input_name}.as_ptr() as u64""")
+      else:
+        syscallargs.append(f"""{input_name}.as_ptr() as u64""")
+        syscallargs.append(f"""{input_name}.len() as u64""")
+
+      inputdecls.append(f"""{input_name} : &{input_type}""")
+      uninit_args.append(f"""{input_name}""")
+
+  outputargs = []
+  outputdecls = []
+  outputinits = []
+
+  uninit_inputdecls = list(inputdecls)
+
+  if syscall["outputs"] is not None:
+    for outp in syscall["outputs"]:
+      output_name = outp["name"]
+      output_type = "[u8]"
+      uninit_outputtype = "[MaybeUninit<u8>]"
+      if "primitive_type" in outp and outp["primitive_type"]:
+        output_type = outp["typename"]
+        syscallargs.append(f"""to_offset_mut({output_name}) as u64""")
+        uninit_outputtype = output_type
+        uninit_args.append(f"""{output_name}""")
+      elif outp["fixed_size"]:
+        output_type = outp["typename"]
+        uninit_outputtype = f"""MaybeUninit<{output_type}>"""
+        syscallargs.append(f"""{output_name}.as_mut_ptr() as u64""")
+        uninit_args.append(f"""unsafe {{core::mem::transmute({output_name})}}""")
+      else:
+        syscallargs.append(f"""{output_name}.as_mut_ptr() as u64""")
+        syscallargs.append(f"""{output_name}.len() as u64""")
+        uninit_args.append(f"""unsafe {{core::mem::transmute({output_name})}}""")
+
+      inputdecls.append(f"""{output_name} : &mut {output_type}""")
+      uninit_inputdecls.append(f"""{output_name} : &mut {uninit_outputtype}""")
+
+  inputdecl_str = ", ".join(inputdecls)
+  uninit_inputdecl_str = ", ".join(uninit_inputdecls)
+
+  syscall_argcount = 4
+  if len(syscallargs) < syscall_argcount:
+    syscallargs += ["0"] * (syscall_argcount - len(syscallargs))
+
+  syscallargs_str = """,
+      """.join(syscallargs)
+
+  uninit_args_str = ", ".join(uninit_args)
+
+  return f"""pub fn uninit_{name}({uninit_inputdecl_str}) -> Result<(), i32> {{
+
+  // syscall will initialize outputs, if error is kNone
+  let err =
+    syscall(SyscallNo::k{name},
+      {syscallargs_str});
+
+  if err != SyscallErrorCode::kNone as i32 {{
+    return Err(err);
+  }}
+
+  Ok(())
+}}
+
+pub fn {name}({inputdecl_str}) -> Result<(), i32> {{
+  uninit_{name}({uninit_args_str})
+}}
+
+"""
+
+def gen_rs_syscall_bindings(spec):
+  syscall_str = ""
+  for syscall in spec:
+    syscall_str += gen_rs_syscall_binding(syscall)
+
+  return f"""#![allow(non_snake_case)]
+use rs_xdr::*;
+use crate::syscall::{{syscall, to_offset_mut}};
+use core::mem::MaybeUninit;
+
+{syscall_str}
+
+"""
+
+
+
 
 parser = argparse.ArgumentParser(description="syscall generator")
 
@@ -323,9 +419,10 @@ parser.add_argument('--syscall_x', action='store_true', help="gen syscall.x")
 parser.add_argument('--syscall_inner_h', action='store_true', help="gen syscall_inner.h")
 parser.add_argument('--syscall_entry_cc', action='store_true', help="gen syscall_entry_cc")
 parser.add_argument('--syscall_yaml', type=str, required = True, help = "input yaml")
+parser.add_argument('--syscall_rs', action='store_true', help = 'gen rust syscall bindings')
 parser.add_argument('--status_cc', action='store_true', help="gen status.cc")
 parser.add_argument('--template_filename', type=str, help = "template filename")
-parser.add_argument('--output_dir', type=str, required = True, help = "output folder")
+parser.add_argument('--output_dir', type=str, default = ".", help = "output folder")
 
 args = parser.parse_args()
 
@@ -352,4 +449,8 @@ if (args.status_cc):
   with open(filename, "w") as f:
     f.write(gen_runtime_status_cc(args.template_filename, spec_full))
 
+if (args.syscall_rs):
+  filename = args.output_dir + "/syscall_bindings.rs"
+  with open(filename, "w") as f:
+    f.write(gen_rs_syscall_bindings(spec))
 

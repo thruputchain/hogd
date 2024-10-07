@@ -1,6 +1,6 @@
 #![no_std]
 
-use rs_contract_sdk as sdk;
+use rs_contract_sdk as _; // needed for importing allocator
 
 extern crate alloc;
 use alloc::format;
@@ -10,7 +10,7 @@ use alloc::format;
 
 #[cfg_attr(target_family = "wasm", export_name = "0")]
 #[no_mangle]
-pub extern "C" fn test_basic() -> u64 {
+pub extern "C" fn test_basic() -> i32 {
     let _x = format!("{}", "foo");
     return 0;
 }

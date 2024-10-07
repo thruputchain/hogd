@@ -6,7 +6,7 @@ use core::mem::MaybeUninit;
 
 pub fn get_msg_sender() -> Result<Address, i32> {
 
-    let mut out_addr: MaybeUninit<Address> = MaybeUninit::<Address>::uninit();//
+    let mut out_addr: MaybeUninit<Address> = MaybeUninit::<Address>::uninit();
 
     let err: i32 = unsafe {
         // ignore return on this syscall

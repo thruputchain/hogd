@@ -11,7 +11,7 @@ ExternalProject_Add(
 	rs_test_contracts
 	SOURCE_DIR ${CMAKE_SOURCE_DIR}/hogd/rs_contracts/
 	CONFIGURE_COMMAND ""
-	BUILD_COMMAND RELEASE=${RS_CONTRACT_BUILD_FLAGS} make rs_contracts
+	BUILD_COMMAND CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR}/built_wasms/ RELEASE=${RS_CONTRACT_BUILD_FLAGS} make rs_contracts
 	BUILD_IN_SOURCE true
 	BUILD_ALWAYS true
 	INSTALL_COMMAND ""
@@ -19,3 +19,5 @@ ExternalProject_Add(
 
 ExternalProject_Get_Property(rs_test_contracts SOURCE_DIR)
 target_sources(rs_test_contracts PRIVATE ${SOURCE_DIR}/Makefile)
+
+add_dependencies(rs_test_contracts protocol_rs generate_syscall_rs)

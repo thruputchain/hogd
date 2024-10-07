@@ -1,27 +1,15 @@
-use rs_xdr::{SyscallNo, SyscallErrorCode};
-use crate::syscall::syscall;
-
 use rs_xdr::SHA256Hash;
 use core::mem::MaybeUninit;
+use crate::syscall_bindings::uninit_SHA256;
 
 pub fn sha256(input : &[u8]) -> Result<SHA256Hash, i32> {
 
 	let mut out_hash: MaybeUninit<SHA256Hash> = MaybeUninit::<SHA256Hash>::uninit();
 
-    // syscall will initialize hash
-	let err =
-		syscall(SyscallNo::kSHA256,
-			input.as_ptr() as u64,
-			input.len() as u64,
-			out_hash.as_mut_ptr() as u64,
-			0);
-
-	if err != SyscallErrorCode::kNone as i32 {
-		return Err(err);
-	}
-
-	unsafe {
-		Ok(out_hash.assume_init())
+	match uninit_SHA256(
+		input, &mut out_hash) {
+		Ok(()) => {Ok(unsafe {out_hash.assume_init()})},
+		Err(x) => Err(x)
 	}
 }
 

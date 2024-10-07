@@ -1,6 +1,6 @@
-namespace hogd {
+%#include "types.hh"
 
-enum StorageObjectType { kBytestring = 0, kNonnegativeInt64 = 1 };
+namespace hogd {
 
 const kBytestringMaxLen = 4096;
 

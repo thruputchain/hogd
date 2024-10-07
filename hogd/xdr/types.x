@@ -1,5 +1,10 @@
 namespace hogd {
 
+typedef unsigned int RuntimeMemoryOffset;  // uint32_t
+typedef unsigned int RuntimeMemoryLength; // uint32_t
+
+enum StorageObjectType { kBytestring = 0, kNonnegativeInt64 = 1 };
+
 typedef opaque uint128_xdr[16];
 typedef opaque uint256_xdr[32];
 
