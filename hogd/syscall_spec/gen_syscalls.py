@@ -25,6 +25,7 @@ def gen_validate_arg(inp, *, is_input):
     return {{SyscallErrorCode::kFault, kGenericBadSyscallCost}};
   }}
 """, [f"user_{arg1}", f"user_{arg2}"], arg1, f"std::span<{const}std::byte> {arg1}"
+  
   # fixed size
   typename = inp["typename"]
   arg1 = f"{in_out}_{arg_name}"
@@ -66,6 +67,20 @@ def gen_inner_outer(syscall):
       user_args += local_user_args
       call_arg_strs.append(f"*{local_arg}")
       inner_arg_decl_strs.append(inner_arg_decl)
+      if "use_written_len" in arg and arg["use_written_len"]:
+        local_name = arg["name"]
+        writelen_arg = {
+          "name" : f"""{local_name}_written_len""",
+          "fixed_size" : True,
+          "typename" : "RuntimeMemoryLength",
+          "primitive_type": True
+        }
+        validate_str, local_user_args, local_arg, inner_arg_decl = gen_validate_arg(writelen_arg, is_input = False)
+        inner_body += validate_str
+        user_args += local_user_args
+        call_arg_strs.append(f"*{local_arg}")
+        inner_arg_decl_strs.append(inner_arg_decl)
+
 
   if len(user_args) >= 1:
     arg1 = user_args[0]
@@ -390,7 +405,7 @@ def gen_rs_syscall_binding(syscall):
   Ok(())
 }}
 
-pub fn {name}({inputdecl_str}) -> Result<(), i32> {{
+pub fn raw_{name}({inputdecl_str}) -> Result<(), i32> {{
   uninit_{name}({uninit_args_str})
 }}
 

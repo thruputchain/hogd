@@ -1,27 +1,16 @@
-use rs_xdr::{SyscallNo, SyscallErrorCode};
-use crate::syscall::syscall;
+#![allow(non_snake_case)]
 
-use rs_xdr::Address;
+use crate::syscall_bindings;
+
+use rs_xdr::ContractAddress;
 use core::mem::MaybeUninit;
 
-pub fn get_msg_sender() -> Result<Address, i32> {
+pub fn GetMsgSender() -> Result<ContractAddress, i32> {
 
-    let mut out_addr: MaybeUninit<Address> = MaybeUninit::<Address>::uninit();
+    let mut out_addr: MaybeUninit<ContractAddress> = MaybeUninit::<ContractAddress>::uninit();
 
-    let err: i32 = unsafe {
-        // ignore return on this syscall
-        syscall(
-            SyscallNo::GetMsgSender,
-            out_addr.as_mut_ptr() as u64,
-            32,
-            0,
-            0,
-        )
-    };
-
-    if err != SyscallErrorCode::None as i32 {
-        return Err(err);
+    match syscall_bindings::uninit_GetMsgSender(&mut out_addr) {
+        Ok(()) => Ok( unsafe {out_addr.assume_init()}),
+        Err(x) => Err(x)
     }
-
-    unsafe { Ok(out_addr.assume_init()) }
 }

@@ -1,86 +1,19 @@
-use crate::syscall::{syscall, to_offset_mut};
-use rs_xdr::{SyscallErrorCode, SyscallNo};
+#![allow(non_snake_case)]
 
-use crate::rt::trap;
-use rs_xdr::StorageKey;
+use rs_xdr::{StorageKey, RuntimeMemoryLength};
+use crate::syscall_bindings;
 
-pub fn bytestring_get_len(key: &StorageKey) -> Result<u64, i32> {
-    let mut out: u64 = 0;
-    let err = syscall(
-        SyscallNo::kBytestringGetLen,
-        key.as_ptr() as u64,
-        to_offset_mut(&mut out) as u64,
-        0,
-        0,
-    );
+pub fn BytestringGetLen(key: &StorageKey) -> Result<RuntimeMemoryLength, i32> {
+    let mut out: RuntimeMemoryLength = 0;
 
-    if err == SyscallErrorCode::kNone as i32 {
-        return Ok(out);
-    }
-    return Err(err);
-}
-
-pub fn bytestring_get_len_defaulted(key: &StorageKey) -> Option<u64> {
-    match bytestring_get_len(&key) {
-        Ok(len) => Some(len),
-        Err(err) => {
-            if err == SyscallErrorCode::kStorageKeyNExist as i32 {
-                return None;
-            }
-            trap();
-        }
+    match syscall_bindings::raw_BytestringGetLen(key, &mut out) {
+        Ok(()) => Ok(out),
+        Err(x) => Err(x)
     }
 }
 
-// returns the number of written bytes; no more than out_slice.len()
-pub fn bytestring_get(
-    key: &StorageKey,
-    out_slice: &mut [u8],
-) -> Result<u64, i32> {
-    let mut out_len: u64 = 0;
-    let err = syscall(
-        SyscallNo::kBytestringGet,
-        key.as_ptr() as u64,
-        out_slice.as_mut_ptr() as u64,
-        out_slice.len() as u64,
-        to_offset_mut(&mut out_len) as u64,
-    );
-
-    if err == SyscallErrorCode::kNone as i32 {
-        return Ok(out_len);
-    }
-
-    return Err(err);
-}
-
-pub fn bytestring_get_defaulted(
-    key: &StorageKey,
-    out_slice: &mut [u8],
-) -> Option<u64> {
-    match bytestring_get(key, out_slice) {
-        Ok(len) => Some(len),
-        Err(err) => {
-            if err == SyscallErrorCode::kStorageKeyNExist as i32 {
-                return None;
-            }
-            trap();
-        }
-    }
-}
-
-pub fn bytestring_set(key: &StorageKey, slice: &[u8]) -> Result<(), i32> {
-    let err = syscall(
-        SyscallNo::kBytestringSet,
-        key.as_ptr() as u64,
-        slice.as_ptr() as u64,
-        slice.len() as u64,
-        0,
-    );
-
-    if err != SyscallErrorCode::kNone as i32 {
-        return Err(err);
-    }
-    Ok(())
+pub fn BytestringSet(key: &StorageKey, slice: &[u8]) -> Result<(), i32> {
+    syscall_bindings::raw_BytestringSet(key, slice)
 }
 
 // Gating the part of the module that needs an allocator behind a feature flag
@@ -88,53 +21,37 @@ pub fn bytestring_set(key: &StorageKey, slice: &[u8]) -> Result<(), i32> {
 #[cfg(feature = "alloc")]
 mod bytestring_get_alloc {
 
-    use rs_xdr::StorageKey;
-
-    use core::mem::MaybeUninit;
+    use rs_xdr::{StorageKey, RuntimeMemoryLength};
 
     extern crate alloc;
     use alloc::boxed::Box;
-    use alloc::vec;
     use alloc::vec::Vec;
 
-    use crate::bytestring::bytestring_get_len_defaulted;
+    use crate::syscall_bindings;
+    use crate::rt::trap;
 
-    use crate::syscall::{syscall, to_offset_mut};
-    use rs_xdr::{SyscallErrorCode, SyscallNo};
+    pub fn BytestringGet(key: &StorageKey) -> Result<Box<[u8]>, i32> {
+        let len : RuntimeMemoryLength = crate::bytestring::BytestringGetLen(key)?;
 
-    pub fn bytestring_get_alloc(
-        key: &StorageKey,
-    ) -> Result<Option<Box<[u8]>>, i32> {
-        let len: u64 = match bytestring_get_len_defaulted(&key) {
-            None => {
-                return Ok(None);
-            }
-            Some(len) => len,
-        };
+        let mut vec_mu = Vec::with_capacity(len as usize);
 
-        let mut out: Vec<MaybeUninit<u8>> =
-            vec![MaybeUninit::<u8>::uninit(); len.try_into().unwrap()];
-
-        let mut out_len: u64 = 0;
-
-        let err = syscall(
-            SyscallNo::kBytestringGet,
-            key.as_ptr() as u64,
-            out.as_mut_ptr() as u64,
-            len as u64,
-            to_offset_mut(&mut out_len) as u64,
-        );
-
-        // we have already handled the NExist case
-        if err == SyscallErrorCode::kNone as i32 {
-            return Ok(Some(
-                unsafe { core::mem::transmute::<_, Vec<u8>>(out) }
-                    .into_boxed_slice(),
-            ));
+        unsafe {
+            vec_mu.set_len(len as usize);
         }
-        Err(err)
+
+        let mut written_len: RuntimeMemoryLength = 0;
+
+        let mut vec = vec_mu.into_boxed_slice();
+
+        syscall_bindings::raw_BytestringGet(key, &mut vec, &mut written_len)?;
+
+        if written_len != len {
+            trap();
+        }
+
+        Ok(vec)
     }
 }
 
 #[cfg(feature = "alloc")]
-pub use bytestring_get_alloc::bytestring_get_alloc;
+pub use bytestring_get_alloc::BytestringGet;

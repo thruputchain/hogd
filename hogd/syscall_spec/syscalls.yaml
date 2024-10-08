@@ -117,7 +117,7 @@ errors:
     doc: "Syscall's expected type does not match object type at provided key"
   - name: "StorageKeyNExist"
     number: 3
-    doc: "Access to storage objet that does not logically exist.
+    doc: "Access to storage object that does not logically exist.
     An object exists if it exists at the start of a transaction (in the ledger snapshot),
     or if it is created by an operation in that transaction.  The DeleteLast syscall
     is not factored into this calculation, as those deletions are only applied at the end of a block." 

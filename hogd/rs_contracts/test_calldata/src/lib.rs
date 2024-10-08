@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 pub extern "C" fn test_calldata_noalloc() -> i32 {
     let mut len: sdk::RuntimeMemoryLength = 100;
 
-    sdk::syscall_bindings::GetCalldataLen(&mut len).unwrap();
+    sdk::syscall_bindings::raw_GetCalldataLen(&mut len).unwrap();
 
     let mut vec_mu = Vec::with_capacity(len as usize);
     unsafe {
@@ -23,14 +23,14 @@ pub extern "C" fn test_calldata_noalloc() -> i32 {
     let mut calldata = vec_mu.into_boxed_slice();
 
     // uninit vec assume_init() is still a nightly rust feature, for some reason
-    sdk::syscall_bindings::GetCalldata(&mut calldata, &mut written_len)
+    sdk::syscall_bindings::raw_GetCalldata(&mut calldata, &mut written_len)
         .unwrap();
 
     if written_len != len {
         sdk::rt::trap();
     }
 
-    sdk::syscall_bindings::Log(&calldata).unwrap();
+    sdk::syscall_bindings::raw_Log(&calldata).unwrap();
 
     0
 }

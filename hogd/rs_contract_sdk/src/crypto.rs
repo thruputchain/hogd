@@ -1,8 +1,10 @@
+#![allow(non_snake_case)]
+
 use crate::syscall_bindings::uninit_SHA256;
 use core::mem::MaybeUninit;
 use rs_xdr::SHA256Hash;
 
-pub fn sha256(input: &[u8]) -> Result<SHA256Hash, i32> {
+pub fn SHA256(input: &[u8]) -> Result<SHA256Hash, i32> {
     let mut out_hash: MaybeUninit<SHA256Hash> =
         MaybeUninit::<SHA256Hash>::uninit();
 
