@@ -11,13 +11,18 @@
 #[cfg(feature = "alloc")]
 pub mod alloc;
 
-pub mod bytestring;
-pub mod crypto;
-pub mod syscall;
-pub mod invoke;
+mod bytestring;
+mod crypto;
+mod general_storage;
+mod invoke;
+mod syscall;
 
 pub mod syscall_bindings;
 
 pub mod rt;
 
+pub use bytestring::*;
+pub use crypto::*;
+pub use general_storage::*;
+pub use invoke::*;
 pub use rs_xdr::*;

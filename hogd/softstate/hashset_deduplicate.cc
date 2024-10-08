@@ -2,12 +2,12 @@
 #include "hogd/softstate/atomic_hashset_node.h"
 
 #include <cassert>
+#include <exception>
 #include <mutex>
 #include <unordered_set>
-#include <exception>
 
-#include "hogd/base/types.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/types.h"
 #include "types.hh"
 
 namespace hogd {
@@ -105,8 +105,7 @@ AtomicHashsetDeduplicator::try_insert(SHA256Hash const &entry)
       continue;
     }
 
-    auto *new_node =
-        new AtomicHashsetNode(prefix, child_match_len);
+    auto *new_node = new AtomicHashsetNode(prefix, child_match_len);
     uint8_t child_bb = new_node->get_branch_bits(child->prefix_);
     AtomicHashsetNode *expect_null = nullptr;
 

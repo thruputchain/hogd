@@ -66,7 +66,7 @@ syscalls:
       - name: "status"
         fixed_size: Yes
         typename: "StorageObjectType"
-        primitive_type: Yes
+        primitive_type: No
     number: 5
   - name: "DeleteLast"
     needs_context: yes

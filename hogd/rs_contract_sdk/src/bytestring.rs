@@ -1,14 +1,14 @@
 #![allow(non_snake_case)]
 
-use rs_xdr::{StorageKey, RuntimeMemoryLength};
 use crate::syscall_bindings;
+use rs_xdr::{RuntimeMemoryLength, StorageKey};
 
 pub fn BytestringGetLen(key: &StorageKey) -> Result<RuntimeMemoryLength, i32> {
     let mut out: RuntimeMemoryLength = 0;
 
     match syscall_bindings::raw_BytestringGetLen(key, &mut out) {
         Ok(()) => Ok(out),
-        Err(x) => Err(x)
+        Err(x) => Err(x),
     }
 }
 
@@ -21,17 +21,18 @@ pub fn BytestringSet(key: &StorageKey, slice: &[u8]) -> Result<(), i32> {
 #[cfg(feature = "alloc")]
 mod bytestring_get_alloc {
 
-    use rs_xdr::{StorageKey, RuntimeMemoryLength};
+    use rs_xdr::{RuntimeMemoryLength, StorageKey};
 
     extern crate alloc;
     use alloc::boxed::Box;
     use alloc::vec::Vec;
 
-    use crate::syscall_bindings;
     use crate::rt::trap;
+    use crate::syscall_bindings;
 
     pub fn BytestringGet(key: &StorageKey) -> Result<Box<[u8]>, i32> {
-        let len : RuntimeMemoryLength = crate::bytestring::BytestringGetLen(key)?;
+        let len: RuntimeMemoryLength =
+            crate::bytestring::BytestringGetLen(key)?;
 
         let mut vec_mu = Vec::with_capacity(len as usize);
 

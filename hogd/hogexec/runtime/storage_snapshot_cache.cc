@@ -2,15 +2,15 @@
 
 #include <cassert>
 #include <memory>
-#include <span>
 #include <optional>
+#include <span>
 
 #include "hogd/crypto/crypto.h"
 #include "x23/serialize.h"
 
 #include "contract.hh"
-#include "types.hh"
 #include "storage_object.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -79,9 +79,9 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 }
 
 namespace test {
-  
+
 SHA256Hash
-LocalMockStorageSnapshot::register_contract(std::shared_ptr<Contract>& contract)
+LocalMockStorageSnapshot::register_contract(std::shared_ptr<Contract> &contract)
 {
   assert(!!contract);
 

@@ -7,9 +7,9 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "x23/vec.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -17,7 +17,6 @@ class CalldataTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    // this wasm just invokes an external call.  We're just reusing it here.
     auto c = test::load_built_rs_contract("test_calldata.wasm");
 
     auto contract_hash = storage_snapshot_.register_contract(c);
@@ -27,7 +26,8 @@ protected:
   test::LocalMockStorageSnapshot storage_snapshot_;
   ContractAddress addr_ = ContractAddress{};
 
-  static void check_log_eq(LogEntry const &entry, x23::Vec<uint8_t> const &calldata)
+  static void check_log_eq(LogEntry const &entry,
+                           x23::Vec<uint8_t> const &calldata)
   {
     ASSERT_EQ(entry.message.size(), calldata.size());
     EXPECT_EQ(0, std::memcmp(entry.message.data(), calldata.data(),

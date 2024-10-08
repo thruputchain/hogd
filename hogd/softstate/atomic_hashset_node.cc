@@ -1,10 +1,10 @@
 #include "hogd/softstate/atomic_hashset_node.h"
 
-#include <stdexcept>
+#include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <memory>
-#include <bit>
-#include <algorithm>
+#include <stdexcept>
 
 #include "types.hh"
 

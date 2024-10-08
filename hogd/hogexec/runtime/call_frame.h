@@ -28,7 +28,7 @@ public:
   StorageProxy *try_get_storage_proxy(AddressAndKey const &query);
 
   void push_new_storage_proxy(AddressAndKey const &new_addrkey,
-                              StorageProxy const& proxy);
+                              StorageProxy const &proxy);
 
   // The set of all runtimes visited by the current call frame and _successful_
   // children. Failed calls poison the set of visited runtimes, unless the

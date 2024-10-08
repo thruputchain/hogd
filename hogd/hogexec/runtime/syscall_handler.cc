@@ -1,15 +1,15 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <utility>
-#include <cstdint>
-#include <algorithm>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"

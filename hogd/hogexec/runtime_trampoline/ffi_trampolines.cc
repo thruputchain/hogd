@@ -50,8 +50,9 @@ c_call_internal(void *function_pointer, void *host_call_context, Args... args)
 {
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
-    auto *ptr = reinterpret_cast<HostFnStatus<int32_t>(*)(HostCallContext *, Args...)>(
-        function_pointer);
+    auto *ptr =
+        reinterpret_cast<HostFnStatus<int32_t> (*)(HostCallContext *, Args...)>(
+            function_pointer);
 
     return handle_result((*ptr)(user_ctx, args...));
 

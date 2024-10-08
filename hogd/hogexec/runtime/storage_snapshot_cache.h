@@ -38,7 +38,7 @@ namespace test {
 
 struct LocalMockStorageSnapshot : public StorageSnapshotCache {
 
-  SHA256Hash register_contract(std::shared_ptr<Contract>& contract);
+  SHA256Hash register_contract(std::shared_ptr<Contract> &contract);
 
   void deploy_contract(ContractAddress const &addr, SHA256Hash const &hash);
 };
