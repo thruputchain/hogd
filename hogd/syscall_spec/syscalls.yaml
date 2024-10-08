@@ -105,6 +105,21 @@ syscalls:
         typename: None
     outputs:
     number: 9
+  - name: "Invoke"
+    needs_context : yes
+    inputs:
+      - name: "invocation"
+        fixed_size: yes
+        typename: "InvocationNoCalldata"
+      - name: "calldata"
+        fixed_size: no
+        typename: None
+    outputs:
+      - name: "return_len"
+        fixed_size: yes
+        typename: "RuntimeMemoryLength"
+        primitive_type: yes
+
 errors:
   - name: "None"
     number: 0
