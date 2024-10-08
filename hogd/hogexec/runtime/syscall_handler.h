@@ -24,7 +24,7 @@ public:
   InvokeResult root_invoke();
 
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-  invoke(Invocation const& invocation);
+  invoke(Invocation const &invocation);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -50,9 +50,7 @@ public:
 
   SyscallStatus<void> log(std::span<const std::byte> message);
 
-  std::vector<LogEntry> const& get_logs() const {
-    return logs_;
-  }
+  std::vector<LogEntry> const &get_logs() const { return logs_; }
 
 private:
   struct RuntimeCacheEntry {
@@ -61,7 +59,7 @@ private:
   };
 
   WasmiRuntime *resolve_runtime(ContractAddress const &addr);
-  InvokeResult invoke_unconverted(Invocation const& invocation);
+  InvokeResult invoke_unconverted(Invocation const &invocation);
 
   // Can only be called when call_frame_stack_ is nonempty
   StorageProxy &resolve_storage_proxy(StorageKey const &key);

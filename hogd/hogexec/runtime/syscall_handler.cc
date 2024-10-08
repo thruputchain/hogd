@@ -15,11 +15,11 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "x23/vec.h"
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -30,18 +30,17 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
   wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
 }
 
-InvokeResult 
+InvokeResult
 SystemCallHandler::root_invoke()
 {
-  auto* runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
-  
+  auto *runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
+
   if (runtime) {
-    runtime -> set_available_gas(signed_tx_.tx.invocation.gas_limit);
+    runtime->set_available_gas(signed_tx_.tx.invocation.gas_limit);
   }
-  
+
   return invoke_unconverted(signed_tx_.tx.invocation);
 }
-
 
 // syscall methods: can only be called when call_frame_stack_ is nonempty
 // (i.e. while at least one invoke() is running)
@@ -61,11 +60,12 @@ SystemCallHandler::get_msg_sender() const
     return SyscallError{SyscallErrorCode::kIsRootTransaction};
   }
 
-  return {call_frame_stack_[call_frame_stack_.size() - 2].active_invocation_.invoked_address};
+  return {call_frame_stack_[call_frame_stack_.size() - 2]
+              .active_invocation_.invoked_address};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-convert_invoke_result_to_host_fn_result(InvokeResult const& result)
+convert_invoke_result_to_host_fn_result(InvokeResult const &result)
 {
   if (!result.result.has_value()) {
     using enum InvokeErrorCode;
@@ -93,9 +93,9 @@ convert_invoke_result_to_host_fn_result(InvokeResult const& result)
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke(Invocation const& invocation)
+SystemCallHandler::invoke(Invocation const &invocation)
 {
-  auto* runtime = resolve_runtime(invocation.invoked_address);
+  auto *runtime = resolve_runtime(invocation.invoked_address);
 
   if (!runtime) {
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
@@ -104,7 +104,8 @@ SystemCallHandler::invoke(Invocation const& invocation)
   const uint64_t initial_gas_limit = runtime->get_available_gas();
 
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
-  if (invocation.gas_limit != UINT64_MAX && invocation.gas_limit > initial_gas_limit) {
+  if (invocation.gas_limit != UINT64_MAX &&
+      invocation.gas_limit > initial_gas_limit) {
     return std::pair{SyscallErrorCode::kInsufficientGasForInvocation, 0};
   }
 
@@ -113,30 +114,31 @@ SystemCallHandler::invoke(Invocation const& invocation)
 }
 
 InvokeResult
-SystemCallHandler::invoke_unconverted(Invocation const& invocation)
+SystemCallHandler::invoke_unconverted(Invocation const &invocation)
 {
   WasmiRuntime *runtime = resolve_runtime(invocation.invoked_address);
 
   if (!runtime) {
-    return InvokeResult {
-      .result = InvokeError{InvokeErrorCode::kDeterministicError},
-      .gas_consumed = 0
-    };
+    return InvokeResult{.result =
+                            InvokeError{InvokeErrorCode::kDeterministicError},
+                        .gas_consumed = 0};
   }
 
   std::string method_name = std::format("{:x}", invocation.method_name);
 
   const uint64_t initial_gas_limit = runtime->get_available_gas();
-  const uint64_t gas_limit = std::min<uint64_t>(initial_gas_limit, invocation.gas_limit);
+  const uint64_t gas_limit =
+      std::min<uint64_t>(initial_gas_limit, invocation.gas_limit);
 
   call_frame_stack_.emplace_back(invocation, *runtime);
 
   InvokeResult result = runtime->invoke(method_name, gas_limit);
 
-  // We choose _not_ to check the return code here, and instead pass it back to the caller.
-  // Implicitly, this is saying that the caller is responsible for checking the return code,
-  // AND that the callee is responsible for cleaning itself up correctly.
-  // I.e. if you pass back a return code, you can be safely called again.
+  // We choose _not_ to check the return code here, and instead pass it back to
+  // the caller. Implicitly, this is saying that the caller is responsible for
+  // checking the return code, AND that the callee is responsible for cleaning
+  // itself up correctly. I.e. if you pass back a return code, you can be safely
+  // called again.
   if (!result.result.has_value()) {
 
     for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
@@ -146,11 +148,10 @@ SystemCallHandler::invoke_unconverted(Invocation const& invocation)
     call_frame_stack_.pop_back();
 
     call_frame_stack_.back().commit_failed_child_call();
-  } 
-  else 
-  {
+  }
+  else {
     size_t call_frame_stack_size = call_frame_stack_.size();
-    
+
     if (call_frame_stack_size >= 2) {
       call_frame_stack_[call_frame_stack_size - 2].commit_successful_child_call(
           std::move(call_frame_stack_.back()));
@@ -265,8 +266,7 @@ SystemCallHandler::set_bytestring(StorageKey const &key,
   return proxy.set_bytestring(input_bytestring);
 }
 
-
-SyscallStatus<Calldata> 
+SyscallStatus<Calldata>
 SystemCallHandler::get_calldata() const
 {
   assert(!call_frame_stack_.empty());
@@ -274,29 +274,27 @@ SystemCallHandler::get_calldata() const
   return call_frame_stack_.back().active_invocation_.calldata;
 }
 
-SyscallStatus<RuntimeMemoryLength> 
+SyscallStatus<RuntimeMemoryLength>
 SystemCallHandler::get_calldata_len() const
 {
   assert(!call_frame_stack_.empty());
   return call_frame_stack_.back().active_invocation_.calldata.size();
 }
 
-SyscallStatus<void> 
+SyscallStatus<void>
 SystemCallHandler::log(std::span<const std::byte> message)
 {
   if (message.size() > kMaxLogMessageLen) {
     return SyscallError{SyscallErrorCode::kStringTooLong};
   }
 
-  std::span<const uint8_t> m = {reinterpret_cast<const uint8_t*>(message.data()), message.size()};
+  std::span<const uint8_t> m = {reinterpret_cast<const uint8_t *>(
+                                    message.data()),
+                                message.size()};
 
-  logs_.emplace_back(
-      get_current_address(),
-      x23::Vec<uint8_t, kMaxLogMessageLen>(m.begin(), m.end())
-    );
+  logs_.emplace_back(get_current_address(),
+                     x23::Vec<uint8_t, kMaxLogMessageLen>(m.begin(), m.end()));
   return {};
 }
-
-
 
 } // namespace hogd

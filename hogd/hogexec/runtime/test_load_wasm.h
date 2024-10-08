@@ -38,19 +38,20 @@ load_wasm_from_file(std::string_view filename)
 }
 
 [[maybe_unused]]
-static
-std::shared_ptr<Contract>
+static std::shared_ptr<Contract>
 load_built_rs_contract(std::string_view filename)
 {
-  std::string file = std::string(CMAKE_ROOT_BINARY_DIR) +
-                     std::string("/hogd/rs_contracts/built_wasms/wasm32-unknown-unknown/release/") +
-                     std::string(filename);
+  std::string file =
+      std::string(CMAKE_ROOT_BINARY_DIR) +
+      std::string(
+          "/hogd/rs_contracts/built_wasms/wasm32-unknown-unknown/release/") +
+      std::string(filename);
   FILE *f = std::fopen(file.c_str(), "r");
   if (f == nullptr)
     throw std::runtime_error("failed to load built rs wasm contract: " + file);
 
   auto contract = std::make_shared<Contract>();
-  auto& contents = contract->contract_data;
+  auto &contents = contract->contract_data;
   constexpr size_t kBufferSize = 65536;
   char buf[kBufferSize];
 

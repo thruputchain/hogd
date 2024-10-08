@@ -1,16 +1,16 @@
 #include <gtest/gtest.h>
 
-#include <memory>
 #include <cstdint>
+#include <memory>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_load_wasm.h"
 
-#include "types.hh"
 #include "contract.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -28,9 +28,11 @@ protected:
   test::LocalMockStorageSnapshot storage_snapshot_;
   ContractAddress addr_ = ContractAddress{};
 
-  void check_log_eq(LogEntry const& entry, x23::Vec<uint8_t> const& calldata) {
+  void check_log_eq(LogEntry const &entry, x23::Vec<uint8_t> const &calldata)
+  {
     ASSERT_EQ(entry.message.size(), calldata.size());
-    EXPECT_EQ(0, std::memcmp(entry.message.data(), calldata.data(), calldata.size()));
+    EXPECT_EQ(0, std::memcmp(entry.message.data(), calldata.data(),
+                             calldata.size()));
   }
 };
 
@@ -48,7 +50,7 @@ TEST_F(CalldataTest, NoCalldata)
 
   EXPECT_TRUE(!!res.result);
 
-  auto const& logs = handler.get_logs();
+  auto const &logs = handler.get_logs();
 
   ASSERT_EQ(logs.size(), 1);
 
@@ -71,7 +73,7 @@ TEST_F(CalldataTest, SomeCalldata)
 
   EXPECT_TRUE(!!res.result);
 
-  auto const& logs = handler.get_logs();
+  auto const &logs = handler.get_logs();
 
   ASSERT_EQ(logs.size(), 1);
 
@@ -93,11 +95,9 @@ TEST_F(CalldataTest, TooMuchCalldata)
 
   EXPECT_TRUE(!res.result);
 
-  auto const& logs = handler.get_logs();
+  auto const &logs = handler.get_logs();
 
   ASSERT_EQ(logs.size(), 0);
 }
 
-
-
-}
+} // namespace hogd

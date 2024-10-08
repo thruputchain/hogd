@@ -11,9 +11,8 @@
 namespace hogd {
 
 CallFrame::CallFrame(Invocation const &invocation, WasmiRuntime &runtime)
-  : active_invocation_(invocation)
-  , active_runtime_(runtime)
-  {}
+  : active_invocation_(invocation), active_runtime_(runtime)
+{}
 
 void
 CallFrame::commit_successful_child_call(CallFrame &&frame)

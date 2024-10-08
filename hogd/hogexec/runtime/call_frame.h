@@ -16,7 +16,7 @@ class CallFrame {
 public:
   CallFrame(Invocation const &invocation, WasmiRuntime &runtime);
 
-  CallFrame(CallFrame&& other) noexcept = default;
+  CallFrame(CallFrame &&other) noexcept = default;
 
   void commit_successful_child_call(CallFrame &&frame);
   void commit_failed_child_call();
