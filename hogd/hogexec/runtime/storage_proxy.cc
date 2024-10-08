@@ -104,7 +104,7 @@ StorageProxy::set_bytestring(std::span<const std::byte> input_bytestring)
   return {};
 }
 
-SyscallStatus<int64_t> 
+SyscallStatus<int64_t>
 StorageProxy::get_nnint64_base_value() const
 {
   auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt64);
@@ -124,7 +124,7 @@ StorageProxy::get_nnint64_base_value() const
   return SyscallError{SyscallErrorCode::kStorageKeyNExist};
 }
 
-SyscallStatus<int64_t> 
+SyscallStatus<int64_t>
 StorageProxy::get_nnint64_value() const
 {
   auto base_value = get_nnint64_base_value();
@@ -145,7 +145,9 @@ StorageProxy::get_nnint64_value() const
   return INT64_MAX;
 }
 
-int64_t capped_add(int64_t a, int64_t b) {
+int64_t
+capped_add(int64_t a, int64_t b)
+{
   int64_t out;
   if (__builtin_add_overflow(a, b, &out)) {
     if (a > 0) {
@@ -161,7 +163,7 @@ int64_t capped_add(int64_t a, int64_t b) {
   return out;
 }
 
-SyscallStatus<void> 
+SyscallStatus<void>
 StorageProxy::nnint64_set_add(int64_t set_value, int64_t add_value)
 {
   auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt64);
@@ -188,8 +190,8 @@ StorageProxy::nnint64_set_add(int64_t set_value, int64_t add_value)
   }
 
   // TODO(geoff): Consider whether we should have add_value as int128,
-  // so that sequences like add(INT64_MAX), add(INT64_MAX), add(INT64_MIN) get handled
-  // in a more sensible way.
+  // so that sequences like add(INT64_MAX), add(INT64_MAX), add(INT64_MIN) get
+  // handled in a more sensible way.
   set_nnint64_arg_ = set_value;
   nnint64_add_sum_ = new_add_value;
 
@@ -197,6 +199,5 @@ StorageProxy::nnint64_set_add(int64_t set_value, int64_t add_value)
 
   return {};
 }
-
 
 } // namespace hogd

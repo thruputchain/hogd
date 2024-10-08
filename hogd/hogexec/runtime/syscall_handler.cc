@@ -158,6 +158,10 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation)
       call_frame_stack_[call_frame_stack_size - 2].commit_successful_child_call(
           std::move(call_frame_stack_.back()));
     }
+    if (call_frame_stack_.size() == 1) {
+      committed_logs_ = call_frame_stack_.back().extract_logs();
+    }
+
     call_frame_stack_.pop_back();
   }
 
@@ -290,12 +294,10 @@ SystemCallHandler::log(std::span<const std::byte> message)
     return SyscallError{SyscallErrorCode::kStringTooLong};
   }
 
-  std::span<const uint8_t> m = {reinterpret_cast<const uint8_t *>(
-                                    message.data()),
-                                message.size()};
+  assert(!call_frame_stack_.empty());
 
-  logs_.emplace_back(get_current_address(),
-                     x23::Vec<uint8_t, kMaxLogMessageLen>(m.begin(), m.end()));
+  call_frame_stack_.back().log(message);
+
   return {};
 }
 

@@ -61,4 +61,25 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_Invoke_inner(SystemCallHandler &syscall_handler,
+                     const ContractAddress &input_address,
+                     const MethodID input_method,
+                     const GasAmount input_gas_limit,
+                     std::span<const std::byte> input_calldata,
+                     RuntimeMemoryLength &output_return_len)
+{
+  Calldata calldata;
+  calldata.resize_uninitialized(input_calldata.size());
+  std::memcpy(
+    calldata.data(), reinterpret_cast<const uint8_t*>(input_calldata.data()),
+    input_calldata.size());
+  return syscall_handler.invoke(
+    Invocation(
+      input_address,
+      input_method,
+      input_gas_limit,
+      calldata));
+}
+
 } // namespace hogd

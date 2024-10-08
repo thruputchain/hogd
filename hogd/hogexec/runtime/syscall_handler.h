@@ -50,7 +50,7 @@ public:
 
   SyscallStatus<void> log(std::span<const std::byte> message);
 
-  std::vector<LogEntry> const &get_logs() const { return logs_; }
+  std::vector<LogEntry> const &get_logs() const { return committed_logs_; }
 
 private:
   struct RuntimeCacheEntry {
@@ -69,7 +69,8 @@ private:
   std::vector<CallFrame> call_frame_stack_;
   std::map<ContractAddress, RuntimeCacheEntry> runtimes_;
 
-  std::vector<LogEntry> logs_;
+  // only set at the end of the transaction
+  std::vector<LogEntry> committed_logs_;
 
   StorageSnapshotCache &snapshot_cache_;
 };

@@ -4,7 +4,7 @@ typedef unsigned int RuntimeMemoryOffset; // uint32_t
 typedef unsigned int RuntimeMemoryLength; // uint32_t
 
 typedef unsigned hyper GasAmount; // uint64_t
-typedef unsigned int MethodID; // uint32_t
+typedef unsigned int MethodID;    // uint32_t
 
 enum StorageObjectType { kBytestring = 0, kNonnegativeInt64 = 1 };
 

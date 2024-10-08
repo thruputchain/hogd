@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <span>
 
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -42,6 +43,11 @@ public:
   std::optional<ReturnBuffer> child_return_buffer_;
 
   void set_call_return(std::span<const std::byte> return_span);
+  void log(std::span<const std::byte> message);
+
+  std::vector<LogEntry> extract_logs() {
+    return std::move(logs_);
+  }
 
 private:
   WasmiRuntime &active_runtime_;
@@ -51,6 +57,8 @@ private:
   // Cached here separately from the primary SystemCallHandler
   // in order to (in later PR) support subcall unwinding
   std::map<AddressAndKey, std::unique_ptr<StorageProxy>> storage_proxies_;
+
+  std::vector<LogEntry> logs_;
 };
 
 } // namespace hogd

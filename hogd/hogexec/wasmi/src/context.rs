@@ -381,7 +381,7 @@ impl WasmiContext {
                         arg5,
                         arg6,
                         arg7,
-                        arg8
+                        arg8,
                     )
                 };
                 return external_call::handle_trampoline_error(res);
@@ -391,8 +391,6 @@ impl WasmiContext {
             Err(err) => Err(err.into()),
         }
     }
-
-
 }
 
 #[no_mangle]
