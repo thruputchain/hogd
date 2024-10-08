@@ -7,7 +7,6 @@
   typedef opaque Calldata<>;
 
   typedef opaque ReturnBuffer<>;
-  typedef unsigned int MethodID; // uint32_t
 
   struct Invocation {
     ContractAddress invoked_address;

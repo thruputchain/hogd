@@ -13,6 +13,8 @@ def gen_validate_arg(inp, *, is_input):
   if (is_input):
     const = "const "
     in_out = "input"
+
+
   if not inp["fixed_size"]:
     arg1 = f"{in_out}_{arg_name}"
     arg2 = f"{in_out}_{arg_name}_len"
@@ -24,11 +26,19 @@ def gen_validate_arg(inp, *, is_input):
   if (!{in_out}_{arg_name}) {{
     return {{SyscallErrorCode::kFault, kGenericBadSyscallCost}};
   }}
-""", [f"user_{arg1}", f"user_{arg2}"], arg1, f"std::span<{const}std::byte> {arg1}"
+""", [f"user_{arg1}", f"user_{arg2}"], arg1, f"*{arg1}", f"std::span<{const}std::byte> {arg1}"
   
-  # fixed size
+
   typename = inp["typename"]
   arg1 = f"{in_out}_{arg_name}"
+  
+  if "primitive_type" in inp and inp["primitive_type"] and is_input:
+    return f"""
+  {const}{typename} {arg1} =
+      check_user_primitive_argument<{const}{typename}>(user_{arg1});
+""", [f"user_{arg1}"], arg1, arg1, f"{const}{typename} {arg1}"
+
+  # else fixed size
   return f"""
   {const}{typename} *{arg1} =
       check_user_argument<{const}{typename}>(contract_memory, user_{arg1},
@@ -37,7 +47,7 @@ def gen_validate_arg(inp, *, is_input):
   if (!{arg1}) {{
     return {{SyscallErrorCode::kFault, kGenericBadSyscallCost}};
   }}
-""", [f"user_{arg1}"], arg1, f"{const}{typename}& {arg1}"
+""", [f"user_{arg1}"], arg1,  f"*{arg1}", f"{const}{typename}& {arg1}"
 
 
 def gen_inner_outer(syscall):
@@ -46,6 +56,10 @@ def gen_inner_outer(syscall):
   arg2 = "/*unused*/"
   arg3 = "/*unused*/"
   arg4 = "/*unused*/"
+  arg5 = "/*unused*/"
+  arg6 = "/*unused*/"
+  arg7 = "/*unused*/"
+
   inner_body = ""
   call_arg_strs = []
   user_args = []
@@ -54,19 +68,21 @@ def gen_inner_outer(syscall):
   syscall_handler_decl = ""
   if syscall["inputs"] is not None:
     for arg in syscall["inputs"]:
-      validate_str, local_user_args, local_arg, inner_arg_decl = gen_validate_arg(arg, is_input = True)
+      validate_str, local_user_args, local_arg, local_call_arg, inner_arg_decl = gen_validate_arg(arg, is_input = True)
       inner_body += validate_str
       user_args += local_user_args
-      call_arg_strs.append(f"*{local_arg}")
+      call_arg_strs.append(local_call_arg)
       inner_arg_decl_strs.append(inner_arg_decl)
 
   if syscall["outputs"] is not None:
     for arg in syscall["outputs"]:
-      validate_str, local_user_args, local_arg, inner_arg_decl = gen_validate_arg(arg, is_input = False)
+      validate_str, local_user_args, local_arg, local_call_arg, inner_arg_decl = gen_validate_arg(arg, is_input = False)
       inner_body += validate_str
       user_args += local_user_args
-      call_arg_strs.append(f"*{local_arg}")
+      call_arg_strs.append(local_call_arg)
       inner_arg_decl_strs.append(inner_arg_decl)
+      
+
       if "use_written_len" in arg and arg["use_written_len"]:
         local_name = arg["name"]
         writelen_arg = {
@@ -90,6 +106,14 @@ def gen_inner_outer(syscall):
     arg3 = user_args[2]
   if len(user_args) >= 4:
     arg4 = user_args[3] 
+  if len(user_args) >= 5:
+    arg5 = user_args[4]
+  if len(user_args) >= 6:
+    arg6 = user_args[5]
+  if len(user_args) >= 7:
+    arg7 = user_args[6]
+  if len(user_args) >= 8:
+    raise ValueError("too many syscall args")
 
   if syscall["needs_context"]:
     syscall_handler = "syscall_handler, "
@@ -104,7 +128,10 @@ syscall_{name}_outer(SystemCallHandler& syscall_handler,
                      uint64_t {arg1}, 
                      uint64_t {arg2},
                      uint64_t {arg3}, 
-                     uint64_t {arg4})
+                     uint64_t {arg4},
+                     uint64_t {arg5},
+                     uint64_t {arg6},
+                     uint64_t {arg7})
 {{{inner_body}
   return syscall_{name}_inner({syscall_handler}{inner_args});
 }}
@@ -206,17 +233,24 @@ check_user_span_argument(std::span<std::byte> contract_memory,
   return contract_memory.subspan(user_offset, user_len);
 }}
 
+template<typename T> requires std::is_integral_v<T>
+T
+check_user_primitive_argument(uint64_t user_value)
+{{
+  return static_cast<T>(user_value);
+}}
+
 {syscall_outers}
 
 using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> (*)(
-    SystemCallHandler&, std::span<std::byte>, uint64_t, uint64_t, uint64_t, uint64_t);
+    SystemCallHandler&, std::span<std::byte>, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
 {syscall_table}
 
 // returns gas_consumed, syscall error>
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
-                    uint64_t arg2, uint64_t arg3, uint64_t arg4)
+                    uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7)
 {{
   if (arg0 >= syscall_table.size()) {{
     // invalid syscall
@@ -234,15 +268,16 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
 
   assert(call_context -> syscall_handler);
 
-  return syscall_fn_outer(*call_context->syscall_handler, contract_memory, arg1, arg2, arg3, arg4);
+  return syscall_fn_outer(*call_context->syscall_handler, contract_memory, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }}
 
 HostFnStatus<int32_t>
 syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
-              uint64_t arg2, uint64_t arg3, uint64_t arg4)
+              uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5, 
+              uint64_t arg6, uint64_t arg7)
 {{
   auto [err, gas_consumed] =
-      syscall_entry_inner(call_context, arg0, arg1, arg2, arg3, arg4);
+      syscall_entry_inner(call_context, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 
   if (!call_context->runtime->consume_gas(gas_consumed)) {{
     return HostFnError{{HostFnErrorCode::kOutOfGas}};
@@ -340,7 +375,10 @@ def gen_rs_syscall_binding(syscall):
     for inp in syscall["inputs"]:
       input_name = inp["name"]
       input_type = "[u8]"
-      if inp["fixed_size"]:
+      if "primitive_type" in inp and inp["primitive_type"]:
+        input_type = inp["typename"]
+        syscallargs.append(f"""*{input_name} as u64""")
+      elif inp["fixed_size"]:
         input_type = inp["typename"]
         syscallargs.append(f"""{input_name}.as_ptr() as u64""")
       else:
@@ -382,7 +420,7 @@ def gen_rs_syscall_binding(syscall):
   inputdecl_str = ", ".join(inputdecls)
   uninit_inputdecl_str = ", ".join(uninit_inputdecls)
 
-  syscall_argcount = 4
+  syscall_argcount = 7
   if len(syscallargs) < syscall_argcount:
     syscallargs += ["0"] * (syscall_argcount - len(syscallargs))
 

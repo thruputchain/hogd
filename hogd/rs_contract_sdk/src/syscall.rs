@@ -9,6 +9,9 @@ extern "C" {
         arg2: u64,
         arg3: u64,
         arg4: u64,
+        arg5: u64,
+        arg6: u64,
+        arg7: u64,
     ) -> i32;
 }
 
@@ -18,8 +21,11 @@ pub fn syscall(
     arg2: u64,
     arg3: u64,
     arg4: u64,
+    arg5: u64,
+    arg6: u64,
+    arg7: u64
 ) -> i32 {
-    unsafe { syscall_internal(syscall as u64, arg1, arg2, arg3, arg4) }
+    unsafe { syscall_internal(syscall as u64, arg1, arg2, arg3, arg4, arg5, arg6, arg7) }
 }
 
 pub(crate) fn to_offset_mut<T>(obj: &mut T) -> *mut u8 {

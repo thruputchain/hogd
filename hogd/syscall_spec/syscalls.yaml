@@ -108,9 +108,17 @@ syscalls:
   - name: "Invoke"
     needs_context : yes
     inputs:
-      - name: "invocation"
+      - name: "address"
         fixed_size: yes
-        typename: "InvocationNoCalldata"
+        typename: "ContractAddress"
+      - name: "method"
+        fixed_size: yes
+        typename: "MethodID"
+        primitive_type: yes
+      - name: "gas_limit"
+        fixed_size: yes
+        typename: "GasAmount"
+        primitive_type: yes
       - name: "calldata"
         fixed_size: no
         typename: None
@@ -119,6 +127,7 @@ syscalls:
         fixed_size: yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
+    number: 10
 
 errors:
   - name: "None"
