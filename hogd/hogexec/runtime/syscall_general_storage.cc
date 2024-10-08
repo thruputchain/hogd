@@ -2,11 +2,9 @@
 
 #include <utility>
 
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "storage_object.hh"
 #include "syscall.hh"
 #include "types.hh"
 

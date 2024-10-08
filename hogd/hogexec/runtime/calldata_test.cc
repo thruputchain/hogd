@@ -1,14 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <memory>
+#include <cstring>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-
-#include "contract.hh"
+#include "x23/vec.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -28,7 +27,7 @@ protected:
   test::LocalMockStorageSnapshot storage_snapshot_;
   ContractAddress addr_ = ContractAddress{};
 
-  void check_log_eq(LogEntry const &entry, x23::Vec<uint8_t> const &calldata)
+  static void check_log_eq(LogEntry const &entry, x23::Vec<uint8_t> const &calldata)
   {
     ASSERT_EQ(entry.message.size(), calldata.size());
     EXPECT_EQ(0, std::memcmp(entry.message.data(), calldata.data(),

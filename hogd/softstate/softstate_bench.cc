@@ -3,13 +3,14 @@
 #include <barrier>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
-#include <vector>
 
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/softstate/hashset_deduplicate.h"
+#include "types.hh"
 
 namespace hogd {
 

@@ -6,12 +6,14 @@
 #include <utility>
 
 #include "hogd/hogexec/runtime/storage_proxy.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "types.hh"
+#include "transaction.hh"
 
 namespace hogd {
 
-CallFrame::CallFrame(Invocation const &invocation, WasmiRuntime &runtime)
-  : active_invocation_(invocation), active_runtime_(runtime)
+CallFrame::CallFrame(Invocation invocation, WasmiRuntime &runtime)
+  : active_invocation_(std::move(invocation)), active_runtime_(runtime)
 {}
 
 void
@@ -35,7 +37,7 @@ CallFrame::commit_failed_child_call()
 
 void
 CallFrame::push_new_storage_proxy(AddressAndKey const &new_addrkey,
-                                  StorageProxy proxy)
+                                  StorageProxy const& proxy)
 {
   assert(storage_proxies_.find(new_addrkey) == storage_proxies_.end());
   storage_proxies_.emplace(new_addrkey, std::make_unique<StorageProxy>(proxy));

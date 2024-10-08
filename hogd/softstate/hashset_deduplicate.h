@@ -74,6 +74,6 @@ private:
   Hasher hasher_;
 };
 
-typedef HashsetDeduplicatorSimple HashsetDeduplicator;
+using HashsetDeduplicator = HashsetDeduplicatorSimple;
 
 } // namespace hogd

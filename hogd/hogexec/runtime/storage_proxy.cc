@@ -8,6 +8,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_object.hh"
 #include "syscall.hh"
+#include "types.hh"
 
 namespace hogd {
 

@@ -14,9 +14,9 @@ namespace hogd {
 
 class CallFrame {
 public:
-  CallFrame(Invocation const &invocation, WasmiRuntime &runtime);
+  CallFrame(Invocation invocation, WasmiRuntime &runtime);
 
-  CallFrame(CallFrame &&other) noexcept = default;
+  CallFrame(CallFrame &&other) = default;
 
   void commit_successful_child_call(CallFrame &&frame);
   void commit_failed_child_call();
@@ -28,7 +28,7 @@ public:
   StorageProxy *try_get_storage_proxy(AddressAndKey const &query);
 
   void push_new_storage_proxy(AddressAndKey const &new_addrkey,
-                              StorageProxy proxy);
+                              StorageProxy const& proxy);
 
   // The set of all runtimes visited by the current call frame and _successful_
   // children. Failed calls poison the set of visited runtimes, unless the

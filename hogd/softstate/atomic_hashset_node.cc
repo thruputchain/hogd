@@ -1,5 +1,13 @@
 #include "hogd/softstate/atomic_hashset_node.h"
 
+#include <stdexcept>
+#include <cstdint>
+#include <memory>
+#include <bit>
+#include <algorithm>
+
+#include "types.hh"
+
 namespace hogd {
 
 bool
@@ -30,7 +38,7 @@ LeafCollisionHandler::remove(SHA256Hash const &entry)
 }
 
 AtomicHashsetNode::AtomicHashsetNode(uint64_t prefix, uint8_t prefix_len)
-  : prefix_(prefix), prefix_len_(prefix_len), owning_(false)
+  : prefix_(prefix), prefix_len_(prefix_len)
 {
   if (prefix_len_ == kMaxPrefixLen) {
     leaf_handler_ = std::make_unique<LeafCollisionHandler>();

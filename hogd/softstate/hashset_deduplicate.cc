@@ -1,11 +1,14 @@
 #include "hogd/softstate/hashset_deduplicate.h"
+#include "hogd/softstate/atomic_hashset_node.h"
 
 #include <cassert>
-#include <cstdint>
 #include <mutex>
 #include <unordered_set>
+#include <exception>
 
+#include "hogd/base/types.h"
 #include "hogd/base/compiler.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -81,7 +84,7 @@ AtomicHashsetDeduplicator::try_insert(SHA256Hash const &entry)
     auto *child = cur_node->get_child(bb);
 
     if (child == nullptr) {
-      AtomicHashsetNode *new_node =
+      auto *new_node =
           new AtomicHashsetNode(prefix, AtomicHashsetNode::kMaxPrefixLen);
 
       if (cur_node->try_compare_exchange_child(bb, child, new_node)) {
@@ -102,7 +105,7 @@ AtomicHashsetDeduplicator::try_insert(SHA256Hash const &entry)
       continue;
     }
 
-    AtomicHashsetNode *new_node =
+    auto *new_node =
         new AtomicHashsetNode(prefix, child_match_len);
     uint8_t child_bb = new_node->get_branch_bits(child->prefix_);
     AtomicHashsetNode *expect_null = nullptr;
@@ -118,7 +121,6 @@ AtomicHashsetDeduplicator::try_insert(SHA256Hash const &entry)
     }
     delete new_node;
     cpu_relax();
-    continue;
   }
 }
 

@@ -8,6 +8,8 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <cstdint>
+#include <algorithm>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"

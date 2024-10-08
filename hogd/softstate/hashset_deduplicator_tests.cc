@@ -2,14 +2,13 @@
 
 #include <cstddef>
 #include <cstdlib>
-#include <span>
-#include <vector>
+#include <cstring>
 
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
 #include "hogd/softstate/hashset_deduplicate.h"
+#include "types.hh"
 
 namespace hogd {
 

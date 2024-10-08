@@ -1,12 +1,17 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <utility>
+#include <cstddef>
+#include <cstring>
+#include <span>
+#include <algorithm>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "types.hh"
+#include "transaction.hh"
 
 namespace hogd {
 
