@@ -310,7 +310,6 @@ pub extern "C" fn wasmi_link_nargs(
         4 => c.link_function_4args(function_pointer, &module, &method),
         5 => c.link_function_5args(function_pointer, &module, &method),
         _ => {
-            println!("wtf");
             return false;
         }
     };
