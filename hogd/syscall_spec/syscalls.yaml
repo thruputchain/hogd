@@ -145,6 +145,8 @@ errors:
   - name: "InsufficientGasForInvocation"
     number: 11
     doc: "Insufficient gas in call frame to supply requested gas limit for child invocation"
-
+  - name: "InvalidSetAdd"
+    number: 12
+    doc: "Invalid input to nnint set add, such as subtracting below 0 or setting to two distinct values in one transaction"
 
 

@@ -67,6 +67,75 @@ TEST(StorageProxy, SetBytestring)
 
   ASSERT_TRUE(!!(get_res = proxy.get_bytestring()));
   EXPECT_TRUE(eq(*get_res, bytes2));
+
+  EXPECT_FALSE(!!proxy.nnint64_set_add(0, 1));
+}
+
+TEST(StorageProxy, NNInt64SetAddPositiveSet)
+{
+  StorageProxy proxy(std::nullopt);
+
+  EXPECT_FALSE(!!proxy.get_nnint64_value());
+  EXPECT_TRUE(!!proxy.nnint64_set_add(100, 10));
+
+  auto res = proxy.get_nnint64_value();
+  ASSERT_TRUE(!!res);
+  EXPECT_EQ(*res, 110);
+
+  res = proxy.get_nnint64_base_value();
+  ASSERT_TRUE(!!res);
+  EXPECT_EQ(*res, 100);
+
+  EXPECT_FALSE(!!proxy.get_bytestring());
+
+  std::vector<uint8_t> bytes{0, 1, 2, 3};
+  EXPECT_FALSE(!!proxy.set_bytestring(std::as_bytes(std::span(bytes))));
+
+  EXPECT_TRUE(!!proxy.nnint64_set_add(100, -50));
+
+  EXPECT_FALSE(!!proxy.nnint64_set_add(100, -80));
+  EXPECT_FALSE(!!proxy.nnint64_set_add(110, 10));
+
+  res = proxy.get_nnint64_base_value();
+  ASSERT_TRUE(!!res);
+  EXPECT_EQ(*res, 100);
+
+  res = proxy.get_nnint64_value();
+  ASSERT_TRUE(!!res);
+  EXPECT_EQ(*res, 60);
+}
+
+TEST(StorageProxy, NNInt64SetAddNegativeSet)
+{
+  StorageProxy proxy(std::nullopt);
+
+  EXPECT_FALSE(!!proxy.get_nnint64_value());
+  EXPECT_TRUE(!!proxy.nnint64_set_add(-100, 10));
+
+  auto res = proxy.get_nnint64_value();
+  ASSERT_TRUE(!!res);
+  EXPECT_EQ(*res, -90);
+
+  res = proxy.get_nnint64_base_value();
+  ASSERT_TRUE(!!res);
+  EXPECT_EQ(*res, -100);
+
+  EXPECT_FALSE(!!proxy.get_bytestring());
+
+  std::vector<uint8_t> bytes{0, 1, 2, 3};
+  EXPECT_FALSE(!!proxy.set_bytestring(std::as_bytes(std::span(bytes))));
+
+  EXPECT_FALSE(!!proxy.nnint64_set_add(-100, -50));
+
+  EXPECT_TRUE(!!proxy.nnint64_set_add(-100, 10));
+
+  res = proxy.get_nnint64_base_value();
+  ASSERT_TRUE(!!res);
+  EXPECT_EQ(*res, -100);
+
+  res = proxy.get_nnint64_value();
+  ASSERT_TRUE(!!res);
+  EXPECT_EQ(*res, -80);
 }
 
 } // namespace hogd

@@ -24,11 +24,19 @@ public:
   SyscallStatus<void>
   set_bytestring(std::span<const std::byte> input_bytestring);
 
+  SyscallStatus<int64_t> get_nnint64_base_value() const;
+  SyscallStatus<int64_t> get_nnint64_value() const;
+  SyscallStatus<void> nnint64_set_add(int64_t set_value, int64_t add_value);
+
 private:
   SyscallStatus<void> type_guard(StorageObjectType expected_type) const;
 
   std::optional<StorageObject> base_object_;
-  std::optional<Bytestring> set_bytestring_arg_;
+  std::optional<StorageObjectType> active_type_ = std::nullopt;
+
+  std::optional<Bytestring> set_bytestring_arg_ = std::nullopt;
+  std::optional<int64_t> set_nnint64_arg_ = std::nullopt;
+  int64_t nnint64_add_sum_ = 0;
   bool is_deleted_last_ = false;
 };
 

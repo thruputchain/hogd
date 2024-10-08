@@ -42,6 +42,11 @@ StorageProxy::type_guard(StorageObjectType expected_type) const
   if (base_object_ && (base_object_->type() != expected_type)) {
     return SyscallError{SyscallErrorCode::kStorageObjectTypeMismatch};
   }
+
+  if (active_type_ && *active_type_ != expected_type) {
+    return SyscallError{SyscallErrorCode::kStorageObjectTypeMismatch};
+  }
+
   return {};
 }
 
@@ -95,7 +100,103 @@ StorageProxy::set_bytestring(std::span<const std::byte> input_bytestring)
   set_bytestring_arg_.emplace(reinterpreted_input.begin(),
                               reinterpreted_input.end());
 
+  active_type_ = StorageObjectType::kBytestring;
   return {};
 }
+
+SyscallStatus<int64_t> 
+StorageProxy::get_nnint64_base_value() const
+{
+  auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt64);
+
+  if (!type_guard_res) {
+    return {type_guard_res.error()};
+  }
+
+  if (set_nnint64_arg_) {
+    return *set_nnint64_arg_;
+  }
+
+  if (base_object_) {
+    return base_object_->int64();
+  }
+
+  return SyscallError{SyscallErrorCode::kStorageKeyNExist};
+}
+
+SyscallStatus<int64_t> 
+StorageProxy::get_nnint64_value() const
+{
+  auto base_value = get_nnint64_base_value();
+
+  if (!base_value) {
+    return {base_value.error()};
+  }
+
+  int64_t result;
+
+  if (!__builtin_add_overflow(*base_value, nnint64_add_sum_, &result)) {
+    return result;
+  }
+
+  // Should be impossible for nnint64_add_sum_ to be less than 0 if we overflow
+  assert(nnint64_add_sum_ > 0);
+
+  return INT64_MAX;
+}
+
+int64_t capped_add(int64_t a, int64_t b) {
+  int64_t out;
+  if (__builtin_add_overflow(a, b, &out)) {
+    if (a > 0) {
+      assert(b > 0);
+      return INT64_MAX;
+    }
+    else {
+      assert(a < 0);
+      assert(b < 0);
+      return INT64_MIN;
+    }
+  }
+  return out;
+}
+
+SyscallStatus<void> 
+StorageProxy::nnint64_set_add(int64_t set_value, int64_t add_value)
+{
+  auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt64);
+
+  if (!type_guard_res) {
+    return {type_guard_res.error()};
+  }
+
+  if (set_nnint64_arg_) {
+    if (*set_nnint64_arg_ != set_value) {
+      return SyscallError{SyscallErrorCode::kInvalidSetAdd};
+    }
+  }
+
+  int64_t new_add_value = capped_add(add_value, nnint64_add_sum_);
+
+  if (new_add_value < 0) {
+    if (set_value < 0) {
+      return SyscallError{SyscallErrorCode::kInvalidSetAdd};
+    }
+    if (set_value + new_add_value < 0) {
+      return SyscallError{SyscallErrorCode::kInvalidSetAdd};
+    }
+  }
+
+  // TODO(geoff): Consider whether we should have add_value as int128,
+  // so that sequences like add(INT64_MAX), add(INT64_MAX), add(INT64_MIN) get handled
+  // in a more sensible way.
+  set_nnint64_arg_ = set_value;
+  nnint64_add_sum_ = new_add_value;
+
+  active_type_ = StorageObjectType::kNonnegativeInt64;
+
+  return {};
+}
+
 
 } // namespace hogd

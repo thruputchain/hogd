@@ -11,6 +11,8 @@
   {
   case kBytestring:
     Bytestring bytestring;
+  case kNonnegativeInt64:
+    hyper int64;
   };
 
 } // namespace hogd
