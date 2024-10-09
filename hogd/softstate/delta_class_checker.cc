@@ -3,10 +3,15 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <memory>
+#include <mutex>
+#include <optional>
 
 #include "storage_object.hh"
 
 namespace hogd {
+
+namespace {
 /*
 Tag format:
 [active_open_tx_count 31b][finalized 1b]
@@ -14,7 +19,7 @@ Tag format:
 bool
 is_finalized(uint32_t tag)
 {
-  return tag & 0x1;
+  return (tag & 0x1) != 0;
 }
 
 void
@@ -34,6 +39,8 @@ finalize(uint32_t &tag)
 {
   tag |= 1;
 }
+
+} // namespace
 
 StorageReserveResult
 StorageDeltaClassChecker::try_set(StorageDeltaClass const &new_obj)

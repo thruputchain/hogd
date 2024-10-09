@@ -3,6 +3,7 @@ add_library(
   hashset_deduplicate.cc
   atomic_hashset_node.cc
   delta_class_checker.cc
+  storage_object_frame.cc
 )
 
 target_link_libraries(
