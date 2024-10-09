@@ -7,6 +7,11 @@ clean:
 
 .PHONY: clean rs_contracts
 
-rs_contracts : basic.wasm basic_alloc.wasm test_calldata.wasm
+rs_contracts : \
+	basic.wasm \
+	basic_alloc.wasm \
+	test_calldata.wasm \
+	test_invoke_1.wasm \
+	test_invoke_2.wasm
 
 # rustup target install wasm32-unknown-unknown

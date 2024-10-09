@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/format.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
@@ -35,13 +36,17 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
 InvokeResult
 SystemCallHandler::root_invoke()
 {
-  auto *runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
+  WasmiRuntime *runtime =
+      resolve_runtime(signed_tx_.tx.invocation.invoked_address);
 
-  if (runtime) {
-    runtime->set_available_gas(signed_tx_.tx.invocation.gas_limit);
+  if (!runtime) {
+    return InvokeResult{.result =
+                            InvokeError{InvokeErrorCode::kDeterministicError},
+                        .gas_consumed = 0};
   }
 
-  return invoke_unconverted(signed_tx_.tx.invocation);
+  return invoke_unconverted(signed_tx_.tx.invocation, runtime,
+                            signed_tx_.tx.invocation.gas_limit);
 }
 
 // syscall methods: can only be called when call_frame_stack_ is nonempty
@@ -103,7 +108,10 @@ SystemCallHandler::invoke(Invocation const &invocation)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  const uint64_t initial_gas_limit = runtime->get_available_gas();
+  uint64_t initial_gas_limit = UINT64_MAX;
+  if (!call_frame_stack_.empty()) {
+    initial_gas_limit = call_frame_stack_.back().get_available_gas();
+  }
 
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
   if (invocation.gas_limit != UINT64_MAX &&
@@ -111,28 +119,21 @@ SystemCallHandler::invoke(Invocation const &invocation)
     return std::pair{SyscallErrorCode::kInsufficientGasForInvocation, 0};
   }
 
-  auto invoke_result = invoke_unconverted(invocation);
+  const uint64_t gas_limit =
+      std::min<uint64_t>(initial_gas_limit, invocation.gas_limit);
+
+  auto invoke_result = invoke_unconverted(invocation, runtime, gas_limit);
+
   return convert_invoke_result_to_host_fn_result(invoke_result);
 }
 
 InvokeResult
-SystemCallHandler::invoke_unconverted(Invocation const &invocation)
+SystemCallHandler::invoke_unconverted(Invocation const &invocation,
+                                      WasmiRuntime *runtime, uint64_t gas_limit)
 {
-  WasmiRuntime *runtime = resolve_runtime(invocation.invoked_address);
-
-  if (!runtime) {
-    return InvokeResult{.result =
-                            InvokeError{InvokeErrorCode::kDeterministicError},
-                        .gas_consumed = 0};
-  }
-
-  std::string method_name = std::format("{:x}", invocation.method_name);
-
-  const uint64_t initial_gas_limit = runtime->get_available_gas();
-  const uint64_t gas_limit =
-      std::min<uint64_t>(initial_gas_limit, invocation.gas_limit);
-
   call_frame_stack_.emplace_back(invocation, *runtime);
+
+  auto method_name = std::format("{:x}", invocation.method_name);
 
   InvokeResult result = runtime->invoke(method_name, gas_limit);
 
@@ -147,9 +148,12 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation)
       // TODO(geoff) metadata allowing unwind_safe declarations
       runtimes_.at(addr).unwind_poisoned = true;
     }
+
     call_frame_stack_.pop_back();
 
-    call_frame_stack_.back().commit_failed_child_call();
+    if (!call_frame_stack_.empty()) {
+      call_frame_stack_.back().commit_failed_child_call();
+    }
   }
   else {
     size_t call_frame_stack_size = call_frame_stack_.size();

@@ -43,13 +43,14 @@ target_include_directories(
 target_link_libraries(
   runtime
   wasmi_lib
-  crypto
+  hogd
   protocol
   ${LIBSODIUM_LIBRARIES}
 )
 
 add_executable(
   runtime_test
+  runtime_test_main.cc
   userctx_test.cc
   instantiate_test.cc
   error_handling_test.cc
@@ -58,12 +59,13 @@ add_executable(
   memory_access_test.cc
   storage_proxy_test.cc
   calldata_test.cc
+  invoke_test.cc
 )
 
 target_link_libraries(
   runtime_test
   runtime
-  GTest::gtest_main
+  GTest::gtest
 )
 gtest_discover_tests(runtime_test)
 

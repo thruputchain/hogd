@@ -377,15 +377,18 @@ def gen_rs_syscall_binding(syscall):
       input_type = "[u8]"
       if "primitive_type" in inp and inp["primitive_type"]:
         input_type = inp["typename"]
-        syscallargs.append(f"""*{input_name} as u64""")
+        syscallargs.append(f"""{input_name} as u64""")
+        inputdecls.append(f"""{input_name} : {input_type}""")
       elif inp["fixed_size"]:
         input_type = inp["typename"]
         syscallargs.append(f"""{input_name}.as_ptr() as u64""")
+        inputdecls.append(f"""{input_name} : &{input_type}""")
       else:
         syscallargs.append(f"""{input_name}.as_ptr() as u64""")
         syscallargs.append(f"""{input_name}.len() as u64""")
+        inputdecls.append(f"""{input_name} : &{input_type}""")
 
-      inputdecls.append(f"""{input_name} : &{input_type}""")
+
       uninit_args.append(f"""{input_name}""")
 
   outputargs = []

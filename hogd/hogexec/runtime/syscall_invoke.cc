@@ -71,15 +71,11 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
 {
   Calldata calldata;
   calldata.resize_uninitialized(input_calldata.size());
-  std::memcpy(
-    calldata.data(), reinterpret_cast<const uint8_t*>(input_calldata.data()),
-    input_calldata.size());
+  std::memcpy(calldata.data(),
+              reinterpret_cast<const uint8_t *>(input_calldata.data()),
+              input_calldata.size());
   return syscall_handler.invoke(
-    Invocation(
-      input_address,
-      input_method,
-      input_gas_limit,
-      calldata));
+      Invocation(input_address, input_method, input_gas_limit, calldata));
 }
 
 } // namespace hogd

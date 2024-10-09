@@ -348,7 +348,7 @@ public:
   constexpr Vec &operator=(Vec<T, MS, allocator_type> &&other)
       noexcept(max_size() <= Vec<T, MS, allocator_type>::max_size())
   {
-    if constexpr (other.max_size() > max_size())
+    if (other.max_size() > max_size())
       check_size(other.size());
     realloc(0);
     a_ = std::move(other.a_);

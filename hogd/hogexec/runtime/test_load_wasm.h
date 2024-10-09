@@ -3,10 +3,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "contract.hh"
+#include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd ::test {
 
@@ -65,6 +68,45 @@ load_built_rs_contract(std::string_view filename)
   std::fclose(f);
 
   return contract;
+}
+
+[[maybe_unused]] Calldata static make_calldata()
+{
+  return {};
+}
+
+template<typename... calldatas>
+Calldata static make_calldata(std::vector<uint8_t> const &data,
+                              calldatas const &...additional)
+{
+  x23::Vec<uint8_t> out;
+
+  out.resize_uninitialized(data.size());
+  std::memcpy(out.data(), data.data(), data.size());
+
+  auto rest = make_calldata(additional...);
+
+  out += rest;
+  return out;
+}
+
+template<typename calldata, typename... calldatas>
+requires std::is_trivially_copyable_v<calldata>
+Calldata static make_calldata(calldata const &data,
+                              calldatas const &...additional)
+{
+  const uint8_t *addr = reinterpret_cast<const uint8_t *>(&data);
+  x23::Vec<uint8_t> out;
+
+  if constexpr (!std::is_empty<calldata>::value) {
+    out.resize_uninitialized(sizeof(calldata));
+    std::memcpy(out.data(), addr, sizeof(calldata));
+  }
+
+  auto rest = make_calldata(additional...);
+
+  out += rest;
+  return out;
 }
 
 } // namespace hogd::test

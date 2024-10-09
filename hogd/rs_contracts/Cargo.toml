@@ -4,7 +4,9 @@ resolver = "2"
 members = [
     "basic",
     "basic_alloc",
-    "test_calldata"
+    "test_calldata",
+    "test_invoke_1",
+    "test_invoke_2"
 ]
 
 [profile.dev]

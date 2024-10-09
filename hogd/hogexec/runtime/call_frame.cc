@@ -3,14 +3,14 @@
 #include <cassert>
 #include <memory>
 #include <optional>
-#include <utility>
 #include <span>
+#include <utility>
 
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "x23/vec.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -29,9 +29,8 @@ CallFrame::commit_successful_child_call(CallFrame &&frame)
                            frame.visited_runtimes_.end());
 
   child_return_buffer_ = frame.to_return_;
-  logs_.insert(logs_.end(),
-    std::make_move_iterator(frame.logs_.begin()),
-    std::make_move_iterator(frame.logs_.end()));
+  logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
+               std::make_move_iterator(frame.logs_.end()));
 }
 
 void
@@ -48,8 +47,9 @@ CallFrame::push_new_storage_proxy(AddressAndKey const &new_addrkey,
   storage_proxies_.emplace(new_addrkey, std::make_unique<StorageProxy>(proxy));
 }
 
-void 
-CallFrame::log(std::span<const std::byte> message) {
+void
+CallFrame::log(std::span<const std::byte> message)
+{
   std::span<const uint8_t> m = {reinterpret_cast<const uint8_t *>(
                                     message.data()),
                                 message.size()};

@@ -83,6 +83,8 @@ do_log(std::string_view fmt, const std::source_location &loc,
        std::format_args &&args)
 {
   if constexpr (should_log(Level)) {
+    std::printf("logger is %p\n", logger.get());
+
     logger->vlog(Level, fmt, loc, std::move(args));
   }
 }
@@ -145,6 +147,8 @@ template<typename... Args> struct log {
   {
     if (level > kMaxLogLevel)
       return;
+
+    std::printf("logger is %p\n", detail::logger.get());
 
     detail::logger->vlog(level, fmt.get(), loc, std::make_format_args(args...));
   }
@@ -259,7 +263,9 @@ MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
 inline void
 log_init(std::unique_ptr<Logger> logger)
 {
+  std::printf("logger = %p\n", logger.get());
   detail::logger = std::move(logger);
+  std::printf("post = %p\n", detail::logger.get());
 }
 
 } // namespace hogd

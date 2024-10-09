@@ -1,0 +1,50 @@
+#![no_std]
+
+use rs_contract_sdk as sdk;
+
+use core::mem::MaybeUninit;
+use core::ptr::copy_nonoverlapping;
+use sdk::rt::trap;
+
+extern crate alloc;
+
+#[cfg_attr(target_family = "wasm", export_name = "0")]
+#[no_mangle]
+pub extern "C" fn test_redirect_call() -> i32 {
+    let calldata = sdk::GetCalldata().unwrap();
+
+    if calldata.len() < 32 + 4 {
+        trap();
+    }
+
+    let mut call_addr_mu = MaybeUninit::<sdk::ContractAddress>::uninit();
+
+    unsafe {
+        copy_nonoverlapping(
+            calldata.as_ptr(),
+            call_addr_mu.as_mut_ptr() as *mut u8,
+            32,
+        );
+    }
+
+    let call_addr = unsafe { call_addr_mu.assume_init() };
+
+    let method: sdk::MethodID =
+        u32::from_le_bytes(calldata[32..36].try_into().unwrap());
+    let mut return_len: sdk::RuntimeMemoryLength = 0;
+
+    sdk::syscall_bindings::raw_Invoke(
+        &call_addr,
+        method,
+        u64::MAX,
+        &calldata[36..],
+        &mut return_len,
+    )
+    .unwrap();
+
+    if return_len != 0 {
+        trap();
+    }
+
+    0
+}

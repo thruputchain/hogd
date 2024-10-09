@@ -59,7 +59,8 @@ private:
   };
 
   WasmiRuntime *resolve_runtime(ContractAddress const &addr);
-  InvokeResult invoke_unconverted(Invocation const &invocation);
+  InvokeResult invoke_unconverted(Invocation const &invocation,
+                                  WasmiRuntime *runtime, uint64_t gas_limit);
 
   // Can only be called when call_frame_stack_ is nonempty
   StorageProxy &resolve_storage_proxy(StorageKey const &key);

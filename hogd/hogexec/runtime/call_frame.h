@@ -40,14 +40,14 @@ public:
 
   // The value of the last _child_ call frame's returned string.
   // Set to nullopt on failed calls, or before any child call happens.
-  std::optional<ReturnBuffer> child_return_buffer_;
+  std::optional<ReturnBuffer> child_return_buffer_ = std::nullopt;
 
   void set_call_return(std::span<const std::byte> return_span);
   void log(std::span<const std::byte> message);
 
-  std::vector<LogEntry> extract_logs() {
-    return std::move(logs_);
-  }
+  std::vector<LogEntry> extract_logs() { return std::move(logs_); }
+
+  uint64_t get_available_gas() { return active_runtime_.get_available_gas(); }
 
 private:
   WasmiRuntime &active_runtime_;

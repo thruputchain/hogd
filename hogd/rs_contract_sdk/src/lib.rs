@@ -15,6 +15,7 @@ mod bytestring;
 mod crypto;
 mod general_storage;
 mod invoke;
+mod log;
 mod syscall;
 
 pub mod syscall_bindings;
@@ -25,4 +26,5 @@ pub use bytestring::*;
 pub use crypto::*;
 pub use general_storage::*;
 pub use invoke::*;
+pub use log::*;
 pub use rs_xdr::*;
