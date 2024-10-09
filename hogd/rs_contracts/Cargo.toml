@@ -20,7 +20,9 @@ panic = "abort"
 [profile.release]
 opt-level = "z"
 overflow-checks = false
-debug = 0
+debug = false
 strip = "symbols"
 debug-assertions = false
 panic = "abort"
+lto = true
+codegen-units = 1
