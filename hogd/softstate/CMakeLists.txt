@@ -2,6 +2,7 @@ add_library(
   softstate
   hashset_deduplicate.cc
   atomic_hashset_node.cc
+  delta_class_checker.cc
 )
 
 target_link_libraries(
