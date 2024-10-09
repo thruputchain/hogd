@@ -276,6 +276,25 @@ SystemCallHandler::set_bytestring(StorageKey const &key,
   return proxy.set_bytestring(input_bytestring);
 }
 
+SyscallStatus<const int64_t>
+SystemCallHandler::get_nnint64_base_value(StorageKey const &key)
+{
+  return resolve_storage_proxy(key).get_nnint64_base_value();
+}
+
+SyscallStatus<const int64_t>
+SystemCallHandler::get_nnint64_value(StorageKey const &key)
+{
+  return resolve_storage_proxy(key).get_nnint64_value();
+}
+
+SyscallStatus<void>
+SystemCallHandler::nnint64_set_add(StorageKey const &key, int64_t set_value,
+                                   int64_t add_value)
+{
+  return resolve_storage_proxy(key).nnint64_set_add(set_value, add_value);
+}
+
 SyscallStatus<Calldata>
 SystemCallHandler::get_calldata() const
 {

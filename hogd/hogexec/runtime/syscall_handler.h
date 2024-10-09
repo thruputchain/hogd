@@ -43,6 +43,12 @@ public:
   set_bytestring(StorageKey const &key,
                  std::span<const std::byte> input_bytestring);
 
+  // nnint64
+  SyscallStatus<const int64_t> get_nnint64_base_value(StorageKey const &key);
+  SyscallStatus<const int64_t> get_nnint64_value(StorageKey const &key);
+  SyscallStatus<void> nnint64_set_add(StorageKey const &key, int64_t set_value,
+                                      int64_t add_value);
+
   SyscallStatus<Calldata> get_calldata() const;
   SyscallStatus<RuntimeMemoryLength> get_calldata_len() const;
 
