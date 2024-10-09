@@ -188,6 +188,15 @@ SystemCallHandler::get_return_buffer() const
   return *top_frame.child_return_buffer_;
 }
 
+void 
+SystemCallHandler::set_return_buffer(ReturnBuffer&& returned_buffer)
+{
+  assert(!call_frame_stack_.empty());
+
+  call_frame_stack_.back().set_call_return(std::move(returned_buffer));
+}
+
+
 WasmiRuntime *
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {

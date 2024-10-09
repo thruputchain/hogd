@@ -12,6 +12,8 @@ rs_contracts : \
 	basic_alloc.wasm \
 	test_calldata.wasm \
 	test_invoke_1.wasm \
-	test_invoke_2.wasm
+	test_invoke_2.wasm \
+	echo.wasm \
+	test_echo.wasm
 
 # rustup target install wasm32-unknown-unknown

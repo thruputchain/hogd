@@ -71,4 +71,11 @@ CallFrame::try_get_storage_proxy(AddressAndKey const &query)
   return it->second.get();
 }
 
+void 
+CallFrame::set_call_return(ReturnBuffer&& return_buffer)
+{
+  to_return_ = std::move(return_buffer);
+}
+
+
 } // namespace hogd

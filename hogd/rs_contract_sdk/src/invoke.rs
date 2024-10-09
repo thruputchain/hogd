@@ -18,6 +18,10 @@ pub fn GetCalldataLen() -> Result<RuntimeMemoryLength, i32> {
     Ok(out)
 }
 
+pub fn Return(return_buf : &[u8]) -> ! {
+    syscall_bindings::raw_Return(return_buf);
+}
+
 #[cfg(feature = "alloc")]
 mod get_calldata_alloc {
 
@@ -51,7 +55,27 @@ mod get_calldata_alloc {
 
         Ok(vec)
     }
+
+    pub fn GetReturnedBuffer(expected_len: RuntimeMemoryLength) -> Result<Box<[u8]>, i32> {
+        let mut vec_mu = Vec::with_capacity(expected_len as usize);
+
+        unsafe {
+            vec_mu.set_len(expected_len as usize);
+        }
+
+        let mut vec = vec_mu.into_boxed_slice();
+
+        let mut written_len : RuntimeMemoryLength = 0;
+
+        syscall_bindings::raw_GetReturnedBuffer(&mut vec, &mut written_len)?;
+
+        if written_len != expected_len {
+            trap();
+        }
+
+        Ok(vec)
+    }
 }
 
 #[cfg(feature = "alloc")]
-pub use get_calldata_alloc::GetCalldata;
+pub use get_calldata_alloc::*;

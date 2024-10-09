@@ -6,7 +6,9 @@ members = [
     "basic_alloc",
     "test_calldata",
     "test_invoke_1",
-    "test_invoke_2"
+    "test_invoke_2",
+    "echo",
+    "test_echo"
 ]
 
 [profile.dev]

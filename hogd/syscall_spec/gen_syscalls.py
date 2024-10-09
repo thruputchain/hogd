@@ -439,22 +439,37 @@ def gen_rs_syscall_binding(syscall):
       """.join(syscallargs)
 
   uninit_args_str = ", ".join(uninit_args)
+  
+  syscall_return_type = "Result<(), i32>"
 
-  return f"""pub fn uninit_{name}({uninit_inputdecl_str}) -> Result<(), i32> {{
-
-  // syscall will initialize outputs, if error is kNone
-  let err =
-    syscall(SyscallNo::k{name},
-      {syscallargs_str});
-
-  if err != SyscallErrorCode::kNone as i32 {{
+  errdecl = "let err = "
+  errhandle_str = """if err != SyscallErrorCode::kNone as i32 {{
     return Err(err);
   }}
 
   Ok(())
+"""
+
+  if "returns" in syscall and not syscall["returns"]:
+    print("no return!")
+    syscall_return_type = "!"
+    errhandle_str = "unsafe {unreachable_unchecked()}"
+    errdecl = ""
+  print(syscall)
+
+  print(syscall_return_type)
+
+  return f"""pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
+
+  // syscall will initialize outputs, if error is kNone
+  {errdecl}
+    syscall(SyscallNo::k{name},
+      {syscallargs_str});
+
+  {errhandle_str}
 }}
 
-pub fn raw_{name}({inputdecl_str}) -> Result<(), i32> {{
+pub fn raw_{name}({inputdecl_str}) -> {syscall_return_type} {{
   uninit_{name}({uninit_args_str})
 }}
 
@@ -469,6 +484,7 @@ def gen_rs_syscall_bindings(spec):
 use rs_xdr::*;
 use crate::syscall::{{syscall, to_offset_mut}};
 use core::mem::MaybeUninit;
+use core::hint::unreachable_unchecked;
 
 {syscall_str}
 

@@ -10,7 +10,7 @@
 template<size_t N> struct std::formatter<std::array<uint8_t, N>> {
   constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
-  auto format(const std::array<uint8_t, N> &obj, std::format_context &ctx) const
+  auto format(const std::array<uint8_t, N> &obj, std::format_context &ctx)
   {
     auto out = ctx.out();
     for (auto v : obj) {
@@ -25,7 +25,7 @@ struct std::formatter<x23::Vec<uint8_t, N, Allocator>> {
   constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
   static auto format(const x23::Vec<uint8_t, N, Allocator> &obj,
-                     std::format_context &ctx) const
+                     std::format_context &ctx)
   {
     auto out = ctx.out();
     for (auto v : obj) {
@@ -38,7 +38,7 @@ struct std::formatter<x23::Vec<uint8_t, N, Allocator>> {
 template<> struct std::formatter<hogd::SyscallNo> {
   constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
-  static auto format(const hogd::SyscallNo &obj, std::format_context &ctx) const
+  static auto format(const hogd::SyscallNo &obj, std::format_context &ctx)
   {
     auto const &tags = x23::xdr_meta<hogd::SyscallNo>::tags;
 
@@ -56,7 +56,7 @@ template<> struct std::formatter<hogd::SyscallErrorCode> {
   constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
   static auto format(const hogd::SyscallErrorCode &obj,
-                     std::format_context &ctx) const
+                     std::format_context &ctx)
   {
     auto const &tags = x23::xdr_meta<hogd::SyscallErrorCode>::tags;
 

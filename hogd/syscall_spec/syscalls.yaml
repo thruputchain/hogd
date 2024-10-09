@@ -172,6 +172,26 @@ syscalls:
         primitive_type: yes  
     outputs:
     number: 13
+  - name: "Return"
+    needs_context: yes
+    inputs:
+      - name: "buffer"
+        fixed_size: no
+        typename: None
+    outputs:
+    returns: no
+    number: 14
+  - name: "GetReturnedBuffer"
+    needs_context: yes
+    inputs:
+    outputs:
+      - name: "buffer"
+        fixed_size: no
+        typename: None
+      - name: "written_len"
+        fixed_size: yes
+        typename: "RuntimeMemoryLength"
+    number: 15
 
 
 
@@ -218,5 +238,4 @@ errors:
   - name: "InvalidSetAdd"
     number: 12
     doc: "Invalid input to nnint set add, such as subtracting below 0 or setting to two distinct values in one transaction"
-
 

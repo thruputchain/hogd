@@ -61,6 +61,7 @@ add_executable(
   storage_proxy_test.cc
   calldata_test.cc
   invoke_test.cc
+  return_test.cc
 )
 
 target_link_libraries(

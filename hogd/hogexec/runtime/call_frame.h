@@ -42,7 +42,7 @@ public:
   // Set to nullopt on failed calls, or before any child call happens.
   std::optional<ReturnBuffer> child_return_buffer_ = std::nullopt;
 
-  void set_call_return(std::span<const std::byte> return_span);
+  void set_call_return(ReturnBuffer&& return_buffer);
   void log(std::span<const std::byte> message);
 
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
