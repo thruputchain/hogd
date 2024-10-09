@@ -11,7 +11,6 @@ extern "C" {
         arg4: u64,
         arg5: u64,
         arg6: u64,
-        arg7: u64,
     ) -> i32;
 }
 
@@ -23,19 +22,9 @@ pub fn syscall(
     arg4: u64,
     arg5: u64,
     arg6: u64,
-    arg7: u64,
 ) -> i32 {
     unsafe {
-        syscall_internal(
-            syscall as u64,
-            arg1,
-            arg2,
-            arg3,
-            arg4,
-            arg5,
-            arg6,
-            arg7,
-        )
+        syscall_internal(syscall as u64, arg1, arg2, arg3, arg4, arg5, arg6)
     }
 }
 

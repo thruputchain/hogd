@@ -31,9 +31,11 @@ pub extern "C" fn test_slice() -> i32 {
 
     let method: sdk::MethodID =
         u32::from_le_bytes(calldata[32..36].try_into().unwrap());
-    
-    let slice_start = u32::from_le_bytes(calldata[36..40].try_into().unwrap()) as usize;
-    let slice_end = u32::from_le_bytes(calldata[40..44].try_into().unwrap()) as usize;
+
+    let slice_start =
+        u32::from_le_bytes(calldata[36..40].try_into().unwrap()) as usize;
+    let slice_end =
+        u32::from_le_bytes(calldata[40..44].try_into().unwrap()) as usize;
 
     let mut return_len: sdk::RuntimeMemoryLength = 0;
 

@@ -84,7 +84,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_Return_inner(SystemCallHandler& syscall_handler, std::span<const std::byte> input_buffer)
+syscall_Return_inner(SystemCallHandler &syscall_handler,
+                     std::span<const std::byte> input_buffer)
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
     return {SyscallErrorCode::kStringTooLong, 0};
@@ -93,8 +94,8 @@ syscall_Return_inner(SystemCallHandler& syscall_handler, std::span<const std::by
   ReturnBuffer buffer;
   buffer.resize_uninitialized(input_buffer.size());
   std::memcpy(buffer.data(),
-    reinterpret_cast<const uint8_t*>(input_buffer.data()),
-    input_buffer.size());
+              reinterpret_cast<const uint8_t *>(input_buffer.data()),
+              input_buffer.size());
 
   syscall_handler.set_return_buffer(std::move(buffer));
 
@@ -102,7 +103,9 @@ syscall_Return_inner(SystemCallHandler& syscall_handler, std::span<const std::by
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_GetReturnedBuffer_inner(SystemCallHandler& syscall_handler, std::span<std::byte> output_buffer, RuntimeMemoryLength& output_written_len)
+syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
+                                std::span<std::byte> output_buffer,
+                                RuntimeMemoryLength &output_written_len)
 {
   auto status = syscall_handler.get_return_buffer();
 
@@ -110,14 +113,13 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler& syscall_handler, std::span<st
     return {status.error().code(), 0};
   }
 
-  size_t write_len = std::min(output_buffer.size(), status -> size());
+  size_t write_len = std::min(output_buffer.size(), status->size());
 
-  std::memcpy(output_buffer.data(), status -> data(), write_len);
+  std::memcpy(output_buffer.data(), status->data(), write_len);
 
   output_written_len = write_len;
 
   return {SyscallErrorCode::kNone, 0};
 }
-
 
 } // namespace hogd

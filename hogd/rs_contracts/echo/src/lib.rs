@@ -9,15 +9,16 @@ extern crate alloc;
 #[cfg_attr(target_family = "wasm", export_name = "0")]
 #[no_mangle]
 pub extern "C" fn echo_calldata() -> i32 {
-
     let calldata = sdk::GetCalldata().unwrap();
 
     if calldata.len() < 8 {
         trap();
     }
 
-    let slice_start = 8 + u32::from_le_bytes(calldata[0..4].try_into().unwrap()) as usize;
-    let slice_end = 8 + u32::from_le_bytes(calldata[4..8].try_into().unwrap()) as usize;
+    let slice_start =
+        8 + u32::from_le_bytes(calldata[0..4].try_into().unwrap()) as usize;
+    let slice_end =
+        8 + u32::from_le_bytes(calldata[4..8].try_into().unwrap()) as usize;
 
     sdk::Log(&calldata[slice_start..slice_end]).unwrap();
 
@@ -29,4 +30,3 @@ pub extern "C" fn echo_calldata() -> i32 {
         trap();
     }
 }
-

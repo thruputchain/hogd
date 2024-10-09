@@ -7,10 +7,10 @@
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/format.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "hogd/hogexec/runtime/format.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -45,11 +45,13 @@ protected:
                            x23::Vec<uint8_t> const &calldata)
   {
     ASSERT_EQ(entry.message.size(), calldata.size());
-    int res = std::memcmp(entry.message.data(), calldata.data(),
-                             calldata.size());
+    int res =
+        std::memcmp(entry.message.data(), calldata.data(), calldata.size());
     EXPECT_EQ(0, res);
     if (res != 0) {
-      std::printf(std::format("detailed log eq check: {} {}\n", entry.message, calldata).c_str());
+      std::printf(
+          std::format("detailed log eq check: {} {}\n", entry.message, calldata)
+              .c_str());
     }
   }
 };
@@ -62,8 +64,7 @@ TEST_F(ReturnTest, EchoFull)
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(addr1_, static_cast<MethodID>(0),
-                          static_cast<uint32_t>(0),
-                          static_cast<uint32_t>(4),
+                          static_cast<uint32_t>(0), static_cast<uint32_t>(4),
                           std::vector<uint8_t>{0, 1, 2, 3});
 
   SystemCallHandler handler(stx, storage_snapshot_);
@@ -91,8 +92,7 @@ TEST_F(ReturnTest, EchoSlice)
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(addr1_, static_cast<MethodID>(0),
-                          static_cast<uint32_t>(1),
-                          static_cast<uint32_t>(2),
+                          static_cast<uint32_t>(1), static_cast<uint32_t>(2),
                           std::vector<uint8_t>{0, 1, 2, 3});
 
   SystemCallHandler handler(stx, storage_snapshot_);
@@ -111,7 +111,5 @@ TEST_F(ReturnTest, EchoSlice)
   EXPECT_EQ(logs[1].source_address, addr2_);
   check_log_eq(logs[1], test::make_calldata(std::vector<uint8_t>{1}));
 }
-
-
 
 } // namespace hogd

@@ -53,14 +53,13 @@ public:
   SyscallStatus<RuntimeMemoryLength> get_calldata_len() const;
 
   SyscallStatus<const ReturnBuffer> get_return_buffer() const;
-  void set_return_buffer(ReturnBuffer&& returned_buffer);
+  void set_return_buffer(ReturnBuffer &&returned_buffer);
 
   SyscallStatus<void> log(std::span<const std::byte> message);
 
   std::vector<LogEntry> const &get_logs() const { return committed_logs_; }
 
   RuntimeMemoryLength get_defaultzero_return_len() const;
-
 
 private:
   struct RuntimeCacheEntry {

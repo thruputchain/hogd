@@ -6,6 +6,9 @@ from yaml import CLoader as Loader, CDumper as Dumper
 
 import argparse
 
+syscall_argcount = 6
+
+
 def gen_validate_arg(inp, *, is_input):
   arg_name = inp["name"]
   const = ""
@@ -97,41 +100,27 @@ def gen_inner_outer(syscall):
         call_arg_strs.append(f"*{local_arg}")
         inner_arg_decl_strs.append(inner_arg_decl)
 
-
-  if len(user_args) >= 1:
-    arg1 = user_args[0]
-  if len(user_args) >= 2:
-    arg2 = user_args[1]
-  if len(user_args) >= 3:
-    arg3 = user_args[2]
-  if len(user_args) >= 4:
-    arg4 = user_args[3] 
-  if len(user_args) >= 5:
-    arg5 = user_args[4]
-  if len(user_args) >= 6:
-    arg6 = user_args[5]
-  if len(user_args) >= 7:
-    arg7 = user_args[6]
-  if len(user_args) >= 8:
+  if len(user_args) > syscall_argcount:
     raise ValueError("too many syscall args")
+
+  if len(user_args) < syscall_argcount:
+    user_args += ["/*unused*/"] * (syscall_argcount - len(user_args))
 
   if syscall["needs_context"]:
     syscall_handler = "syscall_handler, "
     syscall_handler_decl = "SystemCallHandler& syscall_handler, "
-
 
   inner_args = ", ".join(call_arg_strs)
   inner_arg_decls = ", ".join(inner_arg_decl_strs);
   outer= f"""std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_{name}_outer(SystemCallHandler& syscall_handler,
                      std::span<std::byte> contract_memory,
-                     uint64_t {arg1}, 
-                     uint64_t {arg2},
-                     uint64_t {arg3}, 
-                     uint64_t {arg4},
-                     uint64_t {arg5},
-                     uint64_t {arg6},
-                     uint64_t {arg7})
+                     uint64_t {user_args[0]}, 
+                     uint64_t {user_args[1]},
+                     uint64_t {user_args[2]}, 
+                     uint64_t {user_args[3]},
+                     uint64_t {user_args[4]},
+                     uint64_t {user_args[5]})
 {{{inner_body}
   return syscall_{name}_inner({syscall_handler}{inner_args});
 }}
@@ -179,6 +168,18 @@ def gen_syscall_entry_cc(spec):
     syscall_outers += gen_outer(syscall)
 
   syscall_table = gen_syscall_table(spec)
+
+  syscall_uint64_arg_decls = []
+  syscall_uint64_args = []
+  for i in range(0, syscall_argcount + 1):
+    syscall_uint64_arg_decls.append(
+      f"uint64_t arg{i}")
+    syscall_uint64_args.append(f"arg{i}")
+
+
+  syscall_uint64_arg_decls_str = ", ".join(syscall_uint64_arg_decls)
+  syscall_uint64_args_str = ", ".join(syscall_uint64_args)
+  syscall_uint64_args_nozero_str = ", ".join(syscall_uint64_args[1:])
 
   return f"""#include "hogd/hogexec/runtime/syscall_entry.h"
 
@@ -243,14 +244,13 @@ check_user_primitive_argument(uint64_t user_value)
 {syscall_outers}
 
 using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> (*)(
-    SystemCallHandler&, std::span<std::byte>, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    SystemCallHandler&, std::span<std::byte>, {", ".join(["uint64_t"] * (syscall_argcount))});
 
 {syscall_table}
 
 // returns gas_consumed, syscall error>
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
-                    uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5, uint64_t arg6, uint64_t arg7)
+syscall_entry_inner(HostCallContext *call_context, {syscall_uint64_arg_decls_str})
 {{
   if (arg0 >= syscall_table.size()) {{
     // invalid syscall
@@ -268,16 +268,14 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
 
   assert(call_context -> syscall_handler);
 
-  return syscall_fn_outer(*call_context->syscall_handler, contract_memory, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+  return syscall_fn_outer(*call_context->syscall_handler, contract_memory, {syscall_uint64_args_nozero_str});
 }}
 
 HostFnStatus<int32_t>
-syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
-              uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5, 
-              uint64_t arg6, uint64_t arg7)
+syscall_entry(HostCallContext *call_context, {syscall_uint64_arg_decls_str})
 {{
   auto [err, gas_consumed] =
-      syscall_entry_inner(call_context, arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+      syscall_entry_inner(call_context, {syscall_uint64_args_str});
 
   if (!call_context->runtime->consume_gas(gas_consumed)) {{
     return HostFnError{{HostFnErrorCode::kOutOfGas}};
@@ -431,7 +429,6 @@ def gen_rs_syscall_binding(syscall):
   inputdecl_str = ", ".join(inputdecls)
   uninit_inputdecl_str = ", ".join(uninit_inputdecls)
 
-  syscall_argcount = 7
   if len(syscallargs) < syscall_argcount:
     syscallargs += ["0"] * (syscall_argcount - len(syscallargs))
 
@@ -451,13 +448,9 @@ def gen_rs_syscall_binding(syscall):
 """
 
   if "returns" in syscall and not syscall["returns"]:
-    print("no return!")
     syscall_return_type = "!"
     errhandle_str = "unsafe {unreachable_unchecked()}"
     errdecl = ""
-  print(syscall)
-
-  print(syscall_return_type)
 
   return f"""pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
 
