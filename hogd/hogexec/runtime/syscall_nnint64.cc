@@ -32,8 +32,8 @@ syscall_NonnegativeInt64SetAdd_inner(SystemCallHandler &syscall_handler,
                                      const int64_t input_set_value,
                                      const int64_t input_add_value)
 {
-  auto status =
-      syscall_handler.nnint64_set_add(input_key, input_set_value, input_add_value);
+  auto status = syscall_handler.nnint64_set_add(input_key, input_set_value,
+                                                input_add_value);
 
   if (!status) {
     return {status.error().code(), 0};
@@ -60,7 +60,8 @@ syscall_NonnegativeInt64Add_inner(SystemCallHandler &syscall_handler,
     // else base_value is defaulted to 0
   }
 
-  auto status = syscall_handler.nnint64_set_add(input_key, base_value, input_add_value);
+  auto status =
+      syscall_handler.nnint64_set_add(input_key, base_value, input_add_value);
 
   if (!status) {
     return {status.error().code(), 0};
