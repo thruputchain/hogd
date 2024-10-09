@@ -16,6 +16,7 @@ mod crypto;
 mod general_storage;
 mod invoke;
 mod log;
+mod nonnegative_int64;
 mod syscall;
 
 pub mod syscall_bindings;
@@ -27,4 +28,5 @@ pub use crypto::*;
 pub use general_storage::*;
 pub use invoke::*;
 pub use log::*;
+pub use nonnegative_int64::*;
 pub use rs_xdr::*;

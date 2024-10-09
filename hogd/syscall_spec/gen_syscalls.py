@@ -377,10 +377,14 @@ def gen_rs_syscall_binding(syscall):
       input_type = "[u8]"
       if "primitive_type" in inp and inp["primitive_type"]:
         input_type = inp["typename"]
+        if "rust_typename" in inp:
+          input_type = inp["rust_typename"]
         syscallargs.append(f"""{input_name} as u64""")
         inputdecls.append(f"""{input_name} : {input_type}""")
       elif inp["fixed_size"]:
         input_type = inp["typename"]
+        if "rust_typename" in inp:
+          input_type = inp["rust_typename"]
         syscallargs.append(f"""{input_name}.as_ptr() as u64""")
         inputdecls.append(f"""{input_name} : &{input_type}""")
       else:
@@ -404,11 +408,15 @@ def gen_rs_syscall_binding(syscall):
       uninit_outputtype = "[MaybeUninit<u8>]"
       if "primitive_type" in outp and outp["primitive_type"]:
         output_type = outp["typename"]
+        if "rust_typename" in outp:
+          output_type = outp["rust_typename"]
         syscallargs.append(f"""to_offset_mut({output_name}) as u64""")
         uninit_outputtype = output_type
         uninit_args.append(f"""{output_name}""")
       elif outp["fixed_size"]:
         output_type = outp["typename"]
+        if "rust_typename" in outp:
+          output_type = outp["rust_typename"]
         uninit_outputtype = f"""MaybeUninit<{output_type}>"""
         syscallargs.append(f"""{output_name}.as_mut_ptr() as u64""")
         uninit_args.append(f"""unsafe {{core::mem::transmute({output_name})}}""")
