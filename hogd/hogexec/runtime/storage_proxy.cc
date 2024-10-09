@@ -1,6 +1,8 @@
 #include "hogd/hogexec/runtime/storage_proxy.h"
 
+#include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 
@@ -145,6 +147,7 @@ StorageProxy::get_nnint64_value() const
   return INT64_MAX;
 }
 
+namespace {
 int64_t
 capped_add(int64_t a, int64_t b)
 {
@@ -154,14 +157,14 @@ capped_add(int64_t a, int64_t b)
       assert(b > 0);
       return INT64_MAX;
     }
-    else {
-      assert(a < 0);
-      assert(b < 0);
-      return INT64_MIN;
-    }
+    // else a < 0
+    assert(a < 0);
+    assert(b < 0);
+    return INT64_MIN;
   }
   return out;
 }
+} // namespace
 
 SyscallStatus<void>
 StorageProxy::nnint64_set_add(int64_t set_value, int64_t add_value)

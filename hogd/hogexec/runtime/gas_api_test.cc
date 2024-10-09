@@ -9,7 +9,7 @@
 
 namespace hogd {
 
-namespace test {
+namespace {
 
 HostFnStatus<int32_t>
 consume_gas_call(HostCallContext *ctxp)
@@ -29,7 +29,7 @@ consume_gas_call2(HostCallContext *ctxp)
   return 0;
 }
 
-} // namespace test
+} // namespace
 
 class GasApiTest : public ::testing::Test {
 protected:
@@ -41,9 +41,9 @@ protected:
     WasmiContext context;
 
     context.link_fn("test", "good_call",
-                    &test::consume_gas_call2); // called by "call2"
+                    &consume_gas_call2); // called by "call2"
     context.link_fn("test", "external_call",
-                    &test::consume_gas_call); // called by "call1"
+                    &consume_gas_call); // called by "call1"
 
     runtime_ = context.make_new_runtime(c, nullptr);
 

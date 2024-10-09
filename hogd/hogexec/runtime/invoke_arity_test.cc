@@ -14,7 +14,7 @@
 
 namespace hogd {
 
-namespace test {
+namespace {
 
 HostFnStatus<int32_t>
 arity0(HostCallContext * /*unused*/)
@@ -70,7 +70,7 @@ arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   return 105;
 }
 
-} // namespace test
+} // namespace
 
 class InvokeArityTests : public ::testing::Test {
 
@@ -81,12 +81,12 @@ protected:
 
     WasmiContext context;
 
-    context.link_fn("test", "arg0", &test::arity0);
-    context.link_fn("test", "arg1", &test::arity1);
-    context.link_fn("test", "arg2", &test::arity2);
-    context.link_fn("test", "arg3", &test::arity3);
-    context.link_fn("test", "arg4", &test::arity4);
-    context.link_fn("test", "arg5", &test::arity5);
+    context.link_fn("test", "arg0", &arity0);
+    context.link_fn("test", "arg1", &arity1);
+    context.link_fn("test", "arg2", &arity2);
+    context.link_fn("test", "arg3", &arity3);
+    context.link_fn("test", "arg4", &arity4);
+    context.link_fn("test", "arg5", &arity5);
     runtime_ = context.make_new_runtime(c, nullptr);
     ASSERT_TRUE(!!runtime_);
   }

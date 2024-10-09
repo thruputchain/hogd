@@ -5,8 +5,8 @@
 int
 main(int argc, char *argv[])
 {
-  if (int x = hogd::hogd_init(argc, argv) != 0) {
-    return x;
+  if (!hogd::hogd_init(argc, argv)) {
+    return 1;
   }
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

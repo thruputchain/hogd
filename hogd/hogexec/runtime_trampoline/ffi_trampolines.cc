@@ -16,16 +16,18 @@ constexpr static uint8_t kTrampolineErrorOUTOFGAS = 1;
 constexpr static uint8_t kTrampolineErrorUNRECOVERABLE = 2;
 constexpr static uint8_t kTrampolineErrorRETURN = 3;
 
+namespace {
+
 TrampolineResult
 success(int32_t res)
 {
-  return TrampolineResult{res, kTrampolineErrorNONE};
+  return TrampolineResult{.result = res, .panic = kTrampolineErrorNONE};
 }
 
 TrampolineResult
 error(uint8_t error)
 {
-  return TrampolineResult{0, error};
+  return TrampolineResult{.result = 0, .panic = error};
 }
 
 TrampolineResult
@@ -60,6 +62,8 @@ c_call_internal(void *function_pointer, void *host_call_context, Args... args)
     return error(kTrampolineErrorUNRECOVERABLE);
   }
 }
+
+} // namespace
 
 extern "C" {
 

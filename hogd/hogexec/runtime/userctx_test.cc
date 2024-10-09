@@ -9,6 +9,8 @@
 
 namespace hogd {
 
+namespace {
+
 SystemCallHandler *ctx_check =
     reinterpret_cast<SystemCallHandler *>(0xAABBCCDD'EEFF0011);
 
@@ -19,6 +21,8 @@ foo(HostCallContext *ctx, uint64_t value)
   EXPECT_TRUE(value == 12);
   return 15;
 }
+
+} // namespace
 
 TEST(WasmRuntimeTest, CheckCtxCorrect)
 {

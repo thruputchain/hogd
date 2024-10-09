@@ -75,9 +75,9 @@ load_built_rs_contract(std::string_view filename)
   return {};
 }
 
-template<typename... calldatas>
+template<typename... Cs>
 Calldata static make_calldata(std::vector<uint8_t> const &data,
-                              calldatas const &...additional)
+                              Cs const &...additional)
 {
   x23::Vec<uint8_t> out;
 
@@ -90,17 +90,15 @@ Calldata static make_calldata(std::vector<uint8_t> const &data,
   return out;
 }
 
-template<typename calldata, typename... calldatas>
-requires std::is_trivially_copyable_v<calldata>
-Calldata static make_calldata(calldata const &data,
-                              calldatas const &...additional)
+template<typename C, typename... Cs> requires std::is_trivially_copyable_v<C>
+Calldata static make_calldata(C const &data, Cs const &...additional)
 {
-  const uint8_t *addr = reinterpret_cast<const uint8_t *>(&data);
+  const auto *addr = reinterpret_cast<const uint8_t *>(&data);
   x23::Vec<uint8_t> out;
 
-  if constexpr (!std::is_empty<calldata>::value) {
-    out.resize_uninitialized(sizeof(calldata));
-    std::memcpy(out.data(), addr, sizeof(calldata));
+  if constexpr (!std::is_empty_v<C>) {
+    out.resize_uninitialized(sizeof(C));
+    std::memcpy(out.data(), addr, sizeof(C));
   }
 
   auto rest = make_calldata(additional...);

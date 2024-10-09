@@ -8,11 +8,9 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <string>
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/format.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
@@ -71,6 +69,8 @@ SystemCallHandler::get_msg_sender() const
               .active_invocation_.invoked_address};
 }
 
+namespace {
+
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 convert_invoke_result_to_host_fn_result(InvokeResult const &result)
 {
@@ -98,6 +98,8 @@ convert_invoke_result_to_host_fn_result(InvokeResult const &result)
   // for users) but this doesn't particularly matter for correctness.
   return {static_cast<SyscallErrorCode>(*result.result), result.gas_consumed};
 }
+
+} // namespace
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 SystemCallHandler::invoke(Invocation const &invocation)
@@ -322,6 +324,17 @@ SystemCallHandler::log(std::span<const std::byte> message)
   call_frame_stack_.back().log(message);
 
   return {};
+}
+
+RuntimeMemoryLength
+SystemCallHandler::get_defaultzero_return_len() const
+{
+  assert(!call_frame_stack_.empty());
+
+  if (call_frame_stack_.back().child_return_buffer_.has_value()) {
+    return call_frame_stack_.back().child_return_buffer_->size();
+  }
+  return 0;
 }
 
 } // namespace hogd

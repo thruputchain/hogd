@@ -1,11 +1,14 @@
 #include "hogd/hogexec/runtime/call_frame.h"
 
 #include <cassert>
+#include <cstddef>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <span>
 #include <utility>
 
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "transaction.hh"

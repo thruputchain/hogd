@@ -8,7 +8,7 @@
 #include "x23/vec.h"
 
 template<size_t N> struct std::formatter<std::array<uint8_t, N>> {
-  constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
   auto format(const std::array<uint8_t, N> &obj, std::format_context &ctx) const
   {
@@ -20,12 +20,12 @@ template<size_t N> struct std::formatter<std::array<uint8_t, N>> {
   }
 };
 
-template<size_t N, typename allocator>
-struct std::formatter<x23::Vec<uint8_t, N, allocator>> {
-  constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+template<size_t N, typename Allocator>
+struct std::formatter<x23::Vec<uint8_t, N, Allocator>> {
+  constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
-  auto format(const x23::Vec<uint8_t, N, allocator> &obj,
-              std::format_context &ctx) const
+  static auto format(const x23::Vec<uint8_t, N, Allocator> &obj,
+                     std::format_context &ctx) const
   {
     auto out = ctx.out();
     for (auto v : obj) {
@@ -36,9 +36,9 @@ struct std::formatter<x23::Vec<uint8_t, N, allocator>> {
 };
 
 template<> struct std::formatter<hogd::SyscallNo> {
-  constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
-  auto format(const hogd::SyscallNo &obj, std::format_context &ctx) const
+  static auto format(const hogd::SyscallNo &obj, std::format_context &ctx) const
   {
     auto const &tags = x23::xdr_meta<hogd::SyscallNo>::tags;
 
@@ -53,9 +53,10 @@ template<> struct std::formatter<hogd::SyscallNo> {
 };
 
 template<> struct std::formatter<hogd::SyscallErrorCode> {
-  constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
-  auto format(const hogd::SyscallErrorCode &obj, std::format_context &ctx) const
+  static auto format(const hogd::SyscallErrorCode &obj,
+                     std::format_context &ctx) const
   {
     auto const &tags = x23::xdr_meta<hogd::SyscallErrorCode>::tags;
 

@@ -58,6 +58,8 @@ public:
 
   std::vector<LogEntry> const &get_logs() const { return committed_logs_; }
 
+  RuntimeMemoryLength get_defaultzero_return_len() const;
+
 private:
   struct RuntimeCacheEntry {
     std::unique_ptr<WasmiRuntime> runtime;

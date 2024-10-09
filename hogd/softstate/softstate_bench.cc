@@ -14,6 +14,7 @@
 
 namespace hogd {
 
+namespace {
 template<typename Deduplicator>
 void
 bm_deduplicate(benchmark::State &state)
@@ -70,6 +71,8 @@ BENCHMARK(bm_deduplicate<HashsetDeduplicatorSimpleV2>)
     ->RangeMultiplier(4)
     ->Range(32, 32 << 8)
     ->ThreadRange(1, 32); // NOLINT
+
+} // namespace
 
 } // namespace hogd
 
