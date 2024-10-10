@@ -28,12 +28,13 @@ StorageSnapshotCache::try_get_object(AddressAndKey const &addrkey)
     }
   }
 
-  // TODO(geoff) do request to storage
-  std::optional<StorageObject> rpc_result;
+  auto client_res = client_.get_object(current_block_hash_, addrkey)();
 
-  storage_cache_->emplace(addrkey, rpc_result);
-
-  return rpc_result;
+  if (client_res.error() == StorageRPCError::kNone) {
+    storage_cache_->emplace(addrkey, client_res.object());
+    return client_res.object();
+  }
+  return std::nullopt;
 }
 
 std::optional<SHA256Hash>

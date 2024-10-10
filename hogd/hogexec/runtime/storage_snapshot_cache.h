@@ -30,7 +30,10 @@ public:
     : client_(configurator.template client<StorageReadInterfaceV1>())
   {}
 
-protected:
+private:
+  // TODO(geoff): initialize and check this properly
+  SHA256Hash current_block_hash_;
+
   // nullopt to cache "does not exist" results
   x23::MVar<std::map<AddressAndKey, std::optional<StorageObject>>>
       storage_cache_;
