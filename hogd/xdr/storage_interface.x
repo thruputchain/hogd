@@ -72,7 +72,7 @@ namespace hogd
       //   kWrongShard if _any_ of the input deltas are to the wrong shard
       //   Then, kApplyFailed if _any_ of the deltas fail
       // No-op whenever error is not kNone
-      StorageRPCError try_commit_deltas(StorageDeltaVecList, SHA256Hash) = 0;
+      StorageRPCError try_reserve_transaction_deltas(StorageDeltaVecList, SHA256Hash) = 0;
 
       // Rollback all of the StorageDeltas sent by a transaction in the current
       // block. Arguments:

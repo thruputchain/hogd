@@ -143,4 +143,67 @@ LocalSoftstateReadServer::get_deployment(ContractAddress const &addr)
   co_return out;
 }
 
+x23::Async<StorageRPCError>
+LocalSoftstateWriteServer::try_reserve_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash)
+{
+  bool failed = false;
+  ssize_t i = 0;
+  ssize_t j = 0;
+  
+  for (; i < deltas.size() && (!failed); i++) {
+    auto const& dv = deltas[i];
+    for (j = 0; j < dv.deltas.size(); j++) {
+      auto res = local_map_.try_reserve_delta(dv.addr_key, dv.deltas[j]);
+
+      if (res != StorageReserveResult::kSuccess) {
+        failed = true;
+        // the failed one is a no-op
+        break;
+      }
+    }
+  }
+  
+  if (failed) {
+    //cleanup
+    for (ssize_t ii = 0; ii <= i; ii++) {
+      auto const& dv = deltas[ii];
+
+
+      ssize_t jmax = dv.deltas.size();
+      if (ii == i) {
+        jmax = j - 1;
+      }
+
+      for (ssize_t jj = 0; jj < jmax; jj++) {
+        local_map_.revert_delta(dv.addr_key, dv.deltas[jj]);
+      }
+    }
+    co_return StorageRPCError::kApplyFailed;
+  }
+  co_return StorageRPCError::kNone;
+}
+
+
+x23::Async<StorageRPCError>
+LocalSoftstateWriteServer::revert_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash)
+{
+  for (auto const& dv : deltas) {
+    for (auto const& delta : dv.deltas) {
+      local_map_.revert_delta(dv.addr_key, delta);
+    }
+  }
+  co_return StorageRPCError::kNone;
+}
+
+x23::Async<StorageRPCError>
+LocalSoftstateWriteServer::commit_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash)
+{
+  for (auto const& dv : deltas) {
+    for (auto const& delta : dv.deltas) {
+      local_map_.commit_delta(dv.addr_key, delta);
+    }
+  }
+  co_return StorageRPCError::kNone;
+}
+
 } // namespace hogd

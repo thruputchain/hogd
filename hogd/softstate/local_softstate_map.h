@@ -66,4 +66,30 @@ private:
 static_assert(
     is_StorageReadInterfaceV1<LocalSoftstateReadServer *, x23::Async>);
 
+class LocalSoftstateWriteServer {
+public:
+  using rpc_service = StorageWriteInterfaceV1;
+
+  LocalSoftstateWriteServer(LocalSoftstateMap &map, LocalContractMap &contracts)
+    : local_map_(map), local_contract_map_(contracts)
+  {}
+
+  x23::Async<StorageRPCError>
+  try_reserve_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash);
+
+  x23::Async<StorageRPCError>
+  revert_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash);
+
+  x23::Async<StorageRPCError>
+  commit_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash);
+
+private:
+  LocalSoftstateMap &local_map_;
+  LocalContractMap &local_contract_map_;
+};
+
+static_assert(
+    is_StorageWriteInterfaceV1<LocalSoftstateWriteServer *, x23::Async>);
+
+
 } // namespace hogd

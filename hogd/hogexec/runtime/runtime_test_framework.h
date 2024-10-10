@@ -30,6 +30,8 @@ public:
   std::unique_ptr<LocalContractMap> contract_map_;
   std::unique_ptr<LocalSoftstateMap> softstate_map_;
   std::unique_ptr<LocalSoftstateReadServer> read_storage_server_;
+  std::unique_ptr<LocalSoftstateWriteServer> write_storage_server_;
+
 
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 
@@ -39,6 +41,9 @@ public:
     read_storage_server_ =
         std::make_unique<LocalSoftstateReadServer>(*softstate_map_,
                                                    *contract_map_);
+    write_storage_server_ =
+        std::make_unique<LocalSoftstateWriteServer>(*softstate_map_,
+                                                   *contract_map_);
 
     ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, socket_fds_), 0);
 
@@ -47,7 +52,8 @@ public:
 
     snapshot_cache_ = std::make_unique<StorageSnapshotCache>(client_config);
 
-    server_config.server(read_storage_server_.get());    
+    server_config.server(read_storage_server_.get());
+    server_config.server(write_storage_server_.get());
   }
 
   static void check_log_eq(LogEntry const &entry,

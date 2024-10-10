@@ -59,6 +59,9 @@ TEST_F(BytestringTest, BasicWrite)
   EXPECT_EQ(deltas[0].addr_key, AddressAndKey(addr_, key));
   ASSERT_EQ(deltas[0].deltas.size(), 1);
   EXPECT_EQ(deltas[0].deltas[0].bytestring(), Bytestring(test::make_calldata(bstring)));
+
+
+  
 }
 
 } // namespace hogd
