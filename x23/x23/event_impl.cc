@@ -102,7 +102,13 @@ CoroPollImpl::always_eof()
       Errno{}.raise("pipe");
     close(fds[1]);
     int newfd = fds[0];
-    set_nonblock(newfd);
+    try {
+      set_nonblock(newfd);
+    }
+    catch (...) {
+      close(newfd);
+      throw;
+    }
     if (fd.compare_exchange_strong(val, newfd))
       return newfd;
     close(newfd);

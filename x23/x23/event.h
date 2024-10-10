@@ -105,7 +105,7 @@ private:
                                                       EPOLLOUT | EPOLLERR};
 
   struct FdState {
-    enum Mode { kFree, kActive, kPoisoned };
+    enum Mode{kFree, kActive, kPoisoned};
     std::atomic<Mode> mode{kFree};
     std::atomic<std::uint32_t> ready{0};
     // callbacks: [0] = reader, [1] = writer
@@ -132,7 +132,6 @@ private:
   std::atomic_uint numcoro_{0};
 
   std::stop_token st_;
-  std::jthread pollthread_;
 
   struct FdPtr {
     FdState *p_;
@@ -160,7 +159,7 @@ private:
     docb(fdp, true);
   }
 
-#else // !HAVE_EPOLL
+#else  // !HAVE_EPOLL
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
                                                 POLLOUT | POLLERR};
   struct FdState {
@@ -221,8 +220,14 @@ public:
 #else  // !HAVE_ACCEPT4
       int fd = ::accept(lfd.get(), reinterpret_cast<sockaddr *>(addr), addrlen);
       if (fd >= 0) {
+	try {
+	  set_nonblock(fd);
+	}
+	catch (...) {
+	  close(fd);
+	  throw;
+	}
         fcntl(fd, F_SETFD, 1);
-        fcntl(fd, F_SETFD, O_NONBLOCK);
       }
 #endif // !HAVE_ACCEPT4
       if (fd >= 0)
