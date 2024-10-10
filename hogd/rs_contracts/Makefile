@@ -14,6 +14,7 @@ rs_contracts : \
 	test_invoke_1.wasm \
 	test_invoke_2.wasm \
 	echo.wasm \
-	test_echo.wasm
+	test_echo.wasm \
+	test_bytestring.wasm
 
 # rustup target install wasm32-unknown-unknown

@@ -41,20 +41,6 @@ protected:
 
   ContractAddress addr1_;
   ContractAddress addr2_;
-
-  static void check_log_eq(LogEntry const &entry,
-                           x23::Vec<uint8_t> const &calldata)
-  {
-    ASSERT_EQ(entry.message.size(), calldata.size());
-    int res =
-        std::memcmp(entry.message.data(), calldata.data(), calldata.size());
-    EXPECT_EQ(0, res);
-    if (res != 0) {
-      std::printf(
-          std::format("detailed log eq check: {} {}\n", entry.message, calldata)
-              .c_str());
-    }
-  }
 };
 
 TEST_F(ReturnTest, EchoFull)

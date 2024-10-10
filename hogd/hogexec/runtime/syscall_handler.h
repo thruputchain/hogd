@@ -10,6 +10,7 @@
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "transaction.hh"
+#include "storage_interface.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -58,6 +59,7 @@ public:
   SyscallStatus<void> log(std::span<const std::byte> message);
 
   std::vector<LogEntry> const &get_logs() const { return committed_logs_; }
+  StorageDeltaVecList const& get_deltas() const { return committed_delta_vec_; }
 
   RuntimeMemoryLength get_defaultzero_return_len() const;
 
@@ -81,8 +83,11 @@ private:
 
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;
+  StorageDeltaVecList committed_delta_vec_;
 
   StorageSnapshotCache &snapshot_cache_;
+
+  void commit_last_call_frame(CallFrame&& frame);
 };
 
 } // namespace hogd

@@ -20,6 +20,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "storage_interface.hh"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -164,8 +165,9 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
       call_frame_stack_[call_frame_stack_size - 2].commit_successful_child_call(
           std::move(call_frame_stack_.back()));
     }
+
     if (call_frame_stack_.size() == 1) {
-      committed_logs_ = call_frame_stack_.back().extract_logs();
+      commit_last_call_frame(std::move(call_frame_stack_.back()));
     }
 
     call_frame_stack_.pop_back();
@@ -173,6 +175,18 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
 
   return result;
 }
+
+void 
+SystemCallHandler::commit_last_call_frame(CallFrame&& frame)
+{
+  committed_logs_ = frame.extract_logs();
+
+  for (auto const& [addr, proxy] : frame.get_storage_proxies())
+  {
+    committed_delta_vec_.emplace_back(addr, proxy->get_deltas());
+  }
+}
+
 
 SyscallStatus<const ReturnBuffer>
 SystemCallHandler::get_return_buffer() const

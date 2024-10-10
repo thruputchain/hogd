@@ -6,6 +6,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_object.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -27,6 +28,8 @@ public:
   SyscallStatus<int64_t> get_nnint64_base_value() const;
   SyscallStatus<int64_t> get_nnint64_value() const;
   SyscallStatus<void> nnint64_set_add(int64_t set_value, int64_t add_value);
+
+  x23::Vec<StorageDelta> get_deltas() const;
 
 private:
   SyscallStatus<void> type_guard(StorageObjectType expected_type) const;

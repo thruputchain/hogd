@@ -8,7 +8,9 @@ members = [
     "test_invoke_1",
     "test_invoke_2",
     "echo",
-    "test_echo"
+    "test_echo",
+    "test_bytestring"
+
 ]
 
 [profile.dev]

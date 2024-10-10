@@ -40,14 +40,6 @@ protected:
 
   ContractAddress addr1_;
   ContractAddress addr2_;
-
-  static void check_log_eq(LogEntry const &entry,
-                           x23::Vec<uint8_t> const &calldata)
-  {
-    ASSERT_EQ(entry.message.size(), calldata.size());
-    EXPECT_EQ(0, std::memcmp(entry.message.data(), calldata.data(),
-                             calldata.size()));
-  }
 };
 
 TEST_F(InvokeTest, CalldataPassthroughSuccess)

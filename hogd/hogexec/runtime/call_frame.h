@@ -49,6 +49,11 @@ public:
 
   uint64_t get_available_gas() { return active_runtime_.get_available_gas(); }
 
+  std::map<AddressAndKey, std::unique_ptr<StorageProxy>> const& 
+  get_storage_proxies() const {
+    return storage_proxies_;
+  }
+
 private:
   WasmiRuntime &active_runtime_;
 

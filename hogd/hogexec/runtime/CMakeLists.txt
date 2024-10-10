@@ -63,6 +63,7 @@ add_executable(
   calldata_test.cc
   invoke_test.cc
   return_test.cc
+  bytestring_test.cc
 )
 
 target_link_libraries(

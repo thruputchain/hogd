@@ -7,6 +7,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/runtime_test_framework.h"
+#include "hogd/hogexec/runtime/format.h"
 #include "hogd/softstate/local_softstate_map.h"
 #include "x23/rpc.h"
 #include "x23/threadpool.h"
@@ -47,6 +48,20 @@ public:
     snapshot_cache_ = std::make_unique<StorageSnapshotCache>(client_config);
 
     server_config.server(read_storage_server_.get());    
+  }
+
+  static void check_log_eq(LogEntry const &entry,
+                           x23::Vec<uint8_t> const &calldata)
+  {
+    ASSERT_EQ(entry.message.size(), calldata.size());
+    int res =
+        std::memcmp(entry.message.data(), calldata.data(), calldata.size());
+    EXPECT_EQ(0, res);
+    if (res != 0) {
+      std::printf(
+          std::format("detailed log eq check: {} {}\n", entry.message, calldata)
+              .c_str());
+    }
   }
 };
 
