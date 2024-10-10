@@ -46,6 +46,7 @@ target_link_libraries(
   wasmi_lib
   hogd
   protocol
+  softstate
   ${LIBSODIUM_LIBRARIES}
 )
 

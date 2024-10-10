@@ -10,33 +10,34 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/runtime_test_framework.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
 
-class InvokeTest : public ::testing::Test {
+class InvokeTest : public ::testing::Test , public test::RuntimeTestFramework {
 protected:
   void SetUp() override
   {
-    auto c1 = test::load_built_rs_contract("test_invoke_1.wasm");
-    auto c2 = test::load_built_rs_contract("test_invoke_2.wasm");
+    test::RuntimeTestFramework::initialize();
 
-    auto h1 = storage_snapshot_.register_contract(c1);
-    auto h2 = storage_snapshot_.register_contract(c2);
+    auto [h1, c1] = test::load_built_rs_contract("test_invoke_1.wasm");
+    auto [h2, c2] = test::load_built_rs_contract("test_invoke_2.wasm");
 
     std::vector<uint8_t> bytes1 = {0, 1, 2, 3};
     std::vector<uint8_t> bytes2 = {3, 2, 1, 0};
-
     addr1_ = sha256(std::as_bytes(std::span(bytes1)));
     addr2_ = sha256(std::as_bytes(std::span(bytes2)));
 
-    storage_snapshot_.deploy_contract(addr1_, h1);
-    storage_snapshot_.deploy_contract(addr2_, h2);
+    contract_map_->add_contract(h1, c1);
+    contract_map_->deploy_contract(addr1_, h1);
+
+    contract_map_->add_contract(h2, c2);
+    contract_map_->deploy_contract(addr2_, h2);
   }
 
-  test::LocalMockStorageSnapshot storage_snapshot_;
   ContractAddress addr1_;
   ContractAddress addr2_;
 
@@ -59,7 +60,7 @@ TEST_F(InvokeTest, CalldataPassthroughSuccess)
       test::make_calldata(addr1_, static_cast<MethodID>(0),
                           std::vector<uint8_t>{0, 1, 2, 3});
 
-  SystemCallHandler handler(stx, storage_snapshot_);
+  SystemCallHandler handler(stx, *snapshot_cache_);
 
   auto res = handler.root_invoke();
 
@@ -86,7 +87,7 @@ TEST_F(InvokeTest, CalldataPassthroughFail)
       test::make_calldata(addr1_, static_cast<MethodID>(1),
                           std::vector<uint8_t>{0, 1, 2, 3});
 
-  SystemCallHandler handler(stx, storage_snapshot_);
+  SystemCallHandler handler(stx, *snapshot_cache_);
 
   auto res = handler.root_invoke();
 

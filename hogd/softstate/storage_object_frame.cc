@@ -24,7 +24,8 @@ object_from_delta_class(StorageDeltaClass const &d,
   if (prev_object) {
     object = *prev_object;
     assert(object.type() == d.type());
-  } else {
+  }
+  else {
     object.type(d.type());
   }
 

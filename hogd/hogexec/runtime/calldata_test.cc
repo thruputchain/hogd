@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <sys/socket.h>
+
 #include <cstdint>
 #include <cstring>
 
@@ -7,23 +9,28 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/runtime_test_framework.h"
+#include "hogd/softstate/local_softstate_map.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/rpc.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
 
-class CalldataTest : public ::testing::Test {
+class CalldataTest : public ::testing::Test, public test::RuntimeTestFramework {
 protected:
   void SetUp() override
   {
-    auto c = test::load_built_rs_contract("test_calldata.wasm");
+    test::RuntimeTestFramework::initialize();
 
-    auto contract_hash = storage_snapshot_.register_contract(c);
-    storage_snapshot_.deploy_contract(addr_, contract_hash);
+    auto [h, c] = test::load_built_rs_contract("test_calldata.wasm");
+
+    contract_map_->add_contract(h, c);
+    contract_map_->deploy_contract(addr_, h);
   }
 
-  test::LocalMockStorageSnapshot storage_snapshot_;
   ContractAddress addr_ = ContractAddress{};
 
   static void check_log_eq(LogEntry const &entry,
@@ -43,7 +50,7 @@ TEST_F(CalldataTest, NoCalldata)
   stx.tx.invocation.method_name = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
 
-  SystemCallHandler handler(stx, storage_snapshot_);
+  SystemCallHandler handler(stx, *snapshot_cache_);
 
   auto res = handler.root_invoke();
 
@@ -66,7 +73,7 @@ TEST_F(CalldataTest, SomeCalldata)
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = {0, 1, 2, 3, 4, 5};
 
-  SystemCallHandler handler(stx, storage_snapshot_);
+  SystemCallHandler handler(stx, *snapshot_cache_);
 
   auto res = handler.root_invoke();
 
@@ -88,7 +95,7 @@ TEST_F(CalldataTest, TooMuchCalldata)
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = x23::Vec<uint8_t>(kMaxLogMessageLen + 1, 12);
 
-  SystemCallHandler handler(stx, storage_snapshot_);
+  SystemCallHandler handler(stx, *snapshot_cache_);
 
   auto res = handler.root_invoke();
 

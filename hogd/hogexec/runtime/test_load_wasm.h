@@ -7,8 +7,10 @@
 #include <vector>
 
 #include "contract.hh"
+#include "hogd/crypto/crypto.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd ::test {
@@ -41,7 +43,7 @@ load_wasm_from_file(std::string_view filename)
 }
 
 [[maybe_unused]]
-static std::shared_ptr<Contract>
+static std::pair<SHA256Hash, std::shared_ptr<const Contract>>
 load_built_rs_contract(std::string_view filename)
 {
   std::string file =
@@ -67,7 +69,10 @@ load_built_rs_contract(std::string_view filename)
   }
   std::fclose(f);
 
-  return contract;
+  auto serialized = x23::serialize(*contract);
+  SHA256Hash hash = sha256(std::as_bytes(std::span(serialized)));
+
+  return {hash, contract};
 }
 
 [[maybe_unused]] Calldata static make_calldata()

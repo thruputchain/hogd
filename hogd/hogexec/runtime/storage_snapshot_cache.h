@@ -7,9 +7,11 @@
 #include <optional>
 
 #include "contract.hh"
+#include "storage_interface.hh"
 #include "storage_object.hh"
 #include "types.hh"
 #include "x23/mvar.h"
+#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -19,11 +21,14 @@ namespace hogd {
 class StorageSnapshotCache {
 public:
   std::optional<StorageObject> try_get_object(AddressAndKey const &addrkey);
-
   std::shared_ptr<Contract> try_get_contract_by_hash(SHA256Hash const &hash);
-
   std::optional<SHA256Hash>
   try_get_deployed_contract_hash(ContractAddress const &addr);
+
+  StorageSnapshotCache(
+      x23::RpcStream<x23::RpcLogger>::Configurator &configurator)
+    : client_(configurator.template client<StorageReadInterfaceV1>())
+  {}
 
 protected:
   // nullopt to cache "does not exist" results
@@ -32,17 +37,9 @@ protected:
   x23::MVar<std::map<SHA256Hash, std::shared_ptr<Contract>>> contract_cache_;
   x23::MVar<std::map<ContractAddress, std::optional<SHA256Hash>>>
       deployment_cache_;
+
+  StorageReadInterfaceV1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>
+      client_;
 };
-
-namespace test {
-
-struct LocalMockStorageSnapshot : public StorageSnapshotCache {
-
-  SHA256Hash register_contract(std::shared_ptr<Contract> &contract);
-
-  void deploy_contract(ContractAddress const &addr, SHA256Hash const &hash);
-};
-
-} // namespace test
 
 } // namespace hogd

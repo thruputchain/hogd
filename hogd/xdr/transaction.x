@@ -1,9 +1,10 @@
 
-% #include "types.hh"
+// clang-format off
+%#include "types.hh"
 
-    namespace hogd
+namespace hogd
 {
-
+  // clang-format on
   typedef opaque Calldata<>;
 
   typedef opaque ReturnBuffer<>;

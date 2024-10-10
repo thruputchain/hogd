@@ -9,6 +9,7 @@
 #include "x23/serialize.h"
 
 #include "contract.hh"
+#include "storage_interface.hh"
 #include "storage_object.hh"
 #include "types.hh"
 
@@ -49,12 +50,13 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
     }
   }
 
-  // TODO(geoff) do request to storage
-  std::optional<SHA256Hash> hash_from_db = std::nullopt;
+  auto client_res = client_.get_deployment(addr)();
 
-  deployment_cache_->emplace(addr, hash_from_db);
-
-  return hash_from_db;
+  if (client_res.error() == StorageRPCError::kNone) {
+    deployment_cache_->emplace(addr, client_res.deployed_hash());
+    return client_res.deployed_hash();
+  }
+  return std::nullopt;
 }
 
 std::shared_ptr<Contract>
@@ -70,36 +72,16 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
     }
   }
 
-  // TODO(geoff) do request to storage
-  std::shared_ptr<Contract> contract_from_db;
+  auto client_res = client_.get_contract(hash)();
 
-  contract_cache_->emplace(hash, contract_from_db);
+  if (client_res.error() == StorageRPCError::kNone) {
+    std::shared_ptr<Contract> contract_from_db =
+        std::make_shared<Contract>(client_res.contract());
+    contract_cache_->emplace(hash, contract_from_db);
+    return contract_from_db;
+  }
 
-  return contract_from_db;
+  return nullptr;
 }
-
-namespace test {
-
-SHA256Hash
-LocalMockStorageSnapshot::register_contract(std::shared_ptr<Contract> &contract)
-{
-  assert(!!contract);
-
-  auto buf = x23::serialize(*contract);
-
-  SHA256Hash hash = sha256(std::as_bytes(std::span(buf)));
-
-  contract_cache_->emplace(hash, contract);
-  return hash;
-}
-
-void
-LocalMockStorageSnapshot::deploy_contract(ContractAddress const &addr,
-                                          SHA256Hash const &hash)
-{
-  deployment_cache_->emplace(addr, hash);
-}
-
-} // namespace test
 
 } // namespace hogd

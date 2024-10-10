@@ -79,8 +79,8 @@ main(int argc, char **argv)
     if (argv[1] == "-c"s) {
       auto conres = cp.tcpconnect("localhost", argv[2])();
       if (!conres) {
-	std::println(stderr, "{}", conres.error().what());
-	exit(1);
+        std::println(stderr, "{}", conres.error().what());
+        exit(1);
       }
       auto cs = rpc_stream_logged(cp, *conres);
       myvers::client c = cs.client<myvers>();
@@ -89,10 +89,10 @@ main(int argc, char **argv)
     }
     else if (argv[1] == "-s"s) {
       [argv]->Async<void> {
-	auto lfd = x23::tcplisten(std::stoi(argv[2]));
-	while (auto c = co_await cp.accept(lfd)) {
-	  rpc_stream_logged(cp, *c).server<myvers>(&impl, context);
-	}
+        auto lfd = x23::tcplisten(std::stoi(argv[2]));
+        while (auto c = co_await cp.accept(lfd)) {
+          rpc_stream_logged(cp, *c).server<myvers>(&impl, context);
+        }
       }()();
     }
     else {
