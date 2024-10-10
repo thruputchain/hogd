@@ -77,6 +77,12 @@ public:
   // may still be running after poison() returns.
   void poison(BorrowedFd fd);
 
+  // If there's a callback for reading (write == false) or writing
+  // (write == true) on file descriptor fd, then immediately make the
+  // callback with condition err, even though the awaited condition
+  // does not hold yet.
+  void abort(BorrowedFd fd, bool write, int err = ETIMEDOUT);
+
 protected:
   void check(int timeout = -1);
   bool stop_requested() { return ss_.stop_requested(); }
