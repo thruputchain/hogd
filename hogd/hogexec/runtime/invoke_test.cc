@@ -7,17 +7,17 @@
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/runtime_test_framework.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "hogd/hogexec/runtime/runtime_test_framework.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
 
-class InvokeTest : public ::testing::Test , public test::RuntimeTestFramework {
+class InvokeTest : public ::testing::Test, public test::RuntimeTestFramework {
 protected:
   void SetUp() override
   {

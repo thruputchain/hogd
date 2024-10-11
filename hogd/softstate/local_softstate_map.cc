@@ -44,6 +44,24 @@ LocalSoftstateMap::revert_delta(AddressAndKey const &addrkey,
   it->second.revert_delta(delta);
 }
 
+void 
+LocalSoftstateMap::commit_round()
+{
+  auto ptr = map_.take();
+  for (auto it = ptr -> begin(); it != ptr -> end(); it++) {
+    it -> second.commit_round();
+  }
+}
+
+void 
+LocalSoftstateMap::revert_round()
+{
+  auto ptr = map_.take();
+  for (auto it = ptr -> begin(); it != ptr -> end(); it++) {
+    it -> second.revert_round();
+  }
+}
+
 std::optional<StorageObject>
 LocalSoftstateMap::get_committed_object(AddressAndKey const &addrkey)
 {
@@ -144,14 +162,15 @@ LocalSoftstateReadServer::get_deployment(ContractAddress const &addr)
 }
 
 x23::Async<StorageRPCError>
-LocalSoftstateWriteServer::try_reserve_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash)
+LocalSoftstateWriteServer::try_reserve_transaction_deltas(
+    StorageDeltaVecList const &deltas, SHA256Hash const &expected_block_hash)
 {
   bool failed = false;
   ssize_t i = 0;
   ssize_t j = 0;
-  
+
   for (; i < deltas.size() && (!failed); i++) {
-    auto const& dv = deltas[i];
+    auto const &dv = deltas[i];
     for (j = 0; j < dv.deltas.size(); j++) {
       auto res = local_map_.try_reserve_delta(dv.addr_key, dv.deltas[j]);
 
@@ -162,12 +181,11 @@ LocalSoftstateWriteServer::try_reserve_transaction_deltas(StorageDeltaVecList co
       }
     }
   }
-  
-  if (failed) {
-    //cleanup
-    for (ssize_t ii = 0; ii <= i; ii++) {
-      auto const& dv = deltas[ii];
 
+  if (failed) {
+    // cleanup
+    for (ssize_t ii = 0; ii <= i; ii++) {
+      auto const &dv = deltas[ii];
 
       ssize_t jmax = dv.deltas.size();
       if (ii == i) {
@@ -183,12 +201,12 @@ LocalSoftstateWriteServer::try_reserve_transaction_deltas(StorageDeltaVecList co
   co_return StorageRPCError::kNone;
 }
 
-
 x23::Async<StorageRPCError>
-LocalSoftstateWriteServer::revert_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash)
+LocalSoftstateWriteServer::revert_transaction_deltas(
+    StorageDeltaVecList const &deltas, SHA256Hash const &expected_block_hash)
 {
-  for (auto const& dv : deltas) {
-    for (auto const& delta : dv.deltas) {
+  for (auto const &dv : deltas) {
+    for (auto const &delta : dv.deltas) {
       local_map_.revert_delta(dv.addr_key, delta);
     }
   }
@@ -196,10 +214,11 @@ LocalSoftstateWriteServer::revert_transaction_deltas(StorageDeltaVecList const& 
 }
 
 x23::Async<StorageRPCError>
-LocalSoftstateWriteServer::commit_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash)
+LocalSoftstateWriteServer::commit_transaction_deltas(
+    StorageDeltaVecList const &deltas, SHA256Hash const &expected_block_hash)
 {
-  for (auto const& dv : deltas) {
-    for (auto const& delta : dv.deltas) {
+  for (auto const &dv : deltas) {
+    for (auto const &delta : dv.deltas) {
       local_map_.commit_delta(dv.addr_key, delta);
     }
   }

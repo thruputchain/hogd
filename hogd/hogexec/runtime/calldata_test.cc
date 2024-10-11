@@ -6,10 +6,10 @@
 #include <cstring>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime_test_framework.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "hogd/hogexec/runtime/runtime_test_framework.h"
 #include "hogd/softstate/local_softstate_map.h"
 #include "transaction.hh"
 #include "types.hh"

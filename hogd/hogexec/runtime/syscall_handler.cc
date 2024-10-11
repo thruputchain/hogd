@@ -16,11 +16,11 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "storage_interface.hh"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -176,17 +176,18 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
   return result;
 }
 
-void 
-SystemCallHandler::commit_last_call_frame(CallFrame&& frame)
+void
+SystemCallHandler::commit_last_call_frame(CallFrame &&frame)
 {
   committed_logs_ = frame.extract_logs();
 
-  for (auto const& [addr, proxy] : frame.get_storage_proxies())
-  {
-    committed_delta_vec_.emplace_back(addr, proxy->get_deltas());
+  for (auto const &[addr, proxy] : frame.get_storage_proxies()) {
+    auto deltas = proxy->get_deltas();
+    if (!deltas.empty()) {
+      committed_delta_vec_.emplace_back(addr, deltas);
+    }
   }
 }
-
 
 SyscallStatus<const ReturnBuffer>
 SystemCallHandler::get_return_buffer() const

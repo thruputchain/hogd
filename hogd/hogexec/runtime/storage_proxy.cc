@@ -16,14 +16,16 @@ namespace hogd {
 
 namespace {
 
-StorageDelta make_delete_last()
+StorageDelta
+make_delete_last()
 {
   StorageDelta out;
   out.type(StorageDeltaType::kDeleteLast);
   return out;
 }
 
-StorageDelta make_bytestring_set(Bytestring const& string)
+StorageDelta
+make_bytestring_set(Bytestring const &string)
 {
   StorageDelta out;
   out.type(StorageDeltaType::kBytestringSet);
@@ -31,7 +33,8 @@ StorageDelta make_bytestring_set(Bytestring const& string)
   return out;
 }
 
-StorageDelta make_nnint64_set_add(int64_t set, int64_t add)
+StorageDelta
+make_nnint64_set_add(int64_t set, int64_t add)
 {
   StorageDelta out;
   out.type(StorageDeltaType::kNonnegativeInt64SetAdd);
@@ -39,8 +42,7 @@ StorageDelta make_nnint64_set_add(int64_t set, int64_t add)
   return out;
 }
 
-}
-
+} // namespace
 
 void
 StorageProxy::delete_last()
@@ -231,7 +233,7 @@ StorageProxy::nnint64_set_add(int64_t set_value, int64_t add_value)
   return {};
 }
 
-x23::Vec<StorageDelta> 
+x23::Vec<StorageDelta>
 StorageProxy::get_deltas() const
 {
   x23::Vec<StorageDelta> out;
@@ -251,6 +253,5 @@ StorageProxy::get_deltas() const
   // TODO(geoff) others
   return out;
 }
-
 
 } // namespace hogd

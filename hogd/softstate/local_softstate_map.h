@@ -23,6 +23,9 @@ public:
   std::optional<StorageObject>
   get_committed_object(AddressAndKey const &addrkey);
 
+  void commit_round();
+  void revert_round();
+
 private:
   x23::MVar<std::map<AddressAndKey, StorageObjectFrame>> map_;
 };
@@ -75,13 +78,16 @@ public:
   {}
 
   x23::Async<StorageRPCError>
-  try_reserve_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash);
+  try_reserve_transaction_deltas(StorageDeltaVecList const &deltas,
+                                 SHA256Hash const &expected_block_hash);
 
   x23::Async<StorageRPCError>
-  revert_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash);
+  revert_transaction_deltas(StorageDeltaVecList const &deltas,
+                            SHA256Hash const &expected_block_hash);
 
   x23::Async<StorageRPCError>
-  commit_transaction_deltas(StorageDeltaVecList const& deltas, SHA256Hash const& expected_block_hash);
+  commit_transaction_deltas(StorageDeltaVecList const &deltas,
+                            SHA256Hash const &expected_block_hash);
 
 private:
   LocalSoftstateMap &local_map_;
@@ -90,6 +96,5 @@ private:
 
 static_assert(
     is_StorageWriteInterfaceV1<LocalSoftstateWriteServer *, x23::Async>);
-
 
 } // namespace hogd

@@ -6,10 +6,9 @@ use sdk::rt::trap;
 #[cfg_attr(target_family = "wasm", export_name = "0")]
 #[no_mangle]
 pub extern "C" fn write_bytestring() -> i32 {
-
     let calldata = sdk::GetCalldata().unwrap();
 
-    let key : sdk::StorageKey = calldata[0..32].try_into().unwrap();
+    let key: sdk::StorageKey = calldata[0..32].try_into().unwrap();
 
     let string = &calldata[32..];
 
@@ -21,10 +20,9 @@ pub extern "C" fn write_bytestring() -> i32 {
 #[cfg_attr(target_family = "wasm", export_name = "1")]
 #[no_mangle]
 pub extern "C" fn log_bytestring() -> i32 {
-
     let calldata = sdk::GetCalldata().unwrap();
 
-    let key : sdk::StorageKey = calldata[0..32].try_into().unwrap();
+    let key: sdk::StorageKey = calldata[0..32].try_into().unwrap();
 
     if calldata.len() != 32 {
         trap();

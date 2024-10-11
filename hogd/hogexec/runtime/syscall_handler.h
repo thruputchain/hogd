@@ -7,10 +7,10 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "transaction.hh"
-#include "storage_interface.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -59,7 +59,7 @@ public:
   SyscallStatus<void> log(std::span<const std::byte> message);
 
   std::vector<LogEntry> const &get_logs() const { return committed_logs_; }
-  StorageDeltaVecList const& get_deltas() const { return committed_delta_vec_; }
+  StorageDeltaVecList const &get_deltas() const { return committed_delta_vec_; }
 
   RuntimeMemoryLength get_defaultzero_return_len() const;
 
@@ -87,7 +87,7 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
-  void commit_last_call_frame(CallFrame&& frame);
+  void commit_last_call_frame(CallFrame &&frame);
 };
 
 } // namespace hogd

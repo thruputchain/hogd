@@ -4,21 +4,20 @@
 
 #include <sys/socket.h>
 
+#include "hogd/hogexec/runtime/format.h"
+#include "hogd/hogexec/runtime/runtime_test_framework.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/runtime_test_framework.h"
-#include "hogd/hogexec/runtime/format.h"
 #include "hogd/softstate/local_softstate_map.h"
+#include "storage_interface.hh"
 #include "x23/rpc.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
-#include "storage_interface.hh"
 
-namespace hogd :: test {
+namespace hogd ::test {
 
 class RuntimeTestFramework {
 public:
-
   x23::ThreadPool threadpool_ = x23::ThreadPool(2);
   x23::CoroPoll cp_ = x23::CoroPoll(threadpool_);
 
@@ -31,10 +30,19 @@ public:
   std::unique_ptr<LocalSoftstateReadServer> read_storage_server_;
   std::unique_ptr<LocalSoftstateWriteServer> write_storage_server_;
 
-
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 
-  void initialize() {
+  using write_client_t = StorageWriteInterfaceV1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  struct Bizarre {
+    StorageSnapshotCache::client_t read_client_;
+    write_client_t write_client_;
+  };
+
+  std::unique_ptr<Bizarre> storage_clients_;
+
+  void initialize()
+  {
     contract_map_ = std::make_unique<LocalContractMap>();
     softstate_map_ = std::make_unique<LocalSoftstateMap>();
     read_storage_server_ =
@@ -42,17 +50,25 @@ public:
                                                    *contract_map_);
     write_storage_server_ =
         std::make_unique<LocalSoftstateWriteServer>(*softstate_map_,
-                                                   *contract_map_);
+                                                    *contract_map_);
 
     ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, socket_fds_), 0);
 
     rpc_config_t server_config = x23::rpc_stream_logged(cp_, socket_fds_[0]);
     rpc_config_t client_config = x23::rpc_stream_logged(cp_, socket_fds_[1]);
 
-    snapshot_cache_ = std::make_unique<StorageSnapshotCache>(client_config);
+    storage_clients_ = std::unique_ptr<Bizarre>(new Bizarre(
+      client_config.template client<StorageReadInterfaceV1>(),
+      client_config.template client<StorageWriteInterfaceV1>()));
+    snapshot_cache_ = std::make_unique<StorageSnapshotCache>(storage_clients_->read_client_);
 
     server_config.server(read_storage_server_.get());
     server_config.server(write_storage_server_.get());
+  }
+
+  void commit_round() {
+    softstate_map_ -> commit_round();
+    snapshot_cache_ = std::make_unique<StorageSnapshotCache>(storage_clients_->read_client_);
   }
 
   static void check_log_eq(LogEntry const &entry,
@@ -70,5 +86,4 @@ public:
   }
 };
 
-
-}
+} // namespace hogd::test
