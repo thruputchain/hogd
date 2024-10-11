@@ -485,6 +485,12 @@ struct RpcStream : public detail::RpcStreamImpl {
     {
       this->get()->nclients_.fetch_add(1, std::memory_order_relaxed);
     }
+
+    ClientRef(const ClientRef& s) : super(s)
+    {
+      this->get()->nclients_.fetch_add(1, std::memory_order_relaxed);
+    }
+
     ~ClientRef()
     {
       if (this->get()->nclients_.fetch_sub(1, std::memory_order_relaxed) == 1)
