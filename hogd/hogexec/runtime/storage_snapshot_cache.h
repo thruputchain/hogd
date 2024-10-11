@@ -20,16 +20,14 @@ namespace hogd {
 // but must be reset after each block.
 class StorageSnapshotCache {
 public:
-  using client_t = StorageReadInterfaceV1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+  using client_t =
+      StorageReadInterfaceV1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
   std::optional<StorageObject> try_get_object(AddressAndKey const &addrkey);
   std::shared_ptr<Contract> try_get_contract_by_hash(SHA256Hash const &hash);
   std::optional<SHA256Hash>
   try_get_deployed_contract_hash(ContractAddress const &addr);
 
-  StorageSnapshotCache(
-    client_t& client)
-    : client_(client)
-  {}
+  StorageSnapshotCache(client_t &client) : client_(client) {}
 
 private:
   // TODO(geoff): initialize and check this properly
@@ -42,7 +40,7 @@ private:
   x23::MVar<std::map<ContractAddress, std::optional<SHA256Hash>>>
       deployment_cache_;
 
-  client_t& client_;
+  client_t &client_;
 };
 
 } // namespace hogd

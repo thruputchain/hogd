@@ -32,7 +32,8 @@ public:
 
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 
-  using write_client_t = StorageWriteInterfaceV1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+  using write_client_t = StorageWriteInterfaceV1::client<
+      x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   struct Bizarre {
     StorageSnapshotCache::client_t read_client_;
@@ -57,18 +58,21 @@ public:
     rpc_config_t server_config = x23::rpc_stream_logged(cp_, socket_fds_[0]);
     rpc_config_t client_config = x23::rpc_stream_logged(cp_, socket_fds_[1]);
 
-    storage_clients_ = std::unique_ptr<Bizarre>(new Bizarre(
-      client_config.template client<StorageReadInterfaceV1>(),
-      client_config.template client<StorageWriteInterfaceV1>()));
-    snapshot_cache_ = std::make_unique<StorageSnapshotCache>(storage_clients_->read_client_);
+    storage_clients_ = std::unique_ptr<Bizarre>(
+        new Bizarre(client_config.template client<StorageReadInterfaceV1>(),
+                    client_config.template client<StorageWriteInterfaceV1>()));
+    snapshot_cache_ =
+        std::make_unique<StorageSnapshotCache>(storage_clients_->read_client_);
 
     server_config.server(read_storage_server_.get());
     server_config.server(write_storage_server_.get());
   }
 
-  void commit_round() {
-    softstate_map_ -> commit_round();
-    snapshot_cache_ = std::make_unique<StorageSnapshotCache>(storage_clients_->read_client_);
+  void commit_round()
+  {
+    softstate_map_->commit_round();
+    snapshot_cache_ =
+        std::make_unique<StorageSnapshotCache>(storage_clients_->read_client_);
   }
 
   static void check_log_eq(LogEntry const &entry,

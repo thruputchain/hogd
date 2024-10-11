@@ -44,21 +44,21 @@ LocalSoftstateMap::revert_delta(AddressAndKey const &addrkey,
   it->second.revert_delta(delta);
 }
 
-void 
+void
 LocalSoftstateMap::commit_round()
 {
   auto ptr = map_.take();
-  for (auto it = ptr -> begin(); it != ptr -> end(); it++) {
-    it -> second.commit_round();
+  for (auto it = ptr->begin(); it != ptr->end(); it++) {
+    it->second.commit_round();
   }
 }
 
-void 
+void
 LocalSoftstateMap::revert_round()
 {
   auto ptr = map_.take();
-  for (auto it = ptr -> begin(); it != ptr -> end(); it++) {
-    it -> second.revert_round();
+  for (auto it = ptr->begin(); it != ptr->end(); it++) {
+    it->second.revert_round();
   }
 }
 

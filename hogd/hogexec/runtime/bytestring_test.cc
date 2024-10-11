@@ -63,9 +63,11 @@ TEST_F(BytestringTest, BasicWrite)
     EXPECT_EQ(deltas[0].deltas[0].bytestring(),
               Bytestring(test::make_calldata(bstring)));
 
-    auto status = storage_clients_->write_client_.try_reserve_transaction_deltas(deltas, SHA256Hash{})();
+    auto status = storage_clients_->write_client_
+                      .try_reserve_transaction_deltas(deltas, SHA256Hash{})();
     ASSERT_EQ(status, StorageRPCError::kNone);
-    status = storage_clients_->write_client_.commit_transaction_deltas(deltas, SHA256Hash{})();
+    status = storage_clients_->write_client_.commit_transaction_deltas(
+        deltas, SHA256Hash{})();
     ASSERT_EQ(status, StorageRPCError::kNone);
   }
 
