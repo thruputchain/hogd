@@ -5,10 +5,10 @@
 #include <optional>
 #include <stdexcept>
 
-#include "x23/cleanup.h"
-
+#include "hogd/base/compiler.h"
 #include "storage_object.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
@@ -33,6 +33,8 @@ object_from_delta_class(StorageDeltaClass const &d,
   case StorageObjectType::kBytestring:
     object.bytestring() = d.bytestring();
     break;
+  case StorageObjectType::kNonnegativeInt64:
+    object.int64() = d.nnint64_set_value();
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -78,6 +80,43 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
   case StorageDeltaType::kBytestringSet:
     // nothing to do
     return StorageReserveResult::kSuccess;
+  case StorageDeltaType::kNonnegativeInt64SetAdd:
+  {
+    if (delta.nnint64().add_value >= 0) {
+      return StorageReserveResult::kSuccess;
+    }
+
+    const int64_t set_value = delta.nnint64().set_value;
+    if (set_value < 0) {
+      return StorageReserveResult::kDefiniteFailure;
+    }
+
+    int64_t expect_sub =
+        nnint64_total_subtracted.load(std::memory_order_relaxed);
+
+    while (true) {
+      int64_t desired_sub = 0;
+
+      if (__builtin_add_overflow(expect_sub, delta.nnint64().add_value,
+                                 &desired_sub)) {
+        return StorageReserveResult::kDefiniteFailure;
+      }
+
+      // Cannot overflow.
+      // set_value > 0 and desired_sub < 0.  So worst case
+      // we get 1 + INT64_MIN, which does not overflow.
+      if (set_value + desired_sub < 0) {
+        return StorageReserveResult::kDefiniteFailure;
+      }
+
+      if (nnint64_total_subtracted.compare_exchange_strong(
+              expect_sub, desired_sub, std::memory_order_relaxed)) {
+        return StorageReserveResult::kSuccess;
+      }
+
+      cpu_relax();
+    }
+  }
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -99,6 +138,19 @@ StorageObjectFrame::commit_delta(StorageDelta const &delta)
   case StorageDeltaType::kBytestringSet:
     // nothing to do
     return;
+  case StorageDeltaType::kNonnegativeInt64SetAdd:
+  {
+    if (delta.nnint64().add_value <= 0) {
+      return;
+    }
+
+    uint64_t prev_value = nnint64_total_added.fetch_add(delta.nnint64().add_value, std::memory_order_relaxed);
+
+    if (__builtin_add_overflow_p(prev_value, delta.nnint64().add_value, static_cast<uint64_t>(0))) {
+      nnint64_add_overflow_flag.store(true, std::memory_order_relaxed);
+    }
+    break;
+  }
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -118,6 +170,13 @@ StorageObjectFrame::revert_delta(StorageDelta const &delta)
   case StorageDeltaType::kBytestringSet:
     // nothing to do
     return;
+  case StorageDeltaType::kNonnegativeInt64SetAdd:
+  {
+    if (delta.nnint64().add_value < 0) {
+      nnint64_total_subtracted.fetch_sub(delta.nnint64().add_value, std::memory_order_relaxed);
+    }
+    break;
+  }
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -139,6 +198,9 @@ void
 StorageObjectFrame::clear_modifications()
 {
   deleted_last_ = false;
+  nnint64_total_subtracted = 0;
+  nnint64_total_added = 0;
+  nnint64_add_overflow_flag = false;
 }
 
 void
@@ -167,6 +229,19 @@ StorageObjectFrame::commit_round()
     committed_base_object_ = std::nullopt;
     delta_class_checker_.clear_required_type();
     return;
+  }
+
+  if (committed_base_object_ -> type() == StorageObjectType::kNonnegativeInt64)
+  {
+    const int64_t nnint64_sub = nnint64_total_subtracted;
+    const int64_t nnint64_add = nnint64_total_added;
+
+    committed_base_object_ -> int64() += nnint64_sub;
+
+    if (__builtin_add_overflow_p(committed_base_object_-> int64(),
+      nnint64_add, static_cast<int64_t>(0)) || nnint64_add_overflow_flag) {
+      committed_base_object_ -> int64() = INT64_MAX;
+    }
   }
 }
 
