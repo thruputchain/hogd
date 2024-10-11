@@ -41,27 +41,47 @@ TEST_F(BytestringTest, BasicWrite)
   StorageKey key = sha256(std::as_bytes(std::span(bytes)));
   std::vector<uint8_t> bstring = {0, 1, 2, 3, 4, 5, 6, 7};
 
-  SignedTransaction stx;
-  stx.tx.invocation.invoked_address = addr_;
-  stx.tx.invocation.method_name = 0;
-  stx.tx.invocation.gas_limit = UINT64_MAX;
-  stx.tx.invocation.calldata = test::make_calldata(key, bstring);
+  {
+    SignedTransaction stx;
+    stx.tx.invocation.invoked_address = addr_;
+    stx.tx.invocation.method_name = 0;
+    stx.tx.invocation.gas_limit = UINT64_MAX;
+    stx.tx.invocation.calldata = test::make_calldata(key, bstring);
 
-  SystemCallHandler handler(stx, *snapshot_cache_);
+    SystemCallHandler handler(stx, *snapshot_cache_);
 
-  auto res = handler.root_invoke();
+    auto res = handler.root_invoke();
 
-  EXPECT_TRUE(!!res.result);
+    EXPECT_TRUE(!!res.result);
 
-  auto deltas = handler.get_deltas();
+    auto deltas = handler.get_deltas();
 
-  ASSERT_EQ(deltas.size(), 1);
-  EXPECT_EQ(deltas[0].addr_key, AddressAndKey(addr_, key));
-  ASSERT_EQ(deltas[0].deltas.size(), 1);
-  EXPECT_EQ(deltas[0].deltas[0].bytestring(), Bytestring(test::make_calldata(bstring)));
+    ASSERT_EQ(deltas.size(), 1);
+    EXPECT_EQ(deltas[0].addr_key, AddressAndKey(addr_, key));
+    ASSERT_EQ(deltas[0].deltas.size(), 1);
+    EXPECT_EQ(deltas[0].deltas[0].bytestring(), Bytestring(test::make_calldata(bstring)));
+  }
+
+  {
+    SignedTransaction stx;
+    stx.tx.invocation.invoked_address = addr_;
+    stx.tx.invocation.method_name = 1;
+    stx.tx.invocation.gas_limit = UINT64_MAX;
+    stx.tx.invocation.calldata = test::make_calldata(key);
+
+    SystemCallHandler handler(stx, *snapshot_cache_);
+
+    auto res = handler.root_invoke();
+
+    EXPECT_TRUE(!res.result);
+
+    auto deltas = handler.get_deltas();
+
+    ASSERT_EQ(deltas.size(), 0);
+  }
 
 
-  
+
 }
 
 } // namespace hogd

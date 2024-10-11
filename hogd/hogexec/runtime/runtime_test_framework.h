@@ -14,7 +14,6 @@
 #include "x23/vec.h"
 #include "storage_interface.hh"
 
-
 namespace hogd :: test {
 
 class RuntimeTestFramework {
