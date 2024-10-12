@@ -200,7 +200,9 @@ SystemCallHandler::commit_last_call_frame(CallFrame &&frame)
       for (auto const& d : deltas) {
         std::printf("start delta\n");
         committed_delta_vec_.back().deltas.emplace_back();
-        std::printf("committed_delta_vec_.size() %lu\n", committed_delta_vec_.size());
+        std::printf("committed_delta_vec_.size() %lu .back().deltas.size() %lu\n",
+           committed_delta_vec_.size(),
+           committed_delta_vec_.back().deltas.size());
         committed_delta_vec_.back().deltas.back() = d;//push_back(d);
         std::printf("%s", std::format("d.type() {} back.type() {} \n", d.type(), committed_delta_vec_.back().deltas.back().type()).c_str());
         std::printf("stop delta\n");
