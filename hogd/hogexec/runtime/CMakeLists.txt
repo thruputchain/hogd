@@ -11,10 +11,12 @@ add_executable(
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
+  union_test.cc
 )
 target_link_libraries(
   runtime
   wasmi_lib
+  protocol
 )
 target_link_libraries(
   runtime_test
