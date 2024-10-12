@@ -405,7 +405,7 @@ private:
     if (n != index(u)) {
       destroy(u);
       try {
-        construct(u, std::forward<U>(u));
+        construct(u, std::forward<U>(other));
       } catch (...) {
         // We have to leave the object in a state where it can safely
         // be destroyed, which won't be the case after destroy(u).
