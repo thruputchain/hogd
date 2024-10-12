@@ -86,8 +86,8 @@ public:
         std::memcmp(entry.message.data(), calldata.data(), calldata.size());
     EXPECT_EQ(0, res);
     if (res != 0) {
-      std::printf(
-          std::format("detailed log eq check: {} {}\n", entry.message, calldata)
+      std::printf("%s\n",
+          std::format("detailed log eq check: {} {}", entry.message, calldata)
               .c_str());
     }
   }

@@ -231,8 +231,9 @@ StorageObjectFrame::commit_round()
 
     committed_base_object_->int64() += nnint64_sub;
 
-    if (__builtin_add_overflow_p(committed_base_object_->int64(), nnint64_add,
-                                 static_cast<int64_t>(0))) {
+    int64_t res;
+    if (__builtin_add_overflow(committed_base_object_->int64(), nnint64_add,
+                                 &res)) {
       committed_base_object_->int64() = INT64_MAX;
     }
   }

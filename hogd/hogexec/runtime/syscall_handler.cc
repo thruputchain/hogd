@@ -191,7 +191,7 @@ SystemCallHandler::commit_last_call_frame(CallFrame &&frame)
 
   for (auto const &[addr, proxy] : frame.get_storage_proxies()) {
     auto deltas = proxy->get_deltas();
-    std::printf(std::format("pushing deltas on addr {}\n", addr).c_str());
+    //std::printf(std::format("pushing deltas on addr {}\n", addr).c_str());
     if (!deltas.empty()) {
       std::printf("blah\n");
       StorageDeltaVec dv(addr, deltas);
@@ -263,7 +263,7 @@ SystemCallHandler::resolve_storage_proxy(StorageKey const &key)
 {
   AddressAndKey query(get_current_address(), key);
 
-  for (int32_t i = call_frame_stack_.size() - 1; i >= 0; i--) {
+  for (int32_t i = call_frame_stack_.size() - 2; i >= 0; i--) {
     auto *proxy = call_frame_stack_[i].try_get_storage_proxy(query);
     if (proxy) {
       call_frame_stack_.back().push_new_storage_proxy(query, *proxy);
@@ -271,8 +271,15 @@ SystemCallHandler::resolve_storage_proxy(StorageKey const &key)
     }
   }
 
+  auto* proxy = call_frame_stack_.back().try_get_storage_proxy(query);
+
+  if (proxy) {
+    return *proxy;
+  }
+
   call_frame_stack_.back().push_new_storage_proxy(
       query, StorageProxy(snapshot_cache_.try_get_object(query)));
+
   return *call_frame_stack_.back().try_get_storage_proxy(query);
 }
 

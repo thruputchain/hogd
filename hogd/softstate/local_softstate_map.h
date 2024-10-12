@@ -91,7 +91,7 @@ public:
 
 private:
   LocalSoftstateMap &local_map_;
-  LocalContractMap &local_contract_map_;
+  [[maybe_unused]] LocalContractMap &local_contract_map_;
 };
 
 static_assert(
