@@ -96,13 +96,8 @@ program myprog {
 
 enum StorageDeltaType {
   kDeleteLast = 0,
-  kBytestring = 1,
-  kNonnegativeInt64SetAdd = 2,
+  kNonnegativeInt64SetAdd = 1,
 };
-
-const kBytestringMaxLen = 4096;
-
-typedef opaque Bytestring<kBytestringMaxLen>;
 
 struct NonnegativeInt64SetAddArgs {
   hyper set_value; // int64_t
@@ -113,8 +108,6 @@ union StorageDelta switch (StorageDeltaType type)
 {
 case kDeleteLast:
   void;
-case kBytestring:
-  Bytestring bstring;
 case kNonnegativeInt64SetAdd:
   NonnegativeInt64SetAddArgs nnint64;
 };
