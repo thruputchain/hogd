@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/format.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
@@ -140,6 +141,8 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
 
   InvokeResult result = runtime->invoke(method_name, gas_limit);
 
+  std::printf("done invoke\n");
+
   // We choose _not_ to check the return code here, and instead pass it back to
   // the caller. Implicitly, this is saying that the caller is responsible for
   // checking the return code, AND that the callee is responsible for cleaning
@@ -159,6 +162,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
     }
   }
   else {
+    std::printf("start back\n");
     size_t call_frame_stack_size = call_frame_stack_.size();
 
     if (call_frame_stack_size >= 2) {
@@ -166,9 +170,13 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
           std::move(call_frame_stack_.back()));
     }
 
+    std::printf("wtf\n");
+
     if (call_frame_stack_.size() == 1) {
       commit_last_call_frame(std::move(call_frame_stack_.back()));
     }
+
+    std::printf("done back\n");
 
     call_frame_stack_.pop_back();
   }
@@ -183,9 +191,17 @@ SystemCallHandler::commit_last_call_frame(CallFrame &&frame)
 
   for (auto const &[addr, proxy] : frame.get_storage_proxies()) {
     auto deltas = proxy->get_deltas();
+    std::printf(std::format("pushing deltas on addr {}\n", addr).c_str());
     if (!deltas.empty()) {
-      committed_delta_vec_.emplace_back(addr, deltas);
+      std::printf("blah\n");
+      StorageDeltaVec dv(addr, deltas);
+      std::printf("foo\n");
+      committed_delta_vec_.emplace_back();
+      committed_delta_vec_.back() = dv;
+      //committed_delta_vec_.push_back(dv);
+      std::printf("wtf\n");
     }
+    std::printf("done loop\n");
   }
 }
 

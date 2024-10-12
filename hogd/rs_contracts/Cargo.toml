@@ -9,7 +9,8 @@ members = [
     "test_invoke_2",
     "echo",
     "test_echo",
-    "test_bytestring"
+    "test_bytestring",
+    "test_nnint64"
 
 ]
 

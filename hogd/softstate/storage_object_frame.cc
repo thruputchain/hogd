@@ -83,6 +83,7 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
   case StorageDeltaType::kNonnegativeInt64SetAdd:
   {
     if (delta.nnint64().add_value >= 0) {
+      nnint64_total_added.add(delta.nnint64().add_value);
       return StorageReserveResult::kSuccess;
     }
 
@@ -139,18 +140,8 @@ StorageObjectFrame::commit_delta(StorageDelta const &delta)
     // nothing to do
     return;
   case StorageDeltaType::kNonnegativeInt64SetAdd:
-  {
-    if (delta.nnint64().add_value <= 0) {
-      return;
-    }
-
-    uint64_t prev_value = nnint64_total_added.fetch_add(delta.nnint64().add_value, std::memory_order_relaxed);
-
-    if (__builtin_add_overflow_p(prev_value, delta.nnint64().add_value, static_cast<uint64_t>(0))) {
-      nnint64_add_overflow_flag.store(true, std::memory_order_relaxed);
-    }
-    break;
-  }
+    // nothing to do;
+    return;
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -173,7 +164,11 @@ StorageObjectFrame::revert_delta(StorageDelta const &delta)
   case StorageDeltaType::kNonnegativeInt64SetAdd:
   {
     if (delta.nnint64().add_value < 0) {
-      nnint64_total_subtracted.fetch_sub(delta.nnint64().add_value, std::memory_order_relaxed);
+      nnint64_total_subtracted.fetch_sub(delta.nnint64().add_value,
+                                         std::memory_order_relaxed);
+    }
+    else {
+      nnint64_total_added.sub(delta.nnint64().add_value);
     }
     break;
   }
@@ -199,8 +194,7 @@ StorageObjectFrame::clear_modifications()
 {
   deleted_last_ = false;
   nnint64_total_subtracted = 0;
-  nnint64_total_added = 0;
-  nnint64_add_overflow_flag = false;
+  nnint64_total_added.clear();
 }
 
 void
@@ -231,16 +225,15 @@ StorageObjectFrame::commit_round()
     return;
   }
 
-  if (committed_base_object_ -> type() == StorageObjectType::kNonnegativeInt64)
-  {
+  if (committed_base_object_->type() == StorageObjectType::kNonnegativeInt64) {
     const int64_t nnint64_sub = nnint64_total_subtracted;
-    const int64_t nnint64_add = nnint64_total_added;
+    const uint64_t nnint64_add = nnint64_total_added.get_capped();
 
-    committed_base_object_ -> int64() += nnint64_sub;
+    committed_base_object_->int64() += nnint64_sub;
 
-    if (__builtin_add_overflow_p(committed_base_object_-> int64(),
-      nnint64_add, static_cast<int64_t>(0)) || nnint64_add_overflow_flag) {
-      committed_base_object_ -> int64() = INT64_MAX;
+    if (__builtin_add_overflow_p(committed_base_object_->int64(), nnint64_add,
+                                 static_cast<int64_t>(0))) {
+      committed_base_object_->int64() = INT64_MAX;
     }
   }
 }

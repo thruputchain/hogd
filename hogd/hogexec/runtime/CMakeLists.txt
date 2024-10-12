@@ -64,6 +64,7 @@ add_executable(
   invoke_test.cc
   return_test.cc
   bytestring_test.cc
+  nnint64_test.cc
 )
 
 target_link_libraries(

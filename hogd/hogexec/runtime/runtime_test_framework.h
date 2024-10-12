@@ -40,13 +40,6 @@ public:
   std::unique_ptr<write_client_t> write_client_;
   std::unique_ptr<read_client_t> read_client_;
 
-  /*struct Bizarre {
-    StorageSnapshotCache::client_t read_client_;
-    write_client_t write_client_;
-  };
-
-  std::unique_ptr<Bizarre> storage_clients_; */
-
   auto &get_read_client() { return *read_client_; }
 
   auto &get_write_client() { return *write_client_; }
@@ -68,10 +61,6 @@ public:
     rpc_config_t server_config = x23::rpc_stream_logged(cp_, socket_fds_[0]);
     rpc_config_t client_config = x23::rpc_stream_logged(cp_, socket_fds_[1]);
 
-    /*storage_clients_ = std::unique_ptr<Bizarre>(
-        new Bizarre(client_config.template client<StorageReadInterfaceV1>(),
-                    client_config.template client<StorageWriteInterfaceV1>()));
-     */
     read_client_ = std::make_unique<read_client_t>(
         client_config.template client<StorageReadInterfaceV1>());
     write_client_ = std::make_unique<write_client_t>(

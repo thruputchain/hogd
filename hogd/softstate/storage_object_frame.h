@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "hogd/softstate/atomic_uint128.h"
 #include "hogd/softstate/delta_class_checker.h"
 #include "storage_object.hh"
 
@@ -32,8 +33,7 @@ private:
   std::atomic<bool> deleted_last_;
 
   std::atomic<int64_t> nnint64_total_subtracted = 0;
-  std::atomic<uint64_t> nnint64_total_added = 0;
-  std::atomic<bool> nnint64_add_overflow_flag = false;
+  AtomicUint128 nnint64_total_added;
 
   void clear_modifications();
 };
