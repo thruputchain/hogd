@@ -4,9 +4,8 @@
 
 namespace hogd {
 
-namespace {
+namespace test {
 
-[[maybe_unused]]
 StorageDelta
 make_bytestring_set(Bytestring const &string)
 {
@@ -23,10 +22,9 @@ make_nnint64_set_add(int64_t set, int64_t add)
   out.type(StorageDeltaType::kNonnegativeInt64SetAdd);
   out.nnint64() = NonnegativeInt64SetAddArgs{set, add};
   return out;
-} 
-
 }
 
+}
 std::unique_ptr<StorageDeltaVec> dv;
 
 auto const& get_dv() {
@@ -40,19 +38,16 @@ auto const& get_deltas() {
 
 TEST(X23UnionTest, ShouldWorkFine)
 {
-  StorageDeltaVecList dvlist;
 
-  Bytestring bstring;
-  bstring.push_back(12);
+  StorageDeltaVec dv;
 
-  dv = std::make_unique<StorageDeltaVec>();
-  dv->deltas.push_back(make_nnint64_set_add(100, 100));
+  dv.deltas.emplace_back();
 
-  StorageDeltaVec vec2(get_dv().addr_key, get_deltas());
+  StorageDelta d = test::make_nnint64_set_add(100, 10);
 
-  dvlist.push_back(get_dv());
+  dv.deltas.back() = d;
 
-  dvlist.emplace_back(vec2.addr_key, vec2.deltas);
+  EXPECT_EQ(d.type(), dv.deltas.back().type());
 
 }
 
