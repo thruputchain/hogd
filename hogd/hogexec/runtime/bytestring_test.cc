@@ -63,6 +63,8 @@ TEST_F(BytestringTest, BasicWrite)
     EXPECT_EQ(deltas[0].deltas[0].bytestring(),
               Bytestring(test::make_calldata(bstring)));
 
+    std::printf("passed check\n");
+
     auto status =
         get_write_client().try_reserve_transaction_deltas(deltas,
                                                           SHA256Hash{})();

@@ -169,10 +169,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
       call_frame_stack_[call_frame_stack_size - 2].commit_successful_child_call(
           std::move(call_frame_stack_.back()));
     }
-
-    std::printf("wtf\n");
-
-    if (call_frame_stack_.size() == 1) {
+    else if (call_frame_stack_.size() == 1) {
       commit_last_call_frame(std::move(call_frame_stack_.back()));
     }
 
@@ -180,6 +177,8 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
 
     call_frame_stack_.pop_back();
   }
+
+  std::printf("done overall\n");
 
   return result;
 }
@@ -194,10 +193,18 @@ SystemCallHandler::commit_last_call_frame(CallFrame &&frame)
     //std::printf(std::format("pushing deltas on addr {}\n", addr).c_str());
     if (!deltas.empty()) {
       std::printf("blah\n");
-      StorageDeltaVec dv(addr, deltas);
+      //StorageDeltaVec dv(addr, deltas);
       std::printf("foo\n");
       committed_delta_vec_.emplace_back();
-      committed_delta_vec_.back() = dv;
+      committed_delta_vec_.back().addr_key = addr;
+      for (auto const& d : deltas) {
+        std::printf("start delta\n");
+        committed_delta_vec_.back().deltas.emplace_back();
+        std::printf("committed_delta_vec_.size() %lu\n", committed_delta_vec_.size());
+        committed_delta_vec_.back().deltas.back() = d;//push_back(d);
+        std::printf("%s", std::format("d.type() {} back.type() {} \n", d.type(), committed_delta_vec_.back().deltas.back().type()).c_str());
+        std::printf("stop delta\n");
+      }
       //committed_delta_vec_.push_back(dv);
       std::printf("wtf\n");
     }
