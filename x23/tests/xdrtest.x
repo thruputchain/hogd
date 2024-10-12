@@ -92,3 +92,25 @@ program myprog {
     coloru takes_recursive(test_recursive, fix_12) = 5;
   } = 1;
 } = 3123123;
+
+
+enum StorageDeltaType {
+  kDeleteLast = 0,
+  kNonnegativeInt64SetAdd = 1,
+};
+
+struct NonnegativeInt64SetAddArgs {
+  hyper set_value; // int64_t
+  hyper add_value; // int64_t
+};
+
+union StorageDelta switch (StorageDeltaType type)
+{
+case kDeleteLast:
+  void;
+case kNonnegativeInt64SetAdd:
+  NonnegativeInt64SetAddArgs nnint64;
+};
+
+typedef StorageDelta StorageDeltaVec<>;
+

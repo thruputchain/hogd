@@ -374,7 +374,7 @@ struct x23::xdr_meta<struct {1}> {{
   bottom_ += "};\n";
 
   if (!namespaces_.empty())
-    bottom_ += format("\nnamespace {} {{", ns());
+    bottom_ += format("\nnamespace {} {{\n", ns());
 
   if (scopes_.size() == 1)
     bottom_ += std::format(R"(inline std::partial_ordering
