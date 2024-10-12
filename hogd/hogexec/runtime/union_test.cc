@@ -6,6 +6,7 @@ namespace hogd {
 
 namespace {
 
+[[maybe_unused]]
 StorageDelta
 make_bytestring_set(Bytestring const &string)
 {
@@ -36,7 +37,8 @@ TEST(X23UnionTest, ShouldWorkFine)
 
   StorageDeltaVec vec;
   vec.deltas.push_back(make_nnint64_set_add(100, 100));
-  vec.deltas.push_back(make_bytestring_set(bstring));
+
+  StorageDeltaVec vec2(vec.addr_key, vec.deltas);
 
   dvlist.push_back(vec);
 
