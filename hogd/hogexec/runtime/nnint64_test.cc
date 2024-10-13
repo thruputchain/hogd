@@ -161,9 +161,19 @@ TEST_F(NNInt64Test, NegativeSet)
     EXPECT_EQ(deltas.size(), 0);
   };
 
+  auto expect_apply_fail = [&](SystemCallHandler handler) {
+    EXPECT_TRUE(!!handler.root_invoke().result);
+
+    auto const &deltas = handler.get_deltas();
+
+    EXPECT_EQ(deltas.size(), 1);
+    EXPECT_NE(StorageRPCError::kNone, get_write_client().try_reserve_transaction_deltas(deltas, SHA256Hash{})());
+  };
+
   expect_success(make_set_add_tx(-100, 30));
   expect_success(make_set_add_tx(-100, 0));
   expect_fail(make_set_add_tx(-100, -10));
+  expect_apply_fail(make_set_add_tx(100, 10));
 
   commit_round();
 
