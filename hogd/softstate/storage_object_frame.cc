@@ -35,7 +35,6 @@ object_from_delta_class(StorageDeltaClass const &d,
     break;
   case StorageObjectType::kNonnegativeInt64:
     object.int64() = d.nnint64_set_value();
-    std::printf("d.nnint64_set_value was %lld\n", d.nnint64_set_value());
     break;
   default:
     throw std::runtime_error("unimplemented object_from_delta_class");
@@ -88,7 +87,6 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
     return StorageReserveResult::kSuccess;
   case StorageDeltaType::kNonnegativeInt64SetAdd:
   {
-    std::printf("try reserve delta on add_value %lld\n", delta.nnint64().add_value);
     if (delta.nnint64().add_value >= 0) {
       nnint64_total_added.add(delta.nnint64().add_value);
       return StorageReserveResult::kSuccess;
@@ -194,7 +192,6 @@ StorageObjectFrame::StorageObjectFrame(
 std::optional<StorageObject> const &
 StorageObjectFrame::get_committed_object() const
 {
-  std::printf("got committed object\n");
   return committed_base_object_;
 }
 

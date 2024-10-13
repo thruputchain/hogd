@@ -242,21 +242,13 @@ StorageProxy::get_deltas() const
     out.push_back(make_delete_last());
   }
 
-  std::printf("here 123\n");
-
   if (set_bytestring_arg_) {
-    std::printf("made bytestring set\n");
     out.push_back(make_bytestring_set(*set_bytestring_arg_));
   }
 
-  std::printf("blah\n");
-
   if (set_nnint64_arg_) {
-    std::printf("made nnint64 set add\n");
     out.push_back(make_nnint64_set_add(*set_nnint64_arg_, nnint64_add_sum_));
   }
-
-  std::printf("wat\n");
 
   // TODO(geoff) others
   return out;

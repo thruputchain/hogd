@@ -54,11 +54,7 @@ TEST_F(NNInt64Test, SetAddPosValue)
 
     EXPECT_TRUE(!!res.result);
 
-    std::printf("wat\n");
-
     auto deltas = handler.get_deltas();
-
-    std::printf("made deltas\n");
 
     ASSERT_EQ(deltas.size(), 1);
     EXPECT_EQ(deltas[0].addr_key, AddressAndKey(addr_, key));
@@ -74,7 +70,6 @@ TEST_F(NNInt64Test, SetAddPosValue)
         get_write_client().commit_transaction_deltas(deltas, SHA256Hash{})();
     ASSERT_EQ(status, StorageRPCError::kNone);
   }
-  std::printf("got here\n");
 
   {
     SignedTransaction stx;
