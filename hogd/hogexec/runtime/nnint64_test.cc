@@ -167,7 +167,9 @@ TEST_F(NNInt64Test, NegativeSet)
     auto const &deltas = handler.get_deltas();
 
     EXPECT_EQ(deltas.size(), 1);
-    EXPECT_NE(StorageRPCError::kNone, get_write_client().try_reserve_transaction_deltas(deltas, SHA256Hash{})());
+    EXPECT_NE(StorageRPCError::kNone,
+              get_write_client().try_reserve_transaction_deltas(
+                  deltas, SHA256Hash{})());
   };
 
   expect_success(make_set_add_tx(-100, 30));
