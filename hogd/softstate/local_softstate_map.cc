@@ -1,8 +1,10 @@
 #include "hogd/softstate/local_softstate_map.h"
 
 #include <cassert>
+#include <optional>
 
 #include "storage_object.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -48,8 +50,8 @@ void
 LocalSoftstateMap::commit_round()
 {
   auto ptr = map_.take();
-  for (auto it = ptr->begin(); it != ptr->end(); it++) {
-    it->second.commit_round();
+  for (auto& [_, frame] : *ptr) {
+    frame.commit_round();
   }
 }
 

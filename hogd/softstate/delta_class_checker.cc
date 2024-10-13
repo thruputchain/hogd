@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "storage_object.hh"
+#include "types.hh"
 
 namespace hogd {
 
