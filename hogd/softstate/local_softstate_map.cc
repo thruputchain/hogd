@@ -169,7 +169,7 @@ LocalSoftstateWriteServer::try_reserve_transaction_deltas(
   ssize_t i = 0;
   ssize_t j = 0;
 
-  for (; i < deltas.size() && (!failed); i++) {
+  for (; i < deltas.size(); i++) {
     auto const &dv = deltas[i];
     for (j = 0; j < dv.deltas.size(); j++) {
       auto res = local_map_.try_reserve_delta(dv.addr_key, dv.deltas[j]);
@@ -179,6 +179,9 @@ LocalSoftstateWriteServer::try_reserve_transaction_deltas(
         // the failed one is a no-op
         break;
       }
+    }
+    if (failed) {
+      break;
     }
   }
 

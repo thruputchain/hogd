@@ -16,12 +16,13 @@ target_link_libraries(
 add_executable(
   softstate_test
   hashset_deduplicator_tests.cc
+  test_atomic_uint128.cc
 )
 
 target_link_libraries(
   softstate_test
   softstate
-  GTest::gtest_main
+  GTest::gtest
 )
 gtest_discover_tests(softstate_test)
 

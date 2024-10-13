@@ -5,6 +5,7 @@
 // when being actively written.
 
 #include <atomic>
+#include <cstdio>
 #include <cstdint>
 
 namespace hogd {

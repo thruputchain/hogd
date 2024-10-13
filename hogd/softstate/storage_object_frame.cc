@@ -35,8 +35,10 @@ object_from_delta_class(StorageDeltaClass const &d,
     break;
   case StorageObjectType::kNonnegativeInt64:
     object.int64() = d.nnint64_set_value();
+    std::printf("d.nnint64_set_value was %lld\n", d.nnint64_set_value());
+    break;
   default:
-    throw std::runtime_error("unimplemented");
+    throw std::runtime_error("unimplemented object_from_delta_class");
   }
 
   return object;
@@ -54,8 +56,12 @@ delta_class_from_delta(StorageDelta const &delta)
     out.type(StorageObjectType::kBytestring);
     out.bytestring() = delta.bytestring();
     break;
+  case StorageDeltaType::kNonnegativeInt64SetAdd:
+    out.type(StorageObjectType::kNonnegativeInt64);
+    out.nnint64_set_value() = delta.nnint64().set_value;
+    break;
   default:
-    throw std::runtime_error("unimplemented");
+    throw std::runtime_error("unimplemented delta_class_from_delta");
   }
   return out;
 }
@@ -82,13 +88,14 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
     return StorageReserveResult::kSuccess;
   case StorageDeltaType::kNonnegativeInt64SetAdd:
   {
+    std::printf("try reserve delta on add_value %lld\n", delta.nnint64().add_value);
     if (delta.nnint64().add_value >= 0) {
       nnint64_total_added.add(delta.nnint64().add_value);
       return StorageReserveResult::kSuccess;
     }
 
     const int64_t set_value = delta.nnint64().set_value;
-    if (set_value < 0) {
+    if (set_value < 0) { // and add_value < 0
       return StorageReserveResult::kDefiniteFailure;
     }
 
@@ -119,7 +126,7 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
     }
   }
   default:
-    throw std::runtime_error("unimplemented");
+    throw std::runtime_error("unimplemented try_reserve_delta");
   }
 }
 
@@ -143,7 +150,7 @@ StorageObjectFrame::commit_delta(StorageDelta const &delta)
     // nothing to do;
     return;
   default:
-    throw std::runtime_error("unimplemented");
+    throw std::runtime_error("unimplemented commit_delta");
   }
 }
 void
@@ -181,11 +188,13 @@ StorageObjectFrame::StorageObjectFrame(
     std::optional<StorageObject> const &snapshot_state)
   : committed_base_object_(snapshot_state),
     delta_class_checker_(snapshot_state), deleted_last_(false)
-{}
+{
+}
 
 std::optional<StorageObject> const &
 StorageObjectFrame::get_committed_object() const
 {
+  std::printf("got committed object\n");
   return committed_base_object_;
 }
 
@@ -235,6 +244,8 @@ StorageObjectFrame::commit_round()
     if (__builtin_add_overflow(committed_base_object_->int64(), nnint64_add,
                                  &res)) {
       committed_base_object_->int64() = INT64_MAX;
+    } else {
+      committed_base_object_->int64() += nnint64_add;
     }
   }
 }

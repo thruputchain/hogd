@@ -95,11 +95,11 @@ TEST_F(NNInt64Test, SetAddPosValue)
     EXPECT_EQ(deltas[0].addr_key, AddressAndKey(addr_, key));
     ASSERT_EQ(deltas[0].deltas.size(), 1);
     EXPECT_EQ(deltas[0].deltas[0].nnint64(),
-              NonnegativeInt64SetAddArgs(100, 10));
+              NonnegativeInt64SetAddArgs(10, 10));
 
     ASSERT_NE(StorageRPCError::kNone, 
       get_write_client().try_reserve_transaction_deltas(deltas, SHA256Hash{})());
-  }
+  } 
 
   commit_round();
 
@@ -125,7 +125,7 @@ TEST_F(NNInt64Test, SetAddPosValue)
     ASSERT_EQ(logs.size(), 1);
 
     EXPECT_EQ(logs[0].source_address, addr_);
-    check_log_eq(logs[0], test::make_calldata(100LL));
+    check_log_eq(logs[0], test::make_calldata(110LL));
   }
 }
 
