@@ -163,26 +163,54 @@ LocalSoftstateReadServer::get_deployment(ContractAddress const &addr)
   co_return out;
 }
 
+StorageRPCError
+LocalSoftstateWriteServer::try_reserve_transaction_deltas(
+  StorageDeltaVec const& dv) {
+
+  ssize_t i = 0;
+  bool failed = false;
+  for (; i < dv.deltas.size(); i++) {
+    auto res = local_map_.try_reserve_delta(dv.addr_key, dv.deltas[i]);
+    if (res != StorageReserveResult::kSuccess) {
+      failed = true;
+      i--;
+      break;
+    }
+  }
+
+  if (failed) {
+    for (; i >= 0; i--) {
+      local_map_.revert_delta(dv.addr_key, dv.deltas[i]);
+    }
+    return StorageRPCError::kApplyFailed;
+  }
+  return StorageRPCError::kNone;
+}
+
+void
+LocalSoftstateWriteServer::revert_transaction_deltas(
+  StorageDeltaVec const& dv) {
+
+  for (auto const& delta : dv.deltas)
+  {
+    local_map_.revert_delta(dv.addr_key, delta);
+  }
+}
+
 x23::Async<StorageRPCError>
 LocalSoftstateWriteServer::try_reserve_transaction_deltas(
     StorageDeltaVecList const &deltas, SHA256Hash const &expected_block_hash)
 {
-  bool failed = false;
   ssize_t i = 0;
-  ssize_t j = 0;
+
+  bool failed = false;
 
   for (; i < deltas.size(); i++) {
     auto const &dv = deltas[i];
-    for (j = 0; j < dv.deltas.size(); j++) {
-      auto res = local_map_.try_reserve_delta(dv.addr_key, dv.deltas[j]);
-
-      if (res != StorageReserveResult::kSuccess) {
-        failed = true;
-        // the failed one is a no-op
-        break;
-      }
-    }
-    if (failed) {
+    auto res = try_reserve_transaction_deltas(dv);
+    if (res != StorageRPCError::kNone) {
+      failed = true;
+      i--;
       break;
     }
   }
@@ -191,15 +219,7 @@ LocalSoftstateWriteServer::try_reserve_transaction_deltas(
     // cleanup
     for (ssize_t ii = 0; ii <= i; ii++) {
       auto const &dv = deltas[ii];
-
-      ssize_t jmax = dv.deltas.size();
-      if (ii == i) {
-        jmax = j - 1;
-      }
-
-      for (ssize_t jj = 0; jj < jmax; jj++) {
-        local_map_.revert_delta(dv.addr_key, dv.deltas[jj]);
-      }
+      revert_transaction_deltas(dv);
     }
     co_return StorageRPCError::kApplyFailed;
   }

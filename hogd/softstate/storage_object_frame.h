@@ -32,8 +32,8 @@ private:
 
   std::atomic<bool> deleted_last_;
 
-  std::atomic<int64_t> nnint64_total_subtracted = 0;
-  AtomicUint128 nnint64_total_added;
+  std::atomic<int64_t> nnint64_total_subtracted_ = 0;
+  AtomicUint128 nnint64_total_added_;
 
   void clear_modifications();
 };

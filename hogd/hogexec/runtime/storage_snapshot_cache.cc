@@ -5,9 +5,6 @@
 #include <optional>
 #include <span>
 
-#include "hogd/crypto/crypto.h"
-#include "x23/serialize.h"
-
 #include "contract.hh"
 #include "storage_interface.hh"
 #include "storage_object.hh"

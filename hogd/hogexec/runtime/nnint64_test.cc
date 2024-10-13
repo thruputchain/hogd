@@ -124,4 +124,68 @@ TEST_F(NNInt64Test, SetAddPosValue)
   }
 }
 
+TEST_F(NNInt64Test, NegativeSet)
+{
+  std::vector<uint8_t> bytes = {0, 1, 2, 3};
+  StorageKey key = sha256(std::as_bytes(std::span(bytes)));
+
+  auto make_set_add_tx = [&] (int64_t set, int64_t add) {
+    SignedTransaction stx;
+    stx.tx.invocation.invoked_address = addr_;
+    stx.tx.invocation.method_name = 0;
+    stx.tx.invocation.gas_limit = UINT64_MAX;
+    stx.tx.invocation.calldata = test::make_calldata(key, set, add);
+
+    return SystemCallHandler(stx, *snapshot_cache_);
+  };
+
+  auto expect_success = [&] (SystemCallHandler handler) {
+    EXPECT_TRUE(!!handler.root_invoke().result);
+
+    auto const& deltas = handler.get_deltas();
+
+    auto status =
+        get_write_client().try_reserve_transaction_deltas(deltas,
+                                                          SHA256Hash{})();
+    ASSERT_EQ(status, StorageRPCError::kNone);
+    status =
+        get_write_client().commit_transaction_deltas(deltas, SHA256Hash{})();
+    ASSERT_EQ(status, StorageRPCError::kNone);
+  };
+
+   auto expect_fail = [&] (SystemCallHandler handler) {
+    EXPECT_FALSE(!!handler.root_invoke().result);
+
+    auto const& deltas = handler.get_deltas();
+
+    EXPECT_EQ(deltas.size(), 0);
+  };
+
+  expect_success(make_set_add_tx(-100, 30));
+  expect_success(make_set_add_tx(-100, 0));
+  expect_fail(make_set_add_tx(-100, -10));
+
+  commit_round();
+
+  SignedTransaction stx;
+  stx.tx.invocation.invoked_address = addr_;
+  stx.tx.invocation.method_name = 1;
+  stx.tx.invocation.gas_limit = UINT64_MAX;
+  stx.tx.invocation.calldata = test::make_calldata(key);
+
+  SystemCallHandler handler(stx, *snapshot_cache_);
+
+  auto res = handler.root_invoke();
+
+  EXPECT_TRUE(!!res.result);
+
+  auto logs = handler.get_logs();
+
+  ASSERT_EQ(logs.size(), 1);
+
+  EXPECT_EQ(logs[0].source_address, addr_);
+  check_log_eq(logs[0], test::make_calldata(-70LL));
+}
+
+
 } // namespace hogd

@@ -88,7 +88,7 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
   case StorageDeltaType::kNonnegativeInt64SetAdd:
   {
     if (delta.nnint64().add_value >= 0) {
-      nnint64_total_added.add(delta.nnint64().add_value);
+      nnint64_total_added_.add(delta.nnint64().add_value);
       return StorageReserveResult::kSuccess;
     }
 
@@ -98,7 +98,7 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
     }
 
     int64_t expect_sub =
-        nnint64_total_subtracted.load(std::memory_order_relaxed);
+        nnint64_total_subtracted_.load(std::memory_order_relaxed);
 
     while (true) {
       int64_t desired_sub = 0;
@@ -115,7 +115,7 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
         return StorageReserveResult::kDefiniteFailure;
       }
 
-      if (nnint64_total_subtracted.compare_exchange_strong(
+      if (nnint64_total_subtracted_.compare_exchange_strong(
               expect_sub, desired_sub, std::memory_order_relaxed)) {
         return StorageReserveResult::kSuccess;
       }
@@ -169,11 +169,11 @@ StorageObjectFrame::revert_delta(StorageDelta const &delta)
   case StorageDeltaType::kNonnegativeInt64SetAdd:
   {
     if (delta.nnint64().add_value < 0) {
-      nnint64_total_subtracted.fetch_sub(delta.nnint64().add_value,
+      nnint64_total_subtracted_.fetch_sub(delta.nnint64().add_value,
                                          std::memory_order_relaxed);
     }
     else {
-      nnint64_total_added.sub(delta.nnint64().add_value);
+      nnint64_total_added_.sub(delta.nnint64().add_value);
     }
     break;
   }
@@ -199,8 +199,8 @@ void
 StorageObjectFrame::clear_modifications()
 {
   deleted_last_ = false;
-  nnint64_total_subtracted = 0;
-  nnint64_total_added.clear();
+  nnint64_total_subtracted_ = 0;
+  nnint64_total_added_.clear();
 }
 
 void
@@ -232,8 +232,8 @@ StorageObjectFrame::commit_round()
   }
 
   if (committed_base_object_->type() == StorageObjectType::kNonnegativeInt64) {
-    const int64_t nnint64_sub = nnint64_total_subtracted;
-    const uint64_t nnint64_add = nnint64_total_added.get_capped();
+    const int64_t nnint64_sub = nnint64_total_subtracted_;
+    const uint64_t nnint64_add = nnint64_total_added_.get_capped();
 
     committed_base_object_->int64() += nnint64_sub;
 

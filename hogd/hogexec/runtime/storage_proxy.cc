@@ -8,6 +8,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "x23/vec.h"
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "types.hh"
