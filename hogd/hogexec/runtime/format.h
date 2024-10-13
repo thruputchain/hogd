@@ -14,7 +14,8 @@
 template<size_t N> struct std::formatter<std::array<unsigned char, N>> {
   constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
-  static auto format(const std::array<uint8_t, N> &obj, std::format_context &ctx)
+  static auto format(const std::array<uint8_t, N> &obj,
+                     std::format_context &ctx)
   {
     auto out = ctx.out();
     for (auto v : obj) {
@@ -24,12 +25,10 @@ template<size_t N> struct std::formatter<std::array<unsigned char, N>> {
   }
 };
 
-template<>
-struct std::formatter<::hogd::AddressAndKey> {
+template<> struct std::formatter<::hogd::AddressAndKey> {
   constexpr static auto parse(format_parse_context &ctx) { return ctx.begin(); }
 
-  static auto format(const ::hogd::AddressAndKey &v,
-                     std::format_context &ctx)
+  static auto format(const ::hogd::AddressAndKey &v, std::format_context &ctx)
   {
     return std::format_to(ctx.out(), "Address {} Key {}", v.address, v.key);
   }

@@ -10,8 +10,10 @@ pub extern "C" fn do_set_add() -> i32 {
 
     let key: sdk::StorageKey = calldata[0..32].try_into().unwrap();
 
-    let set_value: i64 = i64::from_le_bytes(calldata[32..40].try_into().unwrap());
-    let add_value: i64 = i64::from_le_bytes(calldata[40..48].try_into().unwrap());
+    let set_value: i64 =
+        i64::from_le_bytes(calldata[32..40].try_into().unwrap());
+    let add_value: i64 =
+        i64::from_le_bytes(calldata[40..48].try_into().unwrap());
 
     sdk::NonnegativeInt64SetAdd(&key, set_value, add_value).unwrap();
 

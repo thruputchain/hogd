@@ -170,7 +170,7 @@ StorageObjectFrame::revert_delta(StorageDelta const &delta)
   {
     if (delta.nnint64().add_value < 0) {
       nnint64_total_subtracted_.fetch_sub(delta.nnint64().add_value,
-                                         std::memory_order_relaxed);
+                                          std::memory_order_relaxed);
     }
     else {
       nnint64_total_added_.sub(delta.nnint64().add_value);
@@ -186,8 +186,7 @@ StorageObjectFrame::StorageObjectFrame(
     std::optional<StorageObject> const &snapshot_state)
   : committed_base_object_(snapshot_state),
     delta_class_checker_(snapshot_state), deleted_last_(false)
-{
-}
+{}
 
 std::optional<StorageObject> const &
 StorageObjectFrame::get_committed_object() const
@@ -239,9 +238,10 @@ StorageObjectFrame::commit_round()
 
     int64_t res;
     if (__builtin_add_overflow(committed_base_object_->int64(), nnint64_add,
-                                 &res)) {
+                               &res)) {
       committed_base_object_->int64() = INT64_MAX;
-    } else {
+    }
+    else {
       committed_base_object_->int64() += nnint64_add;
     }
   }

@@ -50,7 +50,7 @@ void
 LocalSoftstateMap::commit_round()
 {
   auto ptr = map_.take();
-  for (auto& [_, frame] : *ptr) {
+  for (auto &[_, frame] : *ptr) {
     frame.commit_round();
   }
 }
@@ -165,7 +165,8 @@ LocalSoftstateReadServer::get_deployment(ContractAddress const &addr)
 
 StorageRPCError
 LocalSoftstateWriteServer::try_reserve_transaction_deltas(
-  StorageDeltaVec const& dv) {
+    StorageDeltaVec const &dv)
+{
 
   ssize_t i = 0;
   bool failed = false;
@@ -188,11 +189,10 @@ LocalSoftstateWriteServer::try_reserve_transaction_deltas(
 }
 
 void
-LocalSoftstateWriteServer::revert_transaction_deltas(
-  StorageDeltaVec const& dv) {
+LocalSoftstateWriteServer::revert_transaction_deltas(StorageDeltaVec const &dv)
+{
 
-  for (auto const& delta : dv.deltas)
-  {
+  for (auto const &delta : dv.deltas) {
     local_map_.revert_delta(dv.addr_key, delta);
   }
 }

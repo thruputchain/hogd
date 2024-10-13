@@ -11,12 +11,12 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/format.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "hogd/hogexec/runtime/format.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
@@ -256,7 +256,7 @@ SystemCallHandler::resolve_storage_proxy(StorageKey const &key)
     }
   }
 
-  auto* proxy = call_frame_stack_.back().try_get_storage_proxy(query);
+  auto *proxy = call_frame_stack_.back().try_get_storage_proxy(query);
 
   if (proxy) {
     return *proxy;

@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <cstdint>
 
 #include "hogd/softstate/atomic_uint128.h"
 

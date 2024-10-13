@@ -20,8 +20,7 @@
 
 namespace hogd {
 
-class NNInt64Test : public ::testing::Test,
-                       public test::RuntimeTestFramework {
+class NNInt64Test : public ::testing::Test, public test::RuntimeTestFramework {
 protected:
   void SetUp() override
   {
@@ -92,9 +91,10 @@ TEST_F(NNInt64Test, SetAddPosValue)
     EXPECT_EQ(deltas[0].deltas[0].nnint64(),
               NonnegativeInt64SetAddArgs(10, 10));
 
-    ASSERT_NE(StorageRPCError::kNone, 
-      get_write_client().try_reserve_transaction_deltas(deltas, SHA256Hash{})());
-  } 
+    ASSERT_NE(StorageRPCError::kNone,
+              get_write_client().try_reserve_transaction_deltas(
+                  deltas, SHA256Hash{})());
+  }
 
   commit_round();
 
@@ -129,7 +129,7 @@ TEST_F(NNInt64Test, NegativeSet)
   std::vector<uint8_t> bytes = {0, 1, 2, 3};
   StorageKey key = sha256(std::as_bytes(std::span(bytes)));
 
-  auto make_set_add_tx = [&] (int64_t set, int64_t add) {
+  auto make_set_add_tx = [&](int64_t set, int64_t add) {
     SignedTransaction stx;
     stx.tx.invocation.invoked_address = addr_;
     stx.tx.invocation.method_name = 0;
@@ -139,10 +139,10 @@ TEST_F(NNInt64Test, NegativeSet)
     return SystemCallHandler(stx, *snapshot_cache_);
   };
 
-  auto expect_success = [&] (SystemCallHandler handler) {
+  auto expect_success = [&](SystemCallHandler handler) {
     EXPECT_TRUE(!!handler.root_invoke().result);
 
-    auto const& deltas = handler.get_deltas();
+    auto const &deltas = handler.get_deltas();
 
     auto status =
         get_write_client().try_reserve_transaction_deltas(deltas,
@@ -153,10 +153,10 @@ TEST_F(NNInt64Test, NegativeSet)
     ASSERT_EQ(status, StorageRPCError::kNone);
   };
 
-   auto expect_fail = [&] (SystemCallHandler handler) {
+  auto expect_fail = [&](SystemCallHandler handler) {
     EXPECT_FALSE(!!handler.root_invoke().result);
 
-    auto const& deltas = handler.get_deltas();
+    auto const &deltas = handler.get_deltas();
 
     EXPECT_EQ(deltas.size(), 0);
   };
@@ -186,6 +186,5 @@ TEST_F(NNInt64Test, NegativeSet)
   EXPECT_EQ(logs[0].source_address, addr_);
   check_log_eq(logs[0], test::make_calldata(-70LL));
 }
-
 
 } // namespace hogd

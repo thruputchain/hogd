@@ -8,10 +8,10 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "x23/vec.h"
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -39,7 +39,8 @@ make_nnint64_set_add(int64_t set, int64_t add)
 {
   StorageDelta out;
   out.type(StorageDeltaType::kNonnegativeInt64SetAdd);
-  out.nnint64() = NonnegativeInt64SetAddArgs{.set_value = set, .add_value = add};
+  out.nnint64() =
+      NonnegativeInt64SetAddArgs{.set_value = set, .add_value = add};
   return out;
 }
 
