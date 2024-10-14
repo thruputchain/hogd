@@ -84,6 +84,10 @@ private:
   std::vector<CallFrame> call_frame_stack_;
   std::map<ContractAddress, RuntimeCacheEntry> runtimes_;
 
+  std::map<ContractAddress, SHA256Hash> new_deployments_;
+  const std::map<SHA256Hash, std::shared_ptr<const Contract>>
+      newly_created_contracts_;
+
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;
   StorageDeltaVecList committed_delta_vec_;

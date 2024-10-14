@@ -23,13 +23,24 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
 
 SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
                                      StorageSnapshotCache &snapshot_cache)
-  : signed_tx_(std::move(signed_tx)), snapshot_cache_(snapshot_cache)
+  : signed_tx_(std::move(signed_tx)), newly_created_contracts_([&] {
+      std::map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
+
+      for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
+        auto serialized = x23::serialize(contract);
+        contracts.emplace(sha256(std::as_bytes(std::span(serialized))),
+                          std::make_shared<const Contract>(contract));
+      }
+      return contracts;
+    }()),
+    snapshot_cache_(snapshot_cache)
 {
   wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
 }
@@ -230,7 +241,13 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   auto load_contract = snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
 
   if (!load_contract) {
-    return nullptr;
+    // try loading from local context
+    auto it = newly_created_contracts_.find(*deployed_hash);
+    if (it == newly_created_contracts_.end()) {
+      return nullptr;
+    }
+
+    load_contract = it->second;
   }
 
   std::unique_ptr<WasmiRuntime> new_runtime =

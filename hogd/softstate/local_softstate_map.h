@@ -39,10 +39,17 @@ public:
   void add_contract(SHA256Hash const &hash,
                     std::shared_ptr<const Contract> contract);
 
+  void commit_round();
+  void revert_round();
+
 private:
   x23::MVar<std::map<ContractAddress, SHA256Hash>> deployment_map_;
   x23::MVar<std::map<SHA256Hash, std::shared_ptr<const Contract>>>
       contract_map_;
+
+  x23::MVar<std::map<ContractAddress, SHA256Hash>> new_deployment_map_;
+  x23::MVar<std::map<SHA256Hash, std::shared_ptr<const Contract>>>
+      new_contract_map_;
 };
 
 class LocalSoftstateReadServer {
@@ -89,12 +96,21 @@ public:
   commit_transaction_deltas(StorageDeltaVecList const &deltas,
                             SHA256Hash const &expected_block_hash);
 
+  x23::Async<StorageRPCError>
+  commit_contract_create(Contract const &new_contract,
+                         SHA256Hash const &expected_block_hash);
+
+  x23::Async<StorageRPCError>
+  commit_contract_deploy(ContractAddress const &new_contract_addr,
+                         SHA256Hash const &deployed_contract_hash,
+                         SHA256Hash const &expected_block_hash);
+
 private:
   StorageRPCError try_reserve_transaction_deltas(StorageDeltaVec const &deltas);
   void revert_transaction_deltas(StorageDeltaVec const &dv);
 
   LocalSoftstateMap &local_map_;
-  [[maybe_unused]] LocalContractMap &local_contract_map_;
+  LocalContractMap &local_contract_map_;
 };
 
 static_assert(

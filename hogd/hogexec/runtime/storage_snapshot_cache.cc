@@ -57,7 +57,7 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
   return std::nullopt;
 }
 
-std::shared_ptr<Contract>
+std::shared_ptr<const Contract>
 StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 {
   {
@@ -73,8 +73,8 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   auto client_res = client_.get_contract(hash)();
 
   if (client_res.error() == StorageRPCError::kNone) {
-    std::shared_ptr<Contract> contract_from_db =
-        std::make_shared<Contract>(client_res.contract());
+    std::shared_ptr<const Contract> contract_from_db =
+        std::make_shared<const Contract>(client_res.contract());
     contract_cache_->emplace(hash, contract_from_db);
     return contract_from_db;
   }

@@ -36,6 +36,7 @@ protected:
 
     contract_map_->add_contract(h2, c2);
     contract_map_->deploy_contract(addr2_, h2);
+    contract_map_->commit_round();
   }
 
   ContractAddress addr1_;

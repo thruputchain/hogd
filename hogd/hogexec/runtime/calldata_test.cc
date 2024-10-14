@@ -29,6 +29,7 @@ protected:
 
     contract_map_->add_contract(h, c);
     contract_map_->deploy_contract(addr_, h);
+    contract_map_->commit_round();
   }
 
   ContractAddress addr_ = ContractAddress{};

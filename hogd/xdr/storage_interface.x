@@ -87,9 +87,25 @@ namespace hogd
       // block. Arguments:
       //   StorageDeltas to be committed
       //   Expected SHA256Hash of previous block header
-      // No-op whenever error is not NONE
+      // No-op whenever error is not kNone
       StorageRPCError commit_transaction_deltas(StorageDeltaVecList,
                                                 SHA256Hash) = 2;
+
+      // Create a new contract.
+      // Arguments:
+      //   New Contract
+      //   Expected SHA256Hash of previous block header
+      // No-op whenever error is not kNone
+      StorageRPCError commit_contract_create(Contract, SHA256Hash) = 3;
+
+      // Create a new deployment.
+      // Arguments:
+      //   ContractAddress
+      //   SHA256Hash of contract to be deployed
+      //   Expected SHA256Hash of previous block header
+      // No-op whenever error is not kNone
+      StorageRPCError commit_contract_deploy(ContractAddress, SHA256Hash,
+                                             SHA256Hash) = 4;
     }
     = 1;
   }

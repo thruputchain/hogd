@@ -3,8 +3,10 @@
 #include <cassert>
 #include <optional>
 
+#include "hogd/crypto/crypto.h"
 #include "storage_object.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -104,14 +106,33 @@ void
 LocalContractMap::deploy_contract(ContractAddress const &addr,
                                   SHA256Hash const &hash)
 {
-  deployment_map_->emplace(addr, hash);
+  new_deployment_map_->emplace(addr, hash);
 }
 
 void
 LocalContractMap::add_contract(SHA256Hash const &hash,
                                std::shared_ptr<const Contract> contract)
 {
-  contract_map_->emplace(hash, contract);
+  new_contract_map_->emplace(hash, contract);
+}
+
+void
+LocalContractMap::commit_round()
+{
+  auto nc_ptr = new_contract_map_.take();
+  contract_map_->insert(nc_ptr->begin(), nc_ptr->end());
+  auto nd_ptr = new_deployment_map_.take();
+  deployment_map_->insert(nd_ptr->begin(), nd_ptr->end());
+
+  nc_ptr->clear();
+  nd_ptr->clear();
+}
+
+void
+LocalContractMap::revert_round()
+{
+  new_contract_map_->clear();
+  new_deployment_map_->clear();
 }
 
 x23::Async<ExpectedStorageObject>
@@ -168,9 +189,10 @@ LocalSoftstateWriteServer::try_reserve_transaction_deltas(
     StorageDeltaVec const &dv)
 {
 
+  const ssize_t dv_size = dv.deltas.size();
   ssize_t i = 0;
   bool failed = false;
-  for (; i < dv.deltas.size(); i++) {
+  for (; i < dv_size; i++) {
     auto res = local_map_.try_reserve_delta(dv.addr_key, dv.deltas[i]);
     if (res != StorageReserveResult::kSuccess) {
       failed = true;
@@ -201,11 +223,11 @@ x23::Async<StorageRPCError>
 LocalSoftstateWriteServer::try_reserve_transaction_deltas(
     StorageDeltaVecList const &deltas, SHA256Hash const &expected_block_hash)
 {
+  const ssize_t deltas_size = deltas.size();
   ssize_t i = 0;
-
   bool failed = false;
 
-  for (; i < deltas.size(); i++) {
+  for (; i < deltas_size; i++) {
     auto const &dv = deltas[i];
     auto res = try_reserve_transaction_deltas(dv);
     if (res != StorageRPCError::kNone) {
@@ -247,6 +269,30 @@ LocalSoftstateWriteServer::commit_transaction_deltas(
       local_map_.commit_delta(dv.addr_key, delta);
     }
   }
+  co_return StorageRPCError::kNone;
+}
+
+x23::Async<StorageRPCError>
+LocalSoftstateWriteServer::commit_contract_create(
+    Contract const &new_contract, SHA256Hash const &expected_block_hash)
+{
+  // Could also be sent over in the RPC
+  auto serialized = x23::serialize(new_contract);
+  auto hash = sha256(std::as_bytes(std::span(serialized)));
+  local_contract_map_.add_contract(hash, std::make_shared<const Contract>(
+                                             new_contract));
+
+  co_return StorageRPCError::kNone;
+}
+
+x23::Async<StorageRPCError>
+LocalSoftstateWriteServer::commit_contract_deploy(
+    ContractAddress const &new_contract_addr,
+    SHA256Hash const &deployed_contract_hash,
+    SHA256Hash const &expected_block_hash)
+{
+  local_contract_map_.deploy_contract(new_contract_addr,
+                                      deployed_contract_hash);
   co_return StorageRPCError::kNone;
 }
 
