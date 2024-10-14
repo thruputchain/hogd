@@ -440,9 +440,9 @@ def gen_rs_syscall_binding(syscall):
   syscall_return_type = "Result<(), i32>"
 
   errdecl = "let err = "
-  errhandle_str = """if err != SyscallErrorCode::kNone as i32 {{
+  errhandle_str = """if err != SyscallErrorCode::kNone as i32 {
     return Err(err);
-  }}
+  }
 
   Ok(())
 """
