@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/format.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
@@ -366,6 +367,27 @@ SystemCallHandler::get_defaultzero_return_len() const
     return call_frame_stack_.back().child_return_buffer_->size();
   }
   return 0;
+}
+
+ContractAddress
+SystemCallHandler::get_deploy_address(SHA256Hash const &nonce,
+                                      SHA256Hash const &contract_hash) const
+{
+  assert(!call_frame_stack_.empty());
+
+  std::array<uint8_t,
+             sizeof(ContractAddress) + sizeof(SHA256Hash) + sizeof(SHA256Hash)>
+      hash_buffer;
+
+  auto const &current_addr = get_current_address();
+
+  std::memcpy(hash_buffer.data(), current_addr.data(), sizeof(ContractAddress));
+  std::memcpy(hash_buffer.data() + sizeof(ContractAddress), nonce.data(),
+              sizeof(SHA256Hash));
+  std::memcpy(hash_buffer.data() + sizeof(ContractAddress) + sizeof(SHA256Hash),
+              contract_hash.data(), sizeof(SHA256Hash));
+
+  return sha256(std::as_bytes(std::span(hash_buffer)));
 }
 
 } // namespace hogd

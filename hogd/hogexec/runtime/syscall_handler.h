@@ -63,6 +63,9 @@ public:
 
   RuntimeMemoryLength get_defaultzero_return_len() const;
 
+  ContractAddress get_deploy_address(SHA256Hash const &nonce,
+                                     SHA256Hash const &contract_hash) const;
+
 private:
   struct RuntimeCacheEntry {
     std::unique_ptr<WasmiRuntime> runtime;

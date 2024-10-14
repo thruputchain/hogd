@@ -192,8 +192,31 @@ syscalls:
         fixed_size: yes
         typename: "RuntimeMemoryLength"
     number: 15
-
-
+  - name: "GetDeployAddress"
+    needs_context : yes
+    inputs:
+      - name: "nonce"
+        fixed_size: yes
+        typename: "SHA256Hash"
+      - name: "contract_hash"
+        fixed_size: yes
+        typename: "SHA256Hash"
+    outputs:
+      - name: "to_be_deployed"
+        fixed_size: yes
+        typename: "ContractAddress"
+    number: 16
+  - name: "DeployContract"
+    needs_context : yes
+    inputs:
+      - name: "nonce"
+        fixed_size: yes
+        typename: "SHA256Hash"
+      - name: "contract_hash"
+        fixed_size: yes
+        typename: "SHA256Hash"
+    outputs:
+    number: 17
 
 errors:
   - name: "None"
@@ -238,4 +261,6 @@ errors:
   - name: "InvalidSetAdd"
     number: 12
     doc: "Invalid input to nnint set add, such as subtracting below 0 or setting to two distinct values in one transaction"
-
+  - name: "ContractAlreadyDeployed"
+    number: 13
+    doc: "Attempt made to deploy a contract twice (same nonce and contract hash, from same address)"

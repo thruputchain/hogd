@@ -17,6 +17,7 @@ add_library(
   storage_proxy.cc
   storage_snapshot_cache.cc
   syscall_bytestring.cc
+  syscall_contract.cc
   syscall_crypto.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
   syscall_general_storage.cc
