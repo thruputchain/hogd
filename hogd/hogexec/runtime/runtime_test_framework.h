@@ -74,6 +74,7 @@ public:
   void commit_round()
   {
     softstate_map_->commit_round();
+    contract_map_->commit_round();
     snapshot_cache_ = std::make_unique<StorageSnapshotCache>(get_read_client());
   }
 
