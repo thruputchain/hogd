@@ -12,6 +12,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -68,6 +69,11 @@ public:
 
   SyscallStatus<void> deploy_contract(SHA256Hash const &nonce,
                                       SHA256Hash const &contract_hash);
+
+  using write_client_t = StorageWriteInterfaceV1::client<
+      x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  void commit_new_contract_deployments(write_client_t &client);
 
 private:
   struct RuntimeCacheEntry {

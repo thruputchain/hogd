@@ -23,6 +23,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -443,6 +444,26 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   new_deployments_.emplace(deploy_addr, contract_hash);
 
   return {};
+}
+
+void
+SystemCallHandler::commit_new_contract_deployments(write_client_t &client)
+{
+  for (auto const &[addr, hash] : new_deployments_) {
+
+    auto it = newly_created_contracts_.find(hash);
+    if (it != newly_created_contracts_.end()) {
+      if (client.commit_contract_create(*it->second, SHA256Hash{})() !=
+          StorageRPCError::kNone) {
+        throw std::runtime_error("unhandled create error");
+      }
+    }
+
+    if (client.commit_contract_deploy(addr, hash, SHA256Hash{})() !=
+        StorageRPCError::kNone) {
+      throw std::runtime_error("unhandled deploy error");
+    }
+  }
 }
 
 } // namespace hogd
