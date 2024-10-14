@@ -407,4 +407,42 @@ SystemCallHandler::get_deploy_address(SHA256Hash const &nonce,
   return sha256(std::as_bytes(std::span(hash_buffer)));
 }
 
+SyscallStatus<void>
+SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
+                                   SHA256Hash const &contract_hash)
+{
+  assert(!call_frame_stack_.empty());
+
+  // check that contract_hash actually exists
+  // This causes a load of the contract to the cache,
+  // but this is in most cases no-cost, as a deployed contract will _probably_
+  // be immediately invoked with e.g. a constructor
+  auto load_contract = snapshot_cache_.try_get_contract_by_hash(contract_hash);
+
+  if (!load_contract) {
+    // try loading from local context
+    auto it = newly_created_contracts_.find(contract_hash);
+    if (it == newly_created_contracts_.end()) {
+      return SyscallError{SyscallErrorCode::kContractLookupFailed};
+    }
+  }
+
+  auto deploy_addr = get_deploy_address(nonce, contract_hash);
+
+  // check that we have not already deployed to that address
+  if (snapshot_cache_.try_get_deployed_contract_hash(deploy_addr)) {
+    return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
+  }
+
+  auto it = new_deployments_.find(deploy_addr);
+  if (it != new_deployments_.end()) {
+    return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
+  }
+
+  // deploy new contract
+  new_deployments_.emplace(deploy_addr, contract_hash);
+
+  return {};
+}
+
 } // namespace hogd

@@ -37,8 +37,12 @@ private:
   // nullopt to cache "does not exist" results
   x23::MVar<std::map<AddressAndKey, std::optional<StorageObject>>>
       storage_cache_;
+
+  // Note: the contract_cache_ does not need to be reset (although it is not
+  // incorrect to reset it) after every block.
   x23::MVar<std::map<SHA256Hash, std::shared_ptr<const Contract>>>
       contract_cache_;
+  // Neither does the deployment cache
   x23::MVar<std::map<ContractAddress, std::optional<SHA256Hash>>>
       deployment_cache_;
 

@@ -29,7 +29,12 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
                              const SHA256Hash &input_nonce,
                              const SHA256Hash &input_contract_hash)
 {
-  throw std::runtime_error("unimpl");
+  auto status =
+      syscall_handler.deploy_contract(input_nonce, input_contract_hash);
+  if (!status) {
+    return {status.error().code(), 0};
+  }
+  return {SyscallErrorCode::kNone, 0};
 }
 
 } // namespace hogd

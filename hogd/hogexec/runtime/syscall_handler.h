@@ -66,6 +66,9 @@ public:
   ContractAddress get_deploy_address(SHA256Hash const &nonce,
                                      SHA256Hash const &contract_hash) const;
 
+  SyscallStatus<void> deploy_contract(SHA256Hash const &nonce,
+                                      SHA256Hash const &contract_hash);
+
 private:
   struct RuntimeCacheEntry {
     std::unique_ptr<WasmiRuntime> runtime;
