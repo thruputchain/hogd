@@ -26,8 +26,13 @@ endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
+message(STATUS "here cxxflags" ${CMAKE_CXX_FLAGS})
+
 include(cmake/stacktrace.cmake)
 include(cmake/wat2wasm.cmake)
+
+message(STATUS "here cxxflags" ${CMAKE_CXX_FLAGS})
+
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
