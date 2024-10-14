@@ -102,7 +102,13 @@ CoroPollImpl::always_eof()
       Errno{}.raise("pipe");
     close(fds[1]);
     int newfd = fds[0];
-    set_nonblock(newfd);
+    try {
+      set_nonblock(newfd);
+    }
+    catch (...) {
+      close(newfd);
+      throw;
+    }
     if (fd.compare_exchange_strong(val, newfd))
       return newfd;
     close(newfd);
@@ -193,6 +199,14 @@ void
 CoroPollImpl::poison(BorrowedFd fd)
 {
   setmode(getfd(fd), FdState::Mode::kPoisoned);
+}
+
+void
+CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
+{
+  if (WorkItem wi = getfd(fd.get())->callbacks[write].exchange(nullptr))
+    if (std::coroutine_handle<> h = wi.set_result_without_resuming(err))
+      pool_.go(h);
 }
 
 #else // !HAVE_EPOLL
@@ -334,6 +348,21 @@ CoroPollImpl::wake()
 {
   char z = '\0';
   write(selfpipe_[1].get(), &z, 1);
+}
+
+void
+CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
+{
+  std::coroutine_handle<> h{nullptr};
+  {
+    auto ptr = state_.take();
+    auto &f = (*ptr)[fd.get()];
+    if (f.callbacks[write])
+      h = std::exchange(f.callbacks[write], nullptr)
+	.set_result_without_resuming(err);
+  }
+  if (h)
+    pool_.go(h);
 }
 
 #endif // !HAVE_EPOLL

@@ -520,10 +520,19 @@ struct x23::xdr_meta<struct {0}> {{
   std::array<std::pair<discriminant_type, int>, {2}> cases{{
 )",
       scope(true), b.switch_id, ncases);
-  for (const auto &ai : aiv)
-    for (const auto &c : ai.arm->cases)
-      bottom_ += format("    std::pair{{{}, {}}},\n",
-			map_case(c), ai.variant_index);
+  {
+    int nonvoidcount = 0;
+    for (const auto &a : b.arms) {
+      int armno;
+      if (a.decl.qual != Declaration::kVoid)
+	armno = ++nonvoidcount;
+      else
+	armno = 0;
+      for (const auto &c : a.cases)
+	bottom_ += format("    std::pair{{{}, {}}},\n",
+			  map_case(c), armno);
+    }
+  }
   bottom_ += "  };\n";
   bottom_ += "};\n";
 
