@@ -20,21 +20,39 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-stdlib=libc++ -fexperimental-library)
 endif()
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  link_libraries(stdc++exp) # needed for C++23 stacktrace library
+endif()
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
-include(FetchContent)
+include(cmake/stacktrace.cmake)
+include(cmake/wat2wasm.cmake)
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
+  ${CMAKE_CURRENT_BINARY_DIR}/built_headers/hogd/config.h
+  @ONLY
+)
+
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/built_headers)
 
 # Enable GoogleTest (google's unit testing library)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 option(INSTALL_GTEST "" OFF)
 add_subdirectory(external/googletest)
+set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest"
+  CACHE PATH "Path to googletest" FORCE)
 enable_testing()
 include(GoogleTest)
 
 # Enable performance (google's benchmarking library)
 option(BENCHMARK_ENABLE_TESTING "" OFF)
 add_subdirectory(external/benchmark)
+if(BENCHMARK_ENABLE_TESTING)
+set(BENCHMARK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/benchmark"
+  CACHE PATH "Path to Google benchmark" FORCE)
+endif()
 
 # Detect number of cores - only needed for make-based ExternalProject
 include(ProcessorCount)
@@ -52,7 +70,6 @@ ExternalProject_Add(libsodium
     BUILD_COMMAND make -j${N}
     INSTALL_COMMAND ""  # Skip installation step
 )
-
 ExternalProject_Get_Property(libsodium binary_dir)
 set(LIBSODIUM_PCFILEDIR "${binary_dir}")
 set(LIBSODIUM_TOP_SRCDIR "${CMAKE_SOURCE_DIR}/external/libsodium")
@@ -63,9 +80,19 @@ set(LIBSODIUM_INCLUDE_DIRS
 )
 set(LIBSODIUM_LIBRARIES
 "${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium.a")
-
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
-# Add code directories
+# Enable x23
+set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
+add_subdirectory(x23)
+include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
+
+# Enable Corrosion
+add_subdirectory(external/corrosion)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
+include(Corrosion)
+
+# Finally, enable hogd's own code
 include_directories(${CMAKE_SOURCE_DIR})
+add_definitions(-DCMAKE_ROOT_BINARY_DIR=\"${CMAKE_BINARY_DIR}\")
 add_subdirectory(hogd)

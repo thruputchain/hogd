@@ -1,0 +1,15 @@
+*.a
+*.o
+*~
+.cache
+.deps
+.dirstamp
+/x23Config.cmake
+/x23ConfigVersion.cmake
+CMakeCache.txt
+CMakeFiles
+CTestTestfile.cmake
+Makefile
+Testing
+cmake_install.cmake
+compile_commands.json

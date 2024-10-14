@@ -2,8 +2,9 @@
 #include <string_view>
 #include <vector>
 
-#include "hogd/base/string.h"
 #include <gtest/gtest.h>
+
+#include "hogd/base/string.h"
 
 namespace hogd {
 

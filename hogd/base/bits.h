@@ -89,4 +89,87 @@ template<std::unsigned_integral T> struct WrappingSequence {
   }
 };
 
+// TaggedPointer provides a pointer-like interface with additional tag bits
+// that are ignored during dereferencing. It can be used to store 6 bits per
+// pointer without additional storage overhead.
+//
+// TODO(amb): This class is compliant with Intel's LAM_U57 (6 bits, [62:57]),
+// AMD's UAI (7 bits, [63:57]), and ARM's top-byte ignore (8 bits, [63:56]). On
+// these CPUs, it could be made more efficient if we are willing to target them
+// at compile time.
+template<typename T> requires std::is_same_v<T, std::remove_reference_t<T>>
+class TaggedPointer {
+public:
+  TaggedPointer() noexcept = default;
+  explicit TaggedPointer(T *ptr) noexcept
+    : ptr_and_tag_(reinterpret_cast<uintptr_t>(ptr))
+  {}
+  TaggedPointer(T *ptr, uint8_t tag) noexcept
+    : ptr_and_tag_(reinterpret_cast<uintptr_t>(ptr) |
+                   (static_cast<uintptr_t>(tag) << kAddressTagShift))
+  {
+    assert(tag < (1UL << kTagBits));
+  }
+
+  // operator overloads
+  std::add_lvalue_reference_t<T> operator*() const noexcept
+  {
+    return *get_addr();
+  }
+  T *operator->() const noexcept { return get_addr(); }
+  explicit operator bool() const noexcept { return get_addr() != nullptr; }
+  TaggedPointer &operator=(T *ptr) noexcept
+  {
+    set_addr(ptr);
+    return *this;
+  }
+
+  // setters and getters
+  T *get() const { return get_addr(); }
+  uint8_t get_tag() const
+  {
+    return static_cast<uint8_t>(ptr_and_tag_ >> kAddressTagShift);
+  }
+  void set_tag(uint8_t tag)
+  {
+    assert(tag < (1UL << kTagBits));
+    ptr_and_tag_ &= kAddressMask;
+    ptr_and_tag_ |= static_cast<uintptr_t>(tag) << kAddressTagShift;
+  }
+
+private:
+  static constexpr int kAddressTagShift = 57;
+  static constexpr int kTagBits = 6;
+  static_assert(kAddressTagShift + kTagBits <=
+                sizeof(uintptr_t) * kBitsPerByte);
+  static constexpr uintptr_t kAddressMask = ((1UL << kAddressTagShift) - 1);
+  static constexpr uintptr_t kTagMask = ~kAddressMask;
+
+  uintptr_t ptr_and_tag_{0};
+
+  T *get_addr() const
+  {
+    return reinterpret_cast<T *>(ptr_and_tag_ & kAddressMask); // NOLINT
+  }
+  void set_addr(T *ptr)
+  {
+    ptr_and_tag_ &= kTagMask;
+    ptr_and_tag_ |= reinterpret_cast<uintptr_t>(ptr);
+  }
+};
+
+template<typename T>
+bool
+operator==(TaggedPointer<T> tptr, T *ptr)
+{
+  return tptr.get() == ptr;
+}
+
+template<typename T>
+bool
+operator==(TaggedPointer<T> lhs, TaggedPointer<T> rhs)
+{
+  return lhs.get() == rhs.get();
+}
+
 } // namespace hogd
