@@ -3,7 +3,7 @@
 use crate::syscall_bindings;
 
 use core::mem::MaybeUninit;
-use rs_xdr::{ContractAddress, RuntimeMemoryLength};
+use rs_xdr::{ContractAddress, RuntimeMemoryLength, SHA256Hash};
 
 pub fn GetMsgSender() -> Result<ContractAddress, i32> {
     let mut out_addr: MaybeUninit<ContractAddress> =
@@ -20,6 +20,13 @@ pub fn GetCalldataLen() -> Result<RuntimeMemoryLength, i32> {
 
 pub fn Return(return_buf: &[u8]) -> ! {
     syscall_bindings::raw_Return(return_buf);
+}
+
+pub fn GetSourceTransactionHash() -> Result<SHA256Hash, i32> {
+    let mut out_hash: MaybeUninit<SHA256Hash> =
+        MaybeUninit::<SHA256Hash>::uninit();
+    syscall_bindings::uninit_GetSourceTransactionHash(&mut out_hash)?;
+    Ok(unsafe { out_hash.assume_init() })
 }
 
 #[cfg(feature = "alloc")]

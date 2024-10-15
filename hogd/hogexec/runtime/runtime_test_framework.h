@@ -7,6 +7,7 @@
 #include "hogd/hogexec/runtime/format.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/softstate/local_softstate_map.h"
 #include "storage_interface.hh"
 #include "x23/rpc.h"
@@ -39,6 +40,8 @@ public:
   std::unique_ptr<write_client_t> write_client_;
   std::unique_ptr<read_client_t> read_client_;
 
+  constexpr static ContractAddress deployer_address_ = ContractAddress{};
+
   auto &get_read_client() { return *read_client_; }
 
   auto &get_write_client() { return *write_client_; }
@@ -69,6 +72,14 @@ public:
 
     server_config.server(read_storage_server_.get());
     server_config.server(write_storage_server_.get());
+  }
+
+  void deploy_genesis_block()
+  {
+    auto [h, c] = test::load_built_rs_contract("genesis_deployer.wasm");
+    contract_map_->add_contract(h, c);
+    contract_map_->deploy_contract(deployer_address_, h);
+    contract_map_->commit_round();
   }
 
   void commit_round()

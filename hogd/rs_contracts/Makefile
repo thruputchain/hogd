@@ -16,6 +16,7 @@ rs_contracts : \
 	echo.wasm \
 	test_echo.wasm \
 	test_bytestring.wasm \
-	test_nnint64.wasm
+	test_nnint64.wasm \
+	genesis_deployer.wasm
 
 # rustup target install wasm32-unknown-unknown

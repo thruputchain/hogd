@@ -66,6 +66,7 @@ add_executable(
   return_test.cc
   bytestring_test.cc
   nnint64_test.cc
+  deployer_test.cc
 )
 
 target_link_libraries(

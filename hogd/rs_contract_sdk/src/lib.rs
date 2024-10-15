@@ -12,6 +12,7 @@
 pub mod alloc;
 
 mod bytestring;
+mod contract;
 mod crypto;
 mod general_storage;
 mod invoke;
@@ -24,6 +25,7 @@ pub mod syscall_bindings;
 pub mod rt;
 
 pub use bytestring::*;
+pub use contract::*;
 pub use crypto::*;
 pub use general_storage::*;
 pub use invoke::*;

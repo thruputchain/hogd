@@ -29,6 +29,14 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_GetSourceTransactionHash_inner(SystemCallHandler &syscall_handler,
+                                       SHA256Hash &output_source_tx_hash)
+{
+  output_source_tx_hash = syscall_handler.get_source_tx_hash();
+  return {SyscallErrorCode::kNone, 0};
+}
+
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
                              RuntimeMemoryLength &output_len)

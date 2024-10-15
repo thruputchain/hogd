@@ -216,7 +216,18 @@ syscalls:
         fixed_size: yes
         typename: "SHA256Hash"
     outputs:
+      - name: "deployed_address"
+        fixed_size: yes
+        typename: "ContractAddress"
     number: 17
+  - name: "GetSourceTransactionHash"
+    needs_context : yes
+    inputs:
+    outputs:
+      - name: "source_tx_hash"
+        fixed_size: yes
+        typename: "SHA256Hash"
+    number: 18
 
 errors:
   - name: "None"

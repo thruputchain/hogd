@@ -62,13 +62,10 @@ TEST_F(NNInt64Test, SetAddPosValue)
     EXPECT_EQ(deltas[0].deltas[0].nnint64(),
               NonnegativeInt64SetAddArgs(100, 10));
 
-    auto status =
-        get_write_client().try_reserve_transaction_deltas(deltas,
-                                                          SHA256Hash{})();
-    ASSERT_EQ(status, StorageRPCError::kNone);
-    status =
-        get_write_client().commit_transaction_deltas(deltas, SHA256Hash{})();
-    ASSERT_EQ(status, StorageRPCError::kNone);
+    ASSERT_EQ(StorageRPCError::kNone,
+              handler.try_reserve_transaction(get_write_client()));
+
+    handler.commit_transaction(get_write_client());
   }
 
   {
@@ -93,8 +90,7 @@ TEST_F(NNInt64Test, SetAddPosValue)
               NonnegativeInt64SetAddArgs(10, 10));
 
     ASSERT_NE(StorageRPCError::kNone,
-              get_write_client().try_reserve_transaction_deltas(
-                  deltas, SHA256Hash{})());
+              handler.try_reserve_transaction(get_write_client()));
   }
 
   commit_round();
@@ -141,17 +137,12 @@ TEST_F(NNInt64Test, NegativeSet)
   };
 
   auto expect_success = [&](SystemCallHandler handler) {
-    EXPECT_TRUE(!!handler.root_invoke().result);
+    ASSERT_TRUE(!!handler.root_invoke().result);
 
-    auto const &deltas = handler.get_deltas();
+    ASSERT_EQ(StorageRPCError::kNone,
+              handler.try_reserve_transaction(get_write_client()));
 
-    auto status =
-        get_write_client().try_reserve_transaction_deltas(deltas,
-                                                          SHA256Hash{})();
-    ASSERT_EQ(status, StorageRPCError::kNone);
-    status =
-        get_write_client().commit_transaction_deltas(deltas, SHA256Hash{})();
-    ASSERT_EQ(status, StorageRPCError::kNone);
+    handler.commit_transaction(get_write_client());
   };
 
   auto expect_fail = [&](SystemCallHandler handler) {
@@ -166,11 +157,10 @@ TEST_F(NNInt64Test, NegativeSet)
     EXPECT_TRUE(!!handler.root_invoke().result);
 
     auto const &deltas = handler.get_deltas();
+    ASSERT_EQ(deltas.size(), 1);
 
-    EXPECT_EQ(deltas.size(), 1);
     EXPECT_NE(StorageRPCError::kNone,
-              get_write_client().try_reserve_transaction_deltas(
-                  deltas, SHA256Hash{})());
+              handler.try_reserve_transaction(get_write_client()));
   };
 
   expect_success(make_set_add_tx(-100, 30));

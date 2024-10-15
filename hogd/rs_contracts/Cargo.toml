@@ -10,8 +10,8 @@ members = [
     "echo",
     "test_echo",
     "test_bytestring",
-    "test_nnint64"
-
+    "test_nnint64",
+    "genesis_deployer"
 ]
 
 [profile.dev]

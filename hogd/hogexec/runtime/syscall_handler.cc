@@ -72,6 +72,13 @@ SystemCallHandler::get_current_address() const
   return call_frame_stack_.back().active_invocation_.invoked_address;
 }
 
+SHA256Hash
+SystemCallHandler::get_source_tx_hash() const
+{
+  auto buf = x23::serialize(signed_tx_);
+  return sha256(std::as_bytes(std::span(buf)));
+}
+
 SyscallStatus<ContractAddress>
 SystemCallHandler::get_msg_sender() const
 {
@@ -236,13 +243,19 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
 
   if (!deployed_hash) {
-    return nullptr;
+    // not found committed deployment; checking local context
+    auto it = new_deployments_.find(addr);
+    if (it == new_deployments_.end()) {
+      return nullptr;
+    }
+    deployed_hash = it->second;
   }
 
   auto load_contract = snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
 
   if (!load_contract) {
-    // try loading from local context
+    // Not found committed contract.
+    // Try loading from local context
     auto it = newly_created_contracts_.find(*deployed_hash);
     if (it == newly_created_contracts_.end()) {
       return nullptr;
@@ -258,6 +271,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     return nullptr;
   }
 
+  // successfully resolved runtime
   runtimes_.emplace(addr, RuntimeCacheEntry(std::move(new_runtime)));
   return runtimes_[addr].runtime.get();
 }
@@ -388,18 +402,15 @@ SystemCallHandler::get_defaultzero_return_len() const
 }
 
 ContractAddress
-SystemCallHandler::get_deploy_address(SHA256Hash const &nonce,
-                                      SHA256Hash const &contract_hash) const
+SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
+                                             SHA256Hash const &nonce,
+                                             SHA256Hash const &contract_hash)
 {
-  assert(!call_frame_stack_.empty());
-
   std::array<uint8_t,
              sizeof(ContractAddress) + sizeof(SHA256Hash) + sizeof(SHA256Hash)>
       hash_buffer;
 
-  auto const &current_addr = get_current_address();
-
-  std::memcpy(hash_buffer.data(), current_addr.data(), sizeof(ContractAddress));
+  std::memcpy(hash_buffer.data(), sender.data(), sizeof(ContractAddress));
   std::memcpy(hash_buffer.data() + sizeof(ContractAddress), nonce.data(),
               sizeof(SHA256Hash));
   std::memcpy(hash_buffer.data() + sizeof(ContractAddress) + sizeof(SHA256Hash),
@@ -408,7 +419,16 @@ SystemCallHandler::get_deploy_address(SHA256Hash const &nonce,
   return sha256(std::as_bytes(std::span(hash_buffer)));
 }
 
-SyscallStatus<void>
+ContractAddress
+SystemCallHandler::get_deploy_address(SHA256Hash const &nonce,
+                                      SHA256Hash const &contract_hash) const
+{
+  assert(!call_frame_stack_.empty());
+
+  return static_get_deploy_address(get_current_address(), nonce, contract_hash);
+}
+
+SyscallStatus<ContractAddress>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
@@ -443,7 +463,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   // deploy new contract
   new_deployments_.emplace(deploy_addr, contract_hash);
 
-  return {};
+  return deploy_addr;
 }
 
 void
@@ -464,6 +484,24 @@ SystemCallHandler::commit_new_contract_deployments(write_client_t &client)
       throw std::runtime_error("unhandled deploy error");
     }
   }
+}
+
+StorageRPCError
+SystemCallHandler::try_reserve_transaction(write_client_t &client)
+{
+  return client.try_reserve_transaction_deltas(get_deltas(), SHA256Hash{})();
+}
+
+void
+SystemCallHandler::commit_transaction(write_client_t &client)
+{
+  auto status = client.commit_transaction_deltas(get_deltas(), SHA256Hash{})();
+
+  if (status != StorageRPCError::kNone) {
+    throw std::runtime_error("unhandled commit transaction deltas error");
+  }
+
+  commit_new_contract_deployments(client);
 }
 
 } // namespace hogd

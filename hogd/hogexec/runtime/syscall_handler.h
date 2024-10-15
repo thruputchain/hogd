@@ -33,6 +33,7 @@ public:
   ContractAddress get_current_address() const;
 
   SyscallStatus<ContractAddress> get_msg_sender() const;
+  SHA256Hash get_source_tx_hash() const;
 
   // general storage
   void delete_last(StorageKey const &key);
@@ -64,16 +65,22 @@ public:
 
   RuntimeMemoryLength get_defaultzero_return_len() const;
 
+  static ContractAddress
+  static_get_deploy_address(ContractAddress const &sender,
+                            SHA256Hash const &nonce,
+                            SHA256Hash const &contract_hash);
+
   ContractAddress get_deploy_address(SHA256Hash const &nonce,
                                      SHA256Hash const &contract_hash) const;
 
-  SyscallStatus<void> deploy_contract(SHA256Hash const &nonce,
-                                      SHA256Hash const &contract_hash);
+  SyscallStatus<ContractAddress>
+  deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
   using write_client_t = StorageWriteInterfaceV1::client<
       x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  void commit_new_contract_deployments(write_client_t &client);
+  StorageRPCError try_reserve_transaction(write_client_t &client);
+  void commit_transaction(write_client_t &client);
 
 private:
   struct RuntimeCacheEntry {
@@ -104,6 +111,10 @@ private:
   StorageSnapshotCache &snapshot_cache_;
 
   void commit_last_call_frame(CallFrame &&frame);
+
+  void commit_new_contract_deployments(write_client_t &client);
+  StorageRPCError try_reserve_transaction_deltas(write_client_t &client);
+  void commit_transaction_deltas(write_client_t &client);
 };
 
 } // namespace hogd

@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/format.h"
 #include "storage_object.hh"
 #include "types.hh"
 #include "x23/serialize.h"
