@@ -1,18 +1,23 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <format>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <utility>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/format.h"
+#include "hogd/hogexec/runtime/call_frame.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
@@ -23,7 +28,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -467,7 +471,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
 }
 
 void
-SystemCallHandler::commit_new_contract_deployments(write_client_t &client)
+SystemCallHandler::commit_new_contract_deployments(write_client_t &client) const
 {
   for (auto const &[addr, hash] : new_deployments_) {
 
@@ -487,13 +491,13 @@ SystemCallHandler::commit_new_contract_deployments(write_client_t &client)
 }
 
 StorageRPCError
-SystemCallHandler::try_reserve_transaction(write_client_t &client)
+SystemCallHandler::try_reserve_transaction(write_client_t &client) const
 {
   return client.try_reserve_transaction_deltas(get_deltas(), SHA256Hash{})();
 }
 
 void
-SystemCallHandler::commit_transaction(write_client_t &client)
+SystemCallHandler::commit_transaction(write_client_t &client) const
 {
   auto status = client.commit_transaction_deltas(get_deltas(), SHA256Hash{})();
 

@@ -106,7 +106,7 @@ public:
                          SHA256Hash const &expected_block_hash);
 
 private:
-  StorageRPCError try_reserve_transaction_deltas(StorageDeltaVec const &deltas);
+  StorageRPCError try_reserve_transaction_deltas(StorageDeltaVec const &dv);
   void revert_transaction_deltas(StorageDeltaVec const &dv);
 
   LocalSoftstateMap &local_map_;

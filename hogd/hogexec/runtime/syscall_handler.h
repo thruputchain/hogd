@@ -79,8 +79,8 @@ public:
   using write_client_t = StorageWriteInterfaceV1::client<
       x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  StorageRPCError try_reserve_transaction(write_client_t &client);
-  void commit_transaction(write_client_t &client);
+  StorageRPCError try_reserve_transaction(write_client_t &client) const;
+  void commit_transaction(write_client_t &client) const;
 
 private:
   struct RuntimeCacheEntry {
@@ -112,9 +112,7 @@ private:
 
   void commit_last_call_frame(CallFrame &&frame);
 
-  void commit_new_contract_deployments(write_client_t &client);
-  StorageRPCError try_reserve_transaction_deltas(write_client_t &client);
-  void commit_transaction_deltas(write_client_t &client);
+  void commit_new_contract_deployments(write_client_t &client) const;
 };
 
 } // namespace hogd

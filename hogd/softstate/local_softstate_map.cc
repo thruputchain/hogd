@@ -1,12 +1,17 @@
 #include "hogd/softstate/local_softstate_map.h"
 
 #include <cassert>
+#include <cstddef>
+#include <memory>
 #include <optional>
+#include <span>
 
+#include "contract.hh"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/format.h"
+#include "storage_interface.hh"
 #include "storage_object.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize.h"
 
 namespace hogd {
@@ -62,8 +67,9 @@ void
 LocalSoftstateMap::revert_round()
 {
   auto ptr = map_.take();
-  for (auto it = ptr->begin(); it != ptr->end(); it++) {
-    it->second.revert_round();
+  for (auto &elt : *ptr) {
+    // for (auto it = ptr->begin(); it != ptr->end(); it++) {
+    elt.second.revert_round();
   }
 }
 
@@ -254,9 +260,7 @@ LocalSoftstateWriteServer::revert_transaction_deltas(
     StorageDeltaVecList const &deltas, SHA256Hash const &expected_block_hash)
 {
   for (auto const &dv : deltas) {
-    for (auto const &delta : dv.deltas) {
-      local_map_.revert_delta(dv.addr_key, delta);
-    }
+    revert_transaction_deltas(dv);
   }
   co_return StorageRPCError::kNone;
 }
