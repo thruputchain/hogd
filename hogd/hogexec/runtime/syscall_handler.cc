@@ -62,8 +62,17 @@ SystemCallHandler::root_invoke()
                         .gas_consumed = 0};
   }
 
-  return invoke_unconverted(signed_tx_.tx.invocation, runtime,
+  auto res = invoke_unconverted(signed_tx_.tx.invocation, runtime,
                             signed_tx_.tx.invocation.gas_limit);
+
+  if (!res.result) {
+    return res;
+  }
+  if (*res.result != 0) {
+    return InvokeResult {.result = InvokeError{InvokeErrorCode::kDeterministicError},
+                          .gas_consumed = res.gas_consumed};
+  }
+  return res;
 }
 
 // syscall methods: can only be called when call_frame_stack_ is nonempty
