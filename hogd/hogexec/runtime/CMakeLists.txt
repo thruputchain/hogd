@@ -10,8 +10,7 @@ set_source_files_properties(
     ${CMAKE_CURRENT_BINARY_DIR}/status.cc
     PROPERTIES GENERATED TRUE)
 
-add_library(
-  runtime
+set(runtime_sources 
   call_frame.cc
   ${CMAKE_CURRENT_BINARY_DIR}/status.cc
   storage_proxy.cc
@@ -25,6 +24,11 @@ add_library(
   syscall_handler.cc
   syscall_log.cc
   syscall_nnint64.cc
+)
+
+add_library(
+  runtime
+  ${runtime_sources}
   wasmi_runtime.cc
 )
 
@@ -40,6 +44,37 @@ target_include_directories(
   runtime
   PRIVATE
   ${CMAKE_BINARY_DIR}
+)
+
+add_library(
+  runtime_nativecontract
+  ${runtime_sources}
+)
+
+add_dependencies(
+  runtime_nativecontract
+  generate_syscall_inner_h
+  generate_syscall_entry_cc
+  generate_status_cc
+  protocol
+)
+
+target_include_directories(
+  runtime_nativecontract
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+target_link_libraries(
+  runtime_nativecontract
+  hogd
+  protocol
+  softstate
+  ${LIBSODIUM_LIBRARIES}
+)
+
+target_compile_options(runtime_nativecontract PRIVATE
+  -DRUST_NATIVE_CONTRACT=1
 )
 
 target_link_libraries(

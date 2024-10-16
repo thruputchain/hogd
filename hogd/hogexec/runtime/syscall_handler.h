@@ -88,17 +88,19 @@ private:
     bool unwind_poisoned = false;
   };
 
-  WasmiRuntime *resolve_runtime(ContractAddress const &addr);
+  WasmiContext wasmi_context_;
+
+  RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
   InvokeResult invoke_unconverted(Invocation const &invocation,
-                                  WasmiRuntime *runtime, uint64_t gas_limit);
+                                  RuntimeCacheEntry *runtime, uint64_t gas_limit);
 
   // Can only be called when call_frame_stack_ is nonempty
   StorageProxy &resolve_storage_proxy(StorageKey const &key);
 
   SignedTransaction signed_tx_;
-  WasmiContext wasmi_context_;
   std::vector<CallFrame> call_frame_stack_;
-  std::map<ContractAddress, RuntimeCacheEntry> runtimes_;
+
+  std::map<ContractAddress, std::unique_ptr<RuntimeCacheEntry>> runtimes_;
 
   std::map<ContractAddress, SHA256Hash> new_deployments_;
   const std::map<SHA256Hash, std::shared_ptr<const Contract>>
@@ -114,5 +116,6 @@ private:
 
   void commit_new_contract_deployments(write_client_t &client) const;
 };
+
 
 } // namespace hogd
