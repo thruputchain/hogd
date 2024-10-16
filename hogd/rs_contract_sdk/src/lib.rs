@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 /**
  * Return type of methods is generally Result<return_type, i32>
@@ -19,6 +19,8 @@ mod invoke;
 mod log;
 mod nonnegative_int64;
 mod syscall;
+
+pub mod parse_trait;
 
 pub mod syscall_bindings;
 

@@ -4,6 +4,7 @@ use rs_contract_sdk as sdk;
 
 use core::mem::MaybeUninit;
 use core::ptr::copy_nonoverlapping;
+use echo;
 use sdk::rt::trap;
 
 extern crate alloc;
@@ -59,4 +60,35 @@ pub extern "C" fn test_slice() -> i32 {
     sdk::Log(&returned_buf).unwrap();
 
     0
+}
+
+fn test_slice_fancysdk_inner(
+    address: sdk::ContractAddress,
+    slice_start: u32,
+    slice_end: u32,
+    calldata: &[u8],
+) -> Result<(), i32> {
+    let returned_buf =
+        echo::echo_calldata(&address, slice_start, slice_end, calldata)?;
+
+    sdk::Log(&returned_buf)?;
+    Ok(())
+}
+
+#[cfg_attr(target_family = "wasm", export_name = "1")]
+#[no_mangle]
+pub extern "C" fn test_slice_fancysdk() -> i32 {
+    let calldata = sdk::GetCalldata().unwrap();
+
+    match sdk::parse_trait::parse_from_calldata_4::<
+        sdk::ContractAddress,
+        u32,
+        u32,
+        &[u8],
+        (),
+    >(&calldata, test_slice_fancysdk_inner)
+    {
+        Ok(()) => 0,
+        Err(x) => x,
+    }
 }

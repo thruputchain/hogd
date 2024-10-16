@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 rs_contract_sdk = {path = "../../rs_contract_sdk/", features = ["alloc"]}
+echo = {path = "../echo", features = ["interface"]}
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]

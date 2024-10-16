@@ -63,14 +63,15 @@ SystemCallHandler::root_invoke()
   }
 
   auto res = invoke_unconverted(signed_tx_.tx.invocation, runtime,
-                            signed_tx_.tx.invocation.gas_limit);
+                                signed_tx_.tx.invocation.gas_limit);
 
   if (!res.result) {
     return res;
   }
   if (*res.result != 0) {
-    return InvokeResult {.result = InvokeError{InvokeErrorCode::kDeterministicError},
-                          .gas_consumed = res.gas_consumed};
+    return InvokeResult{.result =
+                            InvokeError{InvokeErrorCode::kDeterministicError},
+                        .gas_consumed = res.gas_consumed};
   }
   return res;
 }

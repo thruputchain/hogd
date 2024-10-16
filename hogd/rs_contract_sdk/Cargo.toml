@@ -13,3 +13,7 @@ rs_xdr = {path = "../xdr/rs_xdr/"}
 
 [features]
 alloc = []
+std = []
+# Cargo is a bizarre nightmare;
+# I can only get tests to build correctly with `cargo test --features=std`
+# cfg(test) doesn't seem to work right

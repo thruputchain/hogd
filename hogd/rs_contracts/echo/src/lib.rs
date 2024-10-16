@@ -1,18 +1,24 @@
 #![no_std]
 
 use rs_contract_sdk as sdk;
-use sdk::rt::trap;
+
 extern crate alloc;
+
+#[allow(unused_imports)]
+use alloc::boxed::Box;
+#[allow(unused_imports)]
+use alloc::vec::Vec;
 
 // Echoes back the specified slice of the input calldata
 // call format: slice_start slice_end calldata
+#[cfg(not(feature = "interface"))]
 #[cfg_attr(target_family = "wasm", export_name = "0")]
 #[no_mangle]
 pub extern "C" fn echo_calldata() -> i32 {
     let calldata = sdk::GetCalldata().unwrap();
 
     if calldata.len() < 8 {
-        trap();
+        sdk::rt::trap();
     }
 
     let slice_start =
@@ -27,6 +33,47 @@ pub extern "C" fn echo_calldata() -> i32 {
     // assert that this code is actually unreachable
     #[allow(unreachable_code)]
     {
-        trap();
+        sdk::rt::trap();
     }
+}
+
+#[cfg(feature = "interface")]
+pub fn echo_calldata(
+    call_address: &sdk::ContractAddress,
+    slice_start: u32,
+    slice_end: u32,
+    calldata: &[u8],
+) -> Result<Box<[u8]>, i32> {
+    let buffer_size: usize = 4 + 4 + calldata.len();
+
+    let mut vec_mu = Vec::with_capacity(buffer_size);
+
+    unsafe {
+        vec_mu.set_len(buffer_size);
+    }
+
+    let mut vec = vec_mu.into_boxed_slice();
+
+    sdk::parse_trait::serialize_to_calldata_3(
+        &mut vec,
+        slice_start,
+        slice_end,
+        calldata,
+    );
+
+    let mut return_len: sdk::RuntimeMemoryLength = 0;
+
+    let method: sdk::MethodID = 0;
+
+    sdk::syscall_bindings::raw_Invoke(
+        &call_address,
+        method,
+        u64::MAX,
+        &vec,
+        &mut return_len,
+    )?;
+
+    let returned_buf = sdk::GetReturnedBuffer(return_len)?;
+
+    Ok(returned_buf)
 }

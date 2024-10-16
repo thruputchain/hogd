@@ -6,10 +6,8 @@ use rs_xdr::{RuntimeMemoryLength, StorageKey};
 pub fn BytestringGetLen(key: &StorageKey) -> Result<RuntimeMemoryLength, i32> {
     let mut out: RuntimeMemoryLength = 0;
 
-    match syscall_bindings::raw_BytestringGetLen(key, &mut out) {
-        Ok(()) => Ok(out),
-        Err(x) => Err(x),
-    }
+    syscall_bindings::raw_BytestringGetLen(key, &mut out)?;
+    Ok(out)
 }
 
 pub fn BytestringSet(key: &StorageKey, slice: &[u8]) -> Result<(), i32> {

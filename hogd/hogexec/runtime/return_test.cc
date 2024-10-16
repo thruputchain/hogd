@@ -97,4 +97,32 @@ TEST_F(ReturnTest, EchoSlice)
   check_log_eq(logs[1], test::make_calldata(std::vector<uint8_t>{1}));
 }
 
+TEST_F(ReturnTest, EchoSliceFancySDK)
+{
+  SignedTransaction stx;
+  stx.tx.invocation.invoked_address = addr2_;
+  stx.tx.invocation.method_name = 1;
+  stx.tx.invocation.gas_limit = UINT64_MAX;
+  stx.tx.invocation.calldata =
+      test::make_calldata(addr1_, static_cast<uint32_t>(1),
+                          static_cast<uint32_t>(2),
+                          std::vector<uint8_t>{0, 1, 2, 3});
+
+  SystemCallHandler handler(stx, *snapshot_cache_);
+
+  auto res = handler.root_invoke();
+
+  EXPECT_TRUE(!!res.result);
+
+  auto const &logs = handler.get_logs();
+
+  ASSERT_EQ(logs.size(), 2);
+
+  EXPECT_EQ(logs[0].source_address, addr1_);
+  check_log_eq(logs[0], test::make_calldata(std::vector<uint8_t>{1}));
+
+  EXPECT_EQ(logs[1].source_address, addr2_);
+  check_log_eq(logs[1], test::make_calldata(std::vector<uint8_t>{1}));
+}
+
 } // namespace hogd */
