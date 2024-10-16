@@ -1,5 +1,5 @@
 use crate::invoke::Return;
-use crate::rt::trap;
+use crate::rt::{trap, unwrap_abort, unwrap_abort_option};
 use rs_xdr::*;
 
 pub trait Parseable<'a> {
@@ -26,7 +26,7 @@ impl OutputReturnable for () {
 
 impl<'a> Parseable<'a> for u32 {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
-        let out: u32 = u32::from_le_bytes(arg[0..4].try_into().unwrap());
+        let out: u32 = u32::from_le_bytes(unwrap_abort(unwrap_abort_option(arg.get(0..4)).try_into()));
         (out, 4)
     }
 }
@@ -37,7 +37,7 @@ impl Serializable for u32 {
     }
 
     fn do_serialize(&self, slice: &mut [u8]) {
-        assert!(slice.len() == 4);
+        debug_assert!(slice.len() == 4);
         let b = self.to_le_bytes();
         unsafe {
             core::ptr::copy_nonoverlapping(b.as_ptr(), slice.as_mut_ptr(), 4);
@@ -47,7 +47,7 @@ impl Serializable for u32 {
 
 impl<'a> Parseable<'a> for i64 {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
-        let out: i64 = i64::from_le_bytes(arg[0..8].try_into().unwrap());
+        let out: i64 = i64::from_le_bytes(unwrap_abort(unwrap_abort_option(arg.get(0..8)).try_into()));
         (out, 8)
     }
 }
@@ -58,7 +58,7 @@ impl Serializable for i64 {
     }
 
     fn do_serialize(&self, slice: &mut [u8]) {
-        assert!(slice.len() == 4);
+        debug_assert!(slice.len() == 4);
         let b = self.to_le_bytes();
         unsafe {
             core::ptr::copy_nonoverlapping(b.as_ptr(), slice.as_mut_ptr(), 8);
@@ -69,7 +69,7 @@ impl Serializable for i64 {
 impl<'a> Parseable<'a> for StorageKey {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
         //TODO(geoff): Could try something a bit fancier
-        let out: StorageKey = arg[..32].try_into().unwrap();
+        let out: StorageKey = unwrap_abort(unwrap_abort_option(arg.get(..32)).try_into());
         (out, 32)
     }
 }
@@ -80,7 +80,7 @@ impl Serializable for &StorageKey {
     }
 
     fn do_serialize(&self, slice: &mut [u8]) {
-        assert!(slice.len() == 32);
+        debug_assert!(slice.len() == 32);
         unsafe {
             core::ptr::copy_nonoverlapping(
                 self.as_ptr(),
@@ -103,7 +103,7 @@ impl Serializable for &[u8] {
     }
 
     fn do_serialize(&self, slice: &mut [u8]) {
-        assert!(slice.len() == self.len());
+        debug_assert!(slice.len() == self.len());
         unsafe {
             core::ptr::copy_nonoverlapping(
                 self.as_ptr(),
@@ -118,7 +118,7 @@ impl Serializable for &[u8] {
 pub fn serialize_to_calldata_1<T1: Serializable>(buf: &mut [u8], arg1: T1) {
     let mut offset: usize = 0;
 
-    arg1.do_serialize(&mut buf[offset..(offset + arg1.serialize_len())]);
+    arg1.do_serialize(unwrap_abort_option(buf.get_mut(offset..(offset + arg1.serialize_len()))));
     offset += arg1.serialize_len();
 
     if offset != buf.len() {
@@ -133,10 +133,10 @@ pub fn serialize_to_calldata_2<T1: Serializable, T2: Serializable>(
 ) {
     let mut offset: usize = 0;
 
-    arg1.do_serialize(&mut buf[offset..(offset + arg1.serialize_len())]);
+    arg1.do_serialize(unwrap_abort_option(buf.get_mut(offset..(offset + arg1.serialize_len()))));
     offset += arg1.serialize_len();
 
-    arg2.do_serialize(&mut buf[offset..(offset + arg2.serialize_len())]);
+    arg2.do_serialize(unwrap_abort_option(buf.get_mut(offset..(offset + arg2.serialize_len()))));
     offset += arg2.serialize_len();
 
     if offset != buf.len() {
@@ -156,13 +156,13 @@ pub fn serialize_to_calldata_3<
 ) {
     let mut offset: usize = 0;
 
-    arg1.do_serialize(&mut buf[offset..(offset + arg1.serialize_len())]);
+    arg1.do_serialize(unwrap_abort_option(buf.get_mut(offset..(offset + arg1.serialize_len()))));
     offset += arg1.serialize_len();
 
-    arg2.do_serialize(&mut buf[offset..(offset + arg2.serialize_len())]);
+    arg2.do_serialize(unwrap_abort_option(buf.get_mut(offset..(offset + arg2.serialize_len()))));
     offset += arg2.serialize_len();
 
-    arg3.do_serialize(&mut buf[offset..(offset + arg3.serialize_len())]);
+    arg3.do_serialize(unwrap_abort_option(buf.get_mut(offset..(offset + arg3.serialize_len()))));
     offset += arg3.serialize_len();
 
     if offset != buf.len() {
@@ -174,7 +174,7 @@ pub fn parse_from_calldata_1<'a, T1: Parseable<'a>, R: Sized>(
     bytes: &'a [u8],
     main_func: fn(T1) -> Result<R, i32>,
 ) -> Result<R, i32> {
-    let (arg1, arg1len) = T1::parse_from(&bytes);
+    let (arg1, arg1len) = T1::parse_from(bytes);
 
     if arg1len != bytes.len() {
         trap();
@@ -193,10 +193,10 @@ pub fn parse_from_calldata_2<
     main_func: fn(T1, T2) -> Result<R, i32>,
 ) -> Result<R, i32> {
     let mut offset: usize = 0;
-    let (arg1, arg1len) = T1::parse_from(&bytes[offset..]);
+    let (arg1, arg1len) = T1::parse_from(unwrap_abort_option(bytes.get(offset..)));
     offset += arg1len;
 
-    let (arg2, arg2len) = T2::parse_from(&bytes[offset..]);
+    let (arg2, arg2len) = T2::parse_from(unwrap_abort_option(bytes.get(offset..)));
     offset += arg2len;
 
     if offset != bytes.len() {
@@ -217,13 +217,13 @@ pub fn parse_from_calldata_3<
     main_func: fn(T1, T2, T3) -> Result<R, i32>,
 ) -> Result<R, i32> {
     let mut offset: usize = 0;
-    let (arg1, arg1len) = T1::parse_from(&bytes[offset..]);
+    let (arg1, arg1len) = T1::parse_from(unwrap_abort_option(bytes.get(offset..)));
     offset += arg1len;
 
-    let (arg2, arg2len) = T2::parse_from(&bytes[offset..]);
+    let (arg2, arg2len) = T2::parse_from(unwrap_abort_option(bytes.get(offset..)));
     offset += arg2len;
 
-    let (arg3, arg3len) = T3::parse_from(&bytes[offset..]);
+    let (arg3, arg3len) = T3::parse_from(unwrap_abort_option(bytes.get(offset..)));
     offset += arg3len;
 
     if offset != bytes.len() {
@@ -245,16 +245,16 @@ pub fn parse_from_calldata_4<
     main_func: fn(T1, T2, T3, T4) -> Result<R, i32>,
 ) -> Result<R, i32> {
     let mut offset: usize = 0;
-    let (arg1, arg1len) = T1::parse_from(&bytes[offset..]);
+    let (arg1, arg1len) = T1::parse_from(unwrap_abort_option(bytes.get(offset..)));
     offset += arg1len;
 
-    let (arg2, arg2len) = T2::parse_from(&bytes[offset..]);
+    let (arg2, arg2len) = T2::parse_from(unwrap_abort_option(bytes.get(offset..)));
     offset += arg2len;
 
-    let (arg3, arg3len) = T3::parse_from(&bytes[offset..]);
+    let (arg3, arg3len) = T3::parse_from(unwrap_abort_option(bytes.get(offset..)));
     offset += arg3len;
 
-    let (arg4, arg4len) = T4::parse_from(&bytes[offset..]);
+    let (arg4, arg4len) = T4::parse_from(unwrap_abort_option(bytes.get(offset..)));
     offset += arg4len;
 
     if offset != bytes.len() {

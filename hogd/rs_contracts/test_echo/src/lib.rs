@@ -5,14 +5,15 @@ use rs_contract_sdk as sdk;
 use core::mem::MaybeUninit;
 use core::ptr::copy_nonoverlapping;
 use echo;
-use sdk::rt::trap;
+use sdk::rt::{trap, unwrap_abort};
+use rs_macros::public_method;
 
 extern crate alloc;
 
 #[cfg_attr(target_family = "wasm", export_name = "0")]
 #[no_mangle]
 pub extern "C" fn test_slice() -> i32 {
-    let calldata = sdk::GetCalldata().unwrap();
+    let calldata = unwrap_abort(sdk::GetCalldata());
 
     if calldata.len() < 32 + 4 + 4 + 4 {
         trap();
@@ -31,23 +32,22 @@ pub extern "C" fn test_slice() -> i32 {
     let call_addr = unsafe { call_addr_mu.assume_init() };
 
     let method: sdk::MethodID =
-        u32::from_le_bytes(calldata[32..36].try_into().unwrap());
+        u32::from_le_bytes(unwrap_abort(calldata[32..36].try_into()));
 
     let slice_start =
-        u32::from_le_bytes(calldata[36..40].try_into().unwrap()) as usize;
+        u32::from_le_bytes(unwrap_abort(calldata[36..40].try_into())) as usize;
     let slice_end =
-        u32::from_le_bytes(calldata[40..44].try_into().unwrap()) as usize;
+        u32::from_le_bytes(unwrap_abort(calldata[40..44].try_into())) as usize;
 
     let mut return_len: sdk::RuntimeMemoryLength = 0;
 
-    sdk::syscall_bindings::raw_Invoke(
+    unwrap_abort(sdk::syscall_bindings::raw_Invoke(
         &call_addr,
         method,
         u64::MAX,
         &calldata[36..],
         &mut return_len,
-    )
-    .unwrap();
+    ));
 
     let expected_return_len = (slice_end - slice_start) as u32;
 
@@ -55,12 +55,13 @@ pub extern "C" fn test_slice() -> i32 {
         trap();
     }
 
-    let returned_buf = sdk::GetReturnedBuffer(return_len).unwrap();
+    let returned_buf = unwrap_abort(sdk::GetReturnedBuffer(return_len));
 
-    sdk::Log(&returned_buf).unwrap();
+    unwrap_abort(sdk::Log(&returned_buf));
 
     0
 }
+
 
 fn test_slice_fancysdk_inner(
     address: sdk::ContractAddress,
@@ -78,7 +79,7 @@ fn test_slice_fancysdk_inner(
 #[cfg_attr(target_family = "wasm", export_name = "1")]
 #[no_mangle]
 pub extern "C" fn test_slice_fancysdk() -> i32 {
-    let calldata = sdk::GetCalldata().unwrap();
+    let calldata = unwrap_abort(sdk::GetCalldata());
 
     match sdk::parse_trait::parse_from_calldata_4::<
         sdk::ContractAddress,
@@ -91,4 +92,19 @@ pub extern "C" fn test_slice_fancysdk() -> i32 {
         Ok(()) => 0,
         Err(x) => x,
     }
-}
+} 
+
+#[public_method]
+fn test_slice_fancysdk_inner_v2(
+    address: sdk::ContractAddress,
+    slice_start: u32,
+    slice_end: u32,
+    calldata: &[u8],
+) -> Result<(), i32> {
+    let returned_buf =
+        echo::echo_calldata(&address, slice_start, slice_end, calldata)?;
+
+    sdk::Log(&returned_buf)?;
+    Ok(())
+} 
+
