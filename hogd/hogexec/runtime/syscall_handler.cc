@@ -148,7 +148,8 @@ SystemCallHandler::invoke(Invocation const &invocation)
 
   uint64_t initial_gas_limit = UINT64_MAX;
   if (!call_frame_stack_.empty()) {
-    initial_gas_limit = call_frame_stack_.back().get_available_gas();
+    initial_gas_limit = runtimes_.at(call_frame_stack_.back().active_invocation_.invoked_address)
+      .runtime->get_available_gas();
   }
 
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
@@ -169,7 +170,7 @@ InvokeResult
 SystemCallHandler::invoke_unconverted(Invocation const &invocation,
                                       WasmiRuntime *runtime, uint64_t gas_limit)
 {
-  call_frame_stack_.emplace_back(invocation, *runtime);
+  call_frame_stack_.emplace_back(invocation);
 
   auto method_name = std::format("{:x}", invocation.method_name);
 

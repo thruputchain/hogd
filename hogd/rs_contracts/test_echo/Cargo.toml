@@ -9,3 +9,7 @@ echo = {path = "../echo", features = ["interface"]}
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[features]
+std = ["rs_contract_sdk/std"]
+

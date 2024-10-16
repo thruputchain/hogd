@@ -7,7 +7,6 @@
 #include <span>
 
 #include "hogd/hogexec/runtime/storage_proxy.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_object.hh"
 #include "transaction.hh"
 
@@ -15,7 +14,7 @@ namespace hogd {
 
 class CallFrame {
 public:
-  CallFrame(Invocation invocation, WasmiRuntime &runtime);
+  CallFrame(Invocation invocation);
 
   CallFrame(CallFrame &&other) = default;
 
@@ -47,8 +46,6 @@ public:
 
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
 
-  uint64_t get_available_gas() { return active_runtime_.get_available_gas(); }
-
   std::map<AddressAndKey, std::unique_ptr<StorageProxy>> const &
   get_storage_proxies() const
   {
@@ -56,8 +53,6 @@ public:
   }
 
 private:
-  WasmiRuntime &active_runtime_;
-
   ReturnBuffer to_return_;
 
   // Cached here separately from the primary SystemCallHandler

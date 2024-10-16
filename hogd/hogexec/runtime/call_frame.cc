@@ -10,15 +10,14 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
 
-CallFrame::CallFrame(Invocation invocation, WasmiRuntime &runtime)
-  : active_invocation_(std::move(invocation)), active_runtime_(runtime)
+CallFrame::CallFrame(Invocation invocation)
+  : active_invocation_(std::move(invocation))
 {}
 
 void
