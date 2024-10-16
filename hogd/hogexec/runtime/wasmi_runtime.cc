@@ -4,6 +4,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <format>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -206,6 +207,14 @@ WasmiRuntime::get_memory() const noexcept
   assert(wasmi_runtime_ptr_ != nullptr);
   auto slice = wasmi_get_memory(wasmi_runtime_ptr_);
   return std::as_bytes(std::span<const uint8_t>(slice.mem, slice.sz));
+}
+
+InvokeResult
+WasmiRuntime::invoke(uint32_t method_name, uint64_t gas_limit)
+{
+  auto method_name_str = std::format("{:x}", method_name);
+
+  return invoke(method_name_str, gas_limit);
 }
 
 InvokeResult

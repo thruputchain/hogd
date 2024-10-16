@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <format>
 #include <map>
 #include <memory>
 #include <optional>
@@ -22,7 +21,6 @@
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
@@ -30,6 +28,7 @@
 #include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 namespace hogd {
 
@@ -172,9 +171,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
 {
   call_frame_stack_.emplace_back(invocation);
 
-  auto method_name = std::format("{:x}", invocation.method_name);
-
-  InvokeResult result = runtime->runtime->invoke(method_name, gas_limit);
+  InvokeResult result = runtime->runtime->invoke(invocation.method_name, gas_limit);
 
   // We choose _not_ to check the return code here, and instead pass it back to
   // the caller. Implicitly, this is saying that the caller is responsible for
@@ -288,6 +285,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // successfully resolved runtime
   runtimes_.emplace(addr, std::make_unique<RuntimeCacheEntry>(std::move(new_runtime)));
+
   return runtimes_.at(addr).get();
 }
 

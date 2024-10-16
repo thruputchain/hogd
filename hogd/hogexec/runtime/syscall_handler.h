@@ -6,13 +6,13 @@
 #include "hogd/hogexec/runtime/call_frame.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/rpc.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 namespace hogd {
 
@@ -83,6 +83,7 @@ public:
   void commit_transaction(write_client_t &client) const;
 
 private:
+
   struct RuntimeCacheEntry {
     std::unique_ptr<WasmiRuntime> runtime;
     bool unwind_poisoned = false;

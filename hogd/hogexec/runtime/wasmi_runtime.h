@@ -124,6 +124,8 @@ public:
   // (i.e. x = get_available_gas(); invoke(something); assert(x ==
   // get_available_gas()))
   InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
+  InvokeResult invoke(uint32_t method_name, uint64_t gas_limit);
+
 
   // Returns FALSE if gas consumption failed.
   //

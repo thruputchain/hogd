@@ -46,37 +46,6 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
-add_library(
-  runtime_nativecontract
-  ${runtime_sources}
-)
-
-add_dependencies(
-  runtime_nativecontract
-  generate_syscall_inner_h
-  generate_syscall_entry_cc
-  generate_status_cc
-  protocol
-)
-
-target_include_directories(
-  runtime_nativecontract
-  PRIVATE
-  ${CMAKE_BINARY_DIR}
-)
-
-target_link_libraries(
-  runtime_nativecontract
-  hogd
-  protocol
-  softstate
-  ${LIBSODIUM_LIBRARIES}
-)
-
-target_compile_options(runtime_nativecontract PRIVATE
-  -DRUST_NATIVE_CONTRACT=1
-)
-
 target_link_libraries(
   runtime
   wasmi_lib
