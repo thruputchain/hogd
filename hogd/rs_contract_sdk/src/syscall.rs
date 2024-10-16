@@ -2,8 +2,7 @@ use rs_xdr::SyscallNo;
 
 #[link(wasm_import_module = "marmot")]
 extern "C" {
-    #[link_name = "syscall"]
-    pub(crate) fn syscall_internal(
+    pub(crate) fn syscall(
         syscall: u64,
         arg1: u64,
         arg2: u64,
@@ -14,8 +13,8 @@ extern "C" {
     ) -> i32;
 }
 
-pub fn syscall(
-    syscall: SyscallNo,
+pub fn syscall_wrapper(
+    syscall_no: SyscallNo,
     arg1: u64,
     arg2: u64,
     arg3: u64,
@@ -24,7 +23,7 @@ pub fn syscall(
     arg6: u64,
 ) -> i32 {
     unsafe {
-        syscall_internal(syscall as u64, arg1, arg2, arg3, arg4, arg5, arg6)
+        syscall(syscall_no as u64, arg1, arg2, arg3, arg4, arg5, arg6)
     }
 }
 

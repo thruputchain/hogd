@@ -456,7 +456,7 @@ def gen_rs_syscall_binding(syscall):
 
   // syscall will initialize outputs, if error is kNone
   {errdecl}
-    syscall(SyscallNo::k{name},
+    syscall_wrapper(SyscallNo::k{name},
       {syscallargs_str});
 
   {errhandle_str}
@@ -475,7 +475,7 @@ def gen_rs_syscall_bindings(spec):
 
   return f"""#![allow(non_snake_case)]
 use rs_xdr::*;
-use crate::syscall::{{syscall, to_offset_mut}};
+use crate::syscall::{{syscall_wrapper, to_offset_mut}};
 use core::mem::MaybeUninit;
 use core::hint::unreachable_unchecked;
 
