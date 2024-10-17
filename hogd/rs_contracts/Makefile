@@ -1,5 +1,6 @@
 %.wasm : Makefile $(wildcard $</src/*.rs)
-	cargo rustc --target wasm32-unknown-unknown --release -p $(basename $@) \
+	cargo +nightly rustc --target wasm32-unknown-unknown --release -p $(basename $@) \
+	-Zbuild-std=alloc,core -Zbuild-std-features=panic_immediate_abort \
 	-- -C link-args=-zstack-size=64000
 
 clean:

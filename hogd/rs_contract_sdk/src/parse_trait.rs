@@ -1,6 +1,7 @@
 use crate::invoke::Return;
 use crate::rt::{trap, unwrap_abort, unwrap_abort_option};
 use rs_xdr::*;
+use core::mem::MaybeUninit;
 
 pub trait Parseable<'a> {
     fn parse_from(arg: &'a [u8]) -> (Self, usize)
@@ -11,7 +12,7 @@ pub trait Parseable<'a> {
 pub trait Serializable {
     fn serialize_len(&self) -> usize;
 
-    fn do_serialize(&self, slice: &mut [u8]);
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]);
 }
 
 pub trait OutputReturnable {
@@ -36,11 +37,11 @@ impl Serializable for u32 {
         4
     }
 
-    fn do_serialize(&self, slice: &mut [u8]) {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) {
         debug_assert!(slice.len() == 4);
         let b = self.to_le_bytes();
         unsafe {
-            core::ptr::copy_nonoverlapping(b.as_ptr(), slice.as_mut_ptr(), 4);
+            core::ptr::copy_nonoverlapping(b.as_ptr(), MaybeUninit::slice_as_mut_ptr(slice), 4);
         }
     }
 }
@@ -57,11 +58,11 @@ impl Serializable for i64 {
         8
     }
 
-    fn do_serialize(&self, slice: &mut [u8]) {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) {
         debug_assert!(slice.len() == 4);
         let b = self.to_le_bytes();
         unsafe {
-            core::ptr::copy_nonoverlapping(b.as_ptr(), slice.as_mut_ptr(), 8);
+            core::ptr::copy_nonoverlapping(b.as_ptr(), MaybeUninit::slice_as_mut_ptr(slice), 8);
         }
     }
 }
@@ -79,12 +80,12 @@ impl Serializable for &StorageKey {
         32
     }
 
-    fn do_serialize(&self, slice: &mut [u8]) {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) {
         debug_assert!(slice.len() == 32);
         unsafe {
             core::ptr::copy_nonoverlapping(
                 self.as_ptr(),
-                slice.as_mut_ptr(),
+                MaybeUninit::slice_as_mut_ptr(slice),
                 32,
             );
         }
@@ -102,12 +103,12 @@ impl Serializable for &[u8] {
         self.len()
     }
 
-    fn do_serialize(&self, slice: &mut [u8]) {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) {
         debug_assert!(slice.len() == self.len());
         unsafe {
             core::ptr::copy_nonoverlapping(
                 self.as_ptr(),
-                slice.as_mut_ptr(),
+                MaybeUninit::slice_as_mut_ptr(slice),
                 self.len(),
             );
         }
@@ -115,7 +116,7 @@ impl Serializable for &[u8] {
 }
 
 // Will fail if buf.len() != sum(args.serialize_len())
-pub fn serialize_to_calldata_1<T1: Serializable>(buf: &mut [u8], arg1: T1) {
+pub fn serialize_to_calldata_1<T1: Serializable>(buf: &mut [MaybeUninit<u8>], arg1: T1) {
     let mut offset: usize = 0;
 
     arg1.do_serialize(unwrap_abort_option(buf.get_mut(offset..(offset + arg1.serialize_len()))));
@@ -127,7 +128,7 @@ pub fn serialize_to_calldata_1<T1: Serializable>(buf: &mut [u8], arg1: T1) {
 }
 
 pub fn serialize_to_calldata_2<T1: Serializable, T2: Serializable>(
-    buf: &mut [u8],
+    buf: &mut [MaybeUninit<u8>],
     arg1: T1,
     arg2: T2,
 ) {
@@ -149,11 +150,11 @@ pub fn serialize_to_calldata_3<
     T2: Serializable,
     T3: Serializable,
 >(
-    buf: &mut [u8],
+    buf: &mut [MaybeUninit<u8>],
     arg1: T1,
     arg2: T2,
     arg3: T3,
-) {
+) -> Result<(), i32> {
     let mut offset: usize = 0;
 
     arg1.do_serialize(unwrap_abort_option(buf.get_mut(offset..(offset + arg1.serialize_len()))));
@@ -166,8 +167,9 @@ pub fn serialize_to_calldata_3<
     offset += arg3.serialize_len();
 
     if offset != buf.len() {
-        trap();
+        return Err(1234);
     }
+    Ok(())
 }
 
 pub fn parse_from_calldata_1<'a, T1: Parseable<'a>, R: Sized>(
@@ -245,20 +247,20 @@ pub fn parse_from_calldata_4<
     main_func: fn(T1, T2, T3, T4) -> Result<R, i32>,
 ) -> Result<R, i32> {
     let mut offset: usize = 0;
-    let (arg1, arg1len) = T1::parse_from(unwrap_abort_option(bytes.get(offset..)));
+    let (arg1, arg1len) = T1::parse_from((bytes.get(offset..)).ok_or(SyscallErrorCode::kCalldataParseError as i32)?);
     offset += arg1len;
 
-    let (arg2, arg2len) = T2::parse_from(unwrap_abort_option(bytes.get(offset..)));
+    let (arg2, arg2len) = T2::parse_from((bytes.get(offset..)).ok_or(SyscallErrorCode::kCalldataParseError as i32)?);
     offset += arg2len;
 
-    let (arg3, arg3len) = T3::parse_from(unwrap_abort_option(bytes.get(offset..)));
+    let (arg3, arg3len) = T3::parse_from((bytes.get(offset..)).ok_or(SyscallErrorCode::kCalldataParseError as i32)?);
     offset += arg3len;
 
-    let (arg4, arg4len) = T4::parse_from(unwrap_abort_option(bytes.get(offset..)));
+    let (arg4, arg4len) = T4::parse_from((bytes.get(offset..)).ok_or(SyscallErrorCode::kCalldataParseError as i32)?);
     offset += arg4len;
 
     if offset != bytes.len() {
-        trap();
+        return Err(SyscallErrorCode::kCalldataParseError as i32);
     }
 
     main_func(arg1, arg2, arg3, arg4)

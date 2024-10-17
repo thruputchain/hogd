@@ -1,4 +1,19 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![feature(maybe_uninit_slice)]
+
+// If we decide rebuilding core and alloc are bad,
+// we can disable the error handling in the allocator
+// (and the associated nonsense code)
+// with the following.  As it is, rebuilding with panic_immediate_abort
+// seems to give the same code size without this.
+/*
+#![feature(alloc_error_handler)]
+
+#[alloc_error_handler]
+pub fn handle_alloc_error(_: Layout) -> ! {
+    crate::rt::trap();
+} 
+*/
 
 /**
  * Return type of methods is generally Result<return_type, i32>

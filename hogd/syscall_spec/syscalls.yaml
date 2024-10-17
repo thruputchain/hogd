@@ -191,6 +191,7 @@ syscalls:
       - name: "written_len"
         fixed_size: yes
         typename: "RuntimeMemoryLength"
+        primitive_type: yes
     number: 15
   - name: "GetDeployAddress"
     needs_context : yes
@@ -275,3 +276,6 @@ errors:
   - name: "ContractAlreadyDeployed"
     number: 13
     doc: "Attempt made to deploy a contract twice (same nonce and contract hash, from same address)"
+  - name: "CalldataParseError"
+    number: 14
+    doc: "Failed to parse the input calldata into the contract's input signature"

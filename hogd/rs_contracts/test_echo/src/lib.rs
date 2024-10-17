@@ -10,6 +10,7 @@ use rs_macros::public_method;
 
 extern crate alloc;
 
+
 #[cfg_attr(target_family = "wasm", export_name = "0")]
 #[no_mangle]
 pub extern "C" fn test_slice() -> i32 {
@@ -93,6 +94,7 @@ pub extern "C" fn test_slice_fancysdk() -> i32 {
         Err(x) => x,
     }
 } 
+
 
 #[public_method]
 fn test_slice_fancysdk_inner_v2(

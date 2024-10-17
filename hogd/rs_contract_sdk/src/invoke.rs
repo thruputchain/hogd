@@ -36,7 +36,6 @@ mod get_calldata_alloc {
 
     extern crate alloc;
     use alloc::boxed::Box;
-    use alloc::vec::Vec;
 
     use crate::rt::trap;
     use crate::syscall_bindings;
@@ -44,45 +43,35 @@ mod get_calldata_alloc {
     pub fn GetCalldata() -> Result<Box<[u8]>, i32> {
         let len: RuntimeMemoryLength = crate::invoke::GetCalldataLen()?;
 
-        let mut vec_mu = Vec::with_capacity(len as usize);
-
-        unsafe {
-            vec_mu.set_len(len as usize);
-        }
+        let mut vec = Box::<[u8]>::new_uninit_slice(len as usize);
 
         let mut written_len: RuntimeMemoryLength = 0;
 
-        let mut vec = vec_mu.into_boxed_slice();
 
-        syscall_bindings::raw_GetCalldata(&mut vec, &mut written_len)?;
+        syscall_bindings::uninit_GetCalldata(&mut vec, &mut written_len)?;
 
         if written_len != len {
             trap();
         }
 
-        Ok(vec)
+        Ok(unsafe {vec.assume_init() })
     }
 
     pub fn GetReturnedBuffer(
         expected_len: RuntimeMemoryLength,
     ) -> Result<Box<[u8]>, i32> {
-        let mut vec_mu = Vec::with_capacity(expected_len as usize);
 
-        unsafe {
-            vec_mu.set_len(expected_len as usize);
-        }
+        let mut vec = Box::<[u8]>::new_uninit_slice(expected_len as usize);
 
-        let mut vec = vec_mu.into_boxed_slice();
+        let mut written_len : RuntimeMemoryLength = 0;
 
-        let mut written_len: RuntimeMemoryLength = 0;
-
-        syscall_bindings::raw_GetReturnedBuffer(&mut vec, &mut written_len)?;
+        syscall_bindings::uninit_GetReturnedBuffer(&mut vec, &mut written_len)?;
 
         if written_len != expected_len {
             trap();
         }
 
-        Ok(vec)
+        Ok(unsafe {vec.assume_init()})
     }
 }
 

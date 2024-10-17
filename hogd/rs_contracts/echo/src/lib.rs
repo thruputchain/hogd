@@ -6,8 +6,8 @@ extern crate alloc;
 
 #[allow(unused_imports)]
 use alloc::boxed::Box;
-#[allow(unused_imports)]
-use alloc::vec::Vec;
+
+use core::mem::MaybeUninit;
 
 // Echoes back the specified slice of the input calldata
 // call format: slice_start slice_end calldata
@@ -46,20 +46,16 @@ pub fn echo_calldata(
 ) -> Result<Box<[u8]>, i32> {
     let buffer_size: usize = 4 + 4 + calldata.len();
 
-    let mut vec_mu = Vec::with_capacity(buffer_size);
-
-    unsafe {
-        vec_mu.set_len(buffer_size);
-    }
-
-    let mut vec = vec_mu.into_boxed_slice();
+    let mut vec = Box::<[u8]>::new_uninit_slice(buffer_size as usize);
 
     sdk::parse_trait::serialize_to_calldata_3(
-        &mut vec,
+        vec.as_mut(),
         slice_start,
         slice_end,
         calldata,
-    );
+    )?;
+
+    let calldata = unsafe { vec.assume_init() };
 
     let mut return_len: sdk::RuntimeMemoryLength = 0;
 
@@ -69,7 +65,7 @@ pub fn echo_calldata(
         &call_address,
         method,
         u64::MAX,
-        &vec,
+        &calldata,
         &mut return_len,
     )?;
 

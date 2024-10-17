@@ -23,7 +23,6 @@ mod bytestring_get_alloc {
 
     extern crate alloc;
     use alloc::boxed::Box;
-    use alloc::vec::Vec;
 
     use crate::rt::trap;
     use crate::syscall_bindings;
@@ -32,23 +31,17 @@ mod bytestring_get_alloc {
         let len: RuntimeMemoryLength =
             crate::bytestring::BytestringGetLen(key)?;
 
-        let mut vec_mu = Vec::with_capacity(len as usize);
+        let mut vec = Box::<[u8]>::new_uninit_slice(len as usize);
+    
+        let mut written_len : RuntimeMemoryLength = 0;
 
-        unsafe {
-            vec_mu.set_len(len as usize);
-        }
-
-        let mut written_len: RuntimeMemoryLength = 0;
-
-        let mut vec = vec_mu.into_boxed_slice();
-
-        syscall_bindings::raw_BytestringGet(key, &mut vec, &mut written_len)?;
+        syscall_bindings::uninit_BytestringGet(key, &mut vec, &mut written_len)?;
 
         if written_len != len {
             trap();
         }
 
-        Ok(vec)
+        Ok( unsafe {vec.assume_init() })
     }
 }
 
