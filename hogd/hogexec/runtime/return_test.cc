@@ -129,7 +129,8 @@ TEST_F(ReturnTest, EchoSliceFancierSDK)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr2_;
-  stx.tx.invocation.method_name = test::get_sdk_name("test_slice_fancysdk_inner_v2");
+  stx.tx.invocation.method_name =
+      test::get_sdk_name("test_slice_fancysdk_inner_v2");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(addr1_, static_cast<uint32_t>(1),

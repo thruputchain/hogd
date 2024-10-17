@@ -3,9 +3,9 @@ use crate::rt::{trap, unwrap_abort_option};
 use core::mem::MaybeUninit;
 use rs_xdr::*;
 
-#[cfg(feature="alloc")]
+#[cfg(feature = "alloc")]
 extern crate alloc;
-#[cfg(feature="alloc")]
+#[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 
 pub trait Parseable<'a> {
@@ -30,7 +30,7 @@ pub trait OutputReturnable {
     fn return_self(&self) -> !;
 }
 
-#[cfg(feature="alloc")]
+#[cfg(feature = "alloc")]
 impl ParseableOwned for Box<[u8]> {
     fn parse_from(arg: &[u8]) -> (Self, usize) {
         let mut out = Box::new_uninit_slice(arg.len());
@@ -38,9 +38,32 @@ impl ParseableOwned for Box<[u8]> {
             core::ptr::copy_nonoverlapping(
                 arg.as_ptr(),
                 MaybeUninit::slice_as_mut_ptr(out.as_mut()),
-                arg.len())
+                arg.len(),
+            )
         };
-        (unsafe {out.assume_init() }, arg.len())
+        (unsafe { out.assume_init() }, arg.len())
+    }
+}
+
+impl<T1: ParseableOwned, T2: ParseableOwned> ParseableOwned for (T1, T2) {
+    fn parse_from(arg: &[u8]) -> (Self, usize) {
+        let mut offset: usize = 0;
+
+        let (arg1, arg1len) = T1::parse_from(match arg.get(offset..) {
+            Some(b) => b,
+            None => Exit(SyscallErrorCode::kCalldataParseError as i32),
+        });
+
+        offset += arg1len;
+
+        let (arg2, arg2len) = T2::parse_from(match arg.get(offset..) {
+            Some(b) => b,
+            None => Exit(SyscallErrorCode::kCalldataParseError as i32),
+        });
+
+        offset += arg2len;
+
+        ((arg1, arg2), offset)
     }
 }
 
@@ -74,14 +97,13 @@ impl<T: OutputReturnable> OutputReturnable for Option<T> {
         match self {
             Some(x) => {
                 x.return_self();
-            },
+            }
             None => {
                 Exit(-1);
             }
         }
     }
 }
-
 
 impl<'a> Parseable<'a> for u32 {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
@@ -204,7 +226,7 @@ impl Serializable for &[u8] {
     }
 }
 
-#[cfg(feature="alloc")]
+#[cfg(feature = "alloc")]
 impl<'a> Parseable<'a> for Box<[u8]> {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
         let mut out = Box::<[u8]>::new_uninit_slice(arg.len());
@@ -212,11 +234,35 @@ impl<'a> Parseable<'a> for Box<[u8]> {
             core::ptr::copy_nonoverlapping(
                 arg.as_ptr(),
                 MaybeUninit::slice_as_mut_ptr(out.as_mut()),
-                arg.len())
+                arg.len(),
+            )
         };
 
-        (unsafe {out.assume_init()}, arg.len())
+        (unsafe { out.assume_init() }, arg.len())
     }
+}
+
+pub fn compute_serialize_len_1<T1: Serializable>(arg1: T1) -> usize {
+    arg1.serialize_len()
+}
+
+pub fn compute_serialize_len_2<T1: Serializable, T2: Serializable>(
+    arg1: T1,
+    arg2: T2,
+) -> usize {
+    arg1.serialize_len() + arg2.serialize_len()
+}
+
+pub fn compute_serialize_len_3<
+    T1: Serializable,
+    T2: Serializable,
+    T3: Serializable,
+>(
+    arg1: T1,
+    arg2: T2,
+    arg3: T3,
+) -> usize {
+    arg1.serialize_len() + arg2.serialize_len() + arg3.serialize_len()
 }
 
 // We explicitly choose to make serialize_to_calldata trap() on error,
@@ -445,26 +491,16 @@ pub fn parse_from_calldata_4<
     main_func(arg1, arg2, arg3, arg4)
 }
 
-pub fn parse_returns_from_calldata_1<
-    'a,
-    T1: ParseableOwned
->(
-    bytes: &'a [u8]
+pub fn parse_returns_from_calldata<'a, T1: ParseableOwned>(
+    bytes: &'a [u8],
 ) -> T1 {
-    let mut offset: usize = 0;
+    let (arg, arglen) = T1::parse_from(&bytes);
 
-    let (arg1, arg1len) = T1::parse_from(match bytes.get(offset..) {
-        Some(b) => b,
-        None => { Exit(SyscallErrorCode::kCalldataParseError as i32)},
-    });
-
-    offset += arg1len;
-
-    if offset != bytes.len() {
-        Exit (SyscallErrorCode::kCalldataParseError as i32);
+    if arglen != bytes.len() {
+        Exit(SyscallErrorCode::kCalldataParseError as i32);
     }
 
-    arg1
+    arg
 }
 
 #[cfg(test)]

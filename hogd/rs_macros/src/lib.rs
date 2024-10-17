@@ -9,8 +9,8 @@ use sha2::Digest;
 use sha2::Sha256;
 use syn::FnArg::Typed;
 use syn::ReturnType;
-use syn::{ItemFn, Type};
-use syn::Type::Reference;
+use syn::Type::{Reference, Tuple};
+use syn::{ItemFn, Type, TypeTuple};
 
 fn get_method_name(arg: &str) -> String {
     let mut hasher = Sha256::new();
@@ -38,9 +38,10 @@ fn get_method_name_int(arg: &str) -> u32 {
 
 #[proc_macro]
 pub fn public_interface(_item: TokenStream) -> TokenStream {
-    let crate_name = format_ident!("{}", std::env::var("CARGO_PKG_NAME").unwrap());
+    let crate_name =
+        format_ident!("{}", std::env::var("CARGO_PKG_NAME").unwrap());
 
-    TokenStream::from(quote!{
+    TokenStream::from(quote! {
         #[cfg(feature="interface")]
         pub struct #crate_name <'a> {
             call_address: &'a ::rs_contract_sdk::ContractAddress,
@@ -55,22 +56,29 @@ pub fn public_interface(_item: TokenStream) -> TokenStream {
     })
 }
 
-
+// TODO(geoff) Ref to Box on tuple types
 
 fn iface_return_type(ret: &ReturnType) -> Type {
     let t = match ret {
-        ReturnType::Type(_, t) => {t.clone()},
-        _ => {return Type::Verbatim(TokenStream::from(quote!{()}).into());}
+        ReturnType::Type(_, t) => t.clone(),
+        _ => {
+            return Type::Verbatim(TokenStream::from(quote! {()}).into());
+        }
     };
 
     let ref_type = match *t {
         Reference(type_reference) => type_reference,
-        _ => {return *t.clone();}
+        Tuple(tuple_type) => {
+            panic!("unimplemented")
+        }
+        _ => {
+            return *t.clone();
+        }
     };
 
     let elem = *ref_type.elem.clone();
 
-    return Type::Verbatim(quote!{Box<#elem>});
+    return Type::Verbatim(quote! {Box<#elem>});
 }
 
 #[proc_macro_attribute]
@@ -93,7 +101,15 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let parse_from_calldata_name =
         format_ident!("parse_from_calldata_{}", n_args);
 
+    let serialize_to_calldata_name =
+        format_ident!("serialize_to_calldata_{}", n_args);
+
+    let compute_serialize_len_name =
+        format_ident!("compute_serialize_len_{}", n_args);
+
     let mut types: Vec<TokenStream2> = vec![];
+
+    let mut arg_names: Vec<TokenStream2> = vec![];
 
     for input in &function_signature.inputs {
         match input {
@@ -101,6 +117,9 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let type_arg = *t.ty.clone();
                 types.push(quote! {#type_arg});
                 types.push(quote! {, });
+                let pat = *t.pat.clone();
+                arg_names.push(quote! {#pat});
+                arg_names.push(quote! {, });
             }
             _ => {
                 panic!("invalid arg type");
@@ -117,17 +136,21 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let iface_return_type = iface_return_type(&function_signature.output);
-    println!("{:?}", iface_return_type);
-    //.let iface_return = parse_macro_input!(iface_return_tokens as Type);
 
     let args: TokenStream2 = types
         .iter()
         .map(|t| -> TokenStream2 { t.clone() })
         .collect();
 
-    let crate_name = format_ident!("{}", std::env::var("CARGO_PKG_NAME").unwrap());
+    let arg_names_join: TokenStream2 = arg_names
+        .iter()
+        .map(|t| -> TokenStream2 { t.clone() })
+        .collect();
 
-    let methodname : u32 = get_method_name_int(&function_name.to_string());
+    let crate_name =
+        format_ident!("{}", std::env::var("CARGO_PKG_NAME").unwrap());
+
+    let methodname: u32 = get_method_name_int(&function_name.to_string());
 
     TokenStream::from(quote! {
         #[cfg_attr(target_family = "wasm", export_name = #export_name)]
@@ -159,15 +182,14 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 #inputs
             ) -> Result< #iface_return_type, i32> {
 
-                let buffer_size: usize = 4 + 4 + calldata.len();
+                let buffer_size: usize = ::rs_contract_sdk::parse_trait::#compute_serialize_len_name (
+                    #arg_names_join);
 
-                let mut vec = Box::<[u8]>::new_uninit_slice(buffer_size as usize);
+                let mut vec = Box::<[u8]>::new_uninit_slice(buffer_size);
 
-                sdk::parse_trait::serialize_to_calldata_3(
+                ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
                     vec.as_mut(),
-                    slice_start,
-                    slice_end,
-                    calldata,
+                    #arg_names_join
                 )?;
 
                 let calldata = unsafe { vec.assume_init() };
@@ -190,12 +212,12 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 // (which would leave the caller uncertain of whether the error happened inside
                 // the other contract, or inside the parse code on this side)
 
-                // if raw_Invoke returns success, then it cannot be the case that 
+                // if raw_Invoke returns success, then it cannot be the case that
                 // GetReturnedBuffer fails (unless e.g. an allocation error)
 
                 let returned_buf = ::rs_contract_sdk::rt::unwrap_abort(sdk::GetReturnedBuffer(return_len));
 
-                Ok(sdk::parse_trait::parse_returns_from_calldata_1::<#iface_return_type>(&returned_buf))
+                Ok(sdk::parse_trait::parse_returns_from_calldata::<#iface_return_type>(&returned_buf))
             }
         }
     })

@@ -69,7 +69,6 @@ fn test_slice_fancysdk_inner(
     slice_end: u32,
     calldata: &[u8],
 ) -> Result<(), i32> {
-
     let returned_buf =
         echo::echo_calldata(&address, slice_start, slice_end, calldata)?;
 
@@ -95,18 +94,16 @@ pub extern "C" fn test_slice_fancysdk() -> i32 {
     }
 }
 
-
 #[public_method]
 fn test_slice_fancysdk_inner_v2(
     address: sdk::ContractAddress,
     slice_start: u32,
     slice_end: u32,
-    calldata: &[u8]
+    calldata: &[u8],
 ) -> Result<(), i32> {
-
     let echo = echo::echo::new(&address);
 
-    let returned_buf : Box<[u8]> =
+    let returned_buf: Box<[u8]> =
         echo.echo_calldata_fancy(slice_start, slice_end, calldata)?;
 
     sdk::Log(&returned_buf)?;
