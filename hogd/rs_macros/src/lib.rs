@@ -5,12 +5,11 @@ extern crate quote;
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::ToTokens;
 use sha2::Digest;
 use sha2::Sha256;
 use syn::FnArg::Typed;
 use syn::ReturnType;
-use syn::{Ident, ItemFn, LitStr, Type};
+use syn::{ItemFn, Type};
 use syn::Type::Reference;
 
 fn get_method_name(arg: &str) -> String {
@@ -128,6 +127,8 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let crate_name = format_ident!("{}", std::env::var("CARGO_PKG_NAME").unwrap());
 
+    let methodname : u32 = get_method_name_int(&function_name.to_string());
+
     TokenStream::from(quote! {
         #[cfg_attr(target_family = "wasm", export_name = #export_name)]
         #[no_mangle]
@@ -173,7 +174,7 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                 let mut return_len: sdk::RuntimeMemoryLength = 0;
 
-                let method: sdk::MethodID = 0;
+                let method: sdk::MethodID = #methodname;
 
                 sdk::syscall_bindings::raw_Invoke(
                     &self.call_address,

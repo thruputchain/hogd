@@ -8,7 +8,6 @@ extern crate alloc;
 
 #[allow(unused_imports)]
 use alloc::boxed::Box;
-use alloc::rc::Rc;
 
 public_interface!();
 /*
@@ -60,7 +59,10 @@ pub fn echo_calldata_fancy(
     slice_end: u32,
     calldata: &[u8]) -> &[u8]
 {
-    sdk::rt::unwrap_abort_option(calldata.get((slice_start as usize)..(slice_end as usize)))
+    let res = sdk::rt::unwrap_abort_option(calldata.get((slice_start as usize)..(slice_end as usize)));
+
+    sdk::rt::unwrap_abort(sdk::Log(res));
+    res
 }
 
 #[cfg(feature = "interface")]
