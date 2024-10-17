@@ -2,12 +2,29 @@
 
 use rs_contract_sdk as sdk;
 
+use rs_macros::{public_method, public_interface};
+
 extern crate alloc;
 
 #[allow(unused_imports)]
 use alloc::boxed::Box;
+use alloc::rc::Rc;
 
-use core::mem::MaybeUninit;
+public_interface!();
+/*
+#[cfg(feature="interface")]
+pub struct echo<'a> {
+    call_address: &'a ::rs_contract_sdk::ContractAddress,
+}
+
+#[cfg(feature="interface")]
+impl<'a> echo<'a> {
+    pub fn new(address: &'a ::rs_contract_sdk::ContractAddress) -> Self {
+        echo {call_address : address}
+    }
+} 
+*/
+
 
 // Echoes back the specified slice of the input calldata
 // call format: slice_start slice_end calldata
@@ -35,6 +52,15 @@ pub extern "C" fn echo_calldata() -> i32 {
     {
         sdk::rt::trap();
     }
+}
+
+#[public_method]
+pub fn echo_calldata_fancy(
+    slice_start: u32,
+    slice_end: u32,
+    calldata: &[u8]) -> &[u8]
+{
+    sdk::rt::unwrap_abort_option(calldata.get((slice_start as usize)..(slice_end as usize)))
 }
 
 #[cfg(feature = "interface")]
@@ -71,5 +97,5 @@ pub fn echo_calldata(
 
     let returned_buf = sdk::GetReturnedBuffer(return_len)?;
 
-    Ok(returned_buf)
+    Ok(sdk::parse_trait::parse_returns_from_calldata_1::<Box<[u8]>>(&returned_buf))
 }

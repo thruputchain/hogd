@@ -3,8 +3,19 @@ use crate::rt::{trap, unwrap_abort_option};
 use core::mem::MaybeUninit;
 use rs_xdr::*;
 
+#[cfg(feature="alloc")]
+extern crate alloc;
+#[cfg(feature="alloc")]
+use alloc::boxed::Box;
+
 pub trait Parseable<'a> {
     fn parse_from(arg: &'a [u8]) -> (Self, usize)
+    where
+        Self: Sized;
+}
+
+pub trait ParseableOwned {
+    fn parse_from(arg: &[u8]) -> (Self, usize)
     where
         Self: Sized;
 }
@@ -19,9 +30,29 @@ pub trait OutputReturnable {
     fn return_self(&self) -> !;
 }
 
+#[cfg(feature="alloc")]
+impl ParseableOwned for Box<[u8]> {
+    fn parse_from(arg: &[u8]) -> (Self, usize) {
+        let mut out = Box::new_uninit_slice(arg.len());
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                arg.as_ptr(),
+                MaybeUninit::slice_as_mut_ptr(out.as_mut()),
+                arg.len())
+        };
+        (unsafe {out.assume_init() }, arg.len())
+    }
+}
+
 impl OutputReturnable for () {
     fn return_self(&self) -> ! {
         Return(&[])
+    }
+}
+
+impl OutputReturnable for &[u8] {
+    fn return_self(&self) -> ! {
+        Return(self)
     }
 }
 
@@ -37,6 +68,20 @@ impl<T: OutputReturnable> OutputReturnable for Result<T, i32> {
         }
     }
 }
+
+impl<T: OutputReturnable> OutputReturnable for Option<T> {
+    fn return_self(&self) -> ! {
+        match self {
+            Some(x) => {
+                x.return_self();
+            },
+            None => {
+                Exit(-1);
+            }
+        }
+    }
+}
+
 
 impl<'a> Parseable<'a> for u32 {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
@@ -156,6 +201,21 @@ impl Serializable for &[u8] {
                 self.len(),
             );
         }
+    }
+}
+
+#[cfg(feature="alloc")]
+impl<'a> Parseable<'a> for Box<[u8]> {
+    fn parse_from(arg: &'a [u8]) -> (Self, usize) {
+        let mut out = Box::<[u8]>::new_uninit_slice(arg.len());
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                arg.as_ptr(),
+                MaybeUninit::slice_as_mut_ptr(out.as_mut()),
+                arg.len())
+        };
+
+        (unsafe {out.assume_init()}, arg.len())
     }
 }
 
@@ -383,6 +443,28 @@ pub fn parse_from_calldata_4<
     }
 
     main_func(arg1, arg2, arg3, arg4)
+}
+
+pub fn parse_returns_from_calldata_1<
+    'a,
+    T1: ParseableOwned
+>(
+    bytes: &'a [u8]
+) -> T1 {
+    let mut offset: usize = 0;
+
+    let (arg1, arg1len) = T1::parse_from(match bytes.get(offset..) {
+        Some(b) => b,
+        None => { Exit(SyscallErrorCode::kCalldataParseError as i32)},
+    });
+
+    offset += arg1len;
+
+    if offset != bytes.len() {
+        Exit (SyscallErrorCode::kCalldataParseError as i32);
+    }
+
+    arg1
 }
 
 #[cfg(test)]

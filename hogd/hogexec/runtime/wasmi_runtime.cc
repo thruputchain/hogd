@@ -212,7 +212,7 @@ WasmiRuntime::get_memory() const noexcept
 InvokeResult
 WasmiRuntime::invoke(uint32_t method_name, uint64_t gas_limit)
 {
-  auto method_name_str = std::format("{:x}", method_name);
+  auto method_name_str = std::format("{:X}", method_name);
 
   return invoke(method_name_str, gas_limit);
 }
