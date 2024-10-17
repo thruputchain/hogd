@@ -12,7 +12,7 @@
 #[alloc_error_handler]
 pub fn handle_alloc_error(_: Layout) -> ! {
     crate::rt::trap();
-} 
+}
 */
 
 /**

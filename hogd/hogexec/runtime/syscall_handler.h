@@ -6,13 +6,13 @@
 #include "hogd/hogexec/runtime/call_frame.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/rpc.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 namespace hogd {
 
@@ -83,7 +83,6 @@ public:
   void commit_transaction(write_client_t &client) const;
 
 private:
-
   struct RuntimeCacheEntry {
     std::unique_ptr<WasmiRuntime> runtime;
     bool unwind_poisoned = false;
@@ -93,7 +92,8 @@ private:
 
   RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
   InvokeResult invoke_unconverted(Invocation const &invocation,
-                                  RuntimeCacheEntry *runtime, uint64_t gas_limit);
+                                  RuntimeCacheEntry *runtime,
+                                  uint64_t gas_limit);
 
   // Can only be called when call_frame_stack_ is nonempty
   StorageProxy &resolve_storage_proxy(StorageKey const &key);
@@ -117,6 +117,5 @@ private:
 
   void commit_new_contract_deployments(write_client_t &client) const;
 };
-
 
 } // namespace hogd

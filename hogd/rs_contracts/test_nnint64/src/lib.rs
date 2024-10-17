@@ -17,10 +17,13 @@ fn make_set_add(
 pub extern "C" fn do_set_add() -> i32 {
     let calldata = sdk::GetCalldata().unwrap();
 
-    match sdk::parse_trait::parse_from_calldata_3::<sdk::StorageKey, i64, i64, ()>(
-        &calldata,
-        make_set_add,
-    ) {
+    match sdk::parse_trait::parse_from_calldata_3::<
+        sdk::StorageKey,
+        i64,
+        i64,
+        Result<(), i32>,
+    >(&calldata, make_set_add)
+    {
         Ok(()) => 0,
         Err(x) => x,
     }

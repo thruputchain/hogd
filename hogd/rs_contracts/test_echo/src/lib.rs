@@ -5,11 +5,10 @@ use rs_contract_sdk as sdk;
 use core::mem::MaybeUninit;
 use core::ptr::copy_nonoverlapping;
 use echo;
-use sdk::rt::{trap, unwrap_abort};
 use rs_macros::public_method;
+use sdk::rt::{trap, unwrap_abort};
 
 extern crate alloc;
-
 
 #[cfg_attr(target_family = "wasm", export_name = "0")]
 #[no_mangle]
@@ -63,7 +62,6 @@ pub extern "C" fn test_slice() -> i32 {
     0
 }
 
-
 fn test_slice_fancysdk_inner(
     address: sdk::ContractAddress,
     slice_start: u32,
@@ -87,14 +85,13 @@ pub extern "C" fn test_slice_fancysdk() -> i32 {
         u32,
         u32,
         &[u8],
-        (),
+        Result<(), i32>,
     >(&calldata, test_slice_fancysdk_inner)
     {
         Ok(()) => 0,
         Err(x) => x,
     }
-} 
-
+}
 
 #[public_method]
 fn test_slice_fancysdk_inner_v2(
@@ -108,5 +105,4 @@ fn test_slice_fancysdk_inner_v2(
 
     sdk::Log(&returned_buf)?;
     Ok(())
-} 
-
+}

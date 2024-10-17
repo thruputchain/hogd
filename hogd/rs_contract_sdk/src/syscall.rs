@@ -22,9 +22,7 @@ pub fn syscall_wrapper(
     arg5: u64,
     arg6: u64,
 ) -> i32 {
-    unsafe {
-        syscall(syscall_no as u64, arg1, arg2, arg3, arg4, arg5, arg6)
-    }
+    unsafe { syscall(syscall_no as u64, arg1, arg2, arg3, arg4, arg5, arg6) }
 }
 
 pub(crate) fn to_offset_mut<T>(obj: &mut T) -> *mut u8 {

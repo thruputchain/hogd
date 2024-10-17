@@ -229,6 +229,18 @@ syscalls:
         fixed_size: yes
         typename: "SHA256Hash"
     number: 18
+  - name: "Exit"
+    needs_context: yes
+    syscall_return_type: "HostFnResult"
+    inputs:
+      - name: "code"
+        fixed_size: yes
+        typename: "int32_t"
+        rust_typename: "i32"
+        primitive_type: yes
+    outputs:
+    returns: no
+    number: 19
 
 errors:
   - name: "None"

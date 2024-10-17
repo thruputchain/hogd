@@ -11,22 +11,34 @@ namespace hogd {
 
 namespace {
 
-HostFnStatus<int32_t>
+HostFnResult
+error(HostFnErrorCode const &code)
+{
+  return {code, 0};
+}
+
+HostFnResult
+success(int32_t value)
+{
+  return {HostFnErrorCode::kNoneOrRecoverable, value};
+}
+
+HostFnResult
 consume_gas_call(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(100)) {
-    return HostFnError{HostFnErrorCode::kOutOfGas};
+    return error(HostFnErrorCode::kOutOfGas);
   }
-  return 0;
+  return success(0);
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 consume_gas_call2(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(5000)) {
-    return HostFnError{HostFnErrorCode::kOutOfGas};
+    return error(HostFnErrorCode::kOutOfGas);
   }
-  return 0;
+  return success(0);
 }
 
 } // namespace

@@ -133,6 +133,9 @@ impl WasmiRuntime {
                         // Return no error code if successful return
                         return WasmiInvokeResult::success(0);
                     }
+                    external_call::TrampolineErrorEnum::Exit { code } => {
+                        return WasmiInvokeResult::success(code);
+                    }
                     _ => {
                         return WasmiInvokeResult::error(
                             InvokeError::UnrecoverableSystemError,

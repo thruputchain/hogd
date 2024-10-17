@@ -15,6 +15,7 @@ constexpr static uint8_t kTrampolineErrorNONE = 0;
 constexpr static uint8_t kTrampolineErrorOUTOFGAS = 1;
 constexpr static uint8_t kTrampolineErrorUNRECOVERABLE = 2;
 constexpr static uint8_t kTrampolineErrorRETURN = 3;
+constexpr static uint8_t kTrampolineErrorEXIT = 4;
 
 namespace {
 
@@ -25,36 +26,43 @@ success(int32_t res)
 }
 
 TrampolineResult
+host_exit(int32_t res)
+{
+  return TrampolineResult{.result = res, .panic = kTrampolineErrorEXIT};
+}
+
+TrampolineResult
 error(uint8_t error)
 {
   return TrampolineResult{.result = 0, .panic = error};
 }
 
 TrampolineResult
-handle_result(HostFnStatus<int32_t> const &res)
+handle_result(HostFnResult const &res)
 {
-  if (res) {
-    return success(res.value());
-  }
-
-  if (res.error().code() == HostFnErrorCode::kOutOfGas) {
+  switch (res.first) {
+  case HostFnErrorCode::kNoneOrRecoverable:
+    return success(res.second);
+  case HostFnErrorCode::kOutOfGas:
     return error(kTrampolineErrorOUTOFGAS);
-  }
-  if (res.error().code() == HostFnErrorCode::kReturn) {
+  case HostFnErrorCode::kReturn:
     return error(kTrampolineErrorRETURN);
+  case HostFnErrorCode::kExit:
+    return host_exit(res.second);
+  default:
+    return error(kTrampolineErrorUNRECOVERABLE);
   }
-  return error(kTrampolineErrorUNRECOVERABLE);
 }
 
 template<std::same_as<uint64_t>... Args>
 TrampolineResult
-c_call_internal(void *function_pointer, void *host_call_context, Args... args)
+c_call_internal(void *function_pointer, void *host_call_context,
+                Args... args) noexcept
 {
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
-    auto *ptr =
-        reinterpret_cast<HostFnStatus<int32_t> (*)(HostCallContext *, Args...)>(
-            function_pointer);
+    auto *ptr = reinterpret_cast<HostFnResult (*)(HostCallContext *, Args...)>(
+        function_pointer);
 
     return handle_result((*ptr)(user_ctx, args...));
 

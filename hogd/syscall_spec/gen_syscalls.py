@@ -27,7 +27,7 @@ def gen_validate_arg(inp, *, is_input):
                                user_{arg2});
 
   if (!{in_out}_{arg_name}) {{
-    return {{SyscallErrorCode::kFault, kGenericBadSyscallCost}};
+    return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kFault)}}, kGenericBadSyscallCost}};
   }}
 """, [f"user_{arg1}", f"user_{arg2}"], arg1, f"*{arg1}", f"std::span<{const}std::byte> {arg1}"
   
@@ -48,7 +48,7 @@ def gen_validate_arg(inp, *, is_input):
                                       sizeof({typename}));
 
   if (!{arg1}) {{
-    return {{SyscallErrorCode::kFault, kGenericBadSyscallCost}};
+    return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kFault)}}, kGenericBadSyscallCost}};
   }}
 """, [f"user_{arg1}"], arg1,  f"*{arg1}", f"{const}{typename}& {arg1}"
 
@@ -69,6 +69,11 @@ def gen_inner_outer(syscall):
   inner_arg_decl_strs = []
   syscall_handler = ""
   syscall_handler_decl = ""
+  inner_return_type = "HostFnStatus<SyscallErrorCode>"
+
+  if "syscall_return_type" in syscall:
+    inner_return_type = syscall["syscall_return_type"]
+
   if syscall["inputs"] is not None:
     for arg in syscall["inputs"]:
       validate_str, local_user_args, local_arg, local_call_arg, inner_arg_decl = gen_validate_arg(arg, is_input = True)
@@ -112,7 +117,7 @@ def gen_inner_outer(syscall):
 
   inner_args = ", ".join(call_arg_strs)
   inner_arg_decls = ", ".join(inner_arg_decl_strs);
-  outer= f"""std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+  outer= f"""std::pair<HostFnResult, GasAmount>
 syscall_{name}_outer(SystemCallHandler& syscall_handler,
                      std::span<std::byte> contract_memory,
                      uint64_t {user_args[0]}, 
@@ -122,10 +127,12 @@ syscall_{name}_outer(SystemCallHandler& syscall_handler,
                      uint64_t {user_args[4]},
                      uint64_t {user_args[5]})
 {{{inner_body}
-  return syscall_{name}_inner({syscall_handler}{inner_args});
+  auto res = syscall_{name}_inner({syscall_handler}{inner_args});
+
+  return {{convert_return_t(res.first), res.second}};
 }}
 """
-  inner = f"""std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+  inner = f"""std::pair<{inner_return_type}, GasAmount>
 syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
 
 """
@@ -241,20 +248,35 @@ check_user_primitive_argument(uint64_t user_value)
   return static_cast<T>(user_value);
 }}
 
+template<typename T>
+std::pair<HostFnErrorCode, int32_t>
+convert_return_t(T const& value) {{
+  if constexpr (std::is_same_v<T, HostFnStatus<SyscallErrorCode>>) {{
+    if (value) {{
+      return {{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(*value)}};
+    }} else {{
+      return {{value.error().code(), 0}};
+    }}
+  }} else {{
+    static_assert(std::is_same_v<T, std::pair<HostFnErrorCode, int32_t>>);
+    return value;
+  }}
+}}
+
 {syscall_outers}
 
-using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> (*)(
+using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
     SystemCallHandler&, std::span<std::byte>, {", ".join(["uint64_t"] * (syscall_argcount))});
 
 {syscall_table}
 
 // returns gas_consumed, syscall error>
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnResult, uint64_t>
 syscall_entry_inner(HostCallContext *call_context, {syscall_uint64_arg_decls_str})
 {{
   if (arg0 >= syscall_table.size()) {{
     // invalid syscall
-    return {{SyscallErrorCode::kUnknownSyscall, kUnknownSyscallCost}};
+    return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kUnknownSyscall)}}, kUnknownSyscallCost}};
   }}
 
   static_assert(syscall_table.size() < INT32_MAX,
@@ -271,19 +293,19 @@ syscall_entry_inner(HostCallContext *call_context, {syscall_uint64_arg_decls_str
   return syscall_fn_outer(*call_context->syscall_handler, contract_memory, {syscall_uint64_args_nozero_str});
 }}
 
-HostFnStatus<int32_t>
+HostFnResult
 syscall_entry(HostCallContext *call_context, {syscall_uint64_arg_decls_str})
 {{
   auto [err, gas_consumed] =
       syscall_entry_inner(call_context, {syscall_uint64_args_str});
 
   if (!call_context->runtime->consume_gas(gas_consumed)) {{
-    return HostFnError{{HostFnErrorCode::kOutOfGas}};
+    return {{HostFnErrorCode::kOutOfGas, 0}};
   }}
 
   static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>, "mismatch");
 
-  return err.and_then([](SyscallErrorCode err) -> HostFnStatus<int32_t> {{ return static_cast<int32_t>(err); }});
+  return err;
 }}
 
 }} // namespace hogd

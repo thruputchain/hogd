@@ -16,58 +16,58 @@ namespace hogd {
 
 namespace {
 
-HostFnStatus<int32_t>
+HostFnResult
 arity0(HostCallContext * /*unused*/)
 {
-  return 100;
+  return {HostFnErrorCode::kNoneOrRecoverable, 100};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity1(HostCallContext * /*unused*/, uint64_t arg0)
 {
   if (arg0 != 1) {
     throw std::runtime_error("invalid arity check");
   }
-  return 101;
+  return {HostFnErrorCode::kNoneOrRecoverable, 101};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1)
 {
   if (arg0 != 1 || arg1 != 2) {
     throw std::runtime_error("invalid arity check");
   }
-  return 102;
+  return {HostFnErrorCode::kNoneOrRecoverable, 102};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
     throw std::runtime_error("invalid arity check");
   }
-  return 103;
+  return {HostFnErrorCode::kNoneOrRecoverable, 103};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
     throw std::runtime_error("invalid arity check");
   }
-  return 104;
+  return {HostFnErrorCode::kNoneOrRecoverable, 104};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5) {
     throw std::runtime_error("invalid arity check");
   }
-  return 105;
+  return {HostFnErrorCode::kNoneOrRecoverable, 105};
 }
 
 } // namespace

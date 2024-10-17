@@ -20,7 +20,9 @@ fn handle_panic(_: &core::panic::PanicInfo) -> ! {
 pub fn unwrap_abort_option<T>(o: Option<T>) -> T {
     match o {
         Some(t) => t,
-        None => {trap();}
+        None => {
+            trap();
+        }
     }
 }
 
@@ -28,7 +30,8 @@ pub fn unwrap_abort_option<T>(o: Option<T>) -> T {
 pub fn unwrap_abort<T, E>(o: Result<T, E>) -> T {
     match o {
         Ok(t) => t,
-        _ => {trap();}
+        _ => {
+            trap();
+        }
     }
 }
-

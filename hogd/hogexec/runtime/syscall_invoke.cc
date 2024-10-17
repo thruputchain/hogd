@@ -130,4 +130,10 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
+std::pair<HostFnResult, GasAmount>
+syscall_Exit_inner(SystemCallHandler &syscall_handler, const int32_t input_code)
+{
+  return {{HostFnErrorCode::kExit, input_code}, 0};
+}
+
 } // namespace hogd

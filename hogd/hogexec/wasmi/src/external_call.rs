@@ -33,12 +33,15 @@ pub enum TrampolineErrorEnum {
     OutOfGasError = 1,
     UnrecoverableSystemError = 2,
     Return = 3,
+    Exit { code: i32 } = 4,
 }
+
 const TrampolineErrorNONE: u8 = 0;
 const TrampolineErrorOUTOFGAS: u8 = 1;
 #[allow(dead_code)]
 const TrampolineErrorUNRECOVERABLE: u8 = 2;
 const TrampolineErrorRETURN: u8 = 3;
+const TrampolineErrorEXIT: u8 = 4;
 
 #[repr(C)]
 pub struct TrampolineResult {
@@ -53,7 +56,7 @@ pub struct TrampolineError {
 
 impl fmt::Display for TrampolineError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TrampolineError error={}", self.error as u8)
+        write!(f, "TrampolineError error printing is annoying")
     }
 }
 
@@ -145,6 +148,11 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
         }
         x if x == TrampolineErrorRETURN => Err(Error::host(TrampolineError {
             error: TrampolineErrorEnum::Return,
+        })),
+        x if x == TrampolineErrorEXIT => Err(Error::host(TrampolineError {
+            error: TrampolineErrorEnum::Exit {
+                code: result.result,
+            },
         })),
         _ => Err(Error::host(TrampolineError {
             error: TrampolineErrorEnum::UnrecoverableSystemError,

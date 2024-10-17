@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
@@ -28,7 +29,6 @@
 #include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 namespace hogd {
 
@@ -52,8 +52,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
 InvokeResult
 SystemCallHandler::root_invoke()
 {
-  auto *runtime =
-      resolve_runtime(signed_tx_.tx.invocation.invoked_address);
+  auto *runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
 
   if (!runtime) {
     return InvokeResult{.result =
@@ -147,8 +146,10 @@ SystemCallHandler::invoke(Invocation const &invocation)
 
   uint64_t initial_gas_limit = UINT64_MAX;
   if (!call_frame_stack_.empty()) {
-    initial_gas_limit = runtimes_.at(call_frame_stack_.back().active_invocation_.invoked_address)
-      ->runtime->get_available_gas();
+    initial_gas_limit =
+        runtimes_
+            .at(call_frame_stack_.back().active_invocation_.invoked_address)
+            ->runtime->get_available_gas();
   }
 
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
@@ -167,11 +168,13 @@ SystemCallHandler::invoke(Invocation const &invocation)
 
 InvokeResult
 SystemCallHandler::invoke_unconverted(Invocation const &invocation,
-                                      RuntimeCacheEntry *runtime, uint64_t gas_limit)
+                                      RuntimeCacheEntry *runtime,
+                                      uint64_t gas_limit)
 {
   call_frame_stack_.emplace_back(invocation);
 
-  InvokeResult result = runtime->runtime->invoke(invocation.method_name, gas_limit);
+  InvokeResult result =
+      runtime->runtime->invoke(invocation.method_name, gas_limit);
 
   // We choose _not_ to check the return code here, and instead pass it back to
   // the caller. Implicitly, this is saying that the caller is responsible for
@@ -284,7 +287,8 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   }
 
   // successfully resolved runtime
-  runtimes_.emplace(addr, std::make_unique<RuntimeCacheEntry>(std::move(new_runtime)));
+  runtimes_.emplace(addr, std::make_unique<RuntimeCacheEntry>(
+                              std::move(new_runtime)));
 
   return runtimes_.at(addr).get();
 }

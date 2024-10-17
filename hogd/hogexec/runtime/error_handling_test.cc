@@ -13,44 +13,50 @@ namespace hogd {
 
 namespace {
 
-HostFnStatus<int32_t>
+HostFnResult
 throw_runtime_error(HostCallContext * /*unused*/)
 {
   throw std::runtime_error("bad fn\n");
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 throw_unrecoverable_host_error(HostCallContext * /*unused*/)
 {
-  return HostFnError{HostFnErrorCode::kUnrecoverableUnknown};
+  return {HostFnErrorCode::kUnrecoverableUnknown, 0};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 throw_bad_alloc(HostCallContext * /*unused*/)
 {
   throw std::bad_alloc();
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 good_call(HostCallContext * /*unused*/)
 {
-  return 10;
+  return {HostFnErrorCode::kNoneOrRecoverable, 10};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
+exit_call(HostCallContext * /*unused*/)
+{
+  return {HostFnErrorCode::kExit, 10};
+}
+
+HostFnResult
 return_syscall(HostCallContext * /*unused*/)
 {
-  return HostFnError{HostFnErrorCode::kReturn};
+  return {HostFnErrorCode::kReturn, 0};
 }
 
 // Wasmi doesn't necessarily insert a "consume gas" instruction into its
 // internal bytecode at the end of a call instruction. So if a host function
 // uses all gas, it has to return kOutOfGas.
-HostFnStatus<int32_t>
+HostFnResult
 consume_too_much_gas(HostCallContext *context)
 {
   bool _ = context->runtime->consume_gas(context->runtime->get_available_gas());
-  return HostFnError{HostFnErrorCode::kOutOfGas};
+  return {HostFnErrorCode::kOutOfGas, 0};
 }
 
 namespace {
@@ -58,16 +64,16 @@ WasmiRuntime *s_runtime = nullptr;
 bool reentrance_hit = false;
 } // namespace
 
-HostFnStatus<int32_t>
+HostFnResult
 reentrance(HostCallContext * /*unused*/)
 {
   reentrance_hit = true;
 
   auto res = s_runtime->invoke("unreachable", UINT64_MAX);
   if (!res.result.has_value()) {
-    return HostFnError{HostFnErrorCode::kUnrecoverableUnknown};
+    return {HostFnErrorCode::kUnrecoverableUnknown, 0};
   }
-  return {0};
+  return {HostFnErrorCode::kNoneOrRecoverable, 0};
 }
 
 } // namespace
@@ -103,6 +109,19 @@ TEST_F(WasmiErrorHandlingTest, RuntimeError)
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(),
             InvokeError{InvokeErrorCode::kUnrecoverableSystemError});
+}
+
+TEST_F(WasmiErrorHandlingTest, ExitHandling)
+{
+  context_.link_fn("test", "external_call", &exit_call);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
+
+  ASSERT_TRUE(!!runtime_);
+
+  auto res = runtime_->invoke("call1", UINT64_MAX);
+
+  EXPECT_TRUE(!!res.result);
+  EXPECT_EQ(*res.result, 10);
 }
 
 TEST_F(WasmiErrorHandlingTest, HostError)

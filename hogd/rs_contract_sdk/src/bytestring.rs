@@ -32,16 +32,20 @@ mod bytestring_get_alloc {
             crate::bytestring::BytestringGetLen(key)?;
 
         let mut vec = Box::<[u8]>::new_uninit_slice(len as usize);
-    
-        let mut written_len : RuntimeMemoryLength = 0;
 
-        syscall_bindings::uninit_BytestringGet(key, &mut vec, &mut written_len)?;
+        let mut written_len: RuntimeMemoryLength = 0;
+
+        syscall_bindings::uninit_BytestringGet(
+            key,
+            &mut vec,
+            &mut written_len,
+        )?;
 
         if written_len != len {
             trap();
         }
 
-        Ok( unsafe {vec.assume_init() })
+        Ok(unsafe { vec.assume_init() })
     }
 }
 

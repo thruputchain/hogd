@@ -1,10 +1,10 @@
 #include <cassert>
 #include <cstddef>
+#include <format>
 #include <memory>
 #include <span>
 #include <string_view>
 #include <utility>
-#include <format>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
