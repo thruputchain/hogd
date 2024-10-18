@@ -44,22 +44,94 @@ impl ParseableOwned for Box<[u8]> {
     }
 }
 
-impl ParseableOwned for u64 {
+/*
+Infuriating: the following does NOT work in rust, because they decided not to implement it
+and stackoverflow commenters say its too much work
+impl<T : GenericInt> ParseableOwned for T {
     fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
-        let b = arg.get(0..8).ok_or(SyscallErrorCode::kReturnParseError as i32)?.try_into().or_else(|_| {Err(SyscallErrorCode::kReturnParseError as i32)})?;
-        //let b = unwrap_abort(unwrap_abort_option(arg.get(0..8)).try_into());
-        let out : u64 = u64::from_le_bytes(b);
-        Ok((out, 8))
+        const sz : usize = core::mem::size_of::<T>();
+        let b = arg.get(0..sz).ok_or(SyscallErrorCode::kReturnParseError as i32)?.try_into().or_else(|_| {Err(SyscallErrorCode::kReturnParseError as i32)})?;
+        let out = T::from_le_bytes(b);
+        Ok((out, sz))
     }
 }
-
+while the following does work
 impl<const N : usize> ParseableOwned for [u8; N] {
     fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
         let b = arg.get(0..N).ok_or(SyscallErrorCode::kReturnParseError as i32)?.try_into().or_else(|_| {Err(SyscallErrorCode::kReturnParseError as i32)})?;
         Ok((b, N))
     }
 }
+*/
 
+// thank chatgpt for this macro
+macro_rules! impl_generic_int {
+    ($($t:ty)*) => ($(
+        impl ParseableOwned for $t {
+            fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
+                const SZ : usize = core::mem::size_of::<$t>();
+                let b = arg.get(0..SZ).ok_or(SyscallErrorCode::kReturnParseError as i32)?.try_into().or_else(|_| {Err(SyscallErrorCode::kReturnParseError as i32)})?;
+                let out = <$t>::from_le_bytes(b);
+                Ok((out, SZ))
+            }
+        }
+
+        impl OutputReturnable for $t {
+            fn return_self(&self) -> ! {
+                Return(&<$t>::to_le_bytes(*self));
+            }
+        }
+
+        impl<'a> Parseable<'a> for $t {
+            fn parse_from(arg: &'a [u8]) -> (Self, usize) {
+                const SZ : usize = core::mem::size_of::<$t>();
+                let out = match (match arg.get(0..SZ) {
+                    Some(b) => b,
+                    None => Exit(SyscallErrorCode::kCalldataParseError as i32),
+                })
+                .try_into()
+                {
+                    Ok(x) => <$t>::from_le_bytes(x),
+                    Err(_) => Exit(SyscallErrorCode::kCalldataParseError as i32),
+                };
+                (out, SZ)
+            }
+        }
+
+        impl Serializable for $t {
+            fn serialize_len(&self) -> usize {
+                core::mem::size_of::<$t>()
+            }
+
+            fn do_serialize(&self, slice: &mut [MaybeUninit<u8>])  -> Result<(), i32> {
+                const SZ : usize = core::mem::size_of::<$t>();
+                debug_assert!(slice.len() == SZ);
+                let b = self.to_le_bytes();
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        b.as_ptr(),
+                        MaybeUninit::slice_as_mut_ptr(slice),
+                        SZ,
+                    );
+                }
+                Ok(())
+            }
+        }
+    )*)
+}
+
+impl_generic_int! {i8 i16 i32 i64 u8 u16 u32 u64}
+
+impl<const N: usize> ParseableOwned for [u8; N] {
+    fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
+        let b = arg
+            .get(0..N)
+            .ok_or(SyscallErrorCode::kReturnParseError as i32)?
+            .try_into()
+            .or_else(|_| Err(SyscallErrorCode::kReturnParseError as i32))?;
+        Ok((b, N))
+    }
+}
 
 impl<T1: ParseableOwned, T2: ParseableOwned> ParseableOwned for (T1, T2) {
     fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
@@ -67,14 +139,18 @@ impl<T1: ParseableOwned, T2: ParseableOwned> ParseableOwned for (T1, T2) {
 
         let (arg1, arg1len) = T1::parse_from(match arg.get(offset..) {
             Some(b) => b,
-            None => {return Err(SyscallErrorCode::kReturnParseError as i32);},
+            None => {
+                return Err(SyscallErrorCode::kReturnParseError as i32);
+            }
         })?;
 
         offset += arg1len;
 
         let (arg2, arg2len) = T2::parse_from(match arg.get(offset..) {
             Some(b) => b,
-            None => {return Err(SyscallErrorCode::kReturnParseError as i32);},
+            None => {
+                return Err(SyscallErrorCode::kReturnParseError as i32);
+            }
         })?;
 
         offset += arg2len;
@@ -92,12 +168,6 @@ impl OutputReturnable for () {
 impl OutputReturnable for &[u8] {
     fn return_self(&self) -> ! {
         Return(self)
-    }
-}
-
-impl OutputReturnable for u64 {
-    fn return_self(&self) -> ! {
-        Return(&u64::to_le_bytes(*self));
     }
 }
 
@@ -127,74 +197,6 @@ impl<T: OutputReturnable> OutputReturnable for Option<T> {
     }
 }
 
-impl<'a> Parseable<'a> for u32 {
-    fn parse_from(arg: &'a [u8]) -> (Self, usize) {
-        let out: u32 = match (match arg.get(0..4) {
-            Some(b) => b,
-            None => Exit(SyscallErrorCode::kCalldataParseError as i32),
-        })
-        .try_into()
-        {
-            Ok(x) => u32::from_le_bytes(x),
-            Err(_) => Exit(SyscallErrorCode::kCalldataParseError as i32),
-        };
-        (out, 4)
-    }
-}
-
-impl Serializable for u32 {
-    fn serialize_len(&self) -> usize {
-        4
-    }
-
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>])  -> Result<(), i32> {
-        debug_assert!(slice.len() == 4);
-        let b = self.to_le_bytes();
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                b.as_ptr(),
-                MaybeUninit::slice_as_mut_ptr(slice),
-                4,
-            );
-        }
-        Ok(())
-    }
-}
-
-impl<'a> Parseable<'a> for i64 {
-    fn parse_from(arg: &'a [u8]) -> (Self, usize) {
-        let out: i64 = match (match arg.get(0..8) {
-            Some(b) => b,
-            None => Exit(SyscallErrorCode::kCalldataParseError as i32),
-        })
-        .try_into()
-        {
-            Ok(x) => i64::from_le_bytes(x),
-            Err(_) => Exit(SyscallErrorCode::kCalldataParseError as i32),
-        };
-        (out, 8)
-    }
-}
-
-impl Serializable for i64 {
-    fn serialize_len(&self) -> usize {
-        8
-    }
-
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Result<(), i32> {
-        debug_assert!(slice.len() == 4);
-        let b = self.to_le_bytes();
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                b.as_ptr(),
-                MaybeUninit::slice_as_mut_ptr(slice),
-                8,
-            );
-        }
-        Ok(())
-    }
-}
-
 impl<'a> Parseable<'a> for &'a StorageKey {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
         let out: &'a StorageKey = match (match arg.get(..32) {
@@ -215,7 +217,7 @@ impl Serializable for &StorageKey {
         32
     }
 
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>])  -> Result<(), i32> {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Result<(), i32> {
         debug_assert!(slice.len() == 32);
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -305,7 +307,10 @@ pub fn serialize_to_calldata_1<T1: Serializable>(
 ) -> Result<(), i32> {
     let mut offset: usize = 0;
 
-    arg1.do_serialize(buf.get_mut(offset..(offset + arg1.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
+    arg1.do_serialize(
+        buf.get_mut(offset..(offset + arg1.serialize_len()))
+            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
+    )?;
     offset += arg1.serialize_len();
 
     if offset != buf.len() {
@@ -321,11 +326,17 @@ pub fn serialize_to_calldata_2<T1: Serializable, T2: Serializable>(
 ) -> Result<(), i32> {
     let mut offset: usize = 0;
 
-    arg1.do_serialize(buf.get_mut(offset..(offset + arg1.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
+    arg1.do_serialize(
+        buf.get_mut(offset..(offset + arg1.serialize_len()))
+            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
+    )?;
 
     offset += arg1.serialize_len();
 
-    arg2.do_serialize(buf.get_mut(offset..(offset + arg2.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
+    arg2.do_serialize(
+        buf.get_mut(offset..(offset + arg2.serialize_len()))
+            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
+    )?;
     offset += arg2.serialize_len();
 
     if offset != buf.len() {
@@ -346,13 +357,22 @@ pub fn serialize_to_calldata_3<
 ) -> Result<(), i32> {
     let mut offset: usize = 0;
 
-    arg1.do_serialize(buf.get_mut(offset..(offset + arg1.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
+    arg1.do_serialize(
+        buf.get_mut(offset..(offset + arg1.serialize_len()))
+            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
+    )?;
     offset += arg1.serialize_len();
 
-    arg2.do_serialize(buf.get_mut(offset..(offset + arg2.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
+    arg2.do_serialize(
+        buf.get_mut(offset..(offset + arg2.serialize_len()))
+            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
+    )?;
     offset += arg2.serialize_len();
 
-    arg3.do_serialize(buf.get_mut(offset..(offset + arg3.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
+    arg3.do_serialize(
+        buf.get_mut(offset..(offset + arg3.serialize_len()))
+            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
+    )?;
     offset += arg3.serialize_len();
 
     if offset != buf.len() {
@@ -361,11 +381,7 @@ pub fn serialize_to_calldata_3<
     Ok(())
 }
 
-pub fn parse_from_calldata_1<
-    'a,
-    T1: Parseable<'a>,
-    R: OutputReturnable,
->(
+pub fn parse_from_calldata_1<'a, T1: Parseable<'a>, R: OutputReturnable>(
     bytes: &'a [u8],
     main_func: fn(T1) -> R,
 ) -> R {
@@ -383,7 +399,6 @@ pub fn parse_from_calldata_1<
 
     main_func(arg1)
 }
-
 
 pub fn parse_from_calldata_2<
     'a,
@@ -416,7 +431,6 @@ pub fn parse_from_calldata_2<
 
     main_func(arg1, arg2)
 }
-
 
 pub fn parse_from_calldata_3<
     'a,

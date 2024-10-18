@@ -57,7 +57,8 @@ pub extern "C" fn deploy_and_invoke() -> i32 {
     let deployed_addr = sdk::DeployContract(&nonce, &contract_hash).unwrap();
 
     let mut return_len: sdk::RuntimeMemoryLength = 0;
-    let method: sdk::MethodID = u32::from_le_bytes(calldata.as_ref()[32..36].try_into().unwrap());
+    let method: sdk::MethodID =
+        u32::from_le_bytes(calldata.as_ref()[32..36].try_into().unwrap());
 
     sdk::syscall_bindings::raw_Invoke(
         &deployed_addr,

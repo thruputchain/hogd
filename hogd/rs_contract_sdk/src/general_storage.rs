@@ -17,14 +17,15 @@ pub fn DeleteLast(key: &StorageKey) -> Result<(), i32> {
     syscall_bindings::raw_DeleteLast(key)
 }
 
-pub const fn StaticKey(value : u64) -> StorageKey {
-    let mut val = [0;32];
+pub const fn StaticKey(value: u64) -> StorageKey {
+    let mut val = [0; 32];
 
     unsafe {
         core::ptr::copy_nonoverlapping(
             u64::to_le_bytes(value).as_ptr(),
             val.as_mut_ptr(),
-            8)
+            8,
+        )
     };
 
     val
