@@ -4,11 +4,11 @@ use core::mem::MaybeUninit;
 use rs_macros::static_key;
 
 const CONFIG_KEY: sdk::StorageKey = static_key!("config key");
+const CONFIG_LEN : usize = 32;
 
 pub fn write_config_data(
     owner: &sdk::ContractAddress
 ) {
-    const CONFIG_LEN : usize = 32;
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
     sdk::parse_trait::serialize_to_calldata_1(&mut bytes_mu, owner)
         .unwrap();
@@ -18,7 +18,6 @@ pub fn write_config_data(
 }
 
 pub fn load_config_data() -> sdk::ContractAddress {
-    const CONFIG_LEN : usize = 32;
 
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
     let mut len : sdk::RuntimeMemoryLength = 0;
