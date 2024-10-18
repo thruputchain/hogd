@@ -64,7 +64,7 @@ pub extern "C" fn test_slice() -> i32 {
 }
 
 fn test_slice_fancysdk_inner(
-    address: sdk::ContractAddress,
+    address: &sdk::ContractAddress,
     slice_start: u32,
     slice_end: u32,
     calldata: &[u8],
@@ -82,7 +82,7 @@ pub extern "C" fn test_slice_fancysdk() -> i32 {
     let calldata = unwrap_abort(sdk::GetCalldata());
 
     match sdk::parse_trait::parse_from_calldata_4::<
-        sdk::ContractAddress,
+        &sdk::ContractAddress,
         u32,
         u32,
         &[u8],
@@ -96,7 +96,7 @@ pub extern "C" fn test_slice_fancysdk() -> i32 {
 
 #[public_method]
 fn test_slice_fancysdk_inner_v2(
-    address: sdk::ContractAddress,
+    address: &sdk::ContractAddress,
     slice_start: u32,
     slice_end: u32,
     calldata: &[u8],

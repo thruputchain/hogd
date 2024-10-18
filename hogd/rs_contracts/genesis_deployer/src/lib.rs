@@ -45,7 +45,7 @@ pub extern "C" fn deploy_and_invoke() -> i32 {
 
     let calldata = sdk::GetCalldata().unwrap();
 
-    if calldata.len() < 32 {
+    if calldata.len() < 36 {
         trap();
     }
 
@@ -57,7 +57,7 @@ pub extern "C" fn deploy_and_invoke() -> i32 {
     let deployed_addr = sdk::DeployContract(&nonce, &contract_hash).unwrap();
 
     let mut return_len: sdk::RuntimeMemoryLength = 0;
-    let method: sdk::MethodID = 0;
+    let method: sdk::MethodID = u32::from_le_bytes(calldata.as_ref()[32..36].try_into().unwrap());
 
     sdk::syscall_bindings::raw_Invoke(
         &deployed_addr,

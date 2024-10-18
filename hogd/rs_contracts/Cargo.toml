@@ -12,7 +12,8 @@ members = [
     "test_bytestring",
     "test_nnint64",
     "genesis_deployer",
-    "erc20"
+    "erc20",
+    "simple_wallet"
 ]
 
 [profile.dev]

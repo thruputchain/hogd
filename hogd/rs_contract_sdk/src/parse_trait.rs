@@ -1,5 +1,5 @@
 use crate::invoke::{Exit, Return};
-use crate::rt::{trap, unwrap_abort_option};
+use crate::rt::{trap, unwrap_abort_option, unwrap_abort};
 use core::mem::MaybeUninit;
 use rs_xdr::*;
 
@@ -42,6 +42,14 @@ impl ParseableOwned for Box<[u8]> {
             )
         };
         (unsafe { out.assume_init() }, arg.len())
+    }
+}
+
+impl ParseableOwned for u64 {
+    fn parse_from(arg: &[u8]) -> (Self, usize) {
+        let b = unwrap_abort(unwrap_abort_option(arg.get(0..8)).try_into());
+        let out : u64 = u64::from_le_bytes(b);
+        (out, 8)
     }
 }
 
@@ -177,9 +185,9 @@ impl Serializable for i64 {
     }
 }
 
-impl<'a> Parseable<'a> for StorageKey {
+impl<'a> Parseable<'a> for &'a StorageKey {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
-        let out: StorageKey = match (match arg.get(..32) {
+        let out: &'a StorageKey = match (match arg.get(..32) {
             Some(x) => x,
             None => Exit(SyscallErrorCode::kCalldataParseError as i32),
         })
@@ -348,69 +356,6 @@ pub fn serialize_to_calldata_3<
     }
     Ok(())
 }
-/*
-pub fn parse_from_calldata_1<'a, T1: Parseable<'a>, R: Sized>(
-    bytes: &'a [u8],
-    main_func: fn(T1) -> Result<R, i32>,
-) -> Result<R, i32> {
-    let (arg1, arg1len) = T1::parse_from(bytes)?;
-
-    if arg1len != bytes.len() {
-        trap();
-    }
-
-    main_func(arg1)
-}
-
-pub fn parse_from_calldata_2<
-    'a,
-    T1: Parseable<'a>,
-    T2: Parseable<'a>,
-    R: OutputReturnable,
->(
-    bytes: &'a [u8],
-    main_func: fn(T1, T2) -> Result<R, i32>,
-) -> Result<R, i32> {
-    let mut offset: usize = 0;
-    let (arg1, arg1len) = T1::parse_from((bytes.get(offset..)).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
-    offset += arg1len;
-
-    let (arg2, arg2len) = T2::parse_from((bytes.get(offset..)).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
-    offset += arg2len;
-
-    if offset != bytes.len() {
-        trap();
-    }
-
-    main_func(arg1, arg2)
-}
-
-pub fn parse_from_calldata_3<
-    'a,
-    T1: Parseable<'a>,
-    T2: Parseable<'a>,
-    T3: Parseable<'a>,
-    R: OutputReturnable,
->(
-    bytes: &'a [u8],
-    main_func: fn(T1, T2, T3) -> Result<R, i32>,
-) -> Result<R, i32> {
-    let mut offset: usize = 0;
-    let (arg1, arg1len) = T1::parse_from((bytes.get(offset..)).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
-    offset += arg1len;
-
-    let (arg2, arg2len) = T2::parse_from((bytes.get(offset..)).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
-    offset += arg2len;
-
-    let (arg3, arg3len) = T3::parse_from((bytes.get(offset..)).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
-    offset += arg3len;
-
-    if offset != bytes.len() {
-        trap();
-    }
-
-    main_func(arg1, arg2, arg3)
-} */
 
 pub fn parse_from_calldata_1<
     'a,
@@ -426,7 +371,6 @@ pub fn parse_from_calldata_1<
         Some(b) => b,
         None => Exit(SyscallErrorCode::kCalldataParseError as i32),
     });
-
     offset += arg1len;
 
     if offset != bytes.len() {

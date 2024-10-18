@@ -4,7 +4,7 @@ use rs_contract_sdk as sdk;
 use sdk::rt::trap;
 
 fn make_set_add(
-    key: sdk::StorageKey,
+    key: &sdk::StorageKey,
     set_value: i64,
     add_value: i64,
 ) -> Result<(), i32> {
@@ -18,7 +18,7 @@ pub extern "C" fn do_set_add() -> i32 {
     let calldata = sdk::GetCalldata().unwrap();
 
     match sdk::parse_trait::parse_from_calldata_3::<
-        sdk::StorageKey,
+        &sdk::StorageKey,
         i64,
         i64,
         Result<(), i32>,

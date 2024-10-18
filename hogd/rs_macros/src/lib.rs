@@ -61,6 +61,24 @@ pub fn public_interface(_item: TokenStream) -> TokenStream {
 }
 
 // TODO(geoff) Ref to Box on tuple types
+fn iface_return_type_inner(t: &Type) -> Type {
+    match t {
+        Reference(type_reference) => {
+            let elem = *type_reference.elem.clone();
+            return Type::Verbatim(quote!{Box<#elem>});
+        },
+        Tuple(tuple_type) => {
+            let old_elems = tuple_type.elems.clone();
+
+            return Type::Tuple (
+                TypeTuple {
+                    paren_token : tuple_type.paren_token.clone(),
+                    elems : old_elems.iter().map(|t| {iface_return_type_inner(&t)}).collect(),
+                });
+        },
+        _ => {return t.clone()}
+    }
+}
 
 fn iface_return_type(ret: &ReturnType) -> Type {
     let t = match ret {
@@ -70,9 +88,24 @@ fn iface_return_type(ret: &ReturnType) -> Type {
         }
     };
 
+    return iface_return_type_inner(&t);
+/*
     let ref_type = match *t {
         Reference(type_reference) => type_reference,
         Tuple(tuple_type) => {
+            let old_elems = tuple_type.elems.clone();
+
+            let n_elems = elems.len();
+
+            return Tuple {
+                paren_token : tuple_type.paren_token,
+                elems : old_elems.iter().map(|t| {iface})
+            }
+
+            elems.iter().map(|t| {})
+
+
+
             panic!("unimplemented")
         }
         _ => {
@@ -82,7 +115,7 @@ fn iface_return_type(ret: &ReturnType) -> Type {
 
     let elem = *ref_type.elem.clone();
 
-    return Type::Verbatim(quote! {Box<#elem>});
+    return Type::Verbatim(quote! {Box<#elem>}); */
 }
 
 struct AttributeArgs {
@@ -223,7 +256,7 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
                     vec.as_mut(),
                     #arg_names_join
-                )?;
+                );
 
                 let calldata = unsafe { vec.assume_init() };
             },
@@ -235,7 +268,7 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
                     &mut calldata_mu,
                     #arg_names_join
-                )?;
+                );
 
                 let calldata : [u8; #x] = unsafe { core::mem::transmute(calldata_mu)};
             }
