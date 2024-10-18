@@ -11,7 +11,7 @@ use syn::parse::{Parse, ParseStream};
 use syn::FnArg::Typed;
 use syn::ReturnType;
 use syn::Type::{Reference, Tuple};
-use syn::{ItemFn, Lit, LitInt, Type, TypeTuple};
+use syn::{ItemFn, Lit, LitInt, LitStr, Type, TypeTuple};
 
 use syn::Token;
 
@@ -27,6 +27,29 @@ fn get_method_name(arg: &str) -> String {
     let m_write = format!("{}", hex);
 
     m_write
+}
+
+fn make_static_key(arg: &str) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(arg.as_bytes());
+    hasher.finalize().into()
+}
+
+#[proc_macro]
+pub fn static_key(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as LitStr);
+
+    println!("{:?}", input);
+
+    let string = input.token().to_string();
+    println!("{}", string);
+
+    let res = make_static_key(&string);
+
+    TokenStream::from(
+        quote!{
+            [#(#res),*]
+        })
 }
 
 fn get_method_name_int(arg: &str) -> u32 {

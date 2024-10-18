@@ -170,7 +170,9 @@ impl<T1: ParseableOwned, T2: ParseableOwned> ParseableOwned for (T1, T2) {
 }
 
 impl Serializable for () {
-    fn serialize_len(&self) -> usize { 0 }
+    fn serialize_len(&self) -> usize {
+        0
+    }
     fn do_serialize(&self, _: &mut [MaybeUninit<u8>]) -> Result<usize, i32> {
         Ok(0)
     }
@@ -234,7 +236,10 @@ impl Serializable for &StorageKey {
         32
     }
 
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Result<usize, i32> {
+    fn do_serialize(
+        &self,
+        slice: &mut [MaybeUninit<u8>],
+    ) -> Result<usize, i32> {
         debug_assert!(slice.len() == 32);
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -258,7 +263,10 @@ impl Serializable for &[u8] {
         self.len()
     }
 
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Result<usize, i32> {
+    fn do_serialize(
+        &self,
+        slice: &mut [MaybeUninit<u8>],
+    ) -> Result<usize, i32> {
         debug_assert!(slice.len() == self.len());
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -310,18 +318,11 @@ pub fn compute_serialize_len_3<
     arg1.serialize_len() + arg2.serialize_len() + arg3.serialize_len()
 }
 
-// We explicitly choose to make parse_returns_from_calldata trap() on error,
-// as this gets called _after_ sdk logic, so if there's an error the contract
-// (at least in the macro sdk) has no way of responding or undoing its own state changes.
-// By contrast, parse_from_calldata is called before contract logic, so that's fine to return an error
-// instead of trapping.
-// serialize_to_calldata similarly is called before an invoke, so it returns a handlable result error.
+// parse_from_calldata happens inside the sdk, before any user code,
+// so we just call exit(code) there instead of passing that error back up.
 
 // Will fail if buf.len() != sum(args.serialize_len())
-pub fn serialize_to_calldata_0(
-    buf: &mut [MaybeUninit<u8>],
-) -> Result<(), i32> {
-
+pub fn serialize_to_calldata_0(buf: &mut [MaybeUninit<u8>]) -> Result<(), i32> {
     if 0 != buf.len() {
         return Err(SyscallErrorCode::kCalldataParseError as i32);
     }

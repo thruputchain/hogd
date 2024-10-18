@@ -3,7 +3,7 @@
 
 use rs_contract_sdk as sdk;
 
-use rs_macros::{public_interface, public_method};
+use rs_macros::{public_interface, public_method, static_key};
 
 extern crate alloc;
 use core::mem::MaybeUninit;
@@ -11,33 +11,27 @@ use core::mem::MaybeUninit;
 public_interface!();
 
 // Has no replay prevention in this version
+const CONFIG_KEY: sdk::StorageKey = static_key!("config key");
 
-const PUBLIC_KEY: sdk::StorageKey = sdk::StaticKey(1234);
-const SEMAPHORE_KEY: sdk::StorageKey = sdk::StaticKey(1235);
 const CONFIG_LEN: usize = core::mem::size_of::<sdk::ContractAddress>()
     + core::mem::size_of::<sdk::Ed25519PublicKey>();
 
-fn initialization_guard() {
-    match sdk::HasKey(&PUBLIC_KEY) {
-        Err(_) => {
-            sdk::rt::trap();
-        }
-        _ => (),
-    };
-}
 
-fn write_config_data(erc20_addr: &sdk::ContractAddress, pk: &sdk::Ed25519PublicKey) {
+fn write_config_data(
+    erc20_addr: &sdk::ContractAddress,
+    pk: &sdk::Ed25519PublicKey,
+) {
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
     sdk::parse_trait::serialize_to_calldata_2(&mut bytes_mu, pk, erc20_addr)
         .unwrap();
     let bytes: [u8; CONFIG_LEN] = unsafe { core::mem::transmute(bytes_mu) };
 
-    sdk::BytestringSet(&PUBLIC_KEY, &bytes).unwrap();
+    sdk::BytestringSet(&CONFIG_KEY, &bytes).unwrap();
 }
 
 fn load_config_data() -> (sdk::ContractAddress, sdk::Ed25519PublicKey) {
     // TODO(geoff) see marginal impact of rewriting without allocator
-    let config = sdk::BytestringGet(&PUBLIC_KEY).unwrap();
+    let config = sdk::BytestringGet(&CONFIG_KEY).unwrap();
 
     sdk::parse_trait::parse_returns_from_calldata::<(
         sdk::ContractAddress,
@@ -51,11 +45,7 @@ pub fn initialize(
     pk: &sdk::Ed25519PublicKey,
     erc20_addr: &sdk::ContractAddress,
 ) -> () {
-    sdk::NonnegativeInt64SetAdd(&SEMAPHORE_KEY, 1, -1).unwrap();
-    sdk::DeleteLast(&SEMAPHORE_KEY).unwrap();
-
-    initialization_guard();
-
+    sdk::initialization_guard();
     write_config_data(&erc20_addr, &pk);
 }
 

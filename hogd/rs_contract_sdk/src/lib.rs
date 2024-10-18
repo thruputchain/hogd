@@ -34,6 +34,7 @@ mod invoke;
 mod log;
 mod nonnegative_int64;
 mod syscall;
+mod initialize;
 
 pub mod parse_trait;
 
@@ -48,4 +49,5 @@ pub use general_storage::*;
 pub use invoke::*;
 pub use log::*;
 pub use nonnegative_int64::*;
+pub use initialize::*;
 pub use rs_xdr::*;

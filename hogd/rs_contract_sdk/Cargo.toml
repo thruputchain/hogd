@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rs_xdr = {path = "../xdr/rs_xdr/"}
+rs_macros = {path = "../rs_macros"}
 
 [features]
 alloc = []
