@@ -79,6 +79,12 @@ impl OutputReturnable for &[u8] {
     }
 }
 
+impl OutputReturnable for u64 {
+    fn return_self(&self) -> ! {
+        Return(&u64::to_le_bytes(*self));
+    }
+}
+
 impl<T: OutputReturnable> OutputReturnable for Result<T, i32> {
     fn return_self(&self) -> ! {
         match self {
@@ -405,6 +411,64 @@ pub fn parse_from_calldata_3<
 
     main_func(arg1, arg2, arg3)
 } */
+
+pub fn parse_from_calldata_1<
+    'a,
+    T1: Parseable<'a>,
+    R: OutputReturnable,
+>(
+    bytes: &'a [u8],
+    main_func: fn(T1) -> R,
+) -> R {
+    let mut offset: usize = 0;
+
+    let (arg1, arg1len) = T1::parse_from(match bytes.get(offset..) {
+        Some(b) => b,
+        None => Exit(SyscallErrorCode::kCalldataParseError as i32),
+    });
+
+    offset += arg1len;
+
+    if offset != bytes.len() {
+        Exit(SyscallErrorCode::kCalldataParseError as i32);
+    }
+
+    main_func(arg1)
+}
+
+
+pub fn parse_from_calldata_2<
+    'a,
+    T1: Parseable<'a>,
+    T2: Parseable<'a>,
+    R: OutputReturnable,
+>(
+    bytes: &'a [u8],
+    main_func: fn(T1, T2) -> R,
+) -> R {
+    let mut offset: usize = 0;
+
+    let (arg1, arg1len) = T1::parse_from(match bytes.get(offset..) {
+        Some(b) => b,
+        None => Exit(SyscallErrorCode::kCalldataParseError as i32),
+    });
+
+    offset += arg1len;
+
+    let (arg2, arg2len) = T2::parse_from(match bytes.get(offset..) {
+        Some(b) => b,
+        None => Exit(SyscallErrorCode::kCalldataParseError as i32),
+    });
+
+    offset += arg2len;
+
+    if offset != bytes.len() {
+        Exit(SyscallErrorCode::kCalldataParseError as i32);
+    }
+
+    main_func(arg1, arg2)
+}
+
 
 pub fn parse_from_calldata_3<
     'a,

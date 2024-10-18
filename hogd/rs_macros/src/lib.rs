@@ -9,8 +9,12 @@ use sha2::Digest;
 use sha2::Sha256;
 use syn::FnArg::Typed;
 use syn::ReturnType;
+use syn::parse::{Parse, ParseStream};
 use syn::Type::{Reference, Tuple};
-use syn::{ItemFn, Type, TypeTuple};
+use syn::{ItemFn, Type, TypeTuple, LitInt, Lit, LitStr};
+
+use syn::{Meta, Token};
+use syn::punctuated::Punctuated;
 
 fn get_method_name(arg: &str) -> String {
     let mut hasher = Sha256::new();
@@ -81,8 +85,64 @@ fn iface_return_type(ret: &ReturnType) -> Type {
     return Type::Verbatim(quote! {Box<#elem>});
 }
 
+struct AttributeArgs {
+    static_calldata_length: Option<LitInt>,
+    static_return_length: Option<LitInt>,
+}
+
+impl AttributeArgs {
+    pub fn new(scl: &Option<LitInt>, srl: &Option<LitInt>) -> Self {
+        Self {
+            static_calldata_length: scl.clone(),
+            static_return_length: srl.clone()
+        }
+    }
+}
+
+impl Parse for AttributeArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut scl = None;
+        let mut srl = None;
+
+        while !input.is_empty() {
+            let lookahead = input.lookahead1();
+            if lookahead.peek(syn::Ident) {
+                let key: syn::Ident = input.parse()?;
+                input.parse::<Token![=]>()?;
+
+                if key == "static_calldata_length" {
+                    let lit: Lit = input.parse()?;
+                    if let Lit::Int(lit_int) = lit {
+                        scl = Some(lit_int);
+                    }
+                } else if key == "static_return_length" {
+                    let lit: Lit = input.parse()?;
+                    if let Lit::Int(lit_int) = lit {
+                        srl = Some(lit_int);
+                    }
+                } else {
+                    return Err(syn::Error::new(key.span(), "Unknown attribute"));
+                }
+            }
+
+            // Parse comma between attributes
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        Ok(AttributeArgs::new(&scl, &srl))
+    }
+}
+
 #[proc_macro_attribute]
-pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
+
+    let tokens : AttributeArgs = parse_macro_input!(attr as AttributeArgs);
+
+    let calldata_len : Option<LitInt> = tokens.static_calldata_length;
+    let return_len : Option<LitInt> = tokens.static_return_length;
+
     let func: ItemFn = parse_macro_input!(item as ItemFn);
 
     let function_signature = &func.sig;
@@ -152,15 +212,97 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let methodname: u32 = get_method_name_int(&function_name.to_string());
 
+    let interface_calldata_decl = 
+        match calldata_len.clone() {
+            None => quote!{
+                let buffer_size: usize = ::rs_contract_sdk::parse_trait::#compute_serialize_len_name (
+                            #arg_names_join);
+
+                let mut vec = Box::<[u8]>::new_uninit_slice(buffer_size);
+
+                ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
+                    vec.as_mut(),
+                    #arg_names_join
+                )?;
+
+                let calldata = unsafe { vec.assume_init() };
+            },
+            Some(x) => quote!{
+                let buffer_size : usize = #x;
+                
+                let mut calldata_mu= [::core::mem::MaybeUninit::<u8>::uninit(); #x];
+
+                ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
+                    &mut calldata_mu,
+                    #arg_names_join
+                )?;
+
+                let calldata : [u8; #x] = unsafe { core::mem::transmute(calldata_mu)};
+            }
+    };
+
+    let calldata_decl =
+        match calldata_len.clone() {
+            None => {
+                quote!{
+                    let calldata = match ::rs_contract_sdk::GetCalldata() {
+                        Ok(x) => x,
+                        Err(err) => {return err}
+                    };
+                }
+            },
+            Some(x) => {
+                quote!{
+                    let mut calldata_mu= [::core::mem::MaybeUninit::<u8>::uninit(); #x];
+                    let mut calldata_len : ::rs_contract_sdk::RuntimeMemoryLength = 0;
+                    match ::rs_contract_sdk::syscall_bindings::uninit_GetCalldata(&mut calldata_mu, &mut calldata_len) {
+                        Ok(()) => {},
+                        Err(err) => {return err;},
+                    };
+
+                    if calldata_len != #x {
+                        return ::rs_contract_sdk::SyscallErrorCode::kCalldataParseError as i32;
+                    }
+
+                    let calldata : [u8; #x] = unsafe {core::mem::transmute(calldata_mu)};
+                }
+            }
+        };
+
+    let get_return_buf_decl =
+        match return_len.clone() {
+            None => {
+                quote!{
+                   let returned_buf = ::rs_contract_sdk::rt::unwrap_abort(::rs_contract_sdk::GetReturnedBuffer(return_len));
+                }
+            },
+            Some(x) => {
+                quote!{
+                    if #x != return_len {
+                        ::rs_contract_sdk::rt::trap();
+                    }
+                    let mut return_mu= [::core::mem::MaybeUninit::<u8>::uninit(); #x];
+                    let mut return_written_len : ::rs_contract_sdk::RuntimeMemoryLength = 0;
+
+                    ::rs_contract_sdk::rt::unwrap_abort(
+                        ::rs_contract_sdk::syscall_bindings::uninit_GetReturnedBuffer(&mut return_mu, &mut return_written_len));
+
+                    // should be guaranteed by runtime.  if this fails, something weird has happened
+                    if #x != return_written_len {
+                        ::rs_contract_sdk::rt::trap();
+                    }
+
+                    let returned_buf : [u8; #x] = unsafe {core::mem::transmute(return_mu)};
+                }
+            }
+        };   
+
     TokenStream::from(quote! {
         #[cfg_attr(target_family = "wasm", export_name = #export_name)]
         #[no_mangle]
         #[cfg(not(feature="interface"))]
         pub extern "C" fn #wrap_fn_name () -> i32 {
-            let calldata = match ::rs_contract_sdk::GetCalldata() {
-                Ok(x) => x,
-                Err(err) => {return err}
-            };
+            #calldata_decl
 
             use ::rs_contract_sdk::parse_trait::OutputReturnable;
 
@@ -182,17 +324,7 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 #inputs
             ) -> Result< #iface_return_type, i32> {
 
-                let buffer_size: usize = ::rs_contract_sdk::parse_trait::#compute_serialize_len_name (
-                    #arg_names_join);
-
-                let mut vec = Box::<[u8]>::new_uninit_slice(buffer_size);
-
-                ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
-                    vec.as_mut(),
-                    #arg_names_join
-                )?;
-
-                let calldata = unsafe { vec.assume_init() };
+                #interface_calldata_decl
 
                 let mut return_len: sdk::RuntimeMemoryLength = 0;
 
@@ -215,7 +347,8 @@ pub fn public_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 // if raw_Invoke returns success, then it cannot be the case that
                 // GetReturnedBuffer fails (unless e.g. an allocation error)
 
-                let returned_buf = ::rs_contract_sdk::rt::unwrap_abort(sdk::GetReturnedBuffer(return_len));
+                //let returned_buf = ::rs_contract_sdk::rt::unwrap_abort(sdk::GetReturnedBuffer(return_len));
+                #get_return_buf_decl
 
                 Ok(sdk::parse_trait::parse_returns_from_calldata::<#iface_return_type>(&returned_buf))
             }

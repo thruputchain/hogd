@@ -11,7 +11,8 @@ members = [
     "test_echo",
     "test_bytestring",
     "test_nnint64",
-    "genesis_deployer"
+    "genesis_deployer",
+    "erc20"
 ]
 
 [profile.dev]
