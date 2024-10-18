@@ -16,7 +16,6 @@ const CONFIG_KEY: sdk::StorageKey = static_key!("config key");
 const CONFIG_LEN: usize = core::mem::size_of::<sdk::ContractAddress>()
     + core::mem::size_of::<sdk::Ed25519PublicKey>();
 
-
 fn write_config_data(
     erc20_addr: &sdk::ContractAddress,
     pk: &sdk::Ed25519PublicKey,
@@ -57,6 +56,7 @@ pub fn get_balance() -> i64 {
 
     token.get_balance().unwrap()
 }
+
 
 /*
 #[public_method]

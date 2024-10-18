@@ -39,10 +39,7 @@ fn make_static_key(arg: &str) -> [u8; 32] {
 pub fn static_key(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as LitStr);
 
-    println!("{:?}", input);
-
     let string = input.token().to_string();
-    println!("{}", string);
 
     let res = make_static_key(&string);
 
