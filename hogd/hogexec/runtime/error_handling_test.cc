@@ -4,7 +4,6 @@
 
 #include <gtest/gtest.h>
 
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -90,6 +89,7 @@ protected:
   std::optional<WasmiRuntime> runtime_;
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 {
   runtime_ = context_.make_new_runtime(contract_, nullptr);
@@ -318,5 +318,6 @@ TEST_F(WasmiErrorHandlingTest, Spin)
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGasError});
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

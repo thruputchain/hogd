@@ -23,7 +23,7 @@ protected:
 
   std::optional<WasmiRuntime> runtime_;
 };
-
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(MemoryAccessTest, ReadWrites)
 {
   // assert memory exists
@@ -57,5 +57,6 @@ TEST_F(MemoryAccessTest, ReadWrites)
   ASSERT_TRUE(!!res.result);
   EXPECT_EQ(*res.result, 0xABCDEF01);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

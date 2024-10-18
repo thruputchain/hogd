@@ -24,6 +24,7 @@ foo(HostCallContext *ctx, uint64_t value)
 
 } // namespace
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(WasmRuntimeTest, CheckCtxCorrect)
 {
   auto c = test::load_wasm_from_file("test_invoke.wasm");
@@ -39,5 +40,6 @@ TEST(WasmRuntimeTest, CheckCtxCorrect)
   EXPECT_TRUE(!!res.result);
   EXPECT_EQ(*res.result, 15U);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

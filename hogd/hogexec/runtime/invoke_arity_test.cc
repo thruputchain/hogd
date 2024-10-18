@@ -94,6 +94,7 @@ protected:
   std::optional<WasmiRuntime> runtime_;
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(InvokeArityTests, arity0)
 {
   auto res = runtime_->invoke("calltest0", UINT64_MAX);
@@ -135,5 +136,6 @@ TEST_F(InvokeArityTests, arity5)
   EXPECT_TRUE(!!res.result);
   EXPECT_EQ(*res.result, 105);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
