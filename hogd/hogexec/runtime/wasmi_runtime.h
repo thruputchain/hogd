@@ -88,7 +88,7 @@ public:
                          (kArgCount<Args>() + ... + 0));
   }
 
-  std::unique_ptr<WasmiRuntime>
+  std::optional<WasmiRuntime>
   make_new_runtime(ContractBlob const &contract,
                    SystemCallHandler *syscall_handler);
 
@@ -110,6 +110,9 @@ public:
   WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,
                void *wasmi_runtime_ptr);
   WasmiRuntime(WasmiRuntime const &) = delete;
+
+  WasmiRuntime(WasmiRuntime &&other);
+  WasmiRuntime &operator=(WasmiRuntime &&other);
   ~WasmiRuntime();
 
   // This API expects that the invoked function takes no arguments

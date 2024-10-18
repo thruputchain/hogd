@@ -43,10 +43,9 @@ pub fn static_key(item: TokenStream) -> TokenStream {
 
     let res = make_static_key(&string);
 
-    TokenStream::from(
-        quote!{
-            [#(#res),*]
-        })
+    TokenStream::from(quote! {
+        [#(#res),*]
+    })
 }
 
 fn get_method_name_int(arg: &str) -> u32 {

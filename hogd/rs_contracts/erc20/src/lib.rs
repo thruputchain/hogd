@@ -5,7 +5,7 @@ use rs_contract_sdk as sdk;
 use core::mem::MaybeUninit;
 use rs_macros::{public_interface, public_method};
 
-#[cfg(not(feature="interface"))]
+#[cfg(not(feature = "interface"))]
 mod config;
 
 public_interface!();
@@ -43,10 +43,7 @@ fn do_transfer(
     sdk::NonnegativeInt64Add(&to_key, amount).unwrap();
 }
 
-fn do_mint(
-    to: &sdk::ContractAddress,
-    amount: i64,
-) {
+fn do_mint(to: &sdk::ContractAddress, amount: i64) {
     if amount < 0 {
         sdk::rt::trap();
     }
@@ -55,11 +52,9 @@ fn do_mint(
     sdk::NonnegativeInt64Add(&to_key, amount).unwrap();
 }
 
-fn do_burn(
-    to: &sdk::ContractAddress,
-    amount: i64,
-) {
-    if amount > 0 || amount == i64::MIN { // would overflow when we take negative
+fn do_burn(to: &sdk::ContractAddress, amount: i64) {
+    if amount > 0 || amount == i64::MIN {
+        // would overflow when we take negative
         sdk::rt::trap();
     }
 
@@ -77,9 +72,7 @@ fn do_allowance_delta(
 }
 
 #[public_method(static_calldata_length = 32, static_return_length = 0)]
-pub fn initialize(
-    owner: &sdk::ContractAddress,
-) -> () {
+pub fn initialize(owner: &sdk::ContractAddress) -> () {
     sdk::initialization_guard();
     config::write_config_data(&owner);
 }
@@ -127,7 +120,7 @@ pub fn get_balance() -> i64 {
 }
 
 #[public_method(static_calldata_length = 40, static_return_length = 0)]
-pub fn mint(to: &sdk::ContractAddress, amount : i64) {
+pub fn mint(to: &sdk::ContractAddress, amount: i64) {
     let sender = sdk::GetMsgSender().unwrap();
 
     let owner = config::load_config_data();
@@ -139,7 +132,7 @@ pub fn mint(to: &sdk::ContractAddress, amount : i64) {
 }
 
 #[public_method(static_calldata_length = 40, static_return_length = 0)]
-pub fn burn(to: &sdk::ContractAddress, amount : i64) {
+pub fn burn(to: &sdk::ContractAddress, amount: i64) {
     let sender = sdk::GetMsgSender().unwrap();
 
     let owner = config::load_config_data();

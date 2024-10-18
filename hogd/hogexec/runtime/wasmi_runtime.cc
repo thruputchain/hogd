@@ -160,7 +160,7 @@ WasmiContext::~WasmiContext()
   free_wasmi_context(wasmi_context_ptr_);
 }
 
-std::unique_ptr<WasmiRuntime>
+std::optional<WasmiRuntime>
 WasmiContext::make_new_runtime(ContractBlob const &contract,
                                SystemCallHandler *syscall_handler)
 {
@@ -176,8 +176,8 @@ WasmiContext::make_new_runtime(ContractBlob const &contract,
     return {};
   }
 
-  return std::make_unique<WasmiRuntime>(std::move(host_call_context),
-                                        wasmi_runtime_ptr);
+  return std::make_optional<WasmiRuntime>(std::move(host_call_context),
+                                          wasmi_runtime_ptr);
 }
 
 bool
@@ -274,6 +274,27 @@ WasmiRuntime::WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,
     wasmi_runtime_ptr_(wasmi_runtime_ptr)
 {
   host_call_context_->runtime = this;
+}
+
+WasmiRuntime::WasmiRuntime(WasmiRuntime &&other)
+  : host_call_context_(std::move(other.host_call_context_)),
+    wasmi_runtime_ptr_(other.wasmi_runtime_ptr_)
+{
+  other.wasmi_runtime_ptr_ = nullptr;
+  host_call_context_->runtime = this;
+}
+
+WasmiRuntime &
+WasmiRuntime::operator=(WasmiRuntime &&other)
+{
+  host_call_context_ = std::move(other.host_call_context_);
+  host_call_context_->runtime = this;
+  if (wasmi_runtime_ptr_ != nullptr) {
+    free_wasmi_runtime(wasmi_runtime_ptr_);
+  }
+  wasmi_runtime_ptr_ = other.wasmi_runtime_ptr_;
+  other.wasmi_runtime_ptr_ = nullptr;
+  return *this;
 }
 
 WasmiRuntime::~WasmiRuntime()

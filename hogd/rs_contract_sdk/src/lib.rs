@@ -30,11 +30,11 @@ mod bytestring;
 mod contract;
 mod crypto;
 mod general_storage;
+mod initialize;
 mod invoke;
 mod log;
 mod nonnegative_int64;
 mod syscall;
-mod initialize;
 
 pub mod parse_trait;
 
@@ -46,8 +46,8 @@ pub use bytestring::*;
 pub use contract::*;
 pub use crypto::*;
 pub use general_storage::*;
+pub use initialize::*;
 pub use invoke::*;
 pub use log::*;
 pub use nonnegative_int64::*;
-pub use initialize::*;
 pub use rs_xdr::*;

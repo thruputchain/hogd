@@ -149,7 +149,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
     initial_gas_limit =
         runtimes_
             .at(call_frame_stack_.back().active_invocation_.invoked_address)
-            ->runtime->get_available_gas();
+            ->runtime.get_available_gas();
   }
 
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
@@ -174,7 +174,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
   call_frame_stack_.emplace_back(invocation);
 
   InvokeResult result =
-      runtime->runtime->invoke(invocation.method_name, gas_limit);
+      runtime->runtime.invoke(invocation.method_name, gas_limit);
 
   // We choose _not_ to check the return code here, and instead pass it back to
   // the caller. Implicitly, this is saying that the caller is responsible for
@@ -279,7 +279,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     load_contract = it->second;
   }
 
-  std::unique_ptr<WasmiRuntime> new_runtime =
+  auto new_runtime =
       wasmi_context_.make_new_runtime(load_contract->contract_data, this);
 
   if (!new_runtime) {
@@ -288,7 +288,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // successfully resolved runtime
   runtimes_.emplace(addr, std::make_unique<RuntimeCacheEntry>(
-                              std::move(new_runtime)));
+                              std::move(*new_runtime)));
 
   return runtimes_.at(addr).get();
 }

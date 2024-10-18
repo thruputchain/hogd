@@ -57,7 +57,6 @@ pub fn get_balance() -> i64 {
     token.get_balance().unwrap()
 }
 
-
 /*
 #[public_method]
 pub fn send_payment(to_addr: &sdk::ContractAddress, amount: i64) {

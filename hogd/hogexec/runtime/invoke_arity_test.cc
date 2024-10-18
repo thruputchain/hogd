@@ -2,7 +2,7 @@
 // exactly maintain, and very easy to mess up with a copy-paste bug.
 
 #include <cstdint>
-#include <memory>
+#include <optional>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
@@ -91,7 +91,7 @@ protected:
     ASSERT_TRUE(!!runtime_);
   }
 
-  std::unique_ptr<WasmiRuntime> runtime_;
+  std::optional<WasmiRuntime> runtime_;
 };
 
 TEST_F(InvokeArityTests, arity0)

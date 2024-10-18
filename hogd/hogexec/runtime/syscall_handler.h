@@ -84,8 +84,13 @@ public:
 
 private:
   struct RuntimeCacheEntry {
-    std::unique_ptr<WasmiRuntime> runtime;
+    WasmiRuntime runtime;
     bool unwind_poisoned = false;
+
+    RuntimeCacheEntry(WasmiRuntime&& runtime)
+      : runtime(std::move(runtime)) {}
+
+    RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
   };
 
   WasmiContext wasmi_context_;
