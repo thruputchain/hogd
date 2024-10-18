@@ -110,33 +110,6 @@ fn iface_return_type(ret: &ReturnType) -> Type {
     };
 
     return iface_return_type_inner(&t);
-    /*
-    let ref_type = match *t {
-        Reference(type_reference) => type_reference,
-        Tuple(tuple_type) => {
-            let old_elems = tuple_type.elems.clone();
-
-            let n_elems = elems.len();
-
-            return Tuple {
-                paren_token : tuple_type.paren_token,
-                elems : old_elems.iter().map(|t| {iface})
-            }
-
-            elems.iter().map(|t| {})
-
-
-
-            panic!("unimplemented")
-        }
-        _ => {
-            return *t.clone();
-        }
-    };
-
-    let elem = *ref_type.elem.clone();
-
-    return Type::Verbatim(quote! {Box<#elem>}); */
 }
 
 struct AttributeArgs {
