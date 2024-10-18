@@ -1,9 +1,10 @@
 #include <cstdint>
-#include <memory>
+#include <optional>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
 
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -86,7 +87,7 @@ protected:
   }
   ContractBlob contract_;
   WasmiContext context_;
-  std::unique_ptr<WasmiRuntime> runtime_;
+  std::optional<WasmiRuntime> runtime_;
 };
 
 TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
@@ -244,7 +245,7 @@ TEST_F(WasmiErrorHandlingTest, Reentrance)
 
   ASSERT_TRUE(!!runtime_);
 
-  s_runtime = runtime_.get();
+  s_runtime = &(*runtime_);
   reentrance_hit = false;
 
   auto res = runtime_->invoke("call1", UINT64_MAX);

@@ -1,5 +1,5 @@
 #include <cstdint>
-#include <memory>
+#include <optional>
 
 #include <gtest/gtest.h>
 
@@ -21,7 +21,7 @@ protected:
     ASSERT_TRUE(!!runtime_);
   }
 
-  std::unique_ptr<WasmiRuntime> runtime_;
+  std::optional<WasmiRuntime> runtime_;
 };
 
 TEST_F(MemoryAccessTest, ReadWrites)

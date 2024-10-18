@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <memory>
+#include <optional>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -62,7 +62,7 @@ protected:
     ASSERT_TRUE(!!runtime_);
   }
 
-  std::unique_ptr<WasmiRuntime> runtime_;
+  std::optional<WasmiRuntime> runtime_;
 };
 
 TEST_F(GasApiTest, SetGasNoInvoke)
