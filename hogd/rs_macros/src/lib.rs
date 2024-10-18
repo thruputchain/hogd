@@ -11,10 +11,9 @@ use syn::FnArg::Typed;
 use syn::ReturnType;
 use syn::parse::{Parse, ParseStream};
 use syn::Type::{Reference, Tuple};
-use syn::{ItemFn, Type, TypeTuple, LitInt, Lit, LitStr};
+use syn::{ItemFn, Type, TypeTuple, LitInt, Lit};
 
-use syn::{Meta, Token};
-use syn::punctuated::Punctuated;
+use syn::Token;
 
 fn get_method_name(arg: &str) -> String {
     let mut hasher = Sha256::new();
@@ -256,7 +255,7 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
                     vec.as_mut(),
                     #arg_names_join
-                );
+                )?;
 
                 let calldata = unsafe { vec.assume_init() };
             },
@@ -268,7 +267,7 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
                     &mut calldata_mu,
                     #arg_names_join
-                );
+                )?;
 
                 let calldata : [u8; #x] = unsafe { core::mem::transmute(calldata_mu)};
             }
@@ -383,7 +382,7 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 //let returned_buf = ::rs_contract_sdk::rt::unwrap_abort(sdk::GetReturnedBuffer(return_len));
                 #get_return_buf_decl
 
-                Ok(sdk::parse_trait::parse_returns_from_calldata::<#iface_return_type>(&returned_buf))
+                Ok(sdk::parse_trait::parse_returns_from_calldata::<#iface_return_type>(&returned_buf)?)
             }
         }
     })

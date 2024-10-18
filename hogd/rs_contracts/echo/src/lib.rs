@@ -101,5 +101,5 @@ pub fn echo_calldata(
 
     Ok(sdk::parse_trait::parse_returns_from_calldata::<Box<[u8]>>(
         &returned_buf,
-    ))
+    )?)
 }

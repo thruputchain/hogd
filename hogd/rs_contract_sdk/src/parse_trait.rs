@@ -1,5 +1,4 @@
 use crate::invoke::{Exit, Return};
-use crate::rt::{trap, unwrap_abort_option, unwrap_abort};
 use core::mem::MaybeUninit;
 use rs_xdr::*;
 
@@ -15,7 +14,7 @@ pub trait Parseable<'a> {
 }
 
 pub trait ParseableOwned {
-    fn parse_from(arg: &[u8]) -> (Self, usize)
+    fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32>
     where
         Self: Sized;
 }
@@ -23,7 +22,7 @@ pub trait ParseableOwned {
 pub trait Serializable {
     fn serialize_len(&self) -> usize;
 
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]);
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Result<(), i32>;
 }
 
 pub trait OutputReturnable {
@@ -32,7 +31,7 @@ pub trait OutputReturnable {
 
 #[cfg(feature = "alloc")]
 impl ParseableOwned for Box<[u8]> {
-    fn parse_from(arg: &[u8]) -> (Self, usize) {
+    fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
         let mut out = Box::new_uninit_slice(arg.len());
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -41,37 +40,46 @@ impl ParseableOwned for Box<[u8]> {
                 arg.len(),
             )
         };
-        (unsafe { out.assume_init() }, arg.len())
+        Ok((unsafe { out.assume_init() }, arg.len()))
     }
 }
 
 impl ParseableOwned for u64 {
-    fn parse_from(arg: &[u8]) -> (Self, usize) {
-        let b = unwrap_abort(unwrap_abort_option(arg.get(0..8)).try_into());
+    fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
+        let b = arg.get(0..8).ok_or(SyscallErrorCode::kReturnParseError as i32)?.try_into().or_else(|_| {Err(SyscallErrorCode::kReturnParseError as i32)})?;
+        //let b = unwrap_abort(unwrap_abort_option(arg.get(0..8)).try_into());
         let out : u64 = u64::from_le_bytes(b);
-        (out, 8)
+        Ok((out, 8))
     }
 }
 
+impl<const N : usize> ParseableOwned for [u8; N] {
+    fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
+        let b = arg.get(0..N).ok_or(SyscallErrorCode::kReturnParseError as i32)?.try_into().or_else(|_| {Err(SyscallErrorCode::kReturnParseError as i32)})?;
+        Ok((b, N))
+    }
+}
+
+
 impl<T1: ParseableOwned, T2: ParseableOwned> ParseableOwned for (T1, T2) {
-    fn parse_from(arg: &[u8]) -> (Self, usize) {
+    fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
         let mut offset: usize = 0;
 
         let (arg1, arg1len) = T1::parse_from(match arg.get(offset..) {
             Some(b) => b,
-            None => Exit(SyscallErrorCode::kCalldataParseError as i32),
-        });
+            None => {return Err(SyscallErrorCode::kReturnParseError as i32);},
+        })?;
 
         offset += arg1len;
 
         let (arg2, arg2len) = T2::parse_from(match arg.get(offset..) {
             Some(b) => b,
-            None => Exit(SyscallErrorCode::kCalldataParseError as i32),
-        });
+            None => {return Err(SyscallErrorCode::kReturnParseError as i32);},
+        })?;
 
         offset += arg2len;
 
-        ((arg1, arg2), offset)
+        Ok(((arg1, arg2), offset))
     }
 }
 
@@ -139,7 +147,7 @@ impl Serializable for u32 {
         4
     }
 
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>])  -> Result<(), i32> {
         debug_assert!(slice.len() == 4);
         let b = self.to_le_bytes();
         unsafe {
@@ -149,6 +157,7 @@ impl Serializable for u32 {
                 4,
             );
         }
+        Ok(())
     }
 }
 
@@ -172,7 +181,7 @@ impl Serializable for i64 {
         8
     }
 
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Result<(), i32> {
         debug_assert!(slice.len() == 4);
         let b = self.to_le_bytes();
         unsafe {
@@ -182,6 +191,7 @@ impl Serializable for i64 {
                 8,
             );
         }
+        Ok(())
     }
 }
 
@@ -205,7 +215,7 @@ impl Serializable for &StorageKey {
         32
     }
 
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>])  -> Result<(), i32> {
         debug_assert!(slice.len() == 32);
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -214,6 +224,7 @@ impl Serializable for &StorageKey {
                 32,
             );
         }
+        Ok(())
     }
 }
 
@@ -228,7 +239,7 @@ impl Serializable for &[u8] {
         self.len()
     }
 
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Result<(), i32> {
         debug_assert!(slice.len() == self.len());
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -237,6 +248,7 @@ impl Serializable for &[u8] {
                 self.len(),
             );
         }
+        Ok(())
     }
 }
 
@@ -279,49 +291,47 @@ pub fn compute_serialize_len_3<
     arg1.serialize_len() + arg2.serialize_len() + arg3.serialize_len()
 }
 
-// We explicitly choose to make serialize_to_calldata trap() on error,
+// We explicitly choose to make parse_returns_from_calldata trap() on error,
 // as this gets called _after_ sdk logic, so if there's an error the contract
 // (at least in the macro sdk) has no way of responding or undoing its own state changes.
 // By contrast, parse_from_calldata is called before contract logic, so that's fine to return an error
 // instead of trapping.
+// serialize_to_calldata similarly is called before an invoke, so it returns a handlable result error.
 
 // Will fail if buf.len() != sum(args.serialize_len())
 pub fn serialize_to_calldata_1<T1: Serializable>(
     buf: &mut [MaybeUninit<u8>],
     arg1: T1,
-) {
+) -> Result<(), i32> {
     let mut offset: usize = 0;
 
-    arg1.do_serialize(unwrap_abort_option(
-        buf.get_mut(offset..(offset + arg1.serialize_len())),
-    ));
+    arg1.do_serialize(buf.get_mut(offset..(offset + arg1.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
     offset += arg1.serialize_len();
 
     if offset != buf.len() {
-        trap();
+        return Err(SyscallErrorCode::kCalldataParseError as i32);
     }
+    Ok(())
 }
 
 pub fn serialize_to_calldata_2<T1: Serializable, T2: Serializable>(
     buf: &mut [MaybeUninit<u8>],
     arg1: T1,
     arg2: T2,
-) {
+) -> Result<(), i32> {
     let mut offset: usize = 0;
 
-    arg1.do_serialize(unwrap_abort_option(
-        buf.get_mut(offset..(offset + arg1.serialize_len())),
-    ));
+    arg1.do_serialize(buf.get_mut(offset..(offset + arg1.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
+
     offset += arg1.serialize_len();
 
-    arg2.do_serialize(unwrap_abort_option(
-        buf.get_mut(offset..(offset + arg2.serialize_len())),
-    ));
+    arg2.do_serialize(buf.get_mut(offset..(offset + arg2.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
     offset += arg2.serialize_len();
 
     if offset != buf.len() {
-        trap();
+        return Err(SyscallErrorCode::kCalldataParseError as i32);
     }
+    Ok(())
 }
 
 pub fn serialize_to_calldata_3<
@@ -336,23 +346,17 @@ pub fn serialize_to_calldata_3<
 ) -> Result<(), i32> {
     let mut offset: usize = 0;
 
-    arg1.do_serialize(unwrap_abort_option(
-        buf.get_mut(offset..(offset + arg1.serialize_len())),
-    ));
+    arg1.do_serialize(buf.get_mut(offset..(offset + arg1.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
     offset += arg1.serialize_len();
 
-    arg2.do_serialize(unwrap_abort_option(
-        buf.get_mut(offset..(offset + arg2.serialize_len())),
-    ));
+    arg2.do_serialize(buf.get_mut(offset..(offset + arg2.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
     offset += arg2.serialize_len();
 
-    arg3.do_serialize(unwrap_abort_option(
-        buf.get_mut(offset..(offset + arg3.serialize_len())),
-    ));
+    arg3.do_serialize(buf.get_mut(offset..(offset + arg3.serialize_len())).ok_or(SyscallErrorCode::kCalldataParseError as i32)?)?;
     offset += arg3.serialize_len();
 
     if offset != buf.len() {
-        return Err(1234);
+        return Err(SyscallErrorCode::kCalldataParseError as i32);
     }
     Ok(())
 }
@@ -501,14 +505,14 @@ pub fn parse_from_calldata_4<
 
 pub fn parse_returns_from_calldata<'a, T1: ParseableOwned>(
     bytes: &'a [u8],
-) -> T1 {
-    let (arg, arglen) = T1::parse_from(&bytes);
+) -> Result<T1, i32> {
+    let (arg, arglen) = T1::parse_from(&bytes)?;
 
     if arglen != bytes.len() {
-        Exit(SyscallErrorCode::kCalldataParseError as i32);
+        return Err(SyscallErrorCode::kReturnParseError as i32);
     }
 
-    arg
+    Ok(arg)
 }
 
 #[cfg(test)]
