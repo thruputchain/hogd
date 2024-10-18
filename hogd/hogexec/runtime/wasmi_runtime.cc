@@ -276,7 +276,7 @@ WasmiRuntime::WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,
   host_call_context_->runtime = this;
 }
 
-WasmiRuntime::WasmiRuntime(WasmiRuntime &&other)
+WasmiRuntime::WasmiRuntime(WasmiRuntime &&other) noexcept
   : host_call_context_(std::move(other.host_call_context_)),
     wasmi_runtime_ptr_(other.wasmi_runtime_ptr_)
 {
@@ -285,7 +285,7 @@ WasmiRuntime::WasmiRuntime(WasmiRuntime &&other)
 }
 
 WasmiRuntime &
-WasmiRuntime::operator=(WasmiRuntime &&other)
+WasmiRuntime::operator=(WasmiRuntime &&other) noexcept
 {
   host_call_context_ = std::move(other.host_call_context_);
   host_call_context_->runtime = this;
