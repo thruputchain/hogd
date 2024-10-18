@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "contract.hh"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
 
@@ -68,20 +69,20 @@ public:
   // Provide the functions that are made available to wasm modules (as function
   // imports). Imports in wasm are identified by "module name" and "function
   // name". For simplicity, this API implements only u64 arguments (between 0
-  // and 5) and expects imported functions to return a u64 (i.e. an error code
+  // and 5) and expects imported functions to return an i32 (i.e. an error code
   // from the syscall).
   //
-  // These functions have a signature of
-  // HostFnStatus<int32_t>
+  // Imported functions functions have a signature of
+  // std::pair<HostFnErrorCode, int32_t>
   // function(HostCallContext* context, uint64_t arg0,...);
   //
   // Context is the object contained in a WasmiRuntime.
   // If the HostFnStatus is not an error, then the uint64 is returned to the
   // wasm module. Otherwise, Wasmi unwinds the current invocation and returns a
-  // nonzero WasmiInvokeError.
+  // nonzero InvokeError.
   template<std::same_as<uint64_t>... Args>
   bool link_fn(std::string_view module_name, std::string_view fn_name,
-               HostFnStatus<int32_t> (*f)(HostCallContext *, Args...))
+               HostFnResult (*f)(HostCallContext *, Args...))
   {
     return link_fn_nargs(module_name, fn_name, reinterpret_cast<void *>(f),
                          (kArgCount<Args>() + ... + 0));
@@ -123,6 +124,7 @@ public:
   // (i.e. x = get_available_gas(); invoke(something); assert(x ==
   // get_available_gas()))
   InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
+  InvokeResult invoke(uint32_t method_name, uint64_t gas_limit);
 
   // Returns FALSE if gas consumption failed.
   //

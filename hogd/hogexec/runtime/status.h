@@ -23,6 +23,7 @@ enum class HostFnErrorCode : uint8_t {
   kOutOfGas = 1,
   kUnrecoverableUnknown = 2,
   kReturn = 3,
+  kExit = 4,
 };
 
 class HostFnErrorCategory : public std::error_category {
@@ -62,5 +63,7 @@ operator==(const InvokeErrorCode &lhs, const std::error_code &rhs)
 }
 
 template<typename T> using InvokeStatus = std::expected<T, InvokeError>;
+
+using HostFnResult = std::pair<HostFnErrorCode, int32_t>;
 
 } // namespace hogd

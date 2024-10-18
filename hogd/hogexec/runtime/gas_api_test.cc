@@ -1,6 +1,6 @@
-#include <memory>
-
 #include <gtest/gtest.h>
+
+#include <memory>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -9,27 +9,39 @@
 
 namespace hogd {
 
-namespace test {
+namespace {
 
-HostFnStatus<int32_t>
+HostFnResult
+error(HostFnErrorCode const &code)
+{
+  return {code, 0};
+}
+
+HostFnResult
+success(int32_t value)
+{
+  return {HostFnErrorCode::kNoneOrRecoverable, value};
+}
+
+HostFnResult
 consume_gas_call(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(100)) {
-    return HostFnError{HostFnErrorCode::kOutOfGas};
+    return error(HostFnErrorCode::kOutOfGas);
   }
-  return 0;
+  return success(0);
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 consume_gas_call2(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(5000)) {
-    return HostFnError{HostFnErrorCode::kOutOfGas};
+    return error(HostFnErrorCode::kOutOfGas);
   }
-  return 0;
+  return success(0);
 }
 
-} // namespace test
+} // namespace
 
 class GasApiTest : public ::testing::Test {
 protected:
@@ -41,9 +53,9 @@ protected:
     WasmiContext context;
 
     context.link_fn("test", "good_call",
-                    &test::consume_gas_call2); // called by "call2"
+                    &consume_gas_call2); // called by "call2"
     context.link_fn("test", "external_call",
-                    &test::consume_gas_call); // called by "call1"
+                    &consume_gas_call); // called by "call1"
 
     runtime_ = context.make_new_runtime(c, nullptr);
 

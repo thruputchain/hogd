@@ -19,6 +19,8 @@ HostFnErrorCategory::message(int code) const
     return "kUnrecoverableUnknown";
   case kReturn:
     return "kReturn";
+  case kExit:
+    return "kExit";
   default:
     return "HostFnErrorCode Unknown";
   }

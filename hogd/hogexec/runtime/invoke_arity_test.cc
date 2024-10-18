@@ -14,63 +14,63 @@
 
 namespace hogd {
 
-namespace test {
+namespace {
 
-HostFnStatus<int32_t>
+HostFnResult
 arity0(HostCallContext * /*unused*/)
 {
-  return 100;
+  return {HostFnErrorCode::kNoneOrRecoverable, 100};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity1(HostCallContext * /*unused*/, uint64_t arg0)
 {
   if (arg0 != 1) {
     throw std::runtime_error("invalid arity check");
   }
-  return 101;
+  return {HostFnErrorCode::kNoneOrRecoverable, 101};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1)
 {
   if (arg0 != 1 || arg1 != 2) {
     throw std::runtime_error("invalid arity check");
   }
-  return 102;
+  return {HostFnErrorCode::kNoneOrRecoverable, 102};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
     throw std::runtime_error("invalid arity check");
   }
-  return 103;
+  return {HostFnErrorCode::kNoneOrRecoverable, 103};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
     throw std::runtime_error("invalid arity check");
   }
-  return 104;
+  return {HostFnErrorCode::kNoneOrRecoverable, 104};
 }
 
-HostFnStatus<int32_t>
+HostFnResult
 arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4)
 {
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5) {
     throw std::runtime_error("invalid arity check");
   }
-  return 105;
+  return {HostFnErrorCode::kNoneOrRecoverable, 105};
 }
 
-} // namespace test
+} // namespace
 
 class InvokeArityTests : public ::testing::Test {
 
@@ -81,12 +81,12 @@ protected:
 
     WasmiContext context;
 
-    context.link_fn("test", "arg0", &test::arity0);
-    context.link_fn("test", "arg1", &test::arity1);
-    context.link_fn("test", "arg2", &test::arity2);
-    context.link_fn("test", "arg3", &test::arity3);
-    context.link_fn("test", "arg4", &test::arity4);
-    context.link_fn("test", "arg5", &test::arity5);
+    context.link_fn("test", "arg0", &arity0);
+    context.link_fn("test", "arg1", &arity1);
+    context.link_fn("test", "arg2", &arity2);
+    context.link_fn("test", "arg3", &arity3);
+    context.link_fn("test", "arg4", &arity4);
+    context.link_fn("test", "arg5", &arity5);
     runtime_ = context.make_new_runtime(c, nullptr);
     ASSERT_TRUE(!!runtime_);
   }

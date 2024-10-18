@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "contract.hh"
 #include "types.hh"
 
 namespace hogd ::test {
