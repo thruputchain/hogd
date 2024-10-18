@@ -548,10 +548,10 @@ pub fn parse_from_calldata_4<
     main_func(arg1, arg2, arg3, arg4)
 }
 
-pub fn parse_returns_from_calldata<'a, T1: ParseableOwned>(
+pub fn parse_returns_from_calldata<'a, T: ParseableOwned>(
     bytes: &'a [u8],
-) -> Result<T1, i32> {
-    let (arg, arglen) = T1::parse_from(&bytes)?;
+) -> Result<T, i32> {
+    let (arg, arglen) = T::parse_from(&bytes)?;
 
     if arglen != bytes.len() {
         return Err(SyscallErrorCode::kReturnParseError as i32);
