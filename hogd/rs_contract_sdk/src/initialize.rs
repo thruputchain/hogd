@@ -12,9 +12,11 @@ pub fn initialization_guard() {
         Err(x) => {
             if x != rs_xdr::SyscallErrorCode::kStorageKeyNExist as i32 {
                 trap();
-            }            
+            }
         }
-        _ => {trap();}
+        _ => {
+            trap();
+        }
     };
 
     crate::NonnegativeInt64SetAdd(&INITIALIZE_GUARD_KEY, 1, -1).unwrap();

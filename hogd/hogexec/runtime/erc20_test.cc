@@ -31,93 +31,108 @@ protected:
 
 namespace {
 
-SignedTransaction make_deploy_wallet_transaction(SHA256Hash const& h_wallet, std::shared_ptr<const Contract> c_wallet,
-  uint64_t nonce, 
-  Ed25519PublicKey const& pk, ContractAddress const& erc20_addr) {
+SignedTransaction
+make_deploy_wallet_transaction(SHA256Hash const &h_wallet,
+                               std::shared_ptr<const Contract> c_wallet,
+                               uint64_t nonce, Ed25519PublicKey const &pk,
+                               ContractAddress const &erc20_addr)
+{
 
   SignedTransaction wallet_stx;
-  wallet_stx.tx.invocation.invoked_address = test::RuntimeTestFramework::deployer_address_;
+  wallet_stx.tx.invocation.invoked_address =
+      test::RuntimeTestFramework::deployer_address_;
   wallet_stx.tx.invocation.method_name = 1;
   wallet_stx.tx.invocation.gas_limit = UINT64_MAX;
-  wallet_stx.tx.invocation.calldata = 
-    test::make_calldata(h_wallet, test::get_sdk_name("initialize"),
-     pk, erc20_addr);
+  wallet_stx.tx.invocation.calldata =
+      test::make_calldata(h_wallet, test::get_sdk_name("initialize"), pk,
+                          erc20_addr);
   wallet_stx.nonce = nonce;
   wallet_stx.tx.contracts_to_deploy.push_back(*c_wallet);
 
   return wallet_stx;
 }
 
-SignedTransaction make_deploy_erc20_noinit(SHA256Hash const& h_erc20, std::shared_ptr<const Contract> c_erc20) {
+SignedTransaction
+make_deploy_erc20_noinit(SHA256Hash const &h_erc20,
+                         std::shared_ptr<const Contract> c_erc20)
+{
 
   SignedTransaction stx;
-  stx.tx.invocation.invoked_address = test::RuntimeTestFramework::deployer_address_;
+  stx.tx.invocation.invoked_address =
+      test::RuntimeTestFramework::deployer_address_;
   stx.tx.invocation.method_name = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
-  stx.tx.invocation.calldata = 
-    test::make_calldata(h_erc20);
+  stx.tx.invocation.calldata = test::make_calldata(h_erc20);
   stx.tx.contracts_to_deploy.push_back(*c_erc20);
   stx.nonce = 0;
 
   return stx;
 }
 
-SignedTransaction make_initialize_erc20(ContractAddress const& owner, ContractAddress const& erc20_address) {
+SignedTransaction
+make_initialize_erc20(ContractAddress const &owner,
+                      ContractAddress const &erc20_address)
+{
 
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = erc20_address;
   stx.tx.invocation.method_name = test::get_sdk_name("initialize");
   stx.tx.invocation.gas_limit = UINT64_MAX;
-  stx.tx.invocation.calldata = 
-    test::make_calldata(owner);
+  stx.tx.invocation.calldata = test::make_calldata(owner);
   stx.nonce = 0;
 
   return stx;
 }
 
-SignedTransaction make_mint_transaction(ContractAddress const& manager_wallet, ContractAddress const& to) {
+SignedTransaction
+make_mint_transaction(ContractAddress const &manager_wallet,
+                      ContractAddress const &to)
+{
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = manager_wallet;
   stx.tx.invocation.method_name = test::get_sdk_name("mint");
   stx.tx.invocation.gas_limit = UINT64_MAX;
-  stx.tx.invocation.calldata = 
-    test::make_calldata(to, static_cast<int64_t>(10000));
+  stx.tx.invocation.calldata =
+      test::make_calldata(to, static_cast<int64_t>(10000));
   stx.nonce = 0;
 
   return stx;
 }
 
-SignedTransaction make_check_balance_transaction(ContractAddress const& wallet, int64_t value) {
+SignedTransaction
+make_check_balance_transaction(ContractAddress const &wallet, int64_t value)
+{
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = wallet;
   stx.tx.invocation.method_name = test::get_sdk_name("test_expect_balance");
   stx.tx.invocation.gas_limit = UINT64_MAX;
-  stx.tx.invocation.calldata = 
-    test::make_calldata(value);
+  stx.tx.invocation.calldata = test::make_calldata(value);
   stx.nonce = 0;
 
   return stx;
 }
 
-SignedTransaction make_transfer_transaction(ContractAddress const& sender, ContractAddress const& to, int64_t amount)
+SignedTransaction
+make_transfer_transaction(ContractAddress const &sender,
+                          ContractAddress const &to, int64_t amount)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = sender;
   stx.tx.invocation.method_name = test::get_sdk_name("send_payment");
   stx.tx.invocation.gas_limit = UINT64_MAX;
-  stx.tx.invocation.calldata = 
-    test::make_calldata(to, amount);
+  stx.tx.invocation.calldata = test::make_calldata(to, amount);
   stx.nonce = 0;
 
   return stx;
 }
 
-}
+} // namespace
 
 TEST_F(ERC20Test, InitializeAndMint)
 {
   auto [h_erc20, c_erc20] = test::load_built_rs_contract("erc20.wasm");
-  auto [h_wallet, c_wallet] = test::load_built_rs_contract("simple_wallet.wasm");
+  auto [h_wallet, c_wallet] =
+      test::load_built_rs_contract("simple_wallet.wasm");
 
   ContractAddress erc20_address;
   ContractAddress manager_address;
@@ -142,8 +157,9 @@ TEST_F(ERC20Test, InitializeAndMint)
 
   // Create a wallet contract that controls minting on the erc20
   {
-    auto deploy_manager_tx = make_deploy_wallet_transaction(h_wallet, c_wallet,
-      0, Ed25519PublicKey{}, erc20_address);
+    auto deploy_manager_tx =
+        make_deploy_wallet_transaction(h_wallet, c_wallet, 0,
+                                       Ed25519PublicKey{}, erc20_address);
 
     SystemCallHandler handler(deploy_manager_tx, *snapshot_cache_);
 
@@ -158,10 +174,10 @@ TEST_F(ERC20Test, InitializeAndMint)
   }
 
   // Create 10 user wallets for the erc20
-  for (int i = 0; i < 10; i++)
-  {
-    auto deploy_wallet_tx = make_deploy_wallet_transaction(h_wallet, c_wallet,
-      i + 1, Ed25519PublicKey{}, erc20_address);
+  for (int i = 0; i < 10; i++) {
+    auto deploy_wallet_tx =
+        make_deploy_wallet_transaction(h_wallet, c_wallet, i + 1,
+                                       Ed25519PublicKey{}, erc20_address);
 
     SystemCallHandler handler(deploy_wallet_tx, *snapshot_cache_);
 
@@ -195,8 +211,7 @@ TEST_F(ERC20Test, InitializeAndMint)
   commit_round();
 
   // Mint money for each wallet
-  for (auto i = 0U; i < wallets.size(); i++)
-  {
+  for (auto i = 0U; i < wallets.size(); i++) {
     auto mint_tx = make_mint_transaction(manager_address, wallets[i]);
 
     SystemCallHandler handler(mint_tx, *snapshot_cache_);
@@ -211,8 +226,7 @@ TEST_F(ERC20Test, InitializeAndMint)
   commit_round();
 
   // check balances are all set at 10000, from the mint
-  for (auto i = 0U; i < wallets.size(); i++)
-  {
+  for (auto i = 0U; i < wallets.size(); i++) {
     auto check_balance = make_check_balance_transaction(wallets[i], 10000);
 
     SystemCallHandler handler(check_balance, *snapshot_cache_);
@@ -225,9 +239,9 @@ TEST_F(ERC20Test, InitializeAndMint)
   }
 
   // Each wallet pays some money to the manager
-  for (auto i = 0U; i < wallets.size(); i++)
-  {
-    auto payment = make_transfer_transaction(wallets[i], manager_address, (i+1) * 100);
+  for (auto i = 0U; i < wallets.size(); i++) {
+    auto payment =
+        make_transfer_transaction(wallets[i], manager_address, (i + 1) * 100);
 
     SystemCallHandler handler(payment, *snapshot_cache_);
 
@@ -239,8 +253,7 @@ TEST_F(ERC20Test, InitializeAndMint)
   }
 
   // Check balances don't update yet (block not yet committed)
-  for (auto i = 0U; i < wallets.size(); i++)
-  {
+  for (auto i = 0U; i < wallets.size(); i++) {
     auto check_balance = make_check_balance_transaction(wallets[i], 10000);
 
     SystemCallHandler handler(check_balance, *snapshot_cache_);
@@ -255,9 +268,9 @@ TEST_F(ERC20Test, InitializeAndMint)
   commit_round();
 
   // Check balance updates
-  for (auto i = 0U; i < wallets.size(); i++)
-  {
-    auto check_balance = make_check_balance_transaction(wallets[i], 10000 - (i+1)*100);
+  for (auto i = 0U; i < wallets.size(); i++) {
+    auto check_balance =
+        make_check_balance_transaction(wallets[i], 10000 - (i + 1) * 100);
 
     SystemCallHandler handler(check_balance, *snapshot_cache_);
 

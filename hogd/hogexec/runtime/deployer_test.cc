@@ -50,12 +50,11 @@ TEST_F(DeployerTest, DeployAndEcho)
     SystemCallHandler handler(stx, *snapshot_cache_);
     auto stx_hash = handler.get_source_tx_hash();
 
-    deployed_address = SystemCallHandler::static_get_deploy_address(
-        deployer_address_, stx_hash, h);
+    deployed_address =
+        SystemCallHandler::static_get_deploy_address(deployer_address_,
+                                                     stx_hash, h);
 
     ASSERT_TRUE(!!handler.root_invoke().result);
-
-
 
     ASSERT_EQ(handler.try_reserve_transaction(get_write_client()),
               StorageRPCError::kNone);

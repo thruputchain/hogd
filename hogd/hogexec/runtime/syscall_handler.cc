@@ -176,7 +176,6 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
   InvokeResult result =
       runtime->runtime.invoke(invocation.method_name, gas_limit);
 
-
   // We choose _not_ to check the return code here, and instead pass it back to
   // the caller. Implicitly, this is saying that the caller is responsible for
   // checking the return code, AND that the callee is responsible for cleaning

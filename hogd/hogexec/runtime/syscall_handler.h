@@ -87,8 +87,7 @@ private:
     WasmiRuntime runtime;
     bool unwind_poisoned = false;
 
-    RuntimeCacheEntry(WasmiRuntime&& runtime)
-      : runtime(std::move(runtime)) {}
+    RuntimeCacheEntry(WasmiRuntime &&runtime) : runtime(std::move(runtime)) {}
 
     RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
   };

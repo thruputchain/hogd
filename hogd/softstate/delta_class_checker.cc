@@ -127,7 +127,8 @@ StorageDeltaClassChecker::commit_round()
   tag_ = 0;
   finalized_delta_class_ = nullptr;
   if (!sdc_) {
-    // This is the case where nothing committed, so required_type does not need to change
+    // This is the case where nothing committed, so required_type does not need
+    // to change
     return std::nullopt;
   }
 

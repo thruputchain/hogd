@@ -58,7 +58,8 @@ syscall_NonnegativeInt64Add_inner(SystemCallHandler &syscall_handler,
       return {base_status.error().code(), 0};
     }
     // else base_value is defaulted to 0
-  } else {
+  }
+  else {
     base_value = *base_status;
   }
 

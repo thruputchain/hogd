@@ -59,9 +59,8 @@ pub fn initialize(
     write_config_data(&erc20_addr, &pk);
 }
 
-
 #[public_method]
-pub fn test_expect_balance(expect : i64) {
+pub fn test_expect_balance(expect: i64) {
     let (erc20addr, _) = load_config_data();
     let token = erc20::erc20::new(&erc20addr);
 
@@ -87,4 +86,3 @@ pub fn mint(to_addr: &sdk::ContractAddress, amount: i64) {
 
     token.mint(&to_addr, amount).unwrap();
 }
-
