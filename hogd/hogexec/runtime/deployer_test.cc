@@ -32,7 +32,7 @@ TEST_F(DeployerTest, DeployAndEcho)
 
   {
     SignedTransaction stx;
-    stx.tx.invocation.invoked_address = deployer_address_;
+    stx.tx.invocation.invoked_address = kDeployerAddress;
     stx.tx.invocation.method_name = 1;
     stx.tx.invocation.gas_limit = UINT64_MAX;
     stx.tx.invocation.calldata =

@@ -30,7 +30,7 @@ namespace {
 
 SignedTransaction
 make_deploy_wallet_transaction(SHA256Hash const &h_wallet,
-                               std::shared_ptr<const Contract> c_wallet,
+                               std::shared_ptr<const Contract> const &c_wallet,
                                uint64_t nonce, Ed25519PublicKey const &pk,
                                ContractAddress const &erc20_addr)
 {
@@ -51,7 +51,7 @@ make_deploy_wallet_transaction(SHA256Hash const &h_wallet,
 
 SignedTransaction
 make_deploy_erc20_noinit(SHA256Hash const &h_erc20,
-                         std::shared_ptr<const Contract> c_erc20)
+                         std::shared_ptr<const Contract> const &c_erc20)
 {
 
   SignedTransaction stx;
@@ -224,7 +224,7 @@ TEST_F(ERC20Test, InitializeAndMint)
 
   // check balances are all set at 10000, from the mint
   for (auto const &wallet : wallets) {
-    auto check_balance = make_check_balance_transaction(wallets, 10000);
+    auto check_balance = make_check_balance_transaction(wallet, 10000);
 
     SystemCallHandler handler(check_balance, *snapshot_cache_);
 
@@ -251,7 +251,7 @@ TEST_F(ERC20Test, InitializeAndMint)
 
   // Check balances don't update yet (block not yet committed)
   for (auto const &wallet : wallets) {
-    auto check_balance = make_check_balance_transaction(wallets, 10000);
+    auto check_balance = make_check_balance_transaction(wallet, 10000);
 
     SystemCallHandler handler(check_balance, *snapshot_cache_);
 
