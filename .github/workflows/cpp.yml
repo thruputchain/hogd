@@ -41,6 +41,8 @@ jobs:
         path: ${{ env.CACHED_PATHS }}
         # Cmake should handle rebuilding any changed files across commits
         key: ${{ runner.os }}-${{ github.ref_name }}
+    - name: tidy
+      run: echo "CLANG_TIDY=run-clang-tidy-19" > ./scripts/conf.sh && chmod u+x conf.sh && ./scripts/tidy.sh
     - name: check
       run: ./scripts/check.sh
     - uses: actions/cache/save@v4
