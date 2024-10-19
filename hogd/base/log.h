@@ -83,7 +83,6 @@ do_log(std::string_view fmt, const std::source_location &loc,
        std::format_args &&args)
 {
   if constexpr (should_log(Level)) {
-
     logger->vlog(Level, fmt, loc, std::move(args));
   }
 }
