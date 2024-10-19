@@ -71,6 +71,7 @@ add_executable(
   bytestring_test.cc
   nnint64_test.cc
   deployer_test.cc
+  erc20_test.cc
 )
 
 target_link_libraries(

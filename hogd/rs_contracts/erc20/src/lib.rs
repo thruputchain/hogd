@@ -112,7 +112,7 @@ pub fn get_balance_of(addr: &sdk::ContractAddress) -> i64 {
     }
 }
 
-#[public_method(static_calldata_length = 32, static_return_length = 8)]
+#[public_method(static_calldata_length = 0, static_return_length = 8)]
 pub fn get_balance() -> i64 {
     let sender = sdk::GetMsgSender().unwrap();
 

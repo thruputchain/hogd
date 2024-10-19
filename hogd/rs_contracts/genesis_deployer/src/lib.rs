@@ -52,7 +52,7 @@ pub extern "C" fn deploy_and_invoke() -> i32 {
     let contract_hash: sdk::SHA256Hash =
         calldata.as_ref()[0..32].try_into().unwrap();
 
-    let rest_calldata = &calldata.as_ref()[32..];
+    let rest_calldata = &calldata.as_ref()[36..];
 
     let deployed_addr = sdk::DeployContract(&nonce, &contract_hash).unwrap();
 

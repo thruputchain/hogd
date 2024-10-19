@@ -22,9 +22,9 @@ fn get_method_name(arg: &str) -> String {
 
     let prefix = &result[0..4];
 
-    let hex = hex::encode_upper(&prefix);
+    let num: u32 = u32::from_be_bytes(prefix.try_into().unwrap());
 
-    let m_write = format!("{}", hex);
+    let m_write = format!("{:X}", num);
 
     m_write
 }
@@ -257,7 +257,7 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
         Some(x) => quote! {
             let buffer_size : usize = #x;
 
-            let mut calldata_mu= [::core::mem::MaybeUninit::<u8>::uninit(); #x];
+            let mut calldata_mu = [::core::mem::MaybeUninit::<u8>::uninit(); #x];
 
             ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
                 &mut calldata_mu,

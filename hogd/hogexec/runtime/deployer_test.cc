@@ -45,13 +45,17 @@ TEST_F(DeployerTest, DeployAndEcho)
                             static_cast<uint32_t>(0), static_cast<uint32_t>(8),
                             std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
     stx.tx.contracts_to_deploy.push_back(*c);
+    stx.nonce = 0;
 
     SystemCallHandler handler(stx, *snapshot_cache_);
+    auto stx_hash = handler.get_source_tx_hash();
+
+    deployed_address = SystemCallHandler::static_get_deploy_address(
+        deployer_address_, stx_hash, h);
 
     ASSERT_TRUE(!!handler.root_invoke().result);
 
-    deployed_address = SystemCallHandler::static_get_deploy_address(
-        deployer_address_, handler.get_source_tx_hash(), h);
+
 
     ASSERT_EQ(handler.try_reserve_transaction(get_write_client()),
               StorageRPCError::kNone);
@@ -69,6 +73,7 @@ TEST_F(DeployerTest, DeployAndEcho)
   stx.tx.invocation.calldata =
       test::make_calldata(static_cast<uint32_t>(0), static_cast<uint32_t>(4),
                           std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
+  stx.nonce = 0;
 
   SystemCallHandler handler(stx, *snapshot_cache_);
 

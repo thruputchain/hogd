@@ -398,6 +398,7 @@ pub fn serialize_to_calldata_3<
     if offset != buf.len() {
         return Err(SyscallErrorCode::kCalldataParseError as i32);
     }
+
     Ok(())
 }
 

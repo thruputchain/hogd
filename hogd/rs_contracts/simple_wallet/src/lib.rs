@@ -3,6 +3,8 @@
 
 use rs_contract_sdk as sdk;
 
+use sdk::rt::trap;
+
 use rs_macros::{public_interface, public_method, static_key};
 
 extern crate alloc;
@@ -21,7 +23,7 @@ fn write_config_data(
     pk: &sdk::Ed25519PublicKey,
 ) {
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
-    sdk::parse_trait::serialize_to_calldata_2(&mut bytes_mu, pk, erc20_addr)
+    sdk::parse_trait::serialize_to_calldata_2(&mut bytes_mu, erc20_addr, pk)
         .unwrap();
     let bytes: [u8; CONFIG_LEN] = unsafe { core::mem::transmute(bytes_mu) };
 
@@ -39,15 +41,6 @@ fn load_config_data() -> (sdk::ContractAddress, sdk::Ed25519PublicKey) {
     .unwrap()
 }
 
-#[public_method]
-pub fn initialize(
-    pk: &sdk::Ed25519PublicKey,
-    erc20_addr: &sdk::ContractAddress,
-) -> () {
-    sdk::initialization_guard();
-    write_config_data(&erc20_addr, &pk);
-}
-
 // no auth on this method
 #[public_method]
 pub fn get_balance() -> i64 {
@@ -57,10 +50,41 @@ pub fn get_balance() -> i64 {
     token.get_balance().unwrap()
 }
 
-/*
+#[public_method]
+pub fn initialize(
+    pk: &sdk::Ed25519PublicKey,
+    erc20_addr: &sdk::ContractAddress,
+) -> () {
+    sdk::initialization_guard();
+    write_config_data(&erc20_addr, &pk);
+}
+
+
+#[public_method]
+pub fn test_expect_balance(expect : i64) {
+    let (erc20addr, _) = load_config_data();
+    let token = erc20::erc20::new(&erc20addr);
+
+    if expect != token.get_balance().unwrap() {
+        trap();
+    }
+}
+
 #[public_method]
 pub fn send_payment(to_addr: &sdk::ContractAddress, amount: i64) {
-    let (erc20addr, pk) = load_config_data();
+    let (erc20addr, _) = load_config_data();
 
     let token = erc20::erc20::new(&erc20addr);
-} */
+
+    token.transfer(&to_addr, amount).unwrap();
+}
+
+#[public_method]
+pub fn mint(to_addr: &sdk::ContractAddress, amount: i64) {
+    let (erc20addr, _) = load_config_data();
+
+    let token = erc20::erc20::new(&erc20addr);
+
+    token.mint(&to_addr, amount).unwrap();
+}
+

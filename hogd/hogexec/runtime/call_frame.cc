@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <cstdio>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/storage_proxy.h"

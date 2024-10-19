@@ -28,6 +28,7 @@ namespace hogd
   // for a later PR.
   struct SignedTransaction {
     Transaction tx;
+    unsigned hyper nonce; // uint64_t
   };
 
   struct LogEntry {
