@@ -7,6 +7,7 @@
 #include <span>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
