@@ -103,7 +103,7 @@ private:
   StorageProxy &resolve_storage_proxy(StorageKey const &key);
 
   SignedTransaction signed_tx_;
-  std::vector<CallFrame> call_frame_stack_;
+  std::vector<std::unique_ptr<CallFrame>> call_frame_stack_;
 
   std::map<ContractAddress, std::unique_ptr<RuntimeCacheEntry>> runtimes_;
 
@@ -117,7 +117,13 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
-  void commit_last_call_frame(CallFrame &&frame);
+  auto &get_active_call_frame(this auto &self)
+  {
+    assert(!self.call_frame_stack_.empty());
+    return *self.call_frame_stack_.back();
+  }
+
+  void commit_last_call_frame(CallFrame &frame);
 
   void commit_new_contract_deployments(write_client_t &client) const;
 };

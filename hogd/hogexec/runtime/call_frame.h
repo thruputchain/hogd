@@ -15,10 +15,9 @@ namespace hogd {
 class CallFrame {
 public:
   CallFrame(Invocation invocation);
+  CallFrame(CallFrame const &) = delete;
 
-  CallFrame(CallFrame &&other) noexcept = default;
-
-  void commit_successful_child_call(CallFrame &&frame);
+  void commit_successful_child_call(CallFrame &frame);
   void commit_failed_child_call();
 
   // TODO(geoff) set based on metadata

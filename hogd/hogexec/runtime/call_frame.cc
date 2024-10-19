@@ -21,7 +21,7 @@ CallFrame::CallFrame(Invocation invocation)
 {}
 
 void
-CallFrame::commit_successful_child_call(CallFrame &&frame)
+CallFrame::commit_successful_child_call(CallFrame &frame)
 {
   // overwrite any local storage proxies
   for (auto &[addr, proxy] : frame.storage_proxies_) {

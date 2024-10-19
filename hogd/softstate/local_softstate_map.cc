@@ -118,7 +118,7 @@ LocalContractMap::deploy_contract(ContractAddress const &addr,
 
 void
 LocalContractMap::add_contract(SHA256Hash const &hash,
-                               std::shared_ptr<const Contract> const& contract)
+                               std::shared_ptr<const Contract> const &contract)
 {
   new_contract_map_->emplace(hash, contract);
 }

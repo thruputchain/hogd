@@ -79,9 +79,7 @@ SystemCallHandler::root_invoke()
 ContractAddress
 SystemCallHandler::get_current_address() const
 {
-  assert(!call_frame_stack_.empty());
-
-  return call_frame_stack_.back().active_invocation_.invoked_address;
+  return get_active_call_frame().active_invocation_.invoked_address;
 }
 
 SHA256Hash
@@ -100,7 +98,7 @@ SystemCallHandler::get_msg_sender() const
   }
 
   return {call_frame_stack_[call_frame_stack_.size() - 2]
-              .active_invocation_.invoked_address};
+              ->active_invocation_.invoked_address};
 }
 
 namespace {
@@ -148,7 +146,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
   if (!call_frame_stack_.empty()) {
     initial_gas_limit =
         runtimes_
-            .at(call_frame_stack_.back().active_invocation_.invoked_address)
+            .at(call_frame_stack_.back()->active_invocation_.invoked_address)
             ->runtime.get_available_gas();
   }
 
@@ -171,7 +169,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
                                       RuntimeCacheEntry *runtime,
                                       uint64_t gas_limit)
 {
-  call_frame_stack_.emplace_back(invocation);
+  call_frame_stack_.emplace_back(std::make_unique<CallFrame>(invocation));
 
   InvokeResult result =
       runtime->runtime.invoke(invocation.method_name, gas_limit);
@@ -183,7 +181,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
   // called again.
   if (!result.result.has_value()) {
 
-    for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
+    for (auto const &addr : call_frame_stack_.back()->visited_runtimes_) {
       // TODO(geoff) metadata allowing unwind_safe declarations
       runtimes_.at(addr)->unwind_poisoned = true;
     }
@@ -191,18 +189,18 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
     call_frame_stack_.pop_back();
 
     if (!call_frame_stack_.empty()) {
-      call_frame_stack_.back().commit_failed_child_call();
+      call_frame_stack_.back()->commit_failed_child_call();
     }
   }
   else {
     size_t call_frame_stack_size = call_frame_stack_.size();
 
     if (call_frame_stack_size >= 2) {
-      call_frame_stack_[call_frame_stack_size - 2].commit_successful_child_call(
-          std::move(call_frame_stack_.back()));
+      call_frame_stack_[call_frame_stack_size - 2]
+          ->commit_successful_child_call(*call_frame_stack_.back());
     }
     else if (call_frame_stack_.size() == 1) {
-      commit_last_call_frame(std::move(call_frame_stack_.back()));
+      commit_last_call_frame(*call_frame_stack_.back());
     }
 
     call_frame_stack_.pop_back();
@@ -212,7 +210,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
 }
 
 void
-SystemCallHandler::commit_last_call_frame(CallFrame &&frame)
+SystemCallHandler::commit_last_call_frame(CallFrame &frame)
 {
   committed_logs_ = frame.extract_logs();
 
@@ -228,9 +226,7 @@ SystemCallHandler::commit_last_call_frame(CallFrame &&frame)
 SyscallStatus<const ReturnBuffer>
 SystemCallHandler::get_return_buffer() const
 {
-  assert(!call_frame_stack_.empty());
-
-  auto const &top_frame = call_frame_stack_.back();
+  auto const &top_frame = get_active_call_frame();
 
   if (!top_frame.child_return_buffer_.has_value()) {
     return SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
@@ -242,9 +238,7 @@ SystemCallHandler::get_return_buffer() const
 void
 SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
 {
-  assert(!call_frame_stack_.empty());
-
-  call_frame_stack_.back().set_call_return(std::move(returned_buffer));
+  get_active_call_frame().set_call_return(std::move(returned_buffer));
 }
 
 SystemCallHandler::RuntimeCacheEntry *
@@ -298,24 +292,27 @@ SystemCallHandler::resolve_storage_proxy(StorageKey const &key)
 {
   AddressAndKey query(get_current_address(), key);
 
+  auto &top_frame = get_active_call_frame();
+
   for (int32_t i = call_frame_stack_.size() - 2; i >= 0; i--) {
-    auto *proxy = call_frame_stack_[i].try_get_storage_proxy(query);
+    auto *proxy = call_frame_stack_[i]->try_get_storage_proxy(query);
     if (proxy) {
-      call_frame_stack_.back().push_new_storage_proxy(query, *proxy);
-      return *call_frame_stack_.back().try_get_storage_proxy(query);
+      top_frame.push_new_storage_proxy(query, *proxy);
+      return *top_frame.try_get_storage_proxy(query);
     }
   }
 
-  auto *proxy = call_frame_stack_.back().try_get_storage_proxy(query);
+  auto *proxy = top_frame.try_get_storage_proxy(query);
 
   if (proxy) {
     return *proxy;
   }
 
-  call_frame_stack_.back().push_new_storage_proxy(
-      query, StorageProxy(snapshot_cache_.try_get_object(query)));
+  top_frame.push_new_storage_proxy(query,
+                                   StorageProxy(
+                                       snapshot_cache_.try_get_object(query)));
 
-  return *call_frame_stack_.back().try_get_storage_proxy(query);
+  return *top_frame.try_get_storage_proxy(query);
 }
 
 void
@@ -381,15 +378,13 @@ SystemCallHandler::nnint64_set_add(StorageKey const &key, int64_t set_value,
 SyscallStatus<Calldata>
 SystemCallHandler::get_calldata() const
 {
-  assert(!call_frame_stack_.empty());
-  return call_frame_stack_.back().active_invocation_.calldata;
+  return get_active_call_frame().active_invocation_.calldata;
 }
 
 SyscallStatus<RuntimeMemoryLength>
 SystemCallHandler::get_calldata_len() const
 {
-  assert(!call_frame_stack_.empty());
-  return call_frame_stack_.back().active_invocation_.calldata.size();
+  return get_active_call_frame().active_invocation_.calldata.size();
 }
 
 SyscallStatus<void>
@@ -399,9 +394,7 @@ SystemCallHandler::log(std::span<const std::byte> message)
     return SyscallError{SyscallErrorCode::kStringTooLong};
   }
 
-  assert(!call_frame_stack_.empty());
-
-  call_frame_stack_.back().log(message);
+  get_active_call_frame().log(message);
 
   return {};
 }
@@ -409,11 +402,11 @@ SystemCallHandler::log(std::span<const std::byte> message)
 RuntimeMemoryLength
 SystemCallHandler::get_defaultzero_return_len() const
 {
-  assert(!call_frame_stack_.empty());
+  auto const &top_frame = get_active_call_frame();
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  if (call_frame_stack_.back().child_return_buffer_.has_value()) {
-    return call_frame_stack_.back().child_return_buffer_->size();
+  if (top_frame.child_return_buffer_.has_value()) {
+    return top_frame.child_return_buffer_->size();
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
   return 0;
