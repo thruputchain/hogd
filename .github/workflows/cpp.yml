@@ -8,7 +8,6 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-24.04
 
     env:
@@ -43,7 +42,7 @@ jobs:
         path: ${{ env.CACHED_PATHS }}
         # Cmake should handle rebuilding any changed files across commits
         key: ${{ runner.os }}-${{ github.ref_name }}
-     - name: check
+    - name: check
       run: ./scripts/check.sh
     - uses: actions/cache/save@v4
       with:
