@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
 
@@ -142,10 +143,8 @@ StorageObjectFrame::commit_delta(StorageDelta const &delta)
   case StorageDeltaType::kDeleteLast:
     throw std::runtime_error("this case is handled separately");
   case StorageDeltaType::kBytestringSet:
-    // nothing to do
-    return;
   case StorageDeltaType::kNonnegativeInt64SetAdd:
-    // nothing to do;
+    // nothing to do in both cases
     return;
   default:
     throw std::runtime_error("unimplemented commit_delta");

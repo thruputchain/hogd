@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -111,8 +112,8 @@ public:
                void *wasmi_runtime_ptr);
   WasmiRuntime(WasmiRuntime const &) = delete;
 
-  WasmiRuntime(WasmiRuntime &&other);
-  WasmiRuntime &operator=(WasmiRuntime &&other);
+  WasmiRuntime(WasmiRuntime &&other) noexcept;
+  WasmiRuntime &operator=(WasmiRuntime &&other) noexcept;
   ~WasmiRuntime();
 
   // This API expects that the invoked function takes no arguments

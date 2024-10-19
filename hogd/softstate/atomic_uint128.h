@@ -6,7 +6,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <cstdio>
 
 namespace hogd {
 
