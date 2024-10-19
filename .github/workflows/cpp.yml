@@ -29,8 +29,8 @@ jobs:
       run: gcc --version
     - name: clang version check
       run: clang --version
-    - name: tidy
-      run: echo "CLANG_TIDY=run-clang-tidy-19" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh && ./scripts/tidy.sh
+    - name: set clang-tidy
+      run: echo "CLANG_TIDY=run-clang-tidy-19" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: install packages
       run: sudo apt-get install -y git cmake pkg-config wabt
     - name: install rust nightly
