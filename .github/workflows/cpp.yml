@@ -30,6 +30,8 @@ jobs:
       run: sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 14 && sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 14
     - name: gcc version check
       run: gcc --version
+    - name: install rust nightly
+      run: rustup +nightly target install wasm32-unknown-unknown
     - name: Probe Cache
       id: cache
       uses: actions/cache/restore@v4
