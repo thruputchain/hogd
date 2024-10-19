@@ -12,6 +12,7 @@
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/softstate/local_softstate_map.h"
 #include "storage_object.hh"
+#include "storage_interface.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"

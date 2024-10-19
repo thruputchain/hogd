@@ -118,7 +118,7 @@ LocalContractMap::deploy_contract(ContractAddress const &addr,
 
 void
 LocalContractMap::add_contract(SHA256Hash const &hash,
-                               std::shared_ptr<const Contract> contract)
+                               std::shared_ptr<const Contract> const& contract)
 {
   new_contract_map_->emplace(hash, contract);
 }
@@ -196,8 +196,8 @@ LocalSoftstateWriteServer::try_reserve_transaction_deltas(
     StorageDeltaVec const &dv)
 {
 
-  const ssize_t dv_size = dv.deltas.size();
-  ssize_t i = 0;
+  const int32_t dv_size = dv.deltas.size();
+  int32_t i = 0;
   bool failed = false;
   for (; i < dv_size; i++) {
     auto res = local_map_.try_reserve_delta(dv.addr_key, dv.deltas[i]);
@@ -230,8 +230,8 @@ x23::Async<StorageRPCError>
 LocalSoftstateWriteServer::try_reserve_transaction_deltas(
     StorageDeltaVecList const &deltas, SHA256Hash const &expected_block_hash)
 {
-  const ssize_t deltas_size = deltas.size();
-  ssize_t i = 0;
+  const int32_t deltas_size = deltas.size();
+  int32_t i = 0;
   bool failed = false;
 
   for (; i < deltas_size; i++) {
@@ -246,7 +246,7 @@ LocalSoftstateWriteServer::try_reserve_transaction_deltas(
 
   if (failed) {
     // cleanup
-    for (ssize_t ii = 0; ii <= i; ii++) {
+    for (int32_t ii = 0; ii <= i; ii++) {
       auto const &dv = deltas[ii];
       revert_transaction_deltas(dv);
     }

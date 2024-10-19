@@ -37,7 +37,7 @@ public:
 
   void deploy_contract(ContractAddress const &addr, SHA256Hash const &hash);
   void add_contract(SHA256Hash const &hash,
-                    std::shared_ptr<const Contract> contract);
+                    std::shared_ptr<const Contract> const& contract);
 
   void commit_round();
   void revert_round();
