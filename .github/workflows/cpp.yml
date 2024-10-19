@@ -20,11 +20,7 @@ jobs:
       with:
         submodules: "recursive"
     - name: install llvm
-      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 19
-    - name: clang version check
-      run: clang --version
-    - name: install packages
-      run: sudo apt-get install -y git cmake pkg-config wabt
+      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 19 && sudo apt-get remove clang-18
     - name: set gcc-14 default
        # default is 13.2, unfortunately. This makes 14.0 work
       run: sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 14 && sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 14
@@ -32,6 +28,10 @@ jobs:
       run: sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-19 19 && sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 19
     - name: gcc version check
       run: gcc --version
+    - name: clang version check
+      run: clang --version
+    - name: install packages
+      run: sudo apt-get install -y git cmake pkg-config wabt
     - name: install rust nightly
       run: rustup +nightly target install wasm32-unknown-unknown && rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
     - name: Probe Cache
