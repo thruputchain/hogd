@@ -22,7 +22,11 @@ jobs:
     - name: install updated ppa 
       run: sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa && sudo apt update
     - name: install gcc-14
-      run: sudo apt-get install -y gcc-14 build-essential libc++-dev
+      run: sudo apt-get install -y gcc-14 build-essential
+    - name: install llvm
+      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 19
+    - name: clang version check
+      run: clang --version
     - name: install packages
       run: sudo apt-get install -y git cmake pkg-config wabt
     - name: set gcc-14 default
