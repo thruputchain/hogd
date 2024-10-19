@@ -20,7 +20,7 @@ jobs:
       with:
         submodules: "recursive"
     - name: install llvm
-      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 19 && sudo apt-get remove clang-18
+      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh all 19 && sudo apt-get remove clang-18
     - name: set gcc-14 default
        # default is 13.2, unfortunately. This makes 14.0 work
       run: sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 14 && sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 14
