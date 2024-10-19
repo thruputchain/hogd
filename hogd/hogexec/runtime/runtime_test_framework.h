@@ -40,11 +40,11 @@ public:
   std::unique_ptr<write_client_t> write_client_;
   std::unique_ptr<read_client_t> read_client_;
 
-  constexpr static ContractAddress deployer_address_ = ContractAddress{};
+  constexpr static ContractAddress kDeployerAddress = ContractAddress{};
 
-  auto &get_read_client() { return *read_client_; }
+  auto &get_read_client() const { return *read_client_; }
 
-  auto &get_write_client() { return *write_client_; }
+  auto &get_write_client() const { return *write_client_; }
 
   void initialize()
   {
@@ -74,11 +74,11 @@ public:
     server_config.server(write_storage_server_.get());
   }
 
-  void deploy_genesis_block()
+  void deploy_genesis_block() const
   {
     auto [h, c] = test::load_built_rs_contract("genesis_deployer.wasm");
     contract_map_->add_contract(h, c);
-    contract_map_->deploy_contract(deployer_address_, h);
+    contract_map_->deploy_contract(kDeployerAddress, h);
     contract_map_->commit_round();
   }
 
@@ -97,9 +97,7 @@ public:
         std::memcmp(entry.message.data(), calldata.data(), calldata.size());
     EXPECT_EQ(0, res);
     if (res != 0) {
-      std::printf("%s\n", std::format("detailed log eq check: {} {}",
-                                      entry.message, calldata)
-                              .c_str());
+      std::println("detailed log eq check {} {}", entry.message, calldata);
     }
   }
 };

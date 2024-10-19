@@ -16,7 +16,7 @@ class CallFrame {
 public:
   CallFrame(Invocation invocation);
 
-  CallFrame(CallFrame &&other) = default;
+  CallFrame(CallFrame &&other) noexcept = default;
 
   void commit_successful_child_call(CallFrame &&frame);
   void commit_failed_child_call();

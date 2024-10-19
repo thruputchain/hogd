@@ -411,9 +411,11 @@ SystemCallHandler::get_defaultzero_return_len() const
 {
   assert(!call_frame_stack_.empty());
 
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   if (call_frame_stack_.back().child_return_buffer_.has_value()) {
     return call_frame_stack_.back().child_return_buffer_->size();
   }
+  // NOLINTEND(bugprone-unchecked-optional-access)
   return 0;
 }
 

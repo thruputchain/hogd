@@ -230,7 +230,7 @@ syscalls:
         typename: "SHA256Hash"
     number: 18
   - name: "Exit"
-    needs_context: yes
+    needs_context: no
     syscall_return_type: "HostFnResult"
     inputs:
       - name: "code"

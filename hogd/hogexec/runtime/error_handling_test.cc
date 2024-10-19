@@ -89,6 +89,7 @@ protected:
   std::optional<WasmiRuntime> runtime_;
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 {
   runtime_ = context_.make_new_runtime(contract_, nullptr);
@@ -317,5 +318,6 @@ TEST_F(WasmiErrorHandlingTest, Spin)
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGasError});
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

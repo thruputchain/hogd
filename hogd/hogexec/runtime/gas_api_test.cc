@@ -65,6 +65,7 @@ protected:
   std::optional<WasmiRuntime> runtime_;
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(GasApiTest, SetGasNoInvoke)
 {
   EXPECT_EQ(runtime_->get_available_gas(), 0);
@@ -98,5 +99,6 @@ TEST_F(GasApiTest, InvokeResetsGas)
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.gas_consumed, 80);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

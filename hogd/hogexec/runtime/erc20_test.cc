@@ -1,21 +1,18 @@
 #include <gtest/gtest.h>
 
-#include <sys/socket.h>
-
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <vector>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime_test_framework.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "hogd/softstate/local_softstate_map.h"
+#include "storage_interface.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/rpc.h"
-#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -40,7 +37,7 @@ make_deploy_wallet_transaction(SHA256Hash const &h_wallet,
 
   SignedTransaction wallet_stx;
   wallet_stx.tx.invocation.invoked_address =
-      test::RuntimeTestFramework::deployer_address_;
+      test::RuntimeTestFramework::kDeployerAddress;
   wallet_stx.tx.invocation.method_name = 1;
   wallet_stx.tx.invocation.gas_limit = UINT64_MAX;
   wallet_stx.tx.invocation.calldata =
@@ -59,7 +56,7 @@ make_deploy_erc20_noinit(SHA256Hash const &h_erc20,
 
   SignedTransaction stx;
   stx.tx.invocation.invoked_address =
-      test::RuntimeTestFramework::deployer_address_;
+      test::RuntimeTestFramework::kDeployerAddress;
   stx.tx.invocation.method_name = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(h_erc20);
@@ -148,7 +145,7 @@ TEST_F(ERC20Test, InitializeAndMint)
     ASSERT_TRUE(!!handler.root_invoke().result);
 
     erc20_address = SystemCallHandler::static_get_deploy_address(
-        deployer_address_, handler.get_source_tx_hash(), h_erc20);
+        kDeployerAddress, handler.get_source_tx_hash(), h_erc20);
 
     ASSERT_EQ(handler.try_reserve_transaction(get_write_client()),
               StorageRPCError::kNone);
@@ -166,7 +163,7 @@ TEST_F(ERC20Test, InitializeAndMint)
     ASSERT_TRUE(!!handler.root_invoke().result);
 
     manager_address = SystemCallHandler::static_get_deploy_address(
-        deployer_address_, handler.get_source_tx_hash(), h_wallet);
+        kDeployerAddress, handler.get_source_tx_hash(), h_wallet);
 
     ASSERT_EQ(handler.try_reserve_transaction(get_write_client()),
               StorageRPCError::kNone);
@@ -184,7 +181,7 @@ TEST_F(ERC20Test, InitializeAndMint)
     ASSERT_TRUE(!!handler.root_invoke().result);
 
     auto addr = SystemCallHandler::static_get_deploy_address(
-        deployer_address_, handler.get_source_tx_hash(), h_wallet);
+        kDeployerAddress, handler.get_source_tx_hash(), h_wallet);
 
     ASSERT_EQ(handler.try_reserve_transaction(get_write_client()),
               StorageRPCError::kNone);
@@ -211,8 +208,8 @@ TEST_F(ERC20Test, InitializeAndMint)
   commit_round();
 
   // Mint money for each wallet
-  for (auto i = 0U; i < wallets.size(); i++) {
-    auto mint_tx = make_mint_transaction(manager_address, wallets[i]);
+  for (auto const &wallet : wallets) {
+    auto mint_tx = make_mint_transaction(manager_address, wallet);
 
     SystemCallHandler handler(mint_tx, *snapshot_cache_);
 
@@ -226,8 +223,8 @@ TEST_F(ERC20Test, InitializeAndMint)
   commit_round();
 
   // check balances are all set at 10000, from the mint
-  for (auto i = 0U; i < wallets.size(); i++) {
-    auto check_balance = make_check_balance_transaction(wallets[i], 10000);
+  for (auto const &wallet : wallets) {
+    auto check_balance = make_check_balance_transaction(wallets, 10000);
 
     SystemCallHandler handler(check_balance, *snapshot_cache_);
 
@@ -253,8 +250,8 @@ TEST_F(ERC20Test, InitializeAndMint)
   }
 
   // Check balances don't update yet (block not yet committed)
-  for (auto i = 0U; i < wallets.size(); i++) {
-    auto check_balance = make_check_balance_transaction(wallets[i], 10000);
+  for (auto const &wallet : wallets) {
+    auto check_balance = make_check_balance_transaction(wallets, 10000);
 
     SystemCallHandler handler(check_balance, *snapshot_cache_);
 
@@ -270,7 +267,7 @@ TEST_F(ERC20Test, InitializeAndMint)
   // Check balance updates
   for (auto i = 0U; i < wallets.size(); i++) {
     auto check_balance =
-        make_check_balance_transaction(wallets[i], 10000 - (i + 1) * 100);
+        make_check_balance_transaction(wallets[i], 10000 - ((i + 1) * 100));
 
     SystemCallHandler handler(check_balance, *snapshot_cache_);
 

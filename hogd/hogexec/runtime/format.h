@@ -12,7 +12,10 @@
 #include "x23/vec.h"
 
 template<size_t N> struct std::formatter<std::array<unsigned char, N>> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept { return ctx.begin(); }
+  constexpr static auto parse(format_parse_context &ctx) noexcept
+  {
+    return ctx.begin();
+  }
 
   static auto format(const std::array<uint8_t, N> &obj,
                      std::format_context &ctx)
@@ -26,7 +29,10 @@ template<size_t N> struct std::formatter<std::array<unsigned char, N>> {
 };
 
 template<> struct std::formatter<::hogd::AddressAndKey> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept { return ctx.begin(); }
+  constexpr static auto parse(format_parse_context &ctx) noexcept
+  {
+    return ctx.begin();
+  }
 
   static auto format(const ::hogd::AddressAndKey &v, std::format_context &ctx)
   {
@@ -36,7 +42,10 @@ template<> struct std::formatter<::hogd::AddressAndKey> {
 
 template<size_t N, typename Allocator>
 struct std::formatter<x23::Vec<uint8_t, N, Allocator>> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept { return ctx.begin(); }
+  constexpr static auto parse(format_parse_context &ctx) noexcept
+  {
+    return ctx.begin();
+  }
 
   static auto format(const x23::Vec<uint8_t, N, Allocator> &obj,
                      std::format_context &ctx)
@@ -50,7 +59,10 @@ struct std::formatter<x23::Vec<uint8_t, N, Allocator>> {
 };
 
 template<> struct std::formatter<hogd::SyscallNo> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept { return ctx.begin(); }
+  constexpr static auto parse(format_parse_context &ctx) noexcept
+  {
+    return ctx.begin();
+  }
 
   static auto format(const hogd::SyscallNo &obj, std::format_context &ctx)
   {
@@ -67,7 +79,10 @@ template<> struct std::formatter<hogd::SyscallNo> {
 };
 
 template<> struct std::formatter<hogd::SyscallErrorCode> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept { return ctx.begin(); }
+  constexpr static auto parse(format_parse_context &ctx) noexcept
+  {
+    return ctx.begin();
+  }
 
   static auto format(const hogd::SyscallErrorCode &obj,
                      std::format_context &ctx)

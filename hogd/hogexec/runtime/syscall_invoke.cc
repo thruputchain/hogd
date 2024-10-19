@@ -131,7 +131,7 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnResult, GasAmount>
-syscall_Exit_inner(SystemCallHandler &syscall_handler, const int32_t input_code)
+syscall_Exit_inner(const int32_t input_code)
 {
   return {{HostFnErrorCode::kExit, input_code}, 0};
 }

@@ -1,20 +1,15 @@
 #include <gtest/gtest.h>
 
-#include <sys/socket.h>
-
 #include <cstdint>
 #include <cstring>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime_test_framework.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/softstate/local_softstate_map.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/rpc.h"
-#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {

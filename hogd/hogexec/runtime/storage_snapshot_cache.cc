@@ -1,13 +1,13 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 
+#include <cassert>
+#include <memory>
+#include <optional>
+
 #include "contract.hh"
 #include "storage_interface.hh"
 #include "storage_object.hh"
 #include "types.hh"
-#include <cassert>
-#include <memory>
-#include <optional>
-#include <span>
 
 namespace hogd {
 
