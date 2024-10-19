@@ -31,7 +31,7 @@ jobs:
     - name: gcc version check
       run: gcc --version
     - name: install rust nightly
-      run: rustup +nightly target install wasm32-unknown-unknown
+      run: rustup +nightly target install wasm32-unknown-unknown && rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
     - name: Probe Cache
       id: cache
       uses: actions/cache/restore@v4
