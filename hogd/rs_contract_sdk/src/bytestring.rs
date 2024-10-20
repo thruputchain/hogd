@@ -3,6 +3,8 @@
 use crate::syscall_bindings;
 use rs_xdr::{RuntimeMemoryLength, StorageKey};
 
+use core::mem::MaybeUninit;
+
 pub fn BytestringGetLen(key: &StorageKey) -> Result<RuntimeMemoryLength, i32> {
     let mut out: RuntimeMemoryLength = 0;
 
@@ -12,6 +14,27 @@ pub fn BytestringGetLen(key: &StorageKey) -> Result<RuntimeMemoryLength, i32> {
 
 pub fn BytestringSet(key: &StorageKey, slice: &[u8]) -> Result<(), i32> {
     syscall_bindings::raw_BytestringSet(key, slice)
+}
+
+pub fn BytestringGet_Sized<const N: usize>(
+    key: &StorageKey,
+) -> Result<[u8; N], i32> {
+    let mut bytes_mu = [MaybeUninit::<u8>::uninit(); N];
+
+    let mut len: RuntimeMemoryLength = 0;
+
+    crate::syscall_bindings::uninit_BytestringGet(
+        &key,
+        &mut bytes_mu,
+        &mut len,
+    )?;
+
+    if len != N as u32 {
+        crate::rt::trap();
+    }
+
+    let bytes: [u8; N] = unsafe { MaybeUninit::array_assume_init(bytes_mu) };
+    Ok(bytes)
 }
 
 // Gating the part of the module that needs an allocator behind a feature flag

@@ -15,20 +15,6 @@ pub fn write_config_data(owner: &sdk::ContractAddress) {
 }
 
 pub fn load_config_data() -> sdk::ContractAddress {
-    let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
-    let mut len: sdk::RuntimeMemoryLength = 0;
-
-    sdk::syscall_bindings::uninit_BytestringGet(
-        &CONFIG_KEY,
-        &mut bytes_mu,
-        &mut len,
-    )
-    .unwrap();
-
-    if len != CONFIG_LEN as u32 {
-        sdk::rt::trap();
-    }
-    let bytes: [u8; CONFIG_LEN] = unsafe { core::mem::transmute(bytes_mu) };
-
+    let bytes = sdk::BytestringGet_Sized::<CONFIG_LEN>(&CONFIG_KEY).unwrap();
     sdk::parse_trait::parse_returns_from_calldata(&bytes).unwrap()
 }

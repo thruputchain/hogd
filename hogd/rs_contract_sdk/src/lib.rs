@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![feature(maybe_uninit_slice)]
+#![feature(maybe_uninit_array_assume_init)]
 
 // If we decide rebuilding core and alloc are bad,
 // we can disable the error handling in the allocator
