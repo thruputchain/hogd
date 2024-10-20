@@ -96,7 +96,7 @@ program myprog {
 
 enum StorageDeltaType {
   kDeleteLast = 0,
-  kBytestring = 1,
+  kBytestringSet = 1,
   kNonnegativeInt64SetAdd = 2,
 };
 
@@ -113,7 +113,7 @@ union StorageDelta switch (StorageDeltaType type)
 {
 case kDeleteLast:
   void;
-case kBytestring:
+case kBytestringSet:
   Bytestring bstring;
 case kNonnegativeInt64SetAdd:
   NonnegativeInt64SetAddArgs nnint64;

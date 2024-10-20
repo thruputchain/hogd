@@ -4,15 +4,16 @@
 #include <string>
 
 #include "syscall.hh"
+#include "x23/format.h"
 
-namespace hogd {{
+namespace hogd {
 
 std::string
 HostFnErrorCategory::message(int code) const
-{{
+{
   using enum HostFnErrorCode;
   assert(HostFnError::is_in_enum_range(code));
-  switch (static_cast<HostFnErrorCode>(code)) {{
+  switch (static_cast<HostFnErrorCode>(code)) {
   case kNoneOrRecoverable:
     return "kNoneOrRecoverable";
   case kOutOfGas:
@@ -23,15 +24,15 @@ HostFnErrorCategory::message(int code) const
     return "kReturn";
   default:
     return "HostFnErrorCode Unknown";
-  }}
-}}
- 
+  }
+}
+
 std::string
 InvokeErrorCategory::message(int code) const
-{{
+{
   using enum InvokeErrorCode;
   assert(InvokeError::is_in_enum_range(code));
-  switch (static_cast<InvokeErrorCode>(code)) {{
+  switch (static_cast<InvokeErrorCode>(code)) {
   case kNone:
     return "kNone";
   case kDeterministicError:
@@ -42,18 +43,14 @@ InvokeErrorCategory::message(int code) const
     return "kUnrecoverableSystemError";
   default:
     return "InvokeErrorCode Unknown";
-  }}
-}}
+  }
+}
 
 std::string
 SyscallErrorCategory::message(int code) const
-{{
-  using enum SyscallErrorCode;
+{
   assert(SyscallError::is_in_enum_range(code));
-  switch (static_cast<SyscallErrorCode>(code)) {{
-{syscall_status_switch_decls}  default:
-    return "SyscallErrorCode Unknown";
-  }}
-}}
+  return x23::show(static_cast<SyscallErrorCode>(code));
+}
 
-}} // namespace hogd
+} // namespace hogd

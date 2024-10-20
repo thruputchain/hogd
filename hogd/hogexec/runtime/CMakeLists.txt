@@ -6,13 +6,9 @@ set_source_files_properties(
     ${CMAKE_CURRENT_BINARY_DIR}/syscall_inner.h
     PROPERTIES GENERATED TRUE)
 
-set_source_files_properties(
-    ${CMAKE_CURRENT_BINARY_DIR}/status.cc
-    PROPERTIES GENERATED TRUE)
-
 set(runtime_sources 
   call_frame.cc
-  ${CMAKE_CURRENT_BINARY_DIR}/status.cc
+  status.cc
   storage_proxy.cc
   storage_snapshot_cache.cc
   syscall_bytestring.cc
@@ -36,7 +32,6 @@ add_dependencies(
   runtime
   generate_syscall_inner_h
   generate_syscall_entry_cc
-  generate_status_cc
   protocol
 )
 

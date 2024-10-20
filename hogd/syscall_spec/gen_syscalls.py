@@ -374,18 +374,6 @@ enum SyscallErrorCode {{{error_enumdecls}}};
 }} // namespace hogd
 """
 
-def gen_runtime_status_cc(template_filename, spec_full):
-  error_spec = spec_full["errors"]
-  syscall_status_switch_decls = ""
-
-  for error in error_spec:
-    errname = error["name"]
-    syscall_status_switch_decls += f"""  case k{errname}:
-    return "k{errname}";
-"""
-  with open(template_filename, 'r') as file:
-    return file.read().format(**locals())
-
 def gen_rs_syscall_binding(syscall):
   name = syscall["name"]
   inputdecls = []
@@ -515,7 +503,6 @@ parser.add_argument('--syscall_inner_h', action='store_true', help="gen syscall_
 parser.add_argument('--syscall_entry_cc', action='store_true', help="gen syscall_entry_cc")
 parser.add_argument('--syscall_yaml', type=str, required = True, help = "input yaml")
 parser.add_argument('--syscall_rs', action='store_true', help = 'gen rust syscall bindings')
-parser.add_argument('--status_cc', action='store_true', help="gen status.cc")
 parser.add_argument('--template_filename', type=str, help = "template filename")
 parser.add_argument('--output_dir', type=str, default = ".", help = "output folder")
 
@@ -538,11 +525,6 @@ if (args.syscall_entry_cc):
   filename = args.output_dir + "/syscall_entry.cc"
   with open(filename, "w") as f:
     f.write(gen_syscall_entry_cc(spec))
-
-if (args.status_cc):
-  filename = args.output_dir + "/status.cc"
-  with open(filename, "w") as f:
-    f.write(gen_runtime_status_cc(args.template_filename, spec_full))
 
 if (args.syscall_rs):
   filename = args.output_dir + "/syscall_bindings.rs"
