@@ -1,75 +1,18 @@
 #![no_std]
 
 use rs_contract_sdk as sdk;
-
-use core::mem::MaybeUninit;
 use rs_macros::{public_interface, public_method};
 
 #[cfg(not(feature = "interface"))]
 mod config;
 
+#[cfg(not(feature = "interface"))]
+mod implementation;
+
+#[cfg(not(feature = "interface"))]
+use implementation::*;
+
 public_interface!();
-
-fn compute_balance_key(addr: &sdk::ContractAddress) -> sdk::SHA256Hash {
-    sdk::SHA256(addr).unwrap()
-}
-
-fn compute_allowance_key(
-    owner: &sdk::ContractAddress,
-    spender: &sdk::ContractAddress,
-) -> sdk::SHA256Hash {
-    let mut bytes_mu = [MaybeUninit::<u8>::uninit(); 64];
-    sdk::parse_trait::serialize_to_calldata_2(&mut bytes_mu, owner, spender)
-        .unwrap();
-
-    let bytes: [u8; 64] = unsafe { core::mem::transmute(bytes_mu) };
-
-    sdk::SHA256(&bytes).unwrap()
-}
-
-fn do_transfer(
-    from: &sdk::ContractAddress,
-    to: &sdk::ContractAddress,
-    amount: i64,
-) {
-    if amount < 0 {
-        sdk::rt::trap();
-    }
-
-    let from_key = compute_balance_key(from);
-    let to_key = compute_balance_key(to);
-
-    sdk::NonnegativeInt64Add(&from_key, -amount).unwrap();
-    sdk::NonnegativeInt64Add(&to_key, amount).unwrap();
-}
-
-fn do_mint(to: &sdk::ContractAddress, amount: i64) {
-    if amount < 0 {
-        sdk::rt::trap();
-    }
-
-    let to_key = compute_balance_key(to);
-    sdk::NonnegativeInt64Add(&to_key, amount).unwrap();
-}
-
-fn do_burn(to: &sdk::ContractAddress, amount: i64) {
-    if amount > 0 || amount == i64::MIN {
-        // would overflow when we take negative
-        sdk::rt::trap();
-    }
-
-    let to_key = compute_balance_key(to);
-    sdk::NonnegativeInt64Add(&to_key, -amount).unwrap();
-}
-
-fn do_allowance_delta(
-    owner: &sdk::ContractAddress,
-    spender: &sdk::ContractAddress,
-    amount: i64,
-) {
-    let balance_key = compute_allowance_key(owner, spender);
-    sdk::NonnegativeInt64Add(&balance_key, amount).unwrap();
-}
 
 #[public_method(static_calldata_length = 32, static_return_length = 0)]
 pub fn initialize(owner: &sdk::ContractAddress) -> () {
