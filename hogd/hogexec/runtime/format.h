@@ -17,7 +17,7 @@ template<size_t N> struct std::formatter<std::array<unsigned char, N>> {
 
   static auto format(const std::array<uint8_t, N> &obj, auto &ctx)
   {
-    auto out = ctx.out();
+    auto* out = ctx.out();
     for (auto v : obj) {
       out = std::format_to(out, "{:02x}", v);
     }
@@ -40,7 +40,7 @@ struct std::formatter<x23::Vec<uint8_t, N, Allocator>> {
 
   static auto format(const x23::Vec<uint8_t, N, Allocator> &obj, auto &ctx)
   {
-    auto out = ctx.out();
+    auto* out = ctx.out();
     for (auto v : obj) {
       out = std::format_to(out, "{:02x}", v);
     }
