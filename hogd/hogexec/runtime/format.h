@@ -9,16 +9,13 @@
 
 #include "syscall.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/vec.h"
 
 template<size_t N> struct std::formatter<std::array<unsigned char, N>> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept
-  {
-    return ctx.begin();
-  }
+  constexpr static auto parse(auto &ctx) noexcept { return ctx.begin(); }
 
-  static auto format(const std::array<uint8_t, N> &obj,
-                     std::format_context &ctx)
+  static auto format(const std::array<uint8_t, N> &obj, auto &ctx)
   {
     auto out = ctx.out();
     for (auto v : obj) {
@@ -29,12 +26,9 @@ template<size_t N> struct std::formatter<std::array<unsigned char, N>> {
 };
 
 template<> struct std::formatter<::hogd::AddressAndKey> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept
-  {
-    return ctx.begin();
-  }
+  constexpr static auto parse(auto &ctx) noexcept { return ctx.begin(); }
 
-  static auto format(const ::hogd::AddressAndKey &v, std::format_context &ctx)
+  static auto format(const ::hogd::AddressAndKey &v, auto &ctx)
   {
     return std::format_to(ctx.out(), "Address {} Key {}", v.address, v.key);
   }
@@ -42,13 +36,9 @@ template<> struct std::formatter<::hogd::AddressAndKey> {
 
 template<size_t N, typename Allocator>
 struct std::formatter<x23::Vec<uint8_t, N, Allocator>> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept
-  {
-    return ctx.begin();
-  }
+  constexpr static auto parse(auto &ctx) noexcept { return ctx.begin(); }
 
-  static auto format(const x23::Vec<uint8_t, N, Allocator> &obj,
-                     std::format_context &ctx)
+  static auto format(const x23::Vec<uint8_t, N, Allocator> &obj, auto &ctx)
   {
     auto out = ctx.out();
     for (auto v : obj) {
@@ -59,42 +49,19 @@ struct std::formatter<x23::Vec<uint8_t, N, Allocator>> {
 };
 
 template<> struct std::formatter<hogd::SyscallNo> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept
-  {
-    return ctx.begin();
-  }
+  constexpr static auto parse(auto &ctx) noexcept { return ctx.begin(); }
 
-  static auto format(const hogd::SyscallNo &obj, std::format_context &ctx)
+  static auto format(const hogd::SyscallNo &obj, auto &ctx)
   {
-    auto const &tags = x23::xdr_meta<hogd::SyscallNo>::tags;
-
-    for (auto const &[enum_val, string] : tags) {
-      if (enum_val == obj) {
-        return std::format_to(ctx.out(), "SyscallNo: {}", string);
-      }
-    }
-    return std::format_to(ctx.out(), "SyscallNo: {} (Unknown)",
-                          static_cast<int32_t>(obj));
+    return std::format_to(ctx.out(), "SyscallNo::{}", x23::show(obj));
   }
 };
 
 template<> struct std::formatter<hogd::SyscallErrorCode> {
-  constexpr static auto parse(format_parse_context &ctx) noexcept
-  {
-    return ctx.begin();
-  }
+  constexpr static auto parse(auto &ctx) noexcept { return ctx.begin(); }
 
-  static auto format(const hogd::SyscallErrorCode &obj,
-                     std::format_context &ctx)
+  static auto format(const hogd::SyscallErrorCode &obj, auto &ctx)
   {
-    auto const &tags = x23::xdr_meta<hogd::SyscallErrorCode>::tags;
-
-    for (auto const &[enum_val, string] : tags) {
-      if (enum_val == obj) {
-        return std::format_to(ctx.out(), "SyscallErrorCode: {}", string);
-      }
-    }
-    return std::format_to(ctx.out(), "SyscallErrorCode: {} (Unknown)",
-                          static_cast<int32_t>(obj));
+    return std::format_to(ctx.out(), "SyscallErrorCode::{}", x23::show(obj));
   }
 };
