@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstddef>
 #include <iterator>
-#include <memory>
 #include <optional>
 #include <span>
 #include <utility>

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <variant>
 
 #include "hogd/base/types.h"
@@ -169,7 +170,7 @@ ItemCache::get_nnint64_value() const
     return {type_guard_res.error()};
   }
 
-  if (auto *args = get_nnint64_args()) {
+  if (const auto *args = get_nnint64_args()) {
     int64_t result;
 
     if (!__builtin_add_overflow(args->nnint64_set_arg_, args->nnint64_add_sum_,
