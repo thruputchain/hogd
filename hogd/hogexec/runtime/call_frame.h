@@ -31,8 +31,7 @@ public:
   // The set of all runtimes visited by the current call frame and _successful_
   // children. Failed calls poison the set of visited runtimes, unless the
   // runtime is marked UNWIND_SAFE (not this PR) Failed call frames immediately
-  // poison their set of visited runtimes, so we do not need to update this
-  // variable here.
+  // poison their set of visited runtimes.
   std::set<ContractAddress> visited_runtimes_;
 
   // The value of the last _child_ call frame's returned string.

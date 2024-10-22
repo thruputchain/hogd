@@ -199,6 +199,7 @@ def gen_syscall_entry_cc(spec):
 #include <utility>
 #include <type_traits>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
@@ -215,7 +216,7 @@ bool
 check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
 {{
   uint64_t base_end = 0;
-  if (__builtin_add_overflow(base, len, &base_end))
+  if (integer_add_overflow(base, len, &base_end))
     return false;
   return (base_end <= memory_len);
 }}
