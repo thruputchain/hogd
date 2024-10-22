@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.81"
 
 [dependencies]
-wasmi = "0.36.0"
+wasmi = "0.38.0"
 
 [lib]
 crate-type = ["staticlib"]
