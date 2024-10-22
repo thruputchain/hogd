@@ -98,7 +98,8 @@ public:
     int res =
         std::memcmp(entry.message.data(), calldata.data(), calldata.size());
     if (res != 0) {
-      throw std::runtime_error(std::format("logs not equal: {} {}", entry.message, calldata));
+      throw std::runtime_error(
+          std::format("logs not equal: {} {}", entry.message, calldata));
     }
   }
 };

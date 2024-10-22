@@ -5,8 +5,12 @@
 #include <optional>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime_test_framework.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "storage_interface.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd ::test ::erc20 {
@@ -127,7 +131,8 @@ deploy_erc20_noinit(RuntimeTestFramework &runtime_framework)
   handler.commit_transaction(runtime_framework.get_write_client());
 
   return SystemCallHandler::static_get_deploy_address(
-      runtime_framework.kDeployerAddress, handler.get_source_tx_hash(), h_erc20);
+      test::RuntimeTestFramework::kDeployerAddress,
+      handler.get_source_tx_hash(), h_erc20);
 }
 
 std::optional<ContractAddress>
@@ -139,8 +144,8 @@ deploy_and_initialize_wallet(RuntimeTestFramework &runtime_framework,
       test::load_built_rs_contract("simple_wallet.wasm");
 
   auto deploy_manager_tx =
-      make_deploy_wallet_transaction(h_wallet, c_wallet, nonce, Ed25519PublicKey{},
-                                     erc20_address);
+      make_deploy_wallet_transaction(h_wallet, c_wallet, nonce,
+                                     Ed25519PublicKey{}, erc20_address);
 
   SystemCallHandler handler(deploy_manager_tx,
                             *runtime_framework.snapshot_cache_);
@@ -156,13 +161,15 @@ deploy_and_initialize_wallet(RuntimeTestFramework &runtime_framework,
   handler.commit_transaction(runtime_framework.get_write_client());
 
   return SystemCallHandler::static_get_deploy_address(
-      runtime_framework.kDeployerAddress, handler.get_source_tx_hash(), h_wallet);
+      test::RuntimeTestFramework::kDeployerAddress,
+      handler.get_source_tx_hash(), h_wallet);
 }
 
 // Initialize the erc20 (set the owner to be the manager wallet)
-bool initialize_erc20(RuntimeTestFramework &runtime_framework,
-                      ContractAddress const &manager_address,
-                      ContractAddress const &erc20_address)
+bool
+initialize_erc20(RuntimeTestFramework &runtime_framework,
+                 ContractAddress const &manager_address,
+                 ContractAddress const &erc20_address)
 {
   auto init_erc20_tx = make_initialize_erc20(manager_address, erc20_address);
 
@@ -205,11 +212,11 @@ mint_to(RuntimeTestFramework &runtime_framework,
 }
 
 bool
-send_payment(RuntimeTestFramework &runtime_framework, ContractAddress const &from,
-             ContractAddress const &to, int64_t amount)
+send_payment(RuntimeTestFramework &runtime_framework,
+             ContractAddress const &from, ContractAddress const &to,
+             int64_t amount)
 {
-  auto payment =
-      make_transfer_transaction(from, to, amount);
+  auto payment = make_transfer_transaction(from, to, amount);
 
   SystemCallHandler handler(payment, *runtime_framework.snapshot_cache_);
   if (!handler.root_invoke().result) {

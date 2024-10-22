@@ -2,14 +2,15 @@
 
 #include <cstddef>
 #include <cstdlib>
-#include <exception>
+#include <stdexcept>
 #include <vector>
 
 #include "hogd/base/status.h"
-#include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/erc20_test_utils.h"
+#include "hogd/hogexec/runtime/runtime_test_framework.h"
 #include "hogd/init.h"
+
+#include "types.hh"
 
 namespace hogd {
 
@@ -21,10 +22,6 @@ bm_erc20_2wallets(benchmark::State &state)
 
   runtime_framework.initialize();
   runtime_framework.deploy_genesis_block();
-
-  auto [h_erc20, c_erc20] = test::load_built_rs_contract("erc20.wasm");
-  auto [h_wallet, c_wallet] =
-      test::load_built_rs_contract("simple_wallet.wasm");
 
   ContractAddress erc20_address;
   ContractAddress manager_address;
