@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <variant>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_object.hh"
@@ -173,8 +174,8 @@ ItemCache::get_nnint64_value() const
   if (const auto *args = get_nnint64_args()) {
     int64_t result;
 
-    if (!__builtin_add_overflow(args->nnint64_set_arg_, args->nnint64_add_sum_,
-                                &result)) {
+    if (!integer_add_overflow(args->nnint64_set_arg_, args->nnint64_add_sum_,
+                              &result)) {
       return result;
     }
     // Should be impossible for nnint64_add_sum_ to be less than 0 if we
@@ -196,7 +197,7 @@ int64_t
 capped_add(int64_t a, int64_t b)
 {
   int64_t out;
-  if (__builtin_add_overflow(a, b, &out)) {
+  if (integer_add_overflow(a, b, &out)) {
     if (a > 0) {
       assert(b > 0);
       return INT64_MAX;

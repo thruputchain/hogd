@@ -161,22 +161,24 @@ SystemCallHandler::invoke(Invocation const &invocation)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  return convert_invoke_result_to_host_fn_result(invoke_unconverted(invocation, *runtime, gas_limit));
+  return convert_invoke_result_to_host_fn_result(
+      invoke_unconverted(invocation, *runtime, gas_limit));
 }
 
-void 
-SystemCallHandler::start_call_frame(Invocation const& invocation)
+void
+SystemCallHandler::start_call_frame(Invocation const &invocation)
 {
   call_frame_stack_.emplace_back(invocation);
 }
 
 void
-SystemCallHandler::finish_call_frame(InvokeResult const& result) {
+SystemCallHandler::finish_call_frame(InvokeResult const &result)
+{
   // We choose _not_ to check the return code here, and instead pass it back to
   // the caller. Implicitly, this is saying that the caller is responsible for
-  // checking the return/exit code, AND that the callee is responsible for cleaning
-  // itself up correctly. I.e. if you pass back a return code, you can be safely
-  // called again.
+  // checking the return/exit code, AND that the callee is responsible for
+  // cleaning itself up correctly. I.e. if you pass back a return code, you can
+  // be safely called again.
   if (!result.result.has_value()) {
 
     for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
@@ -207,7 +209,7 @@ SystemCallHandler::finish_call_frame(InvokeResult const& result) {
 
 InvokeResult
 SystemCallHandler::invoke_unconverted(Invocation const &invocation,
-                                      RuntimeCacheEntry& runtime,
+                                      RuntimeCacheEntry &runtime,
                                       uint64_t gas_limit)
 {
   start_call_frame(invocation);
@@ -306,14 +308,14 @@ SystemCallHandler::resolve_item_cache(StorageKey const &key)
   auto &top_frame = get_active_call_frame();
 
   for (int32_t i = call_frame_stack_.size() - 2; i >= 0; i--) {
-    auto* proxy = call_frame_stack_[i].try_get_storage_proxy(query);
+    auto *proxy = call_frame_stack_[i].try_get_storage_proxy(query);
     if (proxy) {
       top_frame.push_new_storage_proxy(query, *proxy);
       return *top_frame.try_get_storage_proxy(query);
     }
   }
 
-  auto* proxy = top_frame.try_get_storage_proxy(query);
+  auto *proxy = top_frame.try_get_storage_proxy(query);
 
   if (proxy) {
     return *proxy;

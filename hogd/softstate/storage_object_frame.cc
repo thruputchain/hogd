@@ -104,8 +104,8 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
     while (true) {
       int64_t desired_sub = 0;
 
-      if (__builtin_add_overflow(expect_sub, delta.nnint64().add_value,
-                                 &desired_sub)) {
+      if (integer_add_overflow(expect_sub, delta.nnint64().add_value,
+                               &desired_sub)) {
         return StorageReserveResult::kDefiniteFailure;
       }
 
@@ -235,9 +235,7 @@ StorageObjectFrame::commit_round()
 
     committed_base_object_->int64() += nnint64_sub;
 
-    int64_t res;
-    if (__builtin_add_overflow(committed_base_object_->int64(), nnint64_add,
-                               &res)) {
+    if (integer_add_overflow_p(committed_base_object_->int64(), nnint64_add)) {
       committed_base_object_->int64() = INT64_MAX;
     }
     else {

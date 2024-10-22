@@ -7,6 +7,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include "hogd/base/compiler.h"
+
 namespace hogd {
 
 class AtomicUint128 {
@@ -15,8 +17,7 @@ public:
   {
     uint64_t prev = lowbits_.fetch_add(v, std::memory_order_relaxed);
 
-    uint64_t new_val = 0;
-    if (__builtin_add_overflow(prev, v, &new_val)) {
+    if (integer_add_overflow_p(prev, v)) {
       highbits_.fetch_add(1, std::memory_order_relaxed);
     }
   }
