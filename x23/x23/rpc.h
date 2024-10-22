@@ -468,6 +468,10 @@ struct RpcStream : public detail::RpcStreamImpl {
     {
       this->get()->nclients_.fetch_add(1, std::memory_order_relaxed);
     }
+    ClientRef(const ClientRef &s) : super(s)
+    {
+      this->get()->nclients_.fetch_add(1, std::memory_order_relaxed);
+    }
     ~ClientRef()
     {
       if (this->get()->nclients_.fetch_sub(1, std::memory_order_relaxed) == 1)
@@ -532,11 +536,12 @@ struct RpcStream : public detail::RpcStreamImpl {
   static Configurator make(CoroPoll &cp, UniqueFd fd, Logger logger = {})
   {
     return std::make_shared<RpcStream>(cp, std::move(fd), std::move(logger),
-				       ConstructorKey{});
+                                       ConstructorKey{});
   }
 
 protected:
   struct ConstructorKey {};
+
 public:
   using super::super;
   RpcStream(CoroPoll &cp, UniqueFd fd, Logger logger, ConstructorKey)

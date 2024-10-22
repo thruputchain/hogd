@@ -418,6 +418,15 @@ multiple interface versions, you could say:
                            .server(&impl, myvers2{});
 ```
 
+Note that before X23 will read from a socket, you must either destroy
+the configurator object (as in the above server examples, where the
+result of `rpc_stream_logged` is not assigned to a variable), or else
+issue an RPC as a client, or else call the `go` method on the stream
+object.  If you forget to do this, your code will get stuck and not do
+anything.  The reason for this requirement is to avoid a race
+condition where X23 would reject calls for services that have not yet
+been configured on the socket.
+
 [XDR]: https://datatracker.ietf.org/doc/html/rfc4506
 [RPC]: https://datatracker.ietf.org/doc/html/rfc5531
 [RPC-assignment]: https://datatracker.ietf.org/doc/html/rfc5531#section-8.3

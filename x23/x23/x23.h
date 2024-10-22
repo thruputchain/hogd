@@ -389,7 +389,7 @@ private:
   static void construct(union_type &u, U &&other)
   {
     discriminant_type d = get_discriminant(other);
-    if (int n = index(d) > 0)
+    if (int n = index(d); n > 0)
       with_n<union_size, 1, void>(n, [&u, &other](auto n) {
         std::construct_at(&unsafe_get<n>(u),
                           std::forward_like<U>(unsafe_get<n>(other)));
