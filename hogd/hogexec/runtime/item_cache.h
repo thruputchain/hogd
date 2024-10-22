@@ -54,7 +54,7 @@ private:
   };
 
   struct UnsetType {
-    x23::Vec<StorageDelta> get_deltas() const { return {}; }
+    static x23::Vec<StorageDelta> get_deltas() { return {}; }
 
     constexpr static std::optional<StorageObjectType> kObjectType =
         std::nullopt;

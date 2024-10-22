@@ -164,7 +164,6 @@ SystemCallHandler::invoke(Invocation const &invocation)
   return convert_invoke_result_to_host_fn_result(invoke_unconverted(invocation, *runtime, gas_limit));
 }
 
-
 void 
 SystemCallHandler::start_call_frame(Invocation const& invocation)
 {
