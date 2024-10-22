@@ -227,7 +227,8 @@ public:
 	  close(fd);
 	  throw;
 	}
-        fcntl(fd, F_SETFD, 1);
+	if (close_on_exec)
+	  fcntl(fd, F_SETFD, 1);
       }
 #endif // !HAVE_ACCEPT4
       if (fd >= 0)
