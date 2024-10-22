@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/types.h"
 #include "storage_object.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
