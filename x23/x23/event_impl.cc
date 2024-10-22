@@ -259,7 +259,7 @@ CoroPollImpl::check(int timeout)
   }
   if (pollfds[0].revents) {
     char buf[64];
-    while (::read(selfpipe_[0].get(), &buf, sizeof(buf)) > 0)
+    while (::read(selfpipe_[0].get(), &buf, sizeof(buf)) == sizeof(buf))
       ;
     if (!--n)
       return;
@@ -316,6 +316,8 @@ CoroPollImpl::reset(BorrowedFd fd)
   if (auto it = ptr->find(fd.get()); it != ptr->end()) {
     auto work = report_badfd(it->second);
     ptr->erase(it);
+    if (ptr->empty() && stop_requested())
+      wake();
     ptr.reset();
     pool_.go(work);
   }
