@@ -67,6 +67,7 @@ add_executable(
   nnint64_test.cc
   deployer_test.cc
   erc20_test.cc
+  erc20_test_utils.cc
 )
 
 target_link_libraries(
@@ -108,3 +109,19 @@ add_dependencies(
   test_set_memory_wasm
   rs_test_contracts
 )
+
+# create crypto module benchmark binary
+add_executable(
+  erc20_bench
+  erc20_bench.cc
+  erc20_test_utils.cc
+)
+target_link_libraries(
+  erc20_bench
+  runtime
+  hogd
+  protocol
+  ${LIBSODIUM_LIBRARIES}
+  benchmark::benchmark
+)
+add_dependencies(erc20_bench libsodium)

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <gtest/gtest.h>
-
 #include <sys/socket.h>
 
 #include "hogd/hogexec/runtime/format.h"
@@ -58,7 +56,9 @@ public:
         std::make_unique<LocalSoftstateWriteServer>(*softstate_map_,
                                                     *contract_map_);
 
-    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, socket_fds_), 0);
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, socket_fds_) != 0) {
+      throw std::runtime_error("failed to initialized socket pair");
+    }
 
     rpc_config_t server_config = x23::rpc_stream_logged(cp_, socket_fds_[0]);
     rpc_config_t client_config = x23::rpc_stream_logged(cp_, socket_fds_[1]);
@@ -92,12 +92,13 @@ public:
   static void check_log_eq(LogEntry const &entry,
                            x23::Vec<uint8_t> const &calldata)
   {
-    ASSERT_EQ(entry.message.size(), calldata.size());
+    if (entry.message.size() != calldata.size()) {
+      throw std::runtime_error("message length mismatch");
+    }
     int res =
         std::memcmp(entry.message.data(), calldata.data(), calldata.size());
-    EXPECT_EQ(0, res);
     if (res != 0) {
-      std::println("detailed log eq check {} {}", entry.message, calldata);
+      throw std::runtime_error(std::format("logs not equal: {} {}", entry.message, calldata));
     }
   }
 };
