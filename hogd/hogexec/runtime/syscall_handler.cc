@@ -306,14 +306,14 @@ SystemCallHandler::resolve_item_cache(StorageKey const &key)
   auto &top_frame = get_active_call_frame();
 
   for (int32_t i = call_frame_stack_.size() - 2; i >= 0; i--) {
-    auto proxy = call_frame_stack_[i].try_get_storage_proxy(query);
+    auto* proxy = call_frame_stack_[i].try_get_storage_proxy(query);
     if (proxy) {
       top_frame.push_new_storage_proxy(query, *proxy);
       return *top_frame.try_get_storage_proxy(query);
     }
   }
 
-  auto proxy = top_frame.try_get_storage_proxy(query);
+  auto* proxy = top_frame.try_get_storage_proxy(query);
 
   if (proxy) {
     return *proxy;
