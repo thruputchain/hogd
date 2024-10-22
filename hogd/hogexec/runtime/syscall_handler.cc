@@ -60,12 +60,14 @@ SystemCallHandler::root_invoke()
                         .gas_consumed = 0};
   }
 
-  auto res = invoke_unconverted(signed_tx_.tx.invocation, runtime,
+  auto res = invoke_unconverted(signed_tx_.tx.invocation, *runtime,
                                 signed_tx_.tx.invocation.gas_limit);
 
   if (!res.result) {
     return res;
   }
+
+  // return nonzero error code on root invocation => contract error
   if (*res.result != 0) {
     return InvokeResult{.result =
                             InvokeError{InvokeErrorCode::kDeterministicError},
@@ -136,12 +138,6 @@ convert_invoke_result_to_host_fn_result(InvokeResult const &result)
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 SystemCallHandler::invoke(Invocation const &invocation)
 {
-  auto *runtime = resolve_runtime(invocation.invoked_address);
-
-  if (!runtime) {
-    return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
-  }
-
   uint64_t initial_gas_limit = UINT64_MAX;
   if (!call_frame_stack_.empty()) {
     initial_gas_limit =
@@ -159,24 +155,27 @@ SystemCallHandler::invoke(Invocation const &invocation)
   const uint64_t gas_limit =
       std::min<uint64_t>(initial_gas_limit, invocation.gas_limit);
 
-  auto invoke_result = invoke_unconverted(invocation, runtime, gas_limit);
+  auto *runtime = resolve_runtime(invocation.invoked_address);
 
-  return convert_invoke_result_to_host_fn_result(invoke_result);
+  if (!runtime) {
+    return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
+  }
+
+  return convert_invoke_result_to_host_fn_result(invoke_unconverted(invocation, *runtime, gas_limit));
 }
 
-InvokeResult
-SystemCallHandler::invoke_unconverted(Invocation const &invocation,
-                                      RuntimeCacheEntry *runtime,
-                                      uint64_t gas_limit)
+
+void 
+SystemCallHandler::start_call_frame(Invocation const& invocation)
 {
   call_frame_stack_.emplace_back(invocation);
+}
 
-  InvokeResult result =
-      runtime->runtime.invoke(invocation.method_name, gas_limit);
-
+void
+SystemCallHandler::finish_call_frame(InvokeResult const& result) {
   // We choose _not_ to check the return code here, and instead pass it back to
   // the caller. Implicitly, this is saying that the caller is responsible for
-  // checking the return code, AND that the callee is responsible for cleaning
+  // checking the return/exit code, AND that the callee is responsible for cleaning
   // itself up correctly. I.e. if you pass back a return code, you can be safely
   // called again.
   if (!result.result.has_value()) {
@@ -205,6 +204,19 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
 
     call_frame_stack_.pop_back();
   }
+}
+
+InvokeResult
+SystemCallHandler::invoke_unconverted(Invocation const &invocation,
+                                      RuntimeCacheEntry& runtime,
+                                      uint64_t gas_limit)
+{
+  start_call_frame(invocation);
+
+  InvokeResult result =
+      runtime.runtime.invoke(invocation.method_name, gas_limit);
+
+  finish_call_frame(result);
 
   return result;
 }

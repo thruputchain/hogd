@@ -110,10 +110,13 @@ public:
   // should be called only from within WasmiContext::make_new_runtime
   WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,
                void *wasmi_runtime_ptr);
+
   WasmiRuntime(WasmiRuntime const &) = delete;
+  WasmiRuntime& operator=(WasmiRuntime const&) = delete;
 
   WasmiRuntime(WasmiRuntime &&other) noexcept;
   WasmiRuntime &operator=(WasmiRuntime &&other) noexcept;
+  
   ~WasmiRuntime();
 
   // This API expects that the invoked function takes no arguments

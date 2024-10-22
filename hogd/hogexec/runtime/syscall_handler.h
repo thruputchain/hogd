@@ -88,7 +88,6 @@ private:
     bool unwind_poisoned = false;
 
     RuntimeCacheEntry(WasmiRuntime &&runtime) : runtime(std::move(runtime)) {}
-
     RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
   };
 
@@ -96,8 +95,11 @@ private:
 
   RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
   InvokeResult invoke_unconverted(Invocation const &invocation,
-                                  RuntimeCacheEntry *runtime,
+                                  RuntimeCacheEntry& runtime,
                                   uint64_t gas_limit);
+
+  void start_call_frame(Invocation const& invocation);;
+  void finish_call_frame(InvokeResult const& result);
 
   // Can only be called when call_frame_stack_ is nonempty
   ItemCache &resolve_item_cache(StorageKey const &key);
@@ -105,6 +107,7 @@ private:
   SignedTransaction signed_tx_;
   std::vector<CallFrame> call_frame_stack_;
 
+  // RuntimeCacheEntry cannot be moved while it is actively invoked.  unique_ptr required here.
   std::map<ContractAddress, std::unique_ptr<RuntimeCacheEntry>> runtimes_;
 
   std::map<ContractAddress, SHA256Hash> new_deployments_;
