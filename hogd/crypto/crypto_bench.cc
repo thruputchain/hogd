@@ -12,6 +12,7 @@
 
 namespace hogd {
 
+namespace {
 void
 bm_sha256(benchmark::State &state)
 {
@@ -38,6 +39,8 @@ bm_siphash24(benchmark::State &state)
                           static_cast<int64_t>(state.range(0)));
 }
 BENCHMARK(bm_siphash24)->RangeMultiplier(2)->Range(8, 8 << 10); // NOLINT
+
+} // namespace
 
 } // namespace hogd
 
