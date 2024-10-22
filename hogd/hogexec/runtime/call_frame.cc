@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/storage_proxy.h"
+#include "hogd/hogexec/runtime/item_cache.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -25,7 +25,13 @@ CallFrame::commit_successful_child_call(CallFrame &frame)
 {
   // overwrite any local storage proxies
   for (auto &[addr, proxy] : frame.storage_proxies_) {
-    storage_proxies_[addr] = std::move(proxy);
+    auto it = storage_proxies_.find(addr);
+    if (it == storage_proxies_.end()) {
+      storage_proxies_.emplace(addr, std::move(proxy));
+    }
+    else {
+      storage_proxies_.at(addr) = std::move(proxy);
+    }
   }
   visited_runtimes_.insert(frame.visited_runtimes_.begin(),
                            frame.visited_runtimes_.end());
@@ -43,10 +49,10 @@ CallFrame::commit_failed_child_call()
 
 void
 CallFrame::push_new_storage_proxy(AddressAndKey const &new_addrkey,
-                                  StorageProxy const &proxy)
+                                  ItemCache const &proxy)
 {
   assert(storage_proxies_.find(new_addrkey) == storage_proxies_.end());
-  storage_proxies_.emplace(new_addrkey, std::make_unique<StorageProxy>(proxy));
+  storage_proxies_.emplace(new_addrkey, proxy);
 }
 
 void
@@ -59,7 +65,7 @@ CallFrame::log(std::span<const std::byte> message)
                      x23::Vec<uint8_t, kMaxLogMessageLen>(m.begin(), m.end()));
 }
 
-StorageProxy *
+ItemCache *
 CallFrame::try_get_storage_proxy(AddressAndKey const &query)
 {
   auto it = storage_proxies_.find(query);
@@ -67,7 +73,7 @@ CallFrame::try_get_storage_proxy(AddressAndKey const &query)
   if (it == storage_proxies_.end()) {
     return nullptr;
   }
-  return it->second.get();
+  return &(it->second);
 }
 
 void

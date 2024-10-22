@@ -9,7 +9,7 @@ set_source_files_properties(
 set(runtime_sources 
   call_frame.cc
   status.cc
-  storage_proxy.cc
+  item_cache.cc
   storage_snapshot_cache.cc
   syscall_bytestring.cc
   syscall_contract.cc
@@ -59,7 +59,7 @@ add_executable(
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
-  storage_proxy_test.cc
+  item_cache_test.cc
   calldata_test.cc
   invoke_test.cc
   return_test.cc

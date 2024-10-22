@@ -6,15 +6,15 @@
 #include <gtest/gtest.h>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/storage_proxy.h"
+#include "hogd/hogexec/runtime/item_cache.h"
 #include "storage_object.hh"
 #include "types.hh"
 
 namespace hogd {
 
-TEST(StorageProxy, Exists)
+TEST(ItemCache, Exists)
 {
-  StorageProxy proxy(std::nullopt);
+  ItemCache proxy(std::nullopt);
 
   EXPECT_FALSE(proxy.exists());
 
@@ -35,9 +35,9 @@ TEST(StorageProxy, Exists)
   EXPECT_TRUE(!!proxy.set_bytestring(std::as_bytes(std::span(bytes2))));
 }
 
-TEST(StorageProxy, SetBytestring)
+TEST(ItemCache, SetBytestring)
 {
-  StorageProxy proxy(std::nullopt);
+  ItemCache proxy(std::nullopt);
 
   auto eq = [](Bytestring const &bstring,
                std::vector<uint8_t> const &vec) -> bool {
@@ -71,9 +71,9 @@ TEST(StorageProxy, SetBytestring)
   EXPECT_FALSE(!!proxy.nnint64_set_add(0, 1));
 }
 
-TEST(StorageProxy, NNInt64SetAddPositiveSet)
+TEST(ItemCache, NNInt64SetAddPositiveSet)
 {
-  StorageProxy proxy(std::nullopt);
+  ItemCache proxy(std::nullopt);
 
   EXPECT_FALSE(!!proxy.get_nnint64_value());
   EXPECT_TRUE(!!proxy.nnint64_set_add(100, 10));
@@ -105,9 +105,9 @@ TEST(StorageProxy, NNInt64SetAddPositiveSet)
   EXPECT_EQ(*res, 60);
 }
 
-TEST(StorageProxy, NNInt64SetAddNegativeSet)
+TEST(ItemCache, NNInt64SetAddNegativeSet)
 {
-  StorageProxy proxy(std::nullopt);
+  ItemCache proxy(std::nullopt);
 
   EXPECT_FALSE(!!proxy.get_nnint64_value());
   EXPECT_TRUE(!!proxy.nnint64_set_add(-100, 10));

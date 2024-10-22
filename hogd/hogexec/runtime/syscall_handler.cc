@@ -17,8 +17,8 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/call_frame.h"
+#include "hogd/hogexec/runtime/item_cache.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -98,7 +98,7 @@ SystemCallHandler::get_msg_sender() const
   }
 
   return {call_frame_stack_[call_frame_stack_.size() - 2]
-              ->active_invocation_.invoked_address};
+              .active_invocation_.invoked_address};
 }
 
 namespace {
@@ -146,7 +146,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
   if (!call_frame_stack_.empty()) {
     initial_gas_limit =
         runtimes_
-            .at(call_frame_stack_.back()->active_invocation_.invoked_address)
+            .at(call_frame_stack_.back().active_invocation_.invoked_address)
             ->runtime.get_available_gas();
   }
 
@@ -169,7 +169,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
                                       RuntimeCacheEntry *runtime,
                                       uint64_t gas_limit)
 {
-  call_frame_stack_.emplace_back(std::make_unique<CallFrame>(invocation));
+  call_frame_stack_.emplace_back(invocation);
 
   InvokeResult result =
       runtime->runtime.invoke(invocation.method_name, gas_limit);
@@ -181,7 +181,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
   // called again.
   if (!result.result.has_value()) {
 
-    for (auto const &addr : call_frame_stack_.back()->visited_runtimes_) {
+    for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
       // TODO(geoff) metadata allowing unwind_safe declarations
       runtimes_.at(addr)->unwind_poisoned = true;
     }
@@ -189,18 +189,18 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
     call_frame_stack_.pop_back();
 
     if (!call_frame_stack_.empty()) {
-      call_frame_stack_.back()->commit_failed_child_call();
+      call_frame_stack_.back().commit_failed_child_call();
     }
   }
   else {
     size_t call_frame_stack_size = call_frame_stack_.size();
 
     if (call_frame_stack_size >= 2) {
-      call_frame_stack_[call_frame_stack_size - 2]
-          ->commit_successful_child_call(*call_frame_stack_.back());
+      call_frame_stack_[call_frame_stack_size - 2].commit_successful_child_call(
+          call_frame_stack_.back());
     }
     else if (call_frame_stack_.size() == 1) {
-      commit_last_call_frame(*call_frame_stack_.back());
+      commit_last_call_frame(call_frame_stack_.back());
     }
 
     call_frame_stack_.pop_back();
@@ -215,7 +215,7 @@ SystemCallHandler::commit_last_call_frame(CallFrame &frame)
   committed_logs_ = frame.extract_logs();
 
   for (auto const &[addr, proxy] : frame.get_storage_proxies()) {
-    auto deltas = proxy->get_deltas();
+    auto deltas = proxy.get_deltas();
 
     if (!deltas.empty()) {
       committed_delta_vec_.emplace_back(addr, deltas);
@@ -287,29 +287,29 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   return runtimes_.at(addr).get();
 }
 
-StorageProxy &
-SystemCallHandler::resolve_storage_proxy(StorageKey const &key)
+ItemCache &
+SystemCallHandler::resolve_item_cache(StorageKey const &key)
 {
   AddressAndKey query(get_current_address(), key);
 
   auto &top_frame = get_active_call_frame();
 
   for (int32_t i = call_frame_stack_.size() - 2; i >= 0; i--) {
-    auto *proxy = call_frame_stack_[i]->try_get_storage_proxy(query);
+    auto proxy = call_frame_stack_[i].try_get_storage_proxy(query);
     if (proxy) {
       top_frame.push_new_storage_proxy(query, *proxy);
       return *top_frame.try_get_storage_proxy(query);
     }
   }
 
-  auto *proxy = top_frame.try_get_storage_proxy(query);
+  auto proxy = top_frame.try_get_storage_proxy(query);
 
   if (proxy) {
     return *proxy;
   }
 
   top_frame.push_new_storage_proxy(query,
-                                   StorageProxy(
+                                   ItemCache(
                                        snapshot_cache_.try_get_object(query)));
 
   return *top_frame.try_get_storage_proxy(query);
@@ -318,14 +318,14 @@ SystemCallHandler::resolve_storage_proxy(StorageKey const &key)
 void
 SystemCallHandler::delete_last(StorageKey const &key)
 {
-  auto &proxy = resolve_storage_proxy(key);
+  auto &proxy = resolve_item_cache(key);
   proxy.delete_last();
 }
 
 SyscallStatus<StorageObjectType>
 SystemCallHandler::get_object_type(StorageKey const &key)
 {
-  auto &proxy = resolve_storage_proxy(key);
+  auto &proxy = resolve_item_cache(key);
   std::optional<StorageObjectType> result = proxy.get_object_type();
 
   if (!result) {
@@ -337,14 +337,14 @@ SystemCallHandler::get_object_type(StorageKey const &key)
 SyscallStatus<const Bytestring>
 SystemCallHandler::get_bytestring(StorageKey const &key)
 {
-  auto &proxy = resolve_storage_proxy(key);
+  auto &proxy = resolve_item_cache(key);
   return proxy.get_bytestring();
 }
 
 SyscallStatus<RuntimeMemoryLength>
 SystemCallHandler::get_bytestring_len(StorageKey const &key)
 {
-  auto &proxy = resolve_storage_proxy(key);
+  auto &proxy = resolve_item_cache(key);
   return proxy.get_bytestring_len();
 }
 
@@ -352,27 +352,27 @@ SyscallStatus<void>
 SystemCallHandler::set_bytestring(StorageKey const &key,
                                   std::span<const std::byte> input_bytestring)
 {
-  auto &proxy = resolve_storage_proxy(key);
+  auto &proxy = resolve_item_cache(key);
   return proxy.set_bytestring(input_bytestring);
 }
 
 SyscallStatus<const int64_t>
 SystemCallHandler::get_nnint64_base_value(StorageKey const &key)
 {
-  return resolve_storage_proxy(key).get_nnint64_base_value();
+  return resolve_item_cache(key).get_nnint64_base_value();
 }
 
 SyscallStatus<const int64_t>
 SystemCallHandler::get_nnint64_value(StorageKey const &key)
 {
-  return resolve_storage_proxy(key).get_nnint64_value();
+  return resolve_item_cache(key).get_nnint64_value();
 }
 
 SyscallStatus<void>
 SystemCallHandler::nnint64_set_add(StorageKey const &key, int64_t set_value,
                                    int64_t add_value)
 {
-  return resolve_storage_proxy(key).nnint64_set_add(set_value, add_value);
+  return resolve_item_cache(key).nnint64_set_add(set_value, add_value);
 }
 
 SyscallStatus<Calldata>

@@ -4,8 +4,8 @@
 #include <map>
 
 #include "hogd/hogexec/runtime/call_frame.h"
+#include "hogd/hogexec/runtime/item_cache.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/storage_proxy.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
@@ -100,10 +100,10 @@ private:
                                   uint64_t gas_limit);
 
   // Can only be called when call_frame_stack_ is nonempty
-  StorageProxy &resolve_storage_proxy(StorageKey const &key);
+  ItemCache &resolve_item_cache(StorageKey const &key);
 
   SignedTransaction signed_tx_;
-  std::vector<std::unique_ptr<CallFrame>> call_frame_stack_;
+  std::vector<CallFrame> call_frame_stack_;
 
   std::map<ContractAddress, std::unique_ptr<RuntimeCacheEntry>> runtimes_;
 
@@ -120,7 +120,7 @@ private:
   auto &get_active_call_frame(this auto &self)
   {
     assert(!self.call_frame_stack_.empty());
-    return *self.call_frame_stack_.back();
+    return self.call_frame_stack_.back();
   }
 
   void commit_last_call_frame(CallFrame &frame);

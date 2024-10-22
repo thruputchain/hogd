@@ -6,7 +6,7 @@
 #include <set>
 #include <span>
 
-#include "hogd/hogexec/runtime/storage_proxy.h"
+#include "hogd/hogexec/runtime/item_cache.h"
 #include "storage_object.hh"
 #include "transaction.hh"
 
@@ -15,7 +15,6 @@ namespace hogd {
 class CallFrame {
 public:
   CallFrame(Invocation invocation);
-  CallFrame(CallFrame const &) = delete;
 
   void commit_successful_child_call(CallFrame &frame);
   void commit_failed_child_call();
@@ -24,10 +23,10 @@ public:
   const bool unwind_catch_boundary_ = false;
   const Invocation active_invocation_;
 
-  StorageProxy *try_get_storage_proxy(AddressAndKey const &query);
+  ItemCache *try_get_storage_proxy(AddressAndKey const &query);
 
   void push_new_storage_proxy(AddressAndKey const &new_addrkey,
-                              StorageProxy const &proxy);
+                              ItemCache const &proxy);
 
   // The set of all runtimes visited by the current call frame and _successful_
   // children. Failed calls poison the set of visited runtimes, unless the
@@ -45,8 +44,7 @@ public:
 
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
 
-  std::map<AddressAndKey, std::unique_ptr<StorageProxy>> const &
-  get_storage_proxies() const
+  std::map<AddressAndKey, ItemCache> const &get_storage_proxies() const
   {
     return storage_proxies_;
   }
@@ -56,7 +54,8 @@ private:
 
   // Cached here separately from the primary SystemCallHandler
   // in order to (in later PR) support subcall unwinding
-  std::map<AddressAndKey, std::unique_ptr<StorageProxy>> storage_proxies_;
+  // swap to non unique_ptr
+  std::map<AddressAndKey, ItemCache> storage_proxies_;
 
   std::vector<LogEntry> logs_;
 };
