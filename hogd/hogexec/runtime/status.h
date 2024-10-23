@@ -35,6 +35,10 @@ enum class InvokeErrorCode : uint8_t {
 // At the root (for a transaction) wasmi invocation, a nonzero error code
 // associated with a returned InvokeStatus is converted to an
 // InvokeErrorCode::kDeterministic.
+// 
+// The actual signature of a host function imported to wasmi has a HostFnResult
+// return type, not a HostFnStatus<int32_t>.  This is only to allow implementation of
+// kExit with a nonzero error code.
 enum class HostFnErrorCode : uint8_t {
   kNoneOrRecoverable = 0,
   kOutOfGas = 1,
