@@ -15,35 +15,35 @@ enum class InvokeErrorCode : uint8_t {
   kUnrecoverable = 3,
 };
 
-// Error codes returned from a host function call (from within a wasmi
-// invocation). Host functions return a HostFnStatus<int32_t> (see caveat
-// below), where the int32_t is a (defined elsewhere) error code from the host
-// function. If a nonzero value is returned via the int32_t, then the host
-// function error is recoverable, and the wasmi invocation should continue
-// (possibly handling the error).
-// If the host function returns a nonzero HostFnErrorCode, then
-// invocation ceases and returns to the caller of the wasmi invocation.
-// kExit and kReturn do not signal semantic "error", but still terminate
-// invocation.
+// HostFunctionErrorCode categorizes errors returned from system calls. The
+// normal usage pattern is to wrap them within HostFnStatus<int32_t>, where the
+// int32 is the more detailed error code.
 //
-// When a Wasmi invocation is invoked from within a wasmi invocation
-// (e.g., a contract calls another contract), kExit and kReturn are handled
-// differently. kReturn surfaces a byte buffer to be returned to the caller, and
-// results in the host function (at the caller) returning
-// {InvokeErrorCode::kNone, 0}. kExit does not surface a byte buffer, and
-// results in the host function returning {InvokeErrorCode::kNone, error code}.
-// At the root (for a transaction) wasmi invocation, a nonzero error code
-// associated with a returned InvokeStatus is converted to an
-// InvokeErrorCode::kDeterministic.
-// 
-// The actual signature of a host function imported to wasmi has a HostFnResult
-// return type, not a HostFnStatus<int32_t>.  This is only to allow implementation of
-// kExit with a nonzero error code.
+// In WebAssembly, a host function is defined as a function that can be
+// called outside of WebAssembly. We import one of these functions to provide
+// access to our table of system call handlers.
+//
+// When a HostFnStatus (a std::expected) has an int32_t value,
+// that value is passed to WebAssembly as a handleable error code.
+// Otherwise, the WebAssembly terminates operation.
 enum class HostFnErrorCode : uint8_t {
   kNoneOrRecoverable = 0,
+  // Insufficient gas to continue WebAssembly execution.
+  // Result: the WebAssembly runtime immediately returns an
+  // InvokeErrorCode::kOutOfGas.
   kOutOfGas = 1,
-  kUnrecoverableUnknown = 2,
+  // Insufficient gas to continue WebAssembly execution.
+  // Result: the WebAssembly immediately returns an
+  // InvokeErrorCode::kUnrecoverable.
+  kUnrecoverable = 2,
+  // Return from a WebAssembly invocation to the caller.  Registers a byte
+  // buffer to be passed back to the caller. Runtime immediately returns an
+  // {InvokeErrorCode::kNone, 0}.
   kReturn = 3,
+  // Return from a WebAssembly invocation to the caller, with some (int32_t)
+  // error code. Runtime immediately returns an {InvokeErrorCode::kNone, code}.
+  // On a root smart contract invocation, a nonzero code is converted to a
+  // InvokeErrorCode::kDeterministic.
   kExit = 4,
 };
 

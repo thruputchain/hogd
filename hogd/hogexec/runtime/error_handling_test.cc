@@ -21,7 +21,7 @@ throw_runtime_error(HostCallContext * /*unused*/)
 HostFnResult
 throw_unrecoverable_host_error(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kUnrecoverableUnknown, 0};
+  return {HostFnErrorCode::kUnrecoverable, 0};
 }
 
 HostFnResult
@@ -70,7 +70,7 @@ reentrance(HostCallContext * /*unused*/)
 
   auto res = s_runtime->invoke("unreachable", UINT64_MAX);
   if (!res.result.has_value()) {
-    return {HostFnErrorCode::kUnrecoverableUnknown, 0};
+    return {HostFnErrorCode::kUnrecoverable, 0};
   }
   return {HostFnErrorCode::kNoneOrRecoverable, 0};
 }

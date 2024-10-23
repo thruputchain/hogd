@@ -15,8 +15,8 @@ HostFnErrorCategory::message(int code) const
     return "kNoneOrRecoverable";
   case kOutOfGas:
     return "kOutOfGas";
-  case kUnrecoverableUnknown:
-    return "kUnrecoverableUnknown";
+  case kUnrecoverable:
+    return "kUnrecoverable";
   case kReturn:
     return "kReturn";
   case kExit:
