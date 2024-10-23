@@ -27,7 +27,7 @@ enum class InvokeErrorCode : uint8_t {
 // value, (and a HostFnErrorCode::kNoneOrRecoverable), that int32_t is passed to
 // WebAssembly as a handleable error code, as the return result from the host
 // function. Otherwise, the WebAssembly terminates operation. The WebAssembly
-// itself never sees the HostFnErrorCode.
+// bytecode (the smart contract) itself never sees the HostFnErrorCode.
 enum class HostFnErrorCode : uint8_t {
   kNoneOrRecoverable = 0,
   // Insufficient gas to continue WebAssembly execution.
