@@ -26,8 +26,10 @@ enum class InvokeErrorCode : uint8_t {
 // When a HostFnStatus<int32_t> (a wrapper around std::expected) has an int32_t
 // value, (and a HostFnErrorCode::kNoneOrRecoverable), that int32_t is passed to
 // WebAssembly as a handleable error code, as the return result from the host
-// function. Otherwise, the WebAssembly terminates operation. The WebAssembly
+// function. The WebAssembly
 // bytecode (the smart contract) itself never sees the HostFnErrorCode.
+// Other HostFnErrorCodes terminate the WebAssembly runtime (returning to the
+// caller), and are handled by the WebAssembly runtime.
 enum class HostFnErrorCode : uint8_t {
   kNoneOrRecoverable = 0,
   // Insufficient gas to continue WebAssembly execution.
@@ -39,11 +41,13 @@ enum class HostFnErrorCode : uint8_t {
   // InvokeErrorCode::kUnrecoverable.
   kUnrecoverable = 2,
   // Return from a WebAssembly invocation to the caller.  Registers a byte
-  // buffer to be passed back to the caller. Runtime immediately returns an
-  // {InvokeErrorCode::kNone, 0}.
+  // buffer to be passed back to the caller.
+  // Result: Runtime immediately returns an {InvokeErrorCode::kNone, 0}.
   kReturn = 3,
   // Return from a WebAssembly invocation to the caller, with some (int32_t)
-  // error code. Runtime immediately returns an {InvokeErrorCode::kNone, code}.
+  // error code.
+  // Result: Runtime immediately returns an {InvokeErrorCode::kNone, code}.
+  //
   // On a root smart contract invocation, a nonzero code is converted to a
   // InvokeErrorCode::kDeterministic.
   kExit = 4,
