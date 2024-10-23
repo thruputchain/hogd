@@ -6,12 +6,29 @@
 
 namespace hogd {
 
-// Returned from a runtime (wasmi) invocation.
+// Error codes returned from a runtime (wasmi) invocation.
 // This is the external interface to a smart contract.
+// Normally wrapped in an InvokeStatus<int32_t> (a std::expected).
+//
+// When InvokeStatus<int32_t> has an int32_t value (and an
+// InvokeErrorCode::kNone), the int32_t value represents a handleable
+// (deterministic) result from the invocation.
+// (Specifically, the invoke() syscall in a nested smart contract invocation
+// passes an {InvokeErrorCode::kNone, code}
+// back as a {HostFnErrorCode::kNoneOrRecoverable, code}).
+//
+// This value is generated as
+// either the returned value from the selected WebAssembly exported function
+// that was run, the code caused by a host function returning
+// HostFnErrorCode::kExit, or 0, if invocation ends because a host function
+// returns HostFnErrorCode::kReturn.
 enum class InvokeErrorCode : uint8_t {
   kNone = 0,
+  // An unspecified deterministic error.
   kDeterministic = 1,
+  // Runtime exceeded its gas budget.
   kOutOfGas = 2,
+  // Nondeterministic error during invocation (e.g. malloc error)
   kUnrecoverable = 3,
 };
 
