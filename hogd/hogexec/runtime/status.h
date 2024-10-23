@@ -23,9 +23,11 @@ enum class InvokeErrorCode : uint8_t {
 // called outside of WebAssembly. We import one of these functions to provide
 // access to our table of system call handlers.
 //
-// When a HostFnStatus (a std::expected) has an int32_t value,
-// that value is passed to WebAssembly as a handleable error code.
-// Otherwise, the WebAssembly terminates operation.
+// When a HostFnStatus<int32_t> (a wrapper around std::expected) has an int32_t
+// value, (and a HostFnErrorCode::kNoneOrRecoverable), that int32_t is passed to
+// WebAssembly as a handleable error code, as the return result from the host
+// function. Otherwise, the WebAssembly terminates operation. The WebAssembly
+// itself never sees the HostFnErrorCode.
 enum class HostFnErrorCode : uint8_t {
   kNoneOrRecoverable = 0,
   // Insufficient gas to continue WebAssembly execution.
