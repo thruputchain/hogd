@@ -14,14 +14,13 @@ namespace hogd {
 // InvokeErrorCode::kNone), the int32_t value represents a handleable
 // (deterministic) result from the invocation.
 // (Specifically, the invoke() syscall in a nested smart contract invocation
-// passes an {InvokeErrorCode::kNone, code}
-// back as a {HostFnErrorCode::kNoneOrRecoverable, code}).
+// passes an {InvokeErrorCode::kNone, code} back as a
+// {HostFnErrorCode::kNoneOrRecoverable, code}).
 //
-// This value is generated as
-// either the returned value from the selected WebAssembly exported function
-// that was run, the code caused by a host function returning
-// HostFnErrorCode::kExit, or 0, if invocation ends because a host function
-// returns HostFnErrorCode::kReturn.
+// This value is generated as either the returned value from the selected
+// WebAssembly exported function that was run, the code caused by a host
+// function returning HostFnErrorCode::kExit, or 0, if invocation ends because a
+// host function returns HostFnErrorCode::kReturn.
 enum class InvokeErrorCode : uint8_t {
   kNone = 0,
   // An unspecified deterministic error.
@@ -53,9 +52,10 @@ enum class HostFnErrorCode : uint8_t {
   // Result: the WebAssembly runtime immediately returns an
   // InvokeErrorCode::kOutOfGas.
   kOutOfGas = 1,
-  // Insufficient gas to continue WebAssembly execution.
-  // Result: the WebAssembly immediately returns an
-  // InvokeErrorCode::kUnrecoverable.
+  // Unrecoverable (nondeterministic) error, such as a malloc error.
+  // The only course of action is to abort the entire transaction.
+  // Result: the WebAssembly runtime immediately returns an
+  // InvokeErrorCode::kUnrecoverable
   kUnrecoverable = 2,
   // Return from a WebAssembly invocation to the caller.  Registers a byte
   // buffer to be passed back to the caller.
