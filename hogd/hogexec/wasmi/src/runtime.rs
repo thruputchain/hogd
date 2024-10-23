@@ -82,9 +82,7 @@ impl WasmiRuntime {
         let func = match self.instance.get_func(&self.store, method) {
             Some(v) => v,
             _ => {
-                return WasmiInvokeResult::error(
-                    InvokeError::Deterministic,
-                );
+                return WasmiInvokeResult::error(InvokeError::Deterministic);
             }
         };
 
@@ -123,9 +121,7 @@ impl WasmiRuntime {
 
                 match my_error.error {
                     external_call::TrampolineErrorEnum::OutOfGas => {
-                        return WasmiInvokeResult::error(
-                            InvokeError::OutOfGas,
-                        );
+                        return WasmiInvokeResult::error(InvokeError::OutOfGas);
                     }
                     external_call::TrampolineErrorEnum::Return => {
                         // Return no error code if successful return
