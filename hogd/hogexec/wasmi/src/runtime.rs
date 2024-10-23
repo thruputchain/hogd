@@ -95,8 +95,6 @@ impl WasmiRuntime {
         match func_res {
             Ok(_) => match res[0].i32() {
                 Some(v) => {
-                    // TODO(geoff): figure out when, or if,
-                    // this "error code/result" is visible in the syscall API.
                     return WasmiInvokeResult::success(v as i32);
                 }
                 _ => {
