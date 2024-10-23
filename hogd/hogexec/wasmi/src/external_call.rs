@@ -30,8 +30,8 @@ use core::fmt;
 #[repr(u8)]
 #[derive(Clone, Copy, Debug)]
 pub enum TrampolineErrorEnum {
-    OutOfGasError = 1,
-    UnrecoverableSystemError = 2,
+    OutOfGas = 1,
+    Unrecoverable = 2,
     Return = 3,
     Exit { code: i32 } = 4,
 }
@@ -143,7 +143,7 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
         x if x == TrampolineErrorNONE => Ok(result.result),
         x if x == TrampolineErrorOUTOFGAS => {
             Err(Error::host(TrampolineError {
-                error: TrampolineErrorEnum::OutOfGasError,
+                error: TrampolineErrorEnum::OutOfGas,
             }))
         }
         x if x == TrampolineErrorRETURN => Err(Error::host(TrampolineError {
@@ -155,7 +155,7 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
             },
         })),
         _ => Err(Error::host(TrampolineError {
-            error: TrampolineErrorEnum::UnrecoverableSystemError,
+            error: TrampolineErrorEnum::Unrecoverable,
         })),
     }
 }

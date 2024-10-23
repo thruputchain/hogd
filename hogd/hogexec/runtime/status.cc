@@ -34,12 +34,12 @@ InvokeErrorCategory::message(int code) const
   switch (static_cast<InvokeErrorCode>(code)) {
   case kNone:
     return "kNone";
-  case kDeterministicError:
-    return "kDeterministicError";
-  case kOutOfGasError:
-    return "kOutOfGasError";
-  case kUnrecoverableSystemError:
-    return "kUnrecoverableSystemError";
+  case kDeterministic:
+    return "kDeterministic";
+  case kOutOfGas:
+    return "kOutOfGas";
+  case kUnrecoverable:
+    return "kUnrecoverable";
   }
   return "Unknown";
 }

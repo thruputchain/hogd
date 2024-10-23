@@ -6,18 +6,35 @@
 
 namespace hogd {
 
+// Returned from a runtime (wasmi) invocation.
+// This is the external interface to a smart contract.
 enum class InvokeErrorCode : uint8_t {
   kNone = 0,
-  kDeterministicError = 1,
-  kOutOfGasError = 2,
-  kUnrecoverableSystemError = 3,
+  kDeterministic = 1,
+  kOutOfGas = 2,
+  kUnrecoverable = 3,
 };
 
-// Host fn calls have two types of errors:
-// 1) Recoverable (possibly handled by the caller contract,
-// must generate deterministically -- e.g. accessing a nonexistent key)
-// 2) Everything else (Unrecoverable)
-// We must be very deliberate about what errors we mark in the first category.
+// Error codes returned from a host function call (from within a wasmi
+// invocation). Host functions return a HostFnStatus<int32_t> (see caveat
+// below), where the int32_t is a (defined elsewhere) error code from the host
+// function. If a nonzero value is returned via the int32_t, then the host
+// function error is recoverable, and the wasmi invocation should continue
+// (possibly handling the error).
+// If the host function returns a nonzero HostFnErrorCode, then
+// invocation ceases and returns to the caller of the wasmi invocation.
+// kExit and kReturn do not signal semantic "error", but still terminate
+// invocation.
+//
+// When a Wasmi invocation is invoked from within a wasmi invocation
+// (e.g., a contract calls another contract), kExit and kReturn are handled
+// differently. kReturn surfaces a byte buffer to be returned to the caller, and
+// results in the host function (at the caller) returning
+// {InvokeErrorCode::kNone, 0}. kExit does not surface a byte buffer, and
+// results in the host function returning {InvokeErrorCode::kNone, error code}.
+// At the root (for a transaction) wasmi invocation, a nonzero error code
+// associated with a returned InvokeStatus is converted to an
+// InvokeErrorCode::kDeterministic.
 enum class HostFnErrorCode : uint8_t {
   kNoneOrRecoverable = 0,
   kOutOfGas = 1,

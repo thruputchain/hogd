@@ -107,8 +107,7 @@ TEST_F(WasmiErrorHandlingTest, RuntimeError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(),
-            InvokeError{InvokeErrorCode::kUnrecoverableSystemError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 }
 
 TEST_F(WasmiErrorHandlingTest, ExitHandling)
@@ -133,8 +132,7 @@ TEST_F(WasmiErrorHandlingTest, HostError)
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_EQ(res.result.error(),
-            InvokeError{InvokeErrorCode::kUnrecoverableSystemError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 }
 
 TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
@@ -147,8 +145,7 @@ TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(),
-            InvokeError{InvokeErrorCode::kUnrecoverableSystemError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 }
 
 TEST_F(WasmiErrorHandlingTest, WasmError)
@@ -167,8 +164,7 @@ TEST_F(WasmiErrorHandlingTest, WasmError)
   res = runtime_->invoke("unreachable", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(),
-            InvokeError{InvokeErrorCode::kDeterministicError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kDeterministic});
 }
 
 TEST_F(WasmiErrorHandlingTest, NonexistFn)
@@ -186,8 +182,7 @@ TEST_F(WasmiErrorHandlingTest, NonexistFn)
   res = runtime_->invoke("blah", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(),
-            InvokeError{InvokeErrorCode::kDeterministicError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kDeterministic});
 }
 
 TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
@@ -200,8 +195,7 @@ TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(),
-            InvokeError{InvokeErrorCode::kUnrecoverableSystemError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
@@ -230,8 +224,7 @@ TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(),
-            InvokeError{InvokeErrorCode::kUnrecoverableSystemError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
@@ -285,12 +278,12 @@ TEST_F(WasmiErrorHandlingTest, OutOfGas)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGasError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 
   res = runtime_->invoke("call1", 1);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGasError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
 
 TEST_F(WasmiErrorHandlingTest, NoGas)
@@ -303,7 +296,7 @@ TEST_F(WasmiErrorHandlingTest, NoGas)
   auto res = runtime_->invoke("call1", 1);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGasError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
 
 TEST_F(WasmiErrorHandlingTest, Spin)
@@ -316,7 +309,7 @@ TEST_F(WasmiErrorHandlingTest, Spin)
   auto res = runtime_->invoke("spin", 10000);
 
   EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGasError});
+  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 

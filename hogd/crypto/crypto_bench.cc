@@ -13,6 +13,7 @@
 namespace hogd {
 
 namespace {
+
 void
 bm_sha256(benchmark::State &state)
 {
