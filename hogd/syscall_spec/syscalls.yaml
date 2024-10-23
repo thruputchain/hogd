@@ -3,8 +3,7 @@ syscalls:
     needs_context: no
     inputs:
       - name: "buffer"
-        fixed_size: No
-        typename: None
+        span_argument: yes
     outputs:
       - name: "hash"
         fixed_size: Yes
@@ -38,8 +37,7 @@ syscalls:
         typename: "StorageKey"
     outputs:
       - name: "bytestring"
-        fixed_size: No
-        typename: None
+        span_argument: yes
       - name: "written_len"
         fixed_size: Yes
         typename: "RuntimeMemoryLength"
@@ -52,8 +50,7 @@ syscalls:
         fixed_size: Yes
         typename: "StorageKey"
       - name: "bytestring"
-        fixed_size: No
-        typename: None
+        span_argument: yes
     outputs:
     number: 4
   - name: "HasKey"
@@ -90,8 +87,7 @@ syscalls:
     inputs:
     outputs:
       - name: "buffer"
-        fixed_size: no
-        typename: None
+        span_argument: yes
       - name: "written_len"
         fixed_size: yes
         typename: "RuntimeMemoryLength"
@@ -101,8 +97,7 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "buffer"
-        fixed_size: no
-        typename: None
+        span_argument: yes
     outputs:
     number: 9
   - name: "Invoke"
@@ -120,8 +115,7 @@ syscalls:
         typename: "GasAmount"
         primitive_type: yes
       - name: "calldata"
-        fixed_size: no
-        typename: None
+        span_argument: yes
     outputs:
       - name: "return_len"
         fixed_size: yes
@@ -176,8 +170,7 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "buffer"
-        fixed_size: no
-        typename: None
+        span_argument: yes
     outputs:
     returns: no
     number: 14
@@ -186,8 +179,7 @@ syscalls:
     inputs:
     outputs:
       - name: "buffer"
-        fixed_size: no
-        typename: None
+        span_argument: yes
       - name: "written_len"
         fixed_size: yes
         typename: "RuntimeMemoryLength"
@@ -241,6 +233,22 @@ syscalls:
     outputs:
     returns: no
     number: 19
+  - name: "VerifySignature"
+    needs_context: no
+    inputs:
+      - name: "pk"
+        typename: "PublicKey"
+        custom_parsing: yes
+        custom_args_required: 2
+      - name: "sig"
+        typename: "Signature"
+        custom_parsing: yes
+        custom_args_required: 2
+      - name: "message"
+        span_argument: yes
+    outputs:
+    number: 20 
+
 
 errors:
   - name: "None"
@@ -294,3 +302,6 @@ errors:
   - name: "ReturnParseError"
     number: 15
     doc: "Failed to parse the return buffer into the contract's output signature"
+  - name: "SignatureVerificationFailed"
+    number: 16
+    doc: "Signature verification failed"

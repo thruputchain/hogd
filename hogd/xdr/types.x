@@ -22,19 +22,19 @@ enum CryptographicScheme {
 union Signature switch (CryptographicScheme scheme)
 {
 case Ed25519:
-  Ed25519Signature ed25519_signature;
+  Ed25519Signature ed25519;
 };
 
 union PublicKey switch (CryptographicScheme scheme)
 {
 case Ed25519:
-  Ed25519PublicKey ed25519_publickey;
+  Ed25519PublicKey ed25519;
 };
 
 union SecretKey switch (CryptographicScheme scheme)
 {
 case Ed25519:
-  Ed25519SecretKey ed25519_secretkey;
+  Ed25519SecretKey ed25519;
 };
 
 union ExtensionPoint switch (int v)

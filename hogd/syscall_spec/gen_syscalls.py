@@ -17,8 +17,12 @@ def gen_validate_arg(inp, *, is_input):
     const = "const "
     in_out = "input"
 
+  check_arg_statement = f"""if (!{in_out}_{arg_name}) {{
+    return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kFault)}}, kGenericBadSyscallCost}};
+  }}"""
 
-  if not inp["fixed_size"]:
+
+  if "span_argument" in inp and inp["span_argument"]:
     arg1 = f"{in_out}_{arg_name}"
     arg2 = f"{in_out}_{arg_name}_len"
     return f"""
@@ -26,9 +30,7 @@ def gen_validate_arg(inp, *, is_input):
       check_user_span_argument(contract_memory, user_{arg1},
                                user_{arg2});
 
-  if (!{in_out}_{arg_name}) {{
-    return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kFault)}}, kGenericBadSyscallCost}};
-  }}
+  {check_arg_statement}
 """, [f"user_{arg1}", f"user_{arg2}"], arg1, f"*{arg1}", f"std::span<{const}std::byte> {arg1}"
   
 
@@ -41,15 +43,27 @@ def gen_validate_arg(inp, *, is_input):
       check_user_primitive_argument<{const}{typename}>(user_{arg1});
 """, [f"user_{arg1}"], arg1, arg1, f"{const}{typename} {arg1}"
 
+  if "custom_parsing" in inp and inp["custom_parsing"] and is_input:
+    num_args = inp["custom_args_required"]
+    custom_args = []
+    for i in range(0, num_args):
+      custom_args.append(f"user_{in_out}_{arg_name}_{i}")
+    arg_str = ", ".join(custom_args)
+
+    return f"""
+  std::optional<{const}{typename}> {arg1} =
+      check_user_custom_input_argument<{typename}>(contract_memory, {arg_str});
+
+  {check_arg_statement}
+  """, custom_args, arg1, f"*{arg1}", f"{const}{typename}& {arg1}"
+
   # else fixed size
   return f"""
   {const}{typename} *{arg1} =
       check_user_argument<{const}{typename}>(contract_memory, user_{arg1},
                                       sizeof({typename}));
 
-  if (!{arg1}) {{
-    return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kFault)}}, kGenericBadSyscallCost}};
-  }}
+  {check_arg_statement}
 """, [f"user_{arg1}"], arg1,  f"*{arg1}", f"{const}{typename}& {arg1}"
 
 
@@ -204,6 +218,7 @@ def gen_syscall_entry_cc(spec):
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_object.hh"
@@ -211,43 +226,6 @@ def gen_syscall_entry_cc(spec):
 #include "types.hh"
 
 namespace hogd {{
-
-bool
-check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
-{{
-  uint64_t base_end = 0;
-  if (integer_add_overflow(base, len, &base_end))
-    return false;
-  return (base_end <= memory_len);
-}}
-
-template<typename T> requires std::is_trivially_copyable_v<T>
-T *
-check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset,
-                    uint64_t user_len)
-{{
-  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {{
-    return nullptr;
-  }}
-  return reinterpret_cast<T *>(contract_memory.data() + user_offset);
-}}
-
-std::optional<std::span<std::byte>>
-check_user_span_argument(std::span<std::byte> contract_memory,
-                         uint64_t user_offset, uint64_t user_len)
-{{
-  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {{
-    return std::nullopt;
-  }}
-  return contract_memory.subspan(user_offset, user_len);
-}}
-
-template<typename T> requires std::is_integral_v<T>
-T
-check_user_primitive_argument(uint64_t user_value)
-{{
-  return static_cast<T>(user_value);
-}}
 
 template<typename T>
 std::pair<HostFnErrorCode, int32_t>
@@ -390,19 +368,26 @@ def gen_rs_syscall_binding(syscall):
           input_type = inp["rust_typename"]
         syscallargs.append(f"""{input_name} as u64""")
         inputdecls.append(f"""{input_name} : {input_type}""")
-      elif inp["fixed_size"]:
+        uninit_args.append(f"""{input_name}""")
+      elif "fixed_size" in inp and inp["fixed_size"]:
         input_type = inp["typename"]
         if "rust_typename" in inp:
           input_type = inp["rust_typename"]
         syscallargs.append(f"""{input_name}.as_ptr() as u64""")
         inputdecls.append(f"""{input_name} : &{input_type}""")
-      else:
+        uninit_args.append(f"""{input_name}""")
+      elif "custom_parsing" in inp and inp["custom_parsing"]:
+        # custom parsing, for now I just implement as a direct passthrough
+        # and assume the sdk wrapper will handle.  Input types are just u64s
+        for i in range(0, inp["custom_args_required"]):
+          syscallargs.append(f"""{input_name}_{i}""")
+          inputdecls.append(f"""{input_name}_{i} : u64""")
+          uninit_args.append(f"""{input_name}_{i}""")
+      else: # span argument
         syscallargs.append(f"""{input_name}.as_ptr() as u64""")
         syscallargs.append(f"""{input_name}.len() as u64""")
         inputdecls.append(f"""{input_name} : &{input_type}""")
-
-
-      uninit_args.append(f"""{input_name}""")
+        uninit_args.append(f"""{input_name}""")
 
   outputargs = []
   outputdecls = []
@@ -422,7 +407,7 @@ def gen_rs_syscall_binding(syscall):
         syscallargs.append(f"""to_offset_mut({output_name}) as u64""")
         uninit_outputtype = output_type
         uninit_args.append(f"""{output_name}""")
-      elif outp["fixed_size"]:
+      elif "fixed_size" in outp and outp["fixed_size"]:
         output_type = outp["typename"]
         if "rust_typename" in outp:
           output_type = outp["rust_typename"]

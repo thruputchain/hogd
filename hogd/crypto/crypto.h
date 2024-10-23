@@ -72,4 +72,15 @@ siphash24_keygen()
   return out;
 }
 
+inline bool
+ed25519_verify(Ed25519PublicKey const &publickey,
+               Ed25519Signature const &signature,
+               std::span<const std::byte> message)
+{
+  return crypto_sign_ed25519_verify_detached(signature.data(),
+                                             reinterpret_cast<const uint8_t *>(
+                                                 message.data()),
+                                             message.size(), publickey.data());
+}
+
 } // namespace hogd
