@@ -66,6 +66,8 @@ namespace hogd
     Bytestring bytestring;
   case kNonnegativeInt64:
     hyper nnint64_set_value; // int64_t
+  case kBoundedHashset:
+    void;
   };
 
   enum StorageReserveResult {
