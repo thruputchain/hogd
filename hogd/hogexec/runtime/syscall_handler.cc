@@ -55,8 +55,7 @@ SystemCallHandler::root_invoke()
   auto *runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
 
   if (!runtime) {
-    return InvokeResult{.result =
-                            InvokeError{InvokeErrorCode::kDeterministic},
+    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed = 0};
   }
 
@@ -69,8 +68,7 @@ SystemCallHandler::root_invoke()
 
   // return nonzero error code on root invocation => contract error
   if (*res.result != 0) {
-    return InvokeResult{.result =
-                            InvokeError{InvokeErrorCode::kDeterministic},
+    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed = res.gas_consumed};
   }
   return res;

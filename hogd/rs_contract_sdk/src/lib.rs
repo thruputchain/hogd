@@ -39,6 +39,7 @@ mod syscall;
 
 pub mod parse_trait;
 
+#[rustfmt::skip]
 pub mod syscall_bindings;
 
 pub mod rt;

@@ -43,7 +43,6 @@ InvokeErrorCategory::message(int code) const
     return "kOutOfGas";
   case kUnrecoverable:
     return "kUnrecoverable";
-
   }
   return "Unknown";
 }

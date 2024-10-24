@@ -429,7 +429,7 @@ def gen_rs_syscall_binding(syscall):
     syscallargs += ["0"] * (syscall_argcount - len(syscallargs))
 
   syscallargs_str = """,
-      """.join(syscallargs)
+            """.join(syscallargs)
 
   uninit_args_str = ", ".join(uninit_args)
   
@@ -437,10 +437,10 @@ def gen_rs_syscall_binding(syscall):
 
   errdecl = "let err = "
   errhandle_str = """if err != SyscallErrorCode::kNone as i32 {
-    return Err(err);
-  }
+        return Err(err);
+    }
 
-  Ok(())
+    Ok(())
 """
 
   if "returns" in syscall and not syscall["returns"]:
@@ -450,16 +450,16 @@ def gen_rs_syscall_binding(syscall):
 
   return f"""pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
 
-  // syscall will initialize outputs, if error is kNone
-  {errdecl}
-    syscall_wrapper(SyscallNo::k{name},
-      {syscallargs_str});
+    // syscall will initialize outputs, if error is kNone
+    {errdecl}
+        syscall_wrapper(SyscallNo::k{name},
+            {syscallargs_str});
 
-  {errhandle_str}
+    {errhandle_str}
 }}
 
 pub fn raw_{name}({inputdecl_str}) -> {syscall_return_type} {{
-  uninit_{name}({uninit_args_str})
+    uninit_{name}({uninit_args_str})
 }}
 
 """
