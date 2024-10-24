@@ -60,16 +60,6 @@ namespace hogd
     NonnegativeInt64SetAddArgs nnint64;
   };
 
-  union StorageDeltaClass switch (StorageObjectType type)
-  {
-  case kBytestring:
-    Bytestring bytestring;
-  case kNonnegativeInt64:
-    hyper nnint64_set_value; // int64_t
-  case kBoundedHashset:
-    void;
-  };
-
   enum StorageReserveResult {
     // reservation applied successfully
     kSuccess = 0,
