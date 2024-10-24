@@ -18,8 +18,8 @@ HostFnErrorCategory::message(int code) const
     return "kNoneOrRecoverable";
   case kOutOfGas:
     return "kOutOfGas";
-  case kUnrecoverableUnknown:
-    return "kUnrecoverableUnknown";
+  case kUnrecoverable:
+    return "kUnrecoverable";
   case kReturn:
     return "kReturn";
   case kExit:
@@ -37,15 +37,15 @@ InvokeErrorCategory::message(int code) const
   switch (static_cast<InvokeErrorCode>(code)) {
   case kNone:
     return "kNone";
-  case kDeterministicError:
-    return "kDeterministicError";
-  case kOutOfGasError:
-    return "kOutOfGasError";
-  case kUnrecoverableSystemError:
-    return "kUnrecoverableSystemError";
-  default:
-    return "InvokeErrorCode Unknown";
+  case kDeterministic:
+    return "kDeterministic";
+  case kOutOfGas:
+    return "kOutOfGas";
+  case kUnrecoverable:
+    return "kUnrecoverable";
+
   }
+  return "Unknown";
 }
 
 std::string

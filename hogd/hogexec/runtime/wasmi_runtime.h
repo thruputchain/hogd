@@ -116,7 +116,7 @@ public:
 
   WasmiRuntime(WasmiRuntime &&other) noexcept;
   WasmiRuntime &operator=(WasmiRuntime &&other) noexcept;
-
+  
   ~WasmiRuntime();
 
   // This API expects that the invoked function takes no arguments
