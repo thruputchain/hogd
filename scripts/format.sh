@@ -32,6 +32,7 @@ CODE_DIR=${ROOT_DIR}/hogd
 find "${CODE_DIR}" -name '*.h' -o -name '*.cc' |\
 xargs ${CLANG_FORMAT} -i ${FFLAGS}
 
+set -e
 # Rust fmt
 CARGO_DIRS=$(find "${CODE_DIR}" -name 'Cargo.toml')
 for CARGO_DIR in $CARGO_DIRS; do

@@ -1,6 +1,8 @@
 #include <cassert>
 #include <cstddef>
+#include <format>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -8,6 +10,8 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+
+#include "contract.hh"
 
 namespace hogd {
 
@@ -88,8 +92,8 @@ pub struct WasmiInvokeResult {
     error: u8,
 } */
 struct WasmiInvokeResult {
-  uint64_t result;
-  uint8_t error;
+  int32_t result;
+  uint8_t error; // InvokeErrorCode
 };
 
 /*
@@ -157,8 +161,8 @@ WasmiContext::~WasmiContext()
   free_wasmi_context(wasmi_context_ptr_);
 }
 
-std::unique_ptr<WasmiRuntime>
-WasmiContext::make_new_runtime(Contract const &contract,
+std::optional<WasmiRuntime>
+WasmiContext::make_new_runtime(ContractBlob const &contract,
                                SystemCallHandler *syscall_handler)
 {
   std::unique_ptr<HostCallContext> host_call_context =
@@ -173,8 +177,8 @@ WasmiContext::make_new_runtime(Contract const &contract,
     return {};
   }
 
-  return std::make_unique<WasmiRuntime>(std::move(host_call_context),
-                                        wasmi_runtime_ptr);
+  return std::make_optional<WasmiRuntime>(std::move(host_call_context),
+                                          wasmi_runtime_ptr);
 }
 
 bool
@@ -207,6 +211,14 @@ WasmiRuntime::get_memory() const noexcept
 }
 
 InvokeResult
+WasmiRuntime::invoke(uint32_t method_name, uint64_t gas_limit)
+{
+  auto method_name_str = std::format("{:X}", method_name);
+
+  return invoke(method_name_str, gas_limit);
+}
+
+InvokeResult
 WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
@@ -227,10 +239,10 @@ WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
 
   wasmi_set_available_gas(wasmi_runtime_ptr_, prev_gas_limit);
 
-  WasmiInvokeErrorCode wasmi_error{res.error};
+  InvokeErrorCode wasmi_error{res.error};
 
-  if (wasmi_error != WasmiInvokeErrorCode::kWasmiNone) {
-    return InvokeResult{.result = {WasmiInvokeError{wasmi_error}},
+  if (wasmi_error != InvokeErrorCode::kNone) {
+    return InvokeResult{.result = {InvokeError{wasmi_error}},
                         .gas_consumed = gas_consumed};
   }
   return InvokeResult{.result = res.result, .gas_consumed = gas_consumed};
@@ -263,6 +275,27 @@ WasmiRuntime::WasmiRuntime(std::unique_ptr<HostCallContext> host_call_context,
     wasmi_runtime_ptr_(wasmi_runtime_ptr)
 {
   host_call_context_->runtime = this;
+}
+
+WasmiRuntime::WasmiRuntime(WasmiRuntime &&other) noexcept
+  : host_call_context_(std::move(other.host_call_context_)),
+    wasmi_runtime_ptr_(other.wasmi_runtime_ptr_)
+{
+  other.wasmi_runtime_ptr_ = nullptr;
+  host_call_context_->runtime = this;
+}
+
+WasmiRuntime &
+WasmiRuntime::operator=(WasmiRuntime &&other) noexcept
+{
+  host_call_context_ = std::move(other.host_call_context_);
+  host_call_context_->runtime = this;
+  if (wasmi_runtime_ptr_ != nullptr) {
+    free_wasmi_runtime(wasmi_runtime_ptr_);
+  }
+  wasmi_runtime_ptr_ = other.wasmi_runtime_ptr_;
+  other.wasmi_runtime_ptr_ = nullptr;
+  return *this;
 }
 
 WasmiRuntime::~WasmiRuntime()

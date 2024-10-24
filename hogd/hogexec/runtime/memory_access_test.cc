@@ -1,5 +1,5 @@
 #include <cstdint>
-#include <memory>
+#include <optional>
 
 #include <gtest/gtest.h>
 
@@ -21,9 +21,9 @@ protected:
     ASSERT_TRUE(!!runtime_);
   }
 
-  std::unique_ptr<WasmiRuntime> runtime_;
+  std::optional<WasmiRuntime> runtime_;
 };
-
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(MemoryAccessTest, ReadWrites)
 {
   // assert memory exists
@@ -57,5 +57,6 @@ TEST_F(MemoryAccessTest, ReadWrites)
   ASSERT_TRUE(!!res.result);
   EXPECT_EQ(*res.result, 0xABCDEF01);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

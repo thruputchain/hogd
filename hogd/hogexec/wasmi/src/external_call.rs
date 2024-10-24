@@ -1,3 +1,5 @@
+#![allow(non_upper_case_globals)]
+
 use core::ffi::c_void;
 use wasmi::core::HostError;
 use wasmi::Error;
@@ -26,26 +28,35 @@ use core::fmt;
 
 #[allow(dead_code)]
 #[repr(u8)]
-enum TrampolineErrorEnum {
-    None = 0,
-    OutOfGasError = 1,
-    UnrecoverableSystemError = 2,
+#[derive(Clone, Copy, Debug)]
+pub enum TrampolineErrorEnum {
+    OutOfGas = 1,
+    Unrecoverable = 2,
+    Return = 3,
+    Exit { code: i32 } = 4,
 }
+
+const TrampolineErrorNONE: u8 = 0;
+const TrampolineErrorOUTOFGAS: u8 = 1;
+#[allow(dead_code)]
+const TrampolineErrorUNRECOVERABLE: u8 = 2;
+const TrampolineErrorRETURN: u8 = 3;
+const TrampolineErrorEXIT: u8 = 4;
 
 #[repr(C)]
 pub struct TrampolineResult {
-    result: u64,
+    result: i32,
     panic: u8,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct TrampolineError {
-    pub recoverable: bool,
+    pub error: TrampolineErrorEnum,
 }
 
 impl fmt::Display for TrampolineError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TrampolineError recoverable={}", self.recoverable)
+        write!(f, "TrampolineError error printing is annoying")
     }
 }
 
@@ -91,16 +102,60 @@ extern "C" {
         arg4: u64,
         arg5: u64,
     ) -> TrampolineResult;
+    pub fn c_call_6args(
+        fn_pointer: *mut c_void,
+        userctx: *mut c_void,
+        arg1: u64,
+        arg2: u64,
+        arg3: u64,
+        arg4: u64,
+        arg5: u64,
+        arg6: u64,
+    ) -> TrampolineResult;
+    pub fn c_call_7args(
+        fn_pointer: *mut c_void,
+        userctx: *mut c_void,
+        arg1: u64,
+        arg2: u64,
+        arg3: u64,
+        arg4: u64,
+        arg5: u64,
+        arg6: u64,
+        arg7: u64,
+    ) -> TrampolineResult;
+    pub fn c_call_8args(
+        fn_pointer: *mut c_void,
+        userctx: *mut c_void,
+        arg1: u64,
+        arg2: u64,
+        arg3: u64,
+        arg4: u64,
+        arg5: u64,
+        arg6: u64,
+        arg7: u64,
+        arg8: u64,
+    ) -> TrampolineResult;
 }
 
 // This is annoying, but I'm not sure how better to deal with this
-pub fn handle_trampoline_error(result: TrampolineResult) -> Result<u64, Error> {
-    let err: TrampolineErrorEnum = unsafe { std::mem::transmute(result.panic) };
-    match err {
-        TrampolineErrorEnum::None => Ok(result.result),
-        TrampolineErrorEnum::OutOfGasError => {
-            Err(Error::host(TrampolineError { recoverable: true }))
+pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
+    match result.panic {
+        x if x == TrampolineErrorNONE => Ok(result.result),
+        x if x == TrampolineErrorOUTOFGAS => {
+            Err(Error::host(TrampolineError {
+                error: TrampolineErrorEnum::OutOfGas,
+            }))
         }
-        _ => Err(Error::host(TrampolineError { recoverable: false })),
+        x if x == TrampolineErrorRETURN => Err(Error::host(TrampolineError {
+            error: TrampolineErrorEnum::Return,
+        })),
+        x if x == TrampolineErrorEXIT => Err(Error::host(TrampolineError {
+            error: TrampolineErrorEnum::Exit {
+                code: result.result,
+            },
+        })),
+        _ => Err(Error::host(TrampolineError {
+            error: TrampolineErrorEnum::Unrecoverable,
+        })),
     }
 }

@@ -9,17 +9,22 @@
 
 namespace hogd {
 
+namespace {
+
 SystemCallHandler *ctx_check =
     reinterpret_cast<SystemCallHandler *>(0xAABBCCDD'EEFF0011);
 
-HostFnStatus<uint64_t>
+HostFnResult
 foo(HostCallContext *ctx, uint64_t value)
 {
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
   EXPECT_TRUE(value == 12);
-  return 15;
+  return {HostFnErrorCode::kNoneOrRecoverable, 15};
 }
 
+} // namespace
+
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(WasmRuntimeTest, CheckCtxCorrect)
 {
   auto c = test::load_wasm_from_file("test_invoke.wasm");
@@ -35,5 +40,6 @@ TEST(WasmRuntimeTest, CheckCtxCorrect)
   EXPECT_TRUE(!!res.result);
   EXPECT_EQ(*res.result, 15U);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

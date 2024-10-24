@@ -74,7 +74,7 @@ impl WasmiContext {
         match self.linker.func_wrap(
             import_name,
             fn_name,
-            move |caller: Caller<'_, *mut c_void>| -> Result<u64, wasmi::Error> {
+            move |caller: Caller<'_, *mut c_void>| -> Result<i32, wasmi::Error> {
 
                 let res = unsafe {
                     external_call::c_call_0args(x.clone().fn_pointer, caller.data().clone())
@@ -102,7 +102,7 @@ impl WasmiContext {
             fn_name,
             move |caller: Caller<'_, *mut c_void>,
                   arg1: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_1args(
                         x.clone().fn_pointer,
@@ -135,7 +135,7 @@ impl WasmiContext {
             move |caller: Caller<'_, *mut c_void>,
                   arg1: u64,
                   arg2: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_2args(
                         x.clone().fn_pointer,
@@ -169,7 +169,7 @@ impl WasmiContext {
                   arg1: u64,
                   arg2: u64,
                   arg3: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_3args(
                         x.clone().fn_pointer,
@@ -205,7 +205,7 @@ impl WasmiContext {
                   arg2: u64,
                   arg3: u64,
                   arg4: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_4args(
                         x.clone().fn_pointer,
@@ -243,7 +243,7 @@ impl WasmiContext {
                   arg3: u64,
                   arg4: u64,
                   arg5: u64|
-                  -> Result<u64, wasmi::Error> {
+                  -> Result<i32, wasmi::Error> {
                 let res = unsafe {
                     external_call::c_call_5args(
                         x.clone().fn_pointer,
@@ -253,6 +253,135 @@ impl WasmiContext {
                         arg3,
                         arg4,
                         arg5,
+                    )
+                };
+                return external_call::handle_trampoline_error(res);
+            },
+        ) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn link_function_6args(
+        &mut self,
+        fn_pointer: *mut c_void,
+        import_name: &str,
+        fn_name: &str,
+    ) -> Result<(), Error> {
+        let x = BorrowBypass {
+            fn_pointer: fn_pointer.clone(),
+        };
+
+        match self.linker.func_wrap(
+            import_name,
+            fn_name,
+            move |caller: Caller<'_, *mut c_void>,
+                  arg1: u64,
+                  arg2: u64,
+                  arg3: u64,
+                  arg4: u64,
+                  arg5: u64,
+                  arg6: u64|
+                  -> Result<i32, wasmi::Error> {
+                let res = unsafe {
+                    external_call::c_call_6args(
+                        x.clone().fn_pointer,
+                        caller.data().clone(),
+                        arg1,
+                        arg2,
+                        arg3,
+                        arg4,
+                        arg5,
+                        arg6,
+                    )
+                };
+                return external_call::handle_trampoline_error(res);
+            },
+        ) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn link_function_7args(
+        &mut self,
+        fn_pointer: *mut c_void,
+        import_name: &str,
+        fn_name: &str,
+    ) -> Result<(), Error> {
+        let x = BorrowBypass {
+            fn_pointer: fn_pointer.clone(),
+        };
+
+        match self.linker.func_wrap(
+            import_name,
+            fn_name,
+            move |caller: Caller<'_, *mut c_void>,
+                  arg1: u64,
+                  arg2: u64,
+                  arg3: u64,
+                  arg4: u64,
+                  arg5: u64,
+                  arg6: u64,
+                  arg7: u64|
+                  -> Result<i32, wasmi::Error> {
+                let res = unsafe {
+                    external_call::c_call_7args(
+                        x.clone().fn_pointer,
+                        caller.data().clone(),
+                        arg1,
+                        arg2,
+                        arg3,
+                        arg4,
+                        arg5,
+                        arg6,
+                        arg7,
+                    )
+                };
+                return external_call::handle_trampoline_error(res);
+            },
+        ) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn link_function_8args(
+        &mut self,
+        fn_pointer: *mut c_void,
+        import_name: &str,
+        fn_name: &str,
+    ) -> Result<(), Error> {
+        let x = BorrowBypass {
+            fn_pointer: fn_pointer.clone(),
+        };
+
+        match self.linker.func_wrap(
+            import_name,
+            fn_name,
+            move |caller: Caller<'_, *mut c_void>,
+                  arg1: u64,
+                  arg2: u64,
+                  arg3: u64,
+                  arg4: u64,
+                  arg5: u64,
+                  arg6: u64,
+                  arg7: u64,
+                  arg8: u64|
+                  -> Result<i32, wasmi::Error> {
+                let res = unsafe {
+                    external_call::c_call_8args(
+                        x.clone().fn_pointer,
+                        caller.data().clone(),
+                        arg1,
+                        arg2,
+                        arg3,
+                        arg4,
+                        arg5,
+                        arg6,
+                        arg7,
+                        arg8,
                     )
                 };
                 return external_call::handle_trampoline_error(res);
@@ -309,6 +438,9 @@ pub extern "C" fn wasmi_link_nargs(
         3 => c.link_function_3args(function_pointer, &module, &method),
         4 => c.link_function_4args(function_pointer, &module, &method),
         5 => c.link_function_5args(function_pointer, &module, &method),
+        6 => c.link_function_6args(function_pointer, &module, &method),
+        7 => c.link_function_7args(function_pointer, &module, &method),
+        8 => c.link_function_8args(function_pointer, &module, &method),
         _ => {
             return false;
         }
