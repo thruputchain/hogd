@@ -11,12 +11,20 @@ namespace hogd
 
   enum StorageRPCError {
     kNone = 0,
+    // Query went to the wrong database shard
     kWrongShard = 1,
+    // try_reserve_delta failed on some delta.  The rpc should be a no-op
     kApplyFailed = 2,
+    // Mismatch between the supplied expected block header and the actual header
     kOutOfDateBlockHeader = 3,
+    // Lookup on key that does not exist in database
     kAddressAndKeyNExist = 4,
+    // Lookup on contract that does not exist in database
     kContractNExist = 5,
+    // Lookup deployment of contract on address that has no deployed contract
     kNoContractDeployed = 6,
+    // Returned object is stripped (minimized)
+    kObjectReturnStripped = 7,
   };
 
   struct StorageDeltaVec {
@@ -30,6 +38,8 @@ namespace hogd
   {
   case kNone:
     StorageObject object;
+  case kObjectReturnStripped:
+    StrippedStorageObject stripped_object;
   default:
     void;
   };
@@ -59,8 +69,8 @@ namespace hogd
       // - try_commit(delta)
       // - if the transaction fails: revert(delta)
       // - if the transaction succees: commit(delta)
-      // This is more messages than is necessary---some delta types
-      // can skip some of these steps.
+      // This is more messages than is necessary---some delta types 
+      // might be able to skip some of these steps.
 
       // Try to commit a vector of StorageDeltas.
       // All of the deltas should belong to the server.

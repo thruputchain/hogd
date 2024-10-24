@@ -7,12 +7,36 @@ namespace hogd
 
   typedef opaque Bytestring<kBytestringMaxLen>;
 
+  struct BoundedHashsetEntry {
+    unsigned hyper threshold;
+    SHA256Hash hash;
+  };
+
+  struct BoundedHashset {
+    unsigned int max_size;
+    BoundedHashsetEntry entries<>;
+  };
+
   union StorageObject switch (StorageObjectType type)
   {
   case kBytestring:
     Bytestring bytestring;
   case kNonnegativeInt64:
     hyper int64;
+  case kBoundedHashset:
+    BoundedHashset hashset;
+  };
+
+  // Things to do: figure out which info is stripped, when, and how that
+  // is signalled to rpc caller
+  union StrippedStorageObject switch (StorageObjectType type)
+  {
+  case kBytestring:
+    Bytestring bytestring;
+  case kNonnegativeInt64:
+    hyper int64;
+  case kBoundedHashset:
+    BoundedHashset hashset;
   };
 
   enum StorageDeltaType {
