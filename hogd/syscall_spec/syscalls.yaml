@@ -63,7 +63,8 @@ syscalls:
       - name: "status"
         fixed_size: Yes
         typename: "StorageObjectType"
-        primitive_type: No
+        primitive_type: yes
+        rust_typename: "i32"
     number: 5
   - name: "DeleteLast"
     needs_context: yes
@@ -305,3 +306,6 @@ errors:
   - name: "SignatureVerificationFailed"
     number: 16
     doc: "Signature verification failed"
+  - name: "UnknownEnumVariant"
+    number: 17
+    doc: "Syscall returned an enum variant unrecognized by this contract"

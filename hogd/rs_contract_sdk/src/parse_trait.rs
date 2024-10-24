@@ -46,7 +46,7 @@ impl ParseableOwned for Box<[u8]> {
 }
 
 /*
-Infuriating: the following does NOT work in rust, because they decided not to implement it
+sad: the following does NOT work in rust, because they decided not to implement it
 and stackoverflow commenters say its too much work
 impl<T : GenericInt> ParseableOwned for T {
     fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
@@ -124,7 +124,7 @@ macro_rules! impl_generic_int {
     )*)
 }
 
-impl_generic_int! {i8 i16 i32 i64 u8 u16 u32 u64}
+impl_generic_int! {i8 i16 i32 i64 i128 u8 u16 u32 u64 u128}
 
 impl<const N: usize> ParseableOwned for [u8; N] {
     fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
@@ -216,9 +216,9 @@ impl<T: OutputReturnable> OutputReturnable for Option<T> {
     }
 }
 
-impl<'a> Parseable<'a> for &'a StorageKey {
+impl<'a, const N : usize> Parseable<'a> for &'a [u8; N] {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
-        let out: &'a StorageKey = match (match arg.get(..32) {
+        let out: &'a [u8; N] = match (match arg.get(..N) {
             Some(x) => x,
             None => Exit(SyscallErrorCode::kCalldataParseError as i32),
         })
@@ -227,28 +227,28 @@ impl<'a> Parseable<'a> for &'a StorageKey {
             Ok(x) => x,
             Err(_) => Exit(SyscallErrorCode::kCalldataParseError as i32),
         };
-        (out, 32)
+        (out, N)
     }
 }
 
-impl Serializable for &StorageKey {
+impl<const N: usize> Serializable for &[u8; N] {
     fn serialize_len(&self) -> usize {
-        32
+        N
     }
 
     fn do_serialize(
         &self,
         slice: &mut [MaybeUninit<u8>],
     ) -> Result<usize, i32> {
-        debug_assert!(slice.len() == 32);
+        debug_assert!(slice.len() == N);
         unsafe {
             core::ptr::copy_nonoverlapping(
                 self.as_ptr(),
                 MaybeUninit::slice_as_mut_ptr(slice),
-                32,
+                N,
             );
         }
-        Ok(32)
+        Ok(N)
     }
 }
 

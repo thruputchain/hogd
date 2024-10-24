@@ -440,8 +440,7 @@ def gen_rs_syscall_binding(syscall):
         return Err(err);
     }
 
-    Ok(())
-"""
+    Ok(())"""
 
   if "returns" in syscall and not syscall["returns"]:
     syscall_return_type = "!"
