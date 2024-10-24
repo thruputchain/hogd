@@ -4,15 +4,15 @@
 #[repr(u8)]
 pub enum InvokeError {
     None = 0,
-    DeterministicError = 1,
-    OutOfGasError = 2,
-    UnrecoverableSystemError = 3,
+    Deterministic = 1,
+    OutOfGas = 2,
+    Unrecoverable = 3,
 }
 
 #[repr(C)]
 pub struct WasmiInvokeResult {
     result: i32,
-    error: u8, // WasmiInvokeError
+    error: u8, // InvokeError
 }
 
 impl WasmiInvokeResult {
