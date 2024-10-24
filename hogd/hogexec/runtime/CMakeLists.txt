@@ -69,15 +69,12 @@ add_executable(
   erc20_test.cc
   erc20_test_utils.cc
 )
-<<<<<<< HEAD
 
-=======
 target_link_libraries(
   runtime
   wasmi_lib
   protocol
 )
->>>>>>> main
 target_link_libraries(
   runtime_test
   runtime

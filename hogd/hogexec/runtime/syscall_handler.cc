@@ -56,7 +56,7 @@ SystemCallHandler::root_invoke()
 
   if (!runtime) {
     return InvokeResult{.result =
-                            InvokeError{InvokeErrorCode::kDeterministicError},
+                            InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed = 0};
   }
 
@@ -70,7 +70,7 @@ SystemCallHandler::root_invoke()
   // return nonzero error code on root invocation => contract error
   if (*res.result != 0) {
     return InvokeResult{.result =
-                            InvokeError{InvokeErrorCode::kDeterministicError},
+                            InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed = res.gas_consumed};
   }
   return res;
@@ -87,7 +87,7 @@ SystemCallHandler::get_current_address() const
 SHA256Hash
 SystemCallHandler::get_source_tx_hash() const
 {
-  auto buf = x23::serialize(signed_tx_.tx);
+  auto buf = x23::serialize(signed_tx_);
   return sha256(std::as_bytes(std::span(buf)));
 }
 
@@ -112,16 +112,16 @@ convert_invoke_result_to_host_fn_result(InvokeResult const &result)
     using enum InvokeErrorCode;
 
     switch (result.result.error().code()) {
-    case kUnrecoverableSystemError:
-      return {HostFnError{HostFnErrorCode::kUnrecoverableUnknown},
+    case kUnrecoverable:
+      return {HostFnError{HostFnErrorCode::kUnrecoverable},
               result.gas_consumed};
-    case kDeterministicError:
+    case kDeterministic:
       // i.e. trap within Wasmi
       return {SyscallErrorCode::kDeterministicWasmError, result.gas_consumed};
-    case kOutOfGasError:
+    case kOutOfGas:
       return {HostFnError{HostFnErrorCode::kOutOfGas}, result.gas_consumed};
     default:
-      return {HostFnError{HostFnErrorCode::kUnrecoverableUnknown},
+      return {HostFnError{HostFnErrorCode::kUnrecoverable},
               result.gas_consumed};
     }
     // unreachable

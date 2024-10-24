@@ -1,6 +1,5 @@
 namespace hogd {
 
-<<<<<<< HEAD
 typedef unsigned int RuntimeMemoryOffset; // uint32_t
 typedef unsigned int RuntimeMemoryLength; // uint32_t
 
@@ -9,8 +8,6 @@ typedef unsigned int MethodID;    // uint32_t
 
 enum StorageObjectType { kBytestring = 0, kNonnegativeInt64 = 1 };
 
-=======
->>>>>>> main
 typedef opaque uint128_xdr[16];
 typedef opaque uint256_xdr[32];
 
@@ -22,7 +19,6 @@ enum CryptographicScheme {
   Ed25519 = 0,
 };
 
-<<<<<<< HEAD
 union Signature switch (CryptographicScheme scheme)
 {
 case Ed25519:
@@ -39,24 +35,6 @@ union SecretKey switch (CryptographicScheme scheme)
 {
 case Ed25519:
   Ed25519SecretKey ed25519;
-=======
-union Signature switch (CryptographicScheme type)
-{
-case Ed25519:
-  Ed25519Signature ed25519_signature;
-};
-
-union PublicKey switch (CryptographicScheme type)
-{
-case Ed25519:
-  Ed25519PublicKey ed25519_publickey;
-};
-
-union SecretKey switch (CryptographicScheme type)
-{
-case Ed25519:
-  Ed25519SecretKey ed25519_secretkey;
->>>>>>> main
 };
 
 union ExtensionPoint switch (int v)
