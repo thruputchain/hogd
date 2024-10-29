@@ -19,3 +19,6 @@ add_dependencies(hogd libsodium)
 # Then build the modules for the hogdb and hogexec executables
 add_subdirectory(hogdb)
 add_subdirectory(hogexec)
+
+# Not sure where softstate goes
+add_subdirectory(softstate)
