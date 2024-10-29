@@ -129,8 +129,7 @@ template<typename T> struct ThreadlocalRoundAllocator {
 
 // 0 is nullptr (anything less than kLineIndexMask is nullptr)
 
-template<typename T, bool VerifyAllocations = false>
-class ShortRoundAllocator {
+template<typename T, bool VerifyAllocations = false> class ShortRoundAllocator {
 public:
   constexpr static uint32_t kAllocationLineSize =
       detail::AllocationLine<T>::kAllocationLineSize;

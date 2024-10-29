@@ -91,14 +91,14 @@ namespace {
 
 // Inside this allocator is a threadlocal free list.
 // Frees are deferred to the end of the round.
-// WARNING: when a thread terminates, its threadlocal allocations (on its
-// freelist) are not garbage collected.  This should only be accessed by a
-// static set of worker threads.
+// WARNING: when a thread terminates, its threadlocal allocations are not
+// immediately garbage collected.  This should only be accessed by a static set
+// of worker threads.
 //
-// These freelists do not steal from each other.  I expect worker threads to
-// receive work schedules in a roungly evenly distributed way, so the size of
-// each freelist (roughly speaking, the number of times a thread first touches a
-// storage object in a round) should not vary too much across threads.
+// These threadlocal allocations do not steal from each other.  I expect worker
+// threads to receive work schedules in a roungly evenly distributed way, so the
+// size of each freelist (roughly speaking, the number of times a thread first
+// touches a storage object in a round) should not vary too much across threads.
 ShortRoundAllocator<variant_t> allocator;
 
 bool
@@ -366,7 +366,6 @@ StorageObjectFrame::revert_nnint64_set_add(int64_t add_value)
 StorageReserveResult
 StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
 {
-
   switch (delta.type()) {
   case StorageDeltaType::kDeleteLast:
     return StorageReserveResult::kSuccess;
