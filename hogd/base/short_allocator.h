@@ -20,7 +20,7 @@ struct DeferrableFreeList {
 
   uint64_t freed_round_number_ = 0;
 
-  void deferred_free(uint32_t ptr) { deferred_free_indices_.push_back(ptr); }
+  void deferred_free(uint32_t ptr) noexcept { deferred_free_indices_.push_back(ptr); }
 
   // idempotent with same argument
   void release_deferred_frees(uint64_t round)

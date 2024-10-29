@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <optional>
 #include <variant>
 
@@ -145,7 +146,7 @@ get_variant_arm_unchecked(std::atomic<uint64_t> &atomic_tag_and_ptr)
 }
 
 void
-free_variant(std::atomic<uint64_t> &atomic_tag_and_ptr)
+free_variant(std::atomic<uint64_t> &atomic_tag_and_ptr) noexcept
 {
   uint64_t tag_and_ptr = atomic_tag_and_ptr.load(std::memory_order_relaxed);
 
