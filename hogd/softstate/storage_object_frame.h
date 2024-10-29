@@ -57,6 +57,8 @@ private:
   void revert_bytestring_set();
   void revert_nnint64_set_add(int64_t add_value);
 
+  bool type_guard(StorageObjectType expected_type) const;
+
   void clear_modifications();
 };
 

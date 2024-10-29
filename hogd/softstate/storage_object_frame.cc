@@ -265,9 +265,21 @@ StorageObjectFrame::StorageObjectFrame(
   : committed_base_object_(snapshot_state), deleted_last_(false)
 {}
 
+bool
+StorageObjectFrame::type_guard(StorageObjectType expected_type) const
+{
+  if (committed_base_object_) {
+    return committed_base_object_->type() == expected_type;
+  }
+  return true;
+}
+
 StorageReserveResult
 StorageObjectFrame::try_reserve_bytestring_set(Bytestring const &bytestring_set)
 {
+  if (!type_guard(StorageObjectType::kBytestring)) {
+    return StorageReserveResult::kDefiniteFailure;
+  }
 
   if ([[maybe_unused]] auto *args =
           try_set_variant<BytestringArgs>(delta_tag_and_ptr_, bytestring_set)) {
@@ -288,6 +300,9 @@ StorageReserveResult
 StorageObjectFrame::try_reserve_nnint64_set_add(int64_t set_value,
                                                 int64_t add_value)
 {
+  if (!type_guard(StorageObjectType::kNonnegativeInt64)) {
+    return StorageReserveResult::kDefiniteFailure;
+  }
 
   if (auto *args =
           try_set_variant<NNInt64SetAddArgs>(delta_tag_and_ptr_, set_value)) {
