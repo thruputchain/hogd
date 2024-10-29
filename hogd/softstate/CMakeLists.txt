@@ -1,6 +1,5 @@
 add_library(
   softstate
-  delta_class_checker.cc
   storage_object_frame.cc
   local_softstate_map.cc
 )
@@ -14,6 +13,7 @@ target_link_libraries(
 add_executable(
   softstate_test
   test_atomic_uint128.cc
+  test_storage_object_frame.cc
 )
 
 target_link_libraries(

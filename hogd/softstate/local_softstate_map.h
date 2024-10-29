@@ -28,6 +28,7 @@ public:
 
 private:
   x23::MVar<std::map<AddressAndKey, StorageObjectFrame>> map_;
+  uint64_t round_number_ = 0;
 };
 
 class LocalContractMap {

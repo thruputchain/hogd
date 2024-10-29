@@ -216,7 +216,7 @@ impl<T: OutputReturnable> OutputReturnable for Option<T> {
     }
 }
 
-impl<'a, const N : usize> Parseable<'a> for &'a [u8; N] {
+impl<'a, const N: usize> Parseable<'a> for &'a [u8; N] {
     fn parse_from(arg: &'a [u8]) -> (Self, usize) {
         let out: &'a [u8; N] = match (match arg.get(..N) {
             Some(x) => x,

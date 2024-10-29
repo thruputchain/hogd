@@ -6,7 +6,11 @@ typedef unsigned int RuntimeMemoryLength; // uint32_t
 typedef unsigned hyper GasAmount; // uint64_t
 typedef unsigned int MethodID;    // uint32_t
 
-enum StorageObjectType { kBytestring = 0, kNonnegativeInt64 = 1, kBoundedHashset = 2 };
+enum StorageObjectType {
+  kBytestring = 0,
+  kNonnegativeInt64 = 1,
+  kBoundedHashset = 2
+};
 
 typedef opaque uint128_xdr[16];
 typedef opaque uint256_xdr[32];

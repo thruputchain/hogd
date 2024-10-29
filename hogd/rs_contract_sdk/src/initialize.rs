@@ -7,8 +7,11 @@ const INITIALIZE_GUARD_KEY: StorageKey =
 
 // a function that can only execute on one transaction, ever
 pub fn initialization_guard() {
-    let mut has_key_res : i32 = 0;
-    match crate::syscall_bindings::raw_HasKey(&INITIALIZE_GUARD_KEY, &mut has_key_res) {
+    let mut has_key_res: i32 = 0;
+    match crate::syscall_bindings::raw_HasKey(
+        &INITIALIZE_GUARD_KEY,
+        &mut has_key_res,
+    ) {
         Err(x) => {
             if x != rs_xdr::SyscallErrorCode::kStorageKeyNExist as i32 {
                 trap();

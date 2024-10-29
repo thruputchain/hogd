@@ -11,13 +11,11 @@ pub fn HasKey(key: &StorageKey) -> Result<StorageObjectType, i32> {
     match result {
         x if x == StorageObjectType::kBytestring as i32 => {
             return Ok(StorageObjectType::kBytestring);
-        },
+        }
         x if x == StorageObjectType::kNonnegativeInt64 as i32 => {
             return Ok(StorageObjectType::kNonnegativeInt64)
-        },
-        _ => {
-            return Err(rs_xdr::SyscallErrorCode::kUnknownEnumVariant as i32)
         }
+        _ => return Err(rs_xdr::SyscallErrorCode::kUnknownEnumVariant as i32),
     }
 }
 

@@ -69,7 +69,7 @@ namespace hogd
       // - try_commit(delta)
       // - if the transaction fails: revert(delta)
       // - if the transaction succees: commit(delta)
-      // This is more messages than is necessary---some delta types 
+      // This is more messages than is necessary---some delta types
       // might be able to skip some of these steps.
 
       // Try to commit a vector of StorageDeltas.
