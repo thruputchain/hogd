@@ -11,7 +11,56 @@
 
 namespace hogd {
 
+// Allocator for short-lived objects using 32-bit pointers.
+// Each thread reserves a threadlocal set of allocation buffers,
+// allocating from its active buffer by incrementing a counter.
+// Threads receive additional buffers when they exhaust what they have.
+//
+// Each 32-bit pointer is decomposable into a 15-bit buffer index,
+// and a 17-bit offset into a buffer (these choices are arbitrary).
+//
+// This design relies on a monotonically-increasing ``round counter''.
+// All allocated objects are freed when this round counter increases.
+//
+// TODO(geoff): Investigate whether deferring destructors until the end
+// causes a latency problem.
 namespace detail {
+
+struct AllocationVerifier {
+  std::set<uint32_t> allocated_ptrs;
+  std::mutex mtx;
+
+  void free(uint32_t ptr)
+  {
+    std::lock_guard lock(mtx);
+    if (!allocated_ptrs.contains(ptr)) {
+      throw std::runtime_error("double free on short ptr");
+    }
+    allocated_ptrs.erase(ptr);
+  }
+
+  void alloc(uint32_t ptr)
+  {
+    std::lock_guard lock(mtx);
+
+    if (allocated_ptrs.contains(ptr)) {
+      throw std::runtime_error("double allocation on short ptr");
+    }
+
+    allocated_ptrs.insert(ptr);
+  }
+
+  void check_get(uint32_t ptr)
+  {
+    std::lock_guard lock(mtx);
+
+    if (!allocated_ptrs.contains(ptr)) {
+      throw std::runtime_error("invalid access on short ptr");
+    }
+  }
+};
+
+struct EmptyVerifier {};
 
 template<typename T> struct AllocationLine {
   T *ptr;
@@ -22,7 +71,15 @@ template<typename T> struct AllocationLine {
   constexpr static uint32_t kAllocationLineSize = static_cast<uint32_t>(1)
                                                   << kAllocationLineBits;
 
-  void reset() { alloc_offset = 0; }
+  void reset()
+  {
+    if constexpr (!std::is_trivially_destructible_v<T>) {
+      for (uint32_t idx = 0; idx < alloc_offset; idx++) {
+        std::destroy_at(ptr + idx);
+      }
+    }
+    alloc_offset = 0;
+  }
 
   uint32_t alloc()
   {
@@ -69,7 +126,8 @@ template<typename T> struct ThreadlocalRoundAllocator {
 
 // 0 is nullptr (anything less than kLineIndexMask is nullptr)
 
-template<typename T> class ShortRoundAllocator {
+template<typename T, bool kVerifyAllocations = false>
+class ShortRoundAllocator {
 public:
   constexpr static uint32_t kAllocationLineSize =
       detail::AllocationLine<T>::kAllocationLineSize;
@@ -87,13 +145,17 @@ public:
       return nullptr;
     }
 
+    if constexpr (kVerifyAllocations) {
+      verifier_.check_get(ptr);
+    }
+
     T *line = reinterpret_cast<T *>(get_line(ptr));
     return &(line[ptr & kLineIndexMask]);
   }
 
   template<typename... Args> std::pair<uint32_t, T *> allocate_new(Args... args)
   {
-    auto res = free_list_.allocate();
+    auto res = threadlocal_allocator_.allocate();
     if (res == 0) {
 
       uint32_t next_line =
@@ -103,10 +165,15 @@ public:
       auto *new_line = reinterpret_cast<T *>(make_new_line());
       lines_[(next_line >> kAllocationLineBits) - 1].store(
           new_line, std::memory_order_release);
-      free_list_.add_new_line(
+      threadlocal_allocator_.add_new_line(
           detail::AllocationLine{.ptr = new_line, .line_highbits = next_line});
 
-      res = free_list_.allocate();
+      res = threadlocal_allocator_.allocate();
+      assert(res != 0);
+    }
+
+    if constexpr (kVerifyAllocations) {
+      verifier_.alloc(res);
     }
 
     T *arg = get(res);
@@ -118,17 +185,16 @@ public:
     return {res, arg};
   }
 
-  void deferred_free(uint32_t ptr)
-  {
-    if constexpr (!std::is_trivially_destructible_v<T>) {
-      auto *full_ptr = get(ptr);
-      std::destroy_at(full_ptr);
-    }
-  }
-
   void release_deferred_frees(uint64_t round)
   {
-    free_list_.release_deferred_frees(round);
+    threadlocal_allocator_.release_deferred_frees(round);
+  }
+
+  void deferred_free(uint32_t ptr)
+  {
+    if constexpr (kVerifyAllocations) {
+      verifier_.free(ptr);
+    }
   }
 
 private:
@@ -143,7 +209,14 @@ private:
   std::atomic<uint32_t> next_line_highbits_ = kLineIndexHighbitsIncrement;
   std::array<std::atomic<void *>, 32768> lines_; // 2^15
 
-  inline static thread_local detail::ThreadlocalRoundAllocator<T> free_list_;
+  inline static thread_local detail::ThreadlocalRoundAllocator<T>
+      threadlocal_allocator_;
+
+  using verifier_t =
+      std::conditional_t<kVerifyAllocations, detail::AllocationVerifier,
+                         detail::EmptyVerifier>;
+
+  verifier_t verifier_;
 };
 
 } // namespace hogd
