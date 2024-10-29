@@ -109,6 +109,7 @@ template<typename T> struct ThreadlocalRoundAllocator {
       for (auto &line : lines_) {
         line.reset();
       }
+      freed_round_number_ = round;
     }
   }
 
