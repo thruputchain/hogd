@@ -129,7 +129,7 @@ template<typename T> struct ThreadlocalRoundAllocator {
 
 // 0 is nullptr (anything less than kLineIndexMask is nullptr)
 
-template<typename T, bool kVerifyAllocations = false>
+template<typename T, bool VerifyAllocations = false>
 class ShortRoundAllocator {
 public:
   constexpr static uint32_t kAllocationLineSize =
@@ -148,7 +148,7 @@ public:
       return nullptr;
     }
 
-    if constexpr (kVerifyAllocations) {
+    if constexpr (VerifyAllocations) {
       verifier_.check_get(ptr);
     }
 
@@ -175,7 +175,7 @@ public:
       assert(res != 0);
     }
 
-    if constexpr (kVerifyAllocations) {
+    if constexpr (VerifyAllocations) {
       verifier_.alloc(res);
     }
 
@@ -195,7 +195,7 @@ public:
 
   void deferred_free(uint32_t ptr)
   {
-    if constexpr (kVerifyAllocations) {
+    if constexpr (VerifyAllocations) {
       if (ptr) {
         verifier_.free(ptr);
       }
@@ -218,7 +218,7 @@ private:
       threadlocal_allocator_;
 
   using verifier_t =
-      std::conditional_t<kVerifyAllocations, detail::AllocationVerifier,
+      std::conditional_t<VerifyAllocations, detail::AllocationVerifier,
                          detail::EmptyVerifier>;
 
   verifier_t verifier_;
