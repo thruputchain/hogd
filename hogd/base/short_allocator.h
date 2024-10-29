@@ -6,42 +6,62 @@
 #include <cstdint>
 #include <mutex>
 #include <set>
+#include <type_traits>
 #include <vector>
-
-#include "hogd/base/compiler.h"
 
 namespace hogd {
 
 namespace detail {
 
-struct DeferrableFreeList {
-  std::vector<uint32_t> free_indices_;
-  std::vector<uint32_t> deferred_free_indices_;
+template<typename T> struct AllocationLine {
+  T *ptr;
+  const uint32_t line_highbits;
+  uint32_t alloc_offset = 0;
+
+  constexpr static uint32_t kAllocationLineBits = 17;
+  constexpr static uint32_t kAllocationLineSize = static_cast<uint32_t>(1)
+                                                  << kAllocationLineBits;
+
+  void reset() { alloc_offset = 0; }
+
+  uint32_t alloc()
+  {
+    uint32_t offset = alloc_offset;
+    alloc_offset++;
+
+    assert(alloc_offset <= kAllocationLineSize);
+
+    return line_highbits + offset;
+  }
+
+  bool full() const { return alloc_offset == kAllocationLineSize; }
+};
+
+template<typename T> struct ThreadlocalRoundAllocator {
+  std::vector<AllocationLine<T>> lines_;
 
   uint64_t freed_round_number_ = 0;
-
-  void deferred_free(uint32_t ptr) noexcept { deferred_free_indices_.push_back(ptr); }
 
   // idempotent with same argument
   void release_deferred_frees(uint64_t round)
   {
     if (round > freed_round_number_) {
-      freed_round_number_ = round;
-      free_indices_.insert(free_indices_.end(), deferred_free_indices_.begin(),
-                           deferred_free_indices_.end());
-      deferred_free_indices_.clear();
+      for (auto &line : lines_) {
+        line.reset();
+      }
     }
   }
 
+  void add_new_line(AllocationLine<T> line) { lines_.push_back(line); }
+
   uint32_t allocate()
   {
-    if (free_indices_.empty()) {
-      return 0;
+    for (auto &line : lines_) {
+      if (!line.full()) {
+        return line.alloc();
+      }
     }
-
-    uint32_t back = free_indices_.back();
-    free_indices_.pop_back();
-    return back;
+    return 0;
   }
 };
 
@@ -51,10 +71,15 @@ struct DeferrableFreeList {
 
 template<typename T> class ShortRoundAllocator {
 public:
-  constexpr static uint32_t kAllocationLineSize = static_cast<uint32_t>(1)
-                                                  << 17;
-  // 2^(ceil(log2(kAllocationLineSize))) - 1
-  constexpr static uint32_t kLineIndexMask = kAllocationLineSize - 1;
+  constexpr static uint32_t kAllocationLineSize =
+      detail::AllocationLine<T>::kAllocationLineSize;
+  constexpr static uint32_t kAllocationLineBits =
+      detail::AllocationLine<T>::kAllocationLineBits;
+
+  constexpr static uint32_t kLineIndexMask =
+      (static_cast<uint32_t>(1) << kAllocationLineBits) - 1;
+  constexpr static uint32_t kLineIndexHighbitsIncrement =
+      static_cast<uint32_t>(1) << kAllocationLineBits;
 
   T *get(uint32_t ptr)
   {
@@ -70,7 +95,18 @@ public:
   {
     auto res = free_list_.allocate();
     if (res == 0) {
-      res = next_.fetch_add(1, std::memory_order_relaxed);
+
+      uint32_t next_line =
+          next_line_highbits_.fetch_add(kLineIndexHighbitsIncrement,
+                                        std::memory_order_relaxed);
+
+      auto *new_line = reinterpret_cast<T *>(make_new_line());
+      lines_[(next_line >> kAllocationLineBits) - 1].store(
+          new_line, std::memory_order_release);
+      free_list_.add_new_line(
+          detail::AllocationLine{.ptr = new_line, .line_highbits = next_line});
+
+      res = free_list_.allocate();
     }
 
     T *arg = get(res);
@@ -82,7 +118,13 @@ public:
     return {res, arg};
   }
 
-  void deferred_free(uint32_t ptr) { free_list_.deferred_free(ptr); }
+  void deferred_free(uint32_t ptr)
+  {
+    if constexpr (!std::is_trivially_destructible_v<T>) {
+      auto *full_ptr = get(ptr);
+      std::destroy_at(full_ptr);
+    }
+  }
 
   void release_deferred_frees(uint64_t round)
   {
@@ -94,30 +136,14 @@ private:
 
   void *get_line(uint32_t get_ptr)
   {
-    auto &line_ptr = lines_[(get_ptr >> 17) - 1];
-    void *new_ptr = nullptr;
-
-    auto *ptr = line_ptr.load(std::memory_order_relaxed);
-    while (true) {
-      if (ptr) {
-        free(new_ptr);
-        return ptr;
-      }
-      if (new_ptr == nullptr) {
-        new_ptr = make_new_line();
-      }
-      if (line_ptr.compare_exchange_strong(ptr, new_ptr,
-                                           std::memory_order_release)) {
-        return new_ptr;
-      }
-      cpu_relax();
-    }
+    return lines_[(get_ptr >> kAllocationLineBits) - 1].load(
+        std::memory_order_relaxed);
   }
 
-  std::atomic<uint32_t> next_ = kLineIndexMask + 1;
+  std::atomic<uint32_t> next_line_highbits_ = kLineIndexHighbitsIncrement;
   std::array<std::atomic<void *>, 32768> lines_; // 2^15
 
-  inline static thread_local detail::DeferrableFreeList free_list_;
+  inline static thread_local detail::ThreadlocalRoundAllocator<T> free_list_;
 };
 
 } // namespace hogd
