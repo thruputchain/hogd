@@ -196,7 +196,9 @@ public:
   void deferred_free(uint32_t ptr)
   {
     if constexpr (kVerifyAllocations) {
-      verifier_.free(ptr);
+      if (ptr) {
+        verifier_.free(ptr);
+      }
     }
   }
 
