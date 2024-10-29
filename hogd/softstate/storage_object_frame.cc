@@ -267,7 +267,7 @@ StorageObjectFrame::try_reserve_bytestring_set(Bytestring const &bytestring_set)
 
   if ([[maybe_unused]] auto *args =
           try_set_variant<BytestringArgs>(delta_tag_and_ptr_, bytestring_set)) {
-    assert(args->bytestring_set == bytestring_set);
+    assert(args->bytestring_set_ == bytestring_set);
 
     return StorageReserveResult::kSuccess;
   }
