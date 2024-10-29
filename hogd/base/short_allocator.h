@@ -156,6 +156,8 @@ public:
     return &(line[ptr & kLineIndexMask]);
   }
 
+  // Returns both the short ptr and an actual pointer to the newly-constructed object.
+  // (the short pointer cannot be easily recovered from the actual pointer)
   template<typename... Args> std::pair<uint32_t, T *> allocate_new(Args... args)
   {
     auto res = threadlocal_allocator_.allocate();
@@ -188,11 +190,13 @@ public:
     return {res, arg};
   }
 
+  // Release deferred-free objects for the current thread.
   void release_deferred_frees(uint64_t round)
   {
     threadlocal_allocator_.release_deferred_frees(round);
   }
 
+  // no-op, but the calls are left in for debugging purposes
   void deferred_free(uint32_t ptr)
   {
     if constexpr (VerifyAllocations) {
