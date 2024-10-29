@@ -68,19 +68,33 @@ using variant_t = std::variant<BytestringArgs, NNInt64SetAddArgs>;
 
 // delta_tag_and_ptr_ stores a <tag: 32 bits, ptr: 32 bits> pair.
 // ptr is controlled and dereferenced within allocator.
-// Tag controls concurrent access to ptr, and is essentially a reference count.
+// Tag controls concurrent access to ptr, and acts as a reference count.
 // Tag has the following format: [finalized, 1 bit | number of concurrent,
-// unfinished mod count: 31 bits] try_reserve increments the unfinished mod
-// count, commit sets the finalized bit, and rewind reduces the unfinished mod
-// count, if finalized is unset. If a thread decrements the unfinished mod count
-// to 0, then it clears the ptr. Threads set the ptr to whatever their
-// modification needs if the unfinished mod count is 0. Otherwise, they either
-// proceed or abort immediately (based on whether the ptr that is present
+// unfinished mod count: 31 bits] 
+// 
+// try_reserve increments the unfinished mod count, commit sets the finalized bit, 
+// and rewind reduces the unfinished mod count, if finalized is unset. 
+//
+// If a thread decrements the unfinished mod count
+// to 0, then it clears the ptr.  (This is why calling revert() before try_reserve is bad).
+// 
+// Threads set the ptr to whatever their modification needs if the unfinished mod count is 0. 
+// 
+// Otherwise, they either proceed or abort immediately (based on whether the ptr that is present
 // matches what the modification needs).
+// 
 // Frees are deferred to the end of a block, to prevent UAF.
 
 namespace {
 
+// Inside this allocator is a threadlocal free list.
+// Frees are deferred to the end of the round.
+// WARNING: when a thread terminates, its threadlocal allocations (on its freelist)
+// are not garbage collected.  This should only be accessed by a static set of worker threads.
+//
+// These freelists do not steal from each other.  I expect worker threads to receive work schedules
+// in a roungly evenly distributed way, so the size of each freelist (roughly speaking, the number of
+// times a thread first touches a storage object in a round) should not vary too much across threads.
 ShortRoundAllocator<variant_t> allocator;
 
 bool
@@ -418,6 +432,11 @@ StorageObjectFrame::revert_round(uint64_t round_number)
 {
   clear_modifications();
   allocator.release_deferred_frees(round_number);
+}
+
+StorageObjectFrame::~StorageObjectFrame()
+{
+  clear_modifications();
 }
 
 } // namespace hogd
