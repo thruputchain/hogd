@@ -15,6 +15,9 @@ namespace hogd {
 // Each thread reserves a threadlocal set of allocation buffers,
 // allocating from its active buffer by incrementing a counter.
 // Threads receive additional buffers when they exhaust what they have.
+// Threads DO NOT automatically return buffers to the main allocation when they
+// terminate. As such, these methods should only be accessed by, e.g., a pool of
+// worker threads.
 //
 // Each 32-bit pointer is decomposable into a 15-bit buffer index,
 // and a 17-bit offset into a buffer (these choices are arbitrary).
@@ -23,7 +26,7 @@ namespace hogd {
 // All allocated objects are freed when this round counter increases.
 //
 // TODO(geoff): Investigate whether deferring destructors until the end
-// causes a latency problem.
+// causes a latency problem.  They could be deferred lazily until reallocation.
 namespace detail {
 
 struct AllocationVerifier {
