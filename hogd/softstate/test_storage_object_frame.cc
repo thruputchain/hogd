@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 
 #include "hogd/softstate/storage_object_frame.h"
 #include "storage_object.hh"

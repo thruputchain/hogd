@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <cstdint>
 #include <optional>
 #include <variant>
 
@@ -397,7 +396,7 @@ StorageObjectFrame::get_committed_object() const
 }
 
 void
-StorageObjectFrame::clear_modifications()
+StorageObjectFrame::clear_modifications() noexcept
 {
   deleted_last_ = false;
   free_variant(delta_tag_and_ptr_);
@@ -434,7 +433,7 @@ StorageObjectFrame::revert_round(uint64_t round_number)
   allocator.release_deferred_frees(round_number);
 }
 
-StorageObjectFrame::~StorageObjectFrame()
+StorageObjectFrame::~StorageObjectFrame() noexcept
 {
   clear_modifications();
 }

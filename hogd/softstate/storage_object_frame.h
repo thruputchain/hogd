@@ -39,8 +39,7 @@ public:
   void commit_round(uint64_t round_number);
   void revert_round(uint64_t round_number);
 
-  ~StorageObjectFrame();
-
+  ~StorageObjectFrame() noexcept;
 private:
   std::optional<StorageObject> committed_base_object_;
 
@@ -56,7 +55,7 @@ private:
   void revert_bytestring_set();
   void revert_nnint64_set_add(int64_t add_value);
 
-  void clear_modifications();
+  void clear_modifications() noexcept;
 };
 
 } // namespace hogd
