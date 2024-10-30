@@ -79,7 +79,7 @@ template<typename T> struct AllocationLine {
     uint32_t offset = allocation_offset_;
     allocation_offset_++;
 
-    assert(alloc_offset <= kAllocationLineSize);
+    assert(allocation_offset_ <= kAllocationLineSize);
 
     if (offset < max_allocated_) {
       if constexpr (!std::is_trivially_destructible_v<T>) {
