@@ -28,6 +28,7 @@ public:
   void revert_delta(StorageDelta const &delta);
 
   std::optional<StorageObject> const &get_committed_object() const;
+  std::optional<StrippedStorageObject> get_stripped_committed_object() const;
 
   // Assumes some synchronization barrier between try/commit_delta and
   // commit_round.

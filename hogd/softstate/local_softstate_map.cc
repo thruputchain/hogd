@@ -87,6 +87,18 @@ LocalSoftstateMap::get_committed_object(AddressAndKey const &addrkey)
   return it->second.get_committed_object();
 }
 
+std::optional<StrippedStorageObject>
+LocalSoftstateMap::get_stripped_committed_object(AddressAndKey const &addrkey)
+{
+  auto ptr = map_.take();
+  auto it = ptr->find(addrkey);
+  if (it == ptr->end()) {
+    return std::nullopt;
+  }
+
+  return it->second.get_stripped_committed_object();
+}
+
 std::optional<SHA256Hash>
 LocalContractMap::get_deployment(ContractAddress const &addr)
 {
@@ -149,7 +161,7 @@ LocalSoftstateReadServer::get_object(SHA256Hash const &expected_block_hash,
                                      AddressAndKey const &addrkey)
 {
   ExpectedStorageObject out;
-  auto res = local_map_.get_committed_object(addrkey);
+  auto res = local_map_.get_stripped_committed_object(addrkey);
 
   if (!res) {
     out.error(StorageRPCError::kAddressAndKeyNExist);

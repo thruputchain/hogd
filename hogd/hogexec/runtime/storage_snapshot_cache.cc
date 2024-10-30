@@ -11,7 +11,7 @@
 
 namespace hogd {
 
-std::optional<StorageObject>
+std::optional<StrippedStorageObject>
 StorageSnapshotCache::try_get_object(AddressAndKey const &addrkey)
 {
   {

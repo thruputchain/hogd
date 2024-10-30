@@ -414,6 +414,32 @@ StorageObjectFrame::get_committed_object() const
   return committed_base_object_;
 }
 
+std::optional<StrippedStorageObject> 
+StorageObjectFrame::get_stripped_committed_object() const
+{
+  if (!committed_base_object_) {
+    return std::nullopt;
+  }
+
+  StrippedStorageObject stripped_object(committed_base_object_->type());
+  switch(stripped_object.type())
+  {
+  case StorageObjectType::kBytestring:
+    stripped_object.bytestring() = committed_base_object_->bytestring();
+    break;
+  case StorageObjectType::kNonnegativeInt64:
+    stripped_object.int64() = committed_base_object_ -> int64();
+    break;
+  case StorageObjectType::kBoundedHashset:
+    stripped_object.hashset() = committed_base_object_ -> hashset();
+    break;
+  case StorageObjectType::kReplayCache:
+    stripped_object.replay_cache_metadata() = committed_base_object_ -> replay_cache().metadata;
+    break;
+  }
+  return stripped_object;
+}
+
 void
 StorageObjectFrame::clear_modifications()
 {

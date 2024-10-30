@@ -13,9 +13,20 @@ namespace hogd
   };
 
   struct BoundedHashset {
-    unsigned int max_size;
+    unsigned int max_size; // uint32_t
     BoundedHashsetEntry entries<>;
   };
+
+  struct ReplayCacheMetadata {
+    unsigned int max_size; // uint32_t
+    unsigned hyper clear_threshold; // uint64_t
+  };
+
+  struct ReplayCache {
+    ReplayCacheMetadata metadata;
+    unsigned hyper nonces<>;
+  };
+
 
   union StorageObject switch (StorageObjectType type)
   {
@@ -25,10 +36,12 @@ namespace hogd
     hyper int64;
   case kBoundedHashset:
     BoundedHashset hashset;
+  case kReplayCache:
+    ReplayCache replay_cache;
   };
 
   // Things to do: figure out which info is stripped, when, and how that
-  // is signalled to rpc caller
+  // is signalled to rpc caller (for each type)
   union StrippedStorageObject switch (StorageObjectType type)
   {
   case kBytestring:
@@ -37,6 +50,8 @@ namespace hogd
     hyper int64;
   case kBoundedHashset:
     BoundedHashset hashset;
+  case kReplayCache:
+    ReplayCacheMetadata replay_cache_metadata;
   };
 
   enum StorageDeltaType {

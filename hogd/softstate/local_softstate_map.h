@@ -23,6 +23,9 @@ public:
   std::optional<StorageObject>
   get_committed_object(AddressAndKey const &addrkey);
 
+  std::optional<StrippedStorageObject>
+  get_stripped_committed_object(AddressAndKey const &addrkey);
+
   void commit_round();
   void revert_round();
 

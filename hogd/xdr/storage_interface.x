@@ -23,8 +23,6 @@ namespace hogd
     kContractNExist = 5,
     // Lookup deployment of contract on address that has no deployed contract
     kNoContractDeployed = 6,
-    // Returned object is stripped (minimized)
-    kObjectReturnStripped = 7,
   };
 
   struct StorageDeltaVec {
@@ -37,9 +35,7 @@ namespace hogd
   union ExpectedStorageObject switch (StorageRPCError error)
   {
   case kNone:
-    StorageObject object;
-  case kObjectReturnStripped:
-    StrippedStorageObject stripped_object;
+    StrippedStorageObject object;
   default:
     void;
   };

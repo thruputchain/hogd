@@ -13,7 +13,7 @@ namespace hogd {
 
 class ItemCache {
 public:
-  ItemCache(std::optional<StorageObject> obj) : base_object_(std::move(obj)) {}
+  ItemCache(std::optional<StrippedStorageObject> obj) : base_object_(std::move(obj)) {}
 
   void delete_last();
 
@@ -53,6 +53,17 @@ private:
         StorageObjectType::kNonnegativeInt64;
   };
 
+  struct ReplayCacheCacheType {
+    uint64_t max_nonce_clear_threshold;
+    std::vector<uint64_t> new_nonces;
+
+    x23::Vec<StorageDelta> get_deltas() const;
+
+
+    constexpr static std::optional<StorageObjectType> kObjectType =
+      StorageObjectType::kReplayCache;
+  };
+
   struct UnsetType {
     static x23::Vec<StorageDelta> get_deltas() { return {}; }
 
@@ -79,7 +90,7 @@ private:
     ;
   }
 
-  std::optional<StorageObject> base_object_;
+  std::optional<StrippedStorageObject> base_object_;
   std::variant<UnsetType, BytestringCacheType, NNInt64CacheType> delta_args_ =
       UnsetType{};
 

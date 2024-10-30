@@ -9,7 +9,8 @@ typedef unsigned int MethodID;    // uint32_t
 enum StorageObjectType {
   kBytestring = 0,
   kNonnegativeInt64 = 1,
-  kBoundedHashset = 2
+  kBoundedHashset = 2,
+  kReplayCache = 3,
 };
 
 typedef opaque uint128_xdr[16];
