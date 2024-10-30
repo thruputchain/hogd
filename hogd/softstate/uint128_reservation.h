@@ -14,11 +14,10 @@ class UInt128Reservation {
 public:
   UInt128Reservation &operator+=(uint64_t v)
   {
-    if (integer_add_overflow_p<uint64_t>(lowbits_, v)) {
+    if (integer_add_overflow<uint64_t>(lowbits_, v, &lowbits_)) {
       highbits_++;
     }
-    lowbits_ += v;
-
+    
     return *this;
   }
 
