@@ -123,7 +123,7 @@ decrease_active_thread_count(uint32_t &tag)
 uint64_t
 construct_tag_and_ptr(uint32_t tag, uint32_t ptr)
 {
-  return (static_cast<uint64_t>(tag) << 32) + ptr;
+  return (uint64_t{tag} << 32) + ptr;
 }
 
 variant_t *
