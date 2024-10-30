@@ -5,7 +5,6 @@
 #include <memory>
 #include <vector>
 
-#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/erc20_test_utils.h"
 #include "hogd/hogexec/runtime/runtime_test_framework.h"
@@ -14,7 +13,6 @@
 #include "storage_interface.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -51,6 +49,8 @@ TEST_F(ERC20Test, InitializeAndMint)
 
   std::vector<ContractAddress> wallets;
 
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+
   // Create an ERC20 contract
   auto r = test::erc20::deploy_erc20_noinit(*this);
   ASSERT_TRUE(r);
@@ -70,6 +70,8 @@ TEST_F(ERC20Test, InitializeAndMint)
     ASSERT_TRUE(r);
     wallets.push_back(*r);
   }
+
+  // NOLINTEND(bugprone-unchecked-optional-access)
 
   commit_round();
 
