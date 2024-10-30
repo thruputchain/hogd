@@ -51,8 +51,8 @@ StorageObjectFrame::release_variant(RefcountedVariant &variant)
 
 template<typename VariantArm, typename... VariantArgs>
 VariantArm *
-StorageObjectFrame::try_set_variant(
-    StorageObjectFrame::RefcountedVariant &variant, VariantArgs const &...args)
+StorageObjectFrame::try_set_variant(RefcountedVariant &variant,
+                                    VariantArgs const &...args)
 {
   if (variant.refcount_ == 0) {
     variant.variant_.emplace<VariantArm>(args...);
