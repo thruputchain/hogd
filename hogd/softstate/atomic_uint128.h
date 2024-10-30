@@ -13,21 +13,24 @@ namespace hogd {
 
 class AtomicUint128 {
 public:
-  void add(uint64_t v)
+  AtomicUint128 &operator+=(uint64_t v)
   {
     uint64_t prev = lowbits_.fetch_add(v, std::memory_order_relaxed);
 
-    if (integer_add_overflow_p(prev, v)) {
+    if (integer_add_overflow_p<uint64_t>(prev, v)) {
       highbits_.fetch_add(1, std::memory_order_relaxed);
     }
+
+    return *this;
   }
 
-  void sub(uint64_t v)
+  AtomicUint128 &operator-=(uint64_t v)
   {
     uint64_t prev = lowbits_.fetch_sub(v, std::memory_order_relaxed);
     if (prev < v) {
       highbits_.fetch_sub(1, std::memory_order_relaxed);
     }
+    return *this;
   }
 
   void clear()

@@ -53,7 +53,7 @@ struct NNInt64SetAddArgs {
 
     uint64_t total_add = total_added_.get_capped();
 
-    if (integer_add_overflow_p(object.int64(), total_add)) {
+    if (integer_add_overflow_p<int64_t>(object.int64(), total_add)) {
       object.int64() = INT64_MAX;
     }
     else {
@@ -99,7 +99,7 @@ namespace {
 // threads to receive work schedules in a roungly evenly distributed way, so the
 // size of each freelist (roughly speaking, the number of times a thread first
 // touches a storage object in a round) should not vary too much across threads.
-ShortRoundAllocator<variant_t> allocator;
+RoundAllocator<variant_t> allocator;
 
 bool
 is_finalized_tag(uint32_t tag)
@@ -198,7 +198,7 @@ try_set_variant(std::atomic<uint64_t> &atomic_tag_and_ptr,
     }
     else {
       auto [new_short_ptr, new_ptr] =
-          allocator.allocate_new(std::in_place_type<VariantArm>, args...);
+          allocator.construct(std::in_place_type<VariantArm>, args...);
 
       assert(!!new_ptr);
 
@@ -309,7 +309,7 @@ StorageObjectFrame::try_reserve_nnint64_set_add(int64_t set_value,
     assert(args->set_value_ == set_value);
 
     if (add_value >= 0) {
-      args->total_added_.add(add_value);
+      args->total_added_ += add_value;
       return StorageReserveResult::kSuccess;
     }
 
@@ -354,7 +354,7 @@ StorageObjectFrame::revert_nnint64_set_add(int64_t add_value)
   auto *args = get_variant_arm_unchecked<NNInt64SetAddArgs>(delta_tag_and_ptr_);
 
   if (add_value >= 0) {
-    args->total_added_.sub(add_value);
+    args->total_added_ -= add_value;
   }
   else {
     args->total_subtracted_.fetch_sub(add_value, std::memory_order_relaxed);

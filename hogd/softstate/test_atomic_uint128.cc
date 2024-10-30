@@ -13,18 +13,18 @@ TEST(AtomicUint128, BasicCorrectness)
 {
   AtomicUint128 v;
 
-  v.add(UINT64_MAX);
-  v.add(UINT64_MAX);
-  v.add(UINT64_MAX);
+  v += UINT64_MAX;
+  v += UINT64_MAX;
+  v += UINT64_MAX;
 
   EXPECT_EQ(v.get_capped(), UINT64_MAX);
 
-  v.sub(UINT64_MAX);
-  v.sub(10);
+  v -= UINT64_MAX;
+  v -= 10;
 
   EXPECT_EQ(v.get_capped(), UINT64_MAX);
 
-  v.sub(UINT64_MAX);
+  v -= UINT64_MAX;
   EXPECT_EQ(v.get_capped(), UINT64_MAX - 10);
 }
 
