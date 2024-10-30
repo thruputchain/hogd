@@ -57,8 +57,8 @@ private:
   };
 
   struct ReplayCacheCacheType {
-    uint64_t max_nonce_clear_threshold;
-    std::vector<uint64_t> new_nonces;
+    std::optional<uint64_t> new_max_nonce_clear_threshold_;
+    x23::Vec<uint64_t> new_nonces_;
 
     x23::Vec<StorageDelta> get_deltas() const;
 

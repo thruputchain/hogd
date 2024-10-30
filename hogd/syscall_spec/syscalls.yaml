@@ -270,9 +270,6 @@ errors:
   - name: "UnknownSyscall"
     number: 4
     doc: "Unknown syscall number"
-  - name: "NonnegativeIntSetValueMismatch"
-    number: 5
-    doc: "Cannot set a nonnegative int to different values in the same transaction"
   - name: "IsRootTransaction"
     number: 6
     doc: "Cannot call get_msg_sender on root invocation"
@@ -291,9 +288,9 @@ errors:
   - name: "InsufficientGasForInvocation"
     number: 11
     doc: "Insufficient gas in call frame to supply requested gas limit for child invocation"
-  - name: "InvalidSetAdd"
+  - name: "InvalidSyscallInput"
     number: 12
-    doc: "Invalid input to nnint set add, such as subtracting below 0 or setting to two distinct values in one transaction"
+    doc: "Invalid input to a syscall, such as subtracting below 0 on an nnint64 or setting to two distinct values in one transaction"
   - name: "ContractAlreadyDeployed"
     number: 13
     doc: "Attempt made to deploy a contract twice (same nonce and contract hash, from same address)"

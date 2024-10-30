@@ -20,13 +20,15 @@ namespace hogd
   struct ReplayCacheMetadata {
     unsigned int max_size; // uint32_t
     unsigned hyper clear_threshold; // uint64_t
+    unsigned int current_size; // uint32_t
   };
 
   struct ReplayCache {
     ReplayCacheMetadata metadata;
+    
+    // metadata.current_size == nonces.size()
     unsigned hyper nonces<>;
   };
-
 
   union StorageObject switch (StorageObjectType type)
   {
@@ -58,6 +60,8 @@ namespace hogd
     kDeleteLast = 0,
     kBytestringSet = 1,
     kNonnegativeInt64SetAdd = 2,
+    kReplayCacheInsert = 3,
+    kReplayCacheClear = 4,
   };
 
   struct NonnegativeInt64SetAddArgs {
@@ -73,6 +77,10 @@ namespace hogd
     Bytestring bytestring;
   case kNonnegativeInt64SetAdd:
     NonnegativeInt64SetAddArgs nnint64;
+  case kReplayCacheInsert:
+    unsigned hyper replay_nonces<>; // uint64_t<>
+  case kReplayCacheClear:
+    unsigned hyper replay_clear_threshold; // uint64_t
   };
 
   enum StorageReserveResult {

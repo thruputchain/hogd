@@ -47,6 +47,22 @@ make_nnint64_set_add(int64_t set, int64_t add)
   return out;
 }
 
+StorageDelta
+make_replay_inserts(x23::Vec<uint64_t> const& vec) {
+  StorageDelta out;
+  out.type(StorageDeltaType::kReplayCacheInsert);
+  out.replay_nonces = vec;
+  return out;
+}
+
+StorageDelta
+make_replay_clear(uint64_t threshold) {
+  StorageDelta out;
+  out.type(StorageDeltaType::kReplayCacheClear);
+  out.replay_clear_threshold = threshold;
+  return out;
+}
+
 } // namespace
 
 void
@@ -224,7 +240,7 @@ ItemCache::nnint64_set_add(int64_t set_value, int64_t add_value)
 
   if (auto *args = get_nnint64_args()) {
     if (args->nnint64_set_arg_ != set_value) {
-      return SyscallError{SyscallErrorCode::kInvalidSetAdd};
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     prev_add_sum = args->nnint64_add_sum_;
   }
@@ -233,10 +249,10 @@ ItemCache::nnint64_set_add(int64_t set_value, int64_t add_value)
 
   if (new_add_value < 0) {
     if (set_value < 0) {
-      return SyscallError{SyscallErrorCode::kInvalidSetAdd};
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     if (set_value + new_add_value < 0) {
-      return SyscallError{SyscallErrorCode::kInvalidSetAdd};
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
   }
 
@@ -280,5 +296,47 @@ ItemCache::NNInt64CacheType::get_deltas() const
 {
   return {make_nnint64_set_add(nnint64_set_arg_, nnint64_add_sum_)};
 }
+
+x23::Vec<StorageDelta>
+ItemCache::ReplayCacheCacheType::get_deltas() const
+{
+  x23::Vec<StorageDelta> out;
+  if (new_max_nonce_clear_threshold_) {
+    out.push_back(make_replay_clear(*new_max_nonce_clear_threshold_));
+  }
+
+  if (!new_nonces_.empty())
+  {
+    out.push_back(make_replay_inserts(*new_nonces_));
+  }
+
+  return out;
+}
+
+SyscallStatus<void> 
+ItemCache::replay_cache_insert(uint64_t nonce)
+{
+  auto type_guard_res = type_guard(StorageObjectType::kReplayCache);
+
+  if (!type_guard_res) {
+    return {type_guard_res.error()};
+  }
+
+  if (base_object_) {
+    assert(base_object_->type() == StorageObjectType::kReplayCache);
+
+    if (base_object -> replay_cache_metadata.clear_threshold > nonce) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    }
+
+    
+
+  }
+
+
+}
+SyscallStatus<void> replay_cache_clear(uint64_t threshold);
+
+
 
 } // namespace hogd
