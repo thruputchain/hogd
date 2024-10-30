@@ -22,7 +22,7 @@ public:
   // entirely. Finalizing a delta might slightly improve performance (removes
   // one cache line write) on subsequent deltas. Will wait to remove until we
   // have all the other StorageDelta types worked out.
-  StorageReserveResult __attribute__((warn_unused_result))
+  [[nodiscard]] StorageReserveResult
   try_reserve_delta(StorageDelta const &delta);
   void commit_delta(StorageDelta const &delta);
   void revert_delta(StorageDelta const &delta);
