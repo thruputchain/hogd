@@ -7,6 +7,7 @@
 
 #include "hogd/softstate/storage_object_frame.h"
 #include "storage_object.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -100,11 +101,13 @@ TEST(StorageObjectFrame, RewriteVariantFromBase)
 
   auto committed_obj = obj.get_committed_object();
 
-  ASSERT_TRUE(!!committed_obj);
+  ASSERT_TRUE(committed_obj.has_value());
 
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(committed_obj->type(), StorageObjectType::kBytestring);
 
   EXPECT_EQ(committed_obj->bytestring(), bytestring_delta.bytestring());
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 } // namespace hogd
