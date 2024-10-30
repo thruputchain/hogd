@@ -36,8 +36,7 @@ TEST_F(DeployerTest, DeployAndEcho)
     stx.tx.invocation.method_name = 1;
     stx.tx.invocation.gas_limit = UINT64_MAX;
     stx.tx.invocation.calldata =
-        test::make_calldata(h, static_cast<MethodID>(0),
-                            static_cast<uint32_t>(0), static_cast<uint32_t>(8),
+        test::make_calldata(h, MethodID{0}, uint32_t{0}, uint32_t{8},
                             std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
     stx.tx.contracts_to_deploy.push_back(*c);
     stx.nonce = 0;
@@ -65,7 +64,7 @@ TEST_F(DeployerTest, DeployAndEcho)
   stx.tx.invocation.method_name = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
-      test::make_calldata(static_cast<uint32_t>(0), static_cast<uint32_t>(4),
+      test::make_calldata(uint32_t{0}, uint32_t{4},
                           std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
   stx.nonce = 0;
 

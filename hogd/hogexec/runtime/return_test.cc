@@ -48,8 +48,7 @@ TEST_F(ReturnTest, EchoFull)
   stx.tx.invocation.method_name = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
-      test::make_calldata(addr1_, static_cast<MethodID>(0),
-                          static_cast<uint32_t>(0), static_cast<uint32_t>(4),
+      test::make_calldata(addr1_, MethodID{0}, uint32_t{0}, uint32_t{4},
                           std::vector<uint8_t>{0, 1, 2, 3});
 
   SystemCallHandler handler(stx, *snapshot_cache_);
@@ -76,8 +75,7 @@ TEST_F(ReturnTest, EchoSlice)
   stx.tx.invocation.method_name = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
-      test::make_calldata(addr1_, static_cast<MethodID>(0),
-                          static_cast<uint32_t>(1), static_cast<uint32_t>(2),
+      test::make_calldata(addr1_, MethodID{0}, uint32_t{1}, uint32_t{2},
                           std::vector<uint8_t>{0, 1, 2, 3});
 
   SystemCallHandler handler(stx, *snapshot_cache_);
@@ -104,8 +102,7 @@ TEST_F(ReturnTest, EchoSliceFancySDK)
   stx.tx.invocation.method_name = 1;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
-      test::make_calldata(addr1_, static_cast<uint32_t>(1),
-                          static_cast<uint32_t>(2),
+      test::make_calldata(addr1_, uint32_t{1}, uint32_t{2},
                           std::vector<uint8_t>{0, 1, 2, 3});
 
   SystemCallHandler handler(stx, *snapshot_cache_);
@@ -133,8 +130,7 @@ TEST_F(ReturnTest, EchoSliceFancierSDK)
       test::get_sdk_name("test_slice_fancysdk_inner_v2");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
-      test::make_calldata(addr1_, static_cast<uint32_t>(1),
-                          static_cast<uint32_t>(2),
+      test::make_calldata(addr1_, uint32_t{1}, uint32_t{2},
                           std::vector<uint8_t>{0, 1, 2, 3});
 
   SystemCallHandler handler(stx, *snapshot_cache_);
