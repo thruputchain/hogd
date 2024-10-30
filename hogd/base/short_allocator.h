@@ -156,7 +156,7 @@ public:
       verifier_.check_get(ptr);
     }
 
-    auto *line = static_cast<T *>(get_line(ptr));
+    auto *line = get_line(ptr);
     return &(line[ptr & kLineIndexMask]);
   }
 
@@ -218,14 +218,14 @@ private:
     return static_cast<T *>(malloc(kAllocationLineSize * sizeof(T)));
   }
 
-  void *get_line(uint32_t get_ptr)
+  T *get_line(uint32_t get_ptr)
   {
     return lines_[(get_ptr >> kAllocationLineBits) - 1].load(
         std::memory_order_relaxed);
   }
 
   std::atomic<uint32_t> next_line_highbits_ = kLineIndexHighbitsIncrement;
-  std::array<std::atomic<void *>, 32768> lines_; // 2^15
+  std::array<std::atomic<T *>, 32768> lines_; // 2^15
 
   inline static thread_local detail::ThreadlocalRoundAllocator<T>
       threadlocal_allocator_;
