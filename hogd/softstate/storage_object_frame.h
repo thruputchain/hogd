@@ -28,8 +28,6 @@ public:
 
   std::optional<StorageObject> const &get_committed_object() const;
 
-  // Assumes some synchronization barrier between try/commit_delta and
-  // commit_round.
   void commit_round();
   void revert_round();
 
@@ -95,7 +93,7 @@ private:
 
   template<typename VariantArm, typename... VariantArgs>
   static VariantArm *
-  try_set_variant(StorageObjectFrame::RefcountedVariant &variant,
+  try_set_variant(RefcountedVariant &variant,
                   VariantArgs const &...args);
 };
 
