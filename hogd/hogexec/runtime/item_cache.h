@@ -29,6 +29,9 @@ public:
   SyscallStatus<int64_t> get_nnint64_value() const;
   SyscallStatus<void> nnint64_set_add(int64_t set_value, int64_t add_value);
 
+  SyscallStatus<void> replay_cache_insert(uint64_t nonce);
+  SyscallStatus<void> replay_cache_clear(uint64_t threshold);
+
   x23::Vec<StorageDelta> get_deltas() const;
 
 private:
@@ -59,7 +62,6 @@ private:
 
     x23::Vec<StorageDelta> get_deltas() const;
 
-
     constexpr static std::optional<StorageObjectType> kObjectType =
       StorageObjectType::kReplayCache;
   };
@@ -87,11 +89,19 @@ private:
     }
     return static_cast<decltype(&std::get<NNInt64CacheType>(self.delta_args_))>(
         nullptr);
-    ;
+  }
+
+  auto *get_replay_cache_args(this auto &self)
+  {
+    if (std::holds_alternative<ReplayCacheCacheType>(self.delta_args_)) {
+      return &std::get<ReplayCacheCacheType>(self.delta_args_);
+    }
+    return static_cast<decltype(&std::get<ReplayCacheCacheType>(self.delta_args_))>(
+        nullptr);
   }
 
   std::optional<StrippedStorageObject> base_object_;
-  std::variant<UnsetType, BytestringCacheType, NNInt64CacheType> delta_args_ =
+  std::variant<UnsetType, BytestringCacheType, NNInt64CacheType, ReplayCacheCacheType> delta_args_ =
       UnsetType{};
 
   bool is_deleted_last_ = false;
