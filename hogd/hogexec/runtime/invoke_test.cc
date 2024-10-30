@@ -49,7 +49,7 @@ TEST_F(InvokeTest, CalldataPassthroughSuccess)
   stx.tx.invocation.method_name = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
-      test::make_calldata(addr1_, static_cast<MethodID>(0),
+      test::make_calldata(addr1_, MethodID{0},
                           std::vector<uint8_t>{0, 1, 2, 3});
 
   SystemCallHandler handler(stx, *snapshot_cache_);
@@ -76,7 +76,7 @@ TEST_F(InvokeTest, CalldataPassthroughFail)
   stx.tx.invocation.method_name = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
-      test::make_calldata(addr1_, static_cast<MethodID>(1),
+      test::make_calldata(addr1_, MethodID{1},
                           std::vector<uint8_t>{0, 1, 2, 3});
 
   SystemCallHandler handler(stx, *snapshot_cache_);
