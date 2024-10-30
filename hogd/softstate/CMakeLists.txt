@@ -11,7 +11,7 @@ target_link_libraries(
 
 add_executable(
   softstate_test
-  test_atomic_uint128.cc
+  test_uint128_reservation.cc
   test_storage_object_frame.cc
 )
 

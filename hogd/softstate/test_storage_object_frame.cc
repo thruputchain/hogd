@@ -97,7 +97,7 @@ TEST(StorageObjectFrame, RewriteVariantFromBase)
   EXPECT_EQ(obj.try_reserve_delta(bytestring_delta),
             StorageReserveResult::kSuccess);
 
-  obj.commit_round(1);
+  obj.commit_round();
 
   auto committed_obj = obj.get_committed_object();
 

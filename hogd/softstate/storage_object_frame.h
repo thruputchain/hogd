@@ -4,9 +4,9 @@
 #include <cstdint>
 #include <optional>
 
-#include "hogd/softstate/atomic_uint128.h"
-
+#include "hogd/softstate/uint128_reservation.h"
 #include "storage_object.hh"
+#include "x23/mvar.h"
 
 namespace hogd {
 
@@ -19,8 +19,7 @@ public:
   // and then either calls commit or revert on the delta.
   //
   // TODO(geoff): We can probably just remove the commit_delta() method
-  // entirely. Finalizing a delta might slightly improve performance (removes
-  // one cache line write) on subsequent deltas. Will wait to remove until we
+  // entirely.  Will wait to remove until we
   // have all the other StorageDelta types worked out.
   [[nodiscard]] StorageReserveResult
   try_reserve_delta(StorageDelta const &delta);
@@ -31,21 +30,46 @@ public:
 
   // Assumes some synchronization barrier between try/commit_delta and
   // commit_round.
-  //
-  // Round_number is any monotonically increasing counter.  It
-  // should increase after every successful AND failed block, in order to
-  // garbage collect internal metadata. (although it would not be incorrect to
-  // leave it as the block number -- failed blocks would just not be garbage
-  // collected until a successful block is found).
-  void commit_round(uint64_t round_number);
-  void revert_round(uint64_t round_number);
-
-  ~StorageObjectFrame();
+  void commit_round();
+  void revert_round();
 
 private:
+  struct BytestringArgs {
+    const Bytestring bytestring_set_;
+
+    bool can_accept(Bytestring const &set_arg) const
+    {
+      return bytestring_set_ == set_arg;
+    }
+
+    StorageObject to_object() const
+    {
+      StorageObject object;
+      object.type(StorageObjectType::kBytestring);
+      object.bytestring() = bytestring_set_;
+      return object;
+    }
+  };
+
+  struct NNInt64SetAddArgs {
+    const int64_t set_value_;
+    int64_t total_subtracted_ = 0;
+    UInt128Reservation total_added_;
+
+    bool can_accept(int64_t const &set_arg) const;
+    StorageObject to_object() const;
+  };
+
+  using variant_t = std::variant<BytestringArgs, NNInt64SetAddArgs>;
+
+  struct RefcountedVariant {
+    variant_t variant_;
+    uint32_t refcount_ = 0;
+  };
+
   std::optional<StorageObject> committed_base_object_;
 
-  std::atomic<uint64_t> delta_tag_and_ptr_ = 0;
+  x23::MVar<RefcountedVariant> variant_;
 
   std::atomic<bool> deleted_last_;
 
@@ -60,6 +84,19 @@ private:
   bool type_guard(StorageObjectType expected_type) const;
 
   void clear_modifications();
+
+  static void release_variant(RefcountedVariant &variant);
+
+  template<typename VariantArm>
+  static VariantArm &get_variant_arm_unchecked(RefcountedVariant &variant)
+  {
+    return std::get<VariantArm>(variant.variant_);
+  }
+
+  template<typename VariantArm, typename... VariantArgs>
+  static VariantArm *
+  try_set_variant(StorageObjectFrame::RefcountedVariant &variant,
+                  VariantArgs const &...args);
 };
 
 } // namespace hogd

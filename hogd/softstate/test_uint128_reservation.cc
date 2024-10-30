@@ -5,13 +5,13 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "hogd/softstate/atomic_uint128.h"
+#include "hogd/softstate/uint128_reservation.h"
 
 namespace hogd {
 
-TEST(AtomicUint128, BasicCorrectness)
+TEST(UInt128Reservation, BasicCorrectness)
 {
-  AtomicUint128 v;
+  UInt128Reservation v;
 
   v += UINT64_MAX;
   v += UINT64_MAX;
