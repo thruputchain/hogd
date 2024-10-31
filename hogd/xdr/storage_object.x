@@ -19,12 +19,12 @@ namespace hogd
 
   struct ReplayCacheMetadata {
     unsigned hyper clear_threshold; // uint64_t
-    unsigned int current_size; // uint32_t
+    unsigned int current_size;      // uint32_t
   };
 
   struct ReplayCache {
     ReplayCacheMetadata metadata;
-    
+
     // metadata.current_size == nonces.size()
     unsigned hyper nonces<>;
   };

@@ -48,7 +48,8 @@ make_nnint64_set_add(int64_t set, int64_t add)
 }
 
 StorageDelta
-make_replay_inserts(std::set<uint64_t> const& set) {
+make_replay_inserts(std::set<uint64_t> const &set)
+{
   StorageDelta out;
   out.type(StorageDeltaType::kReplayCacheInsert);
   for (auto elt : set) {
@@ -58,7 +59,8 @@ make_replay_inserts(std::set<uint64_t> const& set) {
 }
 
 StorageDelta
-make_replay_clear(uint64_t threshold) {
+make_replay_clear(uint64_t threshold)
+{
   StorageDelta out;
   out.type(StorageDeltaType::kReplayCacheClear);
   out.replay_clear_threshold() = threshold;
@@ -307,15 +309,14 @@ ItemCache::ReplayCacheCacheType::get_deltas() const
     out.push_back(make_replay_clear(*new_max_nonce_clear_threshold_));
   }
 
-  if (!new_nonces_.empty())
-  {
+  if (!new_nonces_.empty()) {
     out.push_back(make_replay_inserts(new_nonces_));
   }
 
   return out;
 }
 
-SyscallStatus<void> 
+SyscallStatus<void>
 ItemCache::replay_cache_insert(uint64_t nonce)
 {
   auto type_guard_res = type_guard(StorageObjectType::kReplayCache);
@@ -329,15 +330,15 @@ ItemCache::replay_cache_insert(uint64_t nonce)
   if (base_object_) {
     assert(base_object_->type() == StorageObjectType::kReplayCache);
 
-    if (base_object_ -> replay_cache_metadata().clear_threshold > nonce) {
+    if (base_object_->replay_cache_metadata().clear_threshold > nonce) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
 
-    base_size = base_object_ -> replay_cache_metadata().current_size;
+    base_size = base_object_->replay_cache_metadata().current_size;
   }
 
-  if (auto* args = get_replay_cache_args()) {
-    if (args -> new_nonces_.contains(nonce)) {
+  if (auto *args = get_replay_cache_args()) {
+    if (args->new_nonces_.contains(nonce)) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
 
@@ -345,18 +346,25 @@ ItemCache::replay_cache_insert(uint64_t nonce)
     if (new_size + base_size >= kReplayCacheMaxSize) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
-    args -> new_nonces_.insert(nonce);
-  } else {
+
+    if (args->new_max_nonce_clear_threshold_.has_value()) {
+      if (args->new_max_nonce_clear_threshold_.value() > nonce) {
+        return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+      }
+    }
+
+    args->new_nonces_.insert(nonce);
+  }
+  else {
     delta_args_.emplace<ReplayCacheCacheType>(
-      ReplayCacheCacheType{.new_max_nonce_clear_threshold_ = std::nullopt,
-      .new_nonces_ = {nonce}
-    });
+        ReplayCacheCacheType{.new_max_nonce_clear_threshold_ = std::nullopt,
+                             .new_nonces_ = {nonce}});
   }
 
   return {};
 }
 
-SyscallStatus<void> 
+SyscallStatus<void>
 ItemCache::replay_cache_clear(uint64_t threshold)
 {
   auto type_guard_res = type_guard(StorageObjectType::kReplayCache);
@@ -368,23 +376,23 @@ ItemCache::replay_cache_clear(uint64_t threshold)
   if (base_object_) {
     assert(base_object_->type() == StorageObjectType::kReplayCache);
 
-    if (base_object_ -> replay_cache_metadata().clear_threshold > threshold) {
+    if (base_object_->replay_cache_metadata().clear_threshold > threshold) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
   }
 
-  if (auto* args = get_replay_cache_args()) {
-    if (args -> new_max_nonce_clear_threshold_.has_value()) {
-      if (args -> new_max_nonce_clear_threshold_.value() > threshold) {
+  if (auto *args = get_replay_cache_args()) {
+    if (args->new_max_nonce_clear_threshold_.has_value()) {
+      if (args->new_max_nonce_clear_threshold_.value() > threshold) {
         return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
       }
     }
-    args -> new_max_nonce_clear_threshold_ = threshold;
-  } else {
+    args->new_max_nonce_clear_threshold_ = threshold;
+  }
+  else {
     delta_args_.emplace<ReplayCacheCacheType>(
-      ReplayCacheCacheType{.new_max_nonce_clear_threshold_ = threshold,
-      .new_nonces_ = {}
-    });
+        ReplayCacheCacheType{.new_max_nonce_clear_threshold_ = threshold,
+                             .new_nonces_ = {}});
   }
 
   return {};

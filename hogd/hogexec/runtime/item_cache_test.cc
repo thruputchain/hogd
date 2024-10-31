@@ -138,4 +138,34 @@ TEST(ItemCache, NNInt64SetAddNegativeSet)
   EXPECT_EQ(*res, -80);
 }
 
+TEST(ItemCache, ReplayCacheFromNone)
+{
+  ItemCache proxy(std::nullopt);
+
+  EXPECT_TRUE(proxy.replay_cache_insert(0));
+  EXPECT_TRUE(proxy.replay_cache_insert(1));
+  EXPECT_FALSE(proxy.replay_cache_insert(1));
+
+  EXPECT_TRUE(proxy.replay_cache_clear(1));
+
+  EXPECT_TRUE(proxy.replay_cache_clear(10));
+
+  EXPECT_FALSE(proxy.replay_cache_insert(5));
+
+  EXPECT_TRUE(proxy.replay_cache_insert(10));
+}
+
+TEST(ItemCache, ReplayCacheFromSome)
+{
+  StrippedStorageObject object;
+  object.type(StorageObjectType::kReplayCache);
+  object.replay_cache_metadata().clear_threshold = 10;
+
+  ItemCache proxy(object);
+
+  EXPECT_TRUE(proxy.replay_cache_insert(15));
+  EXPECT_FALSE(proxy.replay_cache_insert(5));
+  EXPECT_TRUE(proxy.replay_cache_insert(10));
+}
+
 } // namespace hogd

@@ -2,8 +2,8 @@
 
 #include <cstdint>
 #include <optional>
-#include <variant>
 #include <set>
+#include <variant>
 
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_object.hh"
@@ -14,7 +14,9 @@ namespace hogd {
 
 class ItemCache {
 public:
-  ItemCache(std::optional<StrippedStorageObject> obj) : base_object_(std::move(obj)) {}
+  ItemCache(std::optional<StrippedStorageObject> obj)
+    : base_object_(std::move(obj))
+  {}
 
   void delete_last();
 
@@ -64,7 +66,7 @@ private:
     x23::Vec<StorageDelta> get_deltas() const;
 
     constexpr static std::optional<StorageObjectType> kObjectType =
-      StorageObjectType::kReplayCache;
+        StorageObjectType::kReplayCache;
   };
 
   struct UnsetType {
@@ -97,13 +99,14 @@ private:
     if (std::holds_alternative<ReplayCacheCacheType>(self.delta_args_)) {
       return &std::get<ReplayCacheCacheType>(self.delta_args_);
     }
-    return static_cast<decltype(&std::get<ReplayCacheCacheType>(self.delta_args_))>(
-        nullptr);
+    return static_cast<decltype(&std::get<ReplayCacheCacheType>(
+        self.delta_args_))>(nullptr);
   }
 
   std::optional<StrippedStorageObject> base_object_;
-  std::variant<UnsetType, BytestringCacheType, NNInt64CacheType, ReplayCacheCacheType> delta_args_ =
-      UnsetType{};
+  std::variant<UnsetType, BytestringCacheType, NNInt64CacheType,
+               ReplayCacheCacheType>
+      delta_args_ = UnsetType{};
 
   bool is_deleted_last_ = false;
 };

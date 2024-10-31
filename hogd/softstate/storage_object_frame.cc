@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <variant>
 
 #include "hogd/base/compiler.h"
@@ -22,7 +23,8 @@ StorageObjectFrame::NNInt64SetAddArgs::can_accept(int64_t const &set_arg) const
 }
 
 StorageObject
-StorageObjectFrame::NNInt64SetAddArgs::to_object(std::optional<StorageObject> const&) const
+StorageObjectFrame::NNInt64SetAddArgs::to_object(
+    std::optional<StorageObject> const &) const
 {
   StorageObject object;
   object.type(StorageObjectType::kNonnegativeInt64);
@@ -43,17 +45,46 @@ StorageObjectFrame::NNInt64SetAddArgs::to_object(std::optional<StorageObject> co
 }
 
 StorageObject
-StorageObjectFrame::ReplayCacheArgs::to_object(std::optional<StorageObject> const& previous_object) const
+StorageObjectFrame::ReplayCacheArgs::to_object(
+    std::optional<StorageObject> const &previous_object) const
 {
   StorageObject out;
   if (previous_object) {
     out = *previous_object;
-  } else {
+  }
+  else {
     out.type(StorageObjectType::kReplayCache);
+    out.replay_cache().metadata.clear_threshold = 0;
   }
 
+  // TODO(geoff): this is a very inefficient but correct way of doing the data
+  // structures This should be a set or a BTree
+  for (auto val : new_nonces_) {
+    out.replay_cache().nonces.push_back(val);
+  }
 
+  std::sort(out.replay_cache().nonces.begin(), out.replay_cache().nonces.end(),
+            std::greater<uint64_t>());
 
+  if (new_max_clear_threshold_.has_value()) {
+
+    assert(new_max_clear_threshold_.value() >
+           out.replay_cache().metadata.clear_threshold);
+
+    // TODO(geoff) lazy - swap for a binary search
+    for (uint32_t i = 0; i < out.replay_cache().nonces.size(); i++) {
+      if (out.replay_cache().nonces[i] < new_max_clear_threshold_.value()) {
+        out.replay_cache().nonces.resize(i);
+        break;
+      }
+    }
+
+    out.replay_cache().metadata.clear_threshold = *new_max_clear_threshold_;
+  }
+
+  out.replay_cache().metadata.current_size = out.replay_cache().nonces.size();
+
+  return out;
 }
 
 void
@@ -188,6 +219,114 @@ StorageObjectFrame::revert_nnint64_set_add(int64_t add_value)
 }
 
 StorageReserveResult
+StorageObjectFrame::try_reserve_replay_cache_inserts(
+    x23::Vec<uint64_t> const &nonces)
+{
+  if (!type_guard(StorageObjectType::kReplayCache)) {
+    return StorageReserveResult::kDefiniteFailure;
+  }
+
+  if (committed_base_object_) {
+    assert(committed_base_object_->type() == StorageObjectType::kReplayCache);
+
+    for (auto nonce : nonces) {
+      if (committed_base_object_->replay_cache().metadata.clear_threshold >
+          nonce) {
+        return StorageReserveResult::kDefiniteFailure;
+      }
+      for (auto v : committed_base_object_->replay_cache().nonces) {
+        if (v == nonce) {
+          return StorageReserveResult::kDefiniteFailure;
+        }
+      }
+    }
+  }
+
+  auto v = variant_.take();
+
+  if (auto *args = try_set_variant<ReplayCacheArgs>(*v)) {
+
+    for (auto nonce : nonces) {
+      if (args->new_nonces_.contains(nonce)) {
+        release_variant(*v);
+        return StorageReserveResult::kDefiniteFailure;
+      }
+    }
+
+    for (auto nonce : nonces) {
+      args->new_nonces_.insert(nonce);
+    }
+
+    return StorageReserveResult::kSuccess;
+  }
+
+  return StorageReserveResult::kDefiniteFailure;
+}
+
+void
+StorageObjectFrame::revert_replay_cache_inserts(
+    x23::Vec<uint64_t> const &nonces)
+{
+  auto v = variant_.take();
+  auto &args = get_variant_arm_unchecked<ReplayCacheArgs>(*v);
+
+  for (auto nonce : nonces) {
+    [[maybe_unused]] auto res = args.new_nonces_.erase(nonce);
+    assert(res == 1);
+  }
+
+  release_variant(*v);
+}
+
+StorageReserveResult
+StorageObjectFrame::try_reserve_replay_cache_clear(uint64_t threshold)
+{
+  if (!type_guard(StorageObjectType::kReplayCache)) {
+    return StorageReserveResult::kDefiniteFailure;
+  }
+
+  if (committed_base_object_) {
+    assert(committed_base_object_->type() == StorageObjectType::kReplayCache);
+
+    if (committed_base_object_->replay_cache().metadata.clear_threshold >
+        threshold) {
+      return StorageReserveResult::kDefiniteFailure;
+    }
+  }
+
+  auto v = variant_.take();
+
+  if (try_set_variant<ReplayCacheArgs>(*v)) {
+
+    return StorageReserveResult::kSuccess;
+  }
+
+  return StorageReserveResult::kDefiniteFailure;
+}
+
+void
+StorageObjectFrame::commit_replay_cache_clear(uint64_t threshold)
+{
+  auto v = variant_.take();
+  auto &args = get_variant_arm_unchecked<ReplayCacheArgs>(*v);
+
+  if (args.new_max_clear_threshold_.has_value()) {
+    args.new_max_clear_threshold_ =
+        std::max(threshold, *args.new_max_clear_threshold_);
+  }
+  else {
+    args.new_max_clear_threshold_ = threshold;
+  }
+}
+
+void
+StorageObjectFrame::revert_replay_cache_clear()
+{
+  auto v = variant_.take();
+  release_variant(*v);
+}
+
+StorageReserveResult
 StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
 {
   switch (delta.type()) {
@@ -198,6 +337,10 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
   case StorageDeltaType::kNonnegativeInt64SetAdd:
     return try_reserve_nnint64_set_add(delta.nnint64().set_value,
                                        delta.nnint64().add_value);
+  case StorageDeltaType::kReplayCacheInsert:
+    return try_reserve_replay_cache_inserts(delta.replay_nonces());
+  case StorageDeltaType::kReplayCacheClear:
+    return try_reserve_replay_cache_clear(delta.replay_clear_threshold());
   default:
     return StorageReserveResult::kDefiniteFailure;
   }
@@ -210,6 +353,8 @@ StorageObjectFrame::commit_delta(StorageDelta const &delta)
   case StorageDeltaType::kDeleteLast:
     deleted_last_.store(true, std::memory_order_relaxed);
     return;
+  case StorageDeltaType::kReplayCacheClear:
+    commit_replay_cache_clear(delta.replay_clear_threshold());
   default:
     // no op
     return;
@@ -228,6 +373,12 @@ StorageObjectFrame::revert_delta(StorageDelta const &delta)
   case StorageDeltaType::kNonnegativeInt64SetAdd:
     revert_nnint64_set_add(delta.nnint64().add_value);
     return;
+  case StorageDeltaType::kReplayCacheInsert:
+    revert_replay_cache_inserts(delta.replay_nonces());
+    return;
+  case StorageDeltaType::kReplayCacheClear:
+    revert_replay_cache_clear();
+    return;
   }
 }
 
@@ -244,19 +395,20 @@ StorageObjectFrame::get_stripped_committed_object() const
     return std::nullopt;
   }
 
-  StrippedStorageObject obj(committed_base_object_ -> type());
+  StrippedStorageObject obj(committed_base_object_->type());
   switch (obj.type()) {
   case StorageObjectType::kBytestring:
-    obj.bytestring() = committed_base_object_ -> bytestring();
+    obj.bytestring() = committed_base_object_->bytestring();
     break;
   case StorageObjectType::kNonnegativeInt64:
-    obj.int64() = committed_base_object_ -> int64();
+    obj.int64() = committed_base_object_->int64();
     break;
   case StorageObjectType::kBoundedHashset:
-    obj.hashset() = committed_base_object_ -> hashset();
+    obj.hashset() = committed_base_object_->hashset();
     break;
   case StorageObjectType::kReplayCache:
-    obj.replay_cache_metadata() = committed_base_object_ -> replay_cache().metadata;
+    obj.replay_cache_metadata() =
+        committed_base_object_->replay_cache().metadata;
     break;
   }
   return obj;
@@ -286,8 +438,9 @@ StorageObjectFrame::commit_round()
     return;
   }
 
-  committed_base_object_ =
-      std::visit([&](auto const &arm) { return arm.to_object(committed_base_object_); }, v->variant_);
+  committed_base_object_ = std::visit(
+      [&](auto const &arm) { return arm.to_object(committed_base_object_); },
+      v->variant_);
 }
 
 void

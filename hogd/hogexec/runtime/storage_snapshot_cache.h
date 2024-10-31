@@ -22,7 +22,8 @@ class StorageSnapshotCache {
 public:
   using client_t =
       StorageReadInterfaceV1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-  std::optional<StrippedStorageObject> try_get_object(AddressAndKey const &addrkey);
+  std::optional<StrippedStorageObject>
+  try_get_object(AddressAndKey const &addrkey);
   std::shared_ptr<const Contract>
   try_get_contract_by_hash(SHA256Hash const &hash);
   std::optional<SHA256Hash>
