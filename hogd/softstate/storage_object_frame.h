@@ -10,6 +10,11 @@
 
 namespace hogd {
 
+// Something like the ReplayCache or a BoundedHashset will require
+// internal data structures more complex than a StorageObject (which is really a serialization format
+// more than an efficient data structure).
+// The internals may need reimplementation when we have a database to interact with.
+// However, the external interface and logic will look approximately like this.
 class StorageObjectFrame {
 public:
   StorageObjectFrame(std::optional<StorageObject> const &snapshot_state);
