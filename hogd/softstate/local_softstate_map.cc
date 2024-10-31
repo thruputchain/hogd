@@ -58,20 +58,18 @@ LocalSoftstateMap::revert_delta(AddressAndKey const &addrkey,
 void
 LocalSoftstateMap::commit_round()
 {
-  round_number_++;
   auto ptr = map_.take();
   for (auto &[_, frame] : *ptr) {
-    frame.commit_round(round_number_);
+    frame.commit_round();
   }
 }
 
 void
 LocalSoftstateMap::revert_round()
 {
-  round_number_++;
   auto ptr = map_.take();
   for (auto &elt : *ptr) {
-    elt.second.revert_round(round_number_);
+    elt.second.revert_round();
   }
 }
 
