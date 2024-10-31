@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <variant>
+#include <set>
 
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_object.hh"
@@ -58,7 +59,7 @@ private:
 
   struct ReplayCacheCacheType {
     std::optional<uint64_t> new_max_nonce_clear_threshold_;
-    x23::Vec<uint64_t> new_nonces_;
+    std::set<uint64_t> new_nonces_;
 
     x23::Vec<StorageDelta> get_deltas() const;
 

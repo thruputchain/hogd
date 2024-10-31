@@ -18,7 +18,6 @@ namespace hogd
   };
 
   struct ReplayCacheMetadata {
-    unsigned int max_size; // uint32_t
     unsigned hyper clear_threshold; // uint64_t
     unsigned int current_size; // uint32_t
   };

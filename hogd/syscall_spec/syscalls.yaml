@@ -270,6 +270,9 @@ errors:
   - name: "UnknownSyscall"
     number: 4
     doc: "Unknown syscall number"
+  - name: "Placeholder"
+    doc: "deleted"
+    number: 5
   - name: "IsRootTransaction"
     number: 6
     doc: "Cannot call get_msg_sender on root invocation"
