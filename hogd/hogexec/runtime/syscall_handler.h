@@ -52,6 +52,12 @@ public:
   SyscallStatus<void> nnint64_set_add(StorageKey const &key, int64_t set_value,
                                       int64_t add_value);
 
+  // replay cache
+  SyscallStatus<void> replay_cache_insert(StorageKey const &key,
+                                          const uint64_t nonce);
+  SyscallStatus<void> replay_cache_clear(StorageKey const &key,
+                                         const uint64_t threshold);
+
   SyscallStatus<Calldata> get_calldata() const;
   SyscallStatus<RuntimeMemoryLength> get_calldata_len() const;
 

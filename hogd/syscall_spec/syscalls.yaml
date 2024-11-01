@@ -249,6 +249,32 @@ syscalls:
         span_argument: yes
     outputs:
     number: 20 
+  - name: "ReplayCacheInsert"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        fixed_size: yes
+        typename: "StorageKey"
+      - name: "nonce"
+        fixed_size: yes
+        typename: "uint64_t"
+        rust_typename: "u64"
+        primitive_type: yes
+    outputs:
+    number: 21 
+  - name: "ReplayCacheClear"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        fixed_size: yes
+        typename: "StorageKey"
+      - name: "threshold"
+        fixed_size: yes
+        typename: "uint64_t"
+        rust_typename: "u64"
+        primitive_type: yes
+    outputs:
+    number: 22
 
 
 errors:
@@ -270,9 +296,9 @@ errors:
   - name: "UnknownSyscall"
     number: 4
     doc: "Unknown syscall number"
-  - name: "Placeholder"
-    doc: "deleted"
+  - name: "UnknownEnumVariant"
     number: 5
+    doc: "Syscall returned an enum variant unrecognized by this contract"
   - name: "IsRootTransaction"
     number: 6
     doc: "Cannot call get_msg_sender on root invocation"
@@ -306,6 +332,4 @@ errors:
   - name: "SignatureVerificationFailed"
     number: 16
     doc: "Signature verification failed"
-  - name: "UnknownEnumVariant"
-    number: 17
-    doc: "Syscall returned an enum variant unrecognized by this contract"
+

@@ -150,13 +150,23 @@ syscall_{name}_outer(SystemCallHandler& syscall_handler,
 syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
 
 """
-  return outer, inner
+  frame = f"""std::pair<{inner_return_type}, GasAmount>
+syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls})
+{{
+  throw std::runtime_error("unimplemented");
+}}
+
+"""
+  return outer, inner, frame
 
 def gen_outer(syscall):
   return gen_inner_outer(syscall)[0]
 
 def gen_inner(syscall):
   return gen_inner_outer(syscall)[1]
+
+def gen_frame(syscall):
+  return gen_inner_outer(syscall)[2]
 
 
 def gen_syscall_table_entry(syscall):
@@ -478,6 +488,33 @@ use core::hint::unreachable_unchecked;
 
 """
 
+def gen_syscall_frame(spec, args):
+  req_calls = []
+  for arg in args:
+    for call in spec:
+      if (call["number"] == arg):
+        frame = gen_frame(call)
+        req_calls.append(frame)
+
+  joined = "".join(req_calls)
+
+  return f"""#include "hogd/hogexec/runtime/syscall_inner.h"
+
+#include <cstddef>
+#include <span>
+#include <utility>
+
+#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "syscall.hh"
+#include "types.hh"
+
+namespace hogd {{
+
+{joined}
+}}"""
+  
+
 
 
 
@@ -488,8 +525,8 @@ parser.add_argument('--syscall_inner_h', action='store_true', help="gen syscall_
 parser.add_argument('--syscall_entry_cc', action='store_true', help="gen syscall_entry_cc")
 parser.add_argument('--syscall_yaml', type=str, required = True, help = "input yaml")
 parser.add_argument('--syscall_rs', action='store_true', help = 'gen rust syscall bindings')
-parser.add_argument('--template_filename', type=str, help = "template filename")
 parser.add_argument('--output_dir', type=str, default = ".", help = "output folder")
+parser.add_argument('--syscall_frame', nargs='+', type=int, help = "syscall nos")
 
 args = parser.parse_args()
 
@@ -515,4 +552,7 @@ if (args.syscall_rs):
   filename = args.output_dir + "/syscall_bindings.rs"
   with open(filename, "w") as f:
     f.write(gen_rs_syscall_bindings(spec))
+
+if (args.syscall_frame is not None and len(args.syscall_frame) > 0):
+  print(gen_syscall_frame(spec, args.syscall_frame))
 

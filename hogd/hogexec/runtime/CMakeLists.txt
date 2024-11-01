@@ -20,6 +20,7 @@ set(runtime_sources
   syscall_handler.cc
   syscall_log.cc
   syscall_nnint64.cc
+  syscall_replay.cc
 )
 
 add_library(

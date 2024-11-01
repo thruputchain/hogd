@@ -386,6 +386,20 @@ SystemCallHandler::nnint64_set_add(StorageKey const &key, int64_t set_value,
   return resolve_item_cache(key).nnint64_set_add(set_value, add_value);
 }
 
+SyscallStatus<void>
+SystemCallHandler::replay_cache_insert(StorageKey const &key,
+                                       const uint64_t nonce)
+{
+  return resolve_item_cache(key).replay_cache_insert(nonce);
+}
+
+SyscallStatus<void>
+SystemCallHandler::replay_cache_clear(StorageKey const &key,
+                                      const uint64_t threshold)
+{
+  return resolve_item_cache(key).replay_cache_clear(threshold);
+}
+
 SyscallStatus<Calldata>
 SystemCallHandler::get_calldata() const
 {
