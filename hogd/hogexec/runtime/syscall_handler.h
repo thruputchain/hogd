@@ -103,12 +103,10 @@ private:
   WasmiContext wasmi_context_;
 
   RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
-  InvokeResult invoke_unconverted(Invocation const &invocation,
-                                  RuntimeCacheEntry &runtime,
-                                  uint64_t gas_limit);
 
   void start_call_frame(Invocation const &invocation);
-  ;
+  void start_root_call_frame();
+
   void finish_call_frame(InvokeResult const &result);
 
   // Can only be called when call_frame_stack_ is nonempty

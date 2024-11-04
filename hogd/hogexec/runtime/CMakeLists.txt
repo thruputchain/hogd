@@ -8,6 +8,7 @@ set_source_files_properties(
 
 set(runtime_sources 
   auth_entry_matcher.cc
+  auth_manager.cc
   call_frame.cc
   status.cc
   item_cache.cc

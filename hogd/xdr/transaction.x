@@ -2,6 +2,7 @@
 // clang-format off
 %#include "types.hh"
 %#include "contract.hh"
+%#include "auth.hh"
 
 namespace hogd
 {
@@ -41,6 +42,7 @@ namespace hogd
   // for a later PR.
   struct SignedTransaction {
     Transaction tx;
+    AuthEntry auth_entries<>;
   };
 
   struct LogEntry {

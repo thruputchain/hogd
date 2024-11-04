@@ -23,6 +23,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/auth_manager.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
@@ -66,8 +67,17 @@ SystemCallHandler::root_invoke()
                         .gas_consumed = 0};
   }
 
-  auto res = invoke_unconverted(signed_tx_.tx.invocation, *runtime,
-                                signed_tx_.tx.invocation.gas_limit);
+  if (!AuthManager::initialization_validate_auth_entries(signed_tx_)) {
+    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
+                        .gas_consumed = 0};
+  }
+
+  start_root_call_frame();
+
+  auto res = runtime->runtime.invoke(signed_tx_.tx.invocation.method,
+    signed_tx_.tx.invocation.gas_limit);
+
+  finish_call_frame(res);
 
   if (!res.result) {
     return res;
@@ -166,18 +176,34 @@ SystemCallHandler::invoke(Invocation const &invocation)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  return convert_invoke_result_to_host_fn_result(
-      invoke_unconverted(invocation, *runtime, gas_limit));
+  start_call_frame(invocation);
+
+  auto res = runtime->runtime.invoke(invocation.method, gas_limit);
+
+  finish_call_frame(res);
+
+  return convert_invoke_result_to_host_fn_result(res);
+}
+
+void
+SystemCallHandler::start_root_call_frame() {
+  assert(call_frame_stack_.empty());
+
+  call_frame_stack_.emplace_back(signed_tx_);
 }
 
 void
 SystemCallHandler::start_call_frame(Invocation const &invocation)
 {
-  const CallFrame *parent = nullptr;
-  if (!call_frame_stack_.empty()) {
-    parent = &call_frame_stack_.back();
-  }
-  call_frame_stack_.emplace_back(invocation, parent);
+  assert(!call_frame_stack_.empty());
+
+  // emplace_back might invalidate the reference to call_frame_stack_back(),
+  // and I can't find where in the standard the precise point at which this invalidation
+  // occurs (but it would make sense to do the realloc before a placement new,
+  // so I assume it occurs before the ctor is called)
+  CallFrame new_frame (invocation, call_frame_stack_.back());
+
+  call_frame_stack_.emplace_back(std::move(new_frame));
 }
 
 void
@@ -214,20 +240,6 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
 
     call_frame_stack_.pop_back();
   }
-}
-
-InvokeResult
-SystemCallHandler::invoke_unconverted(Invocation const &invocation,
-                                      RuntimeCacheEntry &runtime,
-                                      uint64_t gas_limit)
-{
-  start_call_frame(invocation);
-
-  InvokeResult result = runtime.runtime.invoke(invocation.method, gas_limit);
-
-  finish_call_frame(result);
-
-  return result;
 }
 
 void
