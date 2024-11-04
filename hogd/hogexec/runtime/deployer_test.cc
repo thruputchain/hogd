@@ -39,7 +39,7 @@ TEST_F(DeployerTest, DeployAndEcho)
         test::make_calldata(h, MethodID{0}, uint32_t{0}, uint32_t{8},
                             std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
     stx.tx.contracts_to_deploy.push_back(*c);
-    stx.nonce = 0;
+    stx.tx.nonce = 0;
 
     SystemCallHandler handler(stx, *snapshot_cache_);
     auto stx_hash = handler.get_source_tx_hash();
@@ -66,7 +66,7 @@ TEST_F(DeployerTest, DeployAndEcho)
   stx.tx.invocation.calldata =
       test::make_calldata(uint32_t{0}, uint32_t{4},
                           std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
-  stx.nonce = 0;
+  stx.tx.nonce = 0;
 
   SystemCallHandler handler(stx, *snapshot_cache_);
 

@@ -30,7 +30,7 @@ make_deploy_wallet_transaction(SHA256Hash const &h_wallet,
   wallet_stx.tx.invocation.calldata =
       test::make_calldata(h_wallet, test::get_sdk_name("initialize"), pk,
                           erc20_addr);
-  wallet_stx.nonce = nonce;
+  wallet_stx.tx.nonce = nonce;
   wallet_stx.tx.contracts_to_deploy.push_back(*c_wallet);
 
   return wallet_stx;
@@ -48,7 +48,7 @@ make_deploy_erc20_noinit(SHA256Hash const &h_erc20,
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(h_erc20);
   stx.tx.contracts_to_deploy.push_back(*c_erc20);
-  stx.nonce = 0;
+  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -63,7 +63,7 @@ make_initialize_erc20(ContractAddress const &owner,
   stx.tx.invocation.method_name = test::get_sdk_name("initialize");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(owner);
-  stx.nonce = 0;
+  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -77,7 +77,7 @@ make_mint_transaction(ContractAddress const &manager_wallet,
   stx.tx.invocation.method_name = test::get_sdk_name("mint");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(to, amount);
-  stx.nonce = 0;
+  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -90,7 +90,7 @@ make_check_balance_transaction(ContractAddress const &wallet, int64_t value)
   stx.tx.invocation.method_name = test::get_sdk_name("test_expect_balance");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(value);
-  stx.nonce = 0;
+  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -104,7 +104,7 @@ make_transfer_transaction(ContractAddress const &sender,
   stx.tx.invocation.method_name = test::get_sdk_name("send_payment");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(to, amount);
-  stx.nonce = 0;
+  stx.tx.nonce = 0;
 
   return stx;
 }

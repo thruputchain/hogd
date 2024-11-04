@@ -85,7 +85,7 @@ SystemCallHandler::get_current_address() const
 SHA256Hash
 SystemCallHandler::get_source_tx_hash() const
 {
-  auto buf = x23::serialize(signed_tx_);
+  auto buf = x23::serialize(signed_tx_.tx);
   return sha256(std::as_bytes(std::span(buf)));
 }
 

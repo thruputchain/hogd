@@ -35,7 +35,7 @@ make_check_balance_transaction(ContractAddress const &wallet, int64_t value)
   stx.tx.invocation.method_name = test::get_sdk_name("test_expect_balance");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(value);
-  stx.nonce = 0;
+  stx.tx.nonce = 0;
 
   return stx;
 }

@@ -7,6 +7,7 @@ set_source_files_properties(
     PROPERTIES GENERATED TRUE)
 
 set(runtime_sources 
+  auth_entry_matcher.cc
   call_frame.cc
   status.cc
   item_cache.cc
@@ -69,6 +70,7 @@ add_executable(
   deployer_test.cc
   erc20_test.cc
   erc20_test_utils.cc
+  auth_match_test.cc
 )
 
 target_link_libraries(
