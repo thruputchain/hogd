@@ -6,6 +6,7 @@
 #include <set>
 #include <span>
 
+#include "hogd/hogexec/runtime/auth_context.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "storage_object.hh"
 #include "transaction.hh"
@@ -14,7 +15,7 @@ namespace hogd {
 
 class CallFrame {
 public:
-  CallFrame(Invocation invocation);
+  CallFrame(Invocation invocation, const CallFrame *parent);
 
   void commit_successful_child_call(CallFrame &frame);
   void commit_failed_child_call();
@@ -47,6 +48,8 @@ public:
   {
     return storage_proxies_;
   }
+
+  AuthContextStack auth_context_;
 
 private:
   ReturnBuffer to_return_;

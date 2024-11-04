@@ -35,7 +35,7 @@ namespace hogd
   };
 
   struct AuthEntrySignaturePayload {
-    opaque message<>;
+    opaque message<>; // by default: Hash(source transaction)
     AuthEntryNode nodes<>;
     AuthEntryMetadata metadata;
   };

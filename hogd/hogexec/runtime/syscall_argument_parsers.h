@@ -28,6 +28,22 @@ check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset,
   return reinterpret_cast<T *>(contract_memory.data() + user_offset);
 }
 
+// If you pass an invalid pointer in to the argument,
+// returns nullptr.
+// This would nominally return an std::optional,
+// but returning the pointer avoids the copy
+template<typename T> requires std::is_trivially_copyable_v<T>
+std::optional<T *>
+check_user_optional_argument(std::span<std::byte> contract_memory,
+                             uint64_t user_offset, uint64_t user_len)
+{
+  T *res = check_user_argument<T>(contract_memory, user_offset, user_len);
+  if (!res) {
+    return std::nullopt;
+  }
+  return res;
+}
+
 std::optional<std::span<std::byte>>
 check_user_span_argument(std::span<std::byte> contract_memory,
                          uint64_t user_offset, uint64_t user_len)

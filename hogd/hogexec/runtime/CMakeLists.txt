@@ -12,6 +12,7 @@ set(runtime_sources
   status.cc
   item_cache.cc
   storage_snapshot_cache.cc
+  syscall_auth.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc

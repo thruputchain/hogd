@@ -27,6 +27,7 @@ pub fn handle_alloc_error(_: Layout) -> ! {
 #[cfg(feature = "alloc")]
 pub mod alloc;
 
+mod auth;
 mod bytestring;
 mod contract;
 mod crypto;
@@ -44,6 +45,7 @@ pub mod syscall_bindings;
 
 pub mod rt;
 
+pub use auth::*;
 pub use bytestring::*;
 pub use contract::*;
 pub use crypto::*;

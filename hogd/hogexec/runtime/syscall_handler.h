@@ -58,6 +58,9 @@ public:
   SyscallStatus<void> replay_cache_clear(StorageKey const &key,
                                          const uint64_t threshold);
 
+  // auth
+  void push_auth_context(std::span<const std::byte> auth_context_frame);
+
   SyscallStatus<Calldata> get_calldata() const;
   SyscallStatus<RuntimeMemoryLength> get_calldata_len() const;
 

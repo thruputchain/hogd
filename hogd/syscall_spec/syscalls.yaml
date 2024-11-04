@@ -275,7 +275,35 @@ syscalls:
         primitive_type: yes
     outputs:
     number: 22
-
+  - name: "GetAuthPayloadHash"
+    needs_context: yes
+    inputs:
+      - name: "message"
+        fixed_size: yes
+        typename: "SHA256Hash"
+        optional: true
+    outputs:
+      - name: "auth_payload_hash"
+        fixed_size: yes
+        typename: "SHA256Hash"
+    number: 23
+  - name: "PushAuthContext"
+    needs_context: yes
+    inputs:
+      - name: "context"
+        span_argument: yes
+    outputs:
+    number: 24
+  - name: "RequireAuth"
+    needs_context: yes
+    inputs:
+      - name: "authorizing_address"
+        fixed_size: yes
+        typename: "ContractAddress"
+      - name: "action"
+        span_argument: yes
+    outputs:
+    number: 25
 
 errors:
   - name: "None"
@@ -332,4 +360,7 @@ errors:
   - name: "SignatureVerificationFailed"
     number: 16
     doc: "Signature verification failed"
+  - name: "AuthMatchFailed"
+    number: 17
+    doc: "Auth Matching Failed"
 

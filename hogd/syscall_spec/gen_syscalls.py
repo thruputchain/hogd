@@ -8,6 +8,10 @@ import argparse
 
 syscall_argcount = 6
 
+def get_check_arg_statement(arg):
+  return f"""if (!{arg}) {{
+    return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kFault)}}, kGenericBadSyscallCost}};
+  }}"""
 
 def gen_validate_arg(inp, *, is_input):
   arg_name = inp["name"]
@@ -17,14 +21,17 @@ def gen_validate_arg(inp, *, is_input):
     const = "const "
     in_out = "input"
 
-  check_arg_statement = f"""if (!{in_out}_{arg_name}) {{
-    return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kFault)}}, kGenericBadSyscallCost}};
-  }}"""
-
+  optional = False
+  if "optional" in inp and inp["optional"]:
+    optional = True
 
   if "span_argument" in inp and inp["span_argument"]:
+    if optional:
+      raise Exception("I haven't impl'd optional span arguments: just make a span of length 0")
     arg1 = f"{in_out}_{arg_name}"
     arg2 = f"{in_out}_{arg_name}_len"
+    check_arg_statement = get_check_arg_statement(arg1)
+
     return f"""
   std::optional<std::span<{const}std::byte>> {arg1} =
       check_user_span_argument(contract_memory, user_{arg1},
@@ -32,10 +39,16 @@ def gen_validate_arg(inp, *, is_input):
 
   {check_arg_statement}
 """, [f"user_{arg1}", f"user_{arg2}"], arg1, f"*{arg1}", f"std::span<{const}std::byte> {arg1}"
-  
+  # endif span_argument
 
   typename = inp["typename"]
   arg1 = f"{in_out}_{arg_name}"
+
+  # put optional_ on front of arg name, for readability
+  if optional:
+    arg1 = f"optional_{arg1}"
+
+  check_arg_statement = get_check_arg_statement(arg1)
   
   if "primitive_type" in inp and inp["primitive_type"] and is_input:
     return f"""
@@ -44,6 +57,8 @@ def gen_validate_arg(inp, *, is_input):
 """, [f"user_{arg1}"], arg1, arg1, f"{const}{typename} {arg1}"
 
   if "custom_parsing" in inp and inp["custom_parsing"] and is_input:
+    if optional:
+      raise Exception("optional parsing is a strict subset of custom parsing--don't use both")
     num_args = inp["custom_args_required"]
     custom_args = []
     for i in range(0, num_args):
@@ -56,6 +71,18 @@ def gen_validate_arg(inp, *, is_input):
 
   {check_arg_statement}
   """, custom_args, arg1, f"*{arg1}", f"{const}{typename}& {arg1}"
+  #endif custom_parsing
+
+  if optional:
+    opt_typename = f"std::optional<{const}{typename} *>"
+    return f"""
+    {opt_typename} {arg1} = 
+        check_user_optional_argument<{const}{typename}>(contract_memory, user_{arg1},
+                                      sizeof({typename}));
+
+    {check_arg_statement}
+""", [f"user_{arg1}"], arg1, f"*{arg1}", f"{const}{typename}* {arg1}"
+  # end optional arg
 
   # else fixed size
   return f"""

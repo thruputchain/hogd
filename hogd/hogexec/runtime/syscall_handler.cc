@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "auth.hh"
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -166,7 +167,11 @@ SystemCallHandler::invoke(Invocation const &invocation)
 void
 SystemCallHandler::start_call_frame(Invocation const &invocation)
 {
-  call_frame_stack_.emplace_back(invocation);
+  const CallFrame *parent = nullptr;
+  if (!call_frame_stack_.empty()) {
+    parent = &call_frame_stack_.back();
+  }
+  call_frame_stack_.emplace_back(invocation, parent);
 }
 
 void
@@ -398,6 +403,24 @@ SystemCallHandler::replay_cache_clear(StorageKey const &key,
                                       const uint64_t threshold)
 {
   return resolve_item_cache(key).replay_cache_clear(threshold);
+}
+
+void
+SystemCallHandler::push_auth_context(
+    std::span<const std::byte> auth_context_frame)
+{
+  auto &active_frame = get_active_call_frame();
+
+  AuthContext new_context;
+  new_context.address = active_frame.active_invocation_.invoked_address;
+
+  std::span<const uint8_t> reinterpreted_auth_frame = {
+      reinterpret_cast<const uint8_t *>(auth_context_frame.data()),
+      auth_context_frame.size()};
+  new_context.bytes = {reinterpreted_auth_frame.begin(),
+                       reinterpreted_auth_frame.end()};
+
+  active_frame.auth_context_.context_.push_back(new_context);
 }
 
 SyscallStatus<Calldata>

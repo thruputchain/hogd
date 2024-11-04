@@ -10,7 +10,7 @@ protected:
   void SetUp() override
   {
     // For simplicity, this test uses every auth context as the same
-    // ContractAddress 
+    // ContractAddress
     //
     // AAA
     //   BBB
@@ -20,7 +20,7 @@ protected:
     // BBB
     // AAA
     //   CCC
-    //     EEE -- check that this does not match AAAA-CCC earlier
+    //     EEE -- check that this does not match AAA-CCC earlier
 
     entry_.metadata.auth_flags = 0;
     entry_.metadata.signature_nonce = 0;
@@ -65,6 +65,7 @@ TEST_F(AuthMatchTest, MatchSimple)
   EXPECT_TRUE(matcher.try_match(stack));
 }
 
+
 TEST_F(AuthMatchTest, NoMatchSimple)
 {
 
@@ -95,14 +96,14 @@ TEST_F(AuthMatchTest, GapMatch)
   EXPECT_TRUE(matcher.try_match(stack));
 }
 
-TEST_F(AuthMatchTest, GapMatch2)
+TEST_F(AuthMatchTest, ExtraContextNoMatch)
 {
-
-  AuthContextStack stack({make_auth_context("CCC"), make_auth_context("EEE")});
+  AuthContextStack stack({make_auth_context("AAA"), make_auth_context("BBB"), 
+    make_auth_context("CCC"), make_auth_context("EEE")});
 
   AuthEntryMatcher matcher(entry_);
 
-  EXPECT_TRUE(matcher.try_match(stack));
+  EXPECT_FALSE(matcher.try_match(stack));
 }
 
 TEST_F(AuthMatchTest, MatchConsumed)
@@ -113,29 +114,7 @@ TEST_F(AuthMatchTest, MatchConsumed)
       AuthContextStack({make_auth_context("AAA"), make_auth_context("BBB")})));
   EXPECT_TRUE(matcher.try_match(
       AuthContextStack({make_auth_context("AAA"), make_auth_context("BBB")})));
-}
-
-TEST_F(AuthMatchTest, DoubleMatch)
-{
-  AuthEntryMatcher matcher(entry_);
-
-  EXPECT_TRUE(matcher.try_match(
-      AuthContextStack({make_auth_context("AAA"), make_auth_context("BBB")})));
-
-  EXPECT_TRUE(matcher.try_match(
-      AuthContextStack({make_auth_context("AAA"), make_auth_context("BBB")})));
-
-  EXPECT_TRUE(matcher.try_match(AuthContextStack({make_auth_context("BBB")})));
-
-  AuthEntryMatcher matcher2(entry_);
-
-  // we match the first match that we find
-  EXPECT_TRUE(matcher2.try_match(AuthContextStack({make_auth_context("BBB")})));
-
-  EXPECT_TRUE(matcher2.try_match(
-      AuthContextStack({make_auth_context("AAA"), make_auth_context("BBB")})));
-
-  EXPECT_FALSE(matcher2.try_match(
+  EXPECT_FALSE(matcher.try_match(
       AuthContextStack({make_auth_context("AAA"), make_auth_context("BBB")})));
 }
 
@@ -143,12 +122,36 @@ TEST_F(AuthMatchTest, OnlyLeaves)
 {
   AuthEntryMatcher matcher(entry_);
 
-  EXPECT_TRUE(matcher.try_match(
-      AuthContextStack({make_auth_context("AAA"), make_auth_context("CCC")})));
-
-  // the second AAA-CCC is not a leaf
   EXPECT_FALSE(matcher.try_match(
-      AuthContextStack({make_auth_context("AAA"), make_auth_context("CCC")})));
+      AuthContextStack({make_auth_context("AAA")})));
+
+  // after failed match nothing should match
+  EXPECT_FALSE(matcher.try_match(
+    AuthContextStack({make_auth_context("BBB")})));
 }
+
+TEST_F(AuthMatchTest, SkipAdvancesIteratorOnlyLeaves)
+{
+  AuthEntryMatcher matcher(entry_);
+
+  EXPECT_TRUE(matcher.try_match(
+      AuthContextStack({make_auth_context("CCC")})));
+
+  EXPECT_FALSE(matcher.try_match(
+      AuthContextStack({make_auth_context("CCC")})));
+}
+
+TEST_F(AuthMatchTest, SkipAdvancesIterator)
+{
+  AuthEntryMatcher matcher(entry_);
+
+  EXPECT_TRUE(matcher.try_match(
+      AuthContextStack({make_auth_context("DDD")})));
+
+  EXPECT_FALSE(matcher.try_match(
+      AuthContextStack({make_auth_context("CCC")})));
+}
+
+
 
 } // namespace hogd
