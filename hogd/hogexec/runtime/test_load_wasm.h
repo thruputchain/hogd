@@ -113,11 +113,16 @@ Calldata static make_calldata(C const &data, Cs const &...additional)
 }
 
 [[maybe_unused]]
-uint32_t static get_sdk_name(std::string const &v)
+MethodSpecifier static get_sdk_name(std::string const &v)
 {
   SHA256Hash hash = sha256(std::as_bytes(std::span(v)));
 
-  return std::byteswap(*reinterpret_cast<uint32_t *>(hash.data()));
+  MethodID out_name = std::byteswap(*reinterpret_cast<uint32_t *>(hash.data()));
+
+  MethodSpecifier specifier(MethodSpecifierType::kDefaultUint32);
+  specifier.method_id_uint32() = out_name;
+
+  return specifier;
 }
 
 } // namespace hogd::test

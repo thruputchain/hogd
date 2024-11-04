@@ -35,7 +35,8 @@ TEST_F(CalldataTest, NoCalldata)
 
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr_;
-  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.nonce = 0;
 
@@ -58,7 +59,8 @@ TEST_F(CalldataTest, SomeCalldata)
 
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr_;
-  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = {0, 1, 2, 3, 4, 5};
   stx.tx.nonce = 0;
@@ -81,7 +83,8 @@ TEST_F(CalldataTest, TooMuchCalldata)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr_;
-  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = x23::Vec<uint8_t>(kMaxLogMessageLen + 1, 12);
   stx.tx.nonce = 0;

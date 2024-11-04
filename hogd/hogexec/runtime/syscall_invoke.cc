@@ -83,8 +83,11 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
               reinterpret_cast<const uint8_t *>(input_calldata.data()),
               input_calldata.size());
 
+  MethodSpecifier specifier(MethodSpecifierType::kDefaultUint32);
+  specifier.method_id_uint32() = input_method;
+
   auto invoke_res = syscall_handler.invoke(
-      Invocation(input_address, input_method, input_gas_limit, calldata));
+      Invocation(input_address, specifier, input_gas_limit, calldata));
 
   output_return_len = syscall_handler.get_defaultzero_return_len();
 

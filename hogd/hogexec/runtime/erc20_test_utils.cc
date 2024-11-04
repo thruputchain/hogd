@@ -25,11 +25,14 @@ make_deploy_wallet_transaction(SHA256Hash const &h_wallet,
   SignedTransaction wallet_stx;
   wallet_stx.tx.invocation.invoked_address =
       test::RuntimeTestFramework::kDeployerAddress;
-  wallet_stx.tx.invocation.method_name = 1;
+  wallet_stx.tx.invocation.method.method_type(
+      MethodSpecifierType::kDefaultUint32);
+  wallet_stx.tx.invocation.method.method_id_uint32() = 1;
   wallet_stx.tx.invocation.gas_limit = UINT64_MAX;
   wallet_stx.tx.invocation.calldata =
-      test::make_calldata(h_wallet, test::get_sdk_name("initialize"), pk,
-                          erc20_addr);
+      test::make_calldata(h_wallet,
+                          test::get_sdk_name("initialize").method_id_uint32(),
+                          pk, erc20_addr);
   wallet_stx.tx.nonce = nonce;
   wallet_stx.tx.contracts_to_deploy.push_back(*c_wallet);
 
@@ -44,7 +47,8 @@ make_deploy_erc20_noinit(SHA256Hash const &h_erc20,
   SignedTransaction stx;
   stx.tx.invocation.invoked_address =
       test::RuntimeTestFramework::kDeployerAddress;
-  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(h_erc20);
   stx.tx.contracts_to_deploy.push_back(*c_erc20);
@@ -60,7 +64,7 @@ make_initialize_erc20(ContractAddress const &owner,
 
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = erc20_address;
-  stx.tx.invocation.method_name = test::get_sdk_name("initialize");
+  stx.tx.invocation.method = test::get_sdk_name("initialize");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(owner);
   stx.tx.nonce = 0;
@@ -74,7 +78,7 @@ make_mint_transaction(ContractAddress const &manager_wallet,
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = manager_wallet;
-  stx.tx.invocation.method_name = test::get_sdk_name("mint");
+  stx.tx.invocation.method = test::get_sdk_name("mint");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(to, amount);
   stx.tx.nonce = 0;
@@ -87,7 +91,7 @@ make_check_balance_transaction(ContractAddress const &wallet, int64_t value)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = wallet;
-  stx.tx.invocation.method_name = test::get_sdk_name("test_expect_balance");
+  stx.tx.invocation.method = test::get_sdk_name("test_expect_balance");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(value);
   stx.tx.nonce = 0;
@@ -101,7 +105,7 @@ make_transfer_transaction(ContractAddress const &sender,
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = sender;
-  stx.tx.invocation.method_name = test::get_sdk_name("send_payment");
+  stx.tx.invocation.method = test::get_sdk_name("send_payment");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(to, amount);
   stx.tx.nonce = 0;

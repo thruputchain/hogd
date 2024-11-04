@@ -33,7 +33,8 @@ TEST_F(DeployerTest, DeployAndEcho)
   {
     SignedTransaction stx;
     stx.tx.invocation.invoked_address = kDeployerAddress;
-    stx.tx.invocation.method_name = 1;
+    stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+    stx.tx.invocation.method.method_id_uint32() = 1;
     stx.tx.invocation.gas_limit = UINT64_MAX;
     stx.tx.invocation.calldata =
         test::make_calldata(h, MethodID{0}, uint32_t{0}, uint32_t{8},
@@ -61,7 +62,8 @@ TEST_F(DeployerTest, DeployAndEcho)
 
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = deployed_address;
-  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(uint32_t{0}, uint32_t{4},

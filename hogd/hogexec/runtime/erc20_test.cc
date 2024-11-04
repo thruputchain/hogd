@@ -32,7 +32,7 @@ make_check_balance_transaction(ContractAddress const &wallet, int64_t value)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = wallet;
-  stx.tx.invocation.method_name = test::get_sdk_name("test_expect_balance");
+  stx.tx.invocation.method = test::get_sdk_name("test_expect_balance");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(value);
   stx.tx.nonce = 0;

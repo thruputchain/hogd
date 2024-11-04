@@ -45,7 +45,8 @@ TEST_F(ReturnTest, EchoFull)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr2_;
-  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(addr1_, MethodID{0}, uint32_t{0}, uint32_t{4},
@@ -72,7 +73,8 @@ TEST_F(ReturnTest, EchoSlice)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr2_;
-  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(addr1_, MethodID{0}, uint32_t{1}, uint32_t{2},
@@ -99,7 +101,8 @@ TEST_F(ReturnTest, EchoSliceFancySDK)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr2_;
-  stx.tx.invocation.method_name = 1;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 1;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(addr1_, uint32_t{1}, uint32_t{2},
@@ -126,8 +129,7 @@ TEST_F(ReturnTest, EchoSliceFancierSDK)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr2_;
-  stx.tx.invocation.method_name =
-      test::get_sdk_name("test_slice_fancysdk_inner_v2");
+  stx.tx.invocation.method = test::get_sdk_name("test_slice_fancysdk_inner_v2");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(addr1_, uint32_t{1}, uint32_t{2},

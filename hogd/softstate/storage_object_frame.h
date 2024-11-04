@@ -47,7 +47,8 @@ private:
       return bytestring_set_ == set_arg;
     }
 
-    StorageObject to_object(std::optional<StorageObject> const &) const
+    StorageObject
+    to_object(std::optional<StorageObject> const & /*unused*/) const
     {
       StorageObject object;
       object.type(StorageObjectType::kBytestring);

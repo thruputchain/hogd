@@ -211,9 +211,22 @@ WasmiRuntime::get_memory() const noexcept
 }
 
 InvokeResult
-WasmiRuntime::invoke(uint32_t method_name, uint64_t gas_limit)
+WasmiRuntime::invoke(const MethodSpecifier method_specifier, uint64_t gas_limit)
 {
-  auto method_name_str = std::format("{:X}", method_name);
+  using enum MethodSpecifierType;
+  std::string method_name_str;
+  switch (method_specifier.method_type()) {
+  case kDefaultUint32:
+    method_name_str = std::format("{:X}", method_specifier.method_id_uint32());
+    break;
+  case kReservedName:
+    method_name_str = method_specifier.reserved_name();
+    break;
+  default:
+    return InvokeResult{.result = {InvokeError{
+                            InvokeErrorCode::kDeterministic}},
+                        .gas_consumed = 0};
+  }
 
   return invoke(method_name_str, gas_limit);
 }

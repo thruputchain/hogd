@@ -46,7 +46,8 @@ TEST_F(InvokeTest, CalldataPassthroughSuccess)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr2_;
-  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(addr1_, MethodID{0},
@@ -73,7 +74,8 @@ TEST_F(InvokeTest, CalldataPassthroughFail)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr2_;
-  stx.tx.invocation.method_name = 0;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata =
       test::make_calldata(addr1_, MethodID{1},

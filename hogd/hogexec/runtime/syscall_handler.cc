@@ -60,6 +60,12 @@ SystemCallHandler::root_invoke()
                         .gas_consumed = 0};
   }
 
+  if (signed_tx_.tx.invocation.method.method_type() !=
+      MethodSpecifierType::kDefaultUint32) {
+    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
+                        .gas_consumed = 0};
+  }
+
   auto res = invoke_unconverted(signed_tx_.tx.invocation, *runtime,
                                 signed_tx_.tx.invocation.gas_limit);
 
@@ -217,8 +223,7 @@ SystemCallHandler::invoke_unconverted(Invocation const &invocation,
 {
   start_call_frame(invocation);
 
-  InvokeResult result =
-      runtime.runtime.invoke(invocation.method_name, gas_limit);
+  InvokeResult result = runtime.runtime.invoke(invocation.method, gas_limit);
 
   finish_call_frame(result);
 

@@ -43,7 +43,8 @@ TEST_F(NNInt64Test, SetAddPosValue)
   {
     SignedTransaction stx;
     stx.tx.invocation.invoked_address = addr_;
-    stx.tx.invocation.method_name = 0;
+    stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+    stx.tx.invocation.method.method_id_uint32() = 0;
     stx.tx.invocation.gas_limit = UINT64_MAX;
     stx.tx.invocation.calldata = test::make_calldata(key, 100LL, 10LL);
 
@@ -70,7 +71,8 @@ TEST_F(NNInt64Test, SetAddPosValue)
   {
     SignedTransaction stx;
     stx.tx.invocation.invoked_address = addr_;
-    stx.tx.invocation.method_name = 0;
+    stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+    stx.tx.invocation.method.method_id_uint32() = 0;
     stx.tx.invocation.gas_limit = UINT64_MAX;
     stx.tx.invocation.calldata = test::make_calldata(key, 10LL, 10LL);
 
@@ -97,7 +99,8 @@ TEST_F(NNInt64Test, SetAddPosValue)
   {
     SignedTransaction stx;
     stx.tx.invocation.invoked_address = addr_;
-    stx.tx.invocation.method_name = 1;
+    stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+    stx.tx.invocation.method.method_id_uint32() = 1;
     stx.tx.invocation.gas_limit = UINT64_MAX;
     stx.tx.invocation.calldata = test::make_calldata(key);
 
@@ -128,7 +131,8 @@ TEST_F(NNInt64Test, NegativeSet)
   auto make_set_add_tx = [&](int64_t set, int64_t add) {
     SignedTransaction stx;
     stx.tx.invocation.invoked_address = addr_;
-    stx.tx.invocation.method_name = 0;
+    stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+    stx.tx.invocation.method.method_id_uint32() = 0;
     stx.tx.invocation.gas_limit = UINT64_MAX;
     stx.tx.invocation.calldata = test::make_calldata(key, set, add);
 
@@ -171,7 +175,8 @@ TEST_F(NNInt64Test, NegativeSet)
 
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = addr_;
-  stx.tx.invocation.method_name = 1;
+  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
+  stx.tx.invocation.method.method_id_uint32() = 1;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(key);
 

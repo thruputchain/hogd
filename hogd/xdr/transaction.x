@@ -10,9 +10,22 @@ namespace hogd
 
   typedef opaque ReturnBuffer<>;
 
+  enum MethodSpecifierType {
+    kDefaultUint32 = 0,
+    kReservedName = 1,
+  };
+
+  union MethodSpecifier switch (MethodSpecifierType method_type)
+  {
+  case kDefaultUint32:
+    MethodID method_id_uint32;
+  case kReservedName:
+    string reserved_name<>;
+  };
+
   struct Invocation {
     ContractAddress invoked_address;
-    MethodID method_name;
+    MethodSpecifier method;
     GasAmount gas_limit;
     Calldata calldata;
   };
