@@ -16,8 +16,8 @@ namespace hogd {
 
 class CallFrame {
 public:
-  CallFrame(Invocation invocation, const CallFrame& parent);
-  CallFrame(SignedTransaction const& root_transaction);
+  CallFrame(Invocation invocation, const CallFrame &parent);
+  CallFrame(SignedTransaction const &root_transaction);
 
   void commit_successful_child_call(CallFrame &frame);
   void commit_failed_child_call();

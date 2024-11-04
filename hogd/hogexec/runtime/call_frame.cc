@@ -17,18 +17,16 @@
 
 namespace hogd {
 
-CallFrame::CallFrame(Invocation invocation, const CallFrame& parent)
+CallFrame::CallFrame(Invocation invocation, const CallFrame &parent)
   : active_invocation_(std::move(invocation)),
-    auth_context_(parent.auth_context_),
-    auth_manager_(parent.auth_manager_)
+    auth_context_(parent.auth_context_), auth_manager_(parent.auth_manager_)
 {}
 
-CallFrame::CallFrame(SignedTransaction const& root_transaction)
-  : active_invocation_(root_transaction.tx.invocation),
-    auth_context_(),
+CallFrame::CallFrame(SignedTransaction const &root_transaction)
+  : active_invocation_(root_transaction.tx.invocation), auth_context_(),
     auth_manager_(root_transaction)
 {
-  //TODO(geoff): initialize auth manager
+  // TODO(geoff): initialize auth manager
 }
 
 void
@@ -50,6 +48,8 @@ CallFrame::commit_successful_child_call(CallFrame &frame)
   child_return_buffer_ = frame.to_return_;
   logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
                std::make_move_iterator(frame.logs_.end()));
+
+  auth_manager_ = std::move(frame.auth_manager_);
 }
 
 void

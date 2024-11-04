@@ -17,13 +17,13 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/auth_manager.h"
 #include "hogd/hogexec/runtime/call_frame.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "hogd/hogexec/runtime/auth_manager.h"
 #include "storage_interface.hh"
 #include "storage_object.hh"
 #include "syscall.hh"
@@ -75,7 +75,7 @@ SystemCallHandler::root_invoke()
   start_root_call_frame();
 
   auto res = runtime->runtime.invoke(signed_tx_.tx.invocation.method,
-    signed_tx_.tx.invocation.gas_limit);
+                                     signed_tx_.tx.invocation.gas_limit);
 
   finish_call_frame(res);
 
@@ -186,7 +186,8 @@ SystemCallHandler::invoke(Invocation const &invocation)
 }
 
 void
-SystemCallHandler::start_root_call_frame() {
+SystemCallHandler::start_root_call_frame()
+{
   assert(call_frame_stack_.empty());
 
   call_frame_stack_.emplace_back(signed_tx_);
@@ -198,10 +199,10 @@ SystemCallHandler::start_call_frame(Invocation const &invocation)
   assert(!call_frame_stack_.empty());
 
   // emplace_back might invalidate the reference to call_frame_stack_back(),
-  // and I can't find where in the standard the precise point at which this invalidation
-  // occurs (but it would make sense to do the realloc before a placement new,
-  // so I assume it occurs before the ctor is called)
-  CallFrame new_frame (invocation, call_frame_stack_.back());
+  // and I can't find where in the standard the precise point at which this
+  // invalidation occurs (but it would make sense to do the realloc before a
+  // placement new, so I assume it occurs before the ctor is called)
+  CallFrame new_frame(invocation, call_frame_stack_.back());
 
   call_frame_stack_.emplace_back(std::move(new_frame));
 }
