@@ -65,7 +65,6 @@ TEST_F(AuthMatchTest, MatchSimple)
   EXPECT_TRUE(matcher.try_match(stack));
 }
 
-
 TEST_F(AuthMatchTest, NoMatchSimple)
 {
 
@@ -98,8 +97,8 @@ TEST_F(AuthMatchTest, GapMatch)
 
 TEST_F(AuthMatchTest, ExtraContextNoMatch)
 {
-  AuthContextStack stack({make_auth_context("AAA"), make_auth_context("BBB"), 
-    make_auth_context("CCC"), make_auth_context("EEE")});
+  AuthContextStack stack({make_auth_context("AAA"), make_auth_context("BBB"),
+                          make_auth_context("CCC"), make_auth_context("EEE")});
 
   AuthEntryMatcher matcher(entry_);
 
@@ -122,36 +121,28 @@ TEST_F(AuthMatchTest, OnlyLeaves)
 {
   AuthEntryMatcher matcher(entry_);
 
-  EXPECT_FALSE(matcher.try_match(
-      AuthContextStack({make_auth_context("AAA")})));
+  EXPECT_FALSE(matcher.try_match(AuthContextStack({make_auth_context("AAA")})));
 
   // after failed match nothing should match
-  EXPECT_FALSE(matcher.try_match(
-    AuthContextStack({make_auth_context("BBB")})));
+  EXPECT_FALSE(matcher.try_match(AuthContextStack({make_auth_context("BBB")})));
 }
 
 TEST_F(AuthMatchTest, SkipAdvancesIteratorOnlyLeaves)
 {
   AuthEntryMatcher matcher(entry_);
 
-  EXPECT_TRUE(matcher.try_match(
-      AuthContextStack({make_auth_context("CCC")})));
+  EXPECT_TRUE(matcher.try_match(AuthContextStack({make_auth_context("CCC")})));
 
-  EXPECT_FALSE(matcher.try_match(
-      AuthContextStack({make_auth_context("CCC")})));
+  EXPECT_FALSE(matcher.try_match(AuthContextStack({make_auth_context("CCC")})));
 }
 
 TEST_F(AuthMatchTest, SkipAdvancesIterator)
 {
   AuthEntryMatcher matcher(entry_);
 
-  EXPECT_TRUE(matcher.try_match(
-      AuthContextStack({make_auth_context("DDD")})));
+  EXPECT_TRUE(matcher.try_match(AuthContextStack({make_auth_context("DDD")})));
 
-  EXPECT_FALSE(matcher.try_match(
-      AuthContextStack({make_auth_context("CCC")})));
+  EXPECT_FALSE(matcher.try_match(AuthContextStack({make_auth_context("CCC")})));
 }
-
-
 
 } // namespace hogd

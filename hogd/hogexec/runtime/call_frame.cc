@@ -17,7 +17,7 @@ namespace hogd {
 
 CallFrame::CallFrame(Invocation invocation, const CallFrame *parent)
   : active_invocation_(std::move(invocation)),
-    auth_context_(parent?parent->auth_context_:AuthContextStack())
+    auth_context_(parent ? parent->auth_context_ : AuthContextStack())
 {}
 
 void
