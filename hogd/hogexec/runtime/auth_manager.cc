@@ -31,8 +31,7 @@ AuthManager::initialization_validate_auth_entries(SignedTransaction const &stx)
 }
 
 bool
-AuthManager::try_match(ContractAddress const &address,
-                       AuthContextStack const &auth_context_stack)
+AuthManager::try_match(ContractAddress const &address)
 {
   auto it = auth_entries_.find(address);
 
@@ -40,7 +39,7 @@ AuthManager::try_match(ContractAddress const &address,
     return false;
   }
 
-  return it->second.matcher_.try_match(auth_context_stack);
+  return it->second.matcher_.try_match(auth_context_stack_);
 }
 
 AuthEntry const &

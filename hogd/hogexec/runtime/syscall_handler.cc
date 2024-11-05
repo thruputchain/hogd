@@ -72,7 +72,7 @@ SystemCallHandler::root_invoke()
                         .gas_consumed = 0};
   }
 
-  start_root_call_frame();
+  start_call_frame(signed_tx_.tx.invocation, 0);
 
   auto res = runtime->runtime.invoke(signed_tx_.tx.invocation.method,
                                      signed_tx_.tx.invocation.gas_limit);
@@ -176,7 +176,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  start_call_frame(invocation);
+  start_call_frame(invocation, call_frame_stack_.back().flags_);
 
   auto res = runtime->runtime.invoke(invocation.method, gas_limit);
 
@@ -186,23 +186,20 @@ SystemCallHandler::invoke(Invocation const &invocation)
 }
 
 void
-SystemCallHandler::start_root_call_frame()
+SystemCallHandler::start_call_frame(Invocation const &invocation,
+                                    uint64_t flags)
 {
-  assert(call_frame_stack_.empty());
-
-  call_frame_stack_.emplace_back(signed_tx_.tx.invocation, root_auth_manager_);
-}
-
-void
-SystemCallHandler::start_call_frame(Invocation const &invocation)
-{
-  assert(!call_frame_stack_.empty());
+  if (call_frame_stack_.empty()) {
+    call_frame_stack_.emplace_back(invocation, root_auth_manager_, flags);
+    return;
+  }
 
   // emplace_back might invalidate the reference to call_frame_stack_back(),
   // and I can't find where in the standard the precise point at which this
   // invalidation occurs (but it would make sense to do the realloc before a
   // placement new, so I assume it occurs before the ctor is called)
-  CallFrame new_frame(invocation, call_frame_stack_.back());
+  CallFrame new_frame(invocation, call_frame_stack_.back().auth_manager_,
+                      flags);
 
   call_frame_stack_.emplace_back(std::move(new_frame));
 }
@@ -454,7 +451,7 @@ SystemCallHandler::push_auth_context(
     std::span<const std::byte> auth_context_frame)
 {
   auto &frame = get_active_call_frame();
-  frame.auth_context_.context_.push_back(
+  frame.auth_manager_.auth_context_stack_.push_back(
       make_auth_context(frame.active_invocation_.invoked_address,
                         auth_context_frame));
 }
@@ -467,11 +464,11 @@ SystemCallHandler::require_auth(const ContractAddress &authorizing_address,
 
   auto leaf_context = make_auth_context(authorizing_address, action);
 
-  active_frame.auth_context_.context_.push_back(leaf_context);
-  x23::Defer d([&] { active_frame.auth_context_.context_.pop_back(); });
+  active_frame.auth_manager_.auth_context_stack_.push_back(leaf_context);
+  x23::Defer d(
+      [&] { active_frame.auth_manager_.auth_context_stack_.pop_back(); });
 
-  if (!active_frame.auth_manager_.try_match(authorizing_address,
-                                            active_frame.auth_context_)) {
+  if (!active_frame.auth_manager_.try_match(authorizing_address)) {
     return SyscallError{SyscallErrorCode::kAuthMatchFailed};
   }
 

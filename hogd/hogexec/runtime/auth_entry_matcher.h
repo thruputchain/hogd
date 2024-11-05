@@ -3,7 +3,6 @@
 #include <vector>
 
 #include "auth.hh"
-#include "hogd/hogexec/runtime/auth_context.h"
 
 namespace hogd {
 
@@ -11,6 +10,8 @@ namespace hogd {
 // Mirrors the AuthEntry structure.
 class AuthEntryMatcher {
 public:
+  using AuthContextStack = std::vector<AuthContext>;
+
   explicit AuthEntryMatcher(AuthEntry const &entry);
   bool try_match(AuthContextStack const &auth_context_stack);
 

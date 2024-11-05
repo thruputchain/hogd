@@ -6,7 +6,6 @@
 #include <set>
 #include <span>
 
-#include "hogd/hogexec/runtime/auth_context.h"
 #include "hogd/hogexec/runtime/auth_manager.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "storage_object.hh"
@@ -14,17 +13,17 @@
 
 namespace hogd {
 
+enum class CallFrameFlags : uint64_t {
+  VerifyAuthFrame = 1,
+};
+
 class CallFrame {
 public:
-  CallFrame(Invocation invocation, const CallFrame &parent);
-  CallFrame(Invocation invocation, AuthManager const &root_auth_manager);
+  CallFrame(Invocation invocation, AuthManager const &auth_manager,
+            uint64_t flags);
 
   void commit_successful_child_call(CallFrame &frame);
   void commit_failed_child_call();
-
-  // TODO(geoff) set based on metadata
-  const bool unwind_catch_boundary_ = false;
-  const Invocation active_invocation_;
 
   ItemCache *try_get_storage_proxy(AddressAndKey const &query);
 
@@ -51,8 +50,11 @@ public:
     return storage_proxies_;
   }
 
-  AuthContextStack auth_context_;
+  // TODO(geoff) set based on metadata
+  const bool unwind_catch_boundary_ = false;
+  const Invocation active_invocation_;
   AuthManager auth_manager_;
+  const uint64_t flags_;
 
 private:
   ReturnBuffer to_return_;

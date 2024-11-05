@@ -109,8 +109,7 @@ private:
 
   RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
 
-  void start_call_frame(Invocation const &invocation);
-  void start_root_call_frame();
+  void start_call_frame(Invocation const &invocation, uint64_t flags);
 
   void finish_call_frame(InvokeResult const &result);
 

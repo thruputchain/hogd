@@ -14,15 +14,17 @@ class AuthManager {
 public:
   AuthManager(SignedTransaction const &stx);
 
-  bool try_match(ContractAddress const &address,
-                 AuthContextStack const &auth_context_stack);
+  bool try_match(ContractAddress const &address);
 
   struct AuthEntryContext {
     AuthEntryMatcher matcher_;
     bool auth_checked_ = false;
   };
 
+  using AuthContextStack = std::vector<AuthContext>;
+
   std::map<ContractAddress, AuthEntryContext> auth_entries_;
+  AuthContextStack auth_context_stack_;
 
   AuthEntry const &get_entry_for(ContractAddress const &address) const;
   bool has_entry_for(ContractAddress const &address) const

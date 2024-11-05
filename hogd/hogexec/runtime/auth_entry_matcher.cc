@@ -19,7 +19,7 @@ AuthEntryMatcher::AuthEntryMatcher(AuthEntry const &entry) : base_entry_(entry)
 bool
 AuthEntryMatcher::try_match(AuthContextStack const &auth_context_stack)
 {
-  if (auth_context_stack.context_.size() == 0) {
+  if (auth_context_stack.size() == 0) {
     return false;
   }
 
@@ -94,11 +94,11 @@ AuthEntryMatcher::check_iter_match(entry_iter_t const &entry_iter,
 
     auto const &cur_context = *it;
 
-    if (cur_context.context_ == auth_context_stack.context_[auth_context_idx]) {
+    if (cur_context.context_ == auth_context_stack[auth_context_idx]) {
       auth_context_idx++;
     }
 
-    if (auth_context_idx == auth_context_stack.context_.size()) {
+    if (auth_context_idx == auth_context_stack.size()) {
       return (it->is_leaf_);
     }
   }

@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/auth_context.h"
 #include "hogd/hogexec/runtime/auth_manager.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "transaction.hh"
@@ -17,15 +16,9 @@
 
 namespace hogd {
 
-CallFrame::CallFrame(Invocation invocation, const CallFrame &parent)
-  : active_invocation_(std::move(invocation)),
-    auth_context_(parent.auth_context_), auth_manager_(parent.auth_manager_)
-{}
-
-CallFrame::CallFrame(Invocation invocation,
-                     const AuthManager &root_auth_manager)
-  : active_invocation_(invocation), auth_context_(),
-    auth_manager_(root_auth_manager)
+CallFrame::CallFrame(Invocation invocation, const AuthManager &auth_manager,
+                     uint64_t flags)
+  : active_invocation_(invocation), auth_manager_(auth_manager), flags_(flags)
 {}
 
 void

@@ -53,6 +53,8 @@ protected:
   }
 
   AuthEntry entry_;
+
+  using AuthContextStack = std::vector<AuthContext>;
 };
 
 TEST_F(AuthMatchTest, MatchSimple)
