@@ -63,6 +63,9 @@ public:
   SyscallStatus<void> require_auth(const ContractAddress &authorizing_address,
                                    std::span<const std::byte> action);
 
+  SyscallStatus<AuthEntrySignaturePayload>
+  get_auth_payload(const SHA256Hash *optional_input_message);
+
   SyscallStatus<Calldata> get_calldata() const;
   SyscallStatus<RuntimeMemoryLength> get_calldata_len() const;
 

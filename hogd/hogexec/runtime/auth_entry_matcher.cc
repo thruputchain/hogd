@@ -2,8 +2,7 @@
 
 namespace hogd {
 
-AuthEntryMatcher::AuthEntryMatcher(AuthEntry const &entry)
-  : auth_metadata_(entry.metadata)
+AuthEntryMatcher::AuthEntryMatcher(AuthEntry const &entry) : base_entry_(entry)
 {
   for (auto const &node : entry.nodes) {
     nodes_.emplace_back(node);
@@ -89,7 +88,6 @@ AuthEntryMatcher::check_iter_match(entry_iter_t const &entry_iter,
                                    AuthContextStack const &auth_context_stack)
 {
   size_t auth_context_idx = 0;
-  size_t last_match_idx = 0;
   for (auto const &layer : entry_iter) {
     auto const &it = std::get<1>(layer);
     assert(it != std::get<0>(layer)->end());

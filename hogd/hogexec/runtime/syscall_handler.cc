@@ -478,6 +478,34 @@ SystemCallHandler::require_auth(const ContractAddress &authorizing_address,
   return {};
 }
 
+SyscallStatus<AuthEntrySignaturePayload>
+SystemCallHandler::get_auth_payload(const SHA256Hash *optional_input_message)
+{
+  assert(!call_frame_stack_.empty());
+
+  auto &active_frame = get_active_call_frame();
+
+  AuthEntrySignaturePayload payload;
+  if (optional_input_message) {
+    payload.message = *optional_input_message;
+  }
+  else {
+    payload.message = get_source_tx_hash();
+  }
+  payload.authorizing_address = active_frame.active_invocation_.invoked_address;
+
+  if (!root_auth_manager_.has_entry_for(payload.authorizing_address)) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+  auto const &entry =
+      root_auth_manager_.get_entry_for(payload.authorizing_address);
+
+  payload.nodes = entry.nodes;
+  payload.metadata = entry.metadata;
+
+  return payload;
+}
+
 SyscallStatus<Calldata>
 SystemCallHandler::get_calldata() const
 {

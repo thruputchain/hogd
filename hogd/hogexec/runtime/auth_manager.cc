@@ -2,6 +2,7 @@
 
 #include <set>
 
+#include "auth.hh"
 #include "hogd/hogexec/runtime/auth_entry_matcher.h"
 #include "hogd/hogexec/runtime/status.h"
 
@@ -40,6 +41,16 @@ AuthManager::try_match(ContractAddress const &address,
   }
 
   return it->second.matcher_.try_match(auth_context_stack);
+}
+
+AuthEntry const &
+AuthManager::get_entry_for(ContractAddress const &address) const
+{
+  auto it = auth_entries_.find(address);
+
+  assert(it != auth_entries_.end());
+
+  return it->second.matcher_.base_entry_;
 }
 
 } // namespace hogd

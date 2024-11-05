@@ -24,6 +24,12 @@ public:
 
   std::map<ContractAddress, AuthEntryContext> auth_entries_;
 
+  AuthEntry const &get_entry_for(ContractAddress const &address) const;
+  bool has_entry_for(ContractAddress const &address) const
+  {
+    return auth_entries_.find(address) != auth_entries_.end();
+  }
+
   static bool
   initialization_validate_auth_entries(SignedTransaction const &stx);
 };

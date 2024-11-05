@@ -14,6 +14,8 @@ public:
   explicit AuthEntryMatcher(AuthEntry const &entry);
   bool try_match(AuthContextStack const &auth_context_stack);
 
+  const AuthEntry base_entry_;
+
 private:
   struct AuthEntryNodeFrame {
     AuthContext context_;
@@ -28,8 +30,6 @@ private:
   using vector_iter_t = children_vector_t::iterator;
   using entry_iter_t =
       std::vector<std::tuple<children_vector_t *, vector_iter_t>>;
-
-  AuthEntryMetadata auth_metadata_;
 
   children_vector_t nodes_;
 

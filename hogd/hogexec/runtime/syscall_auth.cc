@@ -2,13 +2,14 @@
 
 #include <cstddef>
 #include <span>
-#include <stdexcept>
 #include <utility>
 
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -17,7 +18,16 @@ syscall_GetAuthPayloadHash_inner(SystemCallHandler &syscall_handler,
                                  const SHA256Hash *optional_input_message,
                                  SHA256Hash &output_auth_payload_hash)
 {
-  throw std::runtime_error("unimplemented");
+  auto status = syscall_handler.get_auth_payload(optional_input_message);
+  if (!status) {
+    return {status.error().code(), 0};
+  }
+
+  auto buffer = x23::serialize(*status);
+
+  output_auth_payload_hash = sha256(std::as_bytes(std::span(buffer)));
+
+  return {SyscallErrorCode::kNone, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
