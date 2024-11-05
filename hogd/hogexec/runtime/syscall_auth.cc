@@ -53,4 +53,40 @@ syscall_RequireAuth_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_GetAuthWitness_inner(SystemCallHandler &syscall_handler,
+                             const uint32_t input_witness_index,
+                             std::span<std::byte> output_witness)
+{
+  auto witness = syscall_handler.get_auth_witness(input_witness_index);
+
+  if (!witness) {
+    return {witness.error().code(), 0};
+  }
+
+  RuntimeMemoryLength write_len =
+      std::min<RuntimeMemoryLength>(output_witness.size(), witness->size());
+
+  std::memcpy(reinterpret_cast<uint8_t *>(output_witness.data()),
+              witness->data(), write_len);
+
+  return {SyscallErrorCode::kNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_GetAuthWitnessLen_inner(SystemCallHandler &syscall_handler,
+                                const uint32_t input_witness_index,
+                                RuntimeMemoryLength &output_witness_len)
+{
+  auto witness = syscall_handler.get_auth_witness(input_witness_index);
+
+  if (!witness) {
+    return {witness.error().code(), 0};
+  }
+
+  output_witness_len = witness->size();
+
+  return {SyscallErrorCode::kNone, 0};
+}
+
 } // namespace hogd

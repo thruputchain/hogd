@@ -304,6 +304,32 @@ syscalls:
         span_argument: yes
     outputs:
     number: 25
+  - name: "GetAuthWitness"
+    needs_context: yes
+    inputs:
+      - name: "witness_index"
+        fixed_size: yes
+        typename: "uint32_t"
+        rust_typename: "u32"
+        primitive_type: yes
+    outputs:
+      - name: "witness"
+        span_argument: yes
+    number: 26
+  - name: "GetAuthWitnessLen"
+    needs_context: yes
+    inputs:
+      - name: "witness_index"
+        fixed_size: yes
+        typename: "uint32_t"
+        rust_typename: "u32"
+        primitive_type: yes
+    outputs:
+      - name: "witness_len"
+        fixed_size: yes
+        typename: "RuntimeMemoryLength"
+    number: 27
+
 
 errors:
   - name: "None"

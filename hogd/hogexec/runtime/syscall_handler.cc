@@ -252,7 +252,9 @@ make_verify_auth_invocation(ContractAddress const &authorizing_address,
   invocation.method.reserved_name() = "_verify_auth";
   invocation.gas_limit = gas_limit;
   // TODO(geoff): figure out a nice way to transfer an auth_entry into wasm
-  invocation.calldata = x23::serialize(auth_entry.metadata);
+  uint32_t witness_count = auth_entry.witnesses.size();
+
+  invocation.calldata = x23::serialize(auth_entry.metadata, witness_count);
   return invocation;
 }
 
@@ -658,6 +660,36 @@ SystemCallHandler::require_auth(const ContractAddress &authorizing_address,
   }
 
   return {};
+}
+
+bool
+SystemCallHandler::inside_verify_auth_frame() const
+{
+  assert(!call_frame_stack_.empty());
+
+  return std::holds_alternative<VerifyAuthFrameContext>(
+      call_frame_stack_.back().extra_context_);
+}
+
+SyscallStatus<Witness>
+SystemCallHandler::get_auth_witness(uint32_t wit_index) const
+{
+  if (!inside_verify_auth_frame()) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  auto const &authorizing_address =
+      std::get<VerifyAuthFrameContext>(call_frame_stack_.back().extra_context_)
+          .authorizing_address;
+
+  auto const &entry =
+      call_frame_stack_.back().auth_manager_.get_entry_for(authorizing_address);
+
+  if (entry.witnesses.size() <= wit_index) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  return entry.witnesses[wit_index];
 }
 
 SyscallStatus<AuthEntrySignaturePayload>

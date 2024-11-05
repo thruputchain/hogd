@@ -58,6 +58,8 @@ const kMaxLogMessageLen = 1024;
 const kMaxReturnBufferLen = 1024;
 const kBytestringMaxLen = 4096;
 const kReplayCacheMaxSize = 4194304;
+const kMaxAuthWitnessCount = 1024;
+const kMaxAuthWitnessLen = 1024;
 
 // in global storage:
 // [contract address + storage key] = 64 bytes

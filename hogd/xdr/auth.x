@@ -25,13 +25,14 @@ namespace hogd
     unsigned hyper signature_nonce;
   };
 
-  typedef opaque Witness<>; // in default auth setup, this is a Signature
+  typedef opaque
+      Witness<kMaxAuthWitnessLen>; // in default auth setup, this is a Signature
 
   struct AuthEntry {
     ContractAddress authorizing_address;
     AuthEntryNode nodes<>;
     AuthEntryMetadata metadata;
-    Witness witnesses<>;
+    Witness witnesses<kMaxAuthWitnessCount>;
   };
 
   struct AuthEntrySignaturePayload {
