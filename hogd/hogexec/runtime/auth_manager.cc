@@ -9,8 +9,9 @@ namespace hogd {
 
 AuthManager::AuthManager(SignedTransaction const &stx)
 {
-  // assertion: initialization_validate_auth_entries(stx) == true
-
+  // If a transaction contains multiple auth entries for one address,
+  // only the first entry is used.
+  // This should be checked in the transaction preflight logic.
   for (auto const &entry : stx.auth_entries) {
     auth_entries_.emplace(entry.authorizing_address,
                           AuthEntryContext{.matcher_ = AuthEntryMatcher(entry),

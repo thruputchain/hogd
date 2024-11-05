@@ -46,7 +46,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       }
       return contracts;
     }()),
-    snapshot_cache_(snapshot_cache)
+    root_auth_manager_(signed_tx_), snapshot_cache_(snapshot_cache)
 {
   wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
 }
@@ -54,6 +54,11 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
 InvokeResult
 SystemCallHandler::root_invoke()
 {
+  if (!AuthManager::initialization_validate_auth_entries(signed_tx_)) {
+    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
+                        .gas_consumed = 0};
+  }
+
   auto *runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
 
   if (!runtime) {
@@ -63,11 +68,6 @@ SystemCallHandler::root_invoke()
 
   if (signed_tx_.tx.invocation.method.method_type() !=
       MethodSpecifierType::kDefaultUint32) {
-    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
-                        .gas_consumed = 0};
-  }
-
-  if (!AuthManager::initialization_validate_auth_entries(signed_tx_)) {
     return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed = 0};
   }
@@ -190,7 +190,7 @@ SystemCallHandler::start_root_call_frame()
 {
   assert(call_frame_stack_.empty());
 
-  call_frame_stack_.emplace_back(signed_tx_);
+  call_frame_stack_.emplace_back(signed_tx_.tx.invocation, root_auth_manager_);
 }
 
 void
@@ -246,7 +246,12 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
 void
 SystemCallHandler::commit_last_call_frame(CallFrame &frame)
 {
-  committed_logs_ = frame.extract_logs();
+  auto logs = frame.extract_logs();
+
+  // Appends to logs, instead of overwrite.
+  // Required for the case where verify_auth starts more invocations after the
+  // last main invocation finishes
+  committed_logs_.insert(committed_logs_.end(), logs.begin(), logs.end());
 
   for (auto const &[addr, proxy] : frame.get_storage_proxies()) {
     auto deltas = proxy.get_deltas();
@@ -255,6 +260,8 @@ SystemCallHandler::commit_last_call_frame(CallFrame &frame)
       committed_delta_vec_.emplace_back(addr, deltas);
     }
   }
+
+  root_auth_manager_ = std::move(frame.auth_manager_);
 }
 
 SyscallStatus<const ReturnBuffer>
@@ -422,23 +429,53 @@ SystemCallHandler::replay_cache_clear(StorageKey const &key,
 {
   return resolve_item_cache(key).replay_cache_clear(threshold);
 }
+namespace {
+
+AuthContext
+make_auth_context(ContractAddress const &addr,
+                  std::span<const std::byte> action)
+{
+
+  AuthContext new_context;
+  new_context.address = addr;
+
+  std::span<const uint8_t> reinterpreted_auth_frame = {
+      reinterpret_cast<const uint8_t *>(action.data()), action.size()};
+  new_context.bytes = {reinterpreted_auth_frame.begin(),
+                       reinterpreted_auth_frame.end()};
+
+  return new_context;
+}
+
+} // namespace
 
 void
 SystemCallHandler::push_auth_context(
     std::span<const std::byte> auth_context_frame)
 {
+  auto &frame = get_active_call_frame();
+  frame.auth_context_.context_.push_back(
+      make_auth_context(frame.active_invocation_.invoked_address,
+                        auth_context_frame));
+}
+
+SyscallStatus<void>
+SystemCallHandler::require_auth(const ContractAddress &authorizing_address,
+                                std::span<const std::byte> action)
+{
   auto &active_frame = get_active_call_frame();
 
-  AuthContext new_context;
-  new_context.address = active_frame.active_invocation_.invoked_address;
+  auto leaf_context = make_auth_context(authorizing_address, action);
 
-  std::span<const uint8_t> reinterpreted_auth_frame = {
-      reinterpret_cast<const uint8_t *>(auth_context_frame.data()),
-      auth_context_frame.size()};
-  new_context.bytes = {reinterpreted_auth_frame.begin(),
-                       reinterpreted_auth_frame.end()};
+  active_frame.auth_context_.context_.push_back(leaf_context);
+  x23::Defer d([&] { active_frame.auth_context_.context_.pop_back(); });
 
-  active_frame.auth_context_.context_.push_back(new_context);
+  if (!active_frame.auth_manager_.try_match(authorizing_address,
+                                            active_frame.auth_context_)) {
+    return SyscallError{SyscallErrorCode::kAuthMatchFailed};
+  }
+
+  return {};
 }
 
 SyscallStatus<Calldata>

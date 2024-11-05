@@ -34,7 +34,13 @@ syscall_RequireAuth_inner(SystemCallHandler &syscall_handler,
                           const ContractAddress &input_authorizing_address,
                           std::span<const std::byte> input_action)
 {
-  throw std::runtime_error("unimplemented");
+  auto status =
+      syscall_handler.require_auth(input_authorizing_address, input_action);
+  if (!status) {
+    return {status.error().code(), 0};
+  }
+
+  return {SyscallErrorCode::kNone, 0};
 }
 
 } // namespace hogd

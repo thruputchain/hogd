@@ -60,6 +60,8 @@ public:
 
   // auth
   void push_auth_context(std::span<const std::byte> auth_context_frame);
+  SyscallStatus<void> require_auth(const ContractAddress &authorizing_address,
+                                   std::span<const std::byte> action);
 
   SyscallStatus<Calldata> get_calldata() const;
   SyscallStatus<RuntimeMemoryLength> get_calldata_len() const;
@@ -122,6 +124,8 @@ private:
   std::map<ContractAddress, SHA256Hash> new_deployments_;
   const std::map<SHA256Hash, std::shared_ptr<const Contract>>
       newly_created_contracts_;
+
+  AuthManager root_auth_manager_;
 
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;

@@ -22,12 +22,11 @@ CallFrame::CallFrame(Invocation invocation, const CallFrame &parent)
     auth_context_(parent.auth_context_), auth_manager_(parent.auth_manager_)
 {}
 
-CallFrame::CallFrame(SignedTransaction const &root_transaction)
-  : active_invocation_(root_transaction.tx.invocation), auth_context_(),
-    auth_manager_(root_transaction)
-{
-  // TODO(geoff): initialize auth manager
-}
+CallFrame::CallFrame(Invocation invocation,
+                     const AuthManager &root_auth_manager)
+  : active_invocation_(invocation), auth_context_(),
+    auth_manager_(root_auth_manager)
+{}
 
 void
 CallFrame::commit_successful_child_call(CallFrame &frame)
