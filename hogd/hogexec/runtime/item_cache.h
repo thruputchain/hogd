@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <set>
 #include <variant>
@@ -109,6 +110,12 @@ private:
       delta_args_ = UnsetType{};
 
   bool is_deleted_last_ = false;
+};
+
+struct ItemCacheMap {
+  std::map<AddressAndKey, ItemCache> local_map_;
+
+  void commit_child_map(ItemCacheMap &child_map);
 };
 
 } // namespace hogd

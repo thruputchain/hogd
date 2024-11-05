@@ -13,22 +13,30 @@
 
 namespace hogd {
 
-enum class CallFrameFlags : uint64_t {
-  VerifyAuthFrame = 1,
+enum class CallFrameFlags : uint64_t {};
+
+struct NormalFrameContext {};
+
+struct VerifyAuthFrameContext {
+  ContractAddress authorizing_address;
 };
+
+using ExtraFrameContext =
+    std::variant<NormalFrameContext, VerifyAuthFrameContext>;
 
 class CallFrame {
 public:
   CallFrame(Invocation invocation, AuthManager const &auth_manager,
-            uint64_t flags);
+            uint64_t flags, ExtraFrameContext extra_context);
 
   void commit_successful_child_call(CallFrame &frame);
+  // revert the child call frame
   void commit_failed_child_call();
 
-  ItemCache *try_get_storage_proxy(AddressAndKey const &query);
+  ItemCache *try_get_item_cache(AddressAndKey const &query);
 
-  void push_new_storage_proxy(AddressAndKey const &new_addrkey,
-                              ItemCache const &proxy);
+  void push_new_item_cache(AddressAndKey const &new_addrkey,
+                           ItemCache const &proxy);
 
   // The set of all runtimes visited by the current call frame and _successful_
   // children. Failed calls poison the set of visited runtimes, unless the
@@ -45,10 +53,7 @@ public:
 
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
 
-  std::map<AddressAndKey, ItemCache> const &get_storage_proxies() const
-  {
-    return storage_proxies_;
-  }
+  ItemCacheMap &get_item_cache_map() { return item_cache_map_; }
 
   // TODO(geoff) set based on metadata
   const bool unwind_catch_boundary_ = false;
@@ -56,13 +61,15 @@ public:
   AuthManager auth_manager_;
   const uint64_t flags_;
 
+  ExtraFrameContext extra_context_;
+
 private:
   ReturnBuffer to_return_;
 
   // Cached here separately from the primary SystemCallHandler
   // in order to (in later PR) support subcall unwinding
   // swap to non unique_ptr
-  std::map<AddressAndKey, ItemCache> storage_proxies_;
+  ItemCacheMap item_cache_map_;
 
   std::vector<LogEntry> logs_;
 };

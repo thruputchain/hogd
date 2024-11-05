@@ -37,7 +37,7 @@ syscall_GetSourceTransactionHash_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
                              RuntimeMemoryLength &output_len)
 {
@@ -50,7 +50,7 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                           std::span<std::byte> output_buffer,
                           RuntimeMemoryLength &output_written_len)

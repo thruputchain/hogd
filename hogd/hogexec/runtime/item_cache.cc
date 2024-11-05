@@ -398,4 +398,18 @@ ItemCache::replay_cache_clear(uint64_t threshold)
   return {};
 }
 
+void
+ItemCacheMap::commit_child_map(ItemCacheMap &child_map)
+{
+  for (auto &[addr, item] : child_map.local_map_) {
+    auto it = local_map_.find(addr);
+    if (it == local_map_.end()) {
+      local_map_.emplace(addr, std::move(item));
+    }
+    else {
+      local_map_.at(addr) = std::move(item);
+    }
+  }
+}
+
 } // namespace hogd

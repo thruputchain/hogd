@@ -17,23 +17,17 @@
 namespace hogd {
 
 CallFrame::CallFrame(Invocation invocation, const AuthManager &auth_manager,
-                     uint64_t flags)
-  : active_invocation_(invocation), auth_manager_(auth_manager), flags_(flags)
+                     uint64_t flags, ExtraFrameContext extra_context)
+  : active_invocation_(invocation), auth_manager_(auth_manager), flags_(flags),
+    extra_context_(extra_context)
 {}
 
 void
 CallFrame::commit_successful_child_call(CallFrame &frame)
 {
-  // overwrite any local storage proxies
-  for (auto &[addr, proxy] : frame.storage_proxies_) {
-    auto it = storage_proxies_.find(addr);
-    if (it == storage_proxies_.end()) {
-      storage_proxies_.emplace(addr, std::move(proxy));
-    }
-    else {
-      storage_proxies_.at(addr) = std::move(proxy);
-    }
-  }
+  // overwrite any local item cache elements
+  item_cache_map_.commit_child_map(frame.get_item_cache_map());
+
   visited_runtimes_.insert(frame.visited_runtimes_.begin(),
                            frame.visited_runtimes_.end());
 
@@ -51,11 +45,12 @@ CallFrame::commit_failed_child_call()
 }
 
 void
-CallFrame::push_new_storage_proxy(AddressAndKey const &new_addrkey,
-                                  ItemCache const &proxy)
+CallFrame::push_new_item_cache(AddressAndKey const &new_addrkey,
+                               ItemCache const &proxy)
 {
-  assert(storage_proxies_.find(new_addrkey) == storage_proxies_.end());
-  storage_proxies_.emplace(new_addrkey, proxy);
+  assert(item_cache_map_.local_map_.find(new_addrkey) ==
+         item_cache_map_.local_map_.end());
+  item_cache_map_.local_map_.emplace(new_addrkey, proxy);
 }
 
 void
@@ -69,11 +64,11 @@ CallFrame::log(std::span<const std::byte> message)
 }
 
 ItemCache *
-CallFrame::try_get_storage_proxy(AddressAndKey const &query)
+CallFrame::try_get_item_cache(AddressAndKey const &query)
 {
-  auto it = storage_proxies_.find(query);
+  auto it = item_cache_map_.local_map_.find(query);
 
-  if (it == storage_proxies_.end()) {
+  if (it == item_cache_map_.local_map_.end()) {
     return nullptr;
   }
   return &(it->second);

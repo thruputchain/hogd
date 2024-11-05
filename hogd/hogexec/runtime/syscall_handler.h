@@ -28,6 +28,10 @@ public:
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
   invoke(Invocation const &invocation);
 
+  std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+  invoke_verify_auth(ContractAddress const &authorizing_address,
+                     GasAmount call_specified_gas_limit);
+
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
   ContractAddress get_current_address() const;
@@ -99,7 +103,7 @@ public:
 private:
   struct RuntimeCacheEntry {
     WasmiRuntime runtime;
-    bool unwind_poisoned = false;
+    bool revert_poisoned = false;
 
     RuntimeCacheEntry(WasmiRuntime &&runtime) : runtime(std::move(runtime)) {}
     RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
@@ -109,7 +113,11 @@ private:
 
   RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
 
-  void start_call_frame(Invocation const &invocation, uint64_t flags);
+  SyscallStatus<GasAmount>
+  get_invoke_gas_limit(GasAmount call_specified_gas_limit);
+
+  void start_call_frame(Invocation const &invocation, uint64_t new_flags);
+  void start_verify_auth_frame(Invocation const &invocation);
 
   void finish_call_frame(InvokeResult const &result);
 
@@ -128,6 +136,8 @@ private:
       newly_created_contracts_;
 
   AuthManager root_auth_manager_;
+  ItemCacheMap root_item_cache_map_;
+  GasAmount total_gas_consumption_ = 0;
 
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;
@@ -141,7 +151,7 @@ private:
     return self.call_frame_stack_.back();
   }
 
-  void commit_last_call_frame(CallFrame &frame);
+  void commit_last_call_frame_success(CallFrame &frame);
 
   void commit_new_contract_deployments(write_client_t &client) const;
 };

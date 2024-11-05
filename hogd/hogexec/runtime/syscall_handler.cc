@@ -15,6 +15,7 @@
 
 #include "auth.hh"
 #include "contract.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/auth_manager.h"
@@ -88,7 +89,51 @@ SystemCallHandler::root_invoke()
     return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed = res.gas_consumed};
   }
-  return res;
+
+  total_gas_consumption_ += res.gas_consumed;
+
+  auto const &auth_entries = root_auth_manager_.get_auth_entries();
+
+  for (auto const &[authorizing_address, auth_context] : auth_entries) {
+    if (!auth_context.auth_state_.has_been_verified()) {
+
+      assert(total_gas_consumption_ <= signed_tx_.tx.invocation.gas_limit);
+
+      uint64_t gas_remaining =
+          signed_tx_.tx.invocation.gas_limit - total_gas_consumption_;
+
+      // We don't care about the returned result here -- finish_call_frame takes
+      // care of updating root_auth_manager_ with the result
+      auto [_, local_gas_consumed] =
+          invoke_verify_auth(authorizing_address, gas_remaining);
+
+      if (integer_add_overflow(local_gas_consumed, total_gas_consumption_,
+                               &total_gas_consumption_)) {
+        return InvokeResult{.result = InvokeError{InvokeErrorCode::kOutOfGas},
+                            .gas_consumed = UINT64_MAX};
+      }
+
+      if (total_gas_consumption_ > signed_tx_.tx.invocation.gas_limit) {
+        return InvokeResult{.result = InvokeError{InvokeErrorCode::kOutOfGas},
+                            .gas_consumed = total_gas_consumption_};
+      }
+    }
+  }
+
+  if (!root_auth_manager_.all_in_valid_termination_state()) {
+    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
+                        .gas_consumed = total_gas_consumption_};
+  }
+
+  for (auto const &[addr, item] : root_item_cache_map_.local_map_) {
+    auto deltas = item.get_deltas();
+
+    if (!deltas.empty()) {
+      committed_delta_vec_.emplace_back(addr, deltas);
+    }
+  }
+
+  return InvokeResult{.result = 0, .gas_consumed = total_gas_consumption_};
 }
 
 // syscall methods: can only be called when call_frame_stack_ is nonempty
@@ -150,10 +195,10 @@ convert_invoke_result_to_host_fn_result(InvokeResult const &result)
 
 } // namespace
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke(Invocation const &invocation)
+SyscallStatus<GasAmount>
+SystemCallHandler::get_invoke_gas_limit(GasAmount call_specified_gas_limit)
 {
-  uint64_t initial_gas_limit = UINT64_MAX;
+  GasAmount initial_gas_limit = UINT64_MAX;
   if (!call_frame_stack_.empty()) {
     initial_gas_limit =
         runtimes_
@@ -162,13 +207,23 @@ SystemCallHandler::invoke(Invocation const &invocation)
   }
 
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
-  if (invocation.gas_limit != UINT64_MAX &&
-      invocation.gas_limit > initial_gas_limit) {
-    return std::pair{SyscallErrorCode::kInsufficientGasForInvocation, 0};
+  if (call_specified_gas_limit != UINT64_MAX &&
+      call_specified_gas_limit > initial_gas_limit) {
+    return SyscallError{SyscallErrorCode::kInsufficientGasForInvocation};
   }
 
-  const uint64_t gas_limit =
-      std::min<uint64_t>(initial_gas_limit, invocation.gas_limit);
+  return std::min<GasAmount>(initial_gas_limit, call_specified_gas_limit);
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+SystemCallHandler::invoke(Invocation const &invocation)
+{
+
+  auto gas_limit = get_invoke_gas_limit(invocation.gas_limit);
+
+  if (!gas_limit) {
+    return std::pair{gas_limit.error().code(), 0};
+  }
 
   auto *runtime = resolve_runtime(invocation.invoked_address);
 
@@ -176,9 +231,73 @@ SystemCallHandler::invoke(Invocation const &invocation)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  start_call_frame(invocation, call_frame_stack_.back().flags_);
+  start_call_frame(invocation, 0);
 
-  auto res = runtime->runtime.invoke(invocation.method, gas_limit);
+  auto res = runtime->runtime.invoke(invocation.method, *gas_limit);
+
+  finish_call_frame(res);
+
+  return convert_invoke_result_to_host_fn_result(res);
+}
+
+namespace {
+
+Invocation
+make_verify_auth_invocation(ContractAddress const &authorizing_address,
+                            AuthEntry const &auth_entry, uint64_t gas_limit)
+{
+  Invocation invocation;
+  invocation.invoked_address = authorizing_address;
+  invocation.method.method_type(MethodSpecifierType::kReservedName);
+  invocation.method.reserved_name() = "_verify_auth";
+  invocation.gas_limit = gas_limit;
+  // TODO(geoff): figure out a nice way to transfer an auth_entry into wasm
+  invocation.calldata = x23::serialize(auth_entry.metadata);
+  return invocation;
+}
+
+} // namespace
+
+std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+SystemCallHandler::invoke_verify_auth(
+    ContractAddress const &authorizing_address,
+    GasAmount call_specified_gas_limit)
+{
+  auto gas_limit = get_invoke_gas_limit(call_specified_gas_limit);
+
+  if (!gas_limit) {
+    return std::pair{gas_limit.error().code(), 0};
+  }
+
+  auto *runtime = resolve_runtime(authorizing_address);
+
+  if (!runtime) {
+    return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
+  }
+
+  const AuthManager &auth_manager =
+      (call_frame_stack_.empty()) ? root_auth_manager_
+                                  : call_frame_stack_.back().auth_manager_;
+
+  if (!auth_manager.has_entry_for(authorizing_address)) {
+    return std::pair{SyscallErrorCode::kNoAuthRequired, 0};
+  }
+
+  if (!call_frame_stack_.empty()) {
+    if (!std::holds_alternative<NormalFrameContext>(
+            call_frame_stack_.back().extra_context_)) {
+      return std::pair{SyscallErrorCode::kInvalidInvokeContext, 0};
+    }
+  }
+
+  auto const &auth_entry = auth_manager.get_entry_for(authorizing_address);
+
+  Invocation invocation =
+      make_verify_auth_invocation(authorizing_address, auth_entry, *gas_limit);
+
+  start_verify_auth_frame(invocation);
+
+  auto res = runtime->runtime.invoke(invocation.method, *gas_limit);
 
   finish_call_frame(res);
 
@@ -186,11 +305,33 @@ SystemCallHandler::invoke(Invocation const &invocation)
 }
 
 void
+SystemCallHandler::start_verify_auth_frame(Invocation const &invocation)
+{
+  uint64_t new_flags = 0;
+
+  if (call_frame_stack_.empty()) {
+    call_frame_stack_.emplace_back(invocation, root_auth_manager_, new_flags,
+                                   VerifyAuthFrameContext{
+                                       .authorizing_address =
+                                           invocation.invoked_address});
+    return;
+  }
+
+  CallFrame new_frame(invocation, call_frame_stack_.back().auth_manager_,
+                      call_frame_stack_.back().flags_ | new_flags,
+                      VerifyAuthFrameContext{.authorizing_address =
+                                                 invocation.invoked_address});
+
+  call_frame_stack_.emplace_back(std::move(new_frame));
+}
+
+void
 SystemCallHandler::start_call_frame(Invocation const &invocation,
-                                    uint64_t flags)
+                                    uint64_t new_flags)
 {
   if (call_frame_stack_.empty()) {
-    call_frame_stack_.emplace_back(invocation, root_auth_manager_, flags);
+    call_frame_stack_.emplace_back(invocation, root_auth_manager_, new_flags,
+                                   NormalFrameContext{});
     return;
   }
 
@@ -199,7 +340,8 @@ SystemCallHandler::start_call_frame(Invocation const &invocation,
   // invalidation occurs (but it would make sense to do the realloc before a
   // placement new, so I assume it occurs before the ctor is called)
   CallFrame new_frame(invocation, call_frame_stack_.back().auth_manager_,
-                      flags);
+                      call_frame_stack_.back().flags_ | new_flags,
+                      call_frame_stack_.back().extra_context_);
 
   call_frame_stack_.emplace_back(std::move(new_frame));
 }
@@ -207,16 +349,57 @@ SystemCallHandler::start_call_frame(Invocation const &invocation,
 void
 SystemCallHandler::finish_call_frame(InvokeResult const &result)
 {
-  // We choose _not_ to check the return code here, and instead pass it back to
-  // the caller. Implicitly, this is saying that the caller is responsible for
-  // checking the return/exit code, AND that the callee is responsible for
-  // cleaning itself up correctly. I.e. if you pass back a return code, you can
-  // be safely called again.
+  // Error handling: Each contract's return value is effectively a Result<Value,
+  // i32>, or a trap(). A result return (through either the return syscall, the
+  // method returning, or an Exit syscall) does not revert the function. Only a
+  // deterministic trap() (such as out of gas, or divide by 0) cause a contract
+  // to be reverted. We do not need a separate Revert() syscall -- a contract
+  // can just call wasm `unreachable`.
+  //
+  // If a contract has the REVERT_SAFE flag set, then it can be called again
+  // after it has been reverted. A contract might not be REVERT_SAFE because
+  // reversion does NOT reset a wasm's internal memory or other internal state.
+  // We could do that, it's just expensive,
+  // and would require fairly close integration with the wasm runtime and some
+  // fairly invasive changes (We need to restore the entirety of the wasm
+  // module's internal state -- not just memory, but also tables and globals.
+  // The stack is reset automatically).
+
+  // If the frame is the root of a verify_auth invocation tree:
+  // mark the error here, then commit.
+  //
+  // Verify_auth is special: The auth is marked as failed EVEN IF
+  // the verify_auth call reverts.
+  auto is_verify_auth_frame = [](CallFrame const &frame) -> bool {
+    return std::holds_alternative<VerifyAuthFrameContext>(frame.extra_context_);
+  };
+
+  if (is_verify_auth_frame(call_frame_stack_.back())) {
+    if (call_frame_stack_.size() == 1 ||
+        is_verify_auth_frame(call_frame_stack_[call_frame_stack_.size() - 2])) {
+
+      auto &parent_auth_manager =
+          (call_frame_stack_.size() == 1)
+              ? root_auth_manager_
+              : call_frame_stack_[call_frame_stack_.size() - 2].auth_manager_;
+
+      if (result.result.has_value() && *result.result == 0) {
+        parent_auth_manager.mark_verify_auth_successful(
+            call_frame_stack_.back().active_invocation_.invoked_address);
+      }
+      else {
+        parent_auth_manager.mark_verify_auth_failed(
+            call_frame_stack_.back().active_invocation_.invoked_address);
+      }
+    }
+  }
+
+  // Revert the function
   if (!result.result.has_value()) {
 
     for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
-      // TODO(geoff) metadata allowing unwind_safe declarations
-      runtimes_.at(addr)->unwind_poisoned = true;
+      // TODO(geoff) metadata allowing revert_safe declarations
+      runtimes_.at(addr)->revert_poisoned = true;
     }
 
     call_frame_stack_.pop_back();
@@ -233,7 +416,7 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
           call_frame_stack_.back());
     }
     else if (call_frame_stack_.size() == 1) {
-      commit_last_call_frame(call_frame_stack_.back());
+      commit_last_call_frame_success(call_frame_stack_.back());
     }
 
     call_frame_stack_.pop_back();
@@ -241,7 +424,7 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
 }
 
 void
-SystemCallHandler::commit_last_call_frame(CallFrame &frame)
+SystemCallHandler::commit_last_call_frame_success(CallFrame &frame)
 {
   auto logs = frame.extract_logs();
 
@@ -250,13 +433,7 @@ SystemCallHandler::commit_last_call_frame(CallFrame &frame)
   // last main invocation finishes
   committed_logs_.insert(committed_logs_.end(), logs.begin(), logs.end());
 
-  for (auto const &[addr, proxy] : frame.get_storage_proxies()) {
-    auto deltas = proxy.get_deltas();
-
-    if (!deltas.empty()) {
-      committed_delta_vec_.emplace_back(addr, deltas);
-    }
-  }
+  root_item_cache_map_.commit_child_map(frame.get_item_cache_map());
 
   root_auth_manager_ = std::move(frame.auth_manager_);
 }
@@ -284,7 +461,13 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
   auto it = runtimes_.find(addr);
   if (it != runtimes_.end()) {
-    return it->second.get();
+    auto *out = it->second.get();
+
+    if (out->revert_poisoned) {
+      return nullptr;
+    }
+
+    return out;
   }
 
   auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
@@ -332,25 +515,27 @@ SystemCallHandler::resolve_item_cache(StorageKey const &key)
 
   auto &top_frame = get_active_call_frame();
 
+  if (auto *top_frame_item = top_frame.try_get_item_cache(query)) {
+    return *top_frame_item;
+  }
+
   for (int32_t i = call_frame_stack_.size() - 2; i >= 0; i--) {
-    auto *proxy = call_frame_stack_[i].try_get_storage_proxy(query);
-    if (proxy) {
-      top_frame.push_new_storage_proxy(query, *proxy);
-      return *top_frame.try_get_storage_proxy(query);
+    if (auto *item = call_frame_stack_[i].try_get_item_cache(query)) {
+      top_frame.push_new_item_cache(query, *item);
+      return *top_frame.try_get_item_cache(query);
     }
   }
 
-  auto *proxy = top_frame.try_get_storage_proxy(query);
-
-  if (proxy) {
-    return *proxy;
+  auto root_it = root_item_cache_map_.local_map_.find(query);
+  if (root_it != root_item_cache_map_.local_map_.end()) {
+    top_frame.push_new_item_cache(query, root_it->second);
+    return *top_frame.try_get_item_cache(query);
   }
 
-  top_frame.push_new_storage_proxy(query,
-                                   ItemCache(
-                                       snapshot_cache_.try_get_object(query)));
+  top_frame.push_new_item_cache(query, ItemCache(snapshot_cache_.try_get_object(
+                                           query)));
 
-  return *top_frame.try_get_storage_proxy(query);
+  return *top_frame.try_get_item_cache(query);
 }
 
 void
