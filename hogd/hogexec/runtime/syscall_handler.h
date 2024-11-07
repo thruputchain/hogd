@@ -58,9 +58,9 @@ public:
 
   // replay cache
   SyscallStatus<void> replay_cache_insert(StorageKey const &key,
-                                          const uint64_t nonce);
+                                          uint64_t nonce);
   SyscallStatus<void> replay_cache_clear(StorageKey const &key,
-                                         const uint64_t threshold);
+                                          uint64_t threshold);
 
   // auth
   void push_auth_context(std::span<const std::byte> auth_context_frame);

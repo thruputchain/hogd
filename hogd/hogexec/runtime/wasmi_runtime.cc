@@ -211,7 +211,7 @@ WasmiRuntime::get_memory() const noexcept
 }
 
 InvokeResult
-WasmiRuntime::invoke(const MethodSpecifier method_specifier, uint64_t gas_limit)
+WasmiRuntime::invoke(MethodSpecifier method_specifier, uint64_t gas_limit)
 {
   using enum MethodSpecifierType;
   std::string method_name_str;

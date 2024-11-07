@@ -133,8 +133,8 @@ AuthStateMachine::mark_verify_success()
 {
   using enum AuthState;
 
-  assert(state_ != kVerifiedFailedUsed && state != kVerifiedFailedUnused &&
-         state != kVerifiedSuccess);
+  assert(state_ != kVerifiedFailedUsed && state_ != kVerifiedFailedUnused &&
+         state_ != kVerifiedSuccess);
 
   state_ = kVerifiedSuccess;
 }

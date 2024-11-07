@@ -131,7 +131,7 @@ public:
   // The gas counter is saved before calling this method
   // (i.e. x = get_available_gas(); invoke(something); assert(x ==
   // get_available_gas()))
-  InvokeResult invoke(const MethodSpecifier method_specifier,
+  InvokeResult invoke(MethodSpecifier method_specifier,
                       uint64_t gas_limit);
   InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
 
