@@ -16,10 +16,13 @@
 
 namespace hogd {
 
-CallFrame::CallFrame(Invocation invocation, const AuthManager &auth_manager,
-                     uint64_t flags, ExtraFrameContext extra_context)
-  : active_invocation_(invocation), auth_manager_(auth_manager), flags_(flags),
-    extra_context_(extra_context)
+CallFrame::CallFrame(Invocation invocation, AuthManager const &auth_manager,
+                     AuthContextStack const &auth_context_stack, uint64_t flags,
+                     ExtraFrameContext extra_context)
+  : active_invocation_(invocation), auth_manager_(auth_manager),
+    auth_context_stack_(auth_context_stack_.context_,
+                        auth_context_stack_.context_.size()),
+    flags_(flags), extra_context_(extra_context)
 {}
 
 void

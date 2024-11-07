@@ -294,6 +294,11 @@ syscalls:
         span_argument: yes
     outputs:
     number: 24
+  - name: "PopAuthContext"
+    needs_context: yes
+    inputs:
+    outputs:
+    number: 25
   - name: "RequireAuth"
     needs_context: yes
     inputs:
@@ -303,7 +308,7 @@ syscalls:
       - name: "action"
         span_argument: yes
     outputs:
-    number: 25
+    number: 26
   - name: "GetAuthWitness"
     needs_context: yes
     inputs:
@@ -319,7 +324,7 @@ syscalls:
         fixed_size: Yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
-    number: 26
+    number: 27
   - name: "GetAuthWitnessLen"
     needs_context: yes
     inputs:
@@ -332,7 +337,7 @@ syscalls:
       - name: "witness_len"
         fixed_size: yes
         typename: "RuntimeMemoryLength"
-    number: 27
+    number: 28
 
 
 errors:

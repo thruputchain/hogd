@@ -315,7 +315,8 @@ SystemCallHandler::start_verify_auth_frame(Invocation const &invocation)
   uint64_t new_flags = 0;
 
   if (call_frame_stack_.empty()) {
-    call_frame_stack_.emplace_back(invocation, root_auth_manager_, new_flags,
+    call_frame_stack_.emplace_back(invocation, root_auth_manager_,
+                                   AuthContextStack{}, new_flags,
                                    VerifyAuthFrameContext{
                                        .authorizing_address =
                                            invocation.invoked_address});
@@ -323,6 +324,7 @@ SystemCallHandler::start_verify_auth_frame(Invocation const &invocation)
   }
 
   CallFrame new_frame(invocation, call_frame_stack_.back().auth_manager_,
+                      call_frame_stack_.back().auth_context_stack_,
                       call_frame_stack_.back().flags_ | new_flags,
                       VerifyAuthFrameContext{.authorizing_address =
                                                  invocation.invoked_address});
@@ -335,7 +337,8 @@ SystemCallHandler::start_call_frame(Invocation const &invocation,
                                     uint64_t new_flags)
 {
   if (call_frame_stack_.empty()) {
-    call_frame_stack_.emplace_back(invocation, root_auth_manager_, new_flags,
+    call_frame_stack_.emplace_back(invocation, root_auth_manager_,
+                                   AuthContextStack{}, new_flags,
                                    NormalFrameContext{});
     return;
   }
@@ -345,6 +348,7 @@ SystemCallHandler::start_call_frame(Invocation const &invocation,
   // invalidation occurs (but it would make sense to do the realloc before a
   // placement new, so I assume it occurs before the ctor is called)
   CallFrame new_frame(invocation, call_frame_stack_.back().auth_manager_,
+                      call_frame_stack_.back().auth_context_stack_,
                       call_frame_stack_.back().flags_ | new_flags,
                       call_frame_stack_.back().extra_context_);
 
@@ -604,15 +608,13 @@ SystemCallHandler::nnint64_set_add(StorageKey const &key, int64_t set_value,
 }
 
 SyscallStatus<void>
-SystemCallHandler::replay_cache_insert(StorageKey const &key,
-                                      uint64_t nonce)
+SystemCallHandler::replay_cache_insert(StorageKey const &key, uint64_t nonce)
 {
   return resolve_item_cache(key).replay_cache_insert(nonce);
 }
 
 SyscallStatus<void>
-SystemCallHandler::replay_cache_clear(StorageKey const &key,
-                                      uint64_t threshold)
+SystemCallHandler::replay_cache_clear(StorageKey const &key, uint64_t threshold)
 {
   return resolve_item_cache(key).replay_cache_clear(threshold);
 }
@@ -641,9 +643,20 @@ SystemCallHandler::push_auth_context(
     std::span<const std::byte> auth_context_frame)
 {
   auto &frame = get_active_call_frame();
-  frame.auth_manager_.auth_context_stack_.push_back(
+  frame.auth_context_stack_.context_.push_back(
       make_auth_context(frame.active_invocation_.invoked_address,
                         auth_context_frame));
+}
+
+SyscallStatus<void>
+SystemCallHandler::pop_auth_context()
+{
+  auto& frame = get_active_call_frame();
+  if (frame.auth_context_stack_.can_pop_context()) {
+    frame.auth_context_stack_.context_.pop_back();
+    return {};
+  }
+  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
 }
 
 SyscallStatus<void>
@@ -654,11 +667,11 @@ SystemCallHandler::require_auth(const ContractAddress &authorizing_address,
 
   auto leaf_context = make_auth_context(authorizing_address, action);
 
-  active_frame.auth_manager_.auth_context_stack_.push_back(leaf_context);
+  active_frame.auth_context_stack_.context_.push_back(leaf_context);
   x23::Defer d(
-      [&] { active_frame.auth_manager_.auth_context_stack_.pop_back(); });
+      [&] { active_frame.auth_context_stack_.context_.pop_back(); });
 
-  if (!active_frame.auth_manager_.try_match(authorizing_address)) {
+  if (!active_frame.auth_manager_.try_match(authorizing_address, active_frame.auth_context_stack_)) {
     return SyscallError{SyscallErrorCode::kAuthMatchFailed};
   }
 

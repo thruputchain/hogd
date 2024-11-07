@@ -40,6 +40,18 @@ syscall_PushAuthContext_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_PopAuthContext_inner(SystemCallHandler &syscall_handler)
+{
+  auto status = syscall_handler.pop_auth_context();
+
+  if (!status) {
+    return {status.error().code(), 0};
+  }
+
+  return {SyscallErrorCode::kNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_RequireAuth_inner(SystemCallHandler &syscall_handler,
                           const ContractAddress &input_authorizing_address,
                           std::span<const std::byte> input_action)

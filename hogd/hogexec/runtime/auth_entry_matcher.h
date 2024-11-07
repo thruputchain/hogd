@@ -13,7 +13,7 @@ public:
   using AuthContextStack = std::vector<AuthContext>;
 
   explicit AuthEntryMatcher(AuthEntry const &entry);
-  bool try_match(AuthContextStack const &auth_context_stack);
+  bool try_match(std::vector<AuthContext> const &auth_context_stack);
 
   const AuthEntry base_entry_;
 

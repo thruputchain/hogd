@@ -157,8 +157,10 @@ def gen_inner_outer(syscall):
     user_args += ["/*unused*/"] * (syscall_argcount - len(user_args))
 
   if syscall["needs_context"]:
-    syscall_handler = "syscall_handler, "
-    syscall_handler_decl = "SystemCallHandler& syscall_handler, "
+    call_arg_strs = ["syscall_handler"] + call_arg_strs
+    inner_arg_decl_strs = ["SystemCallHandler& syscall_handler"] + inner_arg_decl_strs
+    #syscall_handler = "syscall_handler, "
+    #syscall_handler_decl = "SystemCallHandler& syscall_handler, "
 
   inner_args = ", ".join(call_arg_strs)
   inner_arg_decls = ", ".join(inner_arg_decl_strs);
@@ -172,7 +174,7 @@ syscall_{name}_outer(SystemCallHandler& syscall_handler,
                      uint64_t {user_args[4]},
                      uint64_t {user_args[5]})
 {{{inner_body}
-  auto res = syscall_{name}_inner({syscall_handler}{inner_args});
+  auto res = syscall_{name}_inner({inner_args});
 
   return {{convert_return_t(res.first), res.second}};
 }}

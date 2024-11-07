@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "auth.hh"
+#include "hogd/hogexec/runtime/auth_context_stack.h"
 #include "hogd/hogexec/runtime/auth_entry_matcher.h"
 #include "hogd/hogexec/runtime/status.h"
 
@@ -33,7 +34,8 @@ AuthManager::initialization_validate_auth_entries(SignedTransaction const &stx)
 }
 
 bool
-AuthManager::try_match(ContractAddress const &address)
+AuthManager::try_match(ContractAddress const &address,
+                       AuthContextStack const &auth_context_stack)
 {
   auto it = auth_entries_.find(address);
 
@@ -45,7 +47,7 @@ AuthManager::try_match(ContractAddress const &address)
     return false;
   }
 
-  auto res = it->second.matcher_.try_match(auth_context_stack_);
+  auto res = it->second.matcher_.try_match(auth_context_stack.context_);
 
   if (res) {
     it->second.auth_state_.mark_used();

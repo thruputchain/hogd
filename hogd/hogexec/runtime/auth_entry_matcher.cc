@@ -17,7 +17,7 @@ AuthEntryMatcher::AuthEntryMatcher(AuthEntry const &entry) : base_entry_(entry)
 }
 
 bool
-AuthEntryMatcher::try_match(AuthContextStack const &auth_context_stack)
+AuthEntryMatcher::try_match(std::vector<AuthContext> const &auth_context_stack)
 {
   if (auth_context_stack.size() == 0) {
     return false;

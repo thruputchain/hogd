@@ -27,7 +27,8 @@ using ExtraFrameContext =
 class CallFrame {
 public:
   CallFrame(Invocation invocation, AuthManager const &auth_manager,
-            uint64_t flags, ExtraFrameContext extra_context);
+            AuthContextStack const &auth_context_stack, uint64_t flags,
+            ExtraFrameContext extra_context);
 
   void commit_successful_child_call(CallFrame &frame);
   // revert the child call frame
@@ -59,6 +60,7 @@ public:
   const bool unwind_catch_boundary_ = false;
   const Invocation active_invocation_;
   AuthManager auth_manager_;
+  AuthContextStack auth_context_stack_;
   const uint64_t flags_;
 
   ExtraFrameContext extra_context_;

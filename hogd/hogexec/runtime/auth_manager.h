@@ -3,6 +3,7 @@
 #include <map>
 
 #include "auth.hh"
+#include "hogd/hogexec/runtime/auth_context_stack.h"
 #include "hogd/hogexec/runtime/auth_entry_matcher.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
@@ -57,16 +58,13 @@ class AuthManager {
 public:
   AuthManager(SignedTransaction const &stx);
 
-  bool try_match(ContractAddress const &address);
+  bool try_match(ContractAddress const &address,
+                 AuthContextStack const &auth_context_stack);
 
   struct AuthEntryContext {
     AuthEntryMatcher matcher_;
     AuthStateMachine auth_state_;
   };
-
-  using AuthContextStack = std::vector<AuthContext>;
-
-  AuthContextStack auth_context_stack_;
 
   AuthEntry const &get_entry_for(ContractAddress const &address) const;
   bool has_entry_for(ContractAddress const &address) const
