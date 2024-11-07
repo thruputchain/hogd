@@ -45,7 +45,7 @@ check_user_optional_argument(std::span<std::byte> contract_memory,
   return res;
 }
 
-std::optional<std::span<std::byte>>
+inline std::optional<std::span<std::byte>>
 check_user_span_argument(std::span<std::byte> contract_memory,
                          uint64_t user_offset, uint64_t user_len)
 {

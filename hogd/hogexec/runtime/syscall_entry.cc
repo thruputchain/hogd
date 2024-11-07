@@ -39,6 +39,7 @@ convert_return_t(T const &value)
   }
 }
 
+// NOLINTBEGIN(readability-identifier-naming)
 std::pair<HostFnResult, GasAmount>
 syscall_SHA256_outer(SystemCallHandler & /*syscall_handler*/,
                      std::span<std::byte> contract_memory,
@@ -460,6 +461,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   return syscall_fn_outer(*call_context->syscall_handler, contract_memory, arg1,
                           arg2, arg3, arg4, arg5, arg6);
 }
+// NOLINTEND(readability-identifier-naming)
 
 } // namespace
 
