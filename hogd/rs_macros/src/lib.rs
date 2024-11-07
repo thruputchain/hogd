@@ -234,9 +234,6 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
     let parse_from_calldata_name =
         format_ident!("parse_from_calldata_{}", n_args);
 
-    let serialize_to_calldata_name =
-        format_ident!("serialize_to_calldata_{}", n_args);
-
     let compute_serialize_len_name =
         format_ident!("compute_serialize_len_{}", n_args);
 
@@ -280,6 +277,13 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|t| -> TokenStream2 { t.clone() })
         .collect();
 
+    let arg_names_tupled = if arg_names.len() == 2 {
+        // one actual argument, plus a comma
+        quote! { #arg_names_join}
+    } else {
+        quote! { (#arg_names_join) }
+    };
+
     let crate_name =
         format_ident!("{}", std::env::var("CARGO_PKG_NAME").unwrap());
 
@@ -292,9 +296,10 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let mut vec = Box::<[u8]>::new_uninit_slice(buffer_size);
 
-            ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
+            // TODO(geoff) figure out error code handling story here
+            ::rs_contract_sdk::parse_trait::serialize_to_calldata(
                 vec.as_mut(),
-                #arg_names_join
+                #arg_names_tupled
             )?;
 
             let calldata = unsafe { vec.assume_init() };
@@ -304,9 +309,9 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let mut calldata_mu = [::core::mem::MaybeUninit::<u8>::uninit(); #x];
 
-            ::rs_contract_sdk::parse_trait::#serialize_to_calldata_name (
-                &mut calldata_mu,
-                #arg_names_join
+            ::rs_contract_sdk::parse_trait::serialize_to_calldata(
+                calldata_mu.as_mut(),
+                #arg_names_tupled
             )?;
 
             let calldata : [u8; #x] = unsafe { core::mem::transmute(calldata_mu)};
@@ -347,7 +352,7 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if #x != return_len {
                     ::rs_contract_sdk::rt::trap();
                 }
-                let mut return_mu= [::core::mem::MaybeUninit::<u8>::uninit(); #x];
+                let mut return_mu = [::core::mem::MaybeUninit::<u8>::uninit(); #x];
                 let mut return_written_len : ::rs_contract_sdk::RuntimeMemoryLength = 0;
 
                 ::rs_contract_sdk::rt::unwrap_abort(
@@ -405,16 +410,9 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                     &mut return_len,
                 )?;
 
-                // Design choice: If we make a call across to another contract,
-                // we cannot unwind that inside this code snipped.  Thus,
-                // any subsequent part of code here should trap(), instead of returning an error code
-                // (which would leave the caller uncertain of whether the error happened inside
-                // the other contract, or inside the parse code on this side)
-
                 // if raw_Invoke returns success, then it cannot be the case that
                 // GetReturnedBuffer fails (unless e.g. an allocation error)
 
-                //let returned_buf = ::rs_contract_sdk::rt::unwrap_abort(sdk::GetReturnedBuffer(return_len));
                 #get_return_buf_decl
 
                 Ok(sdk::parse_trait::parse_returns_from_calldata::<#iface_return_type>(&returned_buf)?)

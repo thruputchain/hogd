@@ -65,7 +65,7 @@ public:
   // auth
   void push_auth_context(std::span<const std::byte> auth_context_frame);
   SyscallStatus<void> pop_auth_context();
-  
+
   SyscallStatus<void> require_auth(const ContractAddress &authorizing_address,
                                    std::span<const std::byte> action);
   bool inside_verify_auth_frame() const;

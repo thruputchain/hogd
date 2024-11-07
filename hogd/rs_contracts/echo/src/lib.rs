@@ -76,12 +76,10 @@ pub fn echo_calldata(
 
     let mut vec = Box::<[u8]>::new_uninit_slice(buffer_size as usize);
 
-    sdk::parse_trait::serialize_to_calldata_3(
+    sdk::parse_trait::serialize_to_calldata(
         vec.as_mut(),
-        slice_start,
-        slice_end,
-        calldata,
-    )?;
+        (slice_start, slice_end, calldata),
+    )?; //.ok_or(::rs_contract_sdk::SyscallErrorCode::kCalldataParseError as i32)?;
 
     let calldata = unsafe { vec.assume_init() };
 

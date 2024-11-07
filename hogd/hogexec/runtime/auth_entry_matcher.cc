@@ -84,8 +84,9 @@ AuthEntryMatcher::extend_iterator_to_leaf(entry_iter_t &entry_iter)
 }
 
 bool
-AuthEntryMatcher::check_iter_match(entry_iter_t const &entry_iter,
-                                   AuthContextStack const &auth_context_stack)
+AuthEntryMatcher::check_iter_match(
+    entry_iter_t const &entry_iter,
+    std::vector<AuthContext> const &auth_context_stack)
 {
   size_t auth_context_idx = 0;
   for (auto const &layer : entry_iter) {

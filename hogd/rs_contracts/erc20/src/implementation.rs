@@ -1,5 +1,6 @@
 use core::mem::MaybeUninit;
 use rs_contract_sdk as sdk;
+use sdk::parse_trait::Serializable;
 
 pub fn compute_balance_key(addr: &sdk::ContractAddress) -> sdk::SHA256Hash {
     sdk::SHA256(addr).unwrap()
@@ -10,8 +11,8 @@ fn compute_allowance_key(
     spender: &sdk::ContractAddress,
 ) -> sdk::SHA256Hash {
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); 64];
-    sdk::parse_trait::serialize_to_calldata_2(&mut bytes_mu, owner, spender)
-        .unwrap();
+
+    (owner, spender).do_serialize(&mut bytes_mu).unwrap();
 
     let bytes: [u8; 64] = unsafe { core::mem::transmute(bytes_mu) };
 

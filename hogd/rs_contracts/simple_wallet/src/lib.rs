@@ -23,7 +23,7 @@ fn write_config_data(
     pk: &sdk::Ed25519PublicKey,
 ) {
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
-    sdk::parse_trait::serialize_to_calldata_2(&mut bytes_mu, erc20_addr, pk)
+    sdk::parse_trait::serialize_to_calldata(&mut bytes_mu, (erc20_addr, pk))
         .unwrap();
     let bytes: [u8; CONFIG_LEN] = unsafe { core::mem::transmute(bytes_mu) };
 

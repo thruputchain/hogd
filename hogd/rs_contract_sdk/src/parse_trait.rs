@@ -7,6 +7,19 @@ extern crate alloc;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 
+// TODO(geoff): The error codes in this module are a mess
+// I should rework to SerializeError and DeserializeError
+// The complicating factor is that it might be nice to allow cross-contract
+// invocations to be able to distinguish error types between the following cases:
+// Caller: serialize args
+//   Callee: deserialize args
+//   Callee: serialize return
+// Caller: deserialize return
+//
+// So then the SDK needs 4 error types, essentially.  Which is obnoxious, and perhaps overkill.
+// The caller should at least be able to know, upon trying to invoke another contract,
+// whether the invocation happened or not (regardless of whether it is able to parse the returned buffer).
+
 pub trait Parseable<'a> {
     fn parse_from(arg: &'a [u8]) -> (Self, usize)
     where
@@ -22,8 +35,22 @@ pub trait ParseableOwned {
 pub trait Serializable {
     fn serialize_len(&self) -> usize;
 
-    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>])
-        -> Result<usize, i32>;
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Option<usize>;
+}
+
+// This, or any comparable design,
+// requires generic_const_exprs in order to be meaningfully useful, unfortunately.
+
+trait SizedSerializable {
+    const SZ: usize;
+
+    fn do_sized_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Option<()>;
+
+    /*fn sized_serialize(&self) -> Option<[u8; Self::SZ]> {
+        let mut bytes_mu = [MaybeUninit::<u8>::uninit(); Self::SZ];
+        self.do_sized_serialize(&mut bytes_mu)?;
+        Some(unsafe { MaybeUninit::array_assume_init(bytes_mu) })
+    }*/
 }
 
 pub trait OutputReturnable {
@@ -102,29 +129,47 @@ macro_rules! impl_generic_int {
             }
         }
 
-        impl Serializable for $t {
-            fn serialize_len(&self) -> usize {
-                core::mem::size_of::<$t>()
-            }
+        impl SizedSerializable for $t {
+            const SZ : usize = core::mem::size_of::<$t>();
 
-            fn do_serialize(&self, slice: &mut [MaybeUninit<u8>])  -> Result<usize, i32> {
-                const SZ : usize = core::mem::size_of::<$t>();
-                debug_assert!(slice.len() == SZ);
+            //fn serialize_len(&self) -> usize {
+            //    core::mem::size_of::<$t>()
+            //}
+
+            fn do_sized_serialize(&self, slice: &mut [MaybeUninit<u8>])  -> Option<()> {
+                //const SZ : usize = core::mem::size_of::<$t>();
+                debug_assert!(slice.len() == Self::SZ);
                 let b = self.to_le_bytes();
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         b.as_ptr(),
                         MaybeUninit::slice_as_mut_ptr(slice),
-                        SZ,
+                        Self::SZ,
                     );
                 }
-                Ok(SZ)
+                Some(())
             }
         }
     )*)
 }
 
+macro_rules! sized_serialize_to_serialize {
+    ($($t:ty)*) => ($(
+        impl Serializable for $t {
+            fn serialize_len(&self) -> usize {
+                <$t>::SZ
+            }
+            fn do_serialize(&self, buf : &mut [MaybeUninit<u8>]) -> Option<usize> {
+                self.do_sized_serialize(buf)?;
+                Some(<$t>::SZ)
+            }
+        }
+
+    )*)
+}
+
 impl_generic_int! {i8 i16 i32 i64 i128 u8 u16 u32 u64 u128}
+sized_serialize_to_serialize! {i8 i16 i32 i64 i128 u8 u16 u32 u64 u128}
 
 impl<const N: usize> ParseableOwned for [u8; N] {
     fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
@@ -169,12 +214,142 @@ impl<T1: ParseableOwned, T2: ParseableOwned> ParseableOwned for (T1, T2) {
     }
 }
 
-impl Serializable for () {
-    fn serialize_len(&self) -> usize {
-        0
+impl SizedSerializable for () {
+    const SZ: usize = 0;
+
+    fn do_sized_serialize(&self, _: &mut [MaybeUninit<u8>]) -> Option<()> {
+        Some(())
     }
-    fn do_serialize(&self, _: &mut [MaybeUninit<u8>]) -> Result<usize, i32> {
-        Ok(0)
+}
+
+sized_serialize_to_serialize! { () }
+
+impl<T1: SizedSerializable, T2: SizedSerializable> SizedSerializable
+    for (T1, T2)
+{
+    const SZ: usize = T1::SZ + T2::SZ;
+
+    fn do_sized_serialize(&self, buf: &mut [MaybeUninit<u8>]) -> Option<()> {
+        let mut offset: usize = 0;
+
+        self.0.do_sized_serialize(buf.get_mut(offset..)?)?;
+        offset += T1::SZ;
+
+        self.1.do_sized_serialize(buf.get_mut(offset..)?)?;
+
+        Some(())
+    }
+}
+
+impl<T1: SizedSerializable, T2: SizedSerializable, T3: SizedSerializable>
+    SizedSerializable for (T1, T2, T3)
+{
+    const SZ: usize = T1::SZ + T2::SZ + T3::SZ;
+
+    fn do_sized_serialize(&self, buf: &mut [MaybeUninit<u8>]) -> Option<()> {
+        let mut offset: usize = 0;
+
+        self.0.do_sized_serialize(buf.get_mut(offset..)?)?;
+        offset += T1::SZ;
+
+        self.1.do_sized_serialize(buf.get_mut(offset..)?)?;
+        offset += T2::SZ;
+
+        self.2.do_sized_serialize(buf.get_mut(offset..)?)?;
+
+        Some(())
+    }
+}
+
+impl<
+        T1: SizedSerializable,
+        T2: SizedSerializable,
+        T3: SizedSerializable,
+        T4: SizedSerializable,
+    > SizedSerializable for (T1, T2, T3, T4)
+{
+    const SZ: usize = T1::SZ + T2::SZ + T3::SZ + T4::SZ;
+
+    fn do_sized_serialize(&self, buf: &mut [MaybeUninit<u8>]) -> Option<()> {
+        let mut offset: usize = 0;
+
+        self.0.do_sized_serialize(buf.get_mut(offset..)?)?;
+        offset += T1::SZ;
+
+        self.1.do_sized_serialize(buf.get_mut(offset..)?)?;
+        offset += T2::SZ;
+
+        self.2.do_sized_serialize(buf.get_mut(offset..)?)?;
+        offset += T3::SZ;
+
+        self.3.do_sized_serialize(buf.get_mut(offset..)?)?;
+
+        Some(())
+    }
+}
+
+impl<T1: Serializable, T2: Serializable> Serializable for (T1, T2) {
+    fn serialize_len(&self) -> usize {
+        self.0.serialize_len() + self.1.serialize_len()
+    }
+
+    fn do_serialize(&self, buf: &mut [MaybeUninit<u8>]) -> Option<usize> {
+        let mut offset: usize = 0;
+
+        offset += self.0.do_serialize(buf.get_mut(offset..)?)?;
+
+        offset += self.1.do_serialize(buf.get_mut(offset..)?)?;
+
+        Some(offset)
+    }
+}
+
+impl<T1: Serializable, T2: Serializable, T3: Serializable> Serializable
+    for (T1, T2, T3)
+{
+    fn serialize_len(&self) -> usize {
+        self.0.serialize_len() + self.1.serialize_len() + self.2.serialize_len()
+    }
+
+    fn do_serialize(&self, buf: &mut [MaybeUninit<u8>]) -> Option<usize> {
+        let mut offset: usize = 0;
+
+        offset += self.0.do_serialize(buf.get_mut(offset..)?)?;
+
+        offset += self.1.do_serialize(buf.get_mut(offset..)?)?;
+
+        offset += self.2.do_serialize(buf.get_mut(offset..)?)?;
+
+        Some(offset)
+    }
+}
+
+impl<
+        T1: Serializable,
+        T2: Serializable,
+        T3: Serializable,
+        T4: Serializable,
+    > Serializable for (T1, T2, T3, T4)
+{
+    fn serialize_len(&self) -> usize {
+        self.0.serialize_len()
+            + self.1.serialize_len()
+            + self.2.serialize_len()
+            + self.3.serialize_len()
+    }
+
+    fn do_serialize(&self, buf: &mut [MaybeUninit<u8>]) -> Option<usize> {
+        let mut offset: usize = 0;
+
+        offset += self.0.do_serialize(buf.get_mut(offset..)?)?;
+
+        offset += self.1.do_serialize(buf.get_mut(offset..)?)?;
+
+        offset += self.2.do_serialize(buf.get_mut(offset..)?)?;
+
+        offset += self.3.do_serialize(buf.get_mut(offset..)?)?;
+
+        Some(offset)
     }
 }
 
@@ -231,15 +406,10 @@ impl<'a, const N: usize> Parseable<'a> for &'a [u8; N] {
     }
 }
 
-impl<const N: usize> Serializable for &[u8; N] {
-    fn serialize_len(&self) -> usize {
-        N
-    }
+impl<const N: usize> SizedSerializable for &[u8; N] {
+    const SZ: usize = N;
 
-    fn do_serialize(
-        &self,
-        slice: &mut [MaybeUninit<u8>],
-    ) -> Result<usize, i32> {
+    fn do_sized_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Option<()> {
         debug_assert!(slice.len() == N);
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -248,7 +418,25 @@ impl<const N: usize> Serializable for &[u8; N] {
                 N,
             );
         }
-        Ok(N)
+        Some(())
+    }
+}
+
+impl<const N: usize> Serializable for &[u8; N] {
+    fn serialize_len(&self) -> usize {
+        N
+    }
+
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Option<usize> {
+        debug_assert!(slice.len() == N);
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.as_ptr(),
+                MaybeUninit::slice_as_mut_ptr(slice),
+                N,
+            );
+        }
+        Some(N)
     }
 }
 
@@ -263,10 +451,7 @@ impl Serializable for &[u8] {
         self.len()
     }
 
-    fn do_serialize(
-        &self,
-        slice: &mut [MaybeUninit<u8>],
-    ) -> Result<usize, i32> {
+    fn do_serialize(&self, slice: &mut [MaybeUninit<u8>]) -> Option<usize> {
         debug_assert!(slice.len() == self.len());
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -275,7 +460,7 @@ impl Serializable for &[u8] {
                 self.len(),
             );
         }
-        Ok(slice.len())
+        Some(slice.len())
     }
 }
 
@@ -322,80 +507,14 @@ pub fn compute_serialize_len_3<
 // so we just call exit(code) there instead of passing that error back up.
 
 // Will fail if buf.len() != sum(args.serialize_len())
-pub fn serialize_to_calldata_0(buf: &mut [MaybeUninit<u8>]) -> Result<(), i32> {
-    if 0 != buf.len() {
-        return Err(SyscallErrorCode::kCalldataParseError as i32);
-    }
-    Ok(())
-}
-pub fn serialize_to_calldata_1<T1: Serializable>(
+pub fn serialize_to_calldata<T: Serializable>(
     buf: &mut [MaybeUninit<u8>],
-    arg1: T1,
+    arg: T,
 ) -> Result<(), i32> {
-    let mut offset: usize = 0;
-
-    offset += arg1.do_serialize(
-        buf.get_mut(offset..(offset + arg1.serialize_len()))
-            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
-    )?;
-
-    if offset != buf.len() {
-        return Err(SyscallErrorCode::kCalldataParseError as i32);
-    }
-    Ok(())
-}
-
-pub fn serialize_to_calldata_2<T1: Serializable, T2: Serializable>(
-    buf: &mut [MaybeUninit<u8>],
-    arg1: T1,
-    arg2: T2,
-) -> Result<(), i32> {
-    let mut offset: usize = 0;
-
-    offset += arg1.do_serialize(
-        buf.get_mut(offset..(offset + arg1.serialize_len()))
-            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
-    )?;
-
-    offset += arg2.do_serialize(
-        buf.get_mut(offset..(offset + arg2.serialize_len()))
-            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
-    )?;
-
-    if offset != buf.len() {
-        return Err(SyscallErrorCode::kCalldataParseError as i32);
-    }
-    Ok(())
-}
-
-pub fn serialize_to_calldata_3<
-    T1: Serializable,
-    T2: Serializable,
-    T3: Serializable,
->(
-    buf: &mut [MaybeUninit<u8>],
-    arg1: T1,
-    arg2: T2,
-    arg3: T3,
-) -> Result<(), i32> {
-    let mut offset: usize = 0;
-
-    offset += arg1.do_serialize(
-        buf.get_mut(offset..(offset + arg1.serialize_len()))
-            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
-    )?;
-
-    offset += arg2.do_serialize(
-        buf.get_mut(offset..(offset + arg2.serialize_len()))
-            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
-    )?;
-
-    offset += arg3.do_serialize(
-        buf.get_mut(offset..(offset + arg3.serialize_len()))
-            .ok_or(SyscallErrorCode::kCalldataParseError as i32)?,
-    )?;
-
-    if offset != buf.len() {
+    let len: usize = arg
+        .do_serialize(buf)
+        .ok_or(SyscallErrorCode::kCalldataParseError as i32)?;
+    if len != buf.len() {
         return Err(SyscallErrorCode::kCalldataParseError as i32);
     }
 

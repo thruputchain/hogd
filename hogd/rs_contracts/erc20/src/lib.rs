@@ -35,7 +35,24 @@ pub fn transfer_from(
     let sender = sdk::GetMsgSender().unwrap();
 
     do_allowance_delta(owner, &sender, -amount);
-    do_transfer(owner, &to, amount);
+    do_transfer(owner, to, amount);
+}
+
+#[public_method(static_calldata_length = 72, static_return_length = 0)]
+pub fn authorized_transfer(
+    owner: &sdk::ContractAddress, // 32
+    to: &sdk::ContractAddress,    // 32
+    amount: i64,                  // 8
+) {
+    // This could be avoided if either I used an allocator
+    // or rust had a functional constexpr system
+    let _auth_context =
+        sdk::AuthContext::new_Sized::<
+            _,
+            { "AuthorizedTransfer".as_bytes().len() + 72 },
+        >(("AuthorizedTransfer".as_bytes(), owner, to, amount));
+
+    do_transfer(owner, to, amount);
 }
 
 #[public_method(static_calldata_length = 40, static_return_length = 0)]

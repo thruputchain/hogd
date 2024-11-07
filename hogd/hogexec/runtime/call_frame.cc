@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/auth_context_stack.h"
 #include "hogd/hogexec/runtime/auth_manager.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "transaction.hh"
@@ -20,8 +21,7 @@ CallFrame::CallFrame(Invocation invocation, AuthManager const &auth_manager,
                      AuthContextStack const &auth_context_stack, uint64_t flags,
                      ExtraFrameContext extra_context)
   : active_invocation_(invocation), auth_manager_(auth_manager),
-    auth_context_stack_(auth_context_stack_.context_,
-                        auth_context_stack_.context_.size()),
+    auth_context_stack_(auth_context_stack, new_auth_context_frame_t{}),
     flags_(flags), extra_context_(extra_context)
 {}
 

@@ -2,6 +2,9 @@
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_array_assume_init)]
 
+//#![allow(incomplete_features)]
+//#![feature(generic_const_exprs)]
+
 // If we decide rebuilding core and alloc are bad,
 // we can disable the error handling in the allocator
 // (and the associated nonsense code)

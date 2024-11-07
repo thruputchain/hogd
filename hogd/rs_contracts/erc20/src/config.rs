@@ -2,13 +2,15 @@ use core::mem::MaybeUninit;
 use rs_contract_sdk as sdk;
 
 use rs_macros::static_key;
+use sdk::parse_trait::Serializable;
 
 const CONFIG_KEY: sdk::StorageKey = static_key!("config key");
 const CONFIG_LEN: usize = 32;
 
 pub fn write_config_data(owner: &sdk::ContractAddress) {
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
-    sdk::parse_trait::serialize_to_calldata_1(&mut bytes_mu, owner).unwrap();
+    owner.do_serialize(&mut bytes_mu).unwrap();
+
     let bytes: [u8; CONFIG_LEN] = unsafe { core::mem::transmute(bytes_mu) };
 
     sdk::BytestringSet(&CONFIG_KEY, &bytes).unwrap();

@@ -5,7 +5,9 @@
 #include <memory>
 #include <set>
 #include <span>
+#include <vector>
 
+#include "hogd/hogexec/runtime/auth_context_stack.h"
 #include "hogd/hogexec/runtime/auth_manager.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "storage_object.hh"

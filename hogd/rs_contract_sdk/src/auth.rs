@@ -4,6 +4,7 @@
 // Long term, we need a more ergonomic process. I have some thoughts on what not to do,
 // but no great answers for what to do.
 
+use crate::parse_trait::Serializable;
 use crate::rt::trap;
 use crate::GetMsgSender;
 
@@ -53,4 +54,31 @@ pub fn GetDefaultAuthPayloadHash() -> Result<rs_xdr::SHA256Hash, i32> {
     crate::syscall_bindings::uninit_GetAuthPayloadHash(null(), &mut out_addr)?;
 
     Ok(unsafe { out_addr.assume_init() })
+}
+
+fn PopAuthContext() -> () {
+    crate::syscall_bindings::raw_PopAuthContext().unwrap();
+}
+
+pub struct AuthContext {}
+
+impl AuthContext {
+    pub fn new_Sized<T: Serializable, const N: usize>(context: T) -> Self {
+        let mut bytes_mu = [MaybeUninit::<u8>::uninit(); N];
+
+        context.do_serialize(&mut bytes_mu).unwrap();
+
+        crate::syscall_bindings::raw_PushAuthContext(&unsafe {
+            MaybeUninit::array_assume_init(bytes_mu)
+        })
+        .unwrap();
+
+        AuthContext {}
+    }
+}
+
+impl Drop for AuthContext {
+    fn drop(&mut self) {
+        PopAuthContext();
+    }
 }

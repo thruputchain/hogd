@@ -218,7 +218,6 @@ SystemCallHandler::get_invoke_gas_limit(GasAmount call_specified_gas_limit)
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 SystemCallHandler::invoke(Invocation const &invocation)
 {
-
   auto gas_limit = get_invoke_gas_limit(invocation.gas_limit);
 
   if (!gas_limit) {
@@ -351,7 +350,6 @@ SystemCallHandler::start_call_frame(Invocation const &invocation,
                       call_frame_stack_.back().auth_context_stack_,
                       call_frame_stack_.back().flags_ | new_flags,
                       call_frame_stack_.back().extra_context_);
-
   call_frame_stack_.emplace_back(std::move(new_frame));
 }
 
@@ -651,7 +649,7 @@ SystemCallHandler::push_auth_context(
 SyscallStatus<void>
 SystemCallHandler::pop_auth_context()
 {
-  auto& frame = get_active_call_frame();
+  auto &frame = get_active_call_frame();
   if (frame.auth_context_stack_.can_pop_context()) {
     frame.auth_context_stack_.context_.pop_back();
     return {};
@@ -668,10 +666,10 @@ SystemCallHandler::require_auth(const ContractAddress &authorizing_address,
   auto leaf_context = make_auth_context(authorizing_address, action);
 
   active_frame.auth_context_stack_.context_.push_back(leaf_context);
-  x23::Defer d(
-      [&] { active_frame.auth_context_stack_.context_.pop_back(); });
+  x23::Defer d([&] { active_frame.auth_context_stack_.context_.pop_back(); });
 
-  if (!active_frame.auth_manager_.try_match(authorizing_address, active_frame.auth_context_stack_)) {
+  if (!active_frame.auth_manager_.try_match(authorizing_address,
+                                            active_frame.auth_context_stack_)) {
     return SyscallError{SyscallErrorCode::kAuthMatchFailed};
   }
 

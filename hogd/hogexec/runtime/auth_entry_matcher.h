@@ -10,8 +10,6 @@ namespace hogd {
 // Mirrors the AuthEntry structure.
 class AuthEntryMatcher {
 public:
-  using AuthContextStack = std::vector<AuthContext>;
-
   explicit AuthEntryMatcher(AuthEntry const &entry);
   bool try_match(std::vector<AuthContext> const &auth_context_stack);
 
@@ -36,8 +34,9 @@ private:
 
   entry_iter_t entry_iterator_;
 
-  static bool check_iter_match(entry_iter_t const &entry_iter,
-                               AuthContextStack const &auth_context_stack);
+  static bool
+  check_iter_match(entry_iter_t const &entry_iter,
+                   std::vector<AuthContext> const &auth_context_stack);
 
   static void extend_iterator_to_leaf(entry_iter_t &entry_iter);
 };
