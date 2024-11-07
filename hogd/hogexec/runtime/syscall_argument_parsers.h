@@ -5,6 +5,7 @@
 #include <type_traits>
 
 #include "types.hh"
+#include "hogd/base/compiler.h"
 
 namespace hogd {
 
