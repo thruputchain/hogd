@@ -18,11 +18,11 @@
 namespace hogd {
 
 CallFrame::CallFrame(Invocation invocation, AuthManager const &auth_manager,
-                     AuthContextStack const &auth_context_stack, uint64_t flags,
-                     ExtraFrameContext extra_context)
+  AuthContextStack const& auth_context_stack, 
+                     uint64_t flags, ExtraFrameContext extra_context)
   : active_invocation_(invocation), auth_manager_(auth_manager),
-    auth_context_stack_(auth_context_stack, new_auth_context_frame_t{}),
-    flags_(flags), extra_context_(extra_context)
+  auth_context_stack_(auth_context_stack),
+  flags_(flags), extra_context_(extra_context)
 {}
 
 void
@@ -49,10 +49,9 @@ CallFrame::commit_failed_child_call()
 
 void
 CallFrame::push_new_item_cache(AddressAndKey const &new_addrkey,
-                               ItemCache const &proxy)
+                                  ItemCache const &proxy)
 {
-  assert(item_cache_map_.local_map_.find(new_addrkey) ==
-         item_cache_map_.local_map_.end());
+  assert(item_cache_map_.local_map_.find(new_addrkey) == item_cache_map_.local_map_.end());
   item_cache_map_.local_map_.emplace(new_addrkey, proxy);
 }
 

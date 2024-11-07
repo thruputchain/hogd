@@ -25,6 +25,8 @@ private:
     explicit AuthEntryNodeFrame(AuthEntryNode const &node);
   };
 
+  
+
   using children_vector_t = std::vector<AuthEntryNodeFrame>;
   using vector_iter_t = children_vector_t::iterator;
   using entry_iter_t =

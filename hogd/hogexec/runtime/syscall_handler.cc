@@ -12,8 +12,10 @@
 #include <span>
 #include <stdexcept>
 #include <utility>
+#include <variant>
 
 #include "auth.hh"
+#include "auth_noalloc.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
@@ -32,6 +34,7 @@
 #include "types.hh"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/cleanup.h"
 
 namespace hogd {
 

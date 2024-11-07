@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "hogd/crypto/crypto.h"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"

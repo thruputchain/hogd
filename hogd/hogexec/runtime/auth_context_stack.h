@@ -7,18 +7,15 @@
 
 namespace hogd {
 
-struct new_auth_context_frame_t {};
-
 struct AuthContextStack {
   std::vector<AuthContext> context_;
   // elements in context_ strictly below fixed_context_height
   // cannot be popped from the stack in the current call frame
-  uint32_t fixed_context_height_;
+  const uint32_t fixed_context_height_;
 
-  AuthContextStack() : context_(), fixed_context_height_(0) {}
+  AuthContextStack() : fixed_context_height_(0) {}
 
-  AuthContextStack(AuthContextStack const &base,
-                   new_auth_context_frame_t /*unused */)
+  explicit AuthContextStack(AuthContextStack const &base)
     : context_(base.context_), fixed_context_height_(base.context_.size())
   {}
 

@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <cstring>
+#include <vector>
+
 #include "auth.hh"
 #include "hogd/hogexec/runtime/auth_entry_matcher.h"
 
@@ -27,7 +30,7 @@ protected:
 
     auto make_node = [](std::string str) -> AuthEntryNode {
       AuthEntryNode node;
-      node.context = make_auth_context(str);
+      node.context = make_auth_context(std::move(str));
       return node;
     };
 
