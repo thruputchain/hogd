@@ -56,10 +56,6 @@ pub fn GetDefaultAuthPayloadHash() -> Result<rs_xdr::SHA256Hash, i32> {
     Ok(unsafe { out_addr.assume_init() })
 }
 
-fn PopAuthContext() -> () {
-    crate::syscall_bindings::raw_PopAuthContext().unwrap();
-}
-
 pub struct AuthContext {}
 
 impl AuthContext {
@@ -79,6 +75,6 @@ impl AuthContext {
 
 impl Drop for AuthContext {
     fn drop(&mut self) {
-        PopAuthContext();
+        crate::syscall_bindings::raw_PopAuthContext().unwrap();
     }
 }

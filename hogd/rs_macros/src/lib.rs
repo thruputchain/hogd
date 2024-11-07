@@ -234,9 +234,6 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
     let parse_from_calldata_name =
         format_ident!("parse_from_calldata_{}", n_args);
 
-    let compute_serialize_len_name =
-        format_ident!("compute_serialize_len_{}", n_args);
-
     let mut types: Vec<TokenStream2> = vec![];
 
     let mut arg_names: Vec<TokenStream2> = vec![];
@@ -272,16 +269,20 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|t| -> TokenStream2 { t.clone() })
         .collect();
 
-    let arg_names_join: TokenStream2 = arg_names
-        .iter()
-        .map(|t| -> TokenStream2 { t.clone() })
-        .collect();
+    let arg_names_tupled = if arg_names.len() == 0 {
+        quote! { () }
+    }
+    else {
+        let arg_names_join: TokenStream2 = arg_names[..arg_names.len()-1]
+            .iter()
+            .map(|t| -> TokenStream2 { t.clone() })
+            .collect();
 
-    let arg_names_tupled = if arg_names.len() == 2 {
-        // one actual argument, plus a comma
-        quote! { #arg_names_join}
-    } else {
-        quote! { (#arg_names_join) }
+        if arg_names.len() == 1 {
+            quote! { #arg_names_join }
+        } else {
+            quote! { (#arg_names_join) }
+        }
     };
 
     let crate_name =
@@ -291,8 +292,10 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let interface_calldata_decl = match calldata_len.clone() {
         None => quote! {
-            let buffer_size: usize = ::rs_contract_sdk::parse_trait::#compute_serialize_len_name (
-                        #arg_names_join);
+            //let buffer_size: usize = ::rs_contract_sdk::parse_trait::#compute_serialize_len_name (
+            //            #arg_names_join);
+            use ::rs_contract_sdk::parse_trait::Serializable;
+            let buffer_size : usize = #arg_names_tupled.serialize_len();
 
             let mut vec = Box::<[u8]>::new_uninit_slice(buffer_size);
 

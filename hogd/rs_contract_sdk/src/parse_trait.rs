@@ -480,29 +480,6 @@ impl<'a> Parseable<'a> for Box<[u8]> {
     }
 }
 
-pub fn compute_serialize_len_1<T1: Serializable>(arg1: T1) -> usize {
-    arg1.serialize_len()
-}
-
-pub fn compute_serialize_len_2<T1: Serializable, T2: Serializable>(
-    arg1: T1,
-    arg2: T2,
-) -> usize {
-    arg1.serialize_len() + arg2.serialize_len()
-}
-
-pub fn compute_serialize_len_3<
-    T1: Serializable,
-    T2: Serializable,
-    T3: Serializable,
->(
-    arg1: T1,
-    arg2: T2,
-    arg3: T3,
-) -> usize {
-    arg1.serialize_len() + arg2.serialize_len() + arg3.serialize_len()
-}
-
 // parse_from_calldata happens inside the sdk, before any user code,
 // so we just call exit(code) there instead of passing that error back up.
 
