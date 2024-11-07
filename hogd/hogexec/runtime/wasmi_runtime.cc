@@ -12,6 +12,7 @@
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 #include "contract.hh"
+#include "transaction.hh"
 
 namespace hogd {
 

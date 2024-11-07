@@ -1,7 +1,6 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
-#include <span>
 #include <utility>
 
 #include "hogd/base/types.h"
@@ -15,7 +14,7 @@ namespace hogd {
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_ReplayCacheInsert_inner(SystemCallHandler &syscall_handler,
                                 const StorageKey &input_key,
-                                const uint64_t input_nonce)
+                                uint64_t input_nonce)
 {
   auto status = syscall_handler.replay_cache_insert(input_key, input_nonce);
 
@@ -29,7 +28,7 @@ syscall_ReplayCacheInsert_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_ReplayCacheClear_inner(SystemCallHandler &syscall_handler,
                                const StorageKey &input_key,
-                               const uint64_t input_threshold)
+                               uint64_t input_threshold)
 {
   auto status = syscall_handler.replay_cache_clear(input_key, input_threshold);
 

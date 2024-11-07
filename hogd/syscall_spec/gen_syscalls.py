@@ -67,7 +67,7 @@ def gen_validate_arg(inp, *, is_input):
     return f"""
   {const}{typename} {arg1} =
       check_user_primitive_argument<{const}{typename}>(user_{arg1});
-""", [f"user_{arg1}"], arg1, arg1, f"{const}{typename} {arg1}"
+""", [f"user_{arg1}"], arg1, arg1, f"{typename} {arg1}"
 
   if "custom_parsing" in inp and inp["custom_parsing"] and is_input:
     if optional:
