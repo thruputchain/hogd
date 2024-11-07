@@ -1,0 +1,36 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <optional>
+
+#include "contract.hh"
+#include "types.hh"
+#include "x23/mvar.h"
+
+namespace hogd {
+
+// Root cache for objects read from the ledger.
+// Can be shared between concurrent transactions,
+// but must be reset after each block.
+class StorageSnapshotCache {
+public:
+  std::shared_ptr<const Contract>
+  try_get_contract_by_hash(SHA256Hash const &hash);
+  std::optional<SHA256Hash>
+  try_get_deployed_contract_hash(ContractAddress const &addr);
+
+private:
+  // Note: the contract_cache_ does not need to be reset (although it is not
+  // incorrect to reset it) after every block.
+  // Future PRs will have a storage object cache, which will need to be reset.
+  x23::MVar<std::map<SHA256Hash, std::shared_ptr<const Contract>>>
+      contract_cache_;
+  // Neither does the deployment cache
+  x23::MVar<std::map<ContractAddress, std::optional<SHA256Hash>>>
+      deployment_cache_;
+};
+
+} // namespace hogd

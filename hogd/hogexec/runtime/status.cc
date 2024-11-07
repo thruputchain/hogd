@@ -1,7 +1,10 @@
+#include "hogd/hogexec/runtime/status.h"
+
 #include <cassert>
 #include <string>
 
-#include "hogd/hogexec/runtime/status.h"
+#include "syscall.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -42,6 +45,13 @@ InvokeErrorCategory::message(int code) const
     return "kUnrecoverable";
   }
   return "Unknown";
+}
+
+std::string
+SyscallErrorCategory::message(int code) const
+{
+  assert(SyscallError::is_in_enum_range(code));
+  return x23::show(static_cast<SyscallErrorCode>(code));
 }
 
 } // namespace hogd

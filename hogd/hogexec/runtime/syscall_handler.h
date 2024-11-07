@@ -1,0 +1,101 @@
+#pragma once
+
+#include <cstdint>
+#include <map>
+
+#include "hogd/hogexec/runtime/call_frame.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "syscall.hh"
+#include "transaction.hh"
+#include "types.hh"
+
+namespace hogd {
+
+class StorageSnapshotCache;
+
+class SystemCallHandler {
+public:
+  SystemCallHandler(SignedTransaction signed_tx,
+                    StorageSnapshotCache &snapshot_cache);
+
+  InvokeResult root_invoke();
+
+  std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+  invoke(Invocation const &invocation);
+
+  // syscall methods: can only be called when call_frame_stack_ is nonempty
+  // (i.e. while at least one invoke() is running)
+  ContractAddress get_current_address() const;
+
+  SyscallStatus<ContractAddress> get_msg_sender() const;
+  SHA256Hash get_source_tx_hash() const;
+
+  SyscallStatus<Calldata> get_calldata() const;
+  SyscallStatus<RuntimeMemoryLength> get_calldata_len() const;
+
+  SyscallStatus<const ReturnBuffer> get_return_buffer() const;
+  void set_return_buffer(ReturnBuffer &&returned_buffer);
+
+  SyscallStatus<void> log(std::span<const std::byte> message);
+
+  std::vector<LogEntry> const &get_logs() const { return committed_logs_; }
+
+  RuntimeMemoryLength get_defaultzero_return_len() const;
+
+  static ContractAddress
+  static_get_deploy_address(ContractAddress const &sender,
+                            SHA256Hash const &nonce,
+                            SHA256Hash const &contract_hash);
+
+  ContractAddress get_deploy_address(SHA256Hash const &nonce,
+                                     SHA256Hash const &contract_hash) const;
+
+  SyscallStatus<ContractAddress>
+  deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
+
+private:
+  struct RuntimeCacheEntry {
+    WasmiRuntime runtime;
+    bool revert_poisoned = false;
+
+    RuntimeCacheEntry(WasmiRuntime &&runtime) : runtime(std::move(runtime)) {}
+    RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
+  };
+
+  WasmiContext wasmi_context_;
+
+  RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
+
+  SyscallStatus<GasAmount>
+  get_invoke_gas_limit(GasAmount call_specified_gas_limit);
+
+  void start_call_frame(Invocation const &invocation);
+  void finish_call_frame(InvokeResult const &result);
+
+  const SignedTransaction signed_tx_;
+  std::vector<CallFrame> call_frame_stack_;
+
+  // RuntimeCacheEntry cannot be moved while it is actively invoked.  unique_ptr
+  // required here.
+  std::map<ContractAddress, std::unique_ptr<RuntimeCacheEntry>> runtimes_;
+
+  std::map<ContractAddress, SHA256Hash> new_deployments_;
+  const std::map<SHA256Hash, std::shared_ptr<const Contract>>
+      newly_created_contracts_;
+
+  // only set at the end of the transaction
+  std::vector<LogEntry> committed_logs_;
+
+  StorageSnapshotCache &snapshot_cache_;
+
+  auto &get_active_call_frame(this auto &self)
+  {
+    assert(!self.call_frame_stack_.empty());
+    return self.call_frame_stack_.back();
+  }
+
+  void commit_last_call_frame_success(CallFrame &frame);
+};
+
+} // namespace hogd

@@ -3,6 +3,7 @@
 #include <expected>
 
 #include "hogd/base/status.h"
+#include "syscall.hh"
 
 namespace hogd {
 
@@ -112,5 +113,24 @@ operator==(const InvokeErrorCode &lhs, const std::error_code &rhs)
 template<typename T> using InvokeStatus = std::expected<T, InvokeError>;
 
 using HostFnResult = std::pair<HostFnErrorCode, int32_t>;
+
+class SyscallErrorCategory : public std::error_category {
+public:
+  const char *name() const noexcept override { return "syscall"; }
+  std::string message(int code) const override;
+};
+
+struct SyscallError : public EnumError<SyscallErrorCode, SyscallErrorCategory> {
+  explicit SyscallError(SyscallErrorCode err) : EnumError(err) {}
+};
+
+// Enable comparisons between SyscallErrorCode and std::error_code.
+inline bool
+operator==(const SyscallErrorCode &lhs, const std::error_code &rhs)
+{
+  return SyscallError{lhs} == rhs;
+}
+
+template<typename T> using SyscallStatus = std::expected<T, SyscallError>;
 
 } // namespace hogd
