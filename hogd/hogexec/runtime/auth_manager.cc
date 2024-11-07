@@ -5,11 +5,11 @@
 #include <stdexcept>
 
 #include "auth.hh"
-#include "types.hh"
-#include "transaction.hh"
 #include "hogd/hogexec/runtime/auth_context_stack.h"
 #include "hogd/hogexec/runtime/auth_entry_matcher.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 

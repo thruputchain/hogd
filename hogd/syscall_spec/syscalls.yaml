@@ -307,6 +307,7 @@ syscalls:
         typename: "ContractAddress"
       - name: "action"
         span_argument: yes
+        optional: yes
     outputs:
     number: 26
   - name: "GetAuthWitness"

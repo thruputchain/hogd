@@ -32,13 +32,20 @@ pub fn transfer_from(
     to: &sdk::ContractAddress,
     amount: i64,
 ) {
-    let sender = sdk::GetMsgSender().unwrap();
+    match sdk::RequireAuth(owner) {
+        Ok(()) => {
+            do_transfer(owner, to, amount);
+        }
+        Err(_) => {
+            let sender = sdk::GetMsgSender().unwrap();
 
-    do_allowance_delta(owner, &sender, -amount);
-    do_transfer(owner, to, amount);
+            do_allowance_delta(owner, &sender, -amount);
+            do_transfer(owner, to, amount);
+        }
+    }
 }
 
-#[public_method(static_calldata_length = 72, static_return_length = 0)]
+/*#[public_method(static_calldata_length = 72, static_return_length = 0)]
 pub fn authorized_transfer(
     owner: &sdk::ContractAddress, // 32
     to: &sdk::ContractAddress,    // 32
@@ -53,7 +60,7 @@ pub fn authorized_transfer(
         >(("AuthorizedTransfer".as_bytes(), owner, to, amount));
 
     do_transfer(owner, to, amount);
-}
+}  */
 
 #[public_method(static_calldata_length = 40, static_return_length = 0)]
 pub fn adjust_allowance(spender: &sdk::ContractAddress, amount: i64) {

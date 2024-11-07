@@ -4,8 +4,8 @@
 #include <span>
 #include <utility>
 
-#include "hogd/crypto/crypto.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
@@ -53,9 +53,10 @@ syscall_PopAuthContext_inner(SystemCallHandler &syscall_handler)
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_RequireAuth_inner(SystemCallHandler &syscall_handler,
-                          const ContractAddress &input_authorizing_address,
-                          std::span<const std::byte> input_action)
+syscall_RequireAuth_inner(
+    SystemCallHandler &syscall_handler,
+    const ContractAddress &input_authorizing_address,
+    std::optional<std::span<const std::byte>> input_action)
 {
   auto status =
       syscall_handler.require_auth(input_authorizing_address, input_action);

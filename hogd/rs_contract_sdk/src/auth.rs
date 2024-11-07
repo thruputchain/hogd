@@ -9,8 +9,7 @@ use crate::rt::trap;
 use crate::GetMsgSender;
 
 use core::mem::MaybeUninit;
-use core::ptr::null;
-use rs_xdr::{RuntimeMemoryLength, SHA256Hash};
+use rs_xdr::{ContractAddress, RuntimeMemoryLength, SHA256Hash};
 
 pub fn assert_root_tx() {
     match GetMsgSender() {
@@ -51,7 +50,7 @@ pub fn GetDefaultAuthPayloadHash() -> Result<rs_xdr::SHA256Hash, i32> {
     let mut out_addr: MaybeUninit<SHA256Hash> =
         MaybeUninit::<SHA256Hash>::uninit();
 
-    crate::syscall_bindings::uninit_GetAuthPayloadHash(null(), &mut out_addr)?;
+    crate::syscall_bindings::uninit_GetAuthPayloadHash(None, &mut out_addr)?;
 
     Ok(unsafe { out_addr.assume_init() })
 }
@@ -78,3 +77,20 @@ impl Drop for AuthContext {
         crate::syscall_bindings::raw_PopAuthContext().unwrap();
     }
 }
+
+pub fn RequireAuth(authorizing_address: &ContractAddress) -> Result<(), i32> {
+    crate::syscall_bindings::raw_RequireAuth(authorizing_address, None)
+}
+
+// Example:
+/*
+
+// This could be avoided if either I used an allocator
+// or rust had a functional constexpr system
+let _auth_context =
+    sdk::AuthContext::new_Sized::<
+        _,
+        { "AuthorizedTransfer".as_bytes().len() + 72 },
+    >(("AuthorizedTransfer".as_bytes(), owner, to, amount));
+
+*/

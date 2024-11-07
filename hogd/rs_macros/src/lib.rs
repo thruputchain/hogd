@@ -271,9 +271,8 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let arg_names_tupled = if arg_names.len() == 0 {
         quote! { () }
-    }
-    else {
-        let arg_names_join: TokenStream2 = arg_names[..arg_names.len()-1]
+    } else {
+        let arg_names_join: TokenStream2 = arg_names[..arg_names.len() - 1]
             .iter()
             .map(|t| -> TokenStream2 { t.clone() })
             .collect();

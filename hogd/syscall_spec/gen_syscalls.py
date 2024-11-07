@@ -26,13 +26,22 @@ def gen_validate_arg(inp, *, is_input):
     optional = True
 
   if "span_argument" in inp and inp["span_argument"]:
-    if optional:
-      raise Exception("I haven't impl'd optional span arguments: just make a span of length 0")
     arg1 = f"{in_out}_{arg_name}"
     arg2 = f"{in_out}_{arg_name}_len"
-    check_arg_statement = get_check_arg_statement(arg1)
+    if optional:
+      return f"""
+        std::optional<std::span<{const}std::byte>> {arg1} =
+            check_user_span_argument(contract_memory, user_{arg1},
+                                     user_{arg2});
 
-    return f"""
+        
+      """, [f"user_{arg1}", f"user_{arg2}"], arg1, arg1, f"std::optional<std::span<{const}std::byte>> {arg1}"
+
+    else:
+
+      check_arg_statement = get_check_arg_statement(arg1)
+
+      return f"""
   std::optional<std::span<{const}std::byte>> {arg1} =
       check_user_span_argument(contract_memory, user_{arg1},
                                user_{arg2});
@@ -423,8 +432,8 @@ def gen_rs_syscall_binding(syscall):
         if "rust_typename" in inp:
           input_type = inp["rust_typename"]
         if optional:
-          syscallargs.append(f"""{input_name} as u64""")
-          inputdecls.append(f"""{input_name} : *const {input_type}""")
+          syscallargs.append(f"""match {input_name} {{ Some(x) => {{x.as_ptr() as u64 }}, None => u64::MAX }}""")
+          inputdecls.append(f"""{input_name} : Option<&{input_type}>""")
           uninit_args.append(f"""{input_name}""")
         else:
           syscallargs.append(f"""{input_name}.as_ptr() as u64""")
@@ -439,10 +448,16 @@ def gen_rs_syscall_binding(syscall):
           inputdecls.append(f"""{input_name}_{i} : u64""")
           uninit_args.append(f"""{input_name}_{i}""")
       else: # span argument
-        syscallargs.append(f"""{input_name}.as_ptr() as u64""")
-        syscallargs.append(f"""{input_name}.len() as u64""")
-        inputdecls.append(f"""{input_name} : &{input_type}""")
-        uninit_args.append(f"""{input_name}""")
+        if optional:
+          syscallargs.append(f"""match {input_name} {{ Some(x) => {{x.as_ptr() as u64 }}, None => u64::MAX }}""")
+          syscallargs.append(f"""match {input_name} {{ Some(x) => {{x.len() as u64 }}, None => 0 }}""")
+          inputdecls.append(f"""{input_name} : Option<&{input_type}>""")
+          uninit_args.append(f"""{input_name}""")
+        else:
+          syscallargs.append(f"""{input_name}.as_ptr() as u64""")
+          syscallargs.append(f"""{input_name}.len() as u64""")
+          inputdecls.append(f"""{input_name} : &{input_type}""")
+          uninit_args.append(f"""{input_name}""")
 
   outputargs = []
   outputdecls = []

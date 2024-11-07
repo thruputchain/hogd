@@ -32,9 +32,9 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
-#include "x23/cleanup.h"
 
 namespace hogd {
 
@@ -661,14 +661,25 @@ SystemCallHandler::pop_auth_context()
 }
 
 SyscallStatus<void>
-SystemCallHandler::require_auth(const ContractAddress &authorizing_address,
-                                std::span<const std::byte> action)
+SystemCallHandler::require_auth(
+    const ContractAddress &authorizing_address,
+    std::optional<std::span<const std::byte>> action)
 {
   auto &active_frame = get_active_call_frame();
 
-  auto leaf_context = make_auth_context(authorizing_address, action);
-
-  active_frame.auth_context_stack_.context_.push_back(leaf_context);
+  if (action.has_value()) {
+    auto leaf_context = make_auth_context(authorizing_address, *action);
+    active_frame.auth_context_stack_.context_.push_back(leaf_context);
+  }
+  else {
+    auto &calldata = active_frame.active_invocation_.calldata;
+    auto full_auth_context =
+        x23::serialize(active_frame.active_invocation_.method, calldata);
+    auto leaf_context =
+        make_auth_context(authorizing_address,
+                          std::as_bytes(std::span(full_auth_context)));
+    active_frame.auth_context_stack_.context_.push_back(leaf_context);
+  }
   x23::Defer d([&] { active_frame.auth_context_stack_.context_.pop_back(); });
 
   if (!active_frame.auth_manager_.try_match(authorizing_address,
