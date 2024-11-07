@@ -51,6 +51,10 @@ def gen_validate_arg(inp, *, is_input):
   check_arg_statement = get_check_arg_statement(arg1)
   
   if "primitive_type" in inp and inp["primitive_type"] and is_input:
+    
+    if optional:
+      raise Exception("optional primitive_type is unimplemented");
+
     return f"""
   {const}{typename} {arg1} =
       check_user_primitive_argument<{const}{typename}>(user_{arg1});
@@ -397,6 +401,11 @@ def gen_rs_syscall_binding(syscall):
   uninit_args = []
   if syscall["inputs"] is not None:
     for inp in syscall["inputs"]:
+
+      optional = False
+      if "optional" in inp and inp["optional"]:
+        optional = True
+
       input_name = inp["name"]
       input_type = "[u8]"
       if "primitive_type" in inp and inp["primitive_type"]:
@@ -407,12 +416,19 @@ def gen_rs_syscall_binding(syscall):
         inputdecls.append(f"""{input_name} : {input_type}""")
         uninit_args.append(f"""{input_name}""")
       elif "fixed_size" in inp and inp["fixed_size"]:
+
         input_type = inp["typename"]
         if "rust_typename" in inp:
           input_type = inp["rust_typename"]
-        syscallargs.append(f"""{input_name}.as_ptr() as u64""")
-        inputdecls.append(f"""{input_name} : &{input_type}""")
-        uninit_args.append(f"""{input_name}""")
+        if optional:
+          syscallargs.append(f"""{input_name} as u64""")
+          inputdecls.append(f"""{input_name} : *const {input_type}""")
+          uninit_args.append(f"""{input_name}""")
+        else:
+          syscallargs.append(f"""{input_name}.as_ptr() as u64""")
+          inputdecls.append(f"""{input_name} : &{input_type}""")
+          uninit_args.append(f"""{input_name}""")
+
       elif "custom_parsing" in inp and inp["custom_parsing"]:
         # custom parsing, for now I just implement as a direct passthrough
         # and assume the sdk wrapper will handle.  Input types are just u64s

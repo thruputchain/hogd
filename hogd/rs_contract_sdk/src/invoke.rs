@@ -18,6 +18,22 @@ pub fn GetCalldataLen() -> Result<RuntimeMemoryLength, i32> {
     Ok(out)
 }
 
+pub fn GetCalldata_Sized<const N: usize>() -> Result<[u8; N], i32> {
+    let mut calldata_mu = [::core::mem::MaybeUninit::<u8>::uninit(); N];
+
+    let mut calldata_len: RuntimeMemoryLength = 0;
+
+    syscall_bindings::uninit_GetCalldata(&mut calldata_mu, &mut calldata_len)?;
+
+    if calldata_len != N as u32 {
+        return Err(rs_xdr::SyscallErrorCode::kCalldataParseError as i32);
+    }
+
+    let calldata: [u8; N] =
+        unsafe { MaybeUninit::array_assume_init(calldata_mu) };
+    Ok(calldata)
+}
+
 pub fn Return(return_buf: &[u8]) -> ! {
     syscall_bindings::raw_Return(return_buf);
 }

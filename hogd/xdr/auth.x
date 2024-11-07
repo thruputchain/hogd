@@ -1,5 +1,6 @@
 // clang-format off
 %#include "types.hh"
+%#include "auth_noalloc.hh"
 
 namespace hogd
 {
@@ -11,22 +12,13 @@ namespace hogd
     opaque bytes<>;
   };
 
-  enum AuthEntryFlags {
-    kRequireAllConsumed = 1,
-  };
-
   struct AuthEntryNode {
     AuthContext context;
     AuthEntryNode children<>;
   };
 
-  struct AuthEntryMetadata {
-    unsigned int auth_flags;
-    unsigned hyper signature_nonce;
-  };
-
-  typedef opaque
-      Witness<kMaxAuthWitnessLen>; // in default auth setup, this is a Signature
+  // in default auth setup, this is a Signature
+  typedef opaque Witness<kMaxAuthWitnessLen>;
 
   struct AuthEntry {
     ContractAddress authorizing_address;

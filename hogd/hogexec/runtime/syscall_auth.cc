@@ -56,7 +56,8 @@ syscall_RequireAuth_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetAuthWitness_inner(SystemCallHandler &syscall_handler,
                              const uint32_t input_witness_index,
-                             std::span<std::byte> output_witness)
+                             std::span<std::byte> output_witness,
+                             RuntimeMemoryLength &output_written_len)
 {
   auto witness = syscall_handler.get_auth_witness(input_witness_index);
 
@@ -69,6 +70,8 @@ syscall_GetAuthWitness_inner(SystemCallHandler &syscall_handler,
 
   std::memcpy(reinterpret_cast<uint8_t *>(output_witness.data()),
               witness->data(), write_len);
+
+  output_written_len = write_len;
 
   return {SyscallErrorCode::kNone, 0};
 }

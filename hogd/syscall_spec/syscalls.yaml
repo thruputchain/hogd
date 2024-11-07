@@ -315,6 +315,10 @@ syscalls:
     outputs:
       - name: "witness"
         span_argument: yes
+      - name: "written_len"
+        fixed_size: Yes
+        typename: "RuntimeMemoryLength"
+        primitive_type: yes
     number: 26
   - name: "GetAuthWitnessLen"
     needs_context: yes

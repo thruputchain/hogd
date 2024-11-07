@@ -432,6 +432,21 @@ pub fn parse_from_calldata_1<'a, T1: Parseable<'a>, R: OutputReturnable>(
     main_func(arg1)
 }
 
+pub fn parse_combinator_1<'a, T1: Parseable<'a>, R>(
+    bytes: &'a [u8],
+    main_func: fn(T1) -> R,
+) -> (R, usize) {
+    let mut offset: usize = 0;
+
+    let (arg1, arg1len) = T1::parse_from(match bytes.get(offset..) {
+        Some(b) => b,
+        None => Exit(SyscallErrorCode::kCalldataParseError as i32),
+    });
+    offset += arg1len;
+
+    (main_func(arg1), offset)
+}
+
 pub fn parse_from_calldata_2<
     'a,
     T1: Parseable<'a>,
@@ -462,6 +477,29 @@ pub fn parse_from_calldata_2<
     }
 
     main_func(arg1, arg2)
+}
+
+pub fn parse_combinator_2<'a, T1: Parseable<'a>, T2: Parseable<'a>, R>(
+    bytes: &'a [u8],
+    main_func: fn(T1, T2) -> R,
+) -> (R, usize) {
+    let mut offset: usize = 0;
+
+    let (arg1, arg1len) = T1::parse_from(match bytes.get(offset..) {
+        Some(b) => b,
+        None => Exit(SyscallErrorCode::kCalldataParseError as i32),
+    });
+
+    offset += arg1len;
+
+    let (arg2, arg2len) = T2::parse_from(match bytes.get(offset..) {
+        Some(b) => b,
+        None => Exit(SyscallErrorCode::kCalldataParseError as i32),
+    });
+
+    offset += arg2len;
+
+    (main_func(arg1, arg2), offset)
 }
 
 pub fn parse_from_calldata_3<
@@ -559,6 +597,38 @@ pub fn parse_returns_from_calldata<'a, T: ParseableOwned>(
     }
 
     Ok(arg)
+}
+
+impl<'a> Parseable<'a> for AuthEntryMetadata {
+    fn parse_from(arg: &'a [u8]) -> (Self, usize) {
+        parse_combinator_2::<u32, u64, AuthEntryMetadata>(
+            arg,
+            |arg_auth_flags: u32,
+             arg_signature_nonce: u64|
+             -> AuthEntryMetadata {
+                AuthEntryMetadata {
+                    auth_flags: arg_auth_flags,
+                    signature_nonce: arg_signature_nonce,
+                }
+            },
+        )
+    }
+}
+
+impl<'a> Parseable<'a> for VerifyAuthArgs {
+    fn parse_from(arg: &'a [u8]) -> (Self, usize) {
+        parse_combinator_2::<AuthEntryMetadata, u32, VerifyAuthArgs>(
+            arg,
+            |arg_meta: AuthEntryMetadata,
+             arg_wit_count: u32|
+             -> VerifyAuthArgs {
+                VerifyAuthArgs {
+                    auth_metadata: arg_meta,
+                    witness_count: arg_wit_count,
+                }
+            },
+        )
+    }
 }
 
 #[cfg(test)]

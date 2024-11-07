@@ -165,6 +165,51 @@ impl Parse for AttributeArgs {
 }
 
 #[proc_macro_attribute]
+pub fn verify_auth(_: TokenStream, item: TokenStream) -> TokenStream {
+    let func: ItemFn = parse_macro_input!(item as ItemFn);
+
+    let function_signature = &func.sig;
+
+    let function_name = &function_signature.ident;
+
+    //TODO(geoff): assertion that input sig is correct,
+    // for better error handling
+
+    let wrap_fn_name = format_ident!("wrapper_{}", function_name.to_string());
+
+    let export_name = format!("_verify_auth");
+
+    let calldata_decl = quote! {
+        let calldata : [u8; 16] = match ::rs_contract_sdk::GetCalldata_Sized::<16>()
+        {
+            Ok(res) => res,
+            Err(x) => {return x;}
+        };
+    };
+
+    TokenStream::from(quote! {
+        #[cfg_attr(target_family = "wasm", export_name = #export_name)]
+        #[no_mangle]
+        #[cfg(not(feature="interface"))]
+        pub extern "C" fn #wrap_fn_name () -> i32 {
+            #calldata_decl
+
+            // verify auth call can use Syscall::Exit if it wants to return an error code,
+            // or trap to revert
+            ::rs_contract_sdk::parse_trait::parse_from_calldata_1::<
+                ::rs_contract_sdk::VerifyAuthArgs,
+                ()
+            >(&calldata, #function_name);
+
+            0
+        }
+
+        #[cfg(not(feature = "interface"))]
+        #func
+    })
+}
+
+#[proc_macro_attribute]
 pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
     let tokens: AttributeArgs = parse_macro_input!(attr as AttributeArgs);
 
@@ -279,18 +324,12 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         Some(x) => {
             quote! {
-                let mut calldata_mu= [::core::mem::MaybeUninit::<u8>::uninit(); #x];
-                let mut calldata_len : ::rs_contract_sdk::RuntimeMemoryLength = 0;
-                match ::rs_contract_sdk::syscall_bindings::uninit_GetCalldata(&mut calldata_mu, &mut calldata_len) {
-                    Ok(()) => {},
-                    Err(err) => {return err;},
+
+                let calldata : [u8; #x] = match ::rs_contract_sdk::GetCalldata_Sized::<#x>()
+                {
+                    Ok(res) => res,
+                    Err(err) => {return err;}
                 };
-
-                if calldata_len != #x {
-                    return ::rs_contract_sdk::SyscallErrorCode::kCalldataParseError as i32;
-                }
-
-                let calldata : [u8; #x] = unsafe {core::mem::transmute(calldata_mu)};
             }
         }
     };
@@ -298,7 +337,9 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
     let get_return_buf_decl = match return_len.clone() {
         None => {
             quote! {
-               let returned_buf = ::rs_contract_sdk::rt::unwrap_abort(::rs_contract_sdk::GetReturnedBuffer(return_len));
+                let returned_buf =
+                    ::rs_contract_sdk::rt::unwrap_abort(
+                        ::rs_contract_sdk::GetReturnedBuffer(return_len));
             }
         }
         Some(x) => {
@@ -310,7 +351,8 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let mut return_written_len : ::rs_contract_sdk::RuntimeMemoryLength = 0;
 
                 ::rs_contract_sdk::rt::unwrap_abort(
-                    ::rs_contract_sdk::syscall_bindings::uninit_GetReturnedBuffer(&mut return_mu, &mut return_written_len));
+                    ::rs_contract_sdk::syscall_bindings::uninit_GetReturnedBuffer(
+                        &mut return_mu, &mut return_written_len));
 
                 // should be guaranteed by runtime.  if this fails, something weird has happened
                 if #x != return_written_len {

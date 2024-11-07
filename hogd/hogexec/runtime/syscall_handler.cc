@@ -251,10 +251,13 @@ make_verify_auth_invocation(ContractAddress const &authorizing_address,
   invocation.method.method_type(MethodSpecifierType::kReservedName);
   invocation.method.reserved_name() = "_verify_auth";
   invocation.gas_limit = gas_limit;
-  // TODO(geoff): figure out a nice way to transfer an auth_entry into wasm
-  uint32_t witness_count = auth_entry.witnesses.size();
 
-  invocation.calldata = x23::serialize(auth_entry.metadata, witness_count);
+  // TODO(geoff): figure out a nice way to transfer an auth_entry into wasm
+  VerifyAuthArgs auth_calldata;
+  auth_calldata.auth_metadata = auth_entry.metadata;
+  auth_calldata.witness_count = auth_entry.witnesses.size();
+
+  invocation.calldata = x23::serialize(auth_calldata);
   return invocation;
 }
 
