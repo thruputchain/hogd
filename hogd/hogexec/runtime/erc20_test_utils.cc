@@ -113,6 +113,22 @@ make_transfer_transaction(ContractAddress const &sender,
   return stx;
 }
 
+SignedTransaction
+make_unauthorized_transfer_transaction(
+  ContractAddress const& erc20_address,
+  ContractAddress const &owner,
+                          ContractAddress const &to, int64_t amount)
+{
+  SignedTransaction stx;
+  stx.tx.invocation.invoked_address = erc20_address;
+  stx.tx.invocation.method = test::get_sdk_name("transfer_from");
+  stx.tx.invocation.gas_limit = UINT64_MAX;
+  stx.tx.invocation.calldata = test::make_calldata(owner, to, amount);
+  stx.tx.nonce = 0;
+
+  return stx;
+}
+
 std::optional<ContractAddress>
 deploy_erc20_noinit(RuntimeTestFramework &runtime_framework)
 {

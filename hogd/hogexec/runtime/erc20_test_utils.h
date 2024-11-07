@@ -33,6 +33,13 @@ SignedTransaction make_transfer_transaction(ContractAddress const &sender,
                                             ContractAddress const &to,
                                             int64_t amount);
 
+SignedTransaction
+make_unauthorized_transferFrom_transaction(
+    ContractAddress const& erc20_address,
+    ContractAddress const &owner,
+    ContractAddress const &to, 
+    int64_t amount);
+
 std::optional<ContractAddress>
 deploy_erc20_noinit(RuntimeTestFramework &runtime_framework);
 std::optional<ContractAddress>

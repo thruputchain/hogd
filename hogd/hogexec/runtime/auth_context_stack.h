@@ -13,7 +13,7 @@ struct AuthContextStack {
   // cannot be popped from the stack in the current call frame
   const size_t fixed_context_height_;
 
-  AuthContextStack() : fixed_context_height_{0} {}
+  AuthContextStack() = default;
 
   explicit AuthContextStack(AuthContextStack const &base)
     : context_(base.context_), fixed_context_height_{base.context_.size()}
