@@ -397,7 +397,7 @@ syscall_GetSourceTransactionHash_outer(SystemCallHandler &syscall_handler,
   return {convert_return_t(res.first), res.second};
 }
 std::pair<HostFnResult, GasAmount>
-syscall_Exit_outer(SystemCallHandler &/*syscall_handler*/,
+syscall_Exit_outer(SystemCallHandler & /*syscall_handler*/,
                    std::span<std::byte> contract_memory,
                    uint64_t user_input_code, uint64_t /*unused*/,
                    uint64_t /*unused*/, uint64_t /*unused*/,
@@ -461,6 +461,8 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
                           arg2, arg3, arg4, arg5, arg6);
 }
 
+} // namespace
+
 HostFnResult
 syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
               uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
@@ -477,8 +479,6 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
                 "mismatch");
 
   return err;
-}
-
 }
 
 } // namespace hogd

@@ -4,8 +4,8 @@
 #include <optional>
 #include <type_traits>
 
-#include "types.hh"
 #include "hogd/base/compiler.h"
+#include "types.hh"
 
 namespace hogd {
 

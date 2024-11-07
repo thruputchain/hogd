@@ -3,9 +3,9 @@
 #include <cassert>
 #include <cstddef>
 #include <iterator>
+#include <optional>
 #include <span>
 #include <utility>
-#include <optional>
 
 #include "hogd/base/types.h"
 #include "transaction.hh"
