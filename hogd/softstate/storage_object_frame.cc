@@ -1,8 +1,10 @@
 #include "hogd/softstate/storage_object_frame.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <set>
 #include <variant>
@@ -24,7 +26,7 @@ StorageObjectFrame::NNInt64SetAddArgs::can_accept(int64_t const &set_arg) const
 
 StorageObject
 StorageObjectFrame::NNInt64SetAddArgs::to_object(
-    std::optional<StorageObject> const &) const
+    std::optional<StorageObject> const & /*unused*/) const
 {
   StorageObject object;
   object.type(StorageObjectType::kNonnegativeInt64);
@@ -64,7 +66,7 @@ StorageObjectFrame::ReplayCacheArgs::to_object(
   }
 
   std::sort(out.replay_cache().nonces.begin(), out.replay_cache().nonces.end(),
-            std::greater<uint64_t>());
+            std::greater<>());
 
   if (new_max_clear_threshold_.has_value()) {
 
