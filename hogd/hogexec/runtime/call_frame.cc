@@ -5,6 +5,7 @@
 #include <iterator>
 #include <span>
 #include <utility>
+#include <optional>
 
 #include "hogd/base/types.h"
 #include "transaction.hh"
@@ -13,7 +14,8 @@
 
 namespace hogd {
 
-CallFrame::CallFrame(Invocation invocation) : active_invocation_(invocation)
+CallFrame::CallFrame(Invocation invocation)
+  : active_invocation_(std::move(invocation))
 {}
 
 void

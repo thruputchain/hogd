@@ -11,6 +11,8 @@ namespace hogd {
 
 class SystemCallHandler;
 
+// NOLINTBEGIN(readability-identifier-naming)
+
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_SHA256_inner(std::span<const std::byte> input_buffer,
                      SHA256Hash &output_hash);
@@ -65,5 +67,7 @@ syscall_GetSourceTransactionHash_inner(SystemCallHandler &syscall_handler,
                                        SHA256Hash &output_source_tx_hash);
 
 std::pair<HostFnResult, GasAmount> syscall_Exit_inner(int32_t input_code);
+
+// NOLINTEND(readability-identifier-naming)
 
 } // namespace hogd

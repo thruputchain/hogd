@@ -9,7 +9,6 @@
 #include <type_traits>
 #include <utility>
 
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -21,6 +20,8 @@
 
 namespace hogd {
 
+namespace {
+
 template<typename T>
 std::pair<HostFnErrorCode, int32_t>
 convert_return_t(T const &value)
@@ -30,9 +31,7 @@ convert_return_t(T const &value)
       return {HostFnErrorCode::kNoneOrRecoverable,
               static_cast<int32_t>(*value)};
     }
-    else {
-      return {value.error().code(), 0};
-    }
+    return {value.error().code(), 0};
   }
   else {
     static_assert(std::is_same_v<T, std::pair<HostFnErrorCode, int32_t>>);
@@ -41,7 +40,7 @@ convert_return_t(T const &value)
 }
 
 std::pair<HostFnResult, GasAmount>
-syscall_SHA256_outer(SystemCallHandler &syscall_handler,
+syscall_SHA256_outer(SystemCallHandler & /*syscall_handler*/,
                      std::span<std::byte> contract_memory,
                      uint64_t user_input_buffer, uint64_t user_input_buffer_len,
                      uint64_t user_output_hash, uint64_t /*unused*/,
@@ -381,7 +380,7 @@ syscall_GetSourceTransactionHash_outer(SystemCallHandler &syscall_handler,
                                        uint64_t /*unused*/, uint64_t /*unused*/,
                                        uint64_t /*unused*/)
 {
-  SHA256Hash *output_source_tx_hash =
+  auto *output_source_tx_hash =
       check_user_argument<SHA256Hash>(contract_memory,
                                       user_output_source_tx_hash,
                                       sizeof(SHA256Hash));
@@ -398,13 +397,13 @@ syscall_GetSourceTransactionHash_outer(SystemCallHandler &syscall_handler,
   return {convert_return_t(res.first), res.second};
 }
 std::pair<HostFnResult, GasAmount>
-syscall_Exit_outer(SystemCallHandler &syscall_handler,
+syscall_Exit_outer(SystemCallHandler &/*syscall_handler*/,
                    std::span<std::byte> contract_memory,
                    uint64_t user_input_code, uint64_t /*unused*/,
                    uint64_t /*unused*/, uint64_t /*unused*/,
                    uint64_t /*unused*/, uint64_t /*unused*/)
 {
-  const int32_t input_code =
+  const auto input_code =
       check_user_primitive_argument<const int32_t>(user_input_code);
 
   auto res = syscall_Exit_inner(input_code);
@@ -478,6 +477,8 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
                 "mismatch");
 
   return err;
+}
+
 }
 
 } // namespace hogd
