@@ -27,6 +27,12 @@ CallFrame::commit_successful_child_call(CallFrame &frame)
   child_return_buffer_ = frame.to_return_;
   logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
                std::make_move_iterator(frame.logs_.end()));
+
+  for (auto const &[addr, hash] : frame.new_contract_deployments_) {
+    [[maybe_unused]] auto [_, inserted_new] =
+        new_contract_deployments_.emplace(addr, hash);
+    assert(inserted_new);
+  }
 }
 
 void

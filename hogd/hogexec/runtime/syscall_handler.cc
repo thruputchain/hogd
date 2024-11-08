@@ -273,13 +273,14 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
 
+  // not found committed deployment; checking local context
   if (!deployed_hash) {
-    // not found committed deployment; checking local context
-    auto it = new_deployments_.find(addr);
-    if (it == new_deployments_.end()) {
-      return nullptr;
-    }
-    deployed_hash = it->second;
+    deployed_hash = lookup_locally_deployed_contract(addr);
+  }
+
+  // not found in local context either
+  if (!deployed_hash) {
+    return nullptr;
   }
 
   auto load_contract = snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
@@ -307,6 +308,19 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
                               std::move(*new_runtime)));
 
   return runtimes_.at(addr).get();
+}
+
+std::optional<SHA256Hash>
+SystemCallHandler::lookup_locally_deployed_contract(
+    ContractAddress const &addr) const
+{
+  for (auto const &frame : call_frame_stack_) {
+    auto it = frame.new_contract_deployments_.find(addr);
+    if (it != frame.new_contract_deployments_.end()) {
+      return it->second;
+    }
+  }
+  return std::nullopt;
 }
 
 SyscallStatus<Calldata>
@@ -400,13 +414,14 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
 
-  auto it = new_deployments_.find(deploy_addr);
-  if (it != new_deployments_.end()) {
+  if (lookup_locally_deployed_contract(deploy_addr).has_value()) {
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
 
+  auto &frame = get_active_call_frame();
+
   // deploy new contract
-  new_deployments_.emplace(deploy_addr, contract_hash);
+  frame.new_contract_deployments_.emplace(deploy_addr, contract_hash);
 
   return deploy_addr;
 }

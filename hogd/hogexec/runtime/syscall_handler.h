@@ -80,7 +80,6 @@ private:
   // required here.
   std::map<ContractAddress, std::unique_ptr<RuntimeCacheEntry>> runtimes_;
 
-  std::map<ContractAddress, SHA256Hash> new_deployments_;
   const std::map<SHA256Hash, std::shared_ptr<const Contract>>
       newly_created_contracts_;
 
@@ -88,6 +87,9 @@ private:
   std::vector<LogEntry> committed_logs_;
 
   StorageSnapshotCache &snapshot_cache_;
+
+  std::optional<SHA256Hash>
+  lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
   auto &get_active_call_frame(this auto &self)
   {
