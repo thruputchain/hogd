@@ -2,7 +2,9 @@
 
 #include <array>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <optional>
 #include <span>
@@ -57,7 +59,7 @@ syscall_SHA256_outer(SystemCallHandler & /*syscall_handler*/,
             kGenericBadSyscallCost};
   }
 
-  SHA256Hash *output_hash =
+  auto *output_hash =
       check_user_argument<SHA256Hash>(contract_memory, user_output_hash,
                                       sizeof(SHA256Hash));
 
@@ -78,7 +80,7 @@ syscall_GetMsgSender_outer(SystemCallHandler &syscall_handler,
                            uint64_t /*unused*/, uint64_t /*unused*/,
                            uint64_t /*unused*/, uint64_t /*unused*/)
 {
-  ContractAddress *output_sender =
+  auto *output_sender =
       check_user_argument<ContractAddress>(contract_memory, user_output_sender,
                                            sizeof(ContractAddress));
 
@@ -100,7 +102,7 @@ syscall_GetCalldataLen_outer(SystemCallHandler &syscall_handler,
                              uint64_t /*unused*/, uint64_t /*unused*/,
                              uint64_t /*unused*/, uint64_t /*unused*/)
 {
-  RuntimeMemoryLength *output_len =
+  auto *output_len =
       check_user_argument<RuntimeMemoryLength>(contract_memory, user_output_len,
                                                sizeof(RuntimeMemoryLength));
 
@@ -132,7 +134,7 @@ syscall_GetCalldata_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  RuntimeMemoryLength *output_written_len =
+  auto *output_written_len =
       check_user_argument<RuntimeMemoryLength>(contract_memory,
                                                user_output_written_len,
                                                sizeof(RuntimeMemoryLength));
@@ -178,7 +180,7 @@ syscall_Invoke_outer(SystemCallHandler &syscall_handler,
                      uint64_t user_input_calldata_len,
                      uint64_t user_output_return_len)
 {
-  const ContractAddress *input_address =
+  const auto *input_address =
       check_user_argument<const ContractAddress>(contract_memory,
                                                  user_input_address,
                                                  sizeof(ContractAddress));
@@ -189,10 +191,10 @@ syscall_Invoke_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  const MethodID input_method =
+  auto input_method =
       check_user_primitive_argument<const MethodID>(user_input_method);
 
-  const GasAmount input_gas_limit =
+  auto input_gas_limit =
       check_user_primitive_argument<const GasAmount>(user_input_gas_limit);
 
   std::optional<std::span<const std::byte>> input_calldata =
@@ -205,7 +207,7 @@ syscall_Invoke_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  RuntimeMemoryLength *output_return_len =
+  auto *output_return_len =
       check_user_argument<RuntimeMemoryLength>(contract_memory,
                                                user_output_return_len,
                                                sizeof(RuntimeMemoryLength));
@@ -263,7 +265,7 @@ syscall_GetReturnedBuffer_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  RuntimeMemoryLength *output_written_len =
+  auto *output_written_len =
       check_user_argument<RuntimeMemoryLength>(contract_memory,
                                                user_output_written_len,
                                                sizeof(RuntimeMemoryLength));
@@ -288,7 +290,7 @@ syscall_GetDeployAddress_outer(SystemCallHandler &syscall_handler,
                                uint64_t /*unused*/, uint64_t /*unused*/,
                                uint64_t /*unused*/)
 {
-  const SHA256Hash *input_nonce =
+  const auto *input_nonce =
       check_user_argument<const SHA256Hash>(contract_memory, user_input_nonce,
                                             sizeof(SHA256Hash));
 
@@ -298,7 +300,7 @@ syscall_GetDeployAddress_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  const SHA256Hash *input_contract_hash =
+  const auto *input_contract_hash =
       check_user_argument<const SHA256Hash>(contract_memory,
                                             user_input_contract_hash,
                                             sizeof(SHA256Hash));
@@ -309,7 +311,7 @@ syscall_GetDeployAddress_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  ContractAddress *output_to_be_deployed =
+  auto *output_to_be_deployed =
       check_user_argument<ContractAddress>(contract_memory,
                                            user_output_to_be_deployed,
                                            sizeof(ContractAddress));
@@ -335,7 +337,7 @@ syscall_DeployContract_outer(SystemCallHandler &syscall_handler,
                              uint64_t /*unused*/, uint64_t /*unused*/,
                              uint64_t /*unused*/)
 {
-  const SHA256Hash *input_nonce =
+  const auto *input_nonce =
       check_user_argument<const SHA256Hash>(contract_memory, user_input_nonce,
                                             sizeof(SHA256Hash));
 
@@ -345,7 +347,7 @@ syscall_DeployContract_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  const SHA256Hash *input_contract_hash =
+  const auto *input_contract_hash =
       check_user_argument<const SHA256Hash>(contract_memory,
                                             user_input_contract_hash,
                                             sizeof(SHA256Hash));
@@ -356,7 +358,7 @@ syscall_DeployContract_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  ContractAddress *output_deployed_address =
+  auto *output_deployed_address =
       check_user_argument<ContractAddress>(contract_memory,
                                            user_output_deployed_address,
                                            sizeof(ContractAddress));
@@ -399,7 +401,7 @@ syscall_GetSourceTransactionHash_outer(SystemCallHandler &syscall_handler,
 }
 std::pair<HostFnResult, GasAmount>
 syscall_Exit_outer(SystemCallHandler & /*syscall_handler*/,
-                   std::span<std::byte> contract_memory,
+                   std::span<std::byte> /*contract_memory*/,
                    uint64_t user_input_code, uint64_t /*unused*/,
                    uint64_t /*unused*/, uint64_t /*unused*/,
                    uint64_t /*unused*/, uint64_t /*unused*/)
