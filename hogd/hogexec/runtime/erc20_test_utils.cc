@@ -114,10 +114,10 @@ make_transfer_transaction(ContractAddress const &sender,
 }
 
 SignedTransaction
-make_unauthorized_transfer_transaction(
-  ContractAddress const& erc20_address,
-  ContractAddress const &owner,
-                          ContractAddress const &to, int64_t amount)
+make_unauthorized_transfer_transaction(ContractAddress const &erc20_address,
+                                       ContractAddress const &owner,
+                                       ContractAddress const &to,
+                                       int64_t amount)
 {
   SignedTransaction stx;
   stx.tx.invocation.invoked_address = erc20_address;

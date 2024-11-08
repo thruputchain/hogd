@@ -65,7 +65,7 @@ def gen_validate_arg(inp, *, is_input):
       raise Exception("optional primitive_type is unimplemented");
 
     return f"""
-  {const}{typename} {arg1} =
+  {const}auto {arg1} =
       check_user_primitive_argument<{const}{typename}>(user_{arg1});
 """, [f"user_{arg1}"], arg1, arg1, f"{typename} {arg1}"
 
@@ -99,7 +99,7 @@ def gen_validate_arg(inp, *, is_input):
 
   # else fixed size
   return f"""
-  {const}{typename} *{arg1} =
+  {const}auto *{arg1} =
       check_user_argument<{const}{typename}>(contract_memory, user_{arg1},
                                       sizeof({typename}));
 
@@ -165,17 +165,25 @@ def gen_inner_outer(syscall):
   if len(user_args) < syscall_argcount:
     user_args += ["/*unused*/"] * (syscall_argcount - len(user_args))
 
+  syscall_handler_ref = "/*syscall_handler*/"
   if syscall["needs_context"]:
     call_arg_strs = ["syscall_handler"] + call_arg_strs
     inner_arg_decl_strs = ["SystemCallHandler& syscall_handler"] + inner_arg_decl_strs
-    #syscall_handler = "syscall_handler, "
-    #syscall_handler_decl = "SystemCallHandler& syscall_handler, "
+    syscall_handler_ref="syscall_handler"
 
   inner_args = ", ".join(call_arg_strs)
   inner_arg_decls = ", ".join(inner_arg_decl_strs);
+
+  contract_mem = "contract_memory"
+  if len(user_args) == 0:
+    contract_mem = "/*contract_memory*/"
+
+
+
+
   outer= f"""std::pair<HostFnResult, GasAmount>
-syscall_{name}_outer(SystemCallHandler& syscall_handler,
-                     std::span<std::byte> contract_memory,
+syscall_{name}_outer(SystemCallHandler& {syscall_handler_ref},
+                     std::span<std::byte> {contract_mem},
                      uint64_t {user_args[0]}, 
                      uint64_t {user_args[1]},
                      uint64_t {user_args[2]}, 
@@ -279,6 +287,8 @@ def gen_syscall_entry_cc(spec):
 
 namespace hogd {{
 
+namespace {{
+
 template<typename T>
 std::pair<HostFnErrorCode, int32_t>
 convert_return_t(T const& value) {{
@@ -323,6 +333,8 @@ syscall_entry_inner(HostCallContext *call_context, {syscall_uint64_arg_decls_str
 
   return syscall_fn_outer(*call_context->syscall_handler, contract_memory, {syscall_uint64_args_nozero_str});
 }}
+
+}} // namespace
 
 HostFnResult
 syscall_entry(HostCallContext *call_context, {syscall_uint64_arg_decls_str})

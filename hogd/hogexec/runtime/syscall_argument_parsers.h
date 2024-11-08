@@ -8,7 +8,7 @@
 
 namespace hogd {
 
-bool
+inline bool
 check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
 {
   uint64_t base_end = 0;
@@ -37,14 +37,14 @@ std::optional<T *>
 check_user_optional_argument(std::span<std::byte> contract_memory,
                              uint64_t user_offset, uint64_t user_len)
 {
-  T *res = check_user_argument<T>(contract_memory, user_offset, user_len);
+  auto *res = check_user_argument<T>(contract_memory, user_offset, user_len);
   if (!res) {
     return std::nullopt;
   }
   return res;
 }
 
-std::optional<std::span<std::byte>>
+inline std::optional<std::span<std::byte>>
 check_user_span_argument(std::span<std::byte> contract_memory,
                          uint64_t user_offset, uint64_t user_len)
 {

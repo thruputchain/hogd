@@ -11,7 +11,7 @@ struct AuthContextStack {
   std::vector<AuthContext> context_;
   // elements in context_ strictly below fixed_context_height
   // cannot be popped from the stack in the current call frame
-  const size_t fixed_context_height_;
+  const size_t fixed_context_height_ = 0;
 
   AuthContextStack() = default;
 

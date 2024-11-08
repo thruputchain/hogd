@@ -318,7 +318,7 @@ SystemCallHandler::start_verify_auth_frame(Invocation const &invocation)
 
   if (call_frame_stack_.empty()) {
     call_frame_stack_.emplace_back(invocation, root_auth_manager_,
-                                   AuthContextStack{}, new_flags,
+                                   AuthContextStack(), new_flags,
                                    VerifyAuthFrameContext{
                                        .authorizing_address =
                                            invocation.invoked_address});
