@@ -782,6 +782,12 @@ SystemCallHandler::lookup_locally_deployed_contract(
       return it->second;
     }
   }
+
+  auto it = new_committed_deployments_.find(addr);
+  if (it != frame.new_committed_deployments_.end()) {
+    return it -> second;
+  }
+  
   return std::nullopt;
 }
 
