@@ -16,7 +16,9 @@ namespace hogd {
 
 CallFrame::CallFrame(Invocation invocation)
   : active_invocation_(std::move(invocation))
-{}
+{
+  visited_runtimes_.insert(active_invocation_.invoked_address);
+}
 
 void
 CallFrame::commit_successful_child_call(CallFrame &frame)

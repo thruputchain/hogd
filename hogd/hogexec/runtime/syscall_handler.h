@@ -56,10 +56,13 @@ public:
 
 private:
   struct RuntimeCacheEntry {
-    WasmiRuntime runtime;
-    bool revert_poisoned = false;
+    WasmiRuntime runtime_;
+    const bool local_deployment_;
+    bool revert_poisoned_ = false;
 
-    RuntimeCacheEntry(WasmiRuntime &&runtime) : runtime(std::move(runtime)) {}
+    RuntimeCacheEntry(WasmiRuntime &&runtime, bool local_deployment)
+      : runtime_(std::move(runtime)), local_deployment_(local_deployment)
+    {}
     RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
   };
 

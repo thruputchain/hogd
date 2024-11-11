@@ -57,8 +57,8 @@ SystemCallHandler::root_invoke()
 
   start_call_frame(signed_tx_.tx.invocation);
 
-  auto res = runtime->runtime.invoke(signed_tx_.tx.invocation.method,
-                                     signed_tx_.tx.invocation.gas_limit);
+  auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
+                                      signed_tx_.tx.invocation.gas_limit);
 
   finish_call_frame(res);
 
@@ -142,7 +142,7 @@ SystemCallHandler::get_invoke_gas_limit(GasAmount call_specified_gas_limit)
     initial_gas_limit =
         runtimes_
             .at(call_frame_stack_.back().active_invocation_.invoked_address)
-            ->runtime.get_available_gas();
+            ->runtime_.get_available_gas();
   }
 
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
@@ -171,7 +171,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
 
   start_call_frame(invocation);
 
-  auto res = runtime->runtime.invoke(invocation.method, *gas_limit);
+  auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
 
   finish_call_frame(res);
 
@@ -209,7 +209,7 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
 
     for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
       // TODO(geoff) metadata allowing revert_safe declarations
-      runtimes_.at(addr)->revert_poisoned = true;
+      runtimes_.at(addr)->revert_poisoned_ = true;
     }
 
     call_frame_stack_.pop_back();
@@ -264,7 +264,15 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   if (it != runtimes_.end()) {
     auto *out = it->second.get();
 
-    if (out->revert_poisoned) {
+    if (out->local_deployment_) {
+      // Runtime exists in the cache, but it was deployed in an earlier
+      // call frame that has since been reverted.
+      if (!lookup_locally_deployed_contract(addr)) {
+        return nullptr;
+      }
+    }
+
+    if (out->revert_poisoned_) {
       return nullptr;
     }
 
@@ -273,8 +281,10 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
 
+  bool local_deployment = false;
   // not found committed deployment; checking local context
   if (!deployed_hash) {
+    local_deployment = true;
     deployed_hash = lookup_locally_deployed_contract(addr);
   }
 
@@ -304,8 +314,9 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   }
 
   // successfully resolved runtime
-  runtimes_.emplace(addr, std::make_unique<RuntimeCacheEntry>(
-                              std::move(*new_runtime)));
+  runtimes_.emplace(addr,
+                    std::make_unique<RuntimeCacheEntry>(std::move(*new_runtime),
+                                                        local_deployment));
 
   return runtimes_.at(addr).get();
 }
