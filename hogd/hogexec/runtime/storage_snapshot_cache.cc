@@ -53,6 +53,7 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
     deployment_cache_->emplace(addr, client_res.deployed_hash());
     return client_res.deployed_hash();
   }
+
   return std::nullopt;
 }
 

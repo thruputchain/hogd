@@ -130,15 +130,17 @@ private:
   ItemCache &resolve_item_cache(StorageKey const &key);
 
   SignedTransaction signed_tx_;
+
   std::vector<CallFrame> call_frame_stack_;
 
   // RuntimeCacheEntry cannot be moved while it is actively invoked.  unique_ptr
   // required here.
   std::map<ContractAddress, std::unique_ptr<RuntimeCacheEntry>> runtimes_;
 
-  std::map<ContractAddress, SHA256Hash> new_deployments_;
   const std::map<SHA256Hash, std::shared_ptr<const Contract>>
       newly_created_contracts_;
+
+  std::map<ContractAddress, SHA256Hash> new_committed_deployments_;
 
   AuthManager root_auth_manager_;
   ItemCacheMap root_item_cache_map_;
@@ -150,6 +152,9 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
+  std::optional<SHA256Hash>
+  lookup_locally_deployed_contract(ContractAddress const &addr) const;
+
   auto &get_active_call_frame(this auto &self)
   {
     assert(!self.call_frame_stack_.empty());
@@ -157,8 +162,8 @@ private:
   }
 
   void commit_last_call_frame_success(CallFrame &frame);
-
   void commit_new_contract_deployments(write_client_t &client) const;
+
 };
 
 } // namespace hogd

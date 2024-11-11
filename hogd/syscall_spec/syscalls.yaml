@@ -372,7 +372,7 @@ errors:
   - name: "StringTooLong"
     number: 8
     doc: "Input byte span is too long"
-  - name: "DeterministicWasmError"
+  - name: "DeterministicWasm"
     number: 9
     doc: "Deterministic error within called wasm (i.e. trap)"
   - name: "NoReturnBufferAvailable"

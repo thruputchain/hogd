@@ -51,6 +51,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       return contracts;
     }()),
     root_auth_manager_(signed_tx_), snapshot_cache_(snapshot_cache)
+
 {
   wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
 }
@@ -180,7 +181,7 @@ convert_invoke_result_to_host_fn_result(InvokeResult const &result)
               result.gas_consumed};
     case kDeterministic:
       // i.e. trap within Wasmi
-      return {SyscallErrorCode::kDeterministicWasmError, result.gas_consumed};
+      return {SyscallErrorCode::kDeterministicWasm, result.gas_consumed};
     case kOutOfGas:
       return {HostFnError{HostFnErrorCode::kOutOfGas}, result.gas_consumed};
     default:
@@ -360,11 +361,12 @@ void
 SystemCallHandler::finish_call_frame(InvokeResult const &result)
 {
   // Error handling: Each contract's return value is effectively a Result<Value,
-  // i32>, or a trap(). A result return (through either the return syscall, the
+  // i32>, or a trap() (InvokeError::kDeterministic).
+  //  A result return (through either the return syscall, the
   // method returning, or an Exit syscall) does not revert the function. Only a
   // deterministic trap() (such as out of gas, or divide by 0) cause a contract
   // to be reverted. We do not need a separate Revert() syscall -- a contract
-  // can just call wasm `unreachable`.
+  // can just call trap() or wasm `unreachable`.
   //
   // If a contract has the REVERT_SAFE flag set, then it can be called again
   // after it has been reverted. A contract might not be REVERT_SAFE because
@@ -446,6 +448,10 @@ SystemCallHandler::commit_last_call_frame_success(CallFrame &frame)
   root_item_cache_map_.commit_child_map(frame.get_item_cache_map());
 
   root_auth_manager_ = std::move(frame.auth_manager_);
+
+  for (auto [addr, hash] : frame.new_contract_deployments_) {
+    new_committed_deployments_.emplace(addr, hash);
+  }
 }
 
 SyscallStatus<const ReturnBuffer>
@@ -482,13 +488,14 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
 
+  // not found committed deployment; checking local context
   if (!deployed_hash) {
-    // not found committed deployment; checking local context
-    auto it = new_deployments_.find(addr);
-    if (it == new_deployments_.end()) {
-      return nullptr;
-    }
-    deployed_hash = it->second;
+    deployed_hash = lookup_locally_deployed_contract(addr);
+  }
+
+  // not found in local context either
+  if (!deployed_hash) {
+    return nullptr;
   }
 
   auto load_contract = snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
@@ -753,6 +760,19 @@ SystemCallHandler::get_auth_payload(const SHA256Hash *optional_input_message)
   return payload;
 }
 
+std::optional<SHA256Hash>
+SystemCallHandler::lookup_locally_deployed_contract(
+    ContractAddress const &addr) const
+{
+  for (auto const &frame : call_frame_stack_) {
+    auto it = frame.new_contract_deployments_.find(addr);
+    if (it != frame.new_contract_deployments_.end()) {
+      return it->second;
+    }
+  }
+  return std::nullopt;
+}
+
 SyscallStatus<Calldata>
 SystemCallHandler::get_calldata() const
 {
@@ -844,13 +864,15 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
 
-  auto it = new_deployments_.find(deploy_addr);
-  if (it != new_deployments_.end()) {
+
+  if (lookup_locally_deployed_contract(deploy_addr).has_value()) {
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
 
+  auto &frame = get_active_call_frame();
+
   // deploy new contract
-  new_deployments_.emplace(deploy_addr, contract_hash);
+  frame.new_contract_deployments_.emplace(deploy_addr, contract_hash);
 
   return deploy_addr;
 }
@@ -858,7 +880,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
 void
 SystemCallHandler::commit_new_contract_deployments(write_client_t &client) const
 {
-  for (auto const &[addr, hash] : new_deployments_) {
+  for (auto const &[addr, hash] : new_committed_deployments_) {
 
     auto it = newly_created_contracts_.find(hash);
     if (it != newly_created_contracts_.end()) {

@@ -67,6 +67,8 @@ public:
 
   ExtraFrameContext extra_context_;
 
+  std::map<ContractAddress, SHA256Hash> new_contract_deployments_;
+
 private:
   ReturnBuffer to_return_;
 
