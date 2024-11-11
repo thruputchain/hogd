@@ -130,6 +130,11 @@ impl WasmiRuntime {
                     external_call::TrampolineErrorEnum::Exit { code } => {
                         return WasmiInvokeResult::success(code);
                     }
+                    external_call::TrampolineErrorEnum::Revert => {
+                        return WasmiInvokeResult::error(
+                            InvokeError::Deterministic,
+                        );
+                    }
                     _ => {
                         return WasmiInvokeResult::error(
                             InvokeError::Unrecoverable,

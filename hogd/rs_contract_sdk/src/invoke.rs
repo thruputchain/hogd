@@ -42,6 +42,12 @@ pub fn Exit(code: i32) -> ! {
     syscall_bindings::raw_Exit(code);
 }
 
+pub fn Revert() -> ! {
+    syscall_bindings::raw_Exit(
+        rs_xdr::SyscallErrorCode::kDeterministicWasm as i32,
+    );
+}
+
 pub fn GetSourceTransactionHash() -> Result<SHA256Hash, i32> {
     let mut out_hash: MaybeUninit<SHA256Hash> =
         MaybeUninit::<SHA256Hash>::uninit();

@@ -34,7 +34,6 @@ public:
   StorageSnapshotCache(client_t &client) : client_(client) {}
 
 private:
-
   // TODO(geoff): initialize and check this properly
   SHA256Hash current_block_hash_;
 

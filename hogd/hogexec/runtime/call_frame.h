@@ -58,8 +58,6 @@ public:
 
   ItemCacheMap &get_item_cache_map() { return item_cache_map_; }
 
-  // TODO(geoff) set based on metadata
-  const bool unwind_catch_boundary_ = false;
   const Invocation active_invocation_;
   AuthManager auth_manager_;
   AuthContextStack auth_context_stack_;

@@ -189,6 +189,10 @@ syscalls:
   - name: "GetDeployAddress"
     needs_context : yes
     inputs:
+      - name: "caller_address"
+        fixed_size: yes
+        typename: "ContractAddress"
+        optional: yes
       - name: "nonce"
         fixed_size: yes
         typename: "SHA256Hash"

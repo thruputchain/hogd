@@ -23,7 +23,9 @@ CallFrame::CallFrame(Invocation invocation, AuthManager const &auth_manager,
   : active_invocation_(invocation), auth_manager_(auth_manager),
     auth_context_stack_(auth_context_stack), flags_(flags),
     extra_context_(extra_context)
-{}
+{
+  visited_runtimes_.insert(active_invocation_.invoked_address);
+}
 
 void
 CallFrame::commit_successful_child_call(CallFrame &frame)

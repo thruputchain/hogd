@@ -1,0 +1,17 @@
+[package]
+name = "test_deploy_revert_1"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rs_contract_sdk = {path = "../../rs_contract_sdk/", features = ["alloc"]}
+rs_macros = {path = "../../rs_macros"}
+test_deploy_revert_2 = {path = "../test_deploy_revert_2", features = ["interface"]}
+echo = {path = "../echo", features = ["interface"]}
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+std = ["rs_contract_sdk/std"]
+

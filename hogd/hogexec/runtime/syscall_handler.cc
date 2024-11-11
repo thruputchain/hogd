@@ -79,7 +79,7 @@ SystemCallHandler::root_invoke()
 
   start_call_frame(signed_tx_.tx.invocation, 0);
 
-  auto res = runtime->runtime.invoke(signed_tx_.tx.invocation.method,
+  auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
                                      signed_tx_.tx.invocation.gas_limit);
 
   finish_call_frame(res);
@@ -207,7 +207,7 @@ SystemCallHandler::get_invoke_gas_limit(GasAmount call_specified_gas_limit)
     initial_gas_limit =
         runtimes_
             .at(call_frame_stack_.back().active_invocation_.invoked_address)
-            ->runtime.get_available_gas();
+            ->runtime_.get_available_gas();
   }
 
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
@@ -236,7 +236,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
 
   start_call_frame(invocation, 0);
 
-  auto res = runtime->runtime.invoke(invocation.method, *gas_limit);
+  auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
 
   finish_call_frame(res);
 
@@ -305,7 +305,7 @@ SystemCallHandler::invoke_verify_auth(
 
   start_verify_auth_frame(invocation);
 
-  auto res = runtime->runtime.invoke(invocation.method, *gas_limit);
+  auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
 
   finish_call_frame(res);
 
@@ -411,7 +411,7 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
 
     for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
       // TODO(geoff) metadata allowing revert_safe declarations
-      runtimes_.at(addr)->revert_poisoned = true;
+      runtimes_.at(addr)->revert_poisoned_ = true;
     }
 
     call_frame_stack_.pop_back();
@@ -477,20 +477,31 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
   auto it = runtimes_.find(addr);
   if (it != runtimes_.end()) {
+
     auto *out = it->second.get();
 
-    if (out->revert_poisoned) {
+    if (out->local_deployment_) {
+      // the deployment of this contract was reverted
+      if (!lookup_locally_deployed_contract(addr)) {
+        return nullptr;
+      }
+    }
+
+    if (out->revert_poisoned_) {
       return nullptr;
     }
 
     return out;
   }
 
+  bool local_deployment = false;
+
   auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
 
   // not found committed deployment; checking local context
   if (!deployed_hash) {
     deployed_hash = lookup_locally_deployed_contract(addr);
+    local_deployment = true;
   }
 
   // not found in local context either
@@ -519,8 +530,9 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   }
 
   // successfully resolved runtime
-  runtimes_.emplace(addr, std::make_unique<RuntimeCacheEntry>(
-                              std::move(*new_runtime)));
+  runtimes_.emplace(addr,
+                    std::make_unique<RuntimeCacheEntry>(std::move(*new_runtime),
+                                                        local_deployment));
 
   return runtimes_.at(addr).get();
 }
@@ -829,10 +841,16 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
 }
 
 ContractAddress
-SystemCallHandler::get_deploy_address(SHA256Hash const &nonce,
+SystemCallHandler::get_deploy_address(const SHA256Hash *optional_caller_address,
+                                      SHA256Hash const &nonce,
                                       SHA256Hash const &contract_hash) const
 {
   assert(!call_frame_stack_.empty());
+
+  if (optional_caller_address) {
+    return static_get_deploy_address(*optional_caller_address, nonce,
+                                     contract_hash);
+  }
 
   return static_get_deploy_address(get_current_address(), nonce, contract_hash);
 }
@@ -857,13 +875,12 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     }
   }
 
-  auto deploy_addr = get_deploy_address(nonce, contract_hash);
+  auto deploy_addr = get_deploy_address(nullptr, nonce, contract_hash);
 
   // check that we have not already deployed to that address
   if (snapshot_cache_.try_get_deployed_contract_hash(deploy_addr)) {
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
-
 
   if (lookup_locally_deployed_contract(deploy_addr).has_value()) {
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};

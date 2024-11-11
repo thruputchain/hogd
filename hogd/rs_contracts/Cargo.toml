@@ -14,7 +14,9 @@ members = [
     "genesis_deployer",
     "erc20",
     "simple_wallet",
-    "test_standalone_wallet"
+    "test_standalone_wallet",
+    "test_deploy_revert_1",
+    "test_deploy_revert_2",
 ]
 
 [profile.dev]

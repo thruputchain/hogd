@@ -12,12 +12,14 @@ namespace hogd {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetDeployAddress_inner(SystemCallHandler &syscall_handler,
+                               const SHA256Hash *optional_input_caller_address,
                                const SHA256Hash &input_nonce,
                                const SHA256Hash &input_contract_hash,
                                ContractAddress &output_to_be_deployed)
 {
   output_to_be_deployed =
-      syscall_handler.get_deploy_address(input_nonce, input_contract_hash);
+      syscall_handler.get_deploy_address(optional_input_caller_address,
+                                         input_nonce, input_contract_hash);
 
   return {SyscallErrorCode::kNone, 0};
 }

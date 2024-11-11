@@ -11,7 +11,25 @@ pub fn GetDeployAddress(
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
 
-    uninit_GetDeployAddress(nonce, contract_hash, &mut out_addr)?;
+    uninit_GetDeployAddress(None, nonce, contract_hash, &mut out_addr)?;
+
+    Ok(unsafe { out_addr.assume_init() })
+}
+
+pub fn GetDeployAddressForOther(
+    other_address: &ContractAddress,
+    nonce: &SHA256Hash,
+    contract_hash: &SHA256Hash,
+) -> Result<ContractAddress, i32> {
+    let mut out_addr: MaybeUninit<ContractAddress> =
+        MaybeUninit::<ContractAddress>::uninit();
+
+    uninit_GetDeployAddress(
+        Some(other_address),
+        nonce,
+        contract_hash,
+        &mut out_addr,
+    )?;
 
     Ok(unsafe { out_addr.assume_init() })
 }

@@ -24,6 +24,8 @@ HostFnErrorCategory::message(int code) const
     return "kReturn";
   case kExit:
     return "kExit";
+  case kRevert:
+    return "kRevert";
   default:
     return "HostFnErrorCode Unknown";
   }

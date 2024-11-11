@@ -188,6 +188,13 @@ impl ParseableOwned for () {
     }
 }
 
+impl<T: ParseableOwned> ParseableOwned for Result<T, i32> {
+    fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
+        let (res, len) = T::parse_from(arg)?;
+        Ok((Ok(res), len))
+    }
+}
+
 impl<T1: ParseableOwned, T2: ParseableOwned> ParseableOwned for (T1, T2) {
     fn parse_from(arg: &[u8]) -> Result<(Self, usize), i32> {
         let mut offset: usize = 0;
