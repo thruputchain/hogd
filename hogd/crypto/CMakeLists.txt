@@ -30,3 +30,5 @@ target_link_libraries(
   benchmark::benchmark
 )
 add_dependencies(crypto_bench libsodium)
+
+set_property(TARGET crypto_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
