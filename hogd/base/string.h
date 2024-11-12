@@ -31,4 +31,7 @@ split(std::string_view text, char sep = ' ',
   return tokens;
 }
 
+std::string print_iec_bytes(size_t val, bool add_space = false);
+std::string print_si_bytes(size_t val, bool add_space = false);
+
 } // namespace hogd

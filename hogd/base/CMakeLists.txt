@@ -4,6 +4,7 @@ add_library(
   init.cc
   log.cc
   status.cc
+  string.cc
 )
 
 # create base module test binary
