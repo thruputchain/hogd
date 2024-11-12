@@ -58,15 +58,22 @@ endif()
 include(ProcessorCount)
 ProcessorCount(N)
 
+# default to 03 for external project build
+set(LIBSODIUM_C_FLAGS "-O3 ${CMAKE_C_FLAGS}")
+set(LIBSODIUM_CXX_FLAGS "-O3 ${CMAKE_CXX_FLAGS}")
+
 # Enable libsodium
+# --enable-opt sets -march=native and other compiler flags
+# that the libsodium authors deem important
 include(ExternalProject)
 ExternalProject_Add(libsodium
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
     CONFIGURE_COMMAND
       ${CMAKE_SOURCE_DIR}/external/libsodium/configure
       --prefix=${CMAKE_INSTALL_PREFIX}
+      --enable-opt
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-      CFLAGS=${CMAKE_C_FLAGS} CXXFLAGS=${CMAKE_CXX_FLAGS}
+      CFLAGS=${LIBSODIUM_C_FLAGS} CXXFLAGS=${LIBSODIUM_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
     INSTALL_COMMAND ""  # Skip installation step
 )
