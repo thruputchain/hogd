@@ -19,7 +19,6 @@ namespace hogd
 
   struct Transaction {
     Invocation invocation;
-    unsigned hyper nonce; // uint64_t
     Contract contracts_to_deploy<>;
   };
 
