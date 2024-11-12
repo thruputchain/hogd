@@ -16,43 +16,39 @@
 namespace hogd ::test ::erc20 {
 
 SignedTransaction
-make_deploy_wallet_transaction(SHA256Hash const &h_wallet,
+make_deploy_wallet_transaction(SHA256Hash const &nonce,
+                               SHA256Hash const &h_wallet,
                                std::shared_ptr<const Contract> const &c_wallet,
-                               uint64_t nonce, Ed25519PublicKey const &pk,
+                               Ed25519PublicKey const &pk,
                                ContractAddress const &erc20_addr)
 {
 
   SignedTransaction wallet_stx;
   wallet_stx.tx.invocation.invoked_address =
       test::RuntimeTestFramework::kDeployerAddress;
-  wallet_stx.tx.invocation.method.method_type(
-      MethodSpecifierType::kDefaultUint32);
-  wallet_stx.tx.invocation.method.method_id_uint32() = 1;
+  wallet_stx.tx.invocation.method = test::get_sdk_name("deploy_and_invoke");
   wallet_stx.tx.invocation.gas_limit = UINT64_MAX;
   wallet_stx.tx.invocation.calldata =
-      test::make_calldata(h_wallet,
+      test::make_calldata(nonce, h_wallet,
                           test::get_sdk_name("initialize").method_id_uint32(),
                           pk, erc20_addr);
-  wallet_stx.tx.nonce = nonce;
   wallet_stx.tx.contracts_to_deploy.push_back(*c_wallet);
 
   return wallet_stx;
 }
 
 SignedTransaction
-make_deploy_erc20_noinit(SHA256Hash const &h_erc20,
+make_deploy_erc20_noinit(SHA256Hash const &nonce, SHA256Hash const &h_erc20,
                          std::shared_ptr<const Contract> const &c_erc20)
 {
 
   SignedTransaction stx;
   stx.tx.invocation.invoked_address =
       test::RuntimeTestFramework::kDeployerAddress;
-  stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
-  stx.tx.invocation.method.method_id_uint32() = 0;
+  stx.tx.invocation.method = test::get_sdk_name("deploy");
   stx.tx.invocation.gas_limit = UINT64_MAX;
-  stx.tx.invocation.calldata = test::make_calldata(h_erc20);
+  stx.tx.invocation.calldata = test::make_calldata(nonce, h_erc20);
   stx.tx.contracts_to_deploy.push_back(*c_erc20);
-  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -67,7 +63,6 @@ make_initialize_erc20(ContractAddress const &owner,
   stx.tx.invocation.method = test::get_sdk_name("initialize");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(owner);
-  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -81,7 +76,6 @@ make_mint_transaction(ContractAddress const &manager_wallet,
   stx.tx.invocation.method = test::get_sdk_name("mint");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(to, amount);
-  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -94,7 +88,6 @@ make_check_balance_transaction(ContractAddress const &wallet, int64_t value)
   stx.tx.invocation.method = test::get_sdk_name("test_expect_balance");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(value);
-  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -108,7 +101,6 @@ make_transfer_transaction(ContractAddress const &sender,
   stx.tx.invocation.method = test::get_sdk_name("send_payment");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(to, amount);
-  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -124,7 +116,6 @@ make_unauthorized_transfer_transaction(ContractAddress const &erc20_address,
   stx.tx.invocation.method = test::get_sdk_name("transfer_from");
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = test::make_calldata(owner, to, amount);
-  stx.tx.nonce = 0;
 
   return stx;
 }
@@ -134,7 +125,9 @@ deploy_erc20_noinit(RuntimeTestFramework &runtime_framework)
 {
   auto [h_erc20, c_erc20] = test::load_built_rs_contract("erc20.wasm");
 
-  auto deploy_erc20_tx = make_deploy_erc20_noinit(h_erc20, c_erc20);
+  auto nonce = test::make_nonce(0);
+
+  auto deploy_erc20_tx = make_deploy_erc20_noinit(nonce, h_erc20, c_erc20);
 
   SystemCallHandler handler(deploy_erc20_tx,
                             *runtime_framework.snapshot_cache_);
@@ -151,20 +144,21 @@ deploy_erc20_noinit(RuntimeTestFramework &runtime_framework)
   handler.commit_transaction(runtime_framework.get_write_client());
 
   return SystemCallHandler::static_get_deploy_address(
-      test::RuntimeTestFramework::kDeployerAddress,
-      handler.get_source_tx_hash(), h_erc20);
+      test::RuntimeTestFramework::kDeployerAddress, nonce, h_erc20);
 }
 
 std::optional<ContractAddress>
 deploy_and_initialize_wallet(RuntimeTestFramework &runtime_framework,
                              ContractAddress const &erc20_address,
-                             uint64_t nonce)
+                             uint64_t nonce_u64)
 {
   auto [h_wallet, c_wallet] =
       test::load_built_rs_contract("simple_wallet.wasm");
 
+  SHA256Hash nonce = test::make_nonce(nonce_u64);
+
   auto deploy_manager_tx =
-      make_deploy_wallet_transaction(h_wallet, c_wallet, nonce,
+      make_deploy_wallet_transaction(nonce, h_wallet, c_wallet,
                                      Ed25519PublicKey{}, erc20_address);
 
   SystemCallHandler handler(deploy_manager_tx,
@@ -181,8 +175,7 @@ deploy_and_initialize_wallet(RuntimeTestFramework &runtime_framework,
   handler.commit_transaction(runtime_framework.get_write_client());
 
   return SystemCallHandler::static_get_deploy_address(
-      test::RuntimeTestFramework::kDeployerAddress,
-      handler.get_source_tx_hash(), h_wallet);
+      test::RuntimeTestFramework::kDeployerAddress, nonce, h_wallet);
 }
 
 // Initialize the erc20 (set the owner to be the manager wallet)

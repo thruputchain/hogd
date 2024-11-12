@@ -93,8 +93,8 @@ public:
                             SHA256Hash const &nonce,
                             SHA256Hash const &contract_hash);
 
-  ContractAddress get_deploy_address(
-    const SHA256Hash * optional_caller_address, SHA256Hash const &nonce,
+  ContractAddress get_deploy_address(const SHA256Hash *optional_caller_address,
+                                     SHA256Hash const &nonce,
                                      SHA256Hash const &contract_hash) const;
 
   SyscallStatus<ContractAddress>
@@ -112,8 +112,8 @@ private:
     const bool local_deployment_;
     bool revert_poisoned_ = false;
 
-    RuntimeCacheEntry(WasmiRuntime &&runtime, bool local_deployment) : runtime_(std::move(runtime)),
-    local_deployment_(local_deployment)
+    RuntimeCacheEntry(WasmiRuntime &&runtime, bool local_deployment)
+      : runtime_(std::move(runtime)), local_deployment_(local_deployment)
     {}
 
     RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
@@ -168,7 +168,6 @@ private:
 
   void commit_last_call_frame_success(CallFrame &frame);
   void commit_new_contract_deployments(write_client_t &client) const;
-
 };
 
 } // namespace hogd

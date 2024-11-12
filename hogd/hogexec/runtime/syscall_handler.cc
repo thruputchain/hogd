@@ -80,7 +80,7 @@ SystemCallHandler::root_invoke()
   start_call_frame(signed_tx_.tx.invocation, 0);
 
   auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
-                                     signed_tx_.tx.invocation.gas_limit);
+                                      signed_tx_.tx.invocation.gas_limit);
 
   finish_call_frame(res);
 
@@ -784,7 +784,7 @@ SystemCallHandler::lookup_locally_deployed_contract(
 
   auto it = new_committed_deployments_.find(addr);
   if (it != new_committed_deployments_.end()) {
-    return it -> second;
+    return it->second;
   }
 
   return std::nullopt;

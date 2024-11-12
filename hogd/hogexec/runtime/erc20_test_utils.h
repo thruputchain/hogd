@@ -10,13 +10,12 @@
 
 namespace hogd ::test ::erc20 {
 
+SignedTransaction make_deploy_wallet_transaction(
+    SHA256Hash const &nonce, SHA256Hash const &h_wallet,
+    std::shared_ptr<const Contract> const &c_wallet, Ed25519PublicKey const &pk,
+    ContractAddress const &erc20_addr);
 SignedTransaction
-make_deploy_wallet_transaction(SHA256Hash const &h_wallet,
-                               std::shared_ptr<const Contract> const &c_wallet,
-                               uint64_t nonce, Ed25519PublicKey const &pk,
-                               ContractAddress const &erc20_addr);
-SignedTransaction
-make_deploy_erc20_noinit(SHA256Hash const &h_erc20,
+make_deploy_erc20_noinit(SHA256Hash const &nonce, SHA256Hash const &h_erc20,
                          std::shared_ptr<const Contract> const &c_erc20);
 
 SignedTransaction make_initialize_erc20(ContractAddress const &owner,

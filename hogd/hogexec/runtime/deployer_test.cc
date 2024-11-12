@@ -31,22 +31,20 @@ TEST_F(DeployerTest, DeployAndEcho)
   ContractAddress deployed_address;
 
   {
+    SHA256Hash nonce = test::make_nonce(0);
     SignedTransaction stx;
     stx.tx.invocation.invoked_address = kDeployerAddress;
-    stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
-    stx.tx.invocation.method.method_id_uint32() = 1;
+    stx.tx.invocation.method = test::get_sdk_name("deploy_and_invoke");
     stx.tx.invocation.gas_limit = UINT64_MAX;
     stx.tx.invocation.calldata =
-        test::make_calldata(h, MethodID{0}, uint32_t{0}, uint32_t{8},
+        test::make_calldata(nonce, h, MethodID{0}, uint32_t{0}, uint32_t{8},
                             std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
     stx.tx.contracts_to_deploy.push_back(*c);
-    stx.tx.nonce = 0;
 
     SystemCallHandler handler(stx, *snapshot_cache_);
-    auto stx_hash = handler.get_source_tx_hash();
 
     deployed_address =
-        SystemCallHandler::static_get_deploy_address(kDeployerAddress, stx_hash,
+        SystemCallHandler::static_get_deploy_address(kDeployerAddress, nonce,
                                                      h);
 
     ASSERT_TRUE(!!handler.root_invoke().result);
@@ -68,7 +66,6 @@ TEST_F(DeployerTest, DeployAndEcho)
   stx.tx.invocation.calldata =
       test::make_calldata(uint32_t{0}, uint32_t{4},
                           std::vector<uint8_t>{0, 1, 2, 3, 4, 5, 6, 7});
-  stx.tx.nonce = 0;
 
   SystemCallHandler handler(stx, *snapshot_cache_);
 

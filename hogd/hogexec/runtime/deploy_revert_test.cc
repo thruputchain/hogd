@@ -47,7 +47,6 @@ TEST_F(DeployRevertTest, AssertRevertedDeploysRevert)
       test::make_calldata(h_echo, h_test_deploy_revert_2);
   stx.tx.contracts_to_deploy.push_back(*c_echo);
   stx.tx.contracts_to_deploy.push_back(*c_test_deploy_revert_2);
-  stx.tx.nonce = 0;
 
   SystemCallHandler handler(stx, *snapshot_cache_);
 

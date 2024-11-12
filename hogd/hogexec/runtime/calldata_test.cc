@@ -38,7 +38,6 @@ TEST_F(CalldataTest, NoCalldata)
   stx.tx.invocation.method.method_type(MethodSpecifierType::kDefaultUint32);
   stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
-  stx.tx.nonce = 0;
 
   SystemCallHandler handler(stx, *snapshot_cache_);
 
@@ -63,7 +62,6 @@ TEST_F(CalldataTest, SomeCalldata)
   stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = {0, 1, 2, 3, 4, 5};
-  stx.tx.nonce = 0;
 
   SystemCallHandler handler(stx, *snapshot_cache_);
 
@@ -87,7 +85,6 @@ TEST_F(CalldataTest, TooMuchCalldata)
   stx.tx.invocation.method.method_id_uint32() = 0;
   stx.tx.invocation.gas_limit = UINT64_MAX;
   stx.tx.invocation.calldata = x23::Vec<uint8_t>(kMaxLogMessageLen + 1, 12);
-  stx.tx.nonce = 0;
 
   SystemCallHandler handler(stx, *snapshot_cache_);
 

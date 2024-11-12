@@ -3,7 +3,9 @@
 use rs_contract_sdk as sdk;
 use sdk::rt::trap;
 
-extern crate alloc;
+use rs_macros::{public_interface, public_method};
+
+public_interface! {}
 
 fn assert_root_tx() {
     match sdk::GetMsgSender() {
@@ -19,9 +21,35 @@ fn assert_root_tx() {
     }
 }
 
+#[public_method(static_calldata_length = 64, static_return_length = 0)]
+pub fn deploy(nonce: &sdk::SHA256Hash, contract_hash: &sdk::SHA256Hash) {
+    sdk::DeployContract(nonce, contract_hash).unwrap();
+}
+
+#[public_method]
+pub fn deploy_and_invoke(
+    nonce: &sdk::SHA256Hash,
+    contract_hash: &sdk::SHA256Hash,
+    method: sdk::MethodID,
+    calldata: &[u8],
+) {
+    let deployed_addr = sdk::DeployContract(nonce, contract_hash).unwrap();
+
+    let mut return_len: sdk::RuntimeMemoryLength = 0;
+
+    sdk::syscall_bindings::raw_Invoke(
+        &deployed_addr,
+        method,
+        u64::MAX,
+        calldata,
+        &mut return_len,
+    )
+    .unwrap();
+}
+
 #[cfg_attr(target_family = "wasm", export_name = "0")]
 #[no_mangle]
-pub extern "C" fn deploy() -> i32 {
+pub extern "C" fn deploy_() -> i32 {
     assert_root_tx();
     let nonce = sdk::GetSourceTransactionHash().unwrap();
 
@@ -38,7 +66,7 @@ pub extern "C" fn deploy() -> i32 {
 
 #[cfg_attr(target_family = "wasm", export_name = "1")]
 #[no_mangle]
-pub extern "C" fn deploy_and_invoke() -> i32 {
+pub extern "C" fn deploy_and_invoke_() -> i32 {
     assert_root_tx();
 
     let nonce = sdk::GetSourceTransactionHash().unwrap();

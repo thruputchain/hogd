@@ -125,4 +125,10 @@ MethodSpecifier static get_sdk_name(std::string const &v)
   return specifier;
 }
 
+[[maybe_unused]]
+SHA256Hash static make_nonce(uint64_t id)
+{
+  return sha256(std::as_bytes(std::span(reinterpret_cast<uint8_t *>(&id), 8)));
+}
+
 } // namespace hogd::test
