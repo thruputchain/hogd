@@ -34,7 +34,6 @@ pub enum TrampolineErrorEnum {
     Unrecoverable = 2,
     Return = 3,
     Exit { code: i32 } = 4,
-    Revert = 5,
 }
 
 const TrampolineErrorNONE: u8 = 0;
@@ -43,7 +42,6 @@ const TrampolineErrorOUTOFGAS: u8 = 1;
 const TrampolineErrorUNRECOVERABLE: u8 = 2;
 const TrampolineErrorRETURN: u8 = 3;
 const TrampolineErrorEXIT: u8 = 4;
-const TrampolineErrorREVERT: u8 = 5;
 
 #[repr(C)]
 pub struct TrampolineResult {
@@ -155,9 +153,6 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
             error: TrampolineErrorEnum::Exit {
                 code: result.result,
             },
-        })),
-        x if x == TrampolineErrorREVERT => Err(Error::host(TrampolineError {
-            error: TrampolineErrorEnum::Revert,
         })),
         _ => Err(Error::host(TrampolineError {
             error: TrampolineErrorEnum::Unrecoverable,

@@ -16,7 +16,6 @@ constexpr static uint8_t kTrampolineErrorOUTOFGAS = 1;
 constexpr static uint8_t kTrampolineErrorUNRECOVERABLE = 2;
 constexpr static uint8_t kTrampolineErrorRETURN = 3;
 constexpr static uint8_t kTrampolineErrorEXIT = 4;
-constexpr static uint8_t kTrampolineErrorREVERT = 5;
 
 namespace {
 
@@ -50,8 +49,6 @@ handle_result(HostFnResult const &res)
     return error(kTrampolineErrorRETURN);
   case HostFnErrorCode::kExit:
     return host_exit(res.second);
-  case HostFnErrorCode::kRevert:
-    return error(kTrampolineErrorREVERT);
   default:
     return error(kTrampolineErrorUNRECOVERABLE);
   }

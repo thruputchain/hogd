@@ -72,11 +72,6 @@ enum class HostFnErrorCode : uint8_t {
   // On a root smart contract invocation, a nonzero code is converted to a
   // InvokeErrorCode::kDeterministic.
   kExit = 4,
-  // Return from a WebAssembly invocation to the caller, reverting the current
-  // call frame.
-  //
-  // Result: Runtime immediately returns {InvokeErrorCode::kDeterministic}.
-  kRevert = 5,
 };
 
 class HostFnErrorCategory : public std::error_category {

@@ -376,9 +376,6 @@ errors:
   - name: "StringTooLong"
     number: 8
     doc: "Input byte span is too long"
-  - name: "DeterministicWasm"
-    number: 9
-    doc: "Deterministic error within called wasm (i.e. trap)"
   - name: "NoReturnBufferAvailable"
     number: 10
     doc: "No return buffer is available.  Either the most recent subcall failed, or there have been no subcalls within this call frame."
@@ -410,3 +407,7 @@ errors:
     number: 19
     doc: "Invalid attempt to start new call frame.  For example, cannot call verify_auth within verify_auth."
 
+    # those that cause call frames to revert
+  - name: "DeterministicWasm"
+    number: -1
+    doc: "Deterministic error within called wasm (i.e. trap)"

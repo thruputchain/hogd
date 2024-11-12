@@ -25,7 +25,7 @@ fn deploy_invoke_then_revert(
     let returned_buf: Box<[u8]> = echo.echo_calldata_fancy(0, 4, &echo_data)?;
 
     if returned_buf.as_ref() != echo_data {
-        return Err(-1);
+        return Err(100);
     }
 
     sdk::rt::trap();

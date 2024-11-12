@@ -398,10 +398,10 @@ def gen_syscall_x(spec_full):
 
   error_enumdecls = ""
 
-  for i in range(0, len(errors)):
-    name = errors[i]["name"]
-    docstring=errors[i]["doc"]
-    error_enumdecls += f"\n    // {docstring}\n    k{name} = {i},\n"
+  for num in errors.keys():
+    name = errors[num]["name"]
+    docstring=errors[num]["doc"]
+    error_enumdecls += f"\n    // {docstring}\n    k{name} = {num},\n"
 
 
   return f"""

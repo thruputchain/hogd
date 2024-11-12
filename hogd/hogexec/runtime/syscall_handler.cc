@@ -190,7 +190,6 @@ convert_invoke_result_to_host_fn_result(InvokeResult const &result)
     }
     // unreachable
   }
-
   // This converts the user-defined return value to a syscall error code.
   // We could do a check here (i.e. reserve < 2^16 for system, everything else
   // for users) but this doesn't particularly matter for correctness.
@@ -407,7 +406,7 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
   }
 
   // Revert the function
-  if (!result.result.has_value()) {
+  if (!result.result.has_value() || (*result.result < 0)) {
 
     for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
       // TODO(geoff) metadata allowing revert_safe declarations
@@ -784,10 +783,10 @@ SystemCallHandler::lookup_locally_deployed_contract(
   }
 
   auto it = new_committed_deployments_.find(addr);
-  if (it != frame.new_committed_deployments_.end()) {
+  if (it != new_committed_deployments_.end()) {
     return it -> second;
   }
-  
+
   return std::nullopt;
 }
 

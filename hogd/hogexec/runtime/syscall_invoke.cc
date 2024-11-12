@@ -136,13 +136,6 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnResult, GasAmount>
 syscall_Exit_inner(const int32_t input_code)
 {
-  // TODO(geoff): a more straighforward
-  //  story on whether the exit code is reserved by the runtime
-  if (input_code ==
-      static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)) {
-    return {{HostFnErrorCode::kRevert, 0}, 0};
-  }
-
   return {{HostFnErrorCode::kExit, input_code}, 0};
 }
 
