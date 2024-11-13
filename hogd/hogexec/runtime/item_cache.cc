@@ -47,26 +47,6 @@ make_nnint64_set_add(int64_t set, int64_t add)
   return out;
 }
 
-StorageDelta
-make_replay_inserts(std::set<uint64_t> const &set)
-{
-  StorageDelta out;
-  out.type(StorageDeltaType::kReplayCacheInsert);
-  for (auto elt : set) {
-    out.replay_nonces().push_back(elt);
-  }
-  return out;
-}
-
-StorageDelta
-make_replay_clear(uint64_t threshold)
-{
-  StorageDelta out;
-  out.type(StorageDeltaType::kReplayCacheClear);
-  out.replay_clear_threshold() = threshold;
-  return out;
-}
-
 } // namespace
 
 void
@@ -148,7 +128,7 @@ ItemCache::set_bytestring(std::span<const std::byte> input_bytestring)
   }
 
   if (input_bytestring.size() > kBytestringMaxLen) {
-    return SyscallError{SyscallErrorCode::kStringTooLong};
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
 
   std::span<const uint8_t> reinterpreted_input = {
@@ -299,21 +279,6 @@ x23::Vec<StorageDelta>
 ItemCache::NNInt64CacheType::get_deltas() const
 {
   return {make_nnint64_set_add(nnint64_set_arg_, nnint64_add_sum_)};
-}
-
-x23::Vec<StorageDelta>
-ItemCache::ReplayCacheCacheType::get_deltas() const
-{
-  x23::Vec<StorageDelta> out;
-  if (new_max_nonce_clear_threshold_) {
-    out.push_back(make_replay_clear(*new_max_nonce_clear_threshold_));
-  }
-
-  if (!new_nonces_.empty()) {
-    out.push_back(make_replay_inserts(new_nonces_));
-  }
-
-  return out;
 }
 
 void

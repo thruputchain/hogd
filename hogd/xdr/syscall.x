@@ -16,6 +16,15 @@
 
     // Unknown syscall number
     kUnknownSyscall = 2,
+
+    // Invalid syscall parameters
+    kInvalidSyscallInput = 3,
+
+    // Mismatch between syscall expected object type and actual object type
+    kStorageObjectTypeMismatch = 4,
+
+    // Accessing nonexistent object
+    kStorageKeyNExist = 5,
   };
 
 } // namespace hogd

@@ -2,6 +2,7 @@ add_library(
   runtime
   wasmi_runtime.cc
   status.cc
+  item_cache.cc
 )
 add_executable(
   runtime_test
@@ -11,6 +12,7 @@ add_executable(
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
+  item_cache_test.cc
 )
 target_link_libraries(
   runtime
