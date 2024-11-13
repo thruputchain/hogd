@@ -34,8 +34,6 @@ public:
 
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
 
-  // TODO(geoff) set based on metadata
-  const bool unwind_catch_boundary_ = false;
   const Invocation active_invocation_;
 
   std::map<ContractAddress, SHA256Hash> new_contract_deployments_;
