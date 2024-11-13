@@ -51,7 +51,7 @@
     kContractAlreadyDeployed = 8,
 
     // Deterministic error within a wasm invocation
-    kDeterministicWasm = 9,
+    kDeterministicWasm = -1,
   };
 
 } // namespace hogd

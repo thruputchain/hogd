@@ -34,7 +34,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_Log_inner(SystemCallHandler &syscall_handler,
                   std::span<const std::byte> input_buffer);
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnResult, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const ContractAddress &input_address,
                      MethodID input_method, GasAmount input_gas_limit,

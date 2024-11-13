@@ -83,12 +83,25 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
               reinterpret_cast<const uint8_t *>(input_calldata.data()),
               input_calldata.size());
 
-  auto [invoke_res, gas_consumed] = syscall_handler.invoke(
+  auto [invoke_res, gas_amount] = syscall_handler.invoke(
       Invocation(input_address, input_method, input_gas_limit, calldata));
+
+  if (syscall_handler.current_runtime_is_revert_poisoned()) {
+    return {{HostFnErrorCode::kExit,
+             static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)},
+            0};
+  }
 
   output_return_len = syscall_handler.get_defaultzero_return_len();
 
-  return invoke_res;
+  if (invoke_res) {
+    return {{HostFnErrorCode::kNoneOrRecoverable,
+             static_cast<int32_t>(*invoke_res)},
+            gas_amount};
+  }
+  else {
+    return {{invoke_res.error().code(), 0}, gas_amount};
+  }
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>

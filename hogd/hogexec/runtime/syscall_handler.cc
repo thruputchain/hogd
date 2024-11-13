@@ -190,10 +190,16 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
   // Error handling: Each contract's return value is effectively a Result<Value,
   // i32>, or a trap() (InvokeError::kDeterministic).
   //  A result return (through either the return syscall, the
-  // method returning, or an Exit syscall) does not revert the function. Only a
-  // deterministic trap() (such as out of gas, or divide by 0) cause a contract
+  // method returning, or an Exit syscall) with a nonnegative error code
+  // does not revert the function. Only a
+  // deterministic trap() (such as out of gas, or divide by 0),
+  // or a negative error code, will cause a contract
   // to be reverted. We do not need a separate Revert() syscall -- a contract
-  // can just call trap() or wasm `unreachable`.
+  // can just call trap() or wasm `unreachable`, or Exit(-1).
+  //
+  // Rationale: The default behavior for a contract can be to propagate
+  // unhandled error codes back to the caller.  This makes the revert behavior
+  // (revert or not) also propagate in a sensible default way.
   //
   // If a contract has the REVERT_SAFE flag set, then it can be called again
   // after it has been reverted. A contract might not be REVERT_SAFE because
@@ -205,7 +211,7 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
   // The wasm stack is reset automatically).
 
   // Revert the function
-  if (!result.result.has_value()) {
+  if (!result.result.has_value() || (*result.result < 0)) {
 
     for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
       // TODO(geoff) metadata allowing revert_safe declarations
