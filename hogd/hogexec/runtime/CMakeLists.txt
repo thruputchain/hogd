@@ -74,6 +74,7 @@ add_executable(
   erc20_test_utils.cc
   auth_match_test.cc
   deploy_revert_test.cc
+  reentrant_revert_test.cc
 )
 
 target_link_libraries(

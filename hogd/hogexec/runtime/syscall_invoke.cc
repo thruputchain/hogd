@@ -29,6 +29,15 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+syscall_GetSelfAddress_inner(SystemCallHandler &syscall_handler,
+                             ContractAddress &output_self_address)
+{
+  output_self_address = syscall_handler.get_current_address();
+
+  return {SyscallErrorCode::kNone, 0};
+}
+
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetSourceTransactionHash_inner(SystemCallHandler &syscall_handler,
                                        SHA256Hash &output_source_tx_hash)
@@ -69,7 +78,7 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnResult, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const ContractAddress &input_address,
                      const MethodID input_method,
@@ -86,12 +95,25 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   MethodSpecifier specifier(MethodSpecifierType::kDefaultUint32);
   specifier.method_id_uint32() = input_method;
 
-  auto invoke_res = syscall_handler.invoke(
+  auto [invoke_res, gas_amount] = syscall_handler.invoke(
       Invocation(input_address, specifier, input_gas_limit, calldata));
+
+  if (syscall_handler.current_runtime_is_revert_poisoned()) {
+    return {{HostFnErrorCode::kExit,
+             static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)},
+            0};
+  }
 
   output_return_len = syscall_handler.get_defaultzero_return_len();
 
-  return invoke_res;
+  if (invoke_res) {
+    return {{HostFnErrorCode::kNoneOrRecoverable,
+             static_cast<int32_t>(*invoke_res)},
+            gas_amount};
+  }
+  else {
+    return {{invoke_res.error().code(), 0}, gas_amount};
+  }
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>

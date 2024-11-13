@@ -32,4 +32,3 @@ pub fn deploy_and_invoke(
     )
     .unwrap();
 }
-

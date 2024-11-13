@@ -23,6 +23,8 @@ namespace hogd {
 // function returning HostFnErrorCode::kExit, or 0, if invocation ends because a
 // host function returns HostFnErrorCode::kReturn.
 enum class InvokeErrorCode : uint8_t {
+  // A call frame can only succeed if this code is returned.
+  // All others revert the call frame.
   kNone = 0,
   // An unspecified deterministic error.
   kDeterministic = 1,

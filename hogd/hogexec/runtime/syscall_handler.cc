@@ -434,6 +434,14 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
   }
 }
 
+bool
+SystemCallHandler::current_runtime_is_revert_poisoned() const
+{
+  return runtimes_
+      .at(get_active_call_frame().active_invocation_.invoked_address)
+      ->revert_poisoned_;
+}
+
 void
 SystemCallHandler::commit_last_call_frame_success(CallFrame &frame)
 {

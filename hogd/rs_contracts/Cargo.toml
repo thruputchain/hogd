@@ -17,6 +17,7 @@ members = [
     "test_standalone_wallet",
     "test_deploy_revert_1",
     "test_deploy_revert_2",
+    "test_reentrant_revert",
 ]
 
 [profile.dev]

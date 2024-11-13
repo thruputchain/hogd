@@ -22,6 +22,7 @@ rs_contracts : \
 	erc20.wasm \
 	simple_wallet.wasm \
 	test_deploy_revert_1.wasm \
-	test_deploy_revert_2.wasm
+	test_deploy_revert_2.wasm \
+	test_reentrant_revert.wasm
 
 # rustup target install wasm32-unknown-unknown

@@ -106,6 +106,8 @@ public:
   StorageRPCError try_reserve_transaction(write_client_t &client) const;
   void commit_transaction(write_client_t &client) const;
 
+  bool current_runtime_is_revert_poisoned() const;
+
 private:
   struct RuntimeCacheEntry {
     WasmiRuntime runtime_;

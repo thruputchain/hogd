@@ -122,6 +122,7 @@ syscalls:
         fixed_size: yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
+    syscall_return_type: "HostFnResult"
     number: 10
   - name: "NonnegativeInt64Get"
     needs_context: yes
@@ -343,6 +344,14 @@ syscalls:
         fixed_size: yes
         typename: "RuntimeMemoryLength"
     number: 28
+  - name: "GetSelfAddress"
+    needs_context: yes
+    inputs:
+    outputs:
+      - name: "self_address"
+        fixed_size: Yes
+        typename: "ContractAddress"
+    number: 29
 
 
 errors:
