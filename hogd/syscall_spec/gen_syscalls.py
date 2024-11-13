@@ -365,7 +365,12 @@ def gen_syscall_inner_h(spec):
   for syscall in spec:
     inner_decls += gen_inner(syscall)
 
-  return f"""#pragma once
+  return f"""// -*-C++-*-
+
+// *** Generated Code  ***
+// *** Do not check in ***
+
+#pragma once
 
 #include <utility>
 
@@ -410,8 +415,8 @@ def gen_syscall_x(spec_full):
 
 
   return f"""
-% *** Generated Code  ***
-% *** Do not check in ***
+%// *** Generated Code  ***
+%// *** Do not check in ***
 
 %#include "types.hh"
 
