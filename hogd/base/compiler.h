@@ -12,11 +12,20 @@ namespace hogd {
 #define CSTR_T(x...) #x
 #define CSTR(x...) CSTR_T(x)
 
+// HAS_ATTRIBUTE - returns true if an attribute is supported
+#ifdef __has_attribute
+#define HAS_ATTRIBUTE(x) __has_attribute(x)
+#else
+#define HAS_ATTRIBUTE(x) 0
+#endif
+
 // variable attributes
 #define ATTRIBUTE_PACKED __attribute__((packed))
 
 // function attributes
 #define ATTRIBUTE_NOINLINE __attribute__((noinline))
+#define ATTRIBUTE_ALWAYS_INLINE __attribute__((always_inline))
+#define ATTRIBUTE_COLD __attribute__((cold))
 
 //
 // Prefetching support
@@ -129,21 +138,6 @@ write_once(T &p, const T &val)
   static_cast<T volatile &>(p) = val;
 }
 
-// cpu_relax hints to the CPU that it is in a spin loop.
-//
-// Example:
-// while (condition)
-//   cpu_relax();
-inline void
-cpu_relax()
-{
-#if HAVE_BUILTIN_IA32_PAUSE
-  __builtin_ia32_pause();
-#endif
-  // TODO(amb): figure out what is appropriate on arm and figure out if there
-  // are cases where we want UMWAIT/TPAUSE on x86.
-}
-
 template<std::integral T, std::integral S, std::integral R>
 inline bool
 integer_add_overflow(T a, S b, R *out)
@@ -162,6 +156,21 @@ integer_add_overflow_p(T a, S b)
   R result;
   return __builtin_add_overflow(a, b, &result);
 #endif
+}
+
+// cpu_relax hints to the CPU that it is in a spin loop.
+//
+// Example:
+// while (condition)
+//   cpu_relax();
+inline void
+cpu_relax()
+{
+#if HAVE_BUILTIN_IA32_PAUSE
+  __builtin_ia32_pause();
+#endif
+  // TODO(amb): figure out what is appropriate on arm and figure out if there
+  // are cases where we want UMWAIT/TPAUSE on x86.
 }
 
 } // namespace hogd
