@@ -23,6 +23,8 @@ namespace hogd {
 // function returning HostFnErrorCode::kExit, or 0, if invocation ends because a
 // host function returns HostFnErrorCode::kReturn.
 enum class InvokeErrorCode : uint8_t {
+  // A call frame can only succeed if this code is returned.
+  // All others revert the call frame.
   kNone = 0,
   // An unspecified deterministic error.
   kDeterministic = 1,
@@ -112,8 +114,6 @@ operator==(const InvokeErrorCode &lhs, const std::error_code &rhs)
 
 template<typename T> using InvokeStatus = std::expected<T, InvokeError>;
 
-using HostFnResult = std::pair<HostFnErrorCode, int32_t>;
-
 class SyscallErrorCategory : public std::error_category {
 public:
   const char *name() const noexcept override { return "syscall"; }
@@ -132,5 +132,7 @@ operator==(const SyscallErrorCode &lhs, const std::error_code &rhs)
 }
 
 template<typename T> using SyscallStatus = std::expected<T, SyscallError>;
+
+using HostFnResult = std::pair<HostFnErrorCode, int32_t>;
 
 } // namespace hogd

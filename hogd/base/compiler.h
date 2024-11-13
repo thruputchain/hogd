@@ -12,11 +12,20 @@ namespace hogd {
 #define CSTR_T(x...) #x
 #define CSTR(x...) CSTR_T(x)
 
+// HAS_ATTRIBUTE - returns true if an attribute is supported
+#ifdef __has_attribute
+#define HAS_ATTRIBUTE(x) __has_attribute(x)
+#else
+#define HAS_ATTRIBUTE(x) 0
+#endif
+
 // variable attributes
 #define ATTRIBUTE_PACKED __attribute__((packed))
 
 // function attributes
 #define ATTRIBUTE_NOINLINE __attribute__((noinline))
+#define ATTRIBUTE_ALWAYS_INLINE __attribute__((always_inline))
+#define ATTRIBUTE_COLD __attribute__((cold))
 
 //
 // Prefetching support

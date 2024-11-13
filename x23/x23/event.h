@@ -159,7 +159,8 @@ private:
     docb(fdp, true);
   }
 
-#else  // !HAVE_EPOLL
+#else // !HAVE_EPOLL
+
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
                                                 POLLOUT | POLLERR};
   struct FdState {

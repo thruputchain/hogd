@@ -114,23 +114,18 @@ template<typename Tag>
 bool
 should_log_every_n_sec(float n)
 {
-  // check if timeout has expired
   int64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now().time_since_epoch())
                     .count();
   static std::atomic<int64_t> next_ts{0};
   int64_t next = next_ts.load(std::memory_order_relaxed);
-  if (now < next)
-    return false;
-
-  // timeout has expired; update next_ts
-  while (true) {
-    if (next_ts.compare_exchange_weak(next, now + static_cast<int64_t>(n * 1e6),
-                                      std::memory_order_relaxed,
-                                      std::memory_order_relaxed)) {
-      break;
-    }
-  }
+  do {
+    if (now < next)
+      return false;
+  } while (!next_ts.compare_exchange_weak(next,
+                                          now + static_cast<int64_t>(n * 1e6),
+                                          std::memory_order_relaxed,
+                                          std::memory_order_relaxed));
   return true;
 }
 

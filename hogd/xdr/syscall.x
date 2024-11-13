@@ -1,9 +1,10 @@
+// *** Generated Code: ***
+// *** Do not check in ***
 
 % #include "types.hh"
 
     namespace hogd
 {
-
   enum SyscallNo {
     kSHA256 = 0,
     kGetMsgSender = 1,
@@ -26,8 +27,8 @@
     // Out of bounds pointer to wasm memory passed to syscall
     kFault = 1,
 
-    // Unknown syscall number
-    kUnknownSyscall = 2,
+    // System call number is not supported
+    kNoSyscall = 2,
 
     // Cannot call get_msg_sender on root invocation
     kIsRootTransaction = 3,

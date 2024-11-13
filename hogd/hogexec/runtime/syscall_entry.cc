@@ -445,7 +445,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   if (arg0 >= syscall_table.size()) {
     // invalid syscall
     return {{HostFnErrorCode::kNoneOrRecoverable,
-             static_cast<int32_t>(SyscallErrorCode::kUnknownSyscall)},
+             static_cast<int32_t>(SyscallErrorCode::kNoSyscall)},
             kUnknownSyscallCost};
   }
 
