@@ -175,10 +175,6 @@ SystemCallHandler::invoke(Invocation const &invocation)
 
   finish_call_frame(res);
 
-  if (current_runtime_is_revert_poisoned()) {
-    return {SyscallErrorCode::kDeterministicWasm, res.gas_consumed};
-  }
-
   return convert_invoke_result_to_host_fn_result(res);
 }
 

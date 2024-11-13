@@ -69,7 +69,7 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+std::pair<HostFnResult, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const ContractAddress &input_address,
                      const MethodID input_method,
@@ -83,7 +83,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
               reinterpret_cast<const uint8_t *>(input_calldata.data()),
               input_calldata.size());
 
-  auto invoke_res = syscall_handler.invoke(
+  auto [invoke_res, gas_consumed] = syscall_handler.invoke(
       Invocation(input_address, input_method, input_gas_limit, calldata));
 
   output_return_len = syscall_handler.get_defaultzero_return_len();
