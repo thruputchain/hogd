@@ -1,0 +1,27 @@
+syscalls:
+  - name: "SHA256"
+    needs_context: no
+    inputs:
+      - name: "buffer"
+        span_argument: yes
+    outputs:
+      - name: "hash"
+        fixed_size: Yes
+        typename: "SHA256Hash"
+    number: 0
+
+errors:
+  - name: "None"
+    number: 0
+    doc: "No error"
+  - name: "Fault"
+    number: 1
+    doc: "Out of bounds pointer to wasm memory passed to syscall"
+  - name: "NoSyscall"
+    number: 2
+    doc: "System call for supplied number is not supported"
+
+    # those that cause call frames to revert
+  - name: "DeterministicWasm"
+    number: -1
+    doc: "Deterministic error within called wasm (i.e. trap)"
