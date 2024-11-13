@@ -8,7 +8,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "storage_object.hh"
-#include "types.hh"
 
 namespace hogd {
 
