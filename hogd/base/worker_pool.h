@@ -13,6 +13,7 @@
 #include <thread>
 #include <type_traits>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/unique_function.h"
 
 namespace hogd {
