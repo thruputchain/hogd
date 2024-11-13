@@ -4,6 +4,8 @@ add_library(
   crypto.cc
 )
 
+target_link_libraries(crypto protocol)
+
 # create crypto module test binary
 add_executable(
   crypto_test

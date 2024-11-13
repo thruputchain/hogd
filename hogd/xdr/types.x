@@ -11,22 +11,22 @@ enum CryptographicScheme {
   Ed25519 = 0,
 };
 
-union Signature switch (CryptographicScheme type)
+union Signature switch (CryptographicScheme scheme)
 {
 case Ed25519:
-  Ed25519Signature ed25519_signature;
+  Ed25519Signature ed25519;
 };
 
-union PublicKey switch (CryptographicScheme type)
+union PublicKey switch (CryptographicScheme scheme)
 {
 case Ed25519:
-  Ed25519PublicKey ed25519_publickey;
+  Ed25519PublicKey ed25519;
 };
 
-union SecretKey switch (CryptographicScheme type)
+union SecretKey switch (CryptographicScheme scheme)
 {
 case Ed25519:
-  Ed25519SecretKey ed25519_secretkey;
+  Ed25519SecretKey ed25519;
 };
 
 union ExtensionPoint switch (int v)
@@ -39,7 +39,7 @@ typedef opaque SHA256Hash[32]; // 256 bit hash
 
 typedef opaque ContractAddress[32]; // 256 bit contract addresses
 
-typedef opaque StorageKey[32]; // arbitrary 32 bytes.
+typedef opaque StorageKey[32]; // arbitrary 32 bytes
 
 // in global storage:
 // [contract address + storage key] = 64 bytes
