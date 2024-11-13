@@ -1,5 +1,5 @@
-% *** Generated Code: ***
-% *** Do not check in ***
+%// *** Generated Code: ***
+%// *** Do not check in ***
 
 % #include "types.hh"
 
