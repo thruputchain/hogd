@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <future>
+#include <stdexcept>
 #include <vector>
 
 #include "hogd/base/worker_pool.h"
@@ -45,6 +46,13 @@ TEST(WorkerPoolTest, AdjustWorkers)
     future.get();
 
   EXPECT_EQ(count, kJobs);
+}
+
+TEST(WorkerPoolTest, Exceptions)
+{
+  WorkerPool &pool = WorkerPool::get_default_pool();
+  std::future<void> f = pool.submit([] { throw std::invalid_argument("foo"); });
+  EXPECT_THROW(f.get(), std::invalid_argument);
 }
 
 } // namespace hogd
