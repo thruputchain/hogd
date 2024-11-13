@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <cassert>
 #include <condition_variable>
 #include <functional>
@@ -13,9 +12,7 @@
 #include <queue>
 #include <thread>
 #include <type_traits>
-#include <utility>
 
-#include "hogd/base/compiler.h"
 #include "hogd/base/unique_function.h"
 
 namespace hogd {
