@@ -15,6 +15,10 @@ RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
 std::string
 msg_show_stat(const rpc_msg &msg)
 {
+  using enum accept_stat;
+  using enum reject_stat;
+  using enum msg_type;
+  using enum reply_stat;
   if (msg.body.mtype() != REPLY) [[unlikely]]
     return "CALL";
   if (msg.body.rbody().stat() == MSG_ACCEPTED) [[likely]] {
@@ -113,6 +117,7 @@ RpcStreamImpl::gen_call_xid(CoroCB<Buf> cb)
 Detached
 RpcStreamImpl::reader()
 {
+  using enum msg_type;
   auto _r = shared_from_this();
   Buf b;
   while (!ss_.stop_requested()) {
@@ -148,6 +153,8 @@ RpcStreamImpl::reader()
 Detached
 RpcStreamImpl::serve_call(const rpc_msg &call, BufView args)
 {
+  using enum accept_stat;
+  using enum reject_stat;
   auto _r = shared_from_this();
   const call_body &cb = call.body.cbody();
   rpc_msg res{.xid = call.xid};
