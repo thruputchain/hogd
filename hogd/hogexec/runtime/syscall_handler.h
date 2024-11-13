@@ -114,6 +114,8 @@ private:
   void start_call_frame(Invocation const &invocation);
   void finish_call_frame(InvokeResult const &result);
 
+  bool current_runtime_is_revert_poisoned() const;
+
   std::optional<SHA256Hash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
