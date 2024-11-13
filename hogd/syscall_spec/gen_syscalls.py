@@ -262,7 +262,12 @@ def gen_syscall_entry_cc(spec):
   syscall_uint64_args_str = ", ".join(syscall_uint64_args)
   syscall_uint64_args_nozero_str = ", ".join(syscall_uint64_args[1:])
 
-  return f"""#include "hogd/hogexec/runtime/syscall_entry.h"
+  return f"""// -*-C++-*-
+
+// *** Generated Code  ***
+// *** Do not check in ***
+
+#include "hogd/hogexec/runtime/syscall_entry.h"
 
 #include <array>
 #include <cassert>
@@ -405,6 +410,9 @@ def gen_syscall_x(spec_full):
 
 
   return f"""
+% *** Generated Code  ***
+% *** Do not check in ***
+
 %#include "types.hh"
 
 namespace hogd {{
@@ -550,7 +558,12 @@ def gen_rs_syscall_bindings(spec):
   for syscall in spec:
     syscall_str += gen_rs_syscall_binding(syscall)
 
-  return f"""#![allow(non_snake_case)]
+  return f"""// -*-Rust-*-
+
+// *** Generated Code  ***
+// *** Do not check in ***
+
+#![allow(non_snake_case)]
 use rs_xdr::*;
 use crate::syscall::{{syscall_wrapper, to_offset_mut}};
 use core::mem::MaybeUninit;

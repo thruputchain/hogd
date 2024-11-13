@@ -370,9 +370,9 @@ errors:
     An object exists if it exists at the start of a transaction (in the ledger snapshot),
     or if it is created by an operation in that transaction.  The DeleteLast syscall
     is not factored into this calculation, as those deletions are only applied at the end of a block." 
-  - name: "UnknownSyscall"
+  - name: "NoSyscall"
     number: 4
-    doc: "Unknown syscall number"
+    doc: "System call for supplied number is not supported"
   - name: "UnknownEnumVariant"
     number: 5
     doc: "Syscall returned an enum variant unrecognized by this contract"
