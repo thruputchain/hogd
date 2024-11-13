@@ -1,10 +1,13 @@
+// clang-format off
 %// *** Generated Code: ***
 %// *** Do not check in ***
 
 % #include "types.hh"
 
-    namespace hogd
+namespace hogd
 {
+  // clang-format on
+
   enum SyscallNo {
     kSHA256 = 0,
   };
