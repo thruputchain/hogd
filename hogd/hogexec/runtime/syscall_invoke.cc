@@ -99,9 +99,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
              static_cast<int32_t>(*invoke_res)},
             gas_amount};
   }
-  else {
-    return {{invoke_res.error().code(), 0}, gas_amount};
-  }
+  return {{invoke_res.error().code(), 0}, gas_amount};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
