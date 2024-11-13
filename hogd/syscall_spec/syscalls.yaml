@@ -6,7 +6,6 @@ syscalls:
         span_argument: yes
     outputs:
       - name: "hash"
-        fixed_size: Yes
         typename: "SHA256Hash"
     number: 0
 

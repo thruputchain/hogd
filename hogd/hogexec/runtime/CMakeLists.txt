@@ -1,8 +1,19 @@
+set_source_files_properties(
+    ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
+    PROPERTIES GENERATED TRUE)
+
+set_source_files_properties(
+    ${CMAKE_CURRENT_BINARY_DIR}/syscall_inner.h
+    PROPERTIES GENERATED TRUE)
+
 add_library(
   runtime
   wasmi_runtime.cc
   status.cc
+  syscall_crypto.cc
+  ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
+
 add_executable(
   runtime_test
   userctx_test.cc
@@ -17,6 +28,20 @@ target_link_libraries(
   wasmi_lib
   protocol
 )
+
+add_dependencies(
+  runtime
+  generate_syscall_inner_h
+  generate_syscall_entry_cc
+  protocol
+)
+
+target_include_directories(
+  runtime
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
 target_link_libraries(
   runtime_test
   runtime
