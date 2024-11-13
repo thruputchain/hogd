@@ -24,6 +24,7 @@ static_assert(xdr_size(fix_16{}) == 16);
 void
 check_sizes()
 {
+  using enum color;
   u_4_12 u(4);
   assert(xdr_size(u) == 8);
   u.which(12);
