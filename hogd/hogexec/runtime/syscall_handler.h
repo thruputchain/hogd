@@ -14,6 +14,17 @@ namespace hogd {
 
 class StorageSnapshotCache;
 
+// Data structure that manages all system calls and state associated with a
+// running transaction.
+// Core components:
+//   - Call Frame Stack:  A stack of CallFrame objects representing the current
+//   state of a running transaction.  Each CallFrame is a different invocation
+//   on a contract. A contract might be invoked multiple times and might be
+//   reentrant. Each CallFrame either commits or reverts atomically, and pushes
+//   its state changes into its parent CallFrame.
+//   - Runtime Cache: The set of instantiated WASM runtimes.  One runtime per
+//   ContractAddress. This is maintained separately from the CallFrame stack
+//   because there is not a 1-1 map between runtimes and call frames.
 class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
@@ -58,6 +69,16 @@ private:
   struct RuntimeCacheEntry {
     WasmiRuntime runtime_;
     const bool local_deployment_;
+
+    // When a call frame reverts, it reverts all of the state changes
+    // made in that frame (and all child frames).
+    // We do not revert the internal details of individual WasmiRuntimes
+    // (we could, in theory; but this is expensive and would require
+    // very careful management of Wasmi's internal data structures).
+    // Instead, we mark any contract that was reverted as `revert_poisoned`,
+    // and prevent any further invocations on that runtime.
+    // Future PRs will allow metadata to allow a contract to mark itself
+    // as `revert_safe`.
     bool revert_poisoned_ = false;
 
     RuntimeCacheEntry(WasmiRuntime &&runtime, bool local_deployment)
@@ -68,14 +89,6 @@ private:
 
   WasmiContext wasmi_context_;
 
-  RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
-
-  SyscallStatus<GasAmount>
-  get_invoke_gas_limit(GasAmount call_specified_gas_limit);
-
-  void start_call_frame(Invocation const &invocation);
-  void finish_call_frame(InvokeResult const &result);
-
   const SignedTransaction signed_tx_;
   std::vector<CallFrame> call_frame_stack_;
 
@@ -83,6 +96,8 @@ private:
   // required here.
   std::map<ContractAddress, std::unique_ptr<RuntimeCacheEntry>> runtimes_;
 
+  // Searchable map of contracts that are implicitly created by the current
+  // transaction.
   const std::map<SHA256Hash, std::shared_ptr<const Contract>>
       newly_created_contracts_;
 
@@ -90,6 +105,14 @@ private:
   std::vector<LogEntry> committed_logs_;
 
   StorageSnapshotCache &snapshot_cache_;
+
+  RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
+
+  SyscallStatus<GasAmount>
+  get_invoke_gas_limit(GasAmount call_specified_gas_limit);
+
+  void start_call_frame(Invocation const &invocation);
+  void finish_call_frame(InvokeResult const &result);
 
   std::optional<SHA256Hash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
