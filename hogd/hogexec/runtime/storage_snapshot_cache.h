@@ -31,11 +31,16 @@ public:
   std::optional<SHA256Hash>
   try_get_deployed_contract_hash(ContractAddress const &addr);
 
+  uint64_t get_block_number() const {
+    return current_block_number_;
+  }
+
   StorageSnapshotCache(client_t &client) : client_(client) {}
 
 private:
   // TODO(geoff): initialize and check this properly
   SHA256Hash current_block_hash_;
+  uint64_t current_block_number_ = 0;
 
   // nullopt to cache "does not exist" results
   x23::MVar<std::map<AddressAndKey, std::optional<StrippedStorageObject>>>

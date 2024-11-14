@@ -161,4 +161,13 @@ syscall_Exit_inner(const int32_t input_code)
   return {{HostFnErrorCode::kExit, input_code}, 0};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+syscall_GetBlockNumber_inner(SystemCallHandler &syscall_handler,
+                           uint64_t &output_block_number)
+{
+  output_block_number = syscall_handler.get_block_number();
+  return {SyscallErrorCode::kNone, 0};
+}
+
+
 } // namespace hogd

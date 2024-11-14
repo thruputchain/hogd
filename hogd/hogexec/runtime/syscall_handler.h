@@ -100,6 +100,8 @@ public:
   SyscallStatus<ContractAddress>
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
+  uint64_t get_block_number() const;
+
   using write_client_t = StorageWriteInterfaceV1::client<
       x23::RpcStream<x23::RpcLogger>::ClientRef>;
 

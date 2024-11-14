@@ -12,4 +12,5 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 std = ["rs_contract_sdk/std"]
+interface = []
 

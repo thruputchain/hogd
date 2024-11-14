@@ -7,9 +7,6 @@ use test_deploy_revert_2;
 
 use rs_macros::{public_method, static_key};
 
-extern crate alloc;
-use alloc::boxed::Box;
-
 // invokes test_deploy_revert_2, which should revert.
 // Then checks to see whether the contract that was deployed can be invoked.
 #[public_method]

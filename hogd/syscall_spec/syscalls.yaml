@@ -352,6 +352,14 @@ syscalls:
         fixed_size: Yes
         typename: "ContractAddress"
     number: 29
+  - name: "GetBlockNumber"
+    needs_context: yes
+    inputs:
+    outputs:
+      - name: "block_number"
+        typename: "uint64_t"
+        rust_typename: "u64"
+    number: 30
 
 
 errors:

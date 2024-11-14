@@ -1,7 +1,6 @@
 #![no_std]
 
 use rs_contract_sdk as sdk;
-use sdk::rt::trap;
 
 use rs_macros::{public_interface, public_method};
 

@@ -9,7 +9,7 @@ fn root_test_reentrant_revert() {
 
     let mut return_len: sdk::RuntimeMemoryLength = 0;
 
-    let result = sdk::syscall_bindings::raw_Invoke(
+    let _ = sdk::syscall_bindings::raw_Invoke(
         &addr,
         0,
         u64::MAX,
