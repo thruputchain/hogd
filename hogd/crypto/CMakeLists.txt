@@ -4,6 +4,8 @@ add_library(
   crypto.cc
 )
 
+target_link_libraries(crypto protocol)
+
 # create crypto module test binary
 add_executable(
   crypto_test
@@ -32,3 +34,5 @@ target_link_libraries(
   benchmark::benchmark
 )
 add_dependencies(crypto_bench libsodium)
+
+set_property(TARGET crypto_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

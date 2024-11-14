@@ -4,6 +4,7 @@ add_library(
   init.cc
   log.cc
   status.cc
+  string.cc
 )
 
 # create base module test binary
@@ -14,6 +15,7 @@ add_executable(
   status_test.cc
   string_test.cc
   unique_function_test.cc
+  worker_pool_test.cc
 )
 target_link_libraries(
   base_test

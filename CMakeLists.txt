@@ -15,6 +15,7 @@ endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -g -march=native")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -march=native")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
@@ -23,6 +24,8 @@ endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
 endif()
+set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
+set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG -O3")
 set(CMAKE_CXX_FLAGS_DEBUG "-DDEBUG -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
@@ -34,6 +37,9 @@ configure_file(
   ${CMAKE_CURRENT_BINARY_DIR}/built_headers/hogd/config.h
   @ONLY
 )
+
+include(CheckIPOSupported)
+check_ipo_supported()
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/built_headers)
 
@@ -58,15 +64,26 @@ endif()
 include(ProcessorCount)
 ProcessorCount(N)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+set(EXTERNAL_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_RELEASE}")
+set(EXTERNAL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_RELEASE}")
+else()
+set(EXTERNAL_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
+set(EXTERNAL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG}")
+endif()
+
 # Enable libsodium
+# --enable-opt sets -march=native and other compiler flags
+# that the libsodium authors deem important
 include(ExternalProject)
 ExternalProject_Add(libsodium
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
     CONFIGURE_COMMAND
       ${CMAKE_SOURCE_DIR}/external/libsodium/configure
       --prefix=${CMAKE_INSTALL_PREFIX}
+      --enable-opt
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-      CFLAGS=${CMAKE_C_FLAGS} CXXFLAGS=${CMAKE_CXX_FLAGS}
+      CFLAGS=${EXTERNAL_C_FLAGS} CXXFLAGS=${EXTERNAL_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
     INSTALL_COMMAND ""  # Skip installation step
 )
