@@ -9,7 +9,9 @@ add_library(
   syscall_invoke.cc
   syscall_log.cc
   syscall_crypto.cc
+  syscall_contract.cc
 )
+
 add_executable(
   runtime_test
   userctx_test.cc

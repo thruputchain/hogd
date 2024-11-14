@@ -36,20 +36,20 @@
     // Failed to find contract
     kContractLookupFailed = 4,
 
-    // Input byte span is too long
-    kStringTooLong = 5,
-
     // No return buffer is available.  Either the most recent subcall failed, or
     // there have been no subcalls within this call frame.
-    kNoReturnBufferAvailable = 6,
+    kNoReturnBufferAvailable = 5,
 
     // Insufficient gas in call frame to supply requested gas limit for child
     // invocation
-    kInsufficientGasForInvocation = 7,
+    kInsufficientGasForInvocation = 6,
 
     // Attempt made to deploy a contract twice (same nonce and contract hash,
     // from same address)
-    kContractAlreadyDeployed = 8,
+    kContractAlreadyDeployed = 7,
+
+    // Invalid syscall input.  Why the input was invalid depends on the syscall.
+    kInvalidSyscallInput = 8,
 
     // Deterministic error within a wasm invocation
     kDeterministicWasm = -1,
