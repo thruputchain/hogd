@@ -45,7 +45,7 @@ typedef opaque SHA256Hash[32]; // 256 bit hash
 
 typedef opaque ContractAddress[32]; // 256 bit contract addresses
 
-typedef opaque StorageKey[32]; // arbitrary 32 bytes.
+typedef opaque StorageKey[32]; // arbitrary 32 bytes
 
 // in global storage:
 // [contract address + storage key] = 64 bytes
