@@ -17,6 +17,20 @@ namespace hogd
     BoundedHashsetEntry entries<>;
   };
 
+  const kMessageQueueEventMaxLen = 1024;
+
+  // I would like to call this a "Message" but that's overloaded with many other things
+  typedef opaque MessageQueueEvent<kMessageQueueEventMaxLen>;
+
+  struct MessageQueueMetadata {
+    unsigned hyper event_count;
+  };
+
+  struct MessageQueue {
+    MessageQueueEvent events<>;
+    MessageQueueMetadata metadata;
+  };
+
   struct ReplayCacheMetadata {
     unsigned hyper clear_threshold; // uint64_t
     unsigned int current_size;      // uint32_t
@@ -39,6 +53,8 @@ namespace hogd
     BoundedHashset hashset;
   case kReplayCache:
     ReplayCache replay_cache;
+  case kMessageQueue:
+    MessageQueue message_queue;
   };
 
   // Things to do: figure out which info is stripped, when, and how that
@@ -53,6 +69,8 @@ namespace hogd
     BoundedHashset hashset;
   case kReplayCache:
     ReplayCacheMetadata replay_cache_metadata;
+  case kMessageQueue:
+    MessageQueueMetadata message_queue_metadata;
   };
 
   enum StorageDeltaType {
@@ -61,6 +79,8 @@ namespace hogd
     kNonnegativeInt64SetAdd = 2,
     kReplayCacheInsert = 3,
     kReplayCacheClear = 4,
+    kMessageQueueInsert = 5,
+    kMessageQueueConsume = 6,
   };
 
   struct NonnegativeInt64SetAddArgs {

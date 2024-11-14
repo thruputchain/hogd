@@ -11,6 +11,7 @@ enum StorageObjectType {
   kNonnegativeInt64 = 1,
   kBoundedHashset = 2,
   kReplayCache = 3,
+  kMessageQueue = 4,
 };
 
 typedef opaque uint128_xdr[16];
