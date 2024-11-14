@@ -423,7 +423,8 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     }
   }
 
-  auto deploy_addr = static_get_deploy_address(get_current_address(), nonce, contract_hash);
+  auto deploy_addr =
+      static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
   // check that we have not already deployed to that address
   if (snapshot_cache_.try_get_deployed_contract_hash(deploy_addr)) {
