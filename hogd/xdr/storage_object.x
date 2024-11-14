@@ -27,6 +27,8 @@ namespace hogd
   };
 
   struct MessageQueue {
+    // All the new events in a block are sorted lexicographically,
+    // then put at the back of the list.
     MessageQueueEvent events<>;
     MessageQueueMetadata metadata;
   };
@@ -70,7 +72,7 @@ namespace hogd
   case kReplayCache:
     ReplayCacheMetadata replay_cache_metadata;
   case kMessageQueue:
-    MessageQueueMetadata message_queue_metadata;
+    MessageQueue message_queue;
   };
 
   enum StorageDeltaType {
@@ -79,7 +81,7 @@ namespace hogd
     kNonnegativeInt64SetAdd = 2,
     kReplayCacheInsert = 3,
     kReplayCacheClear = 4,
-    kMessageQueueInsert = 5,
+    kMessageQueueAppend = 5,
     kMessageQueueConsume = 6,
   };
 
@@ -100,6 +102,10 @@ namespace hogd
     unsigned hyper replay_nonces<>; // uint64_t<>
   case kReplayCacheClear:
     unsigned hyper replay_clear_threshold; // uint64_t
+  case kMessageQueueAppend:
+    MessageQueueEvent append_event;
+  case kMessageQueueConsume:
+    unsigned int num_messages_consumed;
   };
 
   enum StorageReserveResult {

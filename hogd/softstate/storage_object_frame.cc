@@ -329,6 +329,71 @@ StorageObjectFrame::revert_replay_cache_clear()
 }
 
 StorageReserveResult
+StorageObjectFrame::try_reserve_mq_append(MessageQueueEvent const &event)
+{
+  if (!type_guard(StorageObjectType::kMessageQueue)) {
+    return StorageReserveResult::kDefiniteFailure;
+  }
+
+  auto v = variant_.take();
+
+  if (auto *args = try_set_variant<MessageQueueArgs>(*v)) {
+    args -> new_events_.insert(event);
+
+    return StorageReserveResult::kSuccess;
+  }
+
+  return StorageReserveResult::kDefiniteFailure;
+}
+
+void 
+StorageObjectFrame::revert_mq_append(MessageQueueEvent const &event)
+{
+  auto v = variant_.take();
+  auto &args = get_variant_arm_unchecked<MessageQueueArgs>(*v);
+
+  [[maybe_unused]] auto res = args.new_events_.erase(event);
+  assert(res == 1);
+
+  release_variant(*v);
+}
+
+StorageReserveResult 
+StorageObjectFrame::try_reserve_mq_consume(uint32_t num_messages)
+{
+  if (!type_guard(StorageObjectType::kMessageQueue)) {
+    return StorageReserveResult::kDefiniteFailure;
+  }
+
+  auto v = variant_.take();
+
+  if (auto *args = try_set_variant<MessageQueueArgs>(*v)) {
+    
+    assert(num_messages != 0);
+
+    if (args -> num_messages_consumed_ == 0) {
+      args -> num_messages_consumed_ = num_messages;
+      return StorageReserveResult::kSuccess;
+    }
+
+    return StorageReserveResult::kDefiniteFailure;
+  }
+
+  return StorageReserveResult::kDefiniteFailure;
+}
+
+void 
+StorageObjectFrame::revert_mq_consume()
+{
+  auto v = variant_.take();
+  auto &args = get_variant_arm_unchecked<MessageQueueArgs>(*v);
+
+  args.num_messages_consumed_ = 0;
+
+  release_variant(*v);
+}
+
+StorageReserveResult
 StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
 {
   switch (delta.type()) {
@@ -343,6 +408,10 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
     return try_reserve_replay_cache_inserts(delta.replay_nonces());
   case StorageDeltaType::kReplayCacheClear:
     return try_reserve_replay_cache_clear(delta.replay_clear_threshold());
+  case StorageDeltaType::kMessageQueueAppend:
+    return try_reserve_mq_append(delta.append_event());
+  case StorageDeltaType::kMessageQueueConsume:
+    return try_reserve_mq_consume(delta.num_messages_consumed());
   default:
     return StorageReserveResult::kDefiniteFailure;
   }
@@ -381,6 +450,12 @@ StorageObjectFrame::revert_delta(StorageDelta const &delta)
   case StorageDeltaType::kReplayCacheClear:
     revert_replay_cache_clear();
     return;
+  case StorageDeltaType::kMessageQueueAppend:
+    revert_mq_append(delta.append_event());
+    return;
+  case StorageDeltaType::kMessageQueueConsume:
+    revert_mq_consume();
+    return;
   }
 }
 
@@ -412,6 +487,12 @@ StorageObjectFrame::get_stripped_committed_object() const
     obj.replay_cache_metadata() =
         committed_base_object_->replay_cache().metadata;
     break;
+  case StorageDeltaType::kMessageQueue:
+    // TODO(geoff): something more efficient than copying the whole thing
+    out.message_queue() = committed_base_object_ -> message_queue();
+    break;
+  default:
+    throw std::runtime_error("unimplemented");
   }
   return obj;
 }

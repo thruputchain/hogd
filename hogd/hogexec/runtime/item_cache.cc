@@ -67,6 +67,24 @@ make_replay_clear(uint64_t threshold)
   return out;
 }
 
+StorageDelta
+make_mq_consume(uint32_t num_messages)
+{
+  StorageDelta out;
+  out.type(StorageDeltaType::kMessageQueueConsume);
+  out.num_messages_consumed() = num_messages;
+  return out;
+}
+
+StorageDelta
+make_mq_append(MessageQueueEvent const& event)
+{
+  StorageDelta out;
+  out.type(StorageDeltaType::kMessageQueueAppend);
+  out.append_event() = event;
+  return out;
+}
+
 } // namespace
 
 void
@@ -315,6 +333,22 @@ ItemCache::ReplayCacheCacheType::get_deltas() const
 
   return out;
 }
+
+x23::Vec<StorageDelta>
+ItemCache::MessageQueueCacheType::get_deltas() const
+{
+  x23::Vec<StorageDelta> out;
+  if (num_messages_consumed_ > 0) {
+    out.push_back(make_mq_consume(num_messages_consumed_));
+  }
+
+  for (auto const& event : new_messages_) {
+    out.push_backl(make_mq_append(event));
+  }
+
+  return out;
+}
+
 
 SyscallStatus<void>
 ItemCache::replay_cache_insert(uint64_t nonce)

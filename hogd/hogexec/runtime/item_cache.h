@@ -36,6 +36,9 @@ public:
   SyscallStatus<void> replay_cache_insert(uint64_t nonce);
   SyscallStatus<void> replay_cache_clear(uint64_t threshold);
 
+  SyscallStatus<MessageQueueEvent> consume_next_mq_event();
+  SyscallStatus<void> append_event_to_mq(MessageQueueEvent const& event);
+
   x23::Vec<StorageDelta> get_deltas() const;
 
 private:
@@ -68,6 +71,16 @@ private:
 
     constexpr static std::optional<StorageObjectType> kObjectType =
         StorageObjectType::kReplayCache;
+  };
+
+  struct MessageQueueCacheType {
+    uint32_t num_messages_consumed_;
+    std::set<MessageQueueEvent> new_messages_;
+
+    x23::Vec<StorageDelta> get_deltas() const;
+
+    constexpr static std::optional<StorageObjectType> kObjectType =
+        StorageObjectType::kMessageQueue;
   };
 
   struct UnsetType {
@@ -104,9 +117,18 @@ private:
         self.delta_args_))>(nullptr);
   }
 
+  auto *get_message_queue_args(this auto &self)
+  {
+    if (std::holds_alternative<MessageQueueCacheType>(self.delta_args_)) {
+      return &std::get<MessageQueueCacheType>(self.delta_args_);
+    }
+    return static_cast<decltype(&std::get<MessageQueueCacheType>(
+        self.delta_args_))>(nullptr);
+  }
+
   std::optional<StrippedStorageObject> base_object_;
   std::variant<UnsetType, BytestringCacheType, NNInt64CacheType,
-               ReplayCacheCacheType>
+               ReplayCacheCacheType, MessageQueueCacheType>
       delta_args_ = UnsetType{};
 
   bool is_deleted_last_ = false;

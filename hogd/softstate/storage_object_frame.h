@@ -75,8 +75,19 @@ private:
     to_object(std::optional<StorageObject> const &previous_object) const;
   };
 
+  struct MessageQueueArgs {
+    uint32_t num_messages_consumed_ = 0;
+
+    std::set<MessageQueueEvent> new_events_;
+
+    static bool can_accept() { return true; }
+
+    StorageObject
+    to_object(std::optional<StorageObject> const &*previous_object) const;
+  };
+
   using variant_t =
-      std::variant<BytestringArgs, NNInt64SetAddArgs, ReplayCacheArgs>;
+      std::variant<BytestringArgs, NNInt64SetAddArgs, ReplayCacheArgs, MessageQueueArgs>;
 
   struct RefcountedVariant {
     variant_t variant_;
@@ -106,6 +117,13 @@ private:
   StorageReserveResult try_reserve_replay_cache_clear(uint64_t threshold);
   void commit_replay_cache_clear(uint64_t threshold);
   void revert_replay_cache_clear();
+
+  // message queue
+  StorageReserveResult
+  try_reserve_mq_append(MessageQueueEvent const &event);
+  void revert_mq_append(MessageQueueEvent const &event);
+  StorageReserveResult try_reserve_mq_consume(uint32_t num_messages);
+  void revert_mq_consume();
 
   bool type_guard(StorageObjectType expected_type) const;
 
