@@ -17,9 +17,15 @@ syscall_GetDeployAddress_inner(SystemCallHandler &syscall_handler,
                                const SHA256Hash &input_contract_hash,
                                ContractAddress &output_to_be_deployed)
 {
-  output_to_be_deployed =
-      syscall_handler.get_deploy_address(optional_input_caller_address,
-                                         input_nonce, input_contract_hash);
+  if (optional_input_caller_address) {
+    output_to_be_deployed =
+        SystemCallHandler::static_get_deploy_address(optional_input_caller_address,
+                                           input_nonce, input_contract_hash);
+  } else {
+    output_to_be_deployed =
+        SystemCallHandler::static_get_deploy_address(syscall_handler.get_current_address(),
+                                           input_nonce, input_contract_hash);
+  }
 
   return {SyscallErrorCode::kNone, 0};
 }

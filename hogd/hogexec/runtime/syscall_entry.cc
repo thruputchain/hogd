@@ -284,10 +284,11 @@ syscall_GetReturnedBuffer_outer(SystemCallHandler &syscall_handler,
 std::pair<HostFnResult, GasAmount>
 syscall_GetDeployAddress_outer(SystemCallHandler &syscall_handler,
                                std::span<std::byte> contract_memory,
+                               uint64_t user_optional_input_contract_address,
                                uint64_t user_input_nonce,
                                uint64_t user_input_contract_hash,
                                uint64_t user_output_to_be_deployed,
-                               uint64_t /*unused*/, uint64_t /*unused*/,
+                               uint64_t /*unused*/,
                                uint64_t /*unused*/)
 {
   const auto *input_nonce =

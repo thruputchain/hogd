@@ -68,11 +68,12 @@ Reverts the contract if the exit codes is negative.
 
 
 # GetDeployAddress
-Signature: GetDeployAddress(nonce: SHA256Hash, contract_hash: SHA256Hash) -> ContractAddress
+Signature: GetDeployAddress(source_address: ContractAddress, nonce: SHA256Hash, contract_hash: SHA256Hash) -> ContractAddress
 
-Returns SHA256(current_address || nonce || contract_hash).
+Returns SHA256(source_address || nonce || contract_hash).
 
-This returned hash is the address at which the DeployContract syscall will deploy a contract with the supplied arguments.
+This returned hash is the address at which the DeployContract syscall, if called from `source_address`,
+will deploy a contract with the supplied arguments `nonce` and `contract_hash`.
 
 Does not return additional errors.
 

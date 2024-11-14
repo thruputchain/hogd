@@ -52,6 +52,7 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetDeployAddress_inner(SystemCallHandler &syscall_handler,
+                               const ContractAddress* optional_input_caller_address,
                                const SHA256Hash &input_nonce,
                                const SHA256Hash &input_contract_hash,
                                ContractAddress &output_to_be_deployed);

@@ -59,9 +59,6 @@ public:
                             SHA256Hash const &nonce,
                             SHA256Hash const &contract_hash);
 
-  ContractAddress get_deploy_address(SHA256Hash const &nonce,
-                                     SHA256Hash const &contract_hash) const;
-
   SyscallStatus<ContractAddress>
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 

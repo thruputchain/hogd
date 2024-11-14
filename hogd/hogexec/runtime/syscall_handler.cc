@@ -403,15 +403,6 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
   return sha256(std::as_bytes(std::span(hash_buffer)));
 }
 
-ContractAddress
-SystemCallHandler::get_deploy_address(SHA256Hash const &nonce,
-                                      SHA256Hash const &contract_hash) const
-{
-  assert(!call_frame_stack_.empty());
-
-  return static_get_deploy_address(get_current_address(), nonce, contract_hash);
-}
-
 SyscallStatus<ContractAddress>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
@@ -432,7 +423,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     }
   }
 
-  auto deploy_addr = get_deploy_address(nonce, contract_hash);
+  auto deploy_addr = static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
   // check that we have not already deployed to that address
   if (snapshot_cache_.try_get_deployed_contract_hash(deploy_addr)) {
