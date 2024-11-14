@@ -291,6 +291,10 @@ syscall_GetDeployAddress_outer(SystemCallHandler &syscall_handler,
                                uint64_t /*unused*/,
                                uint64_t /*unused*/)
 {
+  const auto* optional_input_contract_address 
+    = check_user_argument<const ContractAddress>(contract_memory, user_optional_input_contract_address,
+                                            sizeof(ContractAddress));
+
   const auto *input_nonce =
       check_user_argument<const SHA256Hash>(contract_memory, user_input_nonce,
                                             sizeof(SHA256Hash));
@@ -323,7 +327,8 @@ syscall_GetDeployAddress_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  auto res = syscall_GetDeployAddress_inner(syscall_handler, *input_nonce,
+  auto res = syscall_GetDeployAddress_inner(syscall_handler, 
+    optional_input_contract_address, *input_nonce,
                                             *input_contract_hash,
                                             *output_to_be_deployed);
 
