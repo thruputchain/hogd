@@ -75,6 +75,7 @@ add_executable(
   auth_match_test.cc
   deploy_revert_test.cc
   reentrant_revert_test.cc
+  optional_argument_test.cc
 )
 
 target_link_libraries(
