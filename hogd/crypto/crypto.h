@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -10,11 +11,11 @@
 #include <sodium.h>
 
 #include "hogd/base/types.h"
+#include "types.hh"
 
 namespace hogd {
 
 using Siphash24Key = std::array<uint8_t, 16>;
-using SHA256Hash = std::array<uint8_t, 32>;
 
 // sha256 returns a SHA256 hash of the input.
 inline SHA256Hash
@@ -69,6 +70,18 @@ siphash24_keygen()
   // https://libsodium.gitbook.io/doc/hashing/short-input_hashing
   crypto_shorthash_keygen(out.data());
   return out;
+}
+
+inline bool
+ed25519_verify(Ed25519PublicKey const &publickey,
+               Ed25519Signature const &signature,
+               std::span<const std::byte> message)
+{
+  return crypto_sign_ed25519_verify_detached(signature.data(),
+                                             reinterpret_cast<const uint8_t *>(
+                                                 message.data()),
+                                             message.size(),
+                                             publickey.data()) == 0;
 }
 
 } // namespace hogd
