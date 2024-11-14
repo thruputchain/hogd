@@ -121,7 +121,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_buffer)
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {SyscallErrorCode::kStringTooLong, 0};
+    return {HostFnError{HostFnErrorCode::kExit}, static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)};
   }
 
   ReturnBuffer buffer;
