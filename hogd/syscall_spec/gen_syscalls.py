@@ -156,7 +156,7 @@ def gen_validate_arg(inp, *, is_input):
     return f"""
   {const}auto {arg1} =
       check_user_primitive_argument<{const}{typename}>(user_{arg1});
-""", [f"user_{arg1}"], arg1, arg1, f"{typename} {arg1}"
+""", [f"user_{arg1}"], arg1, f"{typename} {arg1}"
 
   if "custom_parsing" in inp and inp["custom_parsing"] and is_input:
     if optional:
@@ -534,7 +534,13 @@ def gen_rs_syscall_binding(syscall):
         syscallargs.append(f"""{input_name} as u64""")
         inputdecls.append(f"""{input_name} : {input_type}""")
         uninit_args.append(f"""{input_name}""")
-      
+      elif "custom_parsing" in inp and inp["custom_parsing"]:
+        # custom parsing, for now I just implement as a direct passthrough
+        # and assume the sdk wrapper will handle.  Input types are just u64s
+        for i in range(0, inp["custom_args_required"]):
+          syscallargs.append(f"""{input_name}_{i}""")
+          inputdecls.append(f"""{input_name}_{i} : u64""")
+          uninit_args.append(f"""{input_name}_{i}""")
       elif "typename" in inp:
         #Fixed size arguments
         input_type = inp["typename"]
@@ -548,14 +554,6 @@ def gen_rs_syscall_binding(syscall):
           syscallargs.append(f"""{input_name}.as_ptr() as u64""")
           inputdecls.append(f"""{input_name} : &{input_type}""")
           uninit_args.append(f"""{input_name}""")
-
-      elif "custom_parsing" in inp and inp["custom_parsing"]:
-        # custom parsing, for now I just implement as a direct passthrough
-        # and assume the sdk wrapper will handle.  Input types are just u64s
-        for i in range(0, inp["custom_args_required"]):
-          syscallargs.append(f"""{input_name}_{i}""")
-          inputdecls.append(f"""{input_name}_{i} : u64""")
-          uninit_args.append(f"""{input_name}_{i}""")
       
       else: # span argument
         if "span_argument" not in inp or not inp["span_argument"]:
