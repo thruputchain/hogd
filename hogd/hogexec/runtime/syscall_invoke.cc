@@ -121,7 +121,8 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_buffer)
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {HostFnError{HostFnErrorCode::kExit}, static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)};
+    return {HostFnError{HostFnErrorCode::kExit},
+            static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)};
   }
 
   ReturnBuffer buffer;
@@ -163,11 +164,10 @@ syscall_Exit_inner(const int32_t input_code)
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_GetBlockNumber_inner(SystemCallHandler &syscall_handler,
-                           uint64_t &output_block_number)
+                             uint64_t &output_block_number)
 {
   output_block_number = syscall_handler.get_block_number();
   return {SyscallErrorCode::kNone, 0};
 }
-
 
 } // namespace hogd

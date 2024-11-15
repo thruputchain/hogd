@@ -37,7 +37,7 @@ public:
   SyscallStatus<void> replay_cache_clear(uint64_t threshold);
 
   SyscallStatus<MessageQueueEvent> consume_next_mq_event();
-  SyscallStatus<void> append_event_to_mq(MessageQueueEvent const& event);
+  SyscallStatus<void> append_event_to_mq(MessageQueueEvent const &event);
 
   x23::Vec<StorageDelta> get_deltas() const;
 

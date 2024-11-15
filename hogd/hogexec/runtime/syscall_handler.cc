@@ -927,12 +927,11 @@ SystemCallHandler::commit_new_contract_deployments(write_client_t &client) const
   }
 }
 
-uint64_t 
+uint64_t
 SystemCallHandler::get_block_number() const
 {
   return snapshot_cache_.get_block_number();
 }
-
 
 StorageRPCError
 SystemCallHandler::try_reserve_transaction(write_client_t &client) const

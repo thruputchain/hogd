@@ -19,18 +19,14 @@ namespace hogd
 
   const kMessageQueueEventMaxLen = 1024;
 
-  // I would like to call this a "Message" but that's overloaded with many other things
+  // I would like to call this a "Message" but that's overloaded with many other
+  // things
   typedef opaque MessageQueueEvent<kMessageQueueEventMaxLen>;
-
-  struct MessageQueueMetadata {
-    unsigned hyper event_count;
-  };
 
   struct MessageQueue {
     // All the new events in a block are sorted lexicographically,
     // then put at the back of the list.
     MessageQueueEvent events<>;
-    MessageQueueMetadata metadata;
   };
 
   struct ReplayCacheMetadata {

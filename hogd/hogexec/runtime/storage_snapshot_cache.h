@@ -31,9 +31,7 @@ public:
   std::optional<SHA256Hash>
   try_get_deployed_contract_hash(ContractAddress const &addr);
 
-  uint64_t get_block_number() const {
-    return current_block_number_;
-  }
+  uint64_t get_block_number() const { return current_block_number_; }
 
   StorageSnapshotCache(client_t &client) : client_(client) {}
 

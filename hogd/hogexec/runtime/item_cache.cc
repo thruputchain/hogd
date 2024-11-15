@@ -77,7 +77,7 @@ make_mq_consume(uint32_t num_messages)
 }
 
 StorageDelta
-make_mq_append(MessageQueueEvent const& event)
+make_mq_append(MessageQueueEvent const &event)
 {
   StorageDelta out;
   out.type(StorageDeltaType::kMessageQueueAppend);
@@ -342,13 +342,12 @@ ItemCache::MessageQueueCacheType::get_deltas() const
     out.push_back(make_mq_consume(num_messages_consumed_));
   }
 
-  for (auto const& event : new_messages_) {
+  for (auto const &event : new_messages_) {
     out.push_back(make_mq_append(event));
   }
 
   return out;
 }
-
 
 SyscallStatus<void>
 ItemCache::replay_cache_insert(uint64_t nonce)

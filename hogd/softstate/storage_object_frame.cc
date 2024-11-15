@@ -60,7 +60,7 @@ StorageObjectFrame::ReplayCacheArgs::to_object(
   }
 
   // TODO(geoff): this is a very inefficient but correct way of doing the data
-  // structures This should be a set or a BTree
+  // structures.  This should be a set or a BTree
   for (auto val : new_nonces_) {
     out.replay_cache().nonces.push_back(val);
   }
@@ -85,6 +85,33 @@ StorageObjectFrame::ReplayCacheArgs::to_object(
   }
 
   out.replay_cache().metadata.current_size = out.replay_cache().nonces.size();
+
+  return out;
+}
+
+StorageObject
+StorageObjectFrame::MessageQueueArgs::to_object(
+    std::optional<StorageObject> const &previous_object) const
+{
+  // TODO(geoff) inefficient but correcg way of doing this data structure.
+
+  StorageObject out;
+  out.type(StorageObjectType::kMessageQueue);
+
+  for (auto const &event : new_events_) {
+    out.message_queue().events.push_back(event);
+  }
+
+  if (previous_object) {
+    out.message_queue().events.append(
+        previous_object->message_queue().events.begin(),
+        previous_object->message_queue().events.end());
+  }
+
+  uint32_t size = out.message_queue().events.size();
+  assert(size >= num_messages_consumed_);
+
+  out.message_queue().events.resize(size - num_messages_consumed_);
 
   return out;
 }
@@ -338,7 +365,7 @@ StorageObjectFrame::try_reserve_mq_append(MessageQueueEvent const &event)
   auto v = variant_.take();
 
   if (auto *args = try_set_variant<MessageQueueArgs>(*v)) {
-    args -> new_events_.insert(event);
+    args->new_events_.insert(event);
 
     return StorageReserveResult::kSuccess;
   }
@@ -346,7 +373,7 @@ StorageObjectFrame::try_reserve_mq_append(MessageQueueEvent const &event)
   return StorageReserveResult::kDefiniteFailure;
 }
 
-void 
+void
 StorageObjectFrame::revert_mq_append(MessageQueueEvent const &event)
 {
   auto v = variant_.take();
@@ -358,7 +385,7 @@ StorageObjectFrame::revert_mq_append(MessageQueueEvent const &event)
   release_variant(*v);
 }
 
-StorageReserveResult 
+StorageReserveResult
 StorageObjectFrame::try_reserve_mq_consume(uint32_t num_messages)
 {
   if (!type_guard(StorageObjectType::kMessageQueue)) {
@@ -368,11 +395,11 @@ StorageObjectFrame::try_reserve_mq_consume(uint32_t num_messages)
   auto v = variant_.take();
 
   if (auto *args = try_set_variant<MessageQueueArgs>(*v)) {
-    
+
     assert(num_messages != 0);
 
-    if (args -> num_messages_consumed_ == 0) {
-      args -> num_messages_consumed_ = num_messages;
+    if (args->num_messages_consumed_ == 0) {
+      args->num_messages_consumed_ = num_messages;
       return StorageReserveResult::kSuccess;
     }
 
@@ -382,7 +409,7 @@ StorageObjectFrame::try_reserve_mq_consume(uint32_t num_messages)
   return StorageReserveResult::kDefiniteFailure;
 }
 
-void 
+void
 StorageObjectFrame::revert_mq_consume()
 {
   auto v = variant_.take();
@@ -489,7 +516,7 @@ StorageObjectFrame::get_stripped_committed_object() const
     break;
   case StorageObjectType::kMessageQueue:
     // TODO(geoff): something more efficient than copying the whole thing
-    obj.message_queue() = committed_base_object_ -> message_queue();
+    obj.message_queue() = committed_base_object_->message_queue();
     break;
   default:
     throw std::runtime_error("unimplemented");
