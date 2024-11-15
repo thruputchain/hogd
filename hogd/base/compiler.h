@@ -138,26 +138,6 @@ write_once(T &p, const T &val)
   static_cast<T volatile &>(p) = val;
 }
 
-template<std::integral T, std::integral S, std::integral R>
-inline bool
-integer_add_overflow(T a, S b, R *out)
-{
-  return __builtin_add_overflow(a, b, out);
-}
-
-template<std::integral R, std::integral T, std::integral S>
-inline bool
-integer_add_overflow_p(T a, S b)
-{
-  // clang doensn't have add_overflow_p but does have add_overflow
-#if defined(__builtin_add_overflow_p)
-  return __builtin_add_overflow_p(a, b, R{0});
-#else
-  R result;
-  return __builtin_add_overflow(a, b, &result);
-#endif
-}
-
 // cpu_relax hints to the CPU that it is in a spin loop.
 //
 // Example:
