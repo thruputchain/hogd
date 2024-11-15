@@ -153,6 +153,8 @@ cpu_relax()
   // are cases where we want UMWAIT/TPAUSE on x86.
 }
 
+// integer_add_overflow adds b to a and stores the result in out. Returns
+// true if there was an overflow while performing the addition.
 template<std::integral T, std::integral U, std::integral Result>
 inline bool
 integer_add_overflow(T a, U b, Result *out)
@@ -160,9 +162,9 @@ integer_add_overflow(T a, U b, Result *out)
   return __builtin_add_overflow(a, b, out);
 }
 
-// integer_add_overflow adds b to a without storing the result. However, It
-// returns true if there would be an overflow while performing the addition and
-// storing in the type Result.
+// integer_add_overflow adds b to a without storing the result.  Returns true if
+// there would be an overflow while performing the addition and storing in the
+// type Result.  Result defaults to decltype(a+b).
 template<typename R = void, std::integral T, std::integral U>
 inline bool
 integer_add_overflow(T a, U b)
