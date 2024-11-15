@@ -216,4 +216,30 @@ TEST(ItemCache, MessageQueueConsumeFromNonempty)
   EXPECT_FALSE(proxy.consume_next_mq_event());
 }
 
+TEST(ItemCache, MessageQueueConcurrentOutputsSorted)
+{
+  StrippedStorageObject object(StorageObjectType::kMessageQueue);
+
+  object.message_queue().events.push_back(make_event(0));
+  object.message_queue().events.push_back(make_event(15));
+  object.message_queue().events.push_back(make_event(1));
+  object.message_queue().events.push_back(make_event(14));
+
+  ItemCache proxy(object);
+
+  EXPECT_TRUE(proxy.append_event_to_mq(make_event(4)));
+  EXPECT_TRUE(proxy.append_event_to_mq(make_event(7)));
+  EXPECT_TRUE(proxy.append_event_to_mq(make_event(5)));
+
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(0));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(15));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(1));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(14));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(4));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(5));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(7));
+
+  EXPECT_FALSE(proxy.consume_next_mq_event());
+}
+
 } // namespace hogd
