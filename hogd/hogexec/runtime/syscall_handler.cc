@@ -645,6 +645,30 @@ SystemCallHandler::replay_cache_clear(StorageKey const &key, uint64_t threshold)
 {
   return resolve_item_cache(key).replay_cache_clear(threshold);
 }
+
+SyscallStatus<void>
+SystemCallHandler::message_queue_append_event(StorageKey const &key,
+                                              std::span<const std::byte> event)
+{
+  MessageQueueEvent e;
+
+  if (event.size() > kMessageQueueEventMaxLen) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  e.resize(event.size());
+  std::memcpy(e.data(), reinterpret_cast<const uint8_t *>(event.data()),
+              event.size());
+
+  return resolve_item_cache(key).append_event_to_mq(e);
+}
+
+SyscallStatus<MessageQueueEvent>
+SystemCallHandler::message_queue_consume_event(StorageKey const &key)
+{
+  return resolve_item_cache(key).consume_next_mq_event();
+}
+
 namespace {
 
 AuthContext

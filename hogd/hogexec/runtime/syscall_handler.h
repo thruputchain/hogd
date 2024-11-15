@@ -62,6 +62,13 @@ public:
   SyscallStatus<void> replay_cache_clear(StorageKey const &key,
                                          uint64_t threshold);
 
+  // message queue
+  SyscallStatus<void>
+  message_queue_append_event(StorageKey const &key,
+                             std::span<const std::byte> event);
+  SyscallStatus<MessageQueueEvent>
+  message_queue_consume_event(StorageKey const &key);
+
   // auth
   void push_auth_context(std::span<const std::byte> auth_context_frame);
   SyscallStatus<void> pop_auth_context();

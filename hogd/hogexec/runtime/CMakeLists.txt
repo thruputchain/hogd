@@ -24,6 +24,7 @@ set(runtime_sources
   syscall_log.cc
   syscall_nnint64.cc
   syscall_replay.cc
+  syscall_messagequeue.cc
 )
 
 add_library(

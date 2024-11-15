@@ -6,7 +6,6 @@ syscalls:
         span_argument: yes
     outputs:
       - name: "hash"
-        fixed_size: Yes
         typename: "SHA256Hash"
     number: 0
   - name: "GetMsgSender"
@@ -14,18 +13,15 @@ syscalls:
     inputs:
     outputs:
       - name: "sender"
-        fixed_size: Yes
         typename: "ContractAddress"
     number: 1
   - name: "BytestringGetLen"
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: Yes
         typename: "StorageKey"
     outputs:
       - name: "length"
-        fixed_size: Yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
     number: 2
@@ -33,13 +29,11 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: Yes
         typename: "StorageKey"
     outputs:
       - name: "bytestring"
         span_argument: yes
       - name: "written_len"
-        fixed_size: Yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
     number: 3
@@ -47,7 +41,6 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: Yes
         typename: "StorageKey"
       - name: "bytestring"
         span_argument: yes
@@ -61,16 +54,14 @@ syscalls:
         typename: "StorageKey"
     outputs:
       - name: "status"
-        fixed_size: Yes
         typename: "StorageObjectType"
-        primitive_type: yes
         rust_typename: "i32"
+        primitive_type: yes
     number: 5
   - name: "DeleteLast"
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: Yes
         typename: "StorageKey"
     outputs:
     number: 6
@@ -79,9 +70,7 @@ syscalls:
     inputs:
     outputs:
       - name: "len"
-        fixed_size: Yes
         typename: "RuntimeMemoryLength"
-        primitive_type: yes
     number: 7
   - name: "GetCalldata"
     needs_context: yes
@@ -90,7 +79,6 @@ syscalls:
       - name: "buffer"
         span_argument: yes
       - name: "written_len"
-        fixed_size: yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
     number: 8
@@ -119,7 +107,6 @@ syscalls:
         span_argument: yes
     outputs:
       - name: "return_len"
-        fixed_size: yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
     syscall_return_type: "HostFnResult"
@@ -128,11 +115,9 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: yes
         typename: "StorageKey"
     outputs:
       - name: "result"
-        fixed_size: yes
         typename: "int64_t"
         rust_typename: "i64"
         primitive_type: yes
@@ -183,7 +168,6 @@ syscalls:
       - name: "buffer"
         span_argument: yes
       - name: "written_len"
-        fixed_size: yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
     number: 15
@@ -202,7 +186,6 @@ syscalls:
         typename: "SHA256Hash"
     outputs:
       - name: "to_be_deployed"
-        fixed_size: yes
         typename: "ContractAddress"
     number: 16
   - name: "DeployContract"
@@ -216,7 +199,6 @@ syscalls:
         typename: "SHA256Hash"
     outputs:
       - name: "deployed_address"
-        fixed_size: yes
         typename: "ContractAddress"
     number: 17
   - name: "GetSourceTransactionHash"
@@ -224,7 +206,6 @@ syscalls:
     inputs:
     outputs:
       - name: "source_tx_hash"
-        fixed_size: yes
         typename: "SHA256Hash"
     number: 18
   - name: "Exit"
@@ -284,12 +265,10 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "message"
-        fixed_size: yes
         typename: "SHA256Hash"
         optional: true
     outputs:
       - name: "auth_payload_hash"
-        fixed_size: yes
         typename: "SHA256Hash"
     number: 23
   - name: "PushAuthContext"
@@ -327,7 +306,6 @@ syscalls:
       - name: "witness"
         span_argument: yes
       - name: "written_len"
-        fixed_size: Yes
         typename: "RuntimeMemoryLength"
         primitive_type: yes
     number: 27
@@ -341,15 +319,14 @@ syscalls:
         primitive_type: yes
     outputs:
       - name: "witness_len"
-        fixed_size: yes
         typename: "RuntimeMemoryLength"
+        primitive_type: yes
     number: 28
   - name: "GetSelfAddress"
     needs_context: yes
     inputs:
     outputs:
       - name: "self_address"
-        fixed_size: Yes
         typename: "ContractAddress"
     number: 29
   - name: "GetBlockNumber"
@@ -359,7 +336,29 @@ syscalls:
       - name: "block_number"
         typename: "uint64_t"
         rust_typename: "u64"
+        primitive_type: yes
     number: 30
+  - name: "MessageQueueAppend"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+      - name: "message"
+        span_argument: yes
+    outputs:
+    number: 31
+  - name: "MessageQueueConsume"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+      - name: "message"
+        span_argument: yes
+      - name: "written_len"
+        typename: "RuntimeMemoryLength"
+        primitive_type: yes
+    number: 32
 
 
 errors:
