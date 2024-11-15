@@ -487,9 +487,9 @@ StorageObjectFrame::get_stripped_committed_object() const
     obj.replay_cache_metadata() =
         committed_base_object_->replay_cache().metadata;
     break;
-  case StorageDeltaType::kMessageQueue:
+  case StorageObjectType::kMessageQueue:
     // TODO(geoff): something more efficient than copying the whole thing
-    out.message_queue() = committed_base_object_ -> message_queue();
+    obj.message_queue() = committed_base_object_ -> message_queue();
     break;
   default:
     throw std::runtime_error("unimplemented");

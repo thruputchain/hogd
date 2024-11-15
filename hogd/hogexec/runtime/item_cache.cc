@@ -343,7 +343,7 @@ ItemCache::MessageQueueCacheType::get_deltas() const
   }
 
   for (auto const& event : new_messages_) {
-    out.push_backl(make_mq_append(event));
+    out.push_back(make_mq_append(event));
   }
 
   return out;

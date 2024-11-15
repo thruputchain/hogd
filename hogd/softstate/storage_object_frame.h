@@ -83,7 +83,7 @@ private:
     static bool can_accept() { return true; }
 
     StorageObject
-    to_object(std::optional<StorageObject> const &*previous_object) const;
+    to_object(std::optional<StorageObject> const &previous_object) const;
   };
 
   using variant_t =
