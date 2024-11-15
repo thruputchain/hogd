@@ -7,6 +7,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/item_cache.h"
+#include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "storage_object.hh"
 #include "types.hh"
 
@@ -166,6 +167,53 @@ TEST(ItemCache, ReplayCacheFromSome)
   EXPECT_TRUE(proxy.replay_cache_insert(15));
   EXPECT_FALSE(proxy.replay_cache_insert(5));
   EXPECT_TRUE(proxy.replay_cache_insert(10));
+}
+
+namespace {
+MessageQueueEvent
+make_event(uint64_t value)
+{
+  return test::make_calldata(value);
+}
+} // namespace
+
+TEST(ItemCache, MessageQueueAppendConsumeFromEmpty)
+{
+  ItemCache proxy(std::nullopt);
+
+  EXPECT_TRUE(proxy.append_event_to_mq(make_event(0)));
+  EXPECT_TRUE(proxy.append_event_to_mq(make_event(1)));
+  EXPECT_TRUE(proxy.append_event_to_mq(make_event(2)));
+  EXPECT_TRUE(proxy.append_event_to_mq(make_event(3)));
+
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(0));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(1));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(2));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(3));
+
+  EXPECT_FALSE(proxy.consume_next_mq_event());
+}
+
+TEST(ItemCache, MessageQueueConsumeFromNonempty)
+{
+  StrippedStorageObject object(StorageObjectType::kMessageQueue);
+
+  object.message_queue().events.push_back(make_event(0));
+  object.message_queue().events.push_back(make_event(1));
+  object.message_queue().events.push_back(make_event(2));
+  object.message_queue().events.push_back(make_event(3));
+
+  ItemCache proxy(object);
+
+  EXPECT_TRUE(proxy.append_event_to_mq(make_event(4)));
+
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(0));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(1));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(2));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(3));
+  EXPECT_EQ(*proxy.consume_next_mq_event(), make_event(4));
+
+  EXPECT_FALSE(proxy.consume_next_mq_event());
 }
 
 } // namespace hogd

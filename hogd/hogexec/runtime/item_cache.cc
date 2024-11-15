@@ -431,6 +431,69 @@ ItemCache::replay_cache_clear(uint64_t threshold)
   return {};
 }
 
+SyscallStatus<MessageQueueEvent>
+ItemCache::consume_next_mq_event()
+{
+  auto type_guard_res = type_guard(StorageObjectType::kMessageQueue);
+
+  if (!type_guard_res) {
+    return {type_guard_res.error()};
+  }
+
+  if (!get_message_queue_args()) {
+    delta_args_.emplace<MessageQueueCacheType>(
+        MessageQueueCacheType{.num_messages_consumed_ = 0,
+                              .new_messages_ = {}});
+  }
+
+  auto *args = get_message_queue_args();
+  assert(args != nullptr);
+
+  if (base_object_) {
+    assert(base_object_->type() == StorageObjectType::kMessageQueue);
+
+    auto const &events = base_object_->message_queue().events;
+
+    if (args->num_messages_consumed_ < events.size()) {
+      auto const &event_out = events[args->num_messages_consumed_];
+      args->num_messages_consumed_++;
+      return event_out;
+    }
+  }
+
+  auto out_iter = args->new_messages_.begin();
+  if (out_iter == args->new_messages_.end()) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  auto out = *out_iter;
+  args->new_messages_.erase(out_iter);
+  return out;
+}
+
+SyscallStatus<void>
+ItemCache::append_event_to_mq(MessageQueueEvent const &event)
+{
+  auto type_guard_res = type_guard(StorageObjectType::kMessageQueue);
+
+  if (!type_guard_res) {
+    return {type_guard_res.error()};
+  }
+
+  if (!get_message_queue_args()) {
+    delta_args_.emplace<MessageQueueCacheType>(
+        MessageQueueCacheType{.num_messages_consumed_ = 0,
+                              .new_messages_ = {}});
+  }
+
+  auto *args = get_message_queue_args();
+  assert(args != nullptr);
+
+  args->new_messages_.insert(event);
+
+  return {};
+}
+
 void
 ItemCacheMap::commit_child_map(ItemCacheMap &child_map)
 {
