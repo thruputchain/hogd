@@ -13,6 +13,11 @@
 
 namespace hogd {
 
+// Tracks the modifications of one transaction to one storage object.
+// Responsible for both producing, at the end of the transaction,
+// a (possibly condensed) list of StorageDeltas,
+// and also maintaining an internally-consistent view of the storage object
+// while executing a transaction (each transaction, e.g., reads its own writes).
 class ItemCache {
 public:
   ItemCache(std::optional<StrippedStorageObject> obj)
@@ -24,18 +29,22 @@ public:
   bool exists() const;
   std::optional<StorageObjectType> get_object_type() const;
 
+  // bytestring
   SyscallStatus<Bytestring> get_bytestring() const;
   SyscallStatus<uint64_t> get_bytestring_len() const;
   SyscallStatus<void>
   set_bytestring(std::span<const std::byte> input_bytestring);
 
+  // nonnegative int64
   SyscallStatus<int64_t> get_nnint64_base_value() const;
   SyscallStatus<int64_t> get_nnint64_value() const;
   SyscallStatus<void> nnint64_set_add(int64_t set_value, int64_t add_value);
 
+  // replay cache
   SyscallStatus<void> replay_cache_insert(uint64_t nonce);
   SyscallStatus<void> replay_cache_clear(uint64_t threshold);
 
+  // message queue
   SyscallStatus<MessageQueueEvent> consume_next_mq_event();
   SyscallStatus<void> append_event_to_mq(MessageQueueEvent const &event);
 
