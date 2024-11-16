@@ -20,7 +20,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/auth_manager.h"
 #include "hogd/hogexec/runtime/call_frame.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -50,7 +49,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       }
       return contracts;
     }()),
-    root_auth_manager_(signed_tx_), snapshot_cache_(snapshot_cache)
+    snapshot_cache_(snapshot_cache)
 
 {
   wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
@@ -59,11 +58,6 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
 InvokeResult
 SystemCallHandler::root_invoke()
 {
-  if (!AuthManager::initialization_validate_auth_entries(signed_tx_)) {
-    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
-                        .gas_consumed = 0};
-  }
-
   auto *runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
 
   if (!runtime) {
@@ -77,7 +71,7 @@ SystemCallHandler::root_invoke()
                         .gas_consumed = 0};
   }
 
-  start_call_frame(signed_tx_.tx.invocation, 0);
+  start_call_frame(signed_tx_.tx.invocation);
 
   auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
                                       signed_tx_.tx.invocation.gas_limit);
@@ -94,41 +88,6 @@ SystemCallHandler::root_invoke()
                         .gas_consumed = res.gas_consumed};
   }
 
-  total_gas_consumption_ += res.gas_consumed;
-
-  auto const &auth_entries = root_auth_manager_.get_auth_entries();
-
-  for (auto const &[authorizing_address, auth_context] : auth_entries) {
-    if (!auth_context.auth_state_.has_been_verified()) {
-
-      assert(total_gas_consumption_ <= signed_tx_.tx.invocation.gas_limit);
-
-      uint64_t gas_remaining =
-          signed_tx_.tx.invocation.gas_limit - total_gas_consumption_;
-
-      // We don't care about the returned result here -- finish_call_frame takes
-      // care of updating root_auth_manager_ with the result
-      auto [_, local_gas_consumed] =
-          invoke_verify_auth(authorizing_address, gas_remaining);
-
-      if (integer_add_overflow(local_gas_consumed, total_gas_consumption_,
-                               &total_gas_consumption_)) {
-        return InvokeResult{.result = InvokeError{InvokeErrorCode::kOutOfGas},
-                            .gas_consumed = UINT64_MAX};
-      }
-
-      if (total_gas_consumption_ > signed_tx_.tx.invocation.gas_limit) {
-        return InvokeResult{.result = InvokeError{InvokeErrorCode::kOutOfGas},
-                            .gas_consumed = total_gas_consumption_};
-      }
-    }
-  }
-
-  if (!root_auth_manager_.all_in_valid_termination_state()) {
-    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
-                        .gas_consumed = total_gas_consumption_};
-  }
-
   for (auto const &[addr, item] : root_item_cache_map_.local_map_) {
     auto deltas = item.get_deltas();
 
@@ -137,7 +96,7 @@ SystemCallHandler::root_invoke()
     }
   }
 
-  return InvokeResult{.result = 0, .gas_consumed = total_gas_consumption_};
+  return res;
 }
 
 // syscall methods: can only be called when call_frame_stack_ is nonempty
@@ -233,76 +192,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  start_call_frame(invocation, 0);
-
-  auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
-
-  finish_call_frame(res);
-
-  return convert_invoke_result_to_host_fn_result(res);
-}
-
-namespace {
-
-Invocation
-make_verify_auth_invocation(ContractAddress const &authorizing_address,
-                            AuthEntry const &auth_entry, uint64_t gas_limit)
-{
-  Invocation invocation;
-  invocation.invoked_address = authorizing_address;
-  invocation.method.method_type(MethodSpecifierType::kReservedName);
-  invocation.method.reserved_name() = "_verify_auth";
-  invocation.gas_limit = gas_limit;
-
-  // TODO(geoff): figure out a nice way to transfer an auth_entry into wasm
-  VerifyAuthArgs auth_calldata;
-  auth_calldata.auth_metadata = auth_entry.metadata;
-  auth_calldata.witness_count = auth_entry.witnesses.size();
-
-  invocation.calldata = x23::serialize(auth_calldata);
-  return invocation;
-}
-
-} // namespace
-
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke_verify_auth(
-    ContractAddress const &authorizing_address,
-    GasAmount call_specified_gas_limit)
-{
-  auto gas_limit = get_invoke_gas_limit(call_specified_gas_limit);
-
-  if (!gas_limit) {
-    return std::pair{gas_limit.error().code(), 0};
-  }
-
-  auto *runtime = resolve_runtime(authorizing_address);
-
-  if (!runtime) {
-    return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
-  }
-
-  const AuthManager &auth_manager =
-      (call_frame_stack_.empty()) ? root_auth_manager_
-                                  : call_frame_stack_.back().auth_manager_;
-
-  if (!auth_manager.has_entry_for(authorizing_address)) {
-    return std::pair{SyscallErrorCode::kNoAuthRequired, 0};
-  }
-
-  if (!call_frame_stack_.empty()) {
-    if (!std::holds_alternative<NormalFrameContext>(
-            call_frame_stack_.back().extra_context_)) {
-      return std::pair{SyscallErrorCode::kInvalidInvokeContext, 0};
-    }
-  }
-
-  auto const &auth_entry = auth_manager.get_entry_for(authorizing_address);
-
-  Invocation invocation =
-      make_verify_auth_invocation(authorizing_address, auth_entry, *gas_limit);
-
-  start_verify_auth_frame(invocation);
+  start_call_frame(invocation);
 
   auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
 
@@ -312,48 +202,9 @@ SystemCallHandler::invoke_verify_auth(
 }
 
 void
-SystemCallHandler::start_verify_auth_frame(Invocation const &invocation)
+SystemCallHandler::start_call_frame(Invocation const &invocation)
 {
-  uint64_t new_flags = 0;
-
-  if (call_frame_stack_.empty()) {
-    call_frame_stack_.emplace_back(invocation, root_auth_manager_,
-                                   AuthContextStack(), new_flags,
-                                   VerifyAuthFrameContext{
-                                       .authorizing_address =
-                                           invocation.invoked_address});
-    return;
-  }
-
-  CallFrame new_frame(invocation, call_frame_stack_.back().auth_manager_,
-                      call_frame_stack_.back().auth_context_stack_,
-                      call_frame_stack_.back().flags_ | new_flags,
-                      VerifyAuthFrameContext{.authorizing_address =
-                                                 invocation.invoked_address});
-
-  call_frame_stack_.emplace_back(std::move(new_frame));
-}
-
-void
-SystemCallHandler::start_call_frame(Invocation const &invocation,
-                                    uint64_t new_flags)
-{
-  if (call_frame_stack_.empty()) {
-    call_frame_stack_.emplace_back(invocation, root_auth_manager_,
-                                   AuthContextStack{}, new_flags,
-                                   NormalFrameContext{});
-    return;
-  }
-
-  // emplace_back might invalidate the reference to call_frame_stack_back(),
-  // and I can't find where in the standard the precise point at which this
-  // invalidation occurs (but it would make sense to do the realloc before a
-  // placement new, so I assume it occurs before the ctor is called)
-  CallFrame new_frame(invocation, call_frame_stack_.back().auth_manager_,
-                      call_frame_stack_.back().auth_context_stack_,
-                      call_frame_stack_.back().flags_ | new_flags,
-                      call_frame_stack_.back().extra_context_);
-  call_frame_stack_.emplace_back(std::move(new_frame));
+  call_frame_stack_.emplace_back(invocation);
 }
 
 void
@@ -375,35 +226,6 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
   // fairly invasive changes (We need to restore the entirety of the wasm
   // module's internal state -- not just memory, but also tables and globals.
   // The stack is reset automatically).
-
-  // If the frame is the root of a verify_auth invocation tree:
-  // mark the error here, then commit.
-  //
-  // Verify_auth is special: The auth is marked as failed EVEN IF
-  // the verify_auth call reverts.
-  auto is_verify_auth_frame = [](CallFrame const &frame) -> bool {
-    return std::holds_alternative<VerifyAuthFrameContext>(frame.extra_context_);
-  };
-
-  if (is_verify_auth_frame(call_frame_stack_.back())) {
-    if (call_frame_stack_.size() == 1 ||
-        is_verify_auth_frame(call_frame_stack_[call_frame_stack_.size() - 2])) {
-
-      auto &parent_auth_manager =
-          (call_frame_stack_.size() == 1)
-              ? root_auth_manager_
-              : call_frame_stack_[call_frame_stack_.size() - 2].auth_manager_;
-
-      if (result.result.has_value() && *result.result == 0) {
-        parent_auth_manager.mark_verify_auth_successful(
-            call_frame_stack_.back().active_invocation_.invoked_address);
-      }
-      else {
-        parent_auth_manager.mark_verify_auth_failed(
-            call_frame_stack_.back().active_invocation_.invoked_address);
-      }
-    }
-  }
 
   // Revert the function
   if (!result.result.has_value() || (*result.result < 0)) {
@@ -453,8 +275,6 @@ SystemCallHandler::commit_last_call_frame_success(CallFrame &frame)
   committed_logs_.insert(committed_logs_.end(), logs.begin(), logs.end());
 
   root_item_cache_map_.commit_child_map(frame.get_item_cache_map());
-
-  root_auth_manager_ = std::move(frame.auth_manager_);
 
   for (auto [addr, hash] : frame.new_contract_deployments_) {
     new_committed_deployments_.emplace(addr, hash);
@@ -667,140 +487,6 @@ SyscallStatus<MessageQueueEvent>
 SystemCallHandler::message_queue_consume_event(StorageKey const &key)
 {
   return resolve_item_cache(key).consume_next_mq_event();
-}
-
-namespace {
-
-AuthContext
-make_auth_context(ContractAddress const &addr,
-                  std::span<const std::byte> action)
-{
-
-  AuthContext new_context;
-  new_context.address = addr;
-
-  std::span<const uint8_t> reinterpreted_auth_frame = {
-      reinterpret_cast<const uint8_t *>(action.data()), action.size()};
-  new_context.bytes = {reinterpreted_auth_frame.begin(),
-                       reinterpreted_auth_frame.end()};
-
-  return new_context;
-}
-
-} // namespace
-
-void
-SystemCallHandler::push_auth_context(
-    std::span<const std::byte> auth_context_frame)
-{
-  auto &frame = get_active_call_frame();
-  frame.auth_context_stack_.context_.push_back(
-      make_auth_context(frame.active_invocation_.invoked_address,
-                        auth_context_frame));
-}
-
-SyscallStatus<void>
-SystemCallHandler::pop_auth_context()
-{
-  auto &frame = get_active_call_frame();
-  if (frame.auth_context_stack_.can_pop_context()) {
-    frame.auth_context_stack_.context_.pop_back();
-    return {};
-  }
-  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-}
-
-SyscallStatus<void>
-SystemCallHandler::require_auth(
-    const ContractAddress &authorizing_address,
-    std::optional<std::span<const std::byte>> action)
-{
-  auto &active_frame = get_active_call_frame();
-
-  if (action.has_value()) {
-    auto leaf_context = make_auth_context(authorizing_address, *action);
-    active_frame.auth_context_stack_.context_.push_back(leaf_context);
-  }
-  else {
-    auto &calldata = active_frame.active_invocation_.calldata;
-    auto full_auth_context =
-        x23::serialize(active_frame.active_invocation_.method, calldata);
-    auto leaf_context =
-        make_auth_context(authorizing_address,
-                          std::as_bytes(std::span(full_auth_context)));
-    active_frame.auth_context_stack_.context_.push_back(leaf_context);
-  }
-  x23::Defer d([&] { active_frame.auth_context_stack_.context_.pop_back(); });
-
-  if (!active_frame.auth_manager_.try_match(authorizing_address,
-                                            active_frame.auth_context_stack_)) {
-    return SyscallError{SyscallErrorCode::kAuthMatchFailed};
-  }
-
-  return {};
-}
-
-bool
-SystemCallHandler::inside_verify_auth_frame() const
-{
-  assert(!call_frame_stack_.empty());
-
-  return std::holds_alternative<VerifyAuthFrameContext>(
-      call_frame_stack_.back().extra_context_);
-}
-
-SyscallStatus<Witness>
-SystemCallHandler::get_auth_witness(uint32_t wit_index) const
-{
-  if (!inside_verify_auth_frame()) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
-  auto const &authorizing_address =
-      std::get<VerifyAuthFrameContext>(call_frame_stack_.back().extra_context_)
-          .authorizing_address;
-
-  auto const &entry =
-      call_frame_stack_.back().auth_manager_.get_entry_for(authorizing_address);
-
-  if (entry.witnesses.size() <= wit_index) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
-  return entry.witnesses[wit_index];
-}
-
-SyscallStatus<AuthEntrySignaturePayload>
-SystemCallHandler::get_auth_payload(const SHA256Hash *optional_input_message)
-{
-  assert(!call_frame_stack_.empty());
-
-  if (!inside_verify_auth_frame()) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
-  AuthEntrySignaturePayload payload;
-  if (optional_input_message) {
-    payload.message = *optional_input_message;
-  }
-  else {
-    payload.message = get_source_tx_hash();
-  }
-
-  payload.authorizing_address =
-      std::get<VerifyAuthFrameContext>(call_frame_stack_.back().extra_context_)
-          .authorizing_address;
-
-  if (!root_auth_manager_.has_entry_for(payload.authorizing_address)) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-  auto const &entry =
-      root_auth_manager_.get_entry_for(payload.authorizing_address);
-
-  payload.nodes = entry.nodes;
-  payload.metadata = entry.metadata;
-
-  return payload;
 }
 
 std::optional<SHA256Hash>

@@ -8,8 +8,6 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/auth_context_stack.h"
-#include "hogd/hogexec/runtime/auth_manager.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -17,12 +15,7 @@
 
 namespace hogd {
 
-CallFrame::CallFrame(Invocation invocation, AuthManager const &auth_manager,
-                     AuthContextStack const &auth_context_stack, uint64_t flags,
-                     ExtraFrameContext extra_context)
-  : active_invocation_(invocation), auth_manager_(auth_manager),
-    auth_context_stack_(auth_context_stack), flags_(flags),
-    extra_context_(extra_context)
+CallFrame::CallFrame(Invocation invocation) : active_invocation_(invocation)
 {
   visited_runtimes_.insert(active_invocation_.invoked_address);
 }
@@ -39,8 +32,6 @@ CallFrame::commit_successful_child_call(CallFrame &frame)
   child_return_buffer_ = frame.to_return_;
   logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
                std::make_move_iterator(frame.logs_.end()));
-
-  auth_manager_ = std::move(frame.auth_manager_);
 }
 
 void

@@ -7,13 +7,10 @@ set_source_files_properties(
     PROPERTIES GENERATED TRUE)
 
 set(runtime_sources 
-  auth_entry_matcher.cc
-  auth_manager.cc
   call_frame.cc
   status.cc
   item_cache.cc
   storage_snapshot_cache.cc
-  syscall_auth.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
@@ -73,7 +70,6 @@ add_executable(
   deployer_test.cc
   erc20_test.cc
   erc20_test_utils.cc
-  auth_match_test.cc
   deploy_revert_test.cc
   reentrant_revert_test.cc
   optional_argument_test.cc

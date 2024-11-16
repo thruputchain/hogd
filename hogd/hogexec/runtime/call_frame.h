@@ -7,30 +7,15 @@
 #include <span>
 #include <vector>
 
-#include "hogd/hogexec/runtime/auth_context_stack.h"
-#include "hogd/hogexec/runtime/auth_manager.h"
 #include "hogd/hogexec/runtime/item_cache.h"
 #include "storage_object.hh"
 #include "transaction.hh"
 
 namespace hogd {
 
-enum class CallFrameFlags : uint64_t {};
-
-struct NormalFrameContext {};
-
-struct VerifyAuthFrameContext {
-  ContractAddress authorizing_address;
-};
-
-using ExtraFrameContext =
-    std::variant<NormalFrameContext, VerifyAuthFrameContext>;
-
 class CallFrame {
 public:
-  CallFrame(Invocation invocation, AuthManager const &auth_manager,
-            AuthContextStack const &auth_context_stack, uint64_t flags,
-            ExtraFrameContext extra_context);
+  CallFrame(Invocation invocation);
 
   void commit_successful_child_call(CallFrame &frame);
   // revert the child call frame
@@ -59,11 +44,6 @@ public:
   ItemCacheMap &get_item_cache_map() { return item_cache_map_; }
 
   const Invocation active_invocation_;
-  AuthManager auth_manager_;
-  AuthContextStack auth_context_stack_;
-  const uint64_t flags_;
-
-  ExtraFrameContext extra_context_;
 
   std::map<ContractAddress, SHA256Hash> new_contract_deployments_;
 

@@ -30,7 +30,6 @@ pub fn handle_alloc_error(_: Layout) -> ! {
 #[cfg(feature = "alloc")]
 pub mod alloc;
 
-mod auth;
 mod bytestring;
 mod contract;
 mod crypto;
@@ -39,6 +38,7 @@ mod initialize;
 mod invoke;
 mod log;
 mod nonnegative_int64;
+mod replay;
 mod syscall;
 
 pub mod parse_trait;
@@ -48,7 +48,6 @@ pub mod syscall_bindings;
 
 pub mod rt;
 
-pub use auth::*;
 pub use bytestring::*;
 pub use contract::*;
 pub use crypto::*;
@@ -57,4 +56,5 @@ pub use initialize::*;
 pub use invoke::*;
 pub use log::*;
 pub use nonnegative_int64::*;
+pub use replay::*;
 pub use rs_xdr::*;

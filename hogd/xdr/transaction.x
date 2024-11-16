@@ -2,7 +2,6 @@
 // clang-format off
 %#include "types.hh"
 %#include "contract.hh"
-%#include "auth.hh"
 
 namespace hogd
 {
@@ -13,15 +12,12 @@ namespace hogd
 
   enum MethodSpecifierType {
     kDefaultUint32 = 0,
-    kReservedName = 1,
   };
 
   union MethodSpecifier switch (MethodSpecifierType method_type)
   {
   case kDefaultUint32:
     MethodID method_id_uint32;
-  case kReservedName:
-    string reserved_name<>;
   };
 
   struct Invocation {
@@ -41,7 +37,6 @@ namespace hogd
   // for a later PR.
   struct SignedTransaction {
     Transaction tx;
-    AuthEntry auth_entries<>;
   };
 
   struct LogEntry {

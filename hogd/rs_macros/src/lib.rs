@@ -165,51 +165,6 @@ impl Parse for AttributeArgs {
 }
 
 #[proc_macro_attribute]
-pub fn verify_auth(_: TokenStream, item: TokenStream) -> TokenStream {
-    let func: ItemFn = parse_macro_input!(item as ItemFn);
-
-    let function_signature = &func.sig;
-
-    let function_name = &function_signature.ident;
-
-    //TODO(geoff): assertion that input sig is correct,
-    // for better error handling
-
-    let wrap_fn_name = format_ident!("wrapper_{}", function_name.to_string());
-
-    let export_name = format!("_verify_auth");
-
-    let calldata_decl = quote! {
-        let calldata : [u8; 16] = match ::rs_contract_sdk::GetCalldata_Sized::<16>()
-        {
-            Ok(res) => res,
-            Err(x) => {return x;}
-        };
-    };
-
-    TokenStream::from(quote! {
-        #[cfg_attr(target_family = "wasm", export_name = #export_name)]
-        #[no_mangle]
-        #[cfg(not(feature="interface"))]
-        pub extern "C" fn #wrap_fn_name () -> i32 {
-            #calldata_decl
-
-            // verify auth call can use Syscall::Exit if it wants to return an error code,
-            // or trap to revert
-            ::rs_contract_sdk::parse_trait::parse_from_calldata_1::<
-                ::rs_contract_sdk::VerifyAuthArgs,
-                ()
-            >(&calldata, #function_name);
-
-            0
-        }
-
-        #[cfg(not(feature = "interface"))]
-        #func
-    })
-}
-
-#[proc_macro_attribute]
 pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
     let tokens: AttributeArgs = parse_macro_input!(attr as AttributeArgs);
 

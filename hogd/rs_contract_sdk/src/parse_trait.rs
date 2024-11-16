@@ -702,38 +702,6 @@ pub fn parse_returns_from_calldata<'a, T: ParseableOwned>(
     Ok(arg)
 }
 
-impl<'a> Parseable<'a> for AuthEntryMetadata {
-    fn parse_from(arg: &'a [u8]) -> (Self, usize) {
-        parse_combinator_2::<u32, u64, AuthEntryMetadata>(
-            arg,
-            |arg_auth_flags: u32,
-             arg_signature_nonce: u64|
-             -> AuthEntryMetadata {
-                AuthEntryMetadata {
-                    auth_flags: arg_auth_flags,
-                    signature_nonce: arg_signature_nonce,
-                }
-            },
-        )
-    }
-}
-
-impl<'a> Parseable<'a> for VerifyAuthArgs {
-    fn parse_from(arg: &'a [u8]) -> (Self, usize) {
-        parse_combinator_2::<AuthEntryMetadata, u32, VerifyAuthArgs>(
-            arg,
-            |arg_meta: AuthEntryMetadata,
-             arg_wit_count: u32|
-             -> VerifyAuthArgs {
-                VerifyAuthArgs {
-                    auth_metadata: arg_meta,
-                    witness_count: arg_wit_count,
-                }
-            },
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,7 +5,7 @@ use rs_contract_sdk as sdk;
 
 use sdk::rt::trap;
 
-use rs_macros::{public_interface, public_method, static_key, verify_auth};
+use rs_macros::{public_interface, public_method, static_key};
 
 extern crate alloc;
 use core::mem::MaybeUninit;
@@ -41,23 +41,6 @@ fn load_config_data() -> (sdk::ContractAddress, sdk::Ed25519PublicKey) {
         sdk::Ed25519PublicKey,
     )>(&config)
     .unwrap()
-}
-
-#[verify_auth]
-pub fn verify_auth_handler(args: sdk::VerifyAuthArgs) -> () {
-    let (_, pk) = load_config_data();
-
-    if args.witness_count != 1 {
-        trap();
-    }
-
-    let signature: sdk::Ed25519Signature =
-        sdk::GetAuthWitness_Sized::<64>(0).unwrap();
-
-    let auth_message: sdk::SHA256Hash =
-        sdk::GetDefaultAuthPayloadHash().unwrap();
-
-    sdk::VerifySignatureEd25519(&pk, &signature, &auth_message).unwrap();
 }
 
 // no auth on this method

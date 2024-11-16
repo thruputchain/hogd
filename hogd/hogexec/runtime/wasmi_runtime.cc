@@ -220,9 +220,6 @@ WasmiRuntime::invoke(MethodSpecifier method_specifier, uint64_t gas_limit)
   case kDefaultUint32:
     method_name_str = std::format("{:X}", method_specifier.method_id_uint32());
     break;
-  case kReservedName:
-    method_name_str = method_specifier.reserved_name();
-    break;
   default:
     return InvokeResult{.result = {InvokeError{
                             InvokeErrorCode::kDeterministic}},
