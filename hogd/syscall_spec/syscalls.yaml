@@ -50,7 +50,6 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: Yes
         typename: "StorageKey"
     outputs:
       - name: "status"
@@ -93,14 +92,11 @@ syscalls:
     needs_context : yes
     inputs:
       - name: "address"
-        fixed_size: yes
         typename: "ContractAddress"
       - name: "method"
-        fixed_size: yes
         typename: "MethodID"
         primitive_type: yes
       - name: "gas_limit"
-        fixed_size: yes
         typename: "GasAmount"
         primitive_type: yes
       - name: "calldata"
@@ -126,15 +122,12 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: yes
         typename: "StorageKey"
       - name: "set_value"
-        fixed_size: yes
         typename: "int64_t"
         rust_typename: "i64"
         primitive_type: yes
       - name: "add_value"
-        fixed_size: yes
         typename: "int64_t"
         rust_typename: "i64"
         primitive_type: yes  
@@ -144,10 +137,8 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: yes
         typename: "StorageKey"
       - name: "add_value"
-        fixed_size: yes
         typename: "int64_t"
         rust_typename: "i64"
         primitive_type: yes  
@@ -175,14 +166,11 @@ syscalls:
     needs_context : yes
     inputs:
       - name: "caller_address"
-        fixed_size: yes
         typename: "ContractAddress"
         optional: yes
       - name: "nonce"
-        fixed_size: yes
         typename: "SHA256Hash"
       - name: "contract_hash"
-        fixed_size: yes
         typename: "SHA256Hash"
     outputs:
       - name: "to_be_deployed"
@@ -192,10 +180,8 @@ syscalls:
     needs_context : yes
     inputs:
       - name: "nonce"
-        fixed_size: yes
         typename: "SHA256Hash"
       - name: "contract_hash"
-        fixed_size: yes
         typename: "SHA256Hash"
     outputs:
       - name: "deployed_address"
@@ -213,7 +199,6 @@ syscalls:
     syscall_return_type: "HostFnResult"
     inputs:
       - name: "code"
-        fixed_size: yes
         typename: "int32_t"
         rust_typename: "i32"
         primitive_type: yes
@@ -239,10 +224,8 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: yes
         typename: "StorageKey"
       - name: "nonce"
-        fixed_size: yes
         typename: "uint64_t"
         rust_typename: "u64"
         primitive_type: yes
@@ -252,10 +235,8 @@ syscalls:
     needs_context: yes
     inputs:
       - name: "key"
-        fixed_size: yes
         typename: "StorageKey"
       - name: "threshold"
-        fixed_size: yes
         typename: "uint64_t"
         rust_typename: "u64"
         primitive_type: yes

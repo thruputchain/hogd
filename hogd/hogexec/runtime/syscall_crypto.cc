@@ -26,7 +26,7 @@ syscall_VerifySignature_inner(const PublicKey &input_pk,
                               std::span<const std::byte> input_message)
 {
   if (input_pk.scheme() != input_sig.scheme()) {
-    return {SyscallErrorCode::kSignatureVerificationFailed, 0};
+    return {SyscallErrorCode::kInvalidSyscallInput, 0};
   }
 
   using enum CryptographicScheme;
@@ -35,11 +35,11 @@ syscall_VerifySignature_inner(const PublicKey &input_pk,
   case Ed25519:
     if (!ed25519_verify(input_pk.ed25519(), input_sig.ed25519(),
                         input_message)) {
-      return {SyscallErrorCode::kSignatureVerificationFailed, 0};
+      return {SyscallErrorCode::kInvalidSyscallInput, 0};
     }
     return {SyscallErrorCode::kNone, 0};
   default:
-    return {SyscallErrorCode::kSignatureVerificationFailed, 0};
+    return {SyscallErrorCode::kInvalidSyscallInput, 0};
   }
 }
 
