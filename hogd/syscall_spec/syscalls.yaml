@@ -349,18 +349,6 @@ errors:
   - name: "ReturnParseError"
     number: 15
     doc: "Failed to parse the return buffer into the contract's output signature"
-  - name: "SignatureVerificationFailed"
-    number: 16
-    doc: "Signature verification failed"
-  - name: "AuthMatchFailed"
-    number: 17
-    doc: "Auth Matching Failed"
-  - name: "NoAuthRequired"
-    number: 18
-    doc: "Cannot call verify_auth on an address with no auth entry"
-  - name: "InvalidInvokeContext"
-    number: 19
-    doc: "Invalid attempt to start new call frame.  For example, cannot call verify_auth within verify_auth."
 
     # those that cause call frames to revert
   - name: "DeterministicWasm"
