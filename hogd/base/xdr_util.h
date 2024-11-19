@@ -7,7 +7,6 @@
 
 namespace hogd {
 
-
 constexpr inline int128_xdr
 to_xdr(int128_t value)
 {
