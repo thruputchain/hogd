@@ -5,8 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "types.hh"
-
 namespace hogd {
 
 using std::int16_t;
