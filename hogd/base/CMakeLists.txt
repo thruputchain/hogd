@@ -7,6 +7,8 @@ add_library(
   string.cc
 )
 
+target_link_libraries(base protocol)
+
 # create base module test binary
 add_executable(
   base_test
