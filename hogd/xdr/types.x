@@ -1,7 +1,28 @@
 namespace hogd {
 
-typedef opaque uint128_xdr[16];
-typedef opaque uint256_xdr[32];
+struct uint128_xdr {
+  uint64_t highbits;
+  uint64_t lowbits;
+};
+
+struct int128_xdr {
+  int64_t highbits;
+  uint64_t lowbits;
+};
+
+struct uint256_xdr {
+  uint64_t bits_0;
+  uint64_t bits_1;
+  uint64_t bits_2;
+  uint64_t bits_3;
+};
+
+struct int256_xdr {
+  int64_t bits_0;
+  uint64_t bits_1;
+  uint64_t bits_2;
+  uint64_t bits_3;
+};
 
 typedef opaque Ed25519Signature[64]; // ed25519 sig len is 512 bits
 typedef opaque Ed25519PublicKey[32]; // ed25519 key len is 256 bits
