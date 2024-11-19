@@ -12,6 +12,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_object.hh"
 #include "syscall.hh"
