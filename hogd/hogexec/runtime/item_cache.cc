@@ -1,8 +1,9 @@
 #include "hogd/hogexec/runtime/item_cache.h"
 
 #include <cassert>
+#include <concepts>
 #include <cstddef>
-#include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <type_traits>
