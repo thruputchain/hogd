@@ -22,13 +22,13 @@ public:
   void delete_last();
 
   SyscallStatus<Bytestring> get_bytestring() const;
-  SyscallStatus<uint64_t> get_bytestring_len() const;
+  SyscallStatus<uint32_t> get_bytestring_len() const;
   SyscallStatus<void>
   set_bytestring(std::span<const std::byte> input_bytestring);
 
-  SyscallStatus<int64_t> get_nnint64_base_value() const;
-  SyscallStatus<int64_t> get_nnint64_value() const;
-  SyscallStatus<void> nnint64_set_add(int64_t set_value, int64_t add_value);
+  SyscallStatus<int128_t> get_nnint128_base_value() const;
+  SyscallStatus<int128_t> get_nnint128_value() const;
+  SyscallStatus<void> nnint128_set_add(int128_t set_value, int128_t add_value);
 
   x23::Vec<StorageDelta> get_deltas() const;
 
@@ -44,14 +44,14 @@ private:
         StorageObjectType::kBytestring;
   };
 
-  struct NNInt64CacheType {
-    int64_t nnint64_set_arg_ = 0;
-    int64_t nnint64_add_sum_ = 0;
+  struct NNInt128CacheType {
+    int128_t nnint128_set_arg_ = 0;
+    int128_t nnint128_add_sum_ = 0;
 
     x23::Vec<StorageDelta> get_deltas() const;
 
     constexpr static std::optional<StorageObjectType> kObjectType =
-        StorageObjectType::kNonnegativeInt64;
+        StorageObjectType::kNonnegativeInt128;
   };
 
   struct UnsetType {
@@ -70,17 +70,17 @@ private:
         self.delta_args_))>(nullptr);
   }
 
-  auto *get_nnint64_args(this auto &self)
+  auto *get_nnint128_args(this auto &self)
   {
-    if (std::holds_alternative<NNInt64CacheType>(self.delta_args_)) {
-      return &std::get<NNInt64CacheType>(self.delta_args_);
+    if (std::holds_alternative<NNInt128CacheType>(self.delta_args_)) {
+      return &std::get<NNInt128CacheType>(self.delta_args_);
     }
-    return static_cast<decltype(&std::get<NNInt64CacheType>(self.delta_args_))>(
-        nullptr);
+    return static_cast<decltype(&std::get<NNInt128CacheType>(
+        self.delta_args_))>(nullptr);
   }
 
   std::optional<StorageObject> base_object_;
-  std::variant<UnsetType, BytestringCacheType, NNInt64CacheType> delta_args_ =
+  std::variant<UnsetType, BytestringCacheType, NNInt128CacheType> delta_args_ =
       UnsetType{};
 
   bool is_deleted_last_ = false;

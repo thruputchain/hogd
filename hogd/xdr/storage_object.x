@@ -7,7 +7,7 @@ namespace hogd
 
   enum StorageObjectType {
     kBytestring = 0,
-    kNonnegativeInt64 = 1,
+    kNonnegativeInt128 = 1,
   };
 
   const kBytestringMaxLen = 1024;
@@ -18,19 +18,19 @@ namespace hogd
   {
   case kBytestring:
     Bytestring bytestring;
-  case kNonnegativeInt64:
-    hyper int64;
+  case kNonnegativeInt128:
+    int128_xdr nnint128;
   };
 
   enum StorageDeltaType {
     kDeleteLast = 0,
     kBytestringSet = 1,
-    kNonnegativeInt64SetAdd = 2,
+    kNonnegativeInt128SetAdd = 2,
   };
 
-  struct NonnegativeInt64SetAddArgs {
-    hyper set_value; // int64_t
-    hyper add_value; // int64_t
+  struct NonnegativeInt128SetAddArgs {
+    int128_xdr set_value;
+    int128_xdr add_value;
   };
 
   union StorageDelta switch (StorageDeltaType type)
@@ -39,8 +39,8 @@ namespace hogd
     void;
   case kBytestringSet:
     Bytestring bytestring;
-  case kNonnegativeInt64SetAdd:
-    NonnegativeInt64SetAddArgs nnint64;
+  case kNonnegativeInt128SetAdd:
+    NonnegativeInt128SetAddArgs nnint128;
   };
 
 } // namespace hogd
