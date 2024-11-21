@@ -292,6 +292,9 @@ type_specifier:
   scalar_type {
     $$ = $1->text;
     $$->comment = $1->block_comment;
+    if ($1->text == "uint32_t" || $1->text == "int32_t" || $1->text == "uint64_t" || $1->text == "int64_t") {
+      yyerror(&@scalar_type, xc, "Type identifier conflicts with corresponding C++ type", true);
+    }
   }
 | T_ENUM enum_body {
     $$ = $2.move();
