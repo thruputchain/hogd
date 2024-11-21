@@ -18,12 +18,6 @@
 
 namespace hogd {
 
-bool
-StorageObjectFrame::NNInt64SetAddArgs::can_accept(int64_t const &set_arg) const
-{
-  return set_value_ == set_arg;
-}
-
 StorageObject
 StorageObjectFrame::NNInt64SetAddArgs::to_object(
     std::optional<StorageObject> const & /*unused*/) const
@@ -140,37 +134,39 @@ StorageObjectFrame::try_set_variant(RefcountedVariant &variant,
     return nullptr;
   }
 
-  variant.refcount_++;
-
   return &std::get<VariantArm>(variant.variant_);
+}
+
+template<typename VariantArm, typename... VariantArgs>
+void
+StorageObjectFrame::set_variant_from_exclusive_lock(RefcountedVariant &variant,
+                                                    VariantArgs const &...args)
+{
+  assert(std::holds_alternative<ExclusiveLockedArgs>(variant.variant_));
+
+  variant.variant_.emplace<VariantArm>(args...);
+
+  assert(variant.refcount_ == 1);
 }
 
 StorageObjectFrame::StorageObjectFrame(
     std::optional<StorageObject> const &snapshot_state)
-  : committed_base_object_(snapshot_state), deleted_last_(false)
+  : committed_base_object_(snapshot_state)
 {}
 
-bool
-StorageObjectFrame::type_guard(StorageObjectType expected_type) const
-{
-  if (committed_base_object_) {
-    return committed_base_object_->type() == expected_type;
-  }
-  return true;
-}
-
 StorageReserveResult
-StorageObjectFrame::try_reserve_bytestring_set(Bytestring const &bytestring_set)
+StorageObjectFrame::try_reserve_bytestring_set(
+    RefcountedVariant &v, Bytestring const &bytestring_set,
+    std::optional<StorageLock> const &lock)
 {
-  if (!type_guard(StorageObjectType::kBytestring)) {
-    return StorageReserveResult::kDefiniteFailure;
-  }
-
-  auto v = variant_.take();
-
   if ([[maybe_unused]] auto *args =
-          try_set_variant<BytestringArgs>(*v, bytestring_set)) {
+          try_set_variant<BytestringArgs>(v, bytestring_set)) {
+
     assert(args->bytestring_set_ == bytestring_set);
+
+    if (!lock.has_value()) {
+      acquire_variant_reference(v);
+    }
 
     return StorageReserveResult::kSuccess;
   }
@@ -178,9 +174,9 @@ StorageObjectFrame::try_reserve_bytestring_set(Bytestring const &bytestring_set)
 }
 
 void
-StorageObjectFrame::revert_bytestring_set()
+StorageObjectFrame::revert_bytestring_set(RefcountedVariant &v)
 {
-  release_variant(*variant_.take());
+  release_variant_reference(v);
 }
 
 StorageReserveResult
@@ -421,6 +417,53 @@ StorageObjectFrame::revert_mq_consume()
 }
 
 StorageReserveResult
+StorageObjectFrame::try_reserve_delta(StorageDelta const &delta,
+                                      std::optional<StorageLock> const &lock)
+{
+  auto v = variant_.take();
+
+  if (lock.has_value()) {
+    assert(lock.lock_type != StorageLockType::kNone);
+
+    if constexpr (is_debug_build()) {
+      if (lock.lock_type == StorageLockType::kSetObjectTypeClass) {
+        assert(!std::holds_alternative<ExclusiveLockedArgs>(v->variant_));
+        assert(v->variant_.refcount_ != 0);
+      }
+      if (lock.lock_type == StorageLockType::kExclusiveLock) {
+        assert(std::holds_alternative<ExclusiveLockedArgs>(v->variant_));
+        assert(v->variant_.refcount_ == 1);
+      }
+    }
+
+    if (lock.lock_type == StorageLockType::kExclusiveLock) {
+      switch (delta.type()) {
+      case kDelete:
+        set_variant_from_exclusive_lock<DeleteArgs>(*v);
+        break;
+      case StorageDeltaType::kBytestringSet:
+        set_variant_from_exclusive_lock<BytestringArgs>(*v, delta.bytestring());
+        break;
+      default:
+        throw std::runtime_error("unimpl");
+      }
+    }
+  }
+
+  switch (delta.type()) {
+  case StorageDeltaType::kDeleteLast:
+    return StorageReserveResult::kSuccess;
+  case StorageDeltaType::kBytestringSet:
+    return try_reserve_bytestring_set(delta.bytestring(), lock);
+  case StorageDeltaType::kNonnegativeInt64SetAdd:
+    return try_reserve_nnint64_set_add(delta.nnint64().set_value,
+                                       delta.nnint64().add_value, lock);
+  default:
+    throw std::runtime_error("unknown delta type");
+  }
+}
+
+StorageReserveResult
 StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
 {
   switch (delta.type()) {
@@ -448,9 +491,6 @@ void
 StorageObjectFrame::commit_delta(StorageDelta const &delta)
 {
   switch (delta.type()) {
-  case StorageDeltaType::kDeleteLast:
-    deleted_last_.store(true, std::memory_order_relaxed);
-    return;
   case StorageDeltaType::kReplayCacheClear:
     commit_replay_cache_clear(delta.replay_clear_threshold());
   default:

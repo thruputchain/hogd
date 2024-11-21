@@ -53,6 +53,8 @@ namespace hogd
     ReplayCache replay_cache;
   case kMessageQueue:
     MessageQueue message_queue;
+  case kDeleted:
+    void;
   };
 
   // Things to do: figure out which info is stripped, when, and how that
@@ -71,8 +73,62 @@ namespace hogd
     MessageQueue message_queue;
   };
 
+  union StorageObjectTypeClass switch (StorageObjectType type)
+  {
+  case kBytestring:
+    Bytestring bytestring;
+  case kNonnegativeInt64:
+    hyper int64;
+  default:
+    void;
+  };
+
+  enum StorageLockType {
+    kNone = 0,
+    kSetObjectTypeClass = 1, // kind of like a readlock
+    kExclusiveLock = 2,
+  };
+
+  struct StorageLock {
+    StorageLockType lock_type;
+
+    union switch (StorageObjectType type)
+    {
+    case kNonnegativeInt64:
+      hyper nnint64_subtracted_amount;
+    default:
+      void;
+    }
+    type_specific_lock;
+  };
+
+  // Possible transitions:
+  // kNone can only move to kSetObjectTypeClass
+  // kSetObjectTypeClass can go to any state,
+  // but if moving to the same state,
+  // the only thing that can change is the type_specific_extra field
+  // kExclusive can move to any other state
+
+  struct StorageLockChange {
+    StorageLockType previous_type;
+    StorageLockType new_type;
+
+    // only set if previous_type != new_type, and not the exclusive -> none
+    // transition
+    StorageObjectTypeClass *new_typeclass;
+
+    union switch (StorageObjectType type)
+    {
+    case kNonnegativeInt64:
+      hyper marginal_nnint64_subtracted_amount;
+    default:
+      void;
+    }
+    type_specific_extra;
+  };
+
   enum StorageDeltaType {
-    kDeleteLast = 0,
+    kDelete = 0,
     kBytestringSet = 1,
     kNonnegativeInt64SetAdd = 2,
     kReplayCacheInsert = 3,
@@ -88,7 +144,7 @@ namespace hogd
 
   union StorageDelta switch (StorageDeltaType type)
   {
-  case kDeleteLast:
+  case kDelete:
     void;
   case kBytestringSet:
     Bytestring bytestring;
