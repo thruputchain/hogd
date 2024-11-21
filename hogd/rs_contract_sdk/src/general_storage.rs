@@ -19,6 +19,6 @@ pub fn HasKey(key: &StorageKey) -> Result<StorageObjectType, i32> {
     }
 }
 
-pub fn DeleteLast(key: &StorageKey) -> Result<(), i32> {
-    syscall_bindings::raw_DeleteLast(key)
+pub fn DeleteObject(key: &StorageKey) -> Result<(), i32> {
+    syscall_bindings::raw_DeleteObject(key)
 }

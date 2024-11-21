@@ -89,17 +89,19 @@ namespace hogd
     kExclusiveLock = 2,
   };
 
-  struct StorageLock {
-    StorageLockType lock_type;
-
-    union switch (StorageObjectType type)
-    {
+  union TypeSpecificLock switch(StorageObjectType object_type) {
     case kNonnegativeInt64:
       hyper nnint64_subtracted_amount;
     default:
       void;
-    }
-    type_specific_lock;
+  };
+
+  union StorageLock switch (StorageLockType lock_type) {
+    case kSetObjectTypeClass:
+      TypeSpecificLock extra_lock_data;
+    case kExclusiveLock:
+      void;
+    // is never instantiated for kNone
   };
 
   // Possible transitions:

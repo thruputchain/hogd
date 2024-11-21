@@ -18,7 +18,7 @@
 
 namespace hogd {
 
-StorageObject
+std::optional<StorageObject>
 StorageObjectFrame::NNInt64SetAddArgs::to_object(
     std::optional<StorageObject> const & /*unused*/) const
 {
@@ -30,7 +30,7 @@ StorageObjectFrame::NNInt64SetAddArgs::to_object(
 
   uint64_t total_add = total_added_.get_capped();
 
-  if (integer_add_overflow_p<int64_t>(object.int64(), total_add)) {
+  if (integer_add_overflow<int64_t>(object.int64(), total_add)) {
     object.int64() = INT64_MAX;
   }
   else {
@@ -40,7 +40,7 @@ StorageObjectFrame::NNInt64SetAddArgs::to_object(
   return object;
 }
 
-StorageObject
+std::optional<StorageObject>
 StorageObjectFrame::ReplayCacheArgs::to_object(
     std::optional<StorageObject> const &previous_object) const
 {
@@ -83,7 +83,7 @@ StorageObjectFrame::ReplayCacheArgs::to_object(
   return out;
 }
 
-StorageObject
+std::optional<StorageObject>
 StorageObjectFrame::MessageQueueArgs::to_object(
     std::optional<StorageObject> const &previous_object) const
 {
@@ -108,13 +108,6 @@ StorageObjectFrame::MessageQueueArgs::to_object(
   out.message_queue().events.resize(size - num_messages_consumed_);
 
   return out;
-}
-
-void
-StorageObjectFrame::release_variant(RefcountedVariant &variant)
-{
-  assert(variant.refcount_ > 0);
-  variant.refcount_--;
 }
 
 template<typename VariantArm, typename... VariantArgs>
@@ -173,41 +166,107 @@ StorageObjectFrame::try_reserve_bytestring_set(
   return StorageReserveResult::kDefiniteFailure;
 }
 
-void
-StorageObjectFrame::revert_bytestring_set(RefcountedVariant &v)
-{
-  release_variant_reference(v);
-}
-
 StorageReserveResult
-StorageObjectFrame::try_reserve_nnint64_set_add(int64_t set_value,
-                                                int64_t add_value)
+StorageObjectFrame::try_reserve_nnint64_set_add(
+  RefcountedVariant &v, int64_t set_value,int64_t add_value, std::optional<StorageLock>& lock)
 {
-  if (!type_guard(StorageObjectType::kNonnegativeInt64)) {
-    return StorageReserveResult::kDefiniteFailure;
-  }
 
-  auto v = variant_.take();
+  if (auto *args = try_set_variant<NNInt64SetAddArgs>(v, set_value)) {
+    auto release_lock = [&] (bool success) {
+     if (!lock.has_value()) {
+        // we have as yet no reference on the typeclass
+        if (success) {
+          acquire_variant_reference(v);
+        }
+      } else {
 
-  if (auto *args = try_set_variant<NNInt64SetAddArgs>(*v, set_value)) {
+        // release any reserved subtraction
+        // already has a variant reference, so release if reservation fails
+
+        if (!success) {
+          release_variant_reference(v);
+        }
+
+        if (lock -> lock_type() == StorageLockType::kSetObjectTypeClass) {
+          assert (lock->extra_lock_data().object_type() == StorageObjectType::kNonnegativeInt64);
+          
+          int64_t locked_subtract = lock -> extra_lock_data().nnint64_subtracted_amount();
+
+          assert(locked_subtract <= 0);
+          assert(args -> total_subtracted_ <= locked_subtract);
+          args -> total_subtracted_ -= locked_subtract;
+        }
+        // nothing else to do for an exclusive lock
+      }
+    };
+
+
     assert(args->set_value_ == set_value);
 
     if (add_value >= 0) {
       args->total_added_ += add_value;
+
+      release_lock(true);
+
       return StorageReserveResult::kSuccess;
     }
 
     if (set_value < 0) { // and add_value < 0
-      release_variant(*v);
+
+      release_lock(false);
 
       return StorageReserveResult::kDefiniteFailure;
     }
 
     int64_t desired_subtracted = 0;
 
-    if (integer_add_overflow(args->total_subtracted_, add_value,
+    // add_value < 0, and set_value >= 0
+
+    int64_t marginal_reserve = add_value;
+
+    if (lock.has_value()) {
+
+      if (lock->lock_type() == StorageLockType::kExclusiveLock) {
+        assert(args -> total_subtracted_ == 0);
+
+        assert(set_value + add_value >= 0);
+
+        args -> total_subtracted_ = add_value;
+
+        release_lock(true);
+
+        return StorageReserveResult::kSuccess;
+      }
+
+      assert(lock->lock_type() == StorageLockType::kSetObjectTypeClass);
+
+      int64_t reserved_sub = lock->extra_lock_data().nnint64_subtracted_amount();
+
+      assert(reserved_sub <= 0);
+
+      marginal_reserve = add_value - reserved_sub;
+
+      if (marginal_reserve >= 0) {
+        // everything has been locked already
+
+        // setting so that release_lock() operates correctly
+        // remaining locked amount: reserved_sub - add_value
+        lock -> extra_lock_data().nnint64_subtracted_amount() = -marginal_reserve;
+        // no need to modify args -> total_subtracted, as release_lock() will handle that
+
+        release_lock(true);
+
+        return StorageReserveResult::kSuccess;
+      }
+
+      // Otherwise, must reserve the remaining amount
+    }
+
+    if (integer_add_overflow(args->total_subtracted_, marginal_reserve,
                              &desired_subtracted)) {
-      release_variant(*v);
+
+      // reserving the remaining amount failed
+      release_lock(false);
       return StorageReserveResult::kDefiniteFailure;
     }
 
@@ -215,23 +274,32 @@ StorageObjectFrame::try_reserve_nnint64_set_add(int64_t set_value,
     // set_value > 0 and desired_sub < 0.  So worst case
     // we get 1 + INT64_MIN, which does not overflow.
     if (set_value + desired_subtracted < 0) {
-      release_variant(*v);
+
+      release_lock(false);
       return StorageReserveResult::kDefiniteFailure;
     }
 
     args->total_subtracted_ = desired_subtracted;
+
+    if (lock.has_value() && lock -> lock_type() == StorageLockType::kSetObjectTypeClass) {
+      lock -> extra_lock_data().nnint64_subtracted_amount() = 0;
+    }
+
+    release_lock(true);
+
     return StorageReserveResult::kSuccess;
   }
+
+  assert(!lock.has_value());
 
   return StorageReserveResult::kDefiniteFailure;
 }
 
 void
-StorageObjectFrame::revert_nnint64_set_add(int64_t add_value)
+StorageObjectFrame::revert_nnint64_set_add(
+  RefcountedVariant& v, int64_t add_value)
 {
-  auto v = variant_.take();
-
-  auto &args = get_variant_arm_unchecked<NNInt64SetAddArgs>(*v);
+  auto &args = get_variant_arm_unchecked<NNInt64SetAddArgs>(v);
 
   if (add_value >= 0) {
     args.total_added_ -= add_value;
@@ -239,10 +307,9 @@ StorageObjectFrame::revert_nnint64_set_add(int64_t add_value)
   else {
     args.total_subtracted_ -= add_value;
   }
-
-  release_variant(*v);
 }
 
+/*
 StorageReserveResult
 StorageObjectFrame::try_reserve_replay_cache_inserts(
     x23::Vec<uint64_t> const &nonces)
@@ -416,9 +483,11 @@ StorageObjectFrame::revert_mq_consume()
   release_variant(*v);
 }
 
+*/
+
 StorageReserveResult
 StorageObjectFrame::try_reserve_delta(StorageDelta const &delta,
-                                      std::optional<StorageLock> const &lock)
+                                      std::optional<StorageLock> &lock)
 {
   auto v = variant_.take();
 
@@ -426,23 +495,26 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta,
     assert(lock.lock_type != StorageLockType::kNone);
 
     if constexpr (is_debug_build()) {
-      if (lock.lock_type == StorageLockType::kSetObjectTypeClass) {
+      if (lock->lock_type() == StorageLockType::kSetObjectTypeClass) {
         assert(!std::holds_alternative<ExclusiveLockedArgs>(v->variant_));
         assert(v->variant_.refcount_ != 0);
       }
-      if (lock.lock_type == StorageLockType::kExclusiveLock) {
+      if (lock->lock_type() == StorageLockType::kExclusiveLock) {
         assert(std::holds_alternative<ExclusiveLockedArgs>(v->variant_));
         assert(v->variant_.refcount_ == 1);
       }
     }
 
-    if (lock.lock_type == StorageLockType::kExclusiveLock) {
+    if (lock->lock_type() == StorageLockType::kExclusiveLock) {
       switch (delta.type()) {
-      case kDelete:
+      case StorageDeltaType::kDelete:
         set_variant_from_exclusive_lock<DeleteArgs>(*v);
         break;
       case StorageDeltaType::kBytestringSet:
         set_variant_from_exclusive_lock<BytestringArgs>(*v, delta.bytestring());
+        break;
+      case StorageDeltaType::kNonnegativeInt64SetAdd:
+        set_variant_from_exclusive_lock<NNInt64SetAddArgs>(*v, delta.nnint64().set_value);
         break;
       default:
         throw std::runtime_error("unimpl");
@@ -451,18 +523,19 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta,
   }
 
   switch (delta.type()) {
-  case StorageDeltaType::kDeleteLast:
+  case StorageDeltaType::kDelete:
     return StorageReserveResult::kSuccess;
   case StorageDeltaType::kBytestringSet:
-    return try_reserve_bytestring_set(delta.bytestring(), lock);
+    return try_reserve_bytestring_set(*v, delta.bytestring(), lock);
   case StorageDeltaType::kNonnegativeInt64SetAdd:
-    return try_reserve_nnint64_set_add(delta.nnint64().set_value,
+    return try_reserve_nnint64_set_add(*v, delta.nnint64().set_value,
                                        delta.nnint64().add_value, lock);
   default:
     throw std::runtime_error("unknown delta type");
   }
 }
 
+/*
 StorageReserveResult
 StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
 {
@@ -485,14 +558,14 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta)
   default:
     return StorageReserveResult::kDefiniteFailure;
   }
-}
+} */
 
 void
 StorageObjectFrame::commit_delta(StorageDelta const &delta)
 {
   switch (delta.type()) {
-  case StorageDeltaType::kReplayCacheClear:
-    commit_replay_cache_clear(delta.replay_clear_threshold());
+  //case StorageDeltaType::kReplayCacheClear:
+  //  commit_replay_cache_clear(delta.replay_clear_threshold());
   default:
     // no op
     return;
@@ -502,16 +575,19 @@ StorageObjectFrame::commit_delta(StorageDelta const &delta)
 void
 StorageObjectFrame::revert_delta(StorageDelta const &delta)
 {
+  auto v = variant_.take();
+
+  release_variant_reference(*v);
+
   switch (delta.type()) {
-  case StorageDeltaType::kDeleteLast:
+  case StorageDeltaType::kDelete:
     return;
   case StorageDeltaType::kBytestringSet:
-    revert_bytestring_set();
     return;
   case StorageDeltaType::kNonnegativeInt64SetAdd:
-    revert_nnint64_set_add(delta.nnint64().add_value);
+    revert_nnint64_set_add(*v, delta.nnint64().add_value);
     return;
-  case StorageDeltaType::kReplayCacheInsert:
+/*  case StorageDeltaType::kReplayCacheInsert:
     revert_replay_cache_inserts(delta.replay_nonces());
     return;
   case StorageDeltaType::kReplayCacheClear:
@@ -522,7 +598,7 @@ StorageObjectFrame::revert_delta(StorageDelta const &delta)
     return;
   case StorageDeltaType::kMessageQueueConsume:
     revert_mq_consume();
-    return;
+    return; */
   }
 }
 
@@ -567,7 +643,6 @@ StorageObjectFrame::get_stripped_committed_object() const
 void
 StorageObjectFrame::clear_modifications()
 {
-  deleted_last_ = false;
   variant_->refcount_ = 0;
 }
 
@@ -577,11 +652,6 @@ StorageObjectFrame::commit_round()
   x23::Defer cleanup([&] { clear_modifications(); });
 
   auto v = variant_.take();
-
-  if (deleted_last_) {
-    committed_base_object_ = std::nullopt;
-    return;
-  }
 
   if (v->refcount_ == 0) {
     // no committed modifications.

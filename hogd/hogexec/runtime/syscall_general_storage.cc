@@ -27,10 +27,10 @@ syscall_HasKey_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_DeleteLast_inner(SystemCallHandler &syscall_handler,
+syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
                          const StorageKey &input_key)
 {
-  syscall_handler.delete_last(input_key);
+  syscall_handler.delete_object(input_key);
 
   return {SyscallErrorCode::kNone, 0};
 }

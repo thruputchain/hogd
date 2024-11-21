@@ -29,11 +29,17 @@ TEST(ItemCache, Exists)
 
   EXPECT_EQ(proxy.get_object_type(), StorageObjectType::kBytestring);
 
-  proxy.delete_last();
+  proxy.delete_object();
 
-  EXPECT_TRUE(proxy.exists());
+  EXPECT_FALSE(proxy.exists());
+
+  EXPECT_EQ(proxy.get_object_type(), StorageObjectType::kDeleted);
 
   EXPECT_TRUE(!!proxy.set_bytestring(std::as_bytes(std::span(bytes2))));
+
+  EXPECT_EQ(proxy.get_object_type(), StorageObjectType::kBytestring);
+
+  EXPECT_TRUE(proxy.exists());
 }
 
 TEST(ItemCache, SetBytestring)

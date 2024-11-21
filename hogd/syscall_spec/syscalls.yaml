@@ -58,7 +58,7 @@ syscalls:
         rust_typename: "i32"
         primitive_type: yes
     number: 5
-  - name: "DeleteLast"
+  - name: "DeleteObject"
     needs_context: yes
     inputs:
       - name: "key"

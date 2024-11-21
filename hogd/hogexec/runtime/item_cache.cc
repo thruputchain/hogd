@@ -21,14 +21,6 @@ namespace hogd {
 namespace {
 
 StorageDelta
-make_delete_last()
-{
-  StorageDelta out;
-  out.type(StorageDeltaType::kDeleteLast);
-  return out;
-}
-
-StorageDelta
 make_bytestring_set(Bytestring const &string)
 {
   StorageDelta out;
@@ -88,15 +80,18 @@ make_mq_append(MessageQueueEvent const &event)
 } // namespace
 
 void
-ItemCache::delete_last()
+ItemCache::delete_object()
 {
-  is_deleted_last_ = true;
+  delta_args_.emplace<DeleteType>();
 }
 
 bool
 ItemCache::exists() const
 {
-  return get_object_type().has_value();
+  if (!get_object_type().has_value()) {
+    return false;
+  }
+  return *get_object_type() != StorageObjectType::kDeleted;
 }
 
 std::optional<StorageObjectType>
@@ -118,7 +113,7 @@ ItemCache::type_guard(StorageObjectType expected_type) const
 {
   auto type = get_object_type();
 
-  if (type) {
+  if (type && *type != StorageObjectType::kDeleted) {
     if (*type != expected_type) {
       return SyscallError{SyscallErrorCode::kStorageObjectTypeMismatch};
     }
@@ -297,14 +292,7 @@ ItemCache::nnint64_set_add(int64_t set_value, int64_t add_value)
 x23::Vec<StorageDelta>
 ItemCache::get_deltas() const
 {
-  x23::Vec<StorageDelta> out =
-      std::visit([](auto const &v) { return v.get_deltas(); }, delta_args_);
-
-  if (is_deleted_last_) {
-    out.push_back(make_delete_last());
-  }
-
-  return out;
+  return std::visit([](auto const &v) { return v.get_deltas(); }, delta_args_);
 }
 
 x23::Vec<StorageDelta>

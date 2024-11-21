@@ -575,10 +575,10 @@ SystemCallHandler::resolve_item_cache(StorageKey const &key)
 }
 
 void
-SystemCallHandler::delete_last(StorageKey const &key)
+SystemCallHandler::delete_object(StorageKey const &key)
 {
   auto &proxy = resolve_item_cache(key);
-  proxy.delete_last();
+  proxy.delete_object();
 }
 
 SyscallStatus<StorageObjectType>

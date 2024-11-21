@@ -19,7 +19,7 @@ public:
     : base_object_(std::move(obj))
   {}
 
-  void delete_last();
+  void delete_object();
 
   bool exists() const;
   std::optional<StorageObjectType> get_object_type() const;
@@ -83,6 +83,17 @@ private:
         StorageObjectType::kMessageQueue;
   };
 
+  struct DeleteType {
+    constexpr static x23::Vec<StorageDelta> get_deltas() {
+      StorageDelta out;
+      out.type(StorageDeltaType::kDelete);
+      return {out};
+    }
+
+    constexpr static std::optional<StorageObjectType> kObjectType =
+        StorageObjectType::kDeleted;
+  };
+
   struct UnsetType {
     static x23::Vec<StorageDelta> get_deltas() { return {}; }
 
@@ -127,7 +138,7 @@ private:
   }
 
   std::optional<StrippedStorageObject> base_object_;
-  std::variant<UnsetType, BytestringCacheType, NNInt64CacheType,
+  std::variant<UnsetType, DeleteType, BytestringCacheType, NNInt64CacheType,
                ReplayCacheCacheType, MessageQueueCacheType>
       delta_args_ = UnsetType{};
 

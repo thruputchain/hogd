@@ -17,7 +17,7 @@ public:
   {
     uint64_t prev = lowbits_.fetch_add(v, std::memory_order_relaxed);
 
-    if (integer_add_overflow_p<uint64_t>(prev, v)) {
+    if (integer_add_overflow<uint64_t>(prev, v)) {
       highbits_.fetch_add(1, std::memory_order_relaxed);
     }
 

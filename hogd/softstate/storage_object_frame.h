@@ -7,6 +7,7 @@
 
 #include "hogd/softstate/uint128_reservation.h"
 #include "storage_object.hh"
+#include "x23/mvar.h"
 
 namespace hogd {
 
@@ -40,7 +41,7 @@ public:
   // have all the other StorageDelta types worked out.
   [[nodiscard]] StorageReserveResult
   try_reserve_delta(StorageDelta const &delta,
-                    std::optional<StorageLock> const &lock);
+                    std::optional<StorageLock> &lock);
 
   // Always returns successfully when downgrading lock type
   [[nodiscard]] StorageReserveResult
@@ -133,7 +134,7 @@ private:
 
   using variant_t =
       std::variant<BytestringArgs, NNInt64SetAddArgs, ReplayCacheArgs,
-                   MessageQueueArgs, DeletedArgs, ExclusiveLockedArgs>;
+                   MessageQueueArgs, DeleteArgs, ExclusiveLockedArgs>;
 
   struct RefcountedVariant {
     variant_t variant_;
@@ -150,13 +151,17 @@ private:
   // bytestring
   static StorageReserveResult
   try_reserve_bytestring_set(RefcountedVariant &v,
-                             Bytestring const &bytestring_set);
-  static void revert_bytestring_set(RefcountedVariant &v);
+                             Bytestring const &bytestring_set,
+                             std::optional<StorageLock> const& lock);
 
   // nnint64
-  StorageReserveResult try_reserve_nnint64_set_add(int64_t set_value,
-                                                   int64_t add_value);
-  void revert_nnint64_set_add(int64_t add_value);
+  static StorageReserveResult 
+  try_reserve_nnint64_set_add(RefcountedVariant& v, int64_t set_value,
+                                                   int64_t add_value,
+                                                   std::optional<StorageLock>& lock);
+  static void revert_nnint64_set_add(RefcountedVariant &v, int64_t add_value);
+
+  /*
 
   // replay cache
   StorageReserveResult
@@ -172,7 +177,7 @@ private:
   StorageReserveResult try_reserve_mq_consume(uint32_t num_messages);
   void revert_mq_consume();
 
-  bool type_guard(StorageObjectType expected_type) const;
+  */
 
   void clear_modifications();
 

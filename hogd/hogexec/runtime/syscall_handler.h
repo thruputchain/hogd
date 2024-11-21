@@ -40,7 +40,7 @@ public:
   SHA256Hash get_source_tx_hash() const;
 
   // general storage
-  void delete_last(StorageKey const &key);
+  void delete_object(StorageKey const &key);
   SyscallStatus<StorageObjectType> get_object_type(StorageKey const &key);
 
   // bytestring

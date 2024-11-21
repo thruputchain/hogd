@@ -28,7 +28,10 @@ LocalSoftstateMap::try_reserve_delta(AddressAndKey const &addrkey,
     it = ptr->emplace(addrkey, std::nullopt).first;
   }
 
-  return it->second.try_reserve_delta(delta);
+  // TODO(geoff): possibly take lock as input from syscall
+  std::optional<StorageLock> lock = std::nullopt;
+
+  return it->second.try_reserve_delta(delta, lock);
 }
 
 void
