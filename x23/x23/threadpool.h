@@ -106,10 +106,11 @@ public:
   }
 
   // Run a potentially blocking task in a new thread that is not part
-  // of the ThreadPool so as to avoid blocking any threas in the pool.
-  // Suspends the current coroutine until the task has completed, then
-  // resumes the coroutine in the ThreadPool.  Returns an Async<R>
-  // that should be co_awaited, where R is the result of the task.
+  // of the ThreadPool so as to avoid blocking any threads in the
+  // pool.  Suspends the current coroutine until the task has
+  // completed, then resumes the coroutine in the ThreadPool.  Returns
+  // an Async<R> that should be co_awaited, where R is the result of
+  // the task.
   template<typename F, typename... Args> requires std::invocable<F, Args...>
   Async<std::invoke_result_t<F, Args...>> async(F &&f, Args &&...args)
   {
