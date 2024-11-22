@@ -16,7 +16,8 @@ using std::size_t;
 // arbitrary elements from the heap.  The HeapIndex is updated as
 // things shift around the heap, so that the Heap itself can just be a
 // big array.
-template<typename T, typename Cmp = std::less<T>> class Heap {
+template<typename T, typename Cmp = std::less<T>, size_t Degree = 4>
+class Heap {
 public:
   class HeapIndex {
   public:
@@ -35,6 +36,10 @@ public:
     ptrdiff_t idx_ = -1;
     friend Heap;
   };
+
+  Heap() = default;
+  Heap(Heap &&) = default;
+  Heap &operator=(Heap &&) = default;
 
   // Insert a new element in the Heap.  If ip is non-NULL, it will be
   // filled in with a HeapIndex that can be used to fetch or remove
@@ -146,7 +151,7 @@ private:
 
   std::vector<Element> elems_;
 
-  static constexpr size_t kDegree = 2;
+  static constexpr size_t kDegree = Degree;
   static constexpr size_t parent(size_t i) { return (i - 1) / kDegree; }
   static constexpr size_t first_child(size_t i) { return kDegree * i + 1; }
 
