@@ -44,9 +44,9 @@ public:
   // Insert a new element in the Heap.  If ip is non-NULL, it will be
   // filled in with a HeapIndex that can be used to fetch or remove
   // the item just inserted.
-  template<typename U> void emplace(U &&u, HeapIndex *ip = nullptr)
+  template<typename U> void insert(U &&u, HeapIndex *ip = nullptr)
   {
-    int i = elems_.size();
+    size_t i = elems_.size();
     elems_.emplace_back(Element{std::forward<U>(u), ip});
     if (ip)
       ip->idx_ = i;
@@ -119,7 +119,7 @@ public:
   void check()
   {
 #ifndef NDEBUG
-    for (size_t i = 1, e = elems_.size(); i < e; ++i) {
+    for (size_t i = 1; i < elems_.size(); ++i) {
       assert(!(elems_[i] < elems_[parent(i)]));
       if (elems_[i].ip_)
         assert(elems_[i].ip_->idx_ == ptrdiff_t(i));

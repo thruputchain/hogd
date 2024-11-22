@@ -23,7 +23,7 @@ random_heap(size_t sz = 20)
   auto dist = std::uniform_int_distribution{0, int(sz)};
   Heap<int> h;
   for (size_t i = 0; i < sz; ++i)
-    h.emplace(dist(rng));
+    h.insert(dist(rng));
   h.check();
   return h;
 }
@@ -50,7 +50,7 @@ index_test(size_t sz = 20)
   std::vector<std::unique_ptr<Heap<int>::HeapIndex>> is;
   for (size_t i = 0; i < sz; ++i) {
     is.emplace_back(std::make_unique<Heap<int>::HeapIndex>());
-    h.emplace(dist(rng), is.back().get());
+    h.insert(dist(rng), is.back().get());
     h.check();
   }
   print_heap(h);
