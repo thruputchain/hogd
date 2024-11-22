@@ -96,9 +96,24 @@ namespace hogd
       void;
   };
 
+  // data sent to db servers about storage lock state
   union StorageLock switch (StorageLockType lock_type) {
     case kSetObjectTypeClass:
       TypeSpecificLock extra_lock_data;
+    case kExclusiveLock:
+      void;
+    // is never instantiated for kNone
+  };
+
+  struct FullSetObjectTypeClassLock {
+    StorageObjectTypeClass typeclass;
+    TypeSpecificLock extra_lock_data;
+  };
+
+  // data tracked in hogexec about storage lock state
+  union FullStorageLock switch (StorageLockType lock_type) {
+    case kSetObjectTypeClass:
+      FullSetObjectTypeClassLock full_typeclass_lock;
     case kExclusiveLock:
       void;
     // is never instantiated for kNone
