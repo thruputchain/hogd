@@ -117,7 +117,7 @@ public:
     for (size_t i = 1, e = elems_.size(); i < e; ++i) {
       assert(!(elems_[i] < elems_[parent(i)]));
       if (elems_[i].ip_)
-        assert(elems_[i].ip_->idx_ == i);
+        assert(elems_[i].ip_->idx_ == ptrdiff_t(i));
     }
 #endif // !NDEBUG
   }
