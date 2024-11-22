@@ -14,8 +14,6 @@
 #include <utility>
 #include <variant>
 
-#include "auth.hh"
-#include "auth_noalloc.hh"
 #include "contract.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
