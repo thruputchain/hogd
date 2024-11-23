@@ -248,14 +248,16 @@ TEST(ItemCache, MessageQueueConcurrentOutputsSorted)
   EXPECT_FALSE(proxy.consume_next_mq_event());
 }
 
-TEST(ItemCache, NoLockSubInt64Min) {
+TEST(ItemCache, NoLockSubInt64Min)
+{
   ItemCache proxy(std::nullopt);
 
   EXPECT_TRUE(!!proxy.nnint64_set_add(INT64_MAX, -INT64_MAX));
   EXPECT_FALSE(!!proxy.nnint64_set_add(INT64_MAX, -1));
 }
 
-TEST(ItemCache, ExclusiveTypeClassLock) {
+TEST(ItemCache, ExclusiveTypeClassLock)
+{
   ItemCache proxy(std::nullopt);
 
   EXPECT_FALSE(proxy.compute_storage_lock_acquire().has_value());
@@ -283,7 +285,8 @@ TEST(ItemCache, ExclusiveTypeClassLock) {
   EXPECT_EQ(lock->marginal_extra_lock.nnint64_subtracted_amount(), -10);
 
   {
-    // child frame should inherit locks, not implicitly assume parent acquired locks
+    // child frame should inherit locks, not implicitly assume parent acquired
+    // locks
     ItemCache proxy_child_nolocks_acquired(proxy);
 
     proxy_child_nolocks_acquired.delete_object();
@@ -298,9 +301,10 @@ TEST(ItemCache, ExclusiveTypeClassLock) {
   }
 
   proxy.mark_locks_acquired();
-  
+
   {
-    // child frame should inherit locks, not implicitly assume parent acquired locks
+    // child frame should inherit locks, not implicitly assume parent acquired
+    // locks
     ItemCache proxy_child_locks_acquired(proxy);
 
     proxy_child_locks_acquired.delete_object();

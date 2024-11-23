@@ -34,8 +34,7 @@ object_type_from_delta_type(StorageDeltaType delta_type)
 StorageObjectTypeClass
 typeclass_from_delta(StorageDelta const &delta)
 {
-  StorageObjectTypeClass typeclass(
-      object_type_from_delta_type(delta.type()));
+  StorageObjectTypeClass typeclass(object_type_from_delta_type(delta.type()));
 
   std::printf(std::format("delta: {}\n", x23::show(delta)).c_str());
 
@@ -69,7 +68,10 @@ upgrade_lock(std::optional<FullStorageLock> const &previous_lock,
   StorageObjectTypeClass new_typeclass = typeclass_from_delta(new_delta);
 
   std::printf(std::format("starting lock upgrade: lock {} new_delta {}\n",
-    previous_lock.has_value()? x23::show(*previous_lock) : "nullopt", x23::show(new_delta)).c_str());
+                          previous_lock.has_value() ? x23::show(*previous_lock)
+                                                    : "nullopt",
+                          x23::show(new_delta))
+                  .c_str());
 
   if (!previous_lock.has_value()) {
     FullStorageLock new_lock(StorageLockType::kSetObjectTypeClass);
@@ -80,7 +82,7 @@ upgrade_lock(std::optional<FullStorageLock> const &previous_lock,
     switch (new_typeclass.type()) {
     case StorageObjectType::kNonnegativeInt64:
       full_typeclass_lock.extra_lock_data.nnint64_subtracted_amount() =
-        std::min<int64_t>(0, new_delta.nnint64().add_value);
+          std::min<int64_t>(0, new_delta.nnint64().add_value);
       break;
     default:
       // nothing to do
@@ -209,11 +211,14 @@ compute_lock_change(std::optional<FullStorageLock> const &previous_lock,
 
   std::printf(std::format("new lock: {}\n", x23::show(*new_lock)).c_str());
 
-  if ((!previous_lock.has_value()) ||  (previous_lock->lock_type() == StorageLockType::kExclusiveLock)) {
+  if ((!previous_lock.has_value()) ||
+      (previous_lock->lock_type() == StorageLockType::kExclusiveLock)) {
     // (kNone or kExclusive) to kSetObjectTypeClass
 
     StorageLockChange out;
-    out.previous_type = (previous_lock.has_value() ? StorageLockType::kExclusiveLock : StorageLockType::kNone);
+    out.previous_type =
+        (previous_lock.has_value() ? StorageLockType::kExclusiveLock
+                                   : StorageLockType::kNone);
     out.new_type = StorageLockType::kSetObjectTypeClass;
 
     out.new_typeclass.emplace(new_lock->full_typeclass_lock().typeclass);
@@ -244,7 +249,8 @@ compute_lock_change(std::optional<FullStorageLock> const &previous_lock,
     int64_t new_sub_amount = new_lock->full_typeclass_lock()
                                  .extra_lock_data.nnint64_subtracted_amount();
 
-    std::printf("new_sub_amount %lld prev_sub_amount %lld\n", new_sub_amount, prev_sub_amount);
+    std::printf("new_sub_amount %lld prev_sub_amount %lld\n", new_sub_amount,
+                prev_sub_amount);
 
     if (prev_sub_amount == new_sub_amount) {
       return std::nullopt;

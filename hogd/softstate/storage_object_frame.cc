@@ -491,6 +491,200 @@ StorageObjectFrame::revert_mq_consume()
 
 */
 
+// no-op if return false
+bool
+StorageObjectFrame::perform_type_specific_lock_change(
+    RefcountedVariant &v, TypeSpecificLock const &marginal_lock)
+{
+  switch (marginal_lock.object_type()) {
+  case StorageObjectType::kNonnegativeInt64:
+  {
+    assert(v.refcount_ > 0);
+    assert(std::holds_alternative<NNInt64SetAddArgs>(v));
+
+    auto &args = get_variant_arm_unchecked<NNInt64SetAddArgs>(v);
+
+    int64_t sub_delta = marginal_lock.nnint64_subtracted_amount();
+
+    if (sub_delta >= 0) {
+      // infallible operation
+      args.total_subtracted_ += sub_delta;
+      assert(args.total_subtracted_ <= 0);
+      return true;
+    }
+
+    int64_t desired_subtracted = 0;
+    if (integer_add_overflow(args.total_subtracted_, sub_delta,
+                             &desired_subtracted)) {
+      return false;
+    }
+
+    if (args.set_value_ < 0) {
+      return false;
+    }
+
+    // args.set_value_ >= 0, desired_subtracted < 0 => cannot overflow
+
+    if (args.set_value_ + desired_subtracted < 0) {
+      return false;
+    }
+    args.total_subtracted_ = desired_subtracted;
+    return true;
+  } break;
+  default:
+    // nothing to do
+    return true;
+  }
+}
+
+StorageReserveResult
+StorageObjectFrame::try_change_lock(StorageLockChange const &lock_change)
+{
+  auto v = variant_.take();
+
+  if (lock_change.new_type == StorageLockType::kExclusiveLock) {
+    assert(lock_change.previous_type != StorageLockType::kExclusiveLock);
+
+    // if there is an active reference, it must be ours
+    if (v->refcount_ == 0) {
+      assert(lock_change.previous_type != StorageLockType::kSetObjectTypeClass);
+
+      if (lock_change.previous_type == StorageLockType::kNone) {
+
+        v->variant_.emplace<ExclusiveLockedArgs>();
+        acquire_variant_reference(*v);
+
+        return StorageReserveResult::kSuccess;
+      }
+      return StorageReserveResult::kDefiniteFailure;
+    }
+
+    if (v->refcount_ == 1) {
+      if (lock_change.previous_type == StorageLockType::kNone) {
+        // someone else has a reference to whatever the current typeclass is
+        return StorageReserveResult::kDefiniteFailure;
+      }
+
+      assert(lock_change.previous_type == StorageLockType::kSetObjectTypeClass);
+
+      v->variant_.emplace<ExclusiveLockedArgs>();
+      // we already have a variant reference, do not acquire another
+      return StorageReserveResult::kSuccess;
+    }
+
+    return StorageReserveResult::kDefiniteFailure;
+  }
+
+  if (lock_change.new_type == StorageLockType::kNone) {
+
+    // drop current reference and release any type-specific locks
+
+    if (lock_change.previous_type == StorageLockType::kSetObjectTypeClass) {
+      // dropping type-specific locks should be an infallible operation, by
+      // desigh
+      [[maybe_unused]] auto res =
+          perform_type_specific_lock_change(*v,
+                                            lock_change.marginal_extra_lock);
+      assert(res);
+    }
+
+    release_variant_reference(*v);
+    return StorageReserveResult::kSuccess;
+  }
+
+  // new_type is StorageLockType::kSetObjectTypeClass.  prev_type is anything.
+
+  if (lock_change.previous_type == StorageLockType::kNone) {
+    // reconstruct caller's lock state
+    std::optional<StorageLock> previous_lock = std::nullopt;
+
+    assert(lock_change.new_typeclass);
+
+    switch (lock_change.new_typeclass->type()) {
+    case StorageObjectType::kBytestring:
+      return try_reserve_bytestring_set(*v,
+                                        lock_change.new_typeclass->bytestring(),
+                                        previous_lock);
+    case StorageObjectType::kNonnegativeInt64:
+      return try_reserve_nnint64_set_add(
+          *v, lock_change.new_typeclass->int64(),
+          lock_change.marginal_extra_lock.nnint64_subtracted_amount(),
+          previous_lock);
+    default:
+      throw std::runtime_error("unimplemented");
+    }
+  }
+
+  if (lock_change.previous_type == StorageLockType::kExclusiveLock) {
+    std::optional<StorageLock> previous_lock =
+        StorageLock(StorageLockType::kExclusiveLock);
+
+    assert(v->refcount_ == 1);
+    assert(std::holds_alternative<ExclusiveLockedArgs>(v->variant_));
+
+    // everything should be infallible, but using the try_reserve methods
+    // to avoid code duplication.
+    switch (lock_change.new_typeclass->type()) {
+    case StorageObjectType::kBytestring:
+      set_variant_from_exclusive_lock<BytestringArgs>(
+          *v, lock_change.new_typeclass->bytestring());
+      return try_reserve_bytestring_set(*v,
+                                        lock_change.new_typeclass->bytestring(),
+                                        previous_lock);
+    case StorageObjectType::kNonnegativeInt64:
+      set_variant_from_exclusive_lock<NNInt64SetAddArgs>(
+          *v, lock_change.new_typeclass->int64());
+      return try_reserve_nnint64_set_add(
+          *v, lock_change.new_typeclass->int64(),
+          lock_change.marginal_extra_lock.nnint64_subtracted_amount(),
+          previous_lock);
+    default:
+      throw std::runtime_error("unimplemented");
+    }
+  }
+
+  assert(lock_change.previous_type == StorageLockType::kSetObjectTypeClass);
+  assert(v->refcount_ >= 1);
+  assert(!std::holds_alternative<ExclusiveLockedArgs>(v->variant_));
+
+  std::optional<StorageLock> previous_lock =
+      StorageLock(StorageLockType::kExclusiveLock);
+
+  switch (lock_change.marginal_extra_lock.object_type()) {
+  case StorageObjectType::kNonnegativeInt64:
+  {
+    // not strictly true that the caller holds this many locked subtraction
+    // units, However, 0 subtraction units are supplied to the function.
+    previous_lock->extra_lock_data().nnint64_subtracted_amount() = 0;
+
+    assert(std::holds_alternative<NNInt64SetAddArgs>(v->variant_));
+
+    int64_t current_set_value =
+        std::get<NNInt64SetAddArgs>(v->variant_).set_value_;
+
+    int64_t new_subtract_amount =
+        lock_change.marginal_extra_lock.nnint64_subtracted_amount();
+
+    // if we need more locks, acquire more locks.
+    if (new_subtract_amount <= 0) {
+      return try_reserve_nnint64_set_add(
+          *v, current_set_value,
+          lock_change.marginal_extra_lock.nnint64_subtracted_amount(),
+          previous_lock);
+    }
+    // else return the locks we have
+    // We don't use try_reserve pathway here, as that would inadvertently mess
+    // with the total_added_ variable instead of the total_subtracted_ variable
+
+    std::get<NNInt64SetAddArgs>(v->variant_).total_subtracted_ +=
+        new_subtract_amount;
+    return StorageReserveResult::kSuccess;
+  }
+  default:
+    throw std::runtime_error("this should be unreachable");
+  }
+}
+
 StorageReserveResult
 StorageObjectFrame::try_reserve_delta(StorageDelta const &delta,
                                       std::optional<StorageLock> &lock)
@@ -530,8 +724,6 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta,
   }
 
   switch (delta.type()) {
-  case StorageDeltaType::kDelete:
-    return StorageReserveResult::kSuccess;
   case StorageDeltaType::kBytestringSet:
     return try_reserve_bytestring_set(*v, delta.bytestring(), lock);
   case StorageDeltaType::kNonnegativeInt64SetAdd:

@@ -139,9 +139,6 @@ private:
   struct RefcountedVariant {
     variant_t variant_;
     uint32_t refcount_ = 0;
-
-    void set_typeclass_from_delta(StorageDelta const &delta);
-    void set_exclusive_locked();
   };
 
   std::optional<StorageObject> committed_base_object_;
@@ -178,6 +175,10 @@ private:
   void revert_mq_consume();
 
   */
+
+  static bool
+  perform_type_specific_lock_change(RefcountedVariant &variant,
+                                    TypeSpecificLock const &marginal_lock);
 
   void clear_modifications();
 

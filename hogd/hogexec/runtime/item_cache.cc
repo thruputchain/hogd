@@ -483,32 +483,36 @@ ItemCache::append_event_to_mq(MessageQueueEvent const &event)
   return {};
 }
 
-std::optional<FullStorageLock> 
-ItemCache::compute_required_lock() const {
+std::optional<FullStorageLock>
+ItemCache::compute_required_lock() const
+{
   auto deltas = get_deltas();
 
   std::optional<FullStorageLock> output_lock = current_lock_;
 
-  for (auto const& delta : deltas) {
+  for (auto const &delta : deltas) {
     output_lock = upgrade_lock(output_lock, delta);
   }
 
   return output_lock;
 }
 
-std::optional<StorageLockChange> 
-ItemCache::compute_storage_lock_acquire() const {
+std::optional<StorageLockChange>
+ItemCache::compute_storage_lock_acquire() const
+{
 
   return compute_lock_change(current_lock_, compute_required_lock());
 }
 
-std::optional<StorageLockChange> 
-ItemCache::compute_storage_lock_release() const {
+std::optional<StorageLockChange>
+ItemCache::compute_storage_lock_release() const
+{
   return compute_lock_change(current_lock_, previous_lock_);
 }
 
-void 
-ItemCache::mark_locks_acquired() {
+void
+ItemCache::mark_locks_acquired()
+{
   current_lock_ = compute_required_lock();
 }
 

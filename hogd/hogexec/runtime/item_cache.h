@@ -19,15 +19,14 @@ public:
     : base_object_(std::move(obj))
   {}
 
-  ItemCache(ItemCache const& parent)
-    : base_object_(parent.base_object_) 
-    , delta_args_(parent.delta_args_)
-    // parent's current lock status is our previous lock status
-    , previous_lock_(parent.current_lock_) 
-    , current_lock_(parent.current_lock_)
-    {}
+  ItemCache(ItemCache const &parent)
+    : base_object_(parent.base_object_), delta_args_(parent.delta_args_)
+      // parent's current lock status is our previous lock status
+      ,
+      previous_lock_(parent.current_lock_), current_lock_(parent.current_lock_)
+  {}
 
-  ItemCache (ItemCache&&) = default;
+  ItemCache(ItemCache &&) = default;
 
   void delete_object();
 
@@ -60,12 +59,13 @@ public:
   // and then moves these ItemCache elements to the parent call frame.
   // otherwise, this ItemCache is dropped.
   // mark_locks_acquired() updates the current_lock_ variable internally.
-  // An ItemCache object owns the difference between previous_lock_ and current_lock_.
+  // An ItemCache object owns the difference between previous_lock_ and
+  // current_lock_.
   //
-  // When an ItemCache is dropped, due to e.g. its call frame reverting, in _any_ frame,
-  // we call compute_storage_lock_release() on each ItemCache,
-  // and execute those StorageLockChange objects.
-  // Those actions are designed to be infallible (it is a serious design error if they are not).
+  // When an ItemCache is dropped, due to e.g. its call frame reverting, in
+  // _any_ frame, we call compute_storage_lock_release() on each ItemCache, and
+  // execute those StorageLockChange objects. Those actions are designed to be
+  // infallible (it is a serious design error if they are not).
   std::optional<StorageLockChange> compute_storage_lock_acquire() const;
   std::optional<StorageLockChange> compute_storage_lock_release() const;
   void mark_locks_acquired();
@@ -175,8 +175,7 @@ private:
       delta_args_ = UnsetType{};
 
   // status of any storage lock acquired in a parent call frame
-  const 
-  std::optional<FullStorageLock> previous_lock_ = std::nullopt;
+  const std::optional<FullStorageLock> previous_lock_ = std::nullopt;
 
   // lock that is OWNED, possibly not including locally applied deltas.
   std::optional<FullStorageLock> current_lock_ = std::nullopt;
