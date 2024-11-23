@@ -34,8 +34,8 @@ protected:
 };
 
 
-TEST_F(StorageObjectFrameLockingTest, SimpleLockCommit) {
-
+TEST_F(StorageObjectFrameLockingTest, SimpleLockCommit)
+{
   StorageObjectFrame frame(std::nullopt);
   ItemCache proxy_1(std::nullopt);
   ItemCache proxy_2(std::nullopt);
@@ -78,9 +78,62 @@ TEST_F(StorageObjectFrameLockingTest, SimpleLockCommit) {
   frame.revert_delta(bstring_2);
 
   EXPECT_EQ(frame.try_change_lock(*change_lock_2), StorageReserveResult::kSuccess);
-
 }
 
+TEST_F(StorageObjectFrameLockingTest, ExclusiveLockAcquireCommit)
+{
+  StorageObjectFrame frame(std::nullopt);
+  ItemCache proxy_1(std::nullopt);
+
+  EXPECT_TRUE(proxy_1.set_bytestring(std::as_bytes(std::span(bytes))));
+
+  auto lock = proxy_1.compute_storage_lock_acquire();
+
+  ASSERT_TRUE(lock);
+  EXPECT_EQ(frame.try_change_lock(*lock), StorageReserveResult::kSuccess);
+
+  proxy_1.mark_locks_acquired();
+
+  EXPECT_TRUE(proxy_1.set_bytestring(std::as_bytes(std::span(bytes2))));
+
+  lock = proxy_1.compute_storage_lock_acquire();
+  ASSERT_TRUE(lock);
+  EXPECT_EQ(frame.try_change_lock(*lock), StorageReserveResult::kSuccess);
+  proxy_1.mark_locks_acquired();
+
+  // even a write of the same (top-level) value can't succeed,
+  // because proxy_1 has an exclusive lock
+  ItemCache proxy_2(std::nullopt);
+
+  EXPECT_TRUE(proxy_2.set_bytestring(std::as_bytes(std::span(bytes2))));
+
+  lock = proxy_2.compute_storage_lock_acquire();
+
+  ASSERT_TRUE(lock);
+  EXPECT_NE(frame.try_change_lock(*lock), StorageReserveResult::kSuccess);
+
+  auto deltas = proxy_1.get_deltas();
+  ASSERT_EQ(deltas.size(), 1);
+  auto stripped_lock = proxy_1.get_stripped_lock();
+
+  EXPECT_EQ(frame.try_reserve_delta(deltas[0], stripped_lock), StorageReserveResult::kSuccess);
+
+  // now lock is released, proxy_2 can reserve successfully
+
+  EXPECT_EQ(frame.try_change_lock(*lock), StorageReserveResult::kSuccess);
+
+  // but proxy_2 can't acquire an exclusive lock
+
+  proxy_2.mark_locks_acquired();
+
+  EXPECT_TRUE(proxy_2.set_bytestring(std::as_bytes(std::span(bytes))));
+
+  lock = proxy_2.compute_storage_lock_acquire();
+
+  ASSERT_TRUE(lock);
+
+  EXPECT_NE(frame.try_change_lock(*lock), StorageReserveResult::kSuccess);
+}
 
 
 } // namespace hogd
