@@ -19,6 +19,7 @@ members = [
     "test_deploy_revert_2",
     "test_reentrant_revert",
     "test_optional_argument",
+    "fibonacci_bench"
 ]
 
 [profile.dev]

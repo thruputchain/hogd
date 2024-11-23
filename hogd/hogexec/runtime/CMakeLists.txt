@@ -125,7 +125,7 @@ add_dependencies(
   rs_test_contracts
 )
 
-# create crypto module benchmark binary
+# create erc20 benchmark binary
 add_executable(
   erc20_bench
   erc20_bench.cc
@@ -140,3 +140,18 @@ target_link_libraries(
   benchmark::benchmark
 )
 add_dependencies(erc20_bench libsodium)
+
+# create fibonacci benchmark binary
+add_executable(
+  fibonacci_bench
+  fibonacci_bench.cc
+)
+target_link_libraries(
+  fibonacci_bench
+  runtime
+  hogd
+  protocol
+  ${LIBSODIUM_LIBRARIES}
+  benchmark::benchmark
+)
+add_dependencies(fibonacci_bench libsodium)

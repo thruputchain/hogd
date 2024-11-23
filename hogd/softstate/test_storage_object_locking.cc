@@ -18,7 +18,6 @@ class StorageObjectFrameLockingTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-
     bstring_1 = StorageDelta(StorageDeltaType::kBytestringSet);
     bstring_1.bytestring() = bytes;
 
@@ -124,7 +123,7 @@ TEST_F(StorageObjectFrameLockingTest, ExclusiveLockAcquireCommit)
   EXPECT_EQ(frame.try_reserve_delta(deltas[0], stripped_lock),
             StorageReserveResult::kSuccess);
 
-  // now lock is released, proxy_2 can reserve successfully
+  // now exclusive lock is released, proxy_2 can reserve successfully
 
   EXPECT_EQ(frame.try_change_lock(*lock), StorageReserveResult::kSuccess);
 
