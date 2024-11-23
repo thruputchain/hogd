@@ -35,8 +35,6 @@ bm_fibonacci(benchmark::State &state)
   stx.tx.invocation.method = test::get_sdk_name("fibonacci_bench_root");
   stx.tx.invocation.gas_limit = UINT64_MAX;
 
-
-
   uint32_t fibonacci_depth = state.range(0);
 
   for (auto _ : state) {
