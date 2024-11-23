@@ -168,17 +168,19 @@ StorageObjectFrame::try_reserve_bytestring_set(
 
 StorageReserveResult
 StorageObjectFrame::try_reserve_nnint64_set_add(
-  RefcountedVariant &v, int64_t set_value,int64_t add_value, std::optional<StorageLock>& lock)
+    RefcountedVariant &v, int64_t set_value, int64_t add_value,
+    std::optional<StorageLock> &lock)
 {
 
   if (auto *args = try_set_variant<NNInt64SetAddArgs>(v, set_value)) {
-    auto release_lock = [&] (bool success) {
-     if (!lock.has_value()) {
+    auto release_lock = [&](bool success) {
+      if (!lock.has_value()) {
         // we have as yet no reference on the typeclass
         if (success) {
           acquire_variant_reference(v);
         }
-      } else {
+      }
+      else {
 
         // release any reserved subtraction
         // already has a variant reference, so release if reservation fails
@@ -187,19 +189,20 @@ StorageObjectFrame::try_reserve_nnint64_set_add(
           release_variant_reference(v);
         }
 
-        if (lock -> lock_type() == StorageLockType::kSetObjectTypeClass) {
-          assert (lock->extra_lock_data().object_type() == StorageObjectType::kNonnegativeInt64);
-          
-          int64_t locked_subtract = lock -> extra_lock_data().nnint64_subtracted_amount();
+        if (lock->lock_type() == StorageLockType::kSetObjectTypeClass) {
+          assert(lock->extra_lock_data().object_type() ==
+                 StorageObjectType::kNonnegativeInt64);
+
+          int64_t locked_subtract =
+              lock->extra_lock_data().nnint64_subtracted_amount();
 
           assert(locked_subtract <= 0);
-          assert(args -> total_subtracted_ <= locked_subtract);
-          args -> total_subtracted_ -= locked_subtract;
+          assert(args->total_subtracted_ <= locked_subtract);
+          args->total_subtracted_ -= locked_subtract;
         }
         // nothing else to do for an exclusive lock
       }
     };
-
 
     assert(args->set_value_ == set_value);
 
@@ -227,11 +230,11 @@ StorageObjectFrame::try_reserve_nnint64_set_add(
     if (lock.has_value()) {
 
       if (lock->lock_type() == StorageLockType::kExclusiveLock) {
-        assert(args -> total_subtracted_ == 0);
+        assert(args->total_subtracted_ == 0);
 
         assert(set_value + add_value >= 0);
 
-        args -> total_subtracted_ = add_value;
+        args->total_subtracted_ = add_value;
 
         release_lock(true);
 
@@ -240,7 +243,8 @@ StorageObjectFrame::try_reserve_nnint64_set_add(
 
       assert(lock->lock_type() == StorageLockType::kSetObjectTypeClass);
 
-      int64_t reserved_sub = lock->extra_lock_data().nnint64_subtracted_amount();
+      int64_t reserved_sub =
+          lock->extra_lock_data().nnint64_subtracted_amount();
 
       assert(reserved_sub <= 0);
 
@@ -251,8 +255,9 @@ StorageObjectFrame::try_reserve_nnint64_set_add(
 
         // setting so that release_lock() operates correctly
         // remaining locked amount: reserved_sub - add_value
-        lock -> extra_lock_data().nnint64_subtracted_amount() = -marginal_reserve;
-        // no need to modify args -> total_subtracted, as release_lock() will handle that
+        lock->extra_lock_data().nnint64_subtracted_amount() = -marginal_reserve;
+        // no need to modify args -> total_subtracted, as release_lock() will
+        // handle that
 
         release_lock(true);
 
@@ -281,8 +286,9 @@ StorageObjectFrame::try_reserve_nnint64_set_add(
 
     args->total_subtracted_ = desired_subtracted;
 
-    if (lock.has_value() && lock -> lock_type() == StorageLockType::kSetObjectTypeClass) {
-      lock -> extra_lock_data().nnint64_subtracted_amount() = 0;
+    if (lock.has_value() &&
+        lock->lock_type() == StorageLockType::kSetObjectTypeClass) {
+      lock->extra_lock_data().nnint64_subtracted_amount() = 0;
     }
 
     release_lock(true);
@@ -296,8 +302,8 @@ StorageObjectFrame::try_reserve_nnint64_set_add(
 }
 
 void
-StorageObjectFrame::revert_nnint64_set_add(
-  RefcountedVariant& v, int64_t add_value)
+StorageObjectFrame::revert_nnint64_set_add(RefcountedVariant &v,
+                                           int64_t add_value)
 {
   auto &args = get_variant_arm_unchecked<NNInt64SetAddArgs>(v);
 
@@ -514,7 +520,8 @@ StorageObjectFrame::try_reserve_delta(StorageDelta const &delta,
         set_variant_from_exclusive_lock<BytestringArgs>(*v, delta.bytestring());
         break;
       case StorageDeltaType::kNonnegativeInt64SetAdd:
-        set_variant_from_exclusive_lock<NNInt64SetAddArgs>(*v, delta.nnint64().set_value);
+        set_variant_from_exclusive_lock<NNInt64SetAddArgs>(
+            *v, delta.nnint64().set_value);
         break;
       default:
         throw std::runtime_error("unimpl");
@@ -564,8 +571,8 @@ void
 StorageObjectFrame::commit_delta(StorageDelta const &delta)
 {
   switch (delta.type()) {
-  //case StorageDeltaType::kReplayCacheClear:
-  //  commit_replay_cache_clear(delta.replay_clear_threshold());
+  // case StorageDeltaType::kReplayCacheClear:
+  //   commit_replay_cache_clear(delta.replay_clear_threshold());
   default:
     // no op
     return;
@@ -587,18 +594,18 @@ StorageObjectFrame::revert_delta(StorageDelta const &delta)
   case StorageDeltaType::kNonnegativeInt64SetAdd:
     revert_nnint64_set_add(*v, delta.nnint64().add_value);
     return;
-/*  case StorageDeltaType::kReplayCacheInsert:
-    revert_replay_cache_inserts(delta.replay_nonces());
-    return;
-  case StorageDeltaType::kReplayCacheClear:
-    revert_replay_cache_clear();
-    return;
-  case StorageDeltaType::kMessageQueueAppend:
-    revert_mq_append(delta.append_event());
-    return;
-  case StorageDeltaType::kMessageQueueConsume:
-    revert_mq_consume();
-    return; */
+    /*  case StorageDeltaType::kReplayCacheInsert:
+        revert_replay_cache_inserts(delta.replay_nonces());
+        return;
+      case StorageDeltaType::kReplayCacheClear:
+        revert_replay_cache_clear();
+        return;
+      case StorageDeltaType::kMessageQueueAppend:
+        revert_mq_append(delta.append_event());
+        return;
+      case StorageDeltaType::kMessageQueueConsume:
+        revert_mq_consume();
+        return; */
   }
 }
 

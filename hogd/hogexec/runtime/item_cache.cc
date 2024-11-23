@@ -11,6 +11,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/storage_lock_util.h"
 #include "storage_object.hh"
 #include "syscall.hh"
 #include "types.hh"
@@ -482,17 +483,48 @@ ItemCache::append_event_to_mq(MessageQueueEvent const &event)
   return {};
 }
 
+std::optional<FullStorageLock> 
+ItemCache::compute_required_lock() const {
+  auto deltas = get_deltas();
+
+  std::optional<FullStorageLock> output_lock = current_lock_;
+
+  for (auto const& delta : deltas) {
+    output_lock = upgrade_lock(output_lock, delta);
+  }
+
+  return output_lock;
+}
+
+std::optional<StorageLockChange> 
+ItemCache::compute_storage_lock_acquire() const {
+
+  return compute_lock_change(current_lock_, compute_required_lock());
+}
+
+std::optional<StorageLockChange> 
+ItemCache::compute_storage_lock_release() const {
+  return compute_lock_change(current_lock_, previous_lock_);
+}
+
+void 
+ItemCache::mark_locks_acquired() {
+  current_lock_ = compute_required_lock();
+}
+
 void
 ItemCacheMap::commit_child_map(ItemCacheMap &child_map)
 {
   for (auto &[addr, item] : child_map.local_map_) {
-    auto it = local_map_.find(addr);
+    local_map_.erase(addr);
+    local_map_.emplace(addr, std::move(item));
+    /*auto it = local_map_.find(addr);
     if (it == local_map_.end()) {
       local_map_.emplace(addr, std::move(item));
     }
     else {
-      local_map_.at(addr) = std::move(item);
-    }
+      auto [[maybe_unused]] local_map_.at(addr) = std::move(item);
+    } */
   }
 }
 

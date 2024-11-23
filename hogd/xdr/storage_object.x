@@ -89,19 +89,21 @@ namespace hogd
     kExclusiveLock = 2,
   };
 
-  union TypeSpecificLock switch(StorageObjectType object_type) {
-    case kNonnegativeInt64:
-      hyper nnint64_subtracted_amount;
-    default:
-      void;
+  union TypeSpecificLock switch (StorageObjectType object_type)
+  {
+  case kNonnegativeInt64:
+    hyper nnint64_subtracted_amount;
+  default:
+    void;
   };
 
   // data sent to db servers about storage lock state
-  union StorageLock switch (StorageLockType lock_type) {
-    case kSetObjectTypeClass:
-      TypeSpecificLock extra_lock_data;
-    case kExclusiveLock:
-      void;
+  union StorageLock switch (StorageLockType lock_type)
+  {
+  case kSetObjectTypeClass:
+    TypeSpecificLock extra_lock_data;
+  case kExclusiveLock:
+    void;
     // is never instantiated for kNone
   };
 
@@ -111,11 +113,12 @@ namespace hogd
   };
 
   // data tracked in hogexec about storage lock state
-  union FullStorageLock switch (StorageLockType lock_type) {
-    case kSetObjectTypeClass:
-      FullSetObjectTypeClassLock full_typeclass_lock;
-    case kExclusiveLock:
-      void;
+  union FullStorageLock switch (StorageLockType lock_type)
+  {
+  case kSetObjectTypeClass:
+    FullSetObjectTypeClassLock full_typeclass_lock;
+  case kExclusiveLock:
+    void;
     // is never instantiated for kNone
   };
 
@@ -134,14 +137,7 @@ namespace hogd
     // transition
     StorageObjectTypeClass *new_typeclass;
 
-    union switch (StorageObjectType type)
-    {
-    case kNonnegativeInt64:
-      hyper marginal_nnint64_subtracted_amount;
-    default:
-      void;
-    }
-    type_specific_extra;
+    TypeSpecificLock marginal_extra_lock;
   };
 
   enum StorageDeltaType {

@@ -248,4 +248,118 @@ TEST(ItemCache, MessageQueueConcurrentOutputsSorted)
   EXPECT_FALSE(proxy.consume_next_mq_event());
 }
 
+TEST(ItemCache, NoLockSubInt64Min) {
+  ItemCache proxy(std::nullopt);
+
+  EXPECT_TRUE(!!proxy.nnint64_set_add(INT64_MAX, -INT64_MAX));
+  EXPECT_FALSE(!!proxy.nnint64_set_add(INT64_MAX, -1));
+}
+
+TEST(ItemCache, ExclusiveTypeClassLock) {
+  ItemCache proxy(std::nullopt);
+
+  EXPECT_FALSE(proxy.compute_storage_lock_acquire().has_value());
+
+  EXPECT_TRUE(!!proxy.nnint64_set_add(100, 10));
+
+  auto lock = proxy.compute_storage_lock_acquire();
+  ASSERT_TRUE(lock.has_value());
+  EXPECT_EQ(lock->previous_type, StorageLockType::kNone);
+  EXPECT_EQ(lock->new_type, StorageLockType::kSetObjectTypeClass);
+  ASSERT_TRUE(!!lock->new_typeclass);
+  // no type-specific lock data yet required
+  EXPECT_EQ(lock->marginal_extra_lock.nnint64_subtracted_amount(), 0);
+
+  EXPECT_TRUE(!!proxy.nnint64_set_add(100, -20));
+
+  lock = proxy.compute_storage_lock_acquire();
+  ASSERT_TRUE(lock.has_value());
+  EXPECT_EQ(lock->previous_type, StorageLockType::kNone);
+  EXPECT_EQ(lock->new_type, StorageLockType::kSetObjectTypeClass);
+  ASSERT_TRUE(!!lock->new_typeclass);
+  ASSERT_EQ(lock->new_typeclass->type(), StorageObjectType::kNonnegativeInt64);
+  EXPECT_EQ(lock->new_typeclass->int64(), 100);
+  // must reserve subtraction of -10
+  EXPECT_EQ(lock->marginal_extra_lock.nnint64_subtracted_amount(), -10);
+
+  {
+    // child frame should inherit locks, not implicitly assume parent acquired locks
+    ItemCache proxy_child_nolocks_acquired(proxy);
+
+    proxy_child_nolocks_acquired.delete_object();
+
+    auto lock = proxy_child_nolocks_acquired.compute_storage_lock_acquire();
+
+    ASSERT_TRUE(lock.has_value());
+    EXPECT_EQ(lock->previous_type, StorageLockType::kNone);
+    EXPECT_EQ(lock->new_type, StorageLockType::kSetObjectTypeClass);
+
+    EXPECT_EQ(lock->new_typeclass->type(), StorageObjectType::kDeleted);
+  }
+
+  proxy.mark_locks_acquired();
+  
+  {
+    // child frame should inherit locks, not implicitly assume parent acquired locks
+    ItemCache proxy_child_locks_acquired(proxy);
+
+    proxy_child_locks_acquired.delete_object();
+
+    auto lock = proxy_child_locks_acquired.compute_storage_lock_acquire();
+
+    ASSERT_TRUE(lock.has_value());
+    EXPECT_EQ(lock->previous_type, StorageLockType::kSetObjectTypeClass);
+    EXPECT_EQ(lock->new_type, StorageLockType::kExclusiveLock);
+
+    EXPECT_FALSE(!!lock->new_typeclass);
+  }
+
+  // now check unwind negation
+
+  EXPECT_FALSE(!!proxy.compute_storage_lock_acquire());
+
+  lock = proxy.compute_storage_lock_release();
+
+  ASSERT_TRUE(lock.has_value());
+  EXPECT_EQ(lock->previous_type, StorageLockType::kSetObjectTypeClass);
+  EXPECT_EQ(lock->new_type, StorageLockType::kNone);
+  EXPECT_FALSE(!!lock->new_typeclass);
+  // must release subtraction of -10
+  EXPECT_EQ(lock->marginal_extra_lock.nnint64_subtracted_amount(), 10);
+
+  // adding doesn't require extra locks, but subtracting does
+
+  EXPECT_TRUE(!!proxy.nnint64_set_add(100, 5));
+  EXPECT_FALSE(!!proxy.compute_storage_lock_acquire());
+
+  EXPECT_TRUE(!!proxy.nnint64_set_add(100, -10));
+  lock = proxy.compute_storage_lock_acquire();
+
+  ASSERT_TRUE(lock.has_value());
+  EXPECT_EQ(lock->previous_type, StorageLockType::kSetObjectTypeClass);
+  EXPECT_EQ(lock->new_type, StorageLockType::kSetObjectTypeClass);
+  EXPECT_FALSE(!!lock->new_typeclass);
+  // must reserve subtraction of -5
+  EXPECT_EQ(lock->marginal_extra_lock.nnint64_subtracted_amount(), -5);
+
+  // check that child lock unwinds to parent lock
+
+  {
+    ItemCache proxy_child(proxy);
+
+    ASSERT_TRUE(proxy_child.compute_storage_lock_acquire());
+
+    proxy_child.mark_locks_acquired();
+
+    lock = proxy_child.compute_storage_lock_release();
+
+    ASSERT_TRUE(lock.has_value());
+    EXPECT_EQ(lock->previous_type, StorageLockType::kSetObjectTypeClass);
+    EXPECT_EQ(lock->new_type, StorageLockType::kSetObjectTypeClass);
+    EXPECT_FALSE(!!lock->new_typeclass);
+    // must release subtraction of -5
+    EXPECT_EQ(lock->marginal_extra_lock.nnint64_subtracted_amount(), 5);
+  }
+}
+
 } // namespace hogd

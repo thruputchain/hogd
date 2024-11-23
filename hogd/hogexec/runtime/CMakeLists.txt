@@ -25,6 +25,7 @@ set(runtime_sources
   syscall_nnint64.cc
   syscall_replay.cc
   syscall_messagequeue.cc
+  storage_lock_util.cc
 )
 
 add_library(

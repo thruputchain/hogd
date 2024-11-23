@@ -92,7 +92,6 @@ TEST(StorageObjectFrame, RewriteVariantFromBase)
   nnint64_set_add.nnint64().set_value = 0;
   nnint64_set_add.nnint64().add_value = 10;
 
-
   // updated delete semantics allows changing type:
   // checks for mismatched writes go in transaction runtime,
   // not the storage object frame

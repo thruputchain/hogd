@@ -29,7 +29,7 @@ public:
   // called exactly once per transaction. The lock, if supplied, is immediately
   // consumed by try_reserve_delta. Locks that are not consumed must be
   // explicitly released at the end of a (failed) transaction.
-  // 
+  //
   // If lock.has_value(), then lock->lock_type != kNone.
   //
   // Each transaction should call try_reserve_delta() at most ONCE per object.
@@ -152,13 +152,13 @@ private:
   static StorageReserveResult
   try_reserve_bytestring_set(RefcountedVariant &v,
                              Bytestring const &bytestring_set,
-                             std::optional<StorageLock> const& lock);
+                             std::optional<StorageLock> const &lock);
 
   // nnint64
-  static StorageReserveResult 
-  try_reserve_nnint64_set_add(RefcountedVariant& v, int64_t set_value,
-                                                   int64_t add_value,
-                                                   std::optional<StorageLock>& lock);
+  static StorageReserveResult
+  try_reserve_nnint64_set_add(RefcountedVariant &v, int64_t set_value,
+                              int64_t add_value,
+                              std::optional<StorageLock> &lock);
   static void revert_nnint64_set_add(RefcountedVariant &v, int64_t add_value);
 
   /*
