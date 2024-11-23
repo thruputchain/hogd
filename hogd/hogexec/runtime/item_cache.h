@@ -70,6 +70,8 @@ public:
   std::optional<StorageLockChange> compute_storage_lock_release() const;
   void mark_locks_acquired();
 
+  std::optional<StorageLock> get_stripped_lock() const;
+
 private:
   SyscallStatus<void> type_guard(StorageObjectType expected_type) const;
 

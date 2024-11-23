@@ -126,6 +126,21 @@ upgrade_lock(std::optional<FullStorageLock> const &previous_lock,
   return make_exclusive_lock();
 }
 
+StorageLock
+strip_lock_data(FullStorageLock const& lock) {
+  StorageLock out(lock.lock_type());
+  switch (lock.lock_type()) {
+  case StorageLockType::kSetObjectTypeClass:
+    out.extra_lock_data() = lock.full_typeclass_lock().extra_lock_data;
+    break;
+  default:
+    // nothing to do
+    break;
+  }
+
+  return out;
+}
+
 namespace {
 
 // transition from not kNone to kNone

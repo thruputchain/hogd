@@ -516,6 +516,15 @@ ItemCache::mark_locks_acquired()
   current_lock_ = compute_required_lock();
 }
 
+std::optional<StorageLock> 
+ItemCache::get_stripped_lock() const {
+  if (current_lock_) {
+    return strip_lock_data(*current_lock_);
+  }
+  return std::nullopt;
+}
+
+
 void
 ItemCacheMap::commit_child_map(ItemCacheMap &child_map)
 {
