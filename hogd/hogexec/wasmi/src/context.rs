@@ -1,10 +1,14 @@
-use wasmi::{Caller, Config, Engine, Error, Linker, StackLimits};
+use wasmi::{Caller, Config, Engine, Error, Linker, Module, StackLimits};
 
 use core::ffi::c_void;
 use core::slice;
 use core::str::Utf8Error;
 
 use crate::external_call;
+use crate::SHA256Hash;
+
+use lru::LruCache;
+use std::num::NonZeroUsize;
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -24,6 +28,7 @@ use crate::external_call;
 pub struct WasmiContext {
     pub engine: Engine,
     pub linker: Linker<*mut c_void>,
+    pub module_cache: LruCache<SHA256Hash, Module>,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -58,6 +63,7 @@ impl WasmiContext {
         Self {
             engine: engine.clone(),
             linker: Linker::new(&engine),
+            module_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
         }
     }
 

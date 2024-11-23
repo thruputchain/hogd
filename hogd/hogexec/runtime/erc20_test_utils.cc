@@ -9,6 +9,7 @@
 #include "hogd/hogexec/runtime/runtime_test_framework.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_interface.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -227,11 +228,12 @@ mint_to(RuntimeTestFramework &runtime_framework,
 bool
 send_payment(RuntimeTestFramework &runtime_framework,
              ContractAddress const &from, ContractAddress const &to,
-             int64_t amount)
+             int64_t amount, std::shared_ptr<WasmiContext> wasmi_context)
 {
   auto payment = make_transfer_transaction(from, to, amount);
 
-  SystemCallHandler handler(payment, *runtime_framework.snapshot_cache_);
+  SystemCallHandler handler(payment, *runtime_framework.snapshot_cache_,
+                            wasmi_context);
   if (!handler.root_invoke().result) {
     return false;
   }

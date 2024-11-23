@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 
 #include "hogd/hogexec/runtime/call_frame.h"
 #include "hogd/hogexec/runtime/item_cache.h"
@@ -21,7 +22,8 @@ class StorageSnapshotCache;
 class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
-                    StorageSnapshotCache &snapshot_cache);
+                    StorageSnapshotCache &snapshot_cache,
+                    std::shared_ptr<WasmiContext> wasmi_context = nullptr);
 
   InvokeResult root_invoke();
 
@@ -130,7 +132,7 @@ private:
     RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
   };
 
-  WasmiContext wasmi_context_;
+  std::shared_ptr<WasmiContext> wasmi_context_;
 
   RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
 

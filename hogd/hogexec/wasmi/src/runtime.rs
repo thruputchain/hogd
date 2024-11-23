@@ -5,6 +5,7 @@ use wasmi::{Instance, Module, Store, Val};
 use crate::context::WasmiContext;
 use crate::external_call;
 use crate::invoke_result::{InvokeError, WasmiInvokeResult};
+use crate::SHA256Hash;
 
 // A WasmiRuntime implements a single WebAssembly module,
 // with the ability to invoke exported functions and call
@@ -49,14 +50,21 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
 impl WasmiRuntime {
     fn new(
         bytes: &[u8],
-        context: &WasmiContext,
+        script_hash: &SHA256Hash,
+        context: &mut WasmiContext,
         userctx: *mut c_void,
     ) -> Option<WasmiRuntime> {
-        let module = match Module::new(&context.engine, &bytes) {
-            Ok(m) => m,
-            Err(_) => {
-                return None;
-            }
+        let module = match context.module_cache.get(script_hash) {
+            Some(module) => module,
+            None => match Module::new(&context.engine, &bytes) {
+                Ok(m) => {
+                    context.module_cache.push(*script_hash, m);
+                    context.module_cache.get(script_hash).unwrap()
+                }
+                Err(_) => {
+                    return None;
+                }
+            },
         };
 
         let mut store = Store::new(&context.engine, userctx);
@@ -173,27 +181,33 @@ pub extern "C" fn wasmi_invoke(
 pub extern "C" fn new_wasmi_runtime(
     bytes: *const u8,
     bytes_len: u32,
+    script_hash: *const u8,
     userctx: *mut c_void,
-    wasmi_context_ptr: *const c_void,
+    wasmi_context_ptr: *mut c_void,
 ) -> *mut c_void {
     if bytes == core::ptr::null() {
         return core::ptr::null_mut();
     }
 
-    assert!(wasmi_context_ptr != core::ptr::null());
+    assert!(wasmi_context_ptr != core::ptr::null_mut());
+    assert!(script_hash != core::ptr::null());
 
-    let wasmi_context: &WasmiContext = unsafe {
-        &*core::mem::transmute::<_, *mut WasmiContext>(wasmi_context_ptr)
+    let wasmi_context: &mut WasmiContext = unsafe {
+        &mut *core::mem::transmute::<_, *mut WasmiContext>(wasmi_context_ptr)
     };
+
+    let script_hash: &SHA256Hash =
+        unsafe { &*(script_hash as *const [u8; 32]) };
 
     let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
 
-    let b = match WasmiRuntime::new(&slice, &wasmi_context, userctx) {
-        Some(res) => Box::new(res),
-        None => {
-            return core::ptr::null_mut();
-        }
-    };
+    let b =
+        match WasmiRuntime::new(&slice, &script_hash, wasmi_context, userctx) {
+            Some(res) => Box::new(res),
+            None => {
+                return core::ptr::null_mut();
+            }
+        };
 
     return unsafe { core::mem::transmute(Box::into_raw(b)) };
 }

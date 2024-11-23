@@ -8,7 +8,9 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 #include "contract.hh"
@@ -58,13 +60,15 @@ void free_wasmi_context(void *wasmi_context_ptr);
 pub fn new_wasmi_runtime(
     bytes: *const u8,
     bytes_len: u32,
+    script_hash: *const u8,
     userctx: *mut c_void,
-    wasmi_context_ptr: *const c_void
+    wasmi_context_ptr: *mut c_void
 ) -> *mut WasmiRuntime;
 */
 
 void *new_wasmi_runtime(const uint8_t *script_ptr, uint32_t script_len,
-                        void *user_ctx_ptr, void *wasmi_context_ptr);
+                        const uint8_t *script_hash, void *user_ctx_ptr,
+                        void *wasmi_context_ptr);
 
 /*
 #[no_mangle]
@@ -162,6 +166,14 @@ WasmiContext::~WasmiContext()
   free_wasmi_context(wasmi_context_ptr_);
 }
 
+std::shared_ptr<WasmiContext>
+make_hogexec_wasmi_context()
+{
+  auto ptr = std::make_shared<WasmiContext>();
+  ptr->link_fn("marmot", "syscall", &syscall_entry);
+  return ptr;
+}
+
 std::optional<WasmiRuntime>
 WasmiContext::make_new_runtime(ContractBlob const &contract,
                                SystemCallHandler *syscall_handler)
@@ -170,8 +182,12 @@ WasmiContext::make_new_runtime(ContractBlob const &contract,
       std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = syscall_handler;
 
+  // TODO(geoff): this hash is almost always already known to the caller, so
+  // this is done twice
+  SHA256Hash contract_hash = sha256(std::as_bytes(std::span(contract)));
+
   void *wasmi_runtime_ptr =
-      new_wasmi_runtime(contract.data(), contract.size(),
+      new_wasmi_runtime(contract.data(), contract.size(), contract_hash.data(),
                         host_call_context.get(), wasmi_context_ptr_);
 
   if (wasmi_runtime_ptr == nullptr) {

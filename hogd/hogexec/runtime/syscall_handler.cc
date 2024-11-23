@@ -38,9 +38,11 @@
 
 namespace hogd {
 
-SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
-                                     StorageSnapshotCache &snapshot_cache)
-  : signed_tx_(std::move(signed_tx)), newly_created_contracts_([&] {
+SystemCallHandler::SystemCallHandler(
+    SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
+    std::shared_ptr<WasmiContext> wasmi_context)
+  : wasmi_context_(wasmi_context), signed_tx_(std::move(signed_tx)),
+    newly_created_contracts_([&] {
       std::map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
       for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
@@ -51,9 +53,10 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       return contracts;
     }()),
     root_auth_manager_(signed_tx_), snapshot_cache_(snapshot_cache)
-
 {
-  wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
+  if (!wasmi_context_) {
+    wasmi_context_ = make_hogexec_wasmi_context();
+  }
 }
 
 InvokeResult
@@ -530,7 +533,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   }
 
   auto new_runtime =
-      wasmi_context_.make_new_runtime(load_contract->contract_data, this);
+      wasmi_context_->make_new_runtime(load_contract->contract_data, this);
 
   if (!new_runtime) {
     return nullptr;

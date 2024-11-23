@@ -8,6 +8,7 @@
 #include "hogd/base/status.h"
 #include "hogd/hogexec/runtime/erc20_test_utils.h"
 #include "hogd/hogexec/runtime/runtime_test_framework.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/init.h"
 
 #include "types.hh"
@@ -73,11 +74,13 @@ bm_erc20_2wallets(benchmark::State &state)
 
   auto n_payments = state.range(0);
 
+  auto wasmi_context_ptr = make_hogexec_wasmi_context();
+
   state.ResumeTiming();
   for (auto _ : state) {
     for (auto i = 0U; i < n_payments; i++) {
       if (!test::erc20::send_payment(runtime_framework, wallets[0], wallets[1],
-                                     1)) {
+                                     1, wasmi_context_ptr)) {
         throw std::runtime_error("bad payment");
       }
     }

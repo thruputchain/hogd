@@ -103,6 +103,9 @@ private:
   void *wasmi_context_ptr_;
 };
 
+// create WasmiContext, and initialize with hogexec's imported function(s)
+std::shared_ptr<WasmiContext> make_hogexec_wasmi_context();
+
 // Wrapper around one Wasm module (one wasmi instance).
 // Can be invoked, and will call into provided host functions
 // and pass in (as an argument) the provided SystemCallHandler.

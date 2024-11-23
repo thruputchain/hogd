@@ -13,6 +13,8 @@ pub struct MemorySlice {
     sz: u32,
 }
 
+type SHA256Hash = [u8; 32];
+
 #[no_mangle]
 pub extern "C" fn wasmi_get_memory(runtime_void: *mut c_void) -> MemorySlice {
     assert!(runtime_void != core::ptr::null_mut());
