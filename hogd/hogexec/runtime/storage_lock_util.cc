@@ -127,7 +127,8 @@ upgrade_lock(std::optional<FullStorageLock> const &previous_lock,
 }
 
 StorageLock
-strip_lock_data(FullStorageLock const& lock) {
+strip_lock_data(FullStorageLock const &lock)
+{
   StorageLock out(lock.lock_type());
   switch (lock.lock_type()) {
   case StorageLockType::kSetObjectTypeClass:

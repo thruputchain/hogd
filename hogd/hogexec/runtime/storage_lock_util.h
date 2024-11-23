@@ -10,8 +10,7 @@ FullStorageLock
 upgrade_lock(std::optional<FullStorageLock> const &previous_lock,
              StorageDelta const &new_delta);
 
-StorageLock
-strip_lock_data(FullStorageLock const& lock);
+StorageLock strip_lock_data(FullStorageLock const &lock);
 
 std::optional<StorageLockChange>
 compute_lock_change(std::optional<FullStorageLock> const &previous_lock,
