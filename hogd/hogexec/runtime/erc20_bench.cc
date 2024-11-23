@@ -80,7 +80,7 @@ bm_erc20_2wallets(benchmark::State &state)
   for (auto _ : state) {
     for (auto i = 0U; i < n_payments; i++) {
       if (!test::erc20::send_payment(runtime_framework, wallets[0], wallets[1],
-                                     1, wasmi_context_ptr)) {
+                                     1)) {
         throw std::runtime_error("bad payment");
       }
     }
