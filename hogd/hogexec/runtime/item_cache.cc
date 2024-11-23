@@ -16,19 +16,10 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_object.hh"
 #include "syscall.hh"
-#include "x23/vec.h"
 
 namespace hogd {
 
 namespace {
-
-StorageDelta
-make_delete_last()
-{
-  StorageDelta out;
-  out.type(StorageDeltaType::kDeleteLast);
-  return out;
-}
 
 StorageDelta
 make_bytestring_set(Bytestring const &string)
@@ -50,12 +41,6 @@ make_nnint128_set_add(int128_t set, int128_t add)
 }
 
 } // namespace
-
-void
-ItemCache::delete_last()
-{
-  is_deleted_last_ = true;
-}
 
 bool
 ItemCache::exists() const
@@ -260,29 +245,22 @@ ItemCache::nnint128_set_add(int128_t set_value, int128_t add_value)
   return {};
 }
 
-x23::Vec<StorageDelta>
-ItemCache::get_deltas() const
+std::optional<StorageDelta>
+ItemCache::get_delta() const
 {
-  x23::Vec<StorageDelta> out =
-      std::visit([](auto const &v) { return v.get_deltas(); }, delta_args_);
-
-  if (is_deleted_last_) {
-    out.push_back(make_delete_last());
-  }
-
-  return out;
+  return std::visit([](auto const &v) { return v.get_delta(); }, delta_args_);
 }
 
-x23::Vec<StorageDelta>
-ItemCache::BytestringCacheType::get_deltas() const
+std::optional<StorageDelta>
+ItemCache::BytestringCacheType::get_delta() const
 {
-  return {make_bytestring_set(set_bytestring_arg_)};
+  return make_bytestring_set(set_bytestring_arg_);
 }
 
-x23::Vec<StorageDelta>
-ItemCache::NNInt128CacheType::get_deltas() const
+std::optional<StorageDelta>
+ItemCache::NNInt128CacheType::get_delta() const
 {
-  return {make_nnint128_set_add(nnint128_set_arg_, nnint128_add_sum_)};
+  return make_nnint128_set_add(nnint128_set_arg_, nnint128_add_sum_);
 }
 
 void

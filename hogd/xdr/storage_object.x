@@ -23,9 +23,8 @@ namespace hogd
   };
 
   enum StorageDeltaType {
-    kDeleteLast = 0,
-    kBytestringSet = 1,
-    kNonnegativeInt128SetAdd = 2,
+    kBytestringSet = 0,
+    kNonnegativeInt128SetAdd = 1,
   };
 
   struct NonnegativeInt128SetAddArgs {
@@ -35,8 +34,6 @@ namespace hogd
 
   union StorageDelta switch (StorageDeltaType type)
   {
-  case kDeleteLast:
-    void;
   case kBytestringSet:
     Bytestring bytestring;
   case kNonnegativeInt128SetAdd:

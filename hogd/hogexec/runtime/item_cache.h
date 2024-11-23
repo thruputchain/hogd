@@ -19,8 +19,6 @@ public:
   bool exists() const;
   std::optional<StorageObjectType> get_object_type() const;
 
-  void delete_last();
-
   SyscallStatus<Bytestring> get_bytestring() const;
   SyscallStatus<uint32_t> get_bytestring_len() const;
   SyscallStatus<void>
@@ -30,7 +28,7 @@ public:
   SyscallStatus<int128_t> get_nnint128_value() const;
   SyscallStatus<void> nnint128_set_add(int128_t set_value, int128_t add_value);
 
-  x23::Vec<StorageDelta> get_deltas() const;
+  std::optional<StorageDelta> get_delta() const;
 
 private:
   SyscallStatus<void> type_guard(StorageObjectType expected_type) const;
@@ -38,7 +36,7 @@ private:
   struct BytestringCacheType {
     Bytestring set_bytestring_arg_;
 
-    x23::Vec<StorageDelta> get_deltas() const;
+    std::optional<StorageDelta> get_delta() const;
 
     constexpr static std::optional<StorageObjectType> kObjectType =
         StorageObjectType::kBytestring;
@@ -48,14 +46,17 @@ private:
     int128_t nnint128_set_arg_ = 0;
     int128_t nnint128_add_sum_ = 0;
 
-    x23::Vec<StorageDelta> get_deltas() const;
+    std::optional<StorageDelta> get_delta() const;
 
     constexpr static std::optional<StorageObjectType> kObjectType =
         StorageObjectType::kNonnegativeInt128;
   };
 
   struct UnsetType {
-    static x23::Vec<StorageDelta> get_deltas() { return {}; }
+    constexpr static std::optional<StorageDelta> get_delta()
+    {
+      return std::nullopt;
+    }
 
     constexpr static std::optional<StorageObjectType> kObjectType =
         std::nullopt;
@@ -82,8 +83,6 @@ private:
   std::optional<StorageObject> base_object_;
   std::variant<UnsetType, BytestringCacheType, NNInt128CacheType> delta_args_ =
       UnsetType{};
-
-  bool is_deleted_last_ = false;
 };
 
 struct ItemCacheMap {
