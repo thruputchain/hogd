@@ -12,11 +12,20 @@ namespace hogd {
 #define CSTR_T(x...) #x
 #define CSTR(x...) CSTR_T(x)
 
+// HAS_ATTRIBUTE - returns true if an attribute is supported
+#ifdef __has_attribute
+#define HAS_ATTRIBUTE(x) __has_attribute(x)
+#else
+#define HAS_ATTRIBUTE(x) 0
+#endif
+
 // variable attributes
 #define ATTRIBUTE_PACKED __attribute__((packed))
 
 // function attributes
 #define ATTRIBUTE_NOINLINE __attribute__((noinline))
+#define ATTRIBUTE_ALWAYS_INLINE __attribute__((always_inline))
+#define ATTRIBUTE_COLD __attribute__((cold))
 
 //
 // Prefetching support
@@ -144,23 +153,29 @@ cpu_relax()
   // are cases where we want UMWAIT/TPAUSE on x86.
 }
 
-template<std::integral T, std::integral S, std::integral R>
+// integer_add_overflow adds b to a and stores the result in out. Returns
+// true if there was an overflow while performing the addition.
+template<std::integral T, std::integral U, std::integral Result>
 inline bool
-integer_add_overflow(T a, S b, R *out)
+integer_add_overflow(T a, U b, Result *out)
 {
   return __builtin_add_overflow(a, b, out);
 }
 
-template<std::integral R, std::integral T, std::integral S>
+// integer_add_overflow adds b to a without storing the result.  Returns true if
+// there would be an overflow while performing the addition and storing in the
+// type Result.  Result defaults to decltype(a+b).
+template<typename R = void, std::integral T, std::integral U>
 inline bool
-integer_add_overflow_p(T a, S b)
+integer_add_overflow(T a, U b)
 {
+  using Result = std::conditional_t<std::is_void_v<R>, decltype(a + b), R>;
   // clang doensn't have add_overflow_p but does have add_overflow
 #if defined(__builtin_add_overflow_p)
-  return __builtin_add_overflow_p(a, b, R{0});
+  return __builtin_add_overflow_p(a, b, Result{0});
 #else
-  R result;
-  return __builtin_add_overflow(a, b, &result);
+  Result r;
+  return integer_add_overflow(a, b, &r);
 #endif
 }
 

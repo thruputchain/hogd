@@ -11,6 +11,7 @@ using namespace x23;
 int
 main()
 {
+  using enum color;
   fix_4 f4 { .i = 999 };
   std::cout << show(f4) << std::endl;
 
