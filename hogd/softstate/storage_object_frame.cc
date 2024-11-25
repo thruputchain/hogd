@@ -32,7 +32,7 @@ StorageObjectFrame::NNInt64SetAddArgs::to_object() const
 
   uint64_t total_add = total_added_.get_capped();
 
-  if (integer_add_overflow_p<int64_t>(object.int64(), total_add)) {
+  if (integer_add_overflow<int64_t>(object.int64(), total_add)) {
     object.int64() = INT64_MAX;
   }
   else {
