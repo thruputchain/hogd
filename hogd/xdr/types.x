@@ -64,7 +64,6 @@ const kMaxLogMessageLen = 1024;
 const kMaxReturnBufferLen = 1024;
 const kBytestringMaxLen = 4096;
 
-
 // in global storage:
 // [contract address + storage key] = 64 bytes
 // Contracts are free to set their own conventions for keys.

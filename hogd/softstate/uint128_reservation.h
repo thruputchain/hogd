@@ -17,7 +17,7 @@ public:
     if (integer_add_overflow<uint64_t>(lowbits_, v, &lowbits_)) {
       highbits_++;
     }
-    
+
     return *this;
   }
 
