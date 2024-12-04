@@ -177,8 +177,7 @@ syscall_Invoke_outer(SystemCallHandler &syscall_handler,
                      uint64_t user_input_address, uint64_t user_input_method,
                      uint64_t user_input_gas_limit,
                      uint64_t user_input_calldata,
-                     uint64_t user_input_calldata_len,
-                     uint64_t user_output_return_len)
+                     uint64_t user_input_calldata_len, uint64_t /* unused */)
 {
   const auto *input_address =
       check_user_argument<const ContractAddress>(contract_memory,
@@ -207,20 +206,8 @@ syscall_Invoke_outer(SystemCallHandler &syscall_handler,
             kGenericBadSyscallCost};
   }
 
-  auto *output_return_len =
-      check_user_argument<RuntimeMemoryLength>(contract_memory,
-                                               user_output_return_len,
-                                               sizeof(RuntimeMemoryLength));
-
-  if (!output_return_len) {
-    return {{HostFnErrorCode::kNoneOrRecoverable,
-             static_cast<int32_t>(SyscallErrorCode::kFault)},
-            kGenericBadSyscallCost};
-  }
-
   auto res = syscall_Invoke_inner(syscall_handler, *input_address, input_method,
-                                  input_gas_limit, *input_calldata,
-                                  *output_return_len);
+                                  input_gas_limit, *input_calldata);
 
   return {convert_return_t(res.first), res.second};
 }
@@ -278,6 +265,30 @@ syscall_GetReturnedBuffer_outer(SystemCallHandler &syscall_handler,
 
   auto res = syscall_GetReturnedBuffer_inner(syscall_handler, *output_buffer,
                                              *output_written_len);
+
+  return {convert_return_t(res.first), res.second};
+}
+std::pair<HostFnResult, GasAmount>
+syscall_GetReturnedBufferLen_outer(SystemCallHandler &syscall_handler,
+                                   std::span<std::byte> contract_memory,
+                                   uint64_t user_output_buffer_len,
+                                   uint64_t /*unused*/, uint64_t /*unused*/,
+                                   uint64_t /*unused*/, uint64_t /*unused*/,
+                                   uint64_t /*unused*/)
+{
+  auto *output_buffer_len =
+      check_user_argument<RuntimeMemoryLength>(contract_memory,
+                                               user_output_buffer_len,
+                                               sizeof(RuntimeMemoryLength));
+
+  if (!output_buffer_len) {
+    return {{HostFnErrorCode::kNoneOrRecoverable,
+             static_cast<int32_t>(SyscallErrorCode::kFault)},
+            kGenericBadSyscallCost};
+  }
+
+  auto res =
+      syscall_GetReturnedBufferLen_inner(syscall_handler, *output_buffer_len);
 
   return {convert_return_t(res.first), res.second};
 }
@@ -426,7 +437,7 @@ using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(SystemCallHandler &,
                                                           uint64_t, uint64_t,
                                                           uint64_t, uint64_t);
 
-const std::array<std::pair<SyscallNo, SyscallFunc>, 12> syscall_table = {
+const std::array<std::pair<SyscallNo, SyscallFunc>, 13> syscall_table = {
     std::pair{SyscallNo::kSHA256, &syscall_SHA256_outer},
     std::pair{SyscallNo::kGetMsgSender, &syscall_GetMsgSender_outer},
     std::pair{SyscallNo::kGetCalldataLen, &syscall_GetCalldataLen_outer},
@@ -435,6 +446,8 @@ const std::array<std::pair<SyscallNo, SyscallFunc>, 12> syscall_table = {
     std::pair{SyscallNo::kInvoke, &syscall_Invoke_outer},
     std::pair{SyscallNo::kReturn, &syscall_Return_outer},
     std::pair{SyscallNo::kGetReturnedBuffer, &syscall_GetReturnedBuffer_outer},
+    std::pair{SyscallNo::kGetReturnedBufferLen,
+              &syscall_GetReturnedBufferLen_outer},
     std::pair{SyscallNo::kGetDeployAddress, &syscall_GetDeployAddress_outer},
     std::pair{SyscallNo::kDeployContract, &syscall_DeployContract_outer},
     std::pair{SyscallNo::kGetSourceTransactionHash,

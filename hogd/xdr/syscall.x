@@ -17,10 +17,11 @@ namespace hogd
     kInvoke = 5,
     kReturn = 6,
     kGetReturnedBuffer = 7,
-    kGetDeployAddress = 8,
-    kDeployContract = 9,
-    kGetSourceTransactionHash = 10,
-    kExit = 11,
+    kGetReturnedBufferLen = 8,
+    kGetDeployAddress = 9,
+    kDeployContract = 10,
+    kGetSourceTransactionHash = 11,
+    kExit = 12,
   };
 
   enum SyscallErrorCode {

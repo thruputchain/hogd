@@ -38,8 +38,7 @@ std::pair<HostFnResult, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const ContractAddress &input_address,
                      MethodID input_method, GasAmount input_gas_limit,
-                     std::span<const std::byte> input_calldata,
-                     RuntimeMemoryLength &output_return_len);
+                     std::span<const std::byte> input_calldata);
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_Return_inner(SystemCallHandler &syscall_handler,
@@ -49,6 +48,10 @@ std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
                                 std::span<std::byte> output_buffer,
                                 RuntimeMemoryLength &output_written_len);
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_GetReturnedBufferLen_inner(SystemCallHandler &syscall_handler,
+                                   RuntimeMemoryLength &output_buffer_len);
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetDeployAddress_inner(

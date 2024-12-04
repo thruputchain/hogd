@@ -74,8 +74,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const ContractAddress &input_address,
                      const MethodID input_method,
                      const GasAmount input_gas_limit,
-                     std::span<const std::byte> input_calldata,
-                     RuntimeMemoryLength &output_return_len)
+                     std::span<const std::byte> input_calldata)
 {
   Calldata calldata;
   calldata.resize_uninitialized(input_calldata.size());
@@ -91,8 +90,6 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
              static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)},
             0};
   }
-
-  output_return_len = syscall_handler.get_defaultzero_return_len();
 
   if (invoke_res) {
     return {{HostFnErrorCode::kNoneOrRecoverable,
@@ -138,6 +135,21 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
   std::memcpy(output_buffer.data(), status->data(), write_len);
 
   output_written_len = write_len;
+
+  return {SyscallErrorCode::kNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_GetReturnedBufferLen_inner(SystemCallHandler &syscall_handler,
+                                   RuntimeMemoryLength &output_buffer_len)
+{
+  auto status = syscall_handler.get_return_buffer();
+
+  if (!status) {
+    return {status.error().code(), 0};
+  }
+
+  output_buffer_len = status->size();
 
   return {SyscallErrorCode::kNone, 0};
 }

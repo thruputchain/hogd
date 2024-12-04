@@ -43,6 +43,13 @@ associated with the address of the currently running contract.
 
 Returns kInvalidSyscallInput if the supplied message is too long.
 
+# Invoke
+Signature: (call_address: ContractAddress, method: MethodID, gas_limit: GasAmount, calldata: [u8]) -> ()
+
+Invokes the specified method of the contract at the specified address, with the supplied parameters.
+Creates a new callframe, which terminates upon conclusion of the Invoke() syscall.
+
+
 # Return
 Signature: (output : [u8]) -> !
 
@@ -58,6 +65,14 @@ Signature: () -> [u8]
 Loads the bytestring returned by the most recent child callframe.
 
 Returns error kNoReturnBufferAvailable if the most recent child callframe does not exist or exited in an error state.
+
+# GetReturnedBufferLen
+Signature: () -> u32
+
+Gets the size of the bytestring returned by the most recent child callframe.
+
+Returns error kNoReturnBufferAvailable if the most recent child callframe does not exist or exited in an error state.
+
 
 # Exit
 
