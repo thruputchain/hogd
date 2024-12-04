@@ -97,7 +97,7 @@ program myprog {
 enum StorageDeltaType {
   kDeleteLast = 0,
   kBytestringSet = 1,
-  kNonnegativeInt64SetAdd = 2,
+  kNonnegativeInt64SetAdd = 2
 };
 
 const kBytestringMaxLen = 4096;

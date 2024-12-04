@@ -10,6 +10,7 @@ add_library(x23
   fileio.cc
   fileio.h
   format.h
+  heap.h
   mvar.h
   refcnt.h
   rpc.cc
