@@ -1,0 +1,78 @@
+#include <gtest/gtest.h>
+
+#include <latch>
+#include <thread>
+#include <vector>
+
+#include "hogd/base/perthread.h"
+
+namespace hogd {
+
+static constexpr int kThreads = 16;
+
+TEST(PerThreadTest, BasicUsage)
+{
+  PerThread<int> val;
+
+  std::vector<std::jthread> joins;
+  joins.reserve(kThreads);
+  for (int i = 0; i < kThreads; ++i) {
+    joins.emplace_back([i, &val] {
+      *val += i;
+      EXPECT_EQ(*val, i);
+    });
+  }
+
+  *val += 2;
+  EXPECT_EQ(*val, 2);
+}
+
+TEST(PerThreadTest, ForEach)
+{
+  PerThread<std::vector<int>> vecs;
+
+  std::latch vecs_done(kThreads);
+  std::latch exit(1);
+  std::vector<std::jthread> joins;
+  joins.reserve(kThreads);
+  for (int i = 0; i < kThreads; ++i) {
+    joins.emplace_back([&vecs, &vecs_done, &exit] {
+      vecs->push_back(1);
+      EXPECT_EQ(vecs->size(), 1);
+      vecs_done.count_down();
+      exit.wait();
+    });
+  }
+
+  std::vector<int> vec;
+  vecs_done.wait();
+  vecs.for_each([&vec](const std::vector<int> &v) {
+    EXPECT_EQ(v.size(), 1);
+    vec.insert(vec.end(), v.cbegin(), v.cend());
+  });
+  EXPECT_EQ(vec.size(), kThreads);
+  exit.count_down();
+}
+
+TEST(PerThreadTest, Counters)
+{
+  PerThreadCounter<int> cnt;
+
+  // test threads that have exited.
+  std::vector<std::jthread> joins;
+  joins.reserve(kThreads);
+  for (int i = 0; i < kThreads; ++i) {
+    joins.emplace_back([&cnt] { cnt.inc(); });
+  }
+  joins.clear();
+  EXPECT_EQ(cnt.get(), kThreads);
+
+  // test threads that are still active.
+  std::jthread([&cnt] {
+    cnt.inc();
+    EXPECT_EQ(cnt.get(), kThreads + 1);
+  }).join();
+  EXPECT_EQ(cnt.get(), kThreads + 1);
+}
+
+} // namespace hogd
