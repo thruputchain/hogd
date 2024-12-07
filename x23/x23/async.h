@@ -61,25 +61,15 @@
 //       });
 //     }
 //
-// If you use CoroCB as your principal callback abstraction,
-// occasionally you may want to register a callback when you don't
-// have a coroutine.  For this you can use the cb_to_coro function,
-// for example:
-//
-//       register_callback(cb_to_coro<int>([](int result) {
-//          std::println("unimplemented event, previous result was {}",
-//                       result);
-//       }));
-//
 // * Any funtion returning the vacuous type Detached can be a
 //   coroutine that uses co_await and co_return (co_returing void),
 //   but cannot itself be co_awaited.  This is useful for completing
 //   work in the background.
 //
-// * Any function returning void whose final argument is Callback-like
-//   type (meaning Callback<T> or any other movable type for which
-//   callback_traits has been specialized) can be a co_routine if it
-//   returns via "co_return t" for some t of type T.
+// * Any function returning void whose final argument is a
+//   Callback-like type (meaning Callback<T> or any other movable type
+//   for which callback_traits has been specialized) can be a
+//   co_routine if it returns via "co_return t" for some t of type T.
 //
 // * If a coroutine's return_value function expects type
 //   std::expected<T, E> and the coroutine has an object r of type
@@ -214,6 +204,8 @@ namespace detail {
 template<typename R> class AwaitableImpl {
 public:
   using resume_type = R;
+
+  AwaitableImpl(AwaitableImpl &&) = delete;
 
   //
   // Functions for use on the callback/callee/"promise" side
@@ -350,7 +342,6 @@ public:
 
 protected:
   AwaitableImpl() noexcept {}
-  AwaitableImpl(AwaitableImpl &&) = delete;
   ~AwaitableImpl()
   {
     // You cannot discard an Awaitable without co_awaiting it, unless
@@ -482,8 +473,8 @@ template<typename R> struct callback_traits<CoroCB<R>> {
 // though it cannot be copied since it destroys the coroutine in its
 // destructor.  A non-coroutine function can return an Async by
 // passing back the result of another function returning an Async, or
-// can create a trivial Async that returning a specific value by
-// calling async_return(R).
+// can create a trivial Async that returns a specific value by calling
+// async_return(R).
 //
 // Note that you must get the result of an Async before destroying it,
 // as the result is likely being produced in a different thread that
@@ -514,7 +505,7 @@ template<typename R> struct [[nodiscard]] Async {
   // Run Async to completion and make a callback with the result.
   void operator()(detail::is_callback_of<R> auto cb)
   {
-    // To defer destroying callee_, move Async into this
+    // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);
     co_return co_await self;
   }
@@ -612,12 +603,13 @@ struct Detached {
     std::suspend_never final_suspend() const noexcept { return {}; }
   };
 
+  Detached(Detached &&) noexcept = delete;
+
 private:
-  // Make constructors private to flag an error in case a function
+  // Make constructor private to flag an error in case a function
   // returns Detached without using coroutine operations (i.e.,
   // co_await or co_return) to avoid weird surprises.
   Detached() noexcept = default;
-  Detached(Detached &&) noexcept = delete;
 };
 
 namespace detail {
