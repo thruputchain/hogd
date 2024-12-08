@@ -8,7 +8,8 @@
 //
 //   CoroLock lock;
 //
-//   Detached some_coroutine()
+//   Detached
+//   some_coroutine()
 //   {
 //     CoroGuard g;
 //     co_await g(lock);  // acquire lock
@@ -28,9 +29,9 @@
 // to point to itself.  On release, a coroutine resumes the next
 // coroutine.
 //
-// The structure is reminiscent of MCS spinlocks, though CoroLock lock
-// suspends the coroutine, making t more comparable to a sleeping lock
-// than a spinlock.
+// The structure is reminiscent of MCS spinlocks, though CoroLock
+// suspends the coroutine, making it more comparable to a sleeping
+// lock than a spinlock.
 
 #pragma once
 
