@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <latch>
+#include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/perthread.h"
@@ -23,8 +25,8 @@ TEST(PerThreadTest, BasicUsage)
     });
   }
 
-  *val += 2;
-  EXPECT_EQ(*val, 2);
+  *val += kThreads;
+  EXPECT_EQ(*val, kThreads);
 }
 
 TEST(PerThreadTest, ForEach)
@@ -46,7 +48,8 @@ TEST(PerThreadTest, ForEach)
 
   std::vector<int> vec;
   vecs_done.wait();
-  vecs.for_each([&vec](const std::vector<int> &v) {
+  std::unique_lock ul = vecs.lock_threads();
+  vecs.for_each(std::move(ul), [&vec](const std::vector<int> &v) {
     EXPECT_EQ(v.size(), 1);
     vec.insert(vec.end(), v.cbegin(), v.cend());
   });

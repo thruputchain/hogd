@@ -1,9 +1,27 @@
 // perthread.h - utilities for per-thread variables.
+//
+// This library extends thread_local with PerThread, which provides per-thread
+// variables that are local rather than global in scope. For example, if a
+// class uses PerThread to define a member variable, every instance will have
+// its own per-thread copies of the variable.
+//
+// The implementation strategy is to maintain a thread_local std::vector<T> for
+// each T. Then, each PerThread instance refers to an index in the table. A
+// lock is needed to synchronize when threads are spawning and exiting and to
+// adjust the size of the std::vector<T> when more indiies are needed. Threads
+// allocate memory for their index lazily (on the first access) to avoid
+// wasting memory if the thread never touches the PerThread variable.
+//
+// See also alloc_percpu() in the Linux Kernel, which works in a similar way
+// but provides a per-core heap that stores a mix of types in one mapping. We
+// don't do this here in order to avoid the implementation complexity of a full
+// heap allocator, and the added difficulty of initializing types (C++ has to
+// call each item's constructor) each time a new thread joins. Instead we go
+// with a per-thread std::vector<T> for each T.
 
 #pragma once
 
 #include <concepts>
-#include <memory>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -128,16 +146,24 @@ public:
     return *storage_.get(idx_);
   }
 
-  // for_each runs func each thread-local copy of the variable.
-  template<typename F> void for_each(F &&func)
+  // lock_threads returns an acquired lock that prevents threads from leaving
+  // or joining. It is usually used in combination with for_each().
+  std::unique_lock<std::mutex> lock_threads()
   {
-    std::scoped_lock g(storage_.lock_);
+    return std::unique_lock(storage_.lock_);
+  }
+
+  // for_each runs func on each thread-local copy of the variable. The lock
+  // returned by lock_threads() must be passed as ul.
+  template<typename F>
+  void for_each(std::unique_lock<std::mutex> &&ul, F &&func)
+  {
+    assert(ul.owns_lock());
+    assert(ul.mutex() == &storage_.lock_);
     storage_.for_each(idx_, std::forward<F>(func));
   }
 
 private:
-  template<std::integral U> friend class PerThreadCounter;
-
   static inline detail::TLStorage<T> storage_;
   size_t idx_;
 };
@@ -151,13 +177,12 @@ public:
   PerThreadCounter(T val) : global_counter_(val) {}
 
   // get returns the current count
-  T get() const
+  T get()
   {
-    using storage = detail::TLStorage<TLCounter>;
-    std::lock_guard g(storage::lock_);
+    std::unique_lock ul = tl_counters_.lock_threads();
     T cnt = global_counter_;
-    storage::for_each(tl_counters_.idx_,
-                      [&cnt](const TLCounter &val) { cnt += val.count; });
+    tl_counters_.for_each(std::move(ul),
+                          [&cnt](const TLCounter &val) { cnt += val.count; });
     return cnt;
   }
 
