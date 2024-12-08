@@ -3,7 +3,6 @@
 #include <latch>
 #include <mutex>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include "hogd/base/perthread.h"
@@ -49,7 +48,7 @@ TEST(PerThreadTest, ForEach)
   std::vector<int> vec;
   vecs_done.wait();
   std::unique_lock ul = vecs.lock_threads();
-  vecs.for_each(std::move(ul), [&vec](const std::vector<int> &v) {
+  vecs.for_each(ul, [&vec](const std::vector<int> &v) {
     EXPECT_EQ(v.size(), 1);
     vec.insert(vec.end(), v.cbegin(), v.cend());
   });
