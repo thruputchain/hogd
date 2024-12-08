@@ -6,11 +6,12 @@
 // its own per-thread copies of the variable.
 //
 // The implementation strategy is to maintain a thread_local std::vector<T> for
-// each T. Then, each PerThread instance refers to an index in the table. A
-// lock is needed to synchronize when threads are spawning and exiting and to
-// adjust the size of the std::vector<T> when more indiies are needed. Threads
-// allocate memory for their index lazily (on the first access) to avoid
-// wasting memory if the thread never touches the PerThread variable.
+// each T. Then, each PerThread instance refers to an index in the
+// std::vector<T>. A lock is needed to synchronize when threads are spawning
+// and exiting and to adjust the size of the std::vector<T> when more indices
+// are needed. Threads allocate memory for their index lazily (on the first
+// access) to avoid wasting memory if the thread never touches the PerThread
+// variable.
 //
 // See also alloc_percpu() in the Linux Kernel, which works in a similar way
 // but provides a per-core heap that stores a mix of types in one mapping. We
