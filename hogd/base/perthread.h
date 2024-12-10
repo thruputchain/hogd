@@ -209,14 +209,16 @@ public:
   {
     TLCounter &tl_count = *tl_counters_;
     tl_count.count += val;
-    tl_count.global_count = &global_counter_;
+    if (!tl_count.global_count)
+      tl_count.global_count = &global_counter_;
   }
 
 private:
   struct TLCounter {
-    T count;
-    T *global_count;
+    T count{0};
+    T *global_count{nullptr};
 
+    TLCounter() = default;
     // The threads lock is held when this destructor is called, synchronizing
     // access to global_counter_.
     ~TLCounter()
