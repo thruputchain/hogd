@@ -178,7 +178,6 @@ public:
 #ifndef NDEBUG
     SuspendCount start_;
     CrashIfSuspended() : start_(get_suspend_count()) {}
-    CrashIfSuspended(const CrashIfSuspended &) = delete;
     ~CrashIfSuspended() { assert(start_ == get_suspend_count()); }
 #endif // !NDEBUG
   };

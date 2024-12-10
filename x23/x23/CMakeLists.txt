@@ -3,6 +3,7 @@ add_library(x23
   async.h
   cleanup.h
   corosync.h
+  corosync.cc
   err.h
   event.cc
   event.h

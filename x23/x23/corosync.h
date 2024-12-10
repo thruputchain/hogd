@@ -99,7 +99,7 @@ public:
                                                            T t);
 
   // True while lock is held
-  bool busy() const { return last_; }
+  bool busy() const { return last_.load(std::memory_order_acquire); }
 
 private:
   // If last_ is NULL, the lock is free.  If last_ points to a
@@ -122,6 +122,14 @@ private:
     return h;
   }
 };
+
+namespace detail {
+
+// If we are in a thread pool, resume the coroutine in another thread.
+// If not, resume it synchronously in this thread.
+void resume_in_another_thread(std::coroutine_handle<>);
+
+} // namespace detail
 
 template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
   CoroLock &lk_;
@@ -151,20 +159,15 @@ template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
     // awaiter whose await_suspend() returned next_coro.
     if (!next_locker)
       return next_coro;
-    // If we reach here, we need to resume two coroutines, but
-    // unfortunately don't have access to a ThreadPool object.  Our
-    // solution is to run the original next_coro first (i.e., the one
-    // that would get resumed on co_return if no one else were in line
-    // for the lock) and then to yield to next_locker.  The hope is
-    // that next_coro suspends quickly--maybe it's even
-    // std::noop_coroutine(), because we are delaying next_locker,
-    // which at this point holds the lock.
-    //
-    // If you prefer to run next_locker first, just don't use
-    // unlock_and_return.  The normal behavior is to run the next
-    // locker as soon as you release the lock (either explicitly or
-    // implicitly when a CoroGuard is destroyed).
-    next_coro();
+    // If we reach here, we need to resume two coroutines.  If we are
+    // in a thread pool, try to resume next_coro in another thread.
+    // Otherwise, resume it synchronously before resuming the next
+    // locker.  If you might not be in a threadpool and prefer to
+    // resume next_locker first, just don't use unlock_and_return.
+    // The normal behavior is to run the next locker as soon as you
+    // release the lock (either explicitly or implicitly when a
+    // CoroGuard is destroyed).
+    detail::resume_in_another_thread(next_coro);
     return next_locker;
   }
 
