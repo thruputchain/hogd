@@ -17,9 +17,10 @@
 // See also alloc_percpu() in the Linux Kernel, which works in a similar way
 // but uses a per-core heap that stores a mix of types in one mapping. We don't
 // do this here in order to avoid the implementation complexity of a full heap
-// allocator, and the added difficulty of initializing types (C++ has to call
-// each item's constructor) each time a new thread spawns. Instead we went with
-// a per-thread std::vector<T> for each T, and lazily initialize the elements.
+// allocator, and the added difficulty of constructing and destructing types
+// each time a new thread spawns and exits. Instead we went with a per-thread
+// std::vector<T> for each T, so that each type is grouped together, making
+// it easy to know how to construct and destruct items.
 
 #pragma once
 
@@ -54,16 +55,25 @@ public:
   static void free_slot(size_t idx)
   {
     std::scoped_lock g(lock_);
-    for_each(idx, [](T &item) { item = T{}; });
+    for_each(idx, [](T &item) {
+      std::destroy_at(&item);
+      std::construct_at(&item);
+    });
     slots_[idx] = false;
   }
 
-  // get retrieves a thread-local value for a given index. It creates the value
-  // if it hasn't yet been initialized.
-  static T *get(size_t idx)
+  // populate ensures that the item has been allocated an initialized.
+  static void populate(size_t idx)
   {
     if (items_.size() <= idx) [[unlikely]]
       expand(idx + 1);
+  }
+
+  // get retrieves a thread-local value for a given index. It creates the item
+  // if it hasn't yet been initialized.
+  static T *get(size_t idx)
+  {
+    populate(idx);
     return &items_[idx];
   }
 
@@ -147,6 +157,12 @@ public:
   {
     return *storage_.get(idx_);
   }
+
+  // populate ensure that the item has been allocated and initialized. This is
+  // only necessary if you want to maintain references to more than PerThread
+  // of the same type. It prevents dereferencing from causing allocations,
+  // which would invalidate any previous references.
+  void populate() const { return storage_.populate(idx_); }
 
   // lock_threads returns an acquired lock that prevents threads from leaving
   // or joining. It is usually used in combination with for_each(), and allows
