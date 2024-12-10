@@ -292,9 +292,15 @@ type_specifier:
   scalar_type {
     $$ = $1->text;
     $$->comment = $1->block_comment;
-    if ($1->text == "uint32_t" || $1->text == "int32_t" || $1->text == "uint64_t" || $1->text == "int64_t") {
-      yyerror(&@scalar_type, xc, "Type identifier conflicts with corresponding C++ type", true);
-    }
+
+    #define XDRWARN(USED, SHOULD_USE) \
+      if ($1->text == #USED) \
+        yyerror(&@scalar_type, xc, "Use " #SHOULD_USE " in XDR source to get " #USED " in C++", true)
+      XDRWARN(int32_t, int);
+      XDRWARN(uint32_t, unsigned int);
+      XDRWARN(int64_t, hyper);
+      XDRWARN(uint64_t, unsigned hyper);
+    #undef XDRWARN
   }
 | T_ENUM enum_body {
     $$ = $2.move();
