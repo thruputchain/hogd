@@ -74,7 +74,8 @@ TEST(PerThreadTest, Counters)
     cnt.inc();
     EXPECT_EQ(cnt.get(), kThreads + 1);
   }).join();
-  EXPECT_EQ(cnt.get(), kThreads + 1);
+  cnt.inc();
+  EXPECT_EQ(cnt.get(), kThreads + 2);
 }
 
 } // namespace hogd

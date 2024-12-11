@@ -159,9 +159,9 @@ public:
   }
 
   // populate ensure that the item has been allocated and initialized. This is
-  // only necessary if you want to maintain references to more than PerThread
-  // of the same type. It prevents dereferencing from causing allocations,
-  // which would invalidate any previous references.
+  // only necessary if you want to maintain references to more than one
+  // PerThread of the same type. It prevents dereferencing from causing
+  // allocations, which would invalidate any previous references.
   void populate() const { return storage_.populate(idx_); }
 
   // lock_threads returns an acquired lock that prevents threads from leaving
@@ -209,7 +209,7 @@ public:
   {
     TLCounter &tl_count = *tl_counters_;
     tl_count.count += val;
-    if (!tl_count.global_count)
+    if (!tl_count.global_count) [[unlikely]]
       tl_count.global_count = &global_counter_;
   }
 
