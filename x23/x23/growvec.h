@@ -41,7 +41,7 @@ private:
   void check() const { assert(!p_ || sc_ == ThreadPool::get_suspend_count()); }
 #else  // NDEBUG
   void init() {}
-  void check() const {};
+  void check() const {}
 #endif // NDEBUG
 };
 

@@ -235,14 +235,15 @@ public:
 
   Async<void> lock_shared()
   {
-    if (ThreadPool::get_thread_pool() != &pool_)
-      co_await pool_.bg();
-    while (busy()) {
+    for (;;) {
+      if (ThreadPool::get_thread_pool() != &pool_)
+	co_await pool_.bg();
+      if (!busy())
+	co_return;
       LockerState ls;
       co_await lock(&ls);
       unlock(&ls);	    // resumes next coroutine before returning
     }
-    co_return;
   }
 
   // There's no unlock_shared, because you give up the lock as soon as
