@@ -25,6 +25,7 @@
 #pragma once
 
 #include <concepts>
+#include <limits>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -139,13 +140,19 @@ private:
 template<typename T> class PerThread {
 public:
   PerThread() : idx_(storage_.alloc_slot()) {}
-  ~PerThread() { storage_.free_slot(idx_); }
+  ~PerThread()
+  {
+    if (idx_ < std::numeric_limits<size_t>::max())
+      storage_.free_slot(idx_);
+  }
 
   // Enable move and disable copy.
-  PerThread(PerThread &&pt) noexcept : idx_(pt.idx_) {}
+  PerThread(PerThread &&pt) noexcept
+    : idx_(std::exchange(pt.idx_, std::numeric_limits<size_t>::max()))
+  {}
   PerThread &operator=(PerThread &&pt) noexcept
   {
-    idx_ = pt.idx_;
+    idx_ = std::exchange(pt.idx_, std::numeric_limits<size_t>::max());
     return *this;
   }
   PerThread(const PerThread &pt) = delete;
