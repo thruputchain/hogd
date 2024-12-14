@@ -1,7 +1,7 @@
+#include <gtest/gtest.h>
+
 #include <string>
 #include <utility>
-
-#include <gtest/gtest.h>
 
 #include "hogd/base/unique_function.h"
 

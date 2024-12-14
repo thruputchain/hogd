@@ -1,9 +1,10 @@
+#include <gtest/gtest.h>
+
 #include <cerrno>
 #include <format>
 #include <system_error>
 
 #include <fcntl.h>
-#include <gtest/gtest.h>
 
 #include "hogd/base/status.h"
 

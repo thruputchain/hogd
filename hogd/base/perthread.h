@@ -63,7 +63,7 @@ public:
     slots_[idx] = false;
   }
 
-  // populate ensures that the item has been allocated an initialized.
+  // populate ensures that the item has been allocated and initialized.
   static void populate(size_t idx)
   {
     if (items_.size() <= idx) [[unlikely]]
