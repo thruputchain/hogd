@@ -24,9 +24,9 @@ public:
   SyscallStatus<void>
   set_bytestring(std::span<const std::byte> input_bytestring);
 
-  SyscallStatus<int128_t> get_nnint128_base_value() const;
-  SyscallStatus<int128_t> get_nnint128_value() const;
-  SyscallStatus<void> nnint128_set_add(int128_t set_value, int128_t add_value);
+  SyscallStatus<int128_t> get_nnint_base_value() const;
+  SyscallStatus<int128_t> get_nnint_value() const;
+  SyscallStatus<void> nnint_set_add(int128_t set_value, int128_t add_value);
 
   std::optional<StorageDelta> get_delta() const;
 
@@ -49,7 +49,7 @@ private:
     std::optional<StorageDelta> get_delta() const;
 
     constexpr static std::optional<StorageObjectType> kObjectType =
-        StorageObjectType::kNonnegativeInt128;
+        StorageObjectType::kNonnegativeInt;
   };
 
   struct UnsetType {
@@ -71,7 +71,7 @@ private:
         self.delta_args_))>(nullptr);
   }
 
-  auto *get_nnint128_args(this auto &self)
+  auto *get_nnint_args(this auto &self)
   {
     if (std::holds_alternative<NNInt128CacheType>(self.delta_args_)) {
       return &std::get<NNInt128CacheType>(self.delta_args_);

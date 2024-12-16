@@ -61,21 +61,21 @@ TEST(ItemCache, SetBytestring)
   ASSERT_TRUE(!!(get_res = proxy.get_bytestring()));
   EXPECT_TRUE(eq(*get_res, bytes2));
 
-  EXPECT_FALSE(!!proxy.nnint128_set_add(0, 1));
+  EXPECT_FALSE(!!proxy.nnint_set_add(0, 1));
 }
 
-TEST(ItemCache, NNInt128SetAddPositiveSet)
+TEST(ItemCache, NNIntSetAddPositiveSet)
 {
   ItemCache proxy(std::nullopt);
 
-  EXPECT_FALSE(!!proxy.get_nnint128_value());
-  EXPECT_TRUE(!!proxy.nnint128_set_add(100, 10));
+  EXPECT_FALSE(!!proxy.get_nnint_value());
+  EXPECT_TRUE(!!proxy.nnint_set_add(100, 10));
 
-  auto res = proxy.get_nnint128_value();
+  auto res = proxy.get_nnint_value();
   ASSERT_TRUE(!!res);
   EXPECT_EQ(*res, 110);
 
-  res = proxy.get_nnint128_base_value();
+  res = proxy.get_nnint_base_value();
   ASSERT_TRUE(!!res);
   EXPECT_EQ(*res, 100);
 
@@ -84,32 +84,32 @@ TEST(ItemCache, NNInt128SetAddPositiveSet)
   std::vector<uint8_t> bytes{0, 1, 2, 3};
   EXPECT_FALSE(!!proxy.set_bytestring(std::as_bytes(std::span(bytes))));
 
-  EXPECT_TRUE(!!proxy.nnint128_set_add(100, -50));
+  EXPECT_TRUE(!!proxy.nnint_set_add(100, -50));
 
-  EXPECT_FALSE(!!proxy.nnint128_set_add(100, -80));
-  EXPECT_FALSE(!!proxy.nnint128_set_add(110, 10));
+  EXPECT_FALSE(!!proxy.nnint_set_add(100, -80));
+  EXPECT_FALSE(!!proxy.nnint_set_add(110, 10));
 
-  res = proxy.get_nnint128_base_value();
+  res = proxy.get_nnint_base_value();
   ASSERT_TRUE(!!res);
   EXPECT_EQ(*res, 100);
 
-  res = proxy.get_nnint128_value();
+  res = proxy.get_nnint_value();
   ASSERT_TRUE(!!res);
   EXPECT_EQ(*res, 60);
 }
 
-TEST(ItemCache, NNInt128SetAddNegativeSet)
+TEST(ItemCache, NNIntSetAddNegativeSet)
 {
   ItemCache proxy(std::nullopt);
 
-  EXPECT_FALSE(!!proxy.get_nnint128_value());
-  EXPECT_TRUE(!!proxy.nnint128_set_add(-100, 10));
+  EXPECT_FALSE(!!proxy.get_nnint_value());
+  EXPECT_TRUE(!!proxy.nnint_set_add(-100, 10));
 
-  auto res = proxy.get_nnint128_value();
+  auto res = proxy.get_nnint_value();
   ASSERT_TRUE(!!res);
   EXPECT_EQ(*res, -90);
 
-  res = proxy.get_nnint128_base_value();
+  res = proxy.get_nnint_base_value();
   ASSERT_TRUE(!!res);
   EXPECT_EQ(*res, -100);
 
@@ -118,15 +118,15 @@ TEST(ItemCache, NNInt128SetAddNegativeSet)
   std::vector<uint8_t> bytes{0, 1, 2, 3};
   EXPECT_FALSE(!!proxy.set_bytestring(std::as_bytes(std::span(bytes))));
 
-  EXPECT_FALSE(!!proxy.nnint128_set_add(-100, -50));
+  EXPECT_FALSE(!!proxy.nnint_set_add(-100, -50));
 
-  EXPECT_TRUE(!!proxy.nnint128_set_add(-100, 10));
+  EXPECT_TRUE(!!proxy.nnint_set_add(-100, 10));
 
-  res = proxy.get_nnint128_base_value();
+  res = proxy.get_nnint_base_value();
   ASSERT_TRUE(!!res);
   EXPECT_EQ(*res, -100);
 
-  res = proxy.get_nnint128_value();
+  res = proxy.get_nnint_value();
   ASSERT_TRUE(!!res);
   EXPECT_EQ(*res, -80);
 }

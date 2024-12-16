@@ -7,7 +7,7 @@ namespace hogd
 
   enum StorageObjectType {
     kBytestring = 0,
-    kNonnegativeInt128 = 1,
+    kNonnegativeInt = 1,
   };
 
   const kBytestringMaxLen = 1024;
@@ -18,13 +18,13 @@ namespace hogd
   {
   case kBytestring:
     Bytestring bytestring;
-  case kNonnegativeInt128:
-    int128_xdr nnint128;
+  case kNonnegativeInt:
+    int128_xdr nnint;
   };
 
   enum StorageDeltaType {
     kBytestringSet = 0,
-    kNonnegativeInt128SetAdd = 1,
+    kNonnegativeIntSetAdd = 1,
   };
 
   struct NonnegativeInt128SetAddArgs {
@@ -36,8 +36,8 @@ namespace hogd
   {
   case kBytestringSet:
     Bytestring bytestring;
-  case kNonnegativeInt128SetAdd:
-    NonnegativeInt128SetAddArgs nnint128;
+  case kNonnegativeIntSetAdd:
+    NonnegativeInt128SetAddArgs nnint;
   };
 
 } // namespace hogd
