@@ -12,6 +12,7 @@
 
 namespace hogd {
 
+// Maintain the modifications of one CallFrame to one address.
 class ItemCache {
 public:
   ItemCache(std::optional<StorageObject> obj) : base_object_(std::move(obj)) {}
@@ -85,9 +86,12 @@ private:
       UnsetType{};
 };
 
+// Maintains a map of the items modified within one CallFrame.
 struct ItemCacheMap {
   std::map<AddressAndKey, ItemCache> local_map_;
 
+  // Absorb the modifications created during a child CallFrame.
+  // Overwrites entries in local_map_ as necessary.
   void commit_child_map(ItemCacheMap &child_map);
 };
 
