@@ -6,6 +6,7 @@
 #include <set>
 #include <variant>
 
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_object.hh"
 #include "types.hh"
@@ -13,20 +14,22 @@
 namespace hogd {
 
 // Maintain the modifications of one CallFrame to one address.
-class ItemCache {
+// Provides for a transaction a locally consistent view of a storage item,
+// with modifications to the item up to that point in the transaction applied to
+// it.
+class CachedItem {
 public:
-  ItemCache(std::optional<StorageObject> obj) : base_object_(std::move(obj)) {}
+  CachedItem(std::optional<StorageObject> obj) : base_object_(std::move(obj)) {}
 
   bool exists() const;
   std::optional<StorageObjectType> get_object_type() const;
 
-  SyscallStatus<Bytestring> get_bytestring() const;
-  SyscallStatus<uint32_t> get_bytestring_len() const;
+  SyscallStatus<Bytestring> bytestring_get() const;
   SyscallStatus<void>
-  set_bytestring(std::span<const std::byte> input_bytestring);
+  bytestring_set(std::span<const std::byte> input_bytestring);
 
-  SyscallStatus<int128_t> get_nnint_base_value() const;
-  SyscallStatus<int128_t> get_nnint_value() const;
+  SyscallStatus<int128_t> nnint_get_base_value() const;
+  SyscallStatus<int128_t> nnint_get_value() const;
   SyscallStatus<void> nnint_set_add(int128_t set_value, int128_t add_value);
 
   std::optional<StorageDelta> get_delta() const;
@@ -88,7 +91,7 @@ private:
 
 // Maintains a map of the items modified within one CallFrame.
 struct ItemCacheMap {
-  std::map<AddressAndKey, ItemCache> local_map_;
+  std::unordered_map<AddressAndKey, CachedItem> local_map_;
 
   // Absorb the modifications created during a child CallFrame.
   // Overwrites entries in local_map_ as necessary.

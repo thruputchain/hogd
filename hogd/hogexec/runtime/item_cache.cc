@@ -43,13 +43,13 @@ make_nnint128_set_add(int128_t set, int128_t add)
 } // namespace
 
 bool
-ItemCache::exists() const
+CachedItem::exists() const
 {
   return get_object_type().has_value();
 }
 
 std::optional<StorageObjectType>
-ItemCache::get_object_type() const
+CachedItem::get_object_type() const
 {
   if (base_object_) {
     return base_object_->type();
@@ -63,7 +63,7 @@ ItemCache::get_object_type() const
 }
 
 SyscallStatus<void>
-ItemCache::type_guard(StorageObjectType expected_type) const
+CachedItem::type_guard(StorageObjectType expected_type) const
 {
   auto type = get_object_type();
 
@@ -77,7 +77,7 @@ ItemCache::type_guard(StorageObjectType expected_type) const
 }
 
 SyscallStatus<Bytestring>
-ItemCache::get_bytestring() const
+CachedItem::bytestring_get() const
 {
   auto type_guard_res = type_guard(StorageObjectType::kBytestring);
 
@@ -96,17 +96,8 @@ ItemCache::get_bytestring() const
   return SyscallError{SyscallErrorCode::kStorageKeyNExist};
 }
 
-SyscallStatus<uint32_t>
-ItemCache::get_bytestring_len() const
-{
-  return get_bytestring().and_then(
-      [](Bytestring const &bstring) -> SyscallStatus<uint32_t> {
-        return bstring.size();
-      });
-}
-
 SyscallStatus<void>
-ItemCache::set_bytestring(std::span<const std::byte> input_bytestring)
+CachedItem::bytestring_set(std::span<const std::byte> input_bytestring)
 {
   auto type_guard_res = type_guard(StorageObjectType::kBytestring);
 
@@ -130,7 +121,7 @@ ItemCache::set_bytestring(std::span<const std::byte> input_bytestring)
 }
 
 SyscallStatus<int128_t>
-ItemCache::get_nnint_base_value() const
+CachedItem::nnint_get_base_value() const
 {
   auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt);
 
@@ -150,7 +141,7 @@ ItemCache::get_nnint_base_value() const
 }
 
 SyscallStatus<int128_t>
-ItemCache::get_nnint_value() const
+CachedItem::nnint_get_value() const
 {
   auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt);
 
@@ -201,7 +192,7 @@ capped_add(T a, T b)
 } // namespace
 
 SyscallStatus<void>
-ItemCache::nnint_set_add(int128_t set_value, int128_t add_value)
+CachedItem::nnint_set_add(int128_t set_value, int128_t add_value)
 {
   auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt);
 
@@ -246,19 +237,19 @@ ItemCache::nnint_set_add(int128_t set_value, int128_t add_value)
 }
 
 std::optional<StorageDelta>
-ItemCache::get_delta() const
+CachedItem::get_delta() const
 {
   return std::visit([](auto const &v) { return v.get_delta(); }, delta_args_);
 }
 
 std::optional<StorageDelta>
-ItemCache::BytestringCacheType::get_delta() const
+CachedItem::BytestringCacheType::get_delta() const
 {
   return make_bytestring_set(set_bytestring_arg_);
 }
 
 std::optional<StorageDelta>
-ItemCache::NNInt128CacheType::get_delta() const
+CachedItem::NNInt128CacheType::get_delta() const
 {
   return make_nnint128_set_add(nnint128_set_arg_, nnint128_add_sum_);
 }
