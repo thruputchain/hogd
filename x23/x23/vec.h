@@ -371,6 +371,7 @@ public:
     auto copy_src_end = other.begin() + size();
     std::copy(other.begin(), copy_src_end, begin());
     append(copy_src_end, other.end());
+    return *this;
   }
 
   constexpr Vec &operator+=(std::ranges::range auto &rg)

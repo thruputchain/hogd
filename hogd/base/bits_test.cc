@@ -1,8 +1,8 @@
+#include <gtest/gtest.h>
+
 #include <concepts>
 #include <limits>
 #include <memory>
-
-#include <gtest/gtest.h>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/types.h"

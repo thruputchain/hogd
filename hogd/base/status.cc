@@ -1,7 +1,7 @@
+#include "hogd/base/status.h"
+
 #include <cassert>
 #include <string>
-
-#include "hogd/base/status.h"
 
 namespace hogd {
 

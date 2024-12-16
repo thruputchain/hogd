@@ -1,3 +1,5 @@
+// xdr_util.h - utilities for converting to and from xdr types
+
 #pragma once
 
 #include <cstdint>

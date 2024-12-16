@@ -159,7 +159,7 @@ template<typename... Args> struct panic {
 };
 
 template<typename... Args>
-panic(LogLevel, std::format_string<Args...>, Args &&...) -> panic<Args...>;
+panic(std::format_string<Args...>, Args &&...) -> panic<Args...>;
 
 //
 // Convenient logging functions for each severity level.
