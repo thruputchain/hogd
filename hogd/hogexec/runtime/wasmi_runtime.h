@@ -10,6 +10,7 @@
 
 #include "contract.hh"
 #include "hogd/hogexec/runtime/status.h"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -26,8 +27,28 @@ struct HostCallContext {
 };
 
 struct InvokeResult {
-  InvokeStatus<int32_t> result;
-  uint64_t gas_consumed;
+  InvokeStatus<int32_t> result_;
+  uint64_t gas_consumed_;
+
+  // Error handling: Each contract's return value is effectively a Result<Value,
+  // i32>, or a trap() (InvokeError::kDeterministic).
+  //  A result return (through either the return syscall, the
+  // method returning, or an Exit syscall) with a nonnegative error code
+  // does not revert the function. Only a
+  // deterministic trap() (such as out of gas, or divide by 0),
+  // or a negative error code, will cause a contract
+  // to be reverted. We do not need a separate Revert() syscall -- a contract
+  // can just call trap() or wasm `unreachable`, or Exit(-1).
+  //
+  // Rationale: The default behavior for a contract can be to propagate
+  // unhandled error codes back to the caller.  This makes the revert behavior
+  // (revert or not) also propagate in a sensible default way.
+  bool should_revert() const
+  {
+    return (!result_.has_value()) || (*result_ < 0);
+  }
+
+  std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> to_host_fn_result() const;
 };
 
 // Context shared between WasmiRuntime objects.

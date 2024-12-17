@@ -50,8 +50,8 @@ SystemCallHandler::root_invoke()
   auto *runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
 
   if (!runtime) {
-    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
-                        .gas_consumed = 0};
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
+                        .gas_consumed_ = 0};
   }
 
   start_call_frame(signed_tx_.tx.invocation);
@@ -61,14 +61,14 @@ SystemCallHandler::root_invoke()
 
   finish_call_frame(res);
 
-  if (!res.result) {
+  if (!res.result_) {
     return res;
   }
 
   // return nonzero error code on root invocation => contract error
-  if (*res.result != 0) {
-    return InvokeResult{.result = InvokeError{InvokeErrorCode::kDeterministic},
-                        .gas_consumed = res.gas_consumed};
+  if (*res.result_ != 0) {
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
+                        .gas_consumed_ = res.gas_consumed_};
   }
 
   return res;
@@ -100,38 +100,6 @@ SystemCallHandler::get_msg_sender() const
   return {call_frame_stack_[call_frame_stack_.size() - 2]
               .active_invocation_.invoked_address};
 }
-
-namespace {
-
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-convert_invoke_result_to_host_fn_result(InvokeResult const &result)
-{
-  if (!result.result.has_value()) {
-    using enum InvokeErrorCode;
-
-    switch (result.result.error().code()) {
-    case kUnrecoverable:
-      return {HostFnError{HostFnErrorCode::kUnrecoverable},
-              result.gas_consumed};
-    case kDeterministic:
-      // i.e. trap within Wasmi
-      return {SyscallErrorCode::kDeterministicWasm, result.gas_consumed};
-    case kOutOfGas:
-      return {HostFnError{HostFnErrorCode::kOutOfGas}, result.gas_consumed};
-    default:
-      return {HostFnError{HostFnErrorCode::kUnrecoverable},
-              result.gas_consumed};
-    }
-    // unreachable
-  }
-
-  // This converts the user-defined return value to a syscall error code.
-  // We could do a check here (i.e. reserve < 2^16 for system, everything else
-  // for users) but this doesn't particularly matter for correctness.
-  return {static_cast<SyscallErrorCode>(*result.result), result.gas_consumed};
-}
-
-} // namespace
 
 SyscallStatus<GasAmount>
 SystemCallHandler::get_invoke_gas_limit(GasAmount call_specified_gas_limit)
@@ -174,7 +142,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
 
   finish_call_frame(res);
 
-  return convert_invoke_result_to_host_fn_result(res);
+  return res.to_host_fn_result();
 }
 
 void
@@ -186,20 +154,6 @@ SystemCallHandler::start_call_frame(Invocation const &invocation)
 void
 SystemCallHandler::finish_call_frame(InvokeResult const &result)
 {
-  // Error handling: Each contract's return value is effectively a Result<Value,
-  // i32>, or a trap() (InvokeError::kDeterministic).
-  //  A result return (through either the return syscall, the
-  // method returning, or an Exit syscall) with a nonnegative error code
-  // does not revert the function. Only a
-  // deterministic trap() (such as out of gas, or divide by 0),
-  // or a negative error code, will cause a contract
-  // to be reverted. We do not need a separate Revert() syscall -- a contract
-  // can just call trap() or wasm `unreachable`, or Exit(-1).
-  //
-  // Rationale: The default behavior for a contract can be to propagate
-  // unhandled error codes back to the caller.  This makes the revert behavior
-  // (revert or not) also propagate in a sensible default way.
-  //
   // If a contract has the REVERT_SAFE flag set, then it can be called again
   // after it has been reverted. A contract might not be REVERT_SAFE because
   // reversion does NOT reset a wasm's internal memory or other internal state.
@@ -209,9 +163,8 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
   // module's internal state -- not just memory, but also tables and globals.
   // The wasm stack is reset automatically).
 
-  // Revert the function
-  if (!result.result.has_value() || (*result.result < 0)) {
-
+  if (result.should_revert()) {
+    // Revert the call frame
     for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
       // TODO(geoff) metadata allowing revert_safe declarations
       runtimes_.at(addr)->revert_poisoned_ = true;
@@ -224,6 +177,7 @@ SystemCallHandler::finish_call_frame(InvokeResult const &result)
     }
   }
   else {
+    // commit child call frame successfully
     size_t call_frame_stack_size = call_frame_stack_.size();
 
     if (call_frame_stack_size >= 2) {

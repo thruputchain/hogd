@@ -98,6 +98,7 @@ private:
   WasmiContext wasmi_context_;
 
   const SignedTransaction signed_tx_;
+
   std::vector<CallFrame> call_frame_stack_;
 
   // RuntimeCacheEntry cannot be moved while it is actively invoked.  unique_ptr

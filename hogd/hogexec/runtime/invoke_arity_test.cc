@@ -88,7 +88,7 @@ protected:
     context.link_fn("test", "arg4", &arity4);
     context.link_fn("test", "arg5", &arity5);
     runtime_ = context.make_new_runtime(c, nullptr);
-    ASSERT_TRUE(!!runtime_);
+    ASSERT_TRUE(runtime_);
   }
 
   std::optional<WasmiRuntime> runtime_;
@@ -98,43 +98,43 @@ protected:
 TEST_F(InvokeArityTests, arity0)
 {
   auto res = runtime_->invoke("calltest0", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 100);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 100);
 }
 
 TEST_F(InvokeArityTests, arity1)
 {
   auto res = runtime_->invoke("calltest1", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 101);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 101);
 }
 
 TEST_F(InvokeArityTests, arity2)
 {
   auto res = runtime_->invoke("calltest2", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 102);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 102);
 }
 
 TEST_F(InvokeArityTests, arity3)
 {
   auto res = runtime_->invoke("calltest3", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 103);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 103);
 }
 
 TEST_F(InvokeArityTests, arity4)
 {
   auto res = runtime_->invoke("calltest4", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 104);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 104);
 }
 
 TEST_F(InvokeArityTests, arity5)
 {
   auto res = runtime_->invoke("calltest5", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 105);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 105);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
