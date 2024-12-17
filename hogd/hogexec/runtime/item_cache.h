@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -76,7 +77,7 @@ struct DeletedItem {
 
   constexpr static std::optional<StorageObjectType> kObjectType = std::nullopt;
 
-  std::optional<StorageDelta> get_delta() const;
+  static std::optional<StorageDelta> get_delta();
 };
 
 // Maintain the modifications of one CallFrame to one address.

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <span>
@@ -264,7 +265,7 @@ NNIntItem::get_delta() const
 }
 
 std::optional<StorageDelta>
-DeletedItem::get_delta() const
+DeletedItem::get_delta()
 {
   StorageDelta delete_delta(StorageDeltaType::kDelete);
   return delete_delta;
