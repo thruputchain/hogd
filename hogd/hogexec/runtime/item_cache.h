@@ -39,6 +39,8 @@ public:
   SyscallStatus<int128_t> nnint_get_value() const;
   SyscallStatus<void> nnint_set_add(int128_t set_value, int128_t add_value);
 
+  void delete_object();
+
   std::optional<StorageDelta> get_delta() const;
 
 private:
@@ -68,6 +70,13 @@ private:
     {
       return std::nullopt;
     }
+
+    constexpr static std::optional<StorageObjectType> kObjectType =
+        std::nullopt;
+  };
+
+  struct DeletedType {
+    StorageDelta get_delta() const;
 
     constexpr static std::optional<StorageObjectType> kObjectType =
         std::nullopt;

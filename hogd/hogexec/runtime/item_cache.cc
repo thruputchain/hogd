@@ -40,6 +40,24 @@ make_nnint128_set_add(int128_t set, int128_t add)
   return out;
 }
 
+template<std::integral T>
+T
+capped_add(T a, T b)
+{
+  T out;
+  if (integer_add_overflow(a, b, &out)) {
+    if (a > 0) {
+      assert(b > 0);
+      return std::numeric_limits<T>::max();
+    }
+    // else a < 0
+    assert(a < 0);
+    assert(b < 0);
+    return std::numeric_limits<T>::min();
+  }
+  return out;
+}
+
 } // namespace
 
 bool
@@ -170,27 +188,6 @@ CachedItem::nnint_get_value() const
   return SyscallError{SyscallErrorCode::kStorageKeyNExist};
 }
 
-namespace {
-
-template<std::integral T>
-T
-capped_add(T a, T b)
-{
-  T out;
-  if (integer_add_overflow(a, b, &out)) {
-    if (a > 0) {
-      assert(b > 0);
-      return std::numeric_limits<T>::max();
-    }
-    // else a < 0
-    assert(a < 0);
-    assert(b < 0);
-    return std::numeric_limits<T>::min();
-  }
-  return out;
-}
-} // namespace
-
 SyscallStatus<void>
 CachedItem::nnint_set_add(int128_t set_value, int128_t add_value)
 {
@@ -236,6 +233,13 @@ CachedItem::nnint_set_add(int128_t set_value, int128_t add_value)
   return {};
 }
 
+void
+CachedItem::delete_object()
+{
+  base_object_ = std::nullopt;
+  delta_args_.emplace<DeletedType>();
+}
+
 std::optional<StorageDelta>
 CachedItem::get_delta() const
 {
@@ -256,6 +260,12 @@ StorageDelta
 CachedItem::NNInt128CacheType::get_delta() const
 {
   return make_nnint128_set_add(nnint128_set_arg_, nnint128_add_sum_);
+}
+
+StorageDelta
+CachedItem::DeletedType::get_delta() const
+{
+  return StorageDelta(StorageDeltaType::kDelete);
 }
 
 void
