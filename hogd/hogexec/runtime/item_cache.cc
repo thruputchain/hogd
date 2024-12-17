@@ -217,14 +217,9 @@ CachedItem::nnint_set_add(int128_t set_value, int128_t add_value)
     }
   }
 
-  if (auto *args = get_nnint_args()) {
-    args->nnint128_add_sum_ = new_add_value;
-  }
-  else {
-    delta_args_.emplace<NNInt128CacheType>(
-        NNInt128CacheType{.nnint128_set_arg_ = set_value,
-                          .nnint128_add_sum_ = new_add_value});
-  }
+  delta_args_.emplace<NNInt128CacheType>(
+      NNInt128CacheType{.nnint128_set_arg_ = set_value,
+                        .nnint128_add_sum_ = new_add_value});
 
   // TODO(geoff): Consider whether we should have add_value as int256,
   // so that sequences like add(INT128_MAX), add(INT128_MAX), add(INT128_MIN)

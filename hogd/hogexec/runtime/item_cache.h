@@ -101,8 +101,8 @@ private:
   }
 
   std::optional<StorageObject> base_object_;
-  std::variant<UnsetType, BytestringCacheType, NNInt128CacheType> delta_args_ =
-      UnsetType{};
+  std::variant<UnsetType, DeletedType, BytestringCacheType, NNInt128CacheType>
+      delta_args_ = UnsetType{};
 };
 
 // Maintains a map of the items modified within one CallFrame.
