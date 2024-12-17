@@ -18,7 +18,7 @@ constexpr static auto SHA256HashCost = [](uint64_t bytes_len) -> uint64_t {
 };
 // NOLINTEND(readability-identifier-naming)
 
-constexpr static uint64_t kUnknownSyscallCost = 10;
+constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
 constexpr static uint64_t kHasKeyCost = 100;

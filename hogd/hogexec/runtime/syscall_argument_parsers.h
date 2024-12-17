@@ -45,13 +45,74 @@ check_user_span_argument(std::span<std::byte> contract_memory,
 }
 
 // Convert arguments passed as parameters to the wasm host function to the
-// required type. Infallible, but the requires clause checks at least that we
-// did not misconfigure our syscall definitions.
+// required type (i.e. the primitive_type in the syscall spec).. Infallible,
+// but the requires clause checks at least that we did not misconfigure our
+// syscall definitions.
 template<typename T> requires (std::is_integral_v<T> || std::is_enum_v<T>)
 T
 check_user_primitive_argument(uint64_t user_value)
 {
   return static_cast<T>(user_value);
+}
+
+template<typename T, typename... Args>
+requires (std::same_as<Args, uint64_t> && ...)
+std::optional<const T>
+check_user_custom_input_argument(std::span<std::byte> contract_memory,
+                                 Args... args);
+
+template<>
+std::optional<const Signature>
+check_user_custom_input_argument(std::span<std::byte> contract_memory,
+                                 uint64_t user_discriminant,
+                                 uint64_t user_offset)
+{
+  auto disc =
+      check_user_primitive_argument<CryptographicScheme>(user_discriminant);
+
+  Signature out;
+  out.scheme(disc);
+  switch (disc) {
+  case CryptographicScheme::Ed25519:
+  {
+    if (auto *ed25519 =
+            check_user_argument<Ed25519Signature>(contract_memory, user_offset,
+                                                  sizeof(Ed25519Signature))) {
+      out.ed25519() = *ed25519;
+      return out;
+    }
+    return std::nullopt;
+  }
+  default:
+    return std::nullopt;
+  }
+}
+
+template<>
+std::optional<const PublicKey>
+check_user_custom_input_argument(std::span<std::byte> contract_memory,
+                                 uint64_t user_discriminant,
+                                 uint64_t user_offset)
+{
+  auto disc =
+      check_user_primitive_argument<CryptographicScheme>(user_discriminant);
+
+  PublicKey out;
+  out.scheme(disc);
+  switch (disc) {
+  case CryptographicScheme::Ed25519:
+  {
+    if (auto *ed25519 =
+            check_user_argument<Ed25519PublicKey>(contract_memory, user_offset,
+                                                  sizeof(Ed25519Signature))) {
+      out.ed25519() = *ed25519;
+      return out;
+    }
+    return std::nullopt;
+  }
+  default:
+    return std::nullopt;
+  }
 }
 
 } // namespace hogd
