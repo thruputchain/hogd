@@ -115,7 +115,6 @@ span_argument: bool
 
   Mutually exclusive with typename or primitive_type.
 
-
 custom_parsing: bool
   required: no
     default: no
@@ -162,15 +161,17 @@ Return format:
 validate_str, local_user_args, local_call_arg, inner_arg_decl
 
 validate_str is the string that takes as input a number of syscall arguments
-and produces code that validates the argument type that is supposed to be supplied
-via those syscall arguments.
+and produces code that validates the argument type that is supposed to be 
+supplied via those syscall arguments.
 E.g.: 
+```
 std::optional<std::span<const std::byte>> arg =
      check_user_span_argument(contract_memory, user_arg1,
                               user_arg2);
 if (!arg) {
    return error
 }
+```
 
 local_user_args is a list of the uint64 argument names that this 
 syscall argument consumes.
@@ -493,7 +494,10 @@ syscall_entry_inner(HostCallContext *call_context, {syscall_uint64_arg_decls_str
 
   assert(call_context -> syscall_handler);
 
-  return syscall_fn_outer(*call_context->syscall_handler, contract_memory, {syscall_uint64_args_nozero_str});
+  return syscall_fn_outer(
+    *call_context->syscall_handler, 
+    contract_memory, 
+    {syscall_uint64_args_nozero_str});
 }}
 
 }} // namespace
@@ -508,7 +512,9 @@ syscall_entry(HostCallContext *call_context, {syscall_uint64_arg_decls_str})
     return {{HostFnErrorCode::kOutOfGas, 0}};
   }}
 
-  static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>, "mismatch");
+  static_assert(
+    std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>, 
+    "type mismatch");
 
   return err;
 }}
@@ -595,7 +601,8 @@ extern function definition.
 This code generates two functions for each syscall.
 One is a `uninit_{name}` function,
 which takes MaybeUninit arguments for the output variables,
-and one `raw_{name}` that does not (and is largely a wrapper around the uninit() variant).
+and one `raw_{name}` that does not 
+(and is largely a wrapper around the uninit() variant).
 """
 def gen_rs_syscall_binding(syscall):
   name = syscall["name"]
@@ -790,13 +797,37 @@ namespace hogd {{
 
 parser = argparse.ArgumentParser(description="syscall generator")
 
-parser.add_argument('--syscall_x', action='store_true', help="gen syscall.x")
-parser.add_argument('--syscall_inner_h', action='store_true', help="gen syscall_inner.h")
-parser.add_argument('--syscall_entry_cc', action='store_true', help="gen syscall_entry_cc")
-parser.add_argument('--syscall_yaml', type=str, required = True, help = "input yaml")
-parser.add_argument('--syscall_rs', action='store_true', help = 'gen rust syscall bindings')
-parser.add_argument('--output_dir', type=str, default = ".", help = "output folder")
-parser.add_argument('--syscall_frame', nargs='+', type=int, help = "syscall nos")
+parser.add_argument(
+  '--syscall_x', 
+  action='store_true', 
+  help="gen syscall.x")
+parser.add_argument(
+  '--syscall_inner_h', 
+  action='store_true', 
+  help="gen syscall_inner.h")
+parser.add_argument(
+  '--syscall_entry_cc', 
+  action='store_true', 
+  help="gen syscall_entry_cc")
+parser.add_argument(
+  '--syscall_yaml', 
+  type=str, 
+  required = True, 
+  help = "input yaml")
+parser.add_argument(
+  '--syscall_rs', 
+  action='store_true', 
+  help = 'gen rust syscall bindings')
+parser.add_argument(
+  '--output_dir', 
+  type=str, 
+  default = ".", 
+  help = "output folder")
+parser.add_argument(
+  '--syscall_frame', 
+  nargs='+', 
+  type=int, 
+  help = "syscall nos")
 
 args = parser.parse_args()
 
