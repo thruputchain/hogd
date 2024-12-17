@@ -14,9 +14,9 @@ namespace hogd {
 
 TEST(CachedItem, Exists)
 {
-  CachedItem proxy(std::nullopt);
+  CachedItem proxy(nullptr);
 
-  EXPECT_FALSE(proxy.exists());
+  EXPECT_FALSE(proxy.get_object_type());
 
   std::vector<uint8_t> bytes{0, 1, 2, 3};
   std::vector<uint8_t> bytes2{0, 1, 2, 3};
@@ -25,7 +25,6 @@ TEST(CachedItem, Exists)
     return arg.get().set(std::as_bytes(std::span(bytes)));
   }));
 
-  EXPECT_TRUE(proxy.exists());
   ASSERT_TRUE(proxy.get_object_type());
 
   EXPECT_EQ(proxy.get_object_type(), StorageObjectType::kBytestring);
@@ -33,7 +32,7 @@ TEST(CachedItem, Exists)
 
 TEST(CachedItem, SetBytestring)
 {
-  CachedItem proxy(std::nullopt);
+  CachedItem proxy(nullptr);
 
   auto eq = [](Bytestring const &bstring,
                std::vector<uint8_t> const &vec) -> bool {
@@ -89,7 +88,7 @@ TEST(CachedItem, SetBytestring)
 
 TEST(CachedItem, NNIntSetAddPositiveSet)
 {
-  CachedItem proxy(std::nullopt);
+  CachedItem proxy(nullptr);
 
   EXPECT_FALSE(proxy.nnint().and_then(
       [](auto arg) -> SyscallStatus<int128_t> { return arg.get().get(); }));
@@ -135,7 +134,7 @@ TEST(CachedItem, NNIntSetAddPositiveSet)
 
 TEST(CachedItem, NNIntSetAddNegativeSet)
 {
-  CachedItem proxy(std::nullopt);
+  CachedItem proxy(nullptr);
 
   EXPECT_FALSE(proxy.nnint().and_then([](auto arg) -> SyscallStatus<int128_t> {
     return arg.get().get_base();

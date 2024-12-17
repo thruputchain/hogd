@@ -15,56 +15,51 @@
 
 namespace hogd {
 
+// store relevant state when object contains bytestring
 class BytestringItem {
 public:
-  BytestringItem(std::optional<StorageObject> const &base);
+  BytestringItem(const StorageObject *base);
 
   constexpr static std::optional<StorageObjectType> kObjectType =
       StorageObjectType::kBytestring;
+  bool has_modification() const { return has_modification_; }
 
   SyscallStatus<void> set(std::span<const std::byte> arg);
   SyscallStatus<std::reference_wrapper<const Bytestring>> get() const;
-
-  bool has_modification() const { return has_modification_; }
 
   std::optional<StorageDelta> get_delta() const;
 
 private:
   bool has_modification_ = false;
-
   std::optional<Bytestring> set_arg_;
 };
 
+// store relevant state when object contains nnint
 class NNIntItem {
 public:
-  NNIntItem(std::optional<StorageObject> const &base);
+  NNIntItem(const StorageObject *base);
 
   constexpr static std::optional<StorageObjectType> kObjectType =
       StorageObjectType::kNonnegativeInt;
-
   bool has_modification() const { return has_modification_; }
 
   SyscallStatus<int128_t> get_base() const;
   SyscallStatus<int128_t> get() const;
-
   SyscallStatus<void> set_add(int128_t set_value, int128_t add_value);
 
   std::optional<StorageDelta> get_delta() const;
 
 private:
   bool has_modification_ = false;
-
   std::optional<int128_t> base_object_value_;
-
   int128_t add_sum_ = 0;
   int128_t set_arg_ = 0;
 };
 
+// object is in an as-yet-unmodified state
 struct UnsetItem {
-
-  constexpr static bool has_modification() { return false; }
-
   constexpr static std::optional<StorageObjectType> kObjectType = std::nullopt;
+  constexpr static bool has_modification() { return false; }
 
   constexpr static std::optional<StorageDelta> get_delta()
   {
@@ -72,10 +67,10 @@ struct UnsetItem {
   }
 };
 
+// object has been deleted
 struct DeletedItem {
-  constexpr static bool has_modification() { return true; }
-
   constexpr static std::optional<StorageObjectType> kObjectType = std::nullopt;
+  constexpr static bool has_modification() { return true; }
 
   static std::optional<StorageDelta> get_delta();
 };
@@ -93,34 +88,28 @@ struct DeletedItem {
 // methods, no StorageDelta will be produced.
 class CachedItem {
 public:
-  CachedItem(std::optional<StorageObject> obj) : base_object_(std::move(obj)) {}
+  CachedItem(const StorageObject *obj) : base_object_(obj) {}
 
-  bool exists() const;
   std::optional<StorageObjectType> get_object_type() const;
-
   SyscallStatus<std::reference_wrapper<BytestringItem>> bytestring();
   SyscallStatus<std::reference_wrapper<NNIntItem>> nnint();
-
   void delete_object();
 
   std::optional<StorageDelta> get_delta() const;
 
 private:
-  SyscallStatus<void>
-  type_guard(std::optional<StorageObjectType> expected_type) const;
-
-  std::optional<StorageObject> base_object_;
-
+  const StorageObject *base_object_;
   std::variant<UnsetItem, DeletedItem, BytestringItem, NNIntItem> delta_args_ =
       UnsetItem{};
 
+  SyscallStatus<void>
+  type_guard(std::optional<StorageObjectType> expected_type) const;
   void debug_assert_no_modifications() const;
 
   template<typename ItemType>
   SyscallStatus<std::reference_wrapper<ItemType>> get_item()
   {
     auto type_guard_res = type_guard(ItemType::kObjectType);
-
     if (!type_guard_res) {
       return {type_guard_res.error()};
     }
@@ -128,11 +117,9 @@ private:
     if (std::holds_alternative<ItemType>(delta_args_)) {
       return std::get<ItemType>(delta_args_);
     }
-
     if constexpr (is_debug_build()) {
       debug_assert_no_modifications();
     }
-
     delta_args_.emplace<ItemType>(base_object_);
 
     return std::get<ItemType>(delta_args_);

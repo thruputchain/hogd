@@ -61,12 +61,6 @@ capped_add(T a, T b)
 
 } // namespace
 
-bool
-CachedItem::exists() const
-{
-  return get_object_type().has_value();
-}
-
 std::optional<StorageObjectType>
 CachedItem::get_object_type() const
 {
@@ -108,7 +102,7 @@ CachedItem::type_guard(std::optional<StorageObjectType> expected_type) const
   return {};
 }
 
-BytestringItem::BytestringItem(std::optional<StorageObject> const &base)
+BytestringItem::BytestringItem(const StorageObject *base)
 {
   if (base) {
     assert(base->type() == StorageObjectType::kBytestring);
@@ -116,7 +110,7 @@ BytestringItem::BytestringItem(std::optional<StorageObject> const &base)
   }
 }
 
-NNIntItem::NNIntItem(std::optional<StorageObject> const &base)
+NNIntItem::NNIntItem(const StorageObject *base)
 {
   if (base) {
     assert(base->type() == StorageObjectType::kNonnegativeInt);
@@ -155,7 +149,7 @@ CachedItem::delete_object()
 {
   delta_args_.emplace<DeletedItem>();
 
-  base_object_ = std::nullopt;
+  base_object_ = nullptr;
 }
 
 SyscallStatus<std::reference_wrapper<BytestringItem>>
