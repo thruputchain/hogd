@@ -40,138 +40,6 @@ make_nnint128_set_add(int128_t set, int128_t add)
   return out;
 }
 
-} // namespace
-
-bool
-CachedItem::exists() const
-{
-  return get_object_type().has_value();
-}
-
-std::optional<StorageObjectType>
-CachedItem::get_object_type() const
-{
-  if (base_object_) {
-    return base_object_->type();
-  }
-
-  return std::visit(
-      [](auto const &v) {
-        return std::remove_reference_t<decltype(v)>::kObjectType;
-      },
-      delta_args_);
-}
-
-SyscallStatus<void>
-CachedItem::type_guard(StorageObjectType expected_type) const
-{
-  auto type = get_object_type();
-
-  if (type) {
-    if (*type != expected_type) {
-      return SyscallError{SyscallErrorCode::kStorageObjectTypeMismatch};
-    }
-  }
-
-  return {};
-}
-
-SyscallStatus<Bytestring>
-CachedItem::bytestring_get() const
-{
-  auto type_guard_res = type_guard(StorageObjectType::kBytestring);
-
-  if (!type_guard_res) {
-    return {type_guard_res.error()};
-  }
-
-  if (const auto *args = get_bytestring_args()) {
-    return args->set_bytestring_arg_;
-  }
-
-  if (base_object_) {
-    return base_object_->bytestring();
-  }
-
-  return SyscallError{SyscallErrorCode::kStorageKeyNExist};
-}
-
-SyscallStatus<void>
-CachedItem::bytestring_set(std::span<const std::byte> input_bytestring)
-{
-  auto type_guard_res = type_guard(StorageObjectType::kBytestring);
-
-  if (!type_guard_res) {
-    return {type_guard_res.error()};
-  }
-
-  if (input_bytestring.size() > kBytestringMaxLen) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
-  std::span<const uint8_t> reinterpreted_input = {
-      reinterpret_cast<const uint8_t *>(input_bytestring.data()),
-      input_bytestring.size()};
-
-  delta_args_.emplace<BytestringCacheType>(
-      BytestringCacheType{.set_bytestring_arg_ = {reinterpreted_input.begin(),
-                                                  reinterpreted_input.end()}});
-
-  return {};
-}
-
-SyscallStatus<int128_t>
-CachedItem::nnint_get_base_value() const
-{
-  auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt);
-
-  if (!type_guard_res) {
-    return {type_guard_res.error()};
-  }
-
-  if (const auto *args = get_nnint_args()) {
-    return args->nnint128_set_arg_;
-  }
-
-  if (base_object_) {
-    return from_xdr(base_object_->nnint());
-  }
-
-  return SyscallError{SyscallErrorCode::kStorageKeyNExist};
-}
-
-SyscallStatus<int128_t>
-CachedItem::nnint_get_value() const
-{
-  auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt);
-
-  if (!type_guard_res) {
-    return {type_guard_res.error()};
-  }
-
-  if (const auto *args = get_nnint_args()) {
-    int128_t result;
-
-    if (!integer_add_overflow(args->nnint128_set_arg_, args->nnint128_add_sum_,
-                              &result)) {
-      return result;
-    }
-    // Should be impossible for nnint128_add_sum_ to be less than 0 if we
-    // overflow
-    assert(args->nnint128_add_sum_ > 0);
-
-    return std::numeric_limits<int128_t>::max();
-  }
-
-  if (base_object_) {
-    return from_xdr(base_object_->nnint());
-  }
-
-  return SyscallError{SyscallErrorCode::kStorageKeyNExist};
-}
-
-namespace {
-
 template<std::integral T>
 T
 capped_add(T a, T b)
@@ -189,51 +57,217 @@ capped_add(T a, T b)
   }
   return out;
 }
+
 } // namespace
 
-SyscallStatus<void>
-CachedItem::nnint_set_add(int128_t set_value, int128_t add_value)
+bool
+CachedItem::exists() const
 {
-  auto type_guard_res = type_guard(StorageObjectType::kNonnegativeInt);
+  return get_object_type().has_value();
+}
 
-  if (!type_guard_res) {
-    return {type_guard_res.error()};
+std::optional<StorageObjectType>
+CachedItem::get_object_type() const
+{
+  auto active_type = std::visit(
+      [](auto const &v) -> std::optional<StorageObjectType> {
+        if (v.has_modification()) {
+          return std::remove_reference_t<decltype(v)>::kObjectType;
+        }
+        return std::nullopt;
+      },
+      delta_args_);
+
+  if (active_type) {
+    return active_type;
   }
 
-  int128_t prev_add_sum = 0;
+  if (base_object_) {
+    return base_object_->type();
+  }
 
-  if (auto *args = get_nnint_args()) {
-    if (args->nnint128_set_arg_ != set_value) {
-      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  return std::nullopt;
+}
+
+SyscallStatus<void>
+CachedItem::type_guard(std::optional<StorageObjectType> expected_type) const
+{
+  if (!expected_type) {
+    return {};
+  }
+
+  auto type = get_object_type();
+
+  if (type) {
+    if (*type != expected_type) {
+      return SyscallError{SyscallErrorCode::kStorageObjectTypeMismatch};
     }
-    prev_add_sum = args->nnint128_add_sum_;
   }
 
-  int128_t new_add_value = capped_add(add_value, prev_add_sum);
+  return {};
+}
+
+BytestringItem::BytestringItem(std::optional<StorageObject> const &base)
+{
+  if (base) {
+    assert(base->type() == StorageObjectType::kBytestring);
+    set_arg_ = base->bytestring();
+  }
+}
+
+NNIntItem::NNIntItem(std::optional<StorageObject> const &base)
+{
+  if (base) {
+    assert(base->type() == StorageObjectType::kNonnegativeInt);
+    base_object_value_ = from_xdr(base->nnint());
+  }
+}
+
+SyscallStatus<void>
+BytestringItem::set(std::span<const std::byte> arg)
+{
+  if (arg.size() > kBytestringMaxLen) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  std::span<const uint8_t> reinterpreted_input = {
+      reinterpret_cast<const uint8_t *>(arg.data()), arg.size()};
+
+  set_arg_ = {reinterpreted_input.begin(), reinterpreted_input.end()};
+
+  has_modification_ = true;
+  return {};
+}
+
+SyscallStatus<std::reference_wrapper<const Bytestring>>
+BytestringItem::get() const
+{
+  if (set_arg_) {
+    return *set_arg_;
+  }
+
+  return SyscallError{SyscallErrorCode::kStorageKeyNExist};
+}
+
+void
+CachedItem::delete_object()
+{
+  delta_args_.emplace<DeletedItem>();
+
+  base_object_ = std::nullopt;
+}
+
+SyscallStatus<std::reference_wrapper<BytestringItem>>
+CachedItem::bytestring()
+{
+  return get_item<BytestringItem>();
+}
+
+SyscallStatus<std::reference_wrapper<NNIntItem>>
+CachedItem::nnint()
+{
+  return get_item<NNIntItem>();
+}
+
+void
+CachedItem::debug_assert_no_modifications() const
+{
+  std::visit([](auto const &v) { assert(!v.has_modification()); }, delta_args_);
+}
+
+SyscallStatus<int128_t>
+NNIntItem::get_base() const
+{
+  if (has_modification_) {
+    return set_arg_;
+  }
+
+  if (base_object_value_.has_value()) {
+    return *base_object_value_;
+  }
+
+  return SyscallError{SyscallErrorCode::kStorageKeyNExist};
+}
+
+SyscallStatus<int128_t>
+NNIntItem::get() const
+{
+  if (!has_modification_) {
+    if (base_object_value_) {
+      return *base_object_value_;
+    }
+    return SyscallError{SyscallErrorCode::kStorageKeyNExist};
+  }
+
+  int128_t result;
+
+  if (!integer_add_overflow(set_arg_, add_sum_, &result)) {
+    return result;
+  }
+  // Should be impossible for nnint128_add_sum_ to be less than 0 if we
+  // overflow
+  assert(add_sum_ > 0);
+
+  return std::numeric_limits<int128_t>::max();
+
+  if (base_object_value_) {
+    return *base_object_value_;
+  }
+
+  return SyscallError{SyscallErrorCode::kStorageKeyNExist};
+}
+
+SyscallStatus<void>
+NNIntItem::set_add(int128_t set_value, int128_t add_value)
+{
+  if (has_modification_ && set_value != set_arg_) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  int128_t new_add_value = capped_add(add_value, add_sum_);
 
   if (new_add_value < 0) {
     if (set_value < 0) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
+    // cannot overflow
     if (set_value + new_add_value < 0) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
   }
 
-  if (auto *args = get_nnint_args()) {
-    args->nnint128_add_sum_ = new_add_value;
-  }
-  else {
-    delta_args_.emplace<NNInt128CacheType>(
-        NNInt128CacheType{.nnint128_set_arg_ = set_value,
-                          .nnint128_add_sum_ = new_add_value});
-  }
-
-  // TODO(geoff): Consider whether we should have add_value as int256,
-  // so that sequences like add(INT128_MAX), add(INT128_MAX), add(INT128_MIN)
-  // get handled in a more sensible way.
+  add_sum_ = new_add_value;
+  set_arg_ = set_value;
+  has_modification_ = true;
 
   return {};
+}
+
+std::optional<StorageDelta>
+BytestringItem::get_delta() const
+{
+  if (!has_modification_) {
+    return std::nullopt;
+  }
+  assert(set_arg_.has_value());
+  return make_bytestring_set(*set_arg_);
+}
+
+std::optional<StorageDelta>
+NNIntItem::get_delta() const
+{
+  if (!has_modification_) {
+    return std::nullopt;
+  }
+
+  return make_nnint128_set_add(set_arg_, add_sum_);
+}
+
+std::optional<StorageDelta>
+DeletedItem::get_delta() const
+{
+  StorageDelta delete_delta(StorageDeltaType::kDelete);
+  return delete_delta;
 }
 
 std::optional<StorageDelta>
@@ -244,18 +278,6 @@ CachedItem::get_delta() const
         return v.get_delta();
       },
       delta_args_);
-}
-
-StorageDelta
-CachedItem::BytestringCacheType::get_delta() const
-{
-  return make_bytestring_set(set_bytestring_arg_);
-}
-
-StorageDelta
-CachedItem::NNInt128CacheType::get_delta() const
-{
-  return make_nnint128_set_add(nnint128_set_arg_, nnint128_add_sum_);
 }
 
 void

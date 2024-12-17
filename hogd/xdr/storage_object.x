@@ -25,6 +25,7 @@ namespace hogd
   enum StorageDeltaType {
     kBytestringSet = 0,
     kNonnegativeIntSetAdd = 1,
+    kDelete = 2,
   };
 
   struct NonnegativeInt128SetAddArgs {
@@ -38,6 +39,8 @@ namespace hogd
     Bytestring bytestring;
   case kNonnegativeIntSetAdd:
     NonnegativeInt128SetAddArgs nnint;
+  case kDelete:
+    void;
   };
 
 } // namespace hogd
