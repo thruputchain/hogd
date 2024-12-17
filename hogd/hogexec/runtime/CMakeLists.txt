@@ -13,7 +13,6 @@ add_library(
   syscall_handler.cc
   status.cc
   storage_snapshot_cache.cc
-  syscall_entry.cc
   syscall_invoke.cc
   syscall_log.cc
   syscall_contract.cc
