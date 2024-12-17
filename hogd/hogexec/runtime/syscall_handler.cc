@@ -61,12 +61,14 @@ SystemCallHandler::root_invoke()
 
   finish_call_frame(res);
 
-  if (!res.result_) {
-    return res;
-  }
-
-  // return nonzero error code on root invocation => contract error
   if (!res.is_success()) {
+    if (!res.result_) {
+      return res;
+    }
+
+    // return nonzero error code on root invocation => contract error
+    assert(*res.result_ != 0);
+
     return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed_ = res.gas_consumed_};
   }
