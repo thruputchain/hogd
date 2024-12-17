@@ -8,20 +8,23 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime_cache.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
 
-CallFrame::CallFrame(Invocation invocation)
+InvocationFrame::InvocationFrame(Invocation invocation,
+                                 RuntimeCacheEntry *visited_entry)
   : active_invocation_(std::move(invocation))
 {
-  visited_runtimes_.insert(active_invocation_.invoked_address);
+  visited_runtimes_.insert(visited_entry);
 }
 
 void
-CallFrame::commit_successful_child_call(CallFrame &frame)
+InvocationFrame::commit_successful_child_frame(InvocationFrame &frame)
 {
   visited_runtimes_.insert(frame.visited_runtimes_.begin(),
                            frame.visited_runtimes_.end());
@@ -38,13 +41,13 @@ CallFrame::commit_successful_child_call(CallFrame &frame)
 }
 
 void
-CallFrame::commit_failed_child_call()
+InvocationFrame::commit_failed_child_frame()
 {
   child_return_buffer_ = std::nullopt;
 }
 
 void
-CallFrame::log(std::span<const std::byte> message)
+InvocationFrame::log(std::span<const std::byte> message)
 {
   std::span<const uint8_t> m = {reinterpret_cast<const uint8_t *>(
                                     message.data()),
@@ -54,9 +57,86 @@ CallFrame::log(std::span<const std::byte> message)
 }
 
 void
-CallFrame::set_call_return(ReturnBuffer &&return_buffer)
+InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
 {
   to_return_ = std::move(return_buffer);
+}
+
+void
+InvocationFrame::poison_visited_runtimes()
+{
+  for (auto *runtime : visited_runtimes_) {
+    // TODO(geoff) metadata allowing revert_safe declarations
+    runtime->revert_poisoned_ = true;
+  }
+}
+
+void
+InvocationFrameStack::start_frame(Invocation const &invocation,
+                                  RuntimeCacheEntry *visited_entry)
+{
+  frame_stack_.emplace_back(invocation, visited_entry);
+}
+
+void
+InvocationFrameStack::finish_frame(InvokeResult const &result)
+{
+  // If a contract has the REVERT_SAFE flag set, then it can be called again
+  // after it has been reverted. A contract might not be REVERT_SAFE because
+  // reversion does NOT reset a wasm's internal memory or other internal state.
+  // We could do that, it's just expensive,
+  // and would require fairly close integration with the wasm runtime and some
+  // fairly invasive changes (We need to restore the entirety of the wasm
+  // module's internal state -- not just memory, but also tables and globals.
+  // The wasm stack is reset automatically).
+
+  if (result.should_revert()) {
+    assert(!frame_stack_.empty());
+
+    frame_stack_.back().poison_visited_runtimes();
+    frame_stack_.pop_back();
+
+    if (!frame_stack_.empty()) {
+      frame_stack_.back().commit_failed_child_frame();
+    }
+  }
+  else {
+    // commit child call frame successfully
+    size_t stack_size = frame_stack_.size();
+
+    if (stack_size >= 2) {
+      frame_stack_[stack_size - 2].commit_successful_child_frame(
+          frame_stack_.back());
+    }
+    else if (frame_stack_.size() == 1) {
+      last_frame_action_(frame_stack_.back());
+    }
+
+    frame_stack_.pop_back();
+  }
+}
+
+std::optional<ContractAddress>
+InvocationFrameStack::get_msg_sender() const
+{
+  return frame_stack_.size() >= 2
+             ? std::optional<
+                   ContractAddress>{frame_stack_[frame_stack_.size() - 2]
+                                        .active_invocation_.invoked_address}
+             : std::nullopt;
+}
+
+std::optional<SHA256Hash>
+InvocationFrameStack::lookup_locally_deployed_contract(
+    ContractAddress const &addr) const
+{
+  for (auto const &frame : frame_stack_) {
+    auto it = frame.new_contract_deployments_.find(addr);
+    if (it != frame.new_contract_deployments_.end()) {
+      return it->second;
+    }
+  }
+  return std::nullopt;
 }
 
 } // namespace hogd

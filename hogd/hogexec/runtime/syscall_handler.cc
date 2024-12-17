@@ -6,10 +6,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <map>
 #include <memory>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
@@ -30,7 +30,7 @@ namespace hogd {
 SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
                                      StorageSnapshotCache &snapshot_cache)
   : signed_tx_(std::move(signed_tx)), newly_created_contracts_([&] {
-      std::map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
+      std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
       for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
         auto serialized = x23::serialize(contract);
@@ -39,7 +39,10 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       }
       return contracts;
     }()),
-    snapshot_cache_(snapshot_cache)
+    snapshot_cache_(snapshot_cache),
+    invocation_frame_stack_([this](InvocationFrame &last_frame) {
+      commit_last_call_frame_success(last_frame);
+    })
 {
   wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
 }
@@ -54,17 +57,14 @@ SystemCallHandler::root_invoke()
                         .gas_consumed_ = 0};
   }
 
-  start_call_frame(signed_tx_.tx.invocation);
-
+  invocation_frame_stack_.start_frame(signed_tx_.tx.invocation, runtime);
   auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
                                       signed_tx_.tx.invocation.gas_limit);
-
-  finish_call_frame(res);
+  invocation_frame_stack_.finish_frame(res);
 
   if (!res.is_success()) {
-    if (!res.result_) {
+    if (!res.result_)
       return res;
-    }
 
     // return nonzero error code on root invocation => contract error
     assert(*res.result_ != 0);
@@ -81,7 +81,8 @@ SystemCallHandler::root_invoke()
 ContractAddress
 SystemCallHandler::get_current_address() const
 {
-  return get_active_call_frame().active_invocation_.invoked_address;
+  return invocation_frame_stack_.get_active_frame()
+      .active_invocation_.invoked_address;
 }
 
 SHA256Hash
@@ -94,27 +95,25 @@ SystemCallHandler::get_source_tx_hash() const
 SyscallStatus<ContractAddress>
 SystemCallHandler::get_msg_sender() const
 {
-  assert(!call_frame_stack_.empty());
-  if (call_frame_stack_.size() == 1) {
-    return SyscallError{SyscallErrorCode::kIsRootTransaction};
-  }
-
-  return {call_frame_stack_[call_frame_stack_.size() - 2]
-              .active_invocation_.invoked_address};
+  assert(!invocation_frame_stack_.empty());
+  auto res = invocation_frame_stack_.get_msg_sender();
+  return res.has_value() ? SyscallStatus<ContractAddress>(*res)
+                         : SyscallError{SyscallErrorCode::kIsRootTransaction};
 }
 
 SyscallStatus<GasAmount>
 SystemCallHandler::get_invoke_gas_limit(GasAmount call_specified_gas_limit)
 {
-  GasAmount initial_gas_limit = UINT64_MAX;
-  if (!call_frame_stack_.empty()) {
-    initial_gas_limit =
-        runtimes_
-            .at(call_frame_stack_.back().active_invocation_.invoked_address)
-            ->runtime_.get_available_gas();
-  }
-
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
+
+  GasAmount initial_gas_limit =
+      invocation_frame_stack_.empty()
+          ? UINT64_MAX
+          : runtimes_
+                .at(invocation_frame_stack_.get_active_frame()
+                        .active_invocation_.invoked_address)
+                ->runtime_.get_available_gas();
+
   if (call_specified_gas_limit != UINT64_MAX &&
       call_specified_gas_limit > initial_gas_limit) {
     return SyscallError{SyscallErrorCode::kInsufficientGasForInvocation};
@@ -138,72 +137,24 @@ SystemCallHandler::invoke(Invocation const &invocation)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  start_call_frame(invocation);
-
+  invocation_frame_stack_.start_frame(invocation, runtime);
   auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
-
-  finish_call_frame(res);
+  invocation_frame_stack_.finish_frame(res);
 
   return res.to_host_fn_result();
-}
-
-void
-SystemCallHandler::start_call_frame(Invocation const &invocation)
-{
-  call_frame_stack_.emplace_back(invocation);
-}
-
-void
-SystemCallHandler::finish_call_frame(InvokeResult const &result)
-{
-  // If a contract has the REVERT_SAFE flag set, then it can be called again
-  // after it has been reverted. A contract might not be REVERT_SAFE because
-  // reversion does NOT reset a wasm's internal memory or other internal state.
-  // We could do that, it's just expensive,
-  // and would require fairly close integration with the wasm runtime and some
-  // fairly invasive changes (We need to restore the entirety of the wasm
-  // module's internal state -- not just memory, but also tables and globals.
-  // The wasm stack is reset automatically).
-
-  if (result.should_revert()) {
-    // Revert the call frame
-    for (auto const &addr : call_frame_stack_.back().visited_runtimes_) {
-      // TODO(geoff) metadata allowing revert_safe declarations
-      runtimes_.at(addr)->revert_poisoned_ = true;
-    }
-
-    call_frame_stack_.pop_back();
-
-    if (!call_frame_stack_.empty()) {
-      call_frame_stack_.back().commit_failed_child_call();
-    }
-  }
-  else {
-    // commit child call frame successfully
-    size_t call_frame_stack_size = call_frame_stack_.size();
-
-    if (call_frame_stack_size >= 2) {
-      call_frame_stack_[call_frame_stack_size - 2].commit_successful_child_call(
-          call_frame_stack_.back());
-    }
-    else if (call_frame_stack_.size() == 1) {
-      commit_last_call_frame_success(call_frame_stack_.back());
-    }
-
-    call_frame_stack_.pop_back();
-  }
 }
 
 bool
 SystemCallHandler::current_runtime_is_revert_poisoned() const
 {
   return runtimes_
-      .at(get_active_call_frame().active_invocation_.invoked_address)
+      .at(invocation_frame_stack_.get_active_frame()
+              .active_invocation_.invoked_address)
       ->revert_poisoned_;
 }
 
 void
-SystemCallHandler::commit_last_call_frame_success(CallFrame &frame)
+SystemCallHandler::commit_last_call_frame_success(InvocationFrame &frame)
 {
   committed_logs_ = frame.extract_logs();
 }
@@ -211,22 +162,25 @@ SystemCallHandler::commit_last_call_frame_success(CallFrame &frame)
 SyscallStatus<const ReturnBuffer>
 SystemCallHandler::get_return_buffer() const
 {
-  auto const &top_frame = get_active_call_frame();
+  assert(!invocation_frame_stack_.empty());
 
-  if (!top_frame.child_return_buffer_.has_value()) {
-    return SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
-  }
+  auto const &top_frame = invocation_frame_stack_.get_active_frame();
 
-  return *top_frame.child_return_buffer_;
+  return top_frame.child_return_buffer_.has_value()
+             ? SyscallStatus<const ReturnBuffer>(
+                   *top_frame.child_return_buffer_)
+             : SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
 }
 
 void
 SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
 {
-  get_active_call_frame().set_call_return(std::move(returned_buffer));
+  assert(!invocation_frame_stack_.empty());
+  invocation_frame_stack_.get_active_frame().set_frame_return(
+      std::move(returned_buffer));
 }
 
-SystemCallHandler::RuntimeCacheEntry *
+RuntimeCacheEntry *
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
   auto it = runtimes_.find(addr);
@@ -243,11 +197,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
       }
     }
 
-    if (out->revert_poisoned_) {
-      return nullptr;
-    }
-
-    return out;
+    return out->revert_poisoned_ ? nullptr : out;
   }
 
   // No runtime cache entry exists; now try to create a new one.
@@ -303,33 +253,23 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   return runtimes_.at(addr).get();
 }
 
-std::optional<SHA256Hash>
-SystemCallHandler::lookup_locally_deployed_contract(
-    ContractAddress const &addr) const
-{
-  for (auto const &frame : call_frame_stack_) {
-    auto it = frame.new_contract_deployments_.find(addr);
-    if (it != frame.new_contract_deployments_.end()) {
-      return it->second;
-    }
-  }
-  return std::nullopt;
-}
-
 Calldata const &
 SystemCallHandler::get_calldata() const
 {
-  return get_active_call_frame().active_invocation_.calldata;
+  return invocation_frame_stack_.get_active_frame().active_invocation_.calldata;
 }
 
 SyscallStatus<void>
 SystemCallHandler::log(std::span<const std::byte> message)
 {
+  assert(!invocation_frame_stack_.empty());
+
   if (message.size() > kMaxLogMessageLen) {
+    // log message too long, return error
     return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
 
-  get_active_call_frame().log(message);
+  invocation_frame_stack_.get_active_frame().log(message);
 
   return {};
 }
@@ -356,7 +296,7 @@ SyscallStatus<ContractAddress>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
-  assert(!call_frame_stack_.empty());
+  assert(!invocation_frame_stack_.empty());
 
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
@@ -368,6 +308,8 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     // try loading from local context
     auto it = newly_created_contracts_.find(contract_hash);
     if (it == newly_created_contracts_.end()) {
+      // cannot find the contract in question, in either snapshot
+      // or in local context.
       return SyscallError{SyscallErrorCode::kContractLookupFailed};
     }
   }
@@ -375,16 +317,18 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
-  // check that we have not already deployed to that address
   if (snapshot_cache_.try_get_deployed_contract_hash(deploy_addr)) {
+    // Contract has been deployed to query address in a previous block
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
 
-  if (lookup_locally_deployed_contract(deploy_addr).has_value()) {
+  if (invocation_frame_stack_.lookup_locally_deployed_contract(deploy_addr)
+          .has_value()) {
+    // contract has already been deployed in this transaction
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
 
-  auto &frame = get_active_call_frame();
+  auto &frame = invocation_frame_stack_.get_active_frame();
 
   // deploy new contract
   frame.new_contract_deployments_.emplace(deploy_addr, contract_hash);

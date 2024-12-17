@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "hogd/base/types.h"
@@ -36,3 +37,11 @@ from_xdr(uint128_xdr value)
 }
 
 } // namespace hogd
+
+template<std::size_t N> struct std::hash<std::array<uint8_t, N>> {
+  std::size_t operator()(const std::array<uint8_t, N> &array) const noexcept
+  {
+    return std::hash<std::string_view>{}(
+        std::string_view(reinterpret_cast<const char *>(array.data()), N));
+  }
+};

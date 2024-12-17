@@ -4,6 +4,7 @@
 #include <map>
 
 #include "hogd/hogexec/runtime/call_frame.h"
+#include "hogd/hogexec/runtime/runtime_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
@@ -29,6 +30,12 @@ class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache);
+
+  // Disable move and copy.
+  SystemCallHandler(SystemCallHandler &&ll) = delete;
+  SystemCallHandler &operator=(SystemCallHandler &&ll) = delete;
+  SystemCallHandler(const SystemCallHandler &ll) = delete;
+  SystemCallHandler &operator=(const SystemCallHandler &ll) = delete;
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Starts the invocation that is specified within signed_tx_.
@@ -74,46 +81,22 @@ public:
   bool current_runtime_is_revert_poisoned() const;
 
 private:
-  struct RuntimeCacheEntry {
-    WasmiRuntime runtime_;
-    const bool local_deployment_;
-
-    // When a call frame reverts, it reverts all of the state changes
-    // made in that frame (and all child frames).
-    // We do not revert the internal details of individual WasmiRuntimes
-    // (we could, in theory; but this is expensive and would require
-    // very careful management of Wasmi's internal data structures).
-    // Instead, we mark any contract that was reverted as `revert_poisoned`,
-    // and prevent any further invocations on that runtime.
-    // Future PRs will allow metadata to allow a contract to mark itself
-    // as `revert_safe`.
-    bool revert_poisoned_ = false;
-
-    RuntimeCacheEntry(WasmiRuntime &&runtime, bool local_deployment)
-      : runtime_(std::move(runtime)), local_deployment_(local_deployment)
-    {}
-    RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
-  };
-
   WasmiContext wasmi_context_;
-
   const SignedTransaction signed_tx_;
 
-  std::vector<CallFrame> call_frame_stack_;
-
-  // RuntimeCacheEntry cannot be moved while it is actively invoked.  unique_ptr
-  // required here.
-  std::map<ContractAddress, std::unique_ptr<RuntimeCacheEntry>> runtimes_;
+  RuntimeCache runtimes_;
 
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
-  const std::map<SHA256Hash, std::shared_ptr<const Contract>>
+  const std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>
       newly_created_contracts_;
 
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;
 
   StorageSnapshotCache &snapshot_cache_;
+
+  InvocationFrameStack invocation_frame_stack_;
 
   // Resolve the RuntimeCacheEntry associated with the queried address.
   // Creates a new entry if no entry exists, AND a contract is deployed at
@@ -130,9 +113,6 @@ private:
   SyscallStatus<GasAmount>
   get_invoke_gas_limit(GasAmount call_specified_gas_limit);
 
-  void start_call_frame(Invocation const &invocation);
-  void finish_call_frame(InvokeResult const &result);
-
   // Lookup the hash of the contract deployed at the queried address,
   // _only_ for contracts that are deployed during the current transaction.
   // Allows deployments to be created and then invoked during one transaction
@@ -143,16 +123,10 @@ private:
   std::optional<SHA256Hash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
-  auto &get_active_call_frame(this auto &self)
-  {
-    assert(!self.call_frame_stack_.empty());
-    return self.call_frame_stack_.back();
-  }
-
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the
   // transaction.
-  void commit_last_call_frame_success(CallFrame &frame);
+  void commit_last_call_frame_success(InvocationFrame &frame);
 };
 
 } // namespace hogd
