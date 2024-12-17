@@ -223,7 +223,7 @@ class CoroSharedLock : public CoroLock {
 public:
   ThreadPool &pool_;
 
-  CoroSharedLock(ThreadPool &pool) : pool_(pool) {}
+  explicit CoroSharedLock(ThreadPool &pool) : pool_(pool) {}
   Async<void> lock(LockerState *ls)
   {
     co_await CoroLock::lock(ls);
@@ -287,7 +287,7 @@ struct CoroGuard : CoroLock::LockerState {
   // end of a coroutine and release the lock normally before a
   // co_return statement, the invoking coroutine will not be destroyed
   // until the next locker suspends itself.  The version with an
-  // argument returns the argument from its coroutine.
+  // argument returns the return value of the unlocking coroutine.
   [[nodiscard]] auto reset_and_return()
   {
     assert(lkp_);

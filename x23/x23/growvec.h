@@ -1,6 +1,6 @@
 // -*-C++-*-
 
-// A GrowVec is a vector that will grow as needed, without incuring a
+// A GrowVec is a vector that will grow as needed, without incurring a
 // lot of synchronization overhead in the common case that it doesn't
 // need to grow.  For instance, it is suitable to represent a vector
 // of all file descriptor numbers, since the maximum file descriptor
@@ -12,7 +12,8 @@
 namespace x23 {
 
 // A pointer that is good only until you suspend the current
-// coroutine, which is the duration of a shared CoroSharedLock..
+// coroutine, which is the duration of the mutual exclusion provided
+// by CoroSharedLock::lock_shared.
 template<typename T> class CoroTempPtr {
 public:
   using value_type = T;
@@ -48,11 +49,16 @@ private:
 // A vector that grows dynamically, but where you can access any
 // individual member without synchronization provided you are not
 // suspended.
-template<typename V> class GrowVec {
-public:
+template<typename V> struct GrowVec {
   using value_type = typename V::value_type;
+  using pointer = CoroTempPtr<value_type>;
 
-  Async<CoroTempPtr<value_type>> operator[](size_t i) {
+  V v_;
+  CoroSharedLock slk_;
+
+  explicit GrowVec(ThreadPool &pool) : slk_(pool) {}
+
+  Async<pointer> operator[](size_t i) {
     for (;;) {
       co_await slk_.lock_shared();
       if (i < v_.size())
@@ -64,9 +70,13 @@ public:
 	v_.resize(i+1);
     }
   }
-private:
-  V v_;
-  CoroSharedLock slk_;
 };
+
+template<typename T>
+inline ptrdiff_t
+operator-(typename GrowVec<T>::pointer p, const GrowVec<T> &v)
+{
+  return p.get() - v.v_.data();
+}
 
 } // namespace x23
