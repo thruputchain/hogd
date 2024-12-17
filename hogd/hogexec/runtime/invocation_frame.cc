@@ -1,4 +1,4 @@
-#include "hogd/hogexec/runtime/call_frame.h"
+#include "hogd/hogexec/runtime/invocation_frame.h"
 
 #include <cassert>
 #include <cstddef>

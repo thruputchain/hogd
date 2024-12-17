@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <map>
 
-#include "hogd/hogexec/runtime/call_frame.h"
+#include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
