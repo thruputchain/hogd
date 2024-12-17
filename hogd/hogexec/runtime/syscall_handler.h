@@ -51,7 +51,12 @@ public:
   // Reference invalidated when call frame changes.
   Calldata const &get_calldata() const;
 
+  // Get the buffer returned by a child call frame.
+  // Error if most recent child did call set_return_buffer.
   SyscallStatus<const ReturnBuffer> get_return_buffer() const;
+  // Called by the Return syscall.
+  // Sets the buffer to be passed back to the parent call frame.
+  // Can be called by root call frame, but in that case will be ignored.
   void set_return_buffer(ReturnBuffer &&returned_buffer);
 
   SyscallStatus<void> log(std::span<const std::byte> message);
