@@ -21,9 +21,9 @@ namespace hogd {
 // Methods marked `const` are read-only, so accessing them does not change
 // the internal state of the CachedItem.
 // For example, if base_object_ is nullopt, a call to bytestring_get() does not
-// then force the CachedItem into a Bytestring type.  A subsequent call to nnint_set_add
-// could succeed. If a CachedItem is only ever accessed via const methods,
-// no StorageDelta will be produced.
+// then force the CachedItem into a Bytestring type.  A subsequent call to
+// nnint_set_add could succeed. If a CachedItem is only ever accessed via const
+// methods, no StorageDelta will be produced.
 class CachedItem {
 public:
   CachedItem(std::optional<StorageObject> obj) : base_object_(std::move(obj)) {}
@@ -47,7 +47,7 @@ private:
   struct BytestringCacheType {
     Bytestring set_bytestring_arg_;
 
-    std::optional<StorageDelta> get_delta() const;
+    StorageDelta get_delta() const;
 
     constexpr static std::optional<StorageObjectType> kObjectType =
         StorageObjectType::kBytestring;
@@ -57,7 +57,7 @@ private:
     int128_t nnint128_set_arg_ = 0;
     int128_t nnint128_add_sum_ = 0;
 
-    std::optional<StorageDelta> get_delta() const;
+    StorageDelta get_delta() const;
 
     constexpr static std::optional<StorageObjectType> kObjectType =
         StorageObjectType::kNonnegativeInt;

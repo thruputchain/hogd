@@ -239,16 +239,20 @@ CachedItem::nnint_set_add(int128_t set_value, int128_t add_value)
 std::optional<StorageDelta>
 CachedItem::get_delta() const
 {
-  return std::visit([](auto const &v) { return v.get_delta(); }, delta_args_);
+  return std::visit(
+      [](auto const &v) -> std::optional<StorageDelta> {
+        return v.get_delta();
+      },
+      delta_args_);
 }
 
-std::optional<StorageDelta>
+StorageDelta
 CachedItem::BytestringCacheType::get_delta() const
 {
   return make_bytestring_set(set_bytestring_arg_);
 }
 
-std::optional<StorageDelta>
+StorageDelta
 CachedItem::NNInt128CacheType::get_delta() const
 {
   return make_nnint128_set_add(nnint128_set_arg_, nnint128_add_sum_);
