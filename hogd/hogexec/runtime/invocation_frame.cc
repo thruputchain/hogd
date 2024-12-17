@@ -89,7 +89,6 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
   // fairly invasive changes (We need to restore the entirety of the wasm
   // module's internal state -- not just memory, but also tables and globals.
   // The wasm stack is reset automatically).
-
   if (result.should_revert()) {
     assert(!frame_stack_.empty());
 

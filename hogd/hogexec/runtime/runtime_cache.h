@@ -28,7 +28,12 @@ struct RuntimeCacheEntry {
   RuntimeCacheEntry(WasmiRuntime &&runtime, bool local_deployment)
     : runtime_(std::move(runtime)), local_deployment_(local_deployment)
   {}
-  RuntimeCacheEntry(RuntimeCacheEntry &) = delete;
+
+  // Disable move and copy.
+  RuntimeCacheEntry(RuntimeCacheEntry &&ll) = delete;
+  RuntimeCacheEntry &operator=(RuntimeCacheEntry &&ll) = delete;
+  RuntimeCacheEntry(const RuntimeCacheEntry &ll) = delete;
+  RuntimeCacheEntry &operator=(const RuntimeCacheEntry &ll) = delete;
 };
 
 // RuntimeCacheEntry cannot be moved while it is actively invoked.  unique_ptr
