@@ -19,6 +19,24 @@ errors:
   - name: "NoSyscall"
     number: 2
     doc: "System call for supplied number is not supported"
+  - name: "IsRootTransaction"
+    number: 3
+    doc: "Cannot call get_msg_sender on root invocation"
+  - name: "ContractLookupFailed"
+    number: 4
+    doc: "Failed to find contract"
+  - name: "ContractAlreadyDeployed"
+    number: 5
+    doc: "Attempt made to deploy a contract twice (same nonce and contract hash, from same address)"
+  - name: "NoReturnBufferAvailable"
+    number: 6
+    doc: "No return buffer is available.  Either the most recent subcall failed, or there have been no subcalls within this call frame."
+  - name: "InsufficientGasForInvocation"
+    number: 7
+    doc: "Insufficient gas in call frame to supply requested gas limit for child invocation"
+  - name: "InvalidSyscallInput"
+    number: 8
+    doc: "Invalid input to a syscall, such as subtracting below 0 on an nnint64"
 
     # those that cause call frames to revert
   - name: "DeterministicWasm"

@@ -19,7 +19,6 @@ add_library(
   syscall_contract.cc
   syscall_crypto.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
-
 )
 
 add_executable(
