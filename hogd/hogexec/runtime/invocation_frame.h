@@ -80,6 +80,13 @@ public:
 
   std::optional<ContractAddress> get_msg_sender() const;
 
+  // Lookup the hash of the contract deployed at the queried address,
+  // _only_ for contracts that are deployed during the current transaction.
+  // Allows deployments to be created and then invoked during one transaction
+  // (useful for initialization).
+  //
+  // Also usable to check whether a deployment was rolled back by a reverted
+  // call frame. (even if a corresponding runtime entry exists).
   std::optional<SHA256Hash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 

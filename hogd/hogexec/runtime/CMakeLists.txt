@@ -1,6 +1,6 @@
 add_library(
   runtime
-  call_frame.cc
+  invocation_frame.cc
   wasmi_runtime.cc
   syscall_handler.cc
   status.cc

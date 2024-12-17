@@ -18,13 +18,13 @@ class StorageSnapshotCache;
 // Data structure that manages all system calls and state associated with a
 // running transaction.
 // Core components:
-//   - Call Frame Stack:  A stack of CallFrame objects representing the current
-//   state of a running transaction.  Each CallFrame is a different invocation
-//   on a contract. A contract might be invoked multiple times and might be
-//   reentrant. Each CallFrame either commits or reverts atomically, and pushes
-//   its state changes into its parent CallFrame.
+//   - Invocation Frame Stack:  A stack of frame objects representing the
+//   current state of a running transaction.  Each frame is a different
+//   invocation on a contract. A contract might be invoked multiple times and
+//   might be reentrant. Each frame either commits or reverts atomically, and
+//   pushes its state changes into its parent frame.
 //   - Runtime Cache: The set of instantiated WASM runtimes.  One runtime per
-//   ContractAddress. This is maintained separately from the CallFrame stack
+//   ContractAddress. This is maintained separately from the frame stack
 //   because there is not a 1-1 map between runtimes and call frames.
 class SystemCallHandler {
 public:
@@ -112,16 +112,6 @@ private:
   // the requested amount.
   SyscallStatus<GasAmount>
   get_invoke_gas_limit(GasAmount call_specified_gas_limit);
-
-  // Lookup the hash of the contract deployed at the queried address,
-  // _only_ for contracts that are deployed during the current transaction.
-  // Allows deployments to be created and then invoked during one transaction
-  // (useful for initialization).
-  //
-  // Also usable to check whether a deployment was rolled back by a reverted
-  // call frame. (even if a corresponding runtime entry exists).
-  std::optional<SHA256Hash>
-  lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the

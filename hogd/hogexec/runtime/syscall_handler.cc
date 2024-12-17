@@ -189,12 +189,11 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
     // The entry was created by the current transaction.
     // Must check whether that action was rolled back.
-    if (out->local_deployment_) {
-      if (!lookup_locally_deployed_contract(addr)) {
-        // Runtime exists in the cache, but it was deployed in an earlier
-        // call frame that has since been reverted.
-        return nullptr;
-      }
+    if (out->local_deployment_ &&
+        !invocation_frame_stack_.lookup_locally_deployed_contract(addr)) {
+      // Runtime exists in the cache, but it was deployed in an earlier
+      // call frame that has since been reverted.
+      return nullptr;
     }
 
     return out->revert_poisoned_ ? nullptr : out;
@@ -209,7 +208,8 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     // There was no deployment in the previous snapshot.
     // Now check for the transaction's local context.
     local_deployment = true;
-    deployed_hash = lookup_locally_deployed_contract(addr);
+    deployed_hash =
+        invocation_frame_stack_.lookup_locally_deployed_contract(addr);
   }
 
   if (!deployed_hash) {
