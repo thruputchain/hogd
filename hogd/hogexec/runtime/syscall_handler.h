@@ -30,8 +30,12 @@ public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache);
 
+  // Root invocation of a transaction.  Cannot be called from within a syscall.
+  // Starts the invocation that is specified within signed_tx_.
   InvokeResult root_invoke();
 
+  // Create and run a child call frame.
+  // Should be called from within a syscall.
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
   invoke(Invocation const &invocation);
 
@@ -42,6 +46,9 @@ public:
   SyscallStatus<ContractAddress> get_msg_sender() const;
   SHA256Hash get_source_tx_hash() const;
 
+  // return the calldata associated with the current active invocation.
+  // Incorrect to call method when no invocation is running.
+  // Reference invalidated when call frame changes.
   Calldata const &get_calldata() const;
 
   SyscallStatus<const ReturnBuffer> get_return_buffer() const;
