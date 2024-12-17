@@ -48,6 +48,8 @@ struct InvokeResult {
     return (!result_.has_value()) || (*result_ < 0);
   }
 
+  bool is_success() const { return (result_.has_value() && (*result_ == 0)); }
+
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> to_host_fn_result() const;
 };
 

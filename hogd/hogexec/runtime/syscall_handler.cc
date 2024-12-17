@@ -66,7 +66,7 @@ SystemCallHandler::root_invoke()
   }
 
   // return nonzero error code on root invocation => contract error
-  if (*res.result_ != 0) {
+  if (!res.is_success()) {
     return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed_ = res.gas_consumed_};
   }
