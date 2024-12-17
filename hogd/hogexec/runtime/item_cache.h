@@ -17,6 +17,13 @@ namespace hogd {
 // Provides for a transaction a locally consistent view of a storage item,
 // with modifications to the item up to that point in the transaction applied to
 // it.
+//
+// Methods marked `const` are read-only, so accessing them does not change
+// the internal state of the CachedItem.
+// For example, if base_object_ is nullopt, a call to bytestring_get() does not
+// then force the CachedItem into a Bytestring type.  A subsequent call to nnint_set_add
+// could succeed. If a CachedItem is only ever accessed via const methods,
+// no StorageDelta will be produced.
 class CachedItem {
 public:
   CachedItem(std::optional<StorageObject> obj) : base_object_(std::move(obj)) {}
