@@ -79,8 +79,8 @@ typename: string
     default: none
   description: The type of the supplied argument.  Must be a trivially copyable
   type.  `typename` must be present in both the syscall code (e.g., an XDR type,
-   or a basic type) and be present in contract code.  For types that have 
-   different names, the optional `rust_typename` parameter may be set.
+  or a basic type) and be present in contract code.  For types that have 
+  different names, the optional `rust_typename` parameter may be set.
 
 primitive_type: bool
   required: no
