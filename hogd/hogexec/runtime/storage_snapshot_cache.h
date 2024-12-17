@@ -15,6 +15,10 @@ namespace hogd {
 // Root cache for objects read from the ledger.
 // Can be shared between concurrent transactions,
 // but must be reset after each block.
+//
+// This is not designed as a high performance implementation.
+// If this is a performance bottleneck, it can be swapped out
+// for something with this same interface.
 class StorageSnapshotCache {
 public:
   std::shared_ptr<const Contract>
