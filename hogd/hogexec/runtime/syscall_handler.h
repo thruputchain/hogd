@@ -42,8 +42,7 @@ public:
   SyscallStatus<ContractAddress> get_msg_sender() const;
   SHA256Hash get_source_tx_hash() const;
 
-  SyscallStatus<Calldata> get_calldata() const;
-  SyscallStatus<RuntimeMemoryLength> get_calldata_len() const;
+  Calldata const &get_calldata() const;
 
   SyscallStatus<const ReturnBuffer> get_return_buffer() const;
   void set_return_buffer(ReturnBuffer &&returned_buffer);

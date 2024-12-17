@@ -41,12 +41,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
                              RuntimeMemoryLength &output_len)
 {
-  SyscallStatus<RuntimeMemoryLength> status =
-      syscall_handler.get_calldata_len();
-  if (!status) {
-    return {status.error().code(), 0};
-  }
-  output_len = *status;
+  output_len = syscall_handler.get_calldata().size();
   return {SyscallErrorCode::kNone, 0};
 }
 
@@ -55,16 +50,13 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                           std::span<std::byte> output_buffer,
                           RuntimeMemoryLength &output_written_len)
 {
-  SyscallStatus<Calldata> status = syscall_handler.get_calldata();
-  if (!status) {
-    return {status.error().code(), 0};
-  }
+  auto const &calldata = syscall_handler.get_calldata();
 
   output_written_len =
-      std::min<RuntimeMemoryLength>(status->size(), output_buffer.size());
+      std::min<RuntimeMemoryLength>(calldata.size(), output_buffer.size());
 
-  std::memcpy(reinterpret_cast<uint8_t *>(output_buffer.data()), status->data(),
-              output_written_len);
+  std::memcpy(reinterpret_cast<uint8_t *>(output_buffer.data()),
+              calldata.data(), output_written_len);
 
   return {SyscallErrorCode::kNone, 0};
 }

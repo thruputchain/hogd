@@ -348,16 +348,10 @@ SystemCallHandler::lookup_locally_deployed_contract(
   return std::nullopt;
 }
 
-SyscallStatus<Calldata>
+Calldata const &
 SystemCallHandler::get_calldata() const
 {
   return get_active_call_frame().active_invocation_.calldata;
-}
-
-SyscallStatus<RuntimeMemoryLength>
-SystemCallHandler::get_calldata_len() const
-{
-  return get_active_call_frame().active_invocation_.calldata.size();
 }
 
 SyscallStatus<void>
