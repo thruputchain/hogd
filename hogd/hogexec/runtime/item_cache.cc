@@ -66,20 +66,18 @@ CachedItem::get_object_type() const
 {
   auto active_type = std::visit(
       [](auto const &v) -> std::optional<StorageObjectType> {
-        if (v.has_modification()) {
+        if (v.has_modification()) 
           return std::remove_reference_t<decltype(v)>::kObjectType;
-        }
+        
         return std::nullopt;
       },
       delta_args_);
 
-  if (active_type) {
+  if (active_type) 
     return active_type;
-  }
 
-  if (base_object_) {
+  if (base_object_) 
     return base_object_->type();
-  }
 
   return std::nullopt;
 }
@@ -208,13 +206,12 @@ NNIntItem::set_add(int128_t set_value, int128_t add_value)
   int128_t new_add_value = capped_add(add_value, add_sum_);
 
   if (new_add_value < 0) {
-    if (set_value < 0) {
+    if (set_value < 0) 
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-    }
+    
     // cannot overflow
-    if (set_value + new_add_value < 0) {
+    if (set_value + new_add_value < 0) 
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-    }
   }
 
   add_sum_ = new_add_value;
@@ -237,10 +234,9 @@ BytestringItem::get_delta() const
 std::optional<StorageDelta>
 NNIntItem::get_delta() const
 {
-  if (!has_modification_) {
+  if (!has_modification_)
     return std::nullopt;
-  }
-
+  
   return make_nnint128_set_add(set_arg_, add_sum_);
 }
 
