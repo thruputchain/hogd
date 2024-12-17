@@ -115,14 +115,31 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
+  // Resolve the RuntimeCacheEntry associated with the queried address.
+  // Creates a new entry if no entry exists, AND a contract is deployed at
+  // that address in the current context (i.e. if a contract is deployed there
+  // in the snapshot, or by a prior action of the current transaction that was
+  // not rolled back by a revert).
   RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
 
+  // Get the amount of gas available to a child invoke call.
+  // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left.
+  // Otherwise, checks the current runtime's available gas,
+  // and returns an error if it has insufficient gas to supply
+  // the requested amount.
   SyscallStatus<GasAmount>
   get_invoke_gas_limit(GasAmount call_specified_gas_limit);
 
   void start_call_frame(Invocation const &invocation);
   void finish_call_frame(InvokeResult const &result);
 
+  // Lookup the hash of the contract deployed at the queried address,
+  // _only_ for contracts that are deployed during the current transaction.
+  // Allows deployments to be created and then invoked during one transaction
+  // (useful for initialization).
+  //
+  // Also usable to check whether a deployment was rolled back by a reverted
+  // call frame. (even if a corresponding runtime entry exists).
   std::optional<SHA256Hash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
@@ -132,6 +149,9 @@ private:
     return self.call_frame_stack_.back();
   }
 
+  // Commit the last call frame, if the last call frame succeeds.
+  // Extracts relevant data structures, to prepare for committing the
+  // transaction.
   void commit_last_call_frame_success(CallFrame &frame);
 };
 

@@ -76,7 +76,7 @@ SystemCallHandler::root_invoke()
   return res;
 }
 
-// syscall methods: can only be called when call_frame_stack_ is nonempty
+// can only be called when call_frame_stack_ is nonempty
 // (i.e. while at least one invoke() is running)
 ContractAddress
 SystemCallHandler::get_current_address() const
@@ -233,10 +233,12 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   if (it != runtimes_.end()) {
     auto *out = it->second.get();
 
+    // The entry was created by the current transaction.
+    // Must check whether that action was rolled back.
     if (out->local_deployment_) {
-      // Runtime exists in the cache, but it was deployed in an earlier
-      // call frame that has since been reverted.
       if (!lookup_locally_deployed_contract(addr)) {
+        // Runtime exists in the cache, but it was deployed in an earlier
+        // call frame that has since been reverted.
         return nullptr;
       }
     }
@@ -248,36 +250,47 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     return out;
   }
 
+  // No runtime cache entry exists; now try to create a new one.
+
   auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
 
   bool local_deployment = false;
-  // not found committed deployment; checking local context
   if (!deployed_hash) {
+    // There was no deployment in the previous snapshot.
+    // Now check for the transaction's local context.
     local_deployment = true;
     deployed_hash = lookup_locally_deployed_contract(addr);
   }
 
-  // not found in local context either
   if (!deployed_hash) {
+    // A deployment was not found in the local context
+    // nor in the snapshot.
     return nullptr;
   }
 
+  // At this point, we have a deployment and the hash of the contract.
+  // We now resolve the actual contract code from the snapshot.
   auto load_contract = snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
 
   if (!load_contract) {
-    // Not found committed contract.
+    // Not found committed contract in the snapshot.
     // Try loading from local context
     auto it = newly_created_contracts_.find(*deployed_hash);
-    if (it == newly_created_contracts_.end()) {
-      return nullptr;
-    }
+
+    // contract deployment checks to see that a new deployment of a specific
+    // hash always is a hash of a contract that the runtime can access.
+    assert(it != newly_created_contracts_.end());
 
     load_contract = it->second;
   }
 
+  // actually make the new runtime
   auto new_runtime =
       wasmi_context_.make_new_runtime(load_contract->contract_data, this);
 
+  // Some error instantiating the runtime.
+  // TODO(geoff) validate that failures here are deterministic.
+  // (i.e. the result of a malloc() failure).
   if (!new_runtime) {
     return nullptr;
   }
