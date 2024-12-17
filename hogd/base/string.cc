@@ -14,7 +14,7 @@ using Unit = std::pair<std::string, size_t>;
 
 const Unit iec_byte_units[] = {
     {"PiB", 1UL << 50}, {"TiB", 1UL << 40}, {"GiB", 1UL << 30},
-    {"MiB", 1UL << 20}, {"KiB", 1UL << 10}, {"B", 0},
+    {"MiB", 1UL << 20}, {"KiB", 1UL << 10}, {"B", 1},
 };
 
 const Unit si_byte_units[] = {
@@ -23,7 +23,7 @@ const Unit si_byte_units[] = {
     {"GB", 1'000'000'000},
     {"MB", 1'000'000},
     {"KB", 1'000},
-    {"B", 0},
+    {"B", 1},
 };
 
 template<size_t N>
