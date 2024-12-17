@@ -366,19 +366,6 @@ SystemCallHandler::log(std::span<const std::byte> message)
   return {};
 }
 
-RuntimeMemoryLength
-SystemCallHandler::get_defaultzero_return_len() const
-{
-  auto const &top_frame = get_active_call_frame();
-
-  // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  if (top_frame.child_return_buffer_.has_value()) {
-    return top_frame.child_return_buffer_->size();
-  }
-  // NOLINTEND(bugprone-unchecked-optional-access)
-  return 0;
-}
-
 ContractAddress
 SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
                                              SHA256Hash const &nonce,

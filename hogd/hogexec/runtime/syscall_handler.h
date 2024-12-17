@@ -58,8 +58,6 @@ public:
 
   std::vector<LogEntry> const &get_logs() const { return committed_logs_; }
 
-  RuntimeMemoryLength get_defaultzero_return_len() const;
-
   static ContractAddress
   static_get_deploy_address(ContractAddress const &sender,
                             SHA256Hash const &nonce,
