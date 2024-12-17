@@ -66,18 +66,23 @@ CachedItem::get_object_type() const
 {
   auto active_type = std::visit(
       [](auto const &v) -> std::optional<StorageObjectType> {
-        if (v.has_modification()) 
-          return std::remove_reference_t<decltype(v)>::kObjectType;
-        
-        return std::nullopt;
+        return v.has_modification()
+                   ? std::remove_reference_t<decltype(v)>::kObjectType
+                   : std::nullopt;
       },
       delta_args_);
 
-  if (active_type) 
+  if (active_type) {
+    // item cache has been actively modified during current
+    // transaction.  Current type is whatever type was left by last write.
     return active_type;
+  }
 
-  if (base_object_) 
+  if (base_object_) {
+    // Item cache has not been actively modified during current
+    // transaction, but snapshot value exists.
     return base_object_->type();
+  }
 
   return std::nullopt;
 }
@@ -91,10 +96,8 @@ CachedItem::type_guard(std::optional<StorageObjectType> expected_type) const
 
   auto type = get_object_type();
 
-  if (type) {
-    if (*type != expected_type) {
-      return SyscallError{SyscallErrorCode::kStorageObjectTypeMismatch};
-    }
+  if (type && *type != expected_type) {
+    return SyscallError{SyscallErrorCode::kStorageObjectTypeMismatch};
   }
 
   return {};
@@ -168,10 +171,10 @@ NNIntItem::get_base() const
 {
   if (has_modification_)
     return set_arg_;
-  
+
   if (base_object_value_.has_value())
     return *base_object_value_;
-  
+
   return SyscallError{SyscallErrorCode::kStorageKeyNExist};
 }
 
@@ -179,10 +182,11 @@ SyscallStatus<int128_t>
 NNIntItem::get() const
 {
   if (!has_modification_) {
-    if (base_object_value_) 
-      return *base_object_value_;
-    
-    return SyscallError{SyscallErrorCode::kStorageKeyNExist};
+    // object wasn't actually modified during current transaction.
+    // Must ignore local data structures, and default to snapshot value.
+    return base_object_value_
+               ? SyscallStatus<int128_t>(*base_object_value_)
+               : SyscallError{SyscallErrorCode::kStorageKeyNExist};
   }
 
   int128_t result;
@@ -199,18 +203,17 @@ NNIntItem::get() const
 SyscallStatus<void>
 NNIntItem::set_add(int128_t set_value, int128_t add_value)
 {
-  if (has_modification_ && set_value != set_arg_) {
+  if (has_modification_ && set_value != set_arg_)
     return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
+  
   int128_t new_add_value = capped_add(add_value, add_sum_);
 
   if (new_add_value < 0) {
-    if (set_value < 0) 
+    if (set_value < 0)
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-    
+
     // cannot overflow
-    if (set_value + new_add_value < 0) 
+    if (set_value + new_add_value < 0)
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
 
@@ -224,9 +227,9 @@ NNIntItem::set_add(int128_t set_value, int128_t add_value)
 std::optional<StorageDelta>
 BytestringItem::get_delta() const
 {
-  if (!has_modification_) {
+  if (!has_modification_)
     return std::nullopt;
-  }
+  
   assert(set_arg_.has_value());
   return make_bytestring_set(*set_arg_);
 }
@@ -236,7 +239,7 @@ NNIntItem::get_delta() const
 {
   if (!has_modification_)
     return std::nullopt;
-  
+
   return make_nnint128_set_add(set_arg_, add_sum_);
 }
 

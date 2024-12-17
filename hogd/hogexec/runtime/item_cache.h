@@ -75,7 +75,7 @@ struct DeletedItem {
   static std::optional<StorageDelta> get_delta();
 };
 
-// Maintain the modifications of one CallFrame to one address.
+// Maintain the modifications of one InvocationFrame to one address.
 // Provides for a transaction a locally consistent view of a storage item,
 // with modifications to the item up to that point in the transaction applied to
 // it.
