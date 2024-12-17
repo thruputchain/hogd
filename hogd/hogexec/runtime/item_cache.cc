@@ -127,9 +127,7 @@ BytestringItem::set(std::span<const std::byte> arg)
 
   std::span<const uint8_t> reinterpreted_input = {
       reinterpret_cast<const uint8_t *>(arg.data()), arg.size()};
-
   set_arg_ = {reinterpreted_input.begin(), reinterpreted_input.end()};
-
   has_modification_ = true;
   return {};
 }
@@ -137,10 +135,8 @@ BytestringItem::set(std::span<const std::byte> arg)
 SyscallStatus<std::reference_wrapper<const Bytestring>>
 BytestringItem::get() const
 {
-  if (set_arg_) {
+  if (set_arg_)
     return *set_arg_;
-  }
-
   return SyscallError{SyscallErrorCode::kStorageKeyNExist};
 }
 
@@ -148,7 +144,6 @@ void
 CachedItem::delete_object()
 {
   delta_args_.emplace<DeletedItem>();
-
   base_object_ = nullptr;
 }
 
@@ -173,14 +168,12 @@ CachedItem::debug_assert_no_modifications() const
 SyscallStatus<int128_t>
 NNIntItem::get_base() const
 {
-  if (has_modification_) {
+  if (has_modification_)
     return set_arg_;
-  }
-
-  if (base_object_value_.has_value()) {
+  
+  if (base_object_value_.has_value())
     return *base_object_value_;
-  }
-
+  
   return SyscallError{SyscallErrorCode::kStorageKeyNExist};
 }
 
@@ -188,28 +181,21 @@ SyscallStatus<int128_t>
 NNIntItem::get() const
 {
   if (!has_modification_) {
-    if (base_object_value_) {
+    if (base_object_value_) 
       return *base_object_value_;
-    }
+    
     return SyscallError{SyscallErrorCode::kStorageKeyNExist};
   }
 
   int128_t result;
-
-  if (!integer_add_overflow(set_arg_, add_sum_, &result)) {
+  if (!integer_add_overflow(set_arg_, add_sum_, &result))
     return result;
-  }
+
   // Should be impossible for nnint128_add_sum_ to be less than 0 if we
   // overflow
   assert(add_sum_ > 0);
 
   return std::numeric_limits<int128_t>::max();
-
-  if (base_object_value_) {
-    return *base_object_value_;
-  }
-
-  return SyscallError{SyscallErrorCode::kStorageKeyNExist};
 }
 
 SyscallStatus<void>
