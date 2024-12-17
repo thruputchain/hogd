@@ -76,7 +76,7 @@ private:
   };
 
   struct DeletedType {
-    StorageDelta get_delta() const;
+    static StorageDelta get_delta();
 
     constexpr static std::optional<StorageObjectType> kObjectType =
         std::nullopt;
@@ -111,7 +111,8 @@ struct ItemCacheMap {
 
   // Absorb the modifications created during a child CallFrame.
   // Overwrites entries in local_map_ as necessary.
-  // Logic for resolving item cache is elsewhere (later PR TODO(geoff): either here or in CallFrame stack)
+  // Logic for resolving item cache is elsewhere (later PR TODO(geoff): either
+  // here or in CallFrame stack)
   void commit_child_map(ItemCacheMap &child_map);
 };
 

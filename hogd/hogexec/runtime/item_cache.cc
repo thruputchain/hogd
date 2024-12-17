@@ -258,7 +258,7 @@ CachedItem::NNInt128CacheType::get_delta() const
 }
 
 StorageDelta
-CachedItem::DeletedType::get_delta() const
+CachedItem::DeletedType::get_delta()
 {
   return StorageDelta(StorageDeltaType::kDelete);
 }
