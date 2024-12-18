@@ -3,6 +3,7 @@
 #include <concepts>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 
@@ -35,7 +36,7 @@ error(HostFnErrorCode error_code)
   return TrampolineResult{.result = 0, .panic = std::to_underlying(error_code)};
 }
 
-constexpr static TrampolineResult
+constexpr TrampolineResult
 unrecoverable()
 {
   return TrampolineResult{.result = 0,

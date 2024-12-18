@@ -7,11 +7,11 @@
 #include <string_view>
 #include <utility>
 
+#include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-
-#include "contract.hh"
 
 namespace hogd {
 
