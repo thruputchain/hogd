@@ -153,6 +153,7 @@ public:
       : thread_(tid), loop_count_(count)
     {}
     bool operator==(const SuspendCount &) const = default;
+    bool valid() const { return thread_ != std::thread::id{}; }
 
   private:
     std::thread::id thread_;
@@ -174,12 +175,18 @@ public:
   // constructed and destroyed.  Be sure to declare it
   // [[no_unique_address]] in data structures, as it compiles to empty
   // when NDEBUG is defined.
-  struct CrashIfSuspended {
+  struct [[nodiscard]] CrashIfSuspended {
 #ifndef NDEBUG
     SuspendCount start_;
     CrashIfSuspended() : start_(get_suspend_count()) {}
-    ~CrashIfSuspended() { assert(start_ == get_suspend_count()); }
-#endif // !NDEBUG
+    ~CrashIfSuspended()
+    {
+      assert(start_ == get_suspend_count() || !start_.valid());
+    }
+    void reset() { start_ = SuspendCount{}; }
+#else  // NDEBUG
+    void reset() {}
+#endif // NDEBUG
   };
 
 private:

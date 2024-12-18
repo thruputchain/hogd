@@ -8,6 +8,7 @@
 // happen versy seldom.
 
 #include <x23/corosync.h>
+#include <x23/testlock.h>
 
 namespace x23 {
 
@@ -60,12 +61,10 @@ template<typename V> struct GrowVec {
 
   Async<pointer> operator[](size_t i) {
     for (;;) {
-      co_await slk_.lock_shared();
+      co_await slk_.coro_lock_shared();
       if (i < v_.size())
 	co_return &v_[i];
-
-      CoroGuard g;
-      co_await g(slk_);
+      auto guard = co_await slk_.coro_lock();
       if (i <= v_.size())
 	v_.resize(i+1);
     }

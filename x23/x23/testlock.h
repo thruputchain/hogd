@@ -9,41 +9,61 @@ namespace x23 {
 
 // A simple futex-based mutex that, unlike std::mutex, lets you test
 // whether or not the lock is busy without acquiring the lock or
-// exclusively caching it.  Also provides a wait_inhibit() hook for
-// derived types implementing shared locks.  Not optimized for the
-// case where you need to acquire the lock with any frequency.
+// exclusively caching it.  Also provides a block_while_inhibited()
+// hook for derived types implementing shared locks.
 class TestLock {
 public:
-  bool try_lock(this auto &&self)
+  bool try_lock(this auto &&self, bool want_notify = false)
   {
-    if (self.flag_.test_and_set(std::memory_order_acquire))
+    int prev = self.status_.exchange(kLocked, std::memory_order_acquire);
+    if (prev == kLockedWantNotify || (prev == kLocked && want_notify))
+      prev =
+          self.status_.exchange(kLockedWantNotify, std::memory_order_acquire);
+    if (prev != kUnlocked)
       return false;
-    if constexpr (requires { self.wait_inhibit(); })
-      self.wait_inhibit();
+    if constexpr (requires { self.block_while_inhibited(); })
+      self.block_while_inhibited();
     return true;
   }
   void lock(this auto &&self)
   {
-    while (!self.try_lock())
-      self.flag_.wait(true);
+    while (!self.try_lock(true))
+      self.status_.wait(kLockedWantNotify);
   }
   void unlock()
   {
-    flag_.clear(std::memory_order_release);
-    flag_.notify_all(); // not efficient if lock/unlock common
+    if (status_.exchange(kUnlocked) == kLockedWantNotify)
+      status_.notify_all();
   }
 
-  bool busy() const { return flag_.test(std::memory_order_acquire); }
+  bool busy() const
+  {
+    return status_.load(std::memory_order_acquire) != kUnlocked;
+  }
   void block_until_free()
   {
-    while (busy())
-      flag_.wait(true);
+    for (;;) {
+      int prev = status_.load(std::memory_order_acquire);
+      if (prev == kLocked)
+	status_.compare_exchange_weak(prev, kLockedWantNotify,
+				      std::memory_order_relaxed,
+				      std::memory_order_acquire);
+      if (prev == kUnlocked)
+	return;
+      status_.wait(kLockedWantNotify);
+    }
   }
 
 private:
-  std::atomic_flag flag_ = ATOMIC_FLAG_INIT;
+  static constexpr int kUnlocked = 0;
+  static constexpr int kLocked = 1;
+  static constexpr int kLockedWantNotify = 2;
+  std::atomic_int status_{kUnlocked};
 };
 
+// A shared version of TestLock.  The constructor argument is the
+// number of buckets for shared lockers, so that different shared
+// lockers can touch different cache lines.
 class SharedLock : public TestLock {
 public:
   const unsigned nshared_;
@@ -55,7 +75,7 @@ public:
   }
   ~SharedLock() { delete[] inhibitors_; }
 
-  void wait_inhibit()
+  void block_while_inhibited()
   {
     for (size_t i = 0; i < nshared_; ++i)
       while (auto n = inhibitors_[i].count.load()) {
@@ -68,9 +88,9 @@ public:
   {
     Inhibitor &inh = inhibitors_[my_bucket()];
     for (;;) {
-      inh.count.fetch_add(1);
+      inh.count.fetch_add(1, std::memory_order_acquire);
       if (!busy())
-	return;
+        return;
       unlock_shared();
       block_until_free();
     }
@@ -78,8 +98,7 @@ public:
   void unlock_shared()
   {
     Inhibitor &inh = inhibitors_[my_bucket()];
-    if (inh.count.fetch_sub(1) == 0
-	&& inh.want_wake.load()) {
+    if (inh.count.fetch_sub(1) == 0 && inh.want_wake.load()) {
       inh.want_wake = false;
       inh.count.notify_all();
     }
@@ -92,9 +111,50 @@ protected:
   };
   Inhibitor *inhibitors_;
 
-  size_t my_bucket() const {
+  size_t my_bucket() const
+  {
     constexpr std::hash<std::thread::id> hasher;
     return hasher(std::this_thread::get_id()) % nshared_;
+  }
+};
+
+// A CoroSharedLock is a SharedLock that also provides coro_lock() and
+// coro_shared_lock() methods allowing coroutines to acquire the lock
+// without blocking.  Both coro_lock and coro_shared_lock return
+// values you must keep in scope until you are done with the lock.
+// The shared lock is only good until the next time your coroutine is
+// suspended, but as a result is heavily optimized within coroutines.
+//
+// Note this is heavily optimized for shared locks rather than
+// exclusie locks.
+class CoroSharedLock : public SharedLock {
+public:
+  ThreadPool &pool_;
+
+  explicit CoroSharedLock(ThreadPool &pool, size_t non_coro_shared_lockers = 1)
+    : SharedLock(non_coro_shared_lockers), pool_(pool)
+  {}
+
+  void block_while_inhibited()
+  {
+    pool_.drain();
+    SharedLock::block_while_inhibited();
+  }
+
+  Async<std::unique_lock<CoroSharedLock>> coro_lock()
+  {
+    co_await pool_.async([this] { lock(); });
+    co_return std::unique_lock<CoroSharedLock>{*this, std::adopt_lock};
+  }
+
+  Async<ThreadPool::CrashIfSuspended> coro_lock_shared()
+  {
+    if (ThreadPool::get_thread_pool() != &pool_)
+      co_await pool_.bg();
+    block_until_free();
+    co_return ThreadPool::CrashIfSuspended{};
+    // Note: there's nothing to do to unlock shared, because you give
+    // up the lock as soon as the coroutine is suspended.
   }
 };
 

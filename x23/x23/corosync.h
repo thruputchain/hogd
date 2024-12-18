@@ -211,45 +211,6 @@ CoroLock::unlock_and_return(LockerState *ls, T t)
   return AwaitReleaseAndReturn<T>{*this, ls, std::move(t)};
 }
 
-// A CoroSharedLock is a shared lock optimized for shared locking.  It
-// requires that shared lockers not suspend themselves.  Hence,
-// exclusive lockers need only hold the lock and wait for all shared
-// lockers to suspend themselves.  CoroSharedLock is intended to be
-// used for structures like vectors that are very infrequently
-// resized.  In the common case of no exclusive lockers, there is no
-// need for any coherence misses (as might happen in an alternate
-// design that keeps a count of shared lockers in an atomic int).
-class CoroSharedLock : public CoroLock {
-public:
-  ThreadPool &pool_;
-
-  explicit CoroSharedLock(ThreadPool &pool) : pool_(pool) {}
-  Async<void> lock(LockerState *ls)
-  {
-    co_await CoroLock::lock(ls);
-    co_await pool_.async(&ThreadPool::drain, &pool_);
-    co_return;
-  }
-
-  // unlock is unmodified from the superclass
-
-  Async<void> lock_shared()
-  {
-    for (;;) {
-      if (ThreadPool::get_thread_pool() != &pool_)
-	co_await pool_.bg();
-      if (!busy())
-	co_return;
-      LockerState ls;
-      co_await lock(&ls);
-      unlock(&ls);	    // resumes next coroutine before returning
-    }
-  }
-
-  // There's no unlock_shared, because you give up the lock as soon as
-  // the coroutine is suspended.
-};
-
 // A CoroGuard is similar to a lock_guard for a CoroLock.  However,
 // the syntax is different because a CoroLock requires LockerState to
 // persist for the duration of the lock, so the CoroGuard holds that
