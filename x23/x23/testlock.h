@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cassert>
 
+#include <concepts>
 #include <x23/threadpool.h>
 
 namespace x23 {
@@ -45,11 +46,11 @@ public:
     for (;;) {
       int prev = status_.load(std::memory_order_acquire);
       if (prev == kLocked)
-	status_.compare_exchange_weak(prev, kLockedWantNotify,
-				      std::memory_order_relaxed,
-				      std::memory_order_acquire);
+        status_.compare_exchange_weak(prev, kLockedWantNotify,
+                                      std::memory_order_relaxed,
+                                      std::memory_order_acquire);
       if (prev == kUnlocked)
-	return;
+        return;
       status_.wait(kLockedWantNotify);
     }
   }
@@ -127,31 +128,33 @@ protected:
 //
 // Note this is heavily optimized for shared locks rather than
 // exclusie locks.
-class CoroSharedLock : public SharedLock {
+template<typename Super = SharedLock> class CoroSharedLock : public Super {
 public:
   ThreadPool &pool_;
 
-  explicit CoroSharedLock(ThreadPool &pool, size_t non_coro_shared_lockers = 1)
-    : SharedLock(non_coro_shared_lockers), pool_(pool)
+  template<typename... Args> requires std::constructible_from<Super, Args...>
+  explicit CoroSharedLock(ThreadPool &pool, Args &&...args)
+    : Super(std::forward<Args>(args)...), pool_(pool)
   {}
 
   void block_while_inhibited()
   {
     pool_.drain();
-    SharedLock::block_while_inhibited();
+    if constexpr (requires { Super::block_while_inhibited(); })
+      Super::block_while_inhibited();
   }
 
-  Async<std::unique_lock<CoroSharedLock>> coro_lock()
+  Async<std::unique_lock<Super>> coro_lock()
   {
-    co_await pool_.async([this] { lock(); });
-    co_return std::unique_lock<CoroSharedLock>{*this, std::adopt_lock};
+    co_await pool_.async([this] { this->lock(); });
+    co_return std::unique_lock<Super>{*this, std::adopt_lock};
   }
 
   Async<ThreadPool::CrashIfSuspended> coro_lock_shared()
   {
     if (ThreadPool::get_thread_pool() != &pool_)
       co_await pool_.bg();
-    block_until_free();
+    Super::block_until_free();
     co_return ThreadPool::CrashIfSuspended{};
     // Note: there's nothing to do to unlock shared, because you give
     // up the lock as soon as the coroutine is suspended.
