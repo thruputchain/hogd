@@ -25,7 +25,6 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
   }
 
   output_sender = *status;
-
   return {SyscallErrorCode::kNone, 0};
 }
 
@@ -51,10 +50,8 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                           RuntimeMemoryLength &output_written_len)
 {
   auto const &calldata = syscall_handler.get_calldata();
-
   output_written_len =
       std::min<RuntimeMemoryLength>(calldata.size(), output_buffer.size());
-
   std::memcpy(reinterpret_cast<uint8_t *>(output_buffer.data()),
               calldata.data(), output_written_len);
 
@@ -82,12 +79,12 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
              static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)},
             0};
   }
-
   if (invoke_res) {
     return {{HostFnErrorCode::kNoneOrRecoverable,
              static_cast<int32_t>(*invoke_res)},
             gas_amount};
   }
+
   return {{invoke_res.error().code(), 0}, gas_amount};
 }
 
@@ -105,7 +102,6 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   std::memcpy(buffer.data(),
               reinterpret_cast<const uint8_t *>(input_buffer.data()),
               input_buffer.size());
-
   syscall_handler.set_return_buffer(std::move(buffer));
 
   return {HostFnError{HostFnErrorCode::kReturn}, 0};
@@ -117,15 +113,12 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
                                 RuntimeMemoryLength &output_written_len)
 {
   auto status = syscall_handler.get_return_buffer();
-
   if (!status) {
     return {status.error().code(), 0};
   }
 
   size_t write_len = std::min(output_buffer.size(), status->size());
-
   std::memcpy(output_buffer.data(), status->data(), write_len);
-
   output_written_len = write_len;
 
   return {SyscallErrorCode::kNone, 0};
@@ -136,13 +129,11 @@ syscall_GetReturnedBufferLen_inner(SystemCallHandler &syscall_handler,
                                    RuntimeMemoryLength &output_buffer_len)
 {
   auto status = syscall_handler.get_return_buffer();
-
   if (!status) {
     return {status.error().code(), 0};
   }
 
   output_buffer_len = status->size();
-
   return {SyscallErrorCode::kNone, 0};
 }
 
