@@ -6,3 +6,8 @@ target_link_libraries(
   INTERFACE
   runtime_trampoline
 )
+
+add_dependencies(
+  wasmi_lib
+  ffi_enum_rs
+)

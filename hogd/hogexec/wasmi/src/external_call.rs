@@ -1,5 +1,6 @@
 #![allow(non_upper_case_globals)]
 
+use crate::ffi_enums::HostFnErrorCode;
 use core::ffi::c_void;
 use wasmi::core::HostError;
 use wasmi::Error;
@@ -27,26 +28,20 @@ use core::fmt;
  */
 
 #[allow(dead_code)]
-#[repr(u8)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug)]
 pub enum TrampolineErrorEnum {
     OutOfGas = 1,
     Unrecoverable = 2,
     Return = 3,
     Exit { code: i32 } = 4,
+    ValidationFailure = 5,
 }
-
-const TrampolineErrorNONE: u8 = 0;
-const TrampolineErrorOUTOFGAS: u8 = 1;
-#[allow(dead_code)]
-const TrampolineErrorUNRECOVERABLE: u8 = 2;
-const TrampolineErrorRETURN: u8 = 3;
-const TrampolineErrorEXIT: u8 = 4;
 
 #[repr(C)]
 pub struct TrampolineResult {
     result: i32,
-    panic: u8,
+    panic: i32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -140,20 +135,31 @@ extern "C" {
 // This is annoying, but I'm not sure how better to deal with this
 pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
     match result.panic {
-        x if x == TrampolineErrorNONE => Ok(result.result),
-        x if x == TrampolineErrorOUTOFGAS => {
+        x if x == HostFnErrorCode::kNoneOrRecoverable as i32 => {
+            Ok(result.result)
+        }
+        x if x == HostFnErrorCode::kOutOfGas as i32 => {
             Err(Error::host(TrampolineError {
                 error: TrampolineErrorEnum::OutOfGas,
             }))
         }
-        x if x == TrampolineErrorRETURN => Err(Error::host(TrampolineError {
-            error: TrampolineErrorEnum::Return,
-        })),
-        x if x == TrampolineErrorEXIT => Err(Error::host(TrampolineError {
-            error: TrampolineErrorEnum::Exit {
-                code: result.result,
-            },
-        })),
+        x if x == HostFnErrorCode::kReturn as i32 => {
+            Err(Error::host(TrampolineError {
+                error: TrampolineErrorEnum::Return,
+            }))
+        }
+        x if x == HostFnErrorCode::kExit as i32 => {
+            Err(Error::host(TrampolineError {
+                error: TrampolineErrorEnum::Exit {
+                    code: result.result,
+                },
+            }))
+        }
+        x if x == HostFnErrorCode::kValidationFailure as i32 => {
+            Err(Error::host(TrampolineError {
+                error: TrampolineErrorEnum::ValidationFailure,
+            }))
+        }
         _ => Err(Error::host(TrampolineError {
             error: TrampolineErrorEnum::Unrecoverable,
         })),

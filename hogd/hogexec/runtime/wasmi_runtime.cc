@@ -93,7 +93,7 @@ pub struct WasmiInvokeResult {
 } */
 struct WasmiInvokeResult {
   int32_t result;
-  uint8_t error; // InvokeErrorCode
+  int32_t error; // InvokeErrorCode
 };
 
 /*

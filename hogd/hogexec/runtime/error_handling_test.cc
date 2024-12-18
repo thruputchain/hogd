@@ -25,6 +25,12 @@ throw_unrecoverable_host_error(HostCallContext * /*unused*/)
 }
 
 HostFnResult
+throw_validation_error(HostCallContext * /*unused*/)
+{
+  return {HostFnErrorCode::kValidationFailure, 0};
+}
+
+HostFnResult
 throw_bad_alloc(HostCallContext * /*unused*/)
 {
   throw std::bad_alloc();
@@ -133,6 +139,19 @@ TEST_F(WasmiErrorHandlingTest, HostError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+}
+
+TEST_F(WasmiErrorHandlingTest, ValidationError)
+{
+  context_.link_fn("test", "external_call", &throw_validation_error);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
+
+  ASSERT_TRUE(!!runtime_);
+
+  auto res = runtime_->invoke("call1", UINT64_MAX);
+
+  EXPECT_EQ(res.result.error(),
+            InvokeError{InvokeErrorCode::kValidationFailure});
 }
 
 TEST_F(WasmiErrorHandlingTest, OtherWeirdError)

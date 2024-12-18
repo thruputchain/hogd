@@ -2,6 +2,7 @@ use core::ffi::c_void;
 
 pub mod context;
 pub mod external_call;
+pub mod ffi_enums;
 pub mod invoke_result;
 pub mod runtime;
 

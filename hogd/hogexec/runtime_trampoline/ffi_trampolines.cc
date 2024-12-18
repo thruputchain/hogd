@@ -1,6 +1,7 @@
 #include "hogd/hogexec/runtime_trampoline/ffi_trampolines.h"
 
 #include <concepts>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -11,30 +12,35 @@ class HostCallContext;
 
 namespace detail {
 
-constexpr static uint8_t kTrampolineErrorNONE = 0;
-constexpr static uint8_t kTrampolineErrorOUTOFGAS = 1;
-constexpr static uint8_t kTrampolineErrorUNRECOVERABLE = 2;
-constexpr static uint8_t kTrampolineErrorRETURN = 3;
-constexpr static uint8_t kTrampolineErrorEXIT = 4;
-
 namespace {
 
 TrampolineResult
 success(int32_t res)
 {
-  return TrampolineResult{.result = res, .panic = kTrampolineErrorNONE};
+  return TrampolineResult{.result = res,
+                          .panic = std::to_underlying(
+                              HostFnErrorCode::kNoneOrRecoverable)};
 }
 
 TrampolineResult
 host_exit(int32_t res)
 {
-  return TrampolineResult{.result = res, .panic = kTrampolineErrorEXIT};
+  return TrampolineResult{.result = res,
+                          .panic = std::to_underlying(HostFnErrorCode::kExit)};
 }
 
 TrampolineResult
-error(uint8_t error)
+error(HostFnErrorCode error_code)
 {
-  return TrampolineResult{.result = 0, .panic = error};
+  return TrampolineResult{.result = 0, .panic = std::to_underlying(error_code)};
+}
+
+constexpr static TrampolineResult
+unrecoverable()
+{
+  return TrampolineResult{.result = 0,
+                          .panic = std::to_underlying(
+                              HostFnErrorCode::kUnrecoverable)};
 }
 
 TrampolineResult
@@ -44,13 +50,13 @@ handle_result(HostFnResult const &res)
   case HostFnErrorCode::kNoneOrRecoverable:
     return success(res.second);
   case HostFnErrorCode::kOutOfGas:
-    return error(kTrampolineErrorOUTOFGAS);
   case HostFnErrorCode::kReturn:
-    return error(kTrampolineErrorRETURN);
+  case HostFnErrorCode::kValidationFailure:
+    return error(res.first);
   case HostFnErrorCode::kExit:
     return host_exit(res.second);
   default:
-    return error(kTrampolineErrorUNRECOVERABLE);
+    return error(HostFnErrorCode::kUnrecoverable);
   }
 }
 
@@ -67,7 +73,7 @@ c_call_internal(void *function_pointer, void *host_call_context,
     return handle_result((*ptr)(user_ctx, args...));
 
   } catch (...) { // NOLINT(bugprone-empty-catch)
-    return error(kTrampolineErrorUNRECOVERABLE);
+    return unrecoverable();
   }
 }
 
