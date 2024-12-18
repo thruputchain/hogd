@@ -89,7 +89,7 @@ struct MemorySlice {
 #[repr(C)]
 pub struct WasmiInvokeResult {
     result: u64,
-    error: u8,
+    error: i32,
 } */
 struct WasmiInvokeResult {
   int32_t result;
