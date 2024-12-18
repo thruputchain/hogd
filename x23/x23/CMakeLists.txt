@@ -19,6 +19,7 @@ add_library(x23
   rpc.h
   rpc_msg.x
   serialize.h
+  testlock.h
   threadpool.cc
   threadpool.h
   utility.h
