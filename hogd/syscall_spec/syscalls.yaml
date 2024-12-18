@@ -52,10 +52,6 @@ syscalls:
         primitive_type: yes
       - name: "calldata"
         span_argument: yes
-      - name: "frame_flags"
-        typename: "uint64_t"
-        primitive_type: yes
-        rust_typename: "u64"
     outputs:
       # cannot return ReturnLen here:
       # invoke(), if reentrant, could cause the contract memory ptr
