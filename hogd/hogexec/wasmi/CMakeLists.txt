@@ -11,3 +11,4 @@ add_dependencies(
   wasmi_lib
   ffi_enum_rs
 )
+
