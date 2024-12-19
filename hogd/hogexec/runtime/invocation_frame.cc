@@ -96,18 +96,23 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {
+      // Contents of the frame are entirely dropped. We just need to notify
+      // the parent (if there is one) that it had a failed frame.
       frame_stack_.back().commit_failed_child_frame();
     }
   }
   else {
-    // commit child call frame successfully
+    // commit child invocation frame successfully
     size_t stack_size = frame_stack_.size();
 
     if (stack_size >= 2) {
+      // Commit the frame to it's parent
       frame_stack_[stack_size - 2].commit_successful_child_frame(
           frame_stack_.back());
     }
-    else if (frame_stack_.size() == 1) {
+    else if (stack_size == 1) {
+      // last frame -- push frame contents to external caller (SystemCallHandler),
+      // via the supplied lambda
       last_frame_action_(frame_stack_.back());
     }
 
@@ -132,6 +137,8 @@ InvocationFrameStack::lookup_locally_deployed_contract(
   for (auto const &frame : frame_stack_) {
     auto it = frame.new_contract_deployments_.find(addr);
     if (it != frame.new_contract_deployments_.end()) {
+      // contract was deployed at `addr` during a frame earlier on the frame
+      // stack. Thus, deployment exists during the current view.
       return it->second;
     }
   }
