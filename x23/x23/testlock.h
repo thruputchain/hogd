@@ -14,6 +14,8 @@ namespace x23 {
 // hook for derived types implementing shared locks.
 class TestLock {
 public:
+  using Holder = std::unique_lock<TestLock>;
+
   bool try_lock(this auto &&self, bool want_notify = false)
   {
     int prev = self.status_.exchange(kLocked, std::memory_order_acquire);
@@ -119,19 +121,20 @@ public:
   // instead of providing an explicit unlock method, return a Holder
   // that remembers in which thread the lock was acquired and releases
   // it on destruction.
-  class [[nodiscard]] Holder {
+  class [[nodiscard]] SharedHolder {
   public:
-    Holder() noexcept = default;
-    Holder(SharedLock &sl) noexcept
+    SharedHolder() noexcept = default;
+    SharedHolder(SharedLock &sl) noexcept
       : inh_(&sl.inhibitors_[ThreadPool::bucket_index(sl.nshared_)])
     {
       inh_->inc(&sl);
     }
-    Holder(Holder &&other) noexcept : inh_(std::exchange(other.inh_, nullptr))
+    SharedHolder(SharedHolder &&other) noexcept
+      : inh_(std::exchange(other.inh_, nullptr))
     {}
-    ~Holder() { reset(); }
+    ~SharedHolder() { reset(); }
 
-    Holder &operator=(Holder &&other) noexcept
+    SharedHolder &operator=(SharedHolder &&other) noexcept
     {
       reset();
       inh_ = std::exchange(other.inh_, nullptr);
@@ -153,13 +156,13 @@ public:
 
   // Don't call it lock_shared() because the interface is different
   // from shared_mutex.
-  Holder hold_shared() { return *this; }
+  SharedHolder hold_shared() { return *this; }
 
 protected:
   Inhibitor *inhibitors_;
 };
 
-// A CoroSharedLock is a TestLock/SharedLock that also provides
+// A CoroSharedLock is a TestLock (or SharedLock) that also provides
 // coro_lock() and coro_shared_lock() methods allowing coroutines to
 // acquire the lock without blocking.  Both coro_lock and
 // coro_shared_lock return "holder" values you must keep in scope
@@ -167,9 +170,8 @@ protected:
 // until the next time your coroutine is suspended, but as a result is
 // heavily optimized within coroutines.
 //
-// Note this is heavily optimized for shared locks rather than
-// exclusie locks.
-template<typename Super = SharedLock> class CoroSharedLock : public Super {
+// Note this is optimized for shared locks, not exclusive locks.
+template<typename Super = TestLock> class CoroSharedLock : public Super {
 public:
   ThreadPool &pool_;
 
@@ -185,11 +187,10 @@ public:
       this->Super::block_while_inhibited();
   }
 
-  using CoroHolder = std::unique_lock<Super>;
+  using CoroHolder = typename Super::Holder;
   Async<CoroHolder> coro_lock()
   {
-    co_await pool_.async([this] { this->lock(); });
-    co_return std::unique_lock<Super>{*this, std::adopt_lock};
+    return pool_.async([this] { return CoroHolder(*this); });
   }
 
   // Note: there's nothing to do to unlock shared, because you give up
@@ -204,6 +205,41 @@ public:
     Super::block_until_free();
     co_return ThreadPool::CrashIfSuspended{};
   }
+};
+
+// A pointer that is good only until you suspend the current
+// coroutine, which is the duration of the mutual exclusion provided
+// by CoroSharedLock::coro_lock_shared.
+template<typename T> class CoroTempPtr {
+public:
+  using value_type = T;
+
+  CoroTempPtr(T *p = nullptr) : p_(p) { init(); }
+  CoroTempPtr &operator=(T *p)
+  {
+    p_ = p;
+    init();
+    return *this;
+  }
+
+  T *get() const
+  {
+    check();
+    return p_;
+  }
+  operator T &() const { return *get(); }
+  T *operator->() const { return get(); }
+
+private:
+  T *p_;
+#ifndef NDEBUG
+  ThreadPool::SuspendCount sc_;
+  void init() { sc_ = ThreadPool::get_suspend_count(); }
+  void check() const { assert(!p_ || sc_ == ThreadPool::get_suspend_count()); }
+#else  // NDEBUG
+  void init() {}
+  void check() const {}
+#endif // NDEBUG
 };
 
 } // namespace x23

@@ -134,7 +134,7 @@ private:
 
   struct FdPtr {
     FdState *p_;
-    SharedLock::Holder lk_;
+    SharedLock::SharedHolder lk_;
     FdState *get() const { return p_; }
     FdState *operator->() const { return p_; }
   };
