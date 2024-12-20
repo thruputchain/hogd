@@ -138,23 +138,17 @@ CoroPollImpl::getfd(BorrowedFd fd)
   assert(fd.get() >= 0);
 
   if (size_t(fd.get()) >= state_size_) {
-    ++want_resize_;
-    Defer _c([this] { --want_resize_; });
-
     std::lock_guard _lg(resize_lock_);
     if (size_t(fd.get()) >= state_size_) {
-      size_t new_size = std::max<size_t>(fd.get() + 1uz, 2 * state_size_);
-      FdState *new_state = new FdState[new_size];
+      size_t new_size = std::max<size_t>(fd.get() + 1UZ, 2 * state_size_);
+      auto *new_state = new FdState[new_size];
       std::move(state_.load(), state_ + state_size_, new_state);
       delete[] state_.exchange(new_state);
       state_size_ = new_size;
     }
   }
-  else if (want_resize_)
-    // Crude way to avoid writer starvation--briefly grab write lock
-    (void)std::lock_guard{resize_lock_};
 
-  std::shared_lock sl(resize_lock_);
+  auto sl = resize_lock_.hold_shared();
   return FdPtr{state_ + fd.get(), std::move(sl)};
 }
 
@@ -169,7 +163,7 @@ CoroPollImpl::check(int timeout)
     Errno{}.raise("epoll_wait failed");
   }
 
-  std::shared_lock lk(resize_lock_);
+  auto lk = resize_lock_.hold_shared();
   std::vector<std::coroutine_handle<>> coroqueue;
   Errno err = stop_requested() ? EBADF : 0;
   for (int i = 0; i < n; ++i) {
@@ -184,7 +178,7 @@ CoroPollImpl::check(int timeout)
         }
       }
   }
-  lk.unlock();
+  lk.reset();
 
   pool_.go(coroqueue);
 }

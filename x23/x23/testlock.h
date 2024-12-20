@@ -66,6 +66,38 @@ private:
 // number of buckets for shared lockers, so that different shared
 // lockers can touch different cache lines.
 class SharedLock : public TestLock {
+  // One or more if these Inhibitor counters are used to delay an
+  // exclusive locker.
+  struct alignas(hardware_destructive_interference_size) Inhibitor {
+    std::atomic_uint count{0};
+    std::atomic_bool want_wake{false};
+
+    void inc(TestLock *tl)
+    {
+      for (;;) {
+        count.fetch_add(1);
+        if (!tl->busy())
+          return;
+        dec();
+        tl->block_until_free();
+      }
+    }
+    void dec()
+    {
+      if (count.fetch_sub(1) == 0 && want_wake.load()) {
+        want_wake = false;
+        count.notify_all();
+      }
+    }
+    void block()
+    {
+      while (auto n = count.load()) {
+        want_wake = true;
+        count.wait(n);
+      }
+    }
+  };
+
 public:
   const unsigned nshared_;
 
@@ -79,52 +111,61 @@ public:
   void block_while_inhibited()
   {
     for (size_t i = 0; i < nshared_; ++i)
-      while (auto n = inhibitors_[i].count.load()) {
-        inhibitors_[i].want_wake = true;
-        inhibitors_[i].count.wait(n);
-      }
+      inhibitors_[i].block();
   }
 
-  void lock_shared()
-  {
-    Inhibitor &inh = inhibitors_[my_bucket()];
-    for (;;) {
-      inh.count.fetch_add(1, std::memory_order_acquire);
-      if (!busy())
-        return;
-      unlock_shared();
-      block_until_free();
+  // With coroutines, there's a risk of the lock being released in a
+  // different thread from the one in which it was acquired.  So
+  // instead of providing an explicit unlock method, return a Holder
+  // that remembers in which thread the lock was acquired and releases
+  // it on destruction.
+  class [[nodiscard]] Holder {
+  public:
+    Holder() noexcept = default;
+    Holder(SharedLock &sl) noexcept
+      : inh_(&sl.inhibitors_[ThreadPool::bucket_index(sl.nshared_)])
+    {
+      inh_->inc(&sl);
     }
-  }
-  void unlock_shared()
-  {
-    Inhibitor &inh = inhibitors_[my_bucket()];
-    if (inh.count.fetch_sub(1) == 0 && inh.want_wake.load()) {
-      inh.want_wake = false;
-      inh.count.notify_all();
+    Holder(Holder &&other) noexcept : inh_(std::exchange(other.inh_, nullptr))
+    {}
+    ~Holder() { reset(); }
+
+    Holder &operator=(Holder &&other) noexcept
+    {
+      reset();
+      inh_ = std::exchange(other.inh_, nullptr);
+      return *this;
     }
-  }
+
+    // Release the lock immediately (if Holder contains one)
+    void reset()
+    {
+      if (inh_) {
+        inh_->dec();
+        inh_ = nullptr;
+      }
+    }
+
+  private:
+    struct Inhibitor *inh_{};
+  };
+
+  // Don't call it lock_shared() because the interface is different
+  // from shared_mutex.
+  Holder hold_shared() { return *this; }
 
 protected:
-  struct alignas(hardware_destructive_interference_size) Inhibitor {
-    std::atomic_uint count{0};
-    std::atomic_bool want_wake{false};
-  };
   Inhibitor *inhibitors_;
-
-  size_t my_bucket() const
-  {
-    constexpr std::hash<std::thread::id> hasher;
-    return hasher(std::this_thread::get_id()) % nshared_;
-  }
 };
 
-// A CoroSharedLock is a SharedLock that also provides coro_lock() and
-// coro_shared_lock() methods allowing coroutines to acquire the lock
-// without blocking.  Both coro_lock and coro_shared_lock return
-// values you must keep in scope until you are done with the lock.
-// The shared lock is only good until the next time your coroutine is
-// suspended, but as a result is heavily optimized within coroutines.
+// A CoroSharedLock is a TestLock/SharedLock that also provides
+// coro_lock() and coro_shared_lock() methods allowing coroutines to
+// acquire the lock without blocking.  Both coro_lock and
+// coro_shared_lock return "holder" values you must keep in scope
+// until you are done with the lock.  The shared lock is only good
+// until the next time your coroutine is suspended, but as a result is
+// heavily optimized within coroutines.
 //
 // Note this is heavily optimized for shared locks rather than
 // exclusie locks.
@@ -140,24 +181,28 @@ public:
   void block_while_inhibited()
   {
     pool_.drain();
-    if constexpr (requires { Super::block_while_inhibited(); })
-      Super::block_while_inhibited();
+    if constexpr (requires { this->Super::block_while_inhibited(); })
+      this->Super::block_while_inhibited();
   }
 
-  Async<std::unique_lock<Super>> coro_lock()
+  using CoroHolder = std::unique_lock<Super>;
+  Async<CoroHolder> coro_lock()
   {
     co_await pool_.async([this] { this->lock(); });
     co_return std::unique_lock<Super>{*this, std::adopt_lock};
   }
 
-  Async<ThreadPool::CrashIfSuspended> coro_lock_shared()
+  // Note: there's nothing to do to unlock shared, because you give up
+  // the lock as soon as the coroutine is suspended.  But it's a
+  // serious error to hold the lock across suspension points, so we
+  // return a CrashIfSuspended.
+  using CoroSharedHolder = ThreadPool::CrashIfSuspended;
+  Async<CoroSharedHolder> coro_lock_shared()
   {
     if (ThreadPool::get_thread_pool() != &pool_)
       co_await pool_.bg();
     Super::block_until_free();
     co_return ThreadPool::CrashIfSuspended{};
-    // Note: there's nothing to do to unlock shared, because you give
-    // up the lock as soon as the coroutine is suspended.
   }
 };
 

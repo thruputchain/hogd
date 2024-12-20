@@ -3,7 +3,6 @@
 #pragma once
 
 #include <cstdint>
-#include <shared_mutex>
 #include <stop_token>
 #include <sys/socket.h>
 #include <thread>
@@ -15,6 +14,7 @@
 #include <x23/fileio.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
+#include <x23/testlock.h>
 #include <x23/threadpool.h>
 #include <x23/vec.h>
 
@@ -125,17 +125,16 @@ private:
 
   UniqueFd epollfd_;
 
-  std::shared_mutex resize_lock_;
+  SharedLock resize_lock_{std::thread::hardware_concurrency()};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
-  std::atomic_uint want_resize_{0};
   std::atomic_uint numcoro_{0};
 
   std::stop_token st_;
 
   struct FdPtr {
     FdState *p_;
-    std::shared_lock<std::shared_mutex> lk_;
+    SharedLock::Holder lk_;
     FdState *get() const { return p_; }
     FdState *operator->() const { return p_; }
   };
