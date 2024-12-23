@@ -162,51 +162,6 @@ protected:
   Inhibitor *inhibitors_;
 };
 
-// A CoroSharedLock is a TestLock (or SharedLock) that also provides
-// coro_lock() and coro_shared_lock() methods allowing coroutines to
-// acquire the lock without blocking.  Both coro_lock and
-// coro_shared_lock return "holder" values you must keep in scope
-// until you are done with the lock.  The shared lock is only good
-// until the next time your coroutine is suspended, but as a result is
-// heavily optimized within coroutines.
-//
-// Note this is optimized for shared locks, not exclusive locks.
-template<typename Super = TestLock> class CoroSharedLock : public Super {
-public:
-  ThreadPool &pool_;
-
-  template<typename... Args> requires std::constructible_from<Super, Args...>
-  explicit CoroSharedLock(ThreadPool &pool, Args &&...args)
-    : Super(std::forward<Args>(args)...), pool_(pool)
-  {}
-
-  void block_while_inhibited()
-  {
-    pool_.drain();
-    if constexpr (requires { this->Super::block_while_inhibited(); })
-      this->Super::block_while_inhibited();
-  }
-
-  using CoroHolder = typename Super::Holder;
-  Async<CoroHolder> coro_lock()
-  {
-    return pool_.async([this] { return CoroHolder(*this); });
-  }
-
-  // Note: there's nothing to do to unlock shared, because you give up
-  // the lock as soon as the coroutine is suspended.  But it's a
-  // serious error to hold the lock across suspension points, so we
-  // return a CrashIfSuspended.
-  using CoroSharedHolder = ThreadPool::CrashIfSuspended;
-  Async<CoroSharedHolder> coro_lock_shared()
-  {
-    if (ThreadPool::get_thread_pool() != &pool_)
-      co_await pool_.bg();
-    Super::block_until_free();
-    co_return ThreadPool::CrashIfSuspended{};
-  }
-};
-
 // A pointer that is good only until you suspend the current
 // coroutine, which is the duration of the mutual exclusion provided
 // by CoroSharedLock::coro_lock_shared.

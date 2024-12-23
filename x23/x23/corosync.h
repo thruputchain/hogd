@@ -57,10 +57,11 @@ public:
     friend CoroLock;
   };
 
-  // Must be co_awaited.  Acquire the lock or suspend.  You need a
-  // LockerState that will persist for the whole time you have the
-  // lock.
-  [[nodiscard]] auto lock(LockerState *ls)
+  // Acquire the lock or suspend.  The return value must be
+  // co_awaited.  You need a LockerState that will persist for the
+  // whole time you have the lock.
+  template<typename Self>
+  [[nodiscard]] auto lock(this Self &self, LockerState *ls)
   {
     // LockerState can only be used for one lock at a time
     assert(ls->next.load(std::memory_order_relaxed) == nullptr);
@@ -75,7 +76,19 @@ public:
       void await_suspend(std::coroutine_handle<> h) { prev_->next = h; }
       void await_resume() {}
     };
-    return AwaitAcquire{*this, ls};
+
+    if constexpr (!requires { self.block_while_inhibited(); })
+      // This is a plain LockerState
+      return AwaitAcquire{self, ls};
+    else
+      // This is a derived type (probably CoroSharedLock)
+      return [](AwaitAcquire await) -> Async<void> {
+        co_await await;
+	if (ThreadPool *pool = ThreadPool::get_thread_pool())
+	  pool->async(&Self::block_while_inhibited, &await.lk_);
+	else
+	  await.lk_.block_while_inhibited();
+      }({self, ls});
   }
 
   // Release the lock and invoke the next coroutine waiting for the
@@ -210,6 +223,47 @@ CoroLock::unlock_and_return(LockerState *ls, T t)
 {
   return AwaitReleaseAndReturn<T>{*this, ls, std::move(t)};
 }
+
+// A CoroSharedLock is derived from a lock that provides a busy() test
+// (e.g., CoroLock, TestLock, or SharedLock) but also provides
+// coro_shared_lock() methods allowing coroutines to acquire the lock
+// and suspend the coroutine rather than block if the lock is not
+// available.  coro_shared_lock() returns a "holder" value you must
+// keep in scope until you are done with the lock.  The shared lock is
+// only good until the next time your coroutine is suspended, but as a
+// result is heavily optimized within coroutines.  By contrast, this
+// is not optimized for exclusive locks, so is most suitable for
+// situations where you acquire the shared lock all the time and
+// rarely need an exclusive lock.
+template<typename Super = CoroLock> class CoroSharedLock : public Super {
+public:
+  ThreadPool &pool_;
+
+  template<typename... Args> requires std::constructible_from<Super, Args...>
+  explicit CoroSharedLock(ThreadPool &pool, Args &&...args)
+    : Super(std::forward<Args>(args)...), pool_(pool)
+  {}
+
+  void block_while_inhibited()
+  {
+    pool_.drain();
+    if constexpr (requires { this->Super::block_while_inhibited(); })
+      this->Super::block_while_inhibited();
+  }
+
+  // Note: there's nothing to do to unlock shared, because you give up
+  // the lock as soon as the coroutine is suspended.  But it's a
+  // serious error to hold the lock across suspension points, so we
+  // return a CrashIfSuspended.
+  using CoroSharedHolder = ThreadPool::CrashIfSuspended;
+  Async<CoroSharedHolder> coro_lock_shared()
+  {
+    if (ThreadPool::get_thread_pool() != &pool_)
+      co_await pool_.bg();
+    Super::block_until_free();
+    co_return ThreadPool::CrashIfSuspended{};
+  }
+};
 
 // A CoroGuard is similar to a lock_guard for a CoroLock.  However,
 // the syntax is different because a CoroLock requires LockerState to
