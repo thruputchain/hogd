@@ -1,14 +1,20 @@
 namespace hogd {
 
 struct uint128_xdr {
-  uint64_t highbits;
-  uint64_t lowbits;
+  unsigned hyper highbits;
+  unsigned hyper lowbits;
 };
 
 struct int128_xdr {
-  int64_t highbits;
-  uint64_t lowbits;
+  hyper highbits;
+  unsigned hyper lowbits;
 };
+
+typedef unsigned int RuntimeMemoryOffset; // uint32_t
+typedef unsigned int RuntimeMemoryLength; // uint32_t
+
+typedef unsigned hyper GasAmount; // uint64_t
+typedef unsigned int MethodID;    // uint32_t
 
 typedef opaque Ed25519Signature[64]; // ed25519 sig len is 512 bits
 typedef opaque Ed25519PublicKey[32]; // ed25519 key len is 256 bits
