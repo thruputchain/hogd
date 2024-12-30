@@ -40,24 +40,6 @@ make_nnint128_set_add(int128_t set, int128_t add)
   return out;
 }
 
-template<std::integral T>
-T
-capped_add(T a, T b)
-{
-  T out;
-  if (integer_add_overflow(a, b, &out)) {
-    if (a > 0) {
-      assert(b > 0);
-      return std::numeric_limits<T>::max();
-    }
-    // else a < 0
-    assert(a < 0);
-    assert(b < 0);
-    return std::numeric_limits<T>::min();
-  }
-  return out;
-}
-
 } // namespace
 
 std::optional<StorageObjectType>
@@ -83,22 +65,61 @@ ItemView::get_delta() const
 StorageDelta
 BytestringItem::get_delta() const
 {
-  return make_bytestring_set(set_bytestring_arg_);
+  return make_bytestring_set(bytestring_);
 }
 
 StorageDelta
-NNIntType::get_delta() const
+NNIntItem::get_delta() const
 {
-  return make_nnint128_set_add(nnint128_set_arg_, nnint128_add_sum_);
+  return make_nnint128_set_add(base_value_, add_value_);
 }
 
-SyscallStatus<void> 
+SyscallStatus<void>
 BytestringItem::validate() const
 {
-  if (bytestring_.size() > kBytestringMaxLen) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
+  if (bytestring_.size() > kBytestringMaxLen)
+    return SyscallError{SyscallErrorCode::kInvalidInput};
+
+  return {};
 }
 
+SyscallStatus<void>
+NNIntItem::validate() const
+{
+  if (add_value_ >= 0) {
+    // When add_value_ is nonnegative, the storage delta produced
+    // by this item is always valid.
+    return {};
+  }
+
+  if (base_value_ < 0) {
+    // cannot subtract from a value that is already negative
+    return SyscallError{SyscallErrorCode::kInvalidInput};
+  }
+
+  if (base_value_ >= 0) {
+    // base_value_ + add_value_ cannot overflow here,
+    // because base_value_ and add_value_ have opposite signs
+    if (base_value_ + add_value_ < 0) {
+      // This would be always rejected by the delta handling logic
+      // in the storage server.  Putting this check here
+      // may simplify some downstream logic.
+      return SyscallError{SyscallErrorCode::kInvalidInput};
+    }
+  }
+
+  return {};
+}
+
+std::optional<StorageObjectType>
+UnmodifiedItem::get_object_type() const
+{
+  if (!base_object_) {
+    // no base object exists in the snapshot,
+    // so object has no type
+    return std::nullopt;
+  }
+  return base_object_->type();
+}
 
 } // namespace hogd

@@ -16,11 +16,11 @@ namespace hogd {
 // Representing the internal state of a bytestring item.
 class BytestringItem {
 public:
-
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
 
-  constexpr static StorageObjectType get_object_type() {
+  constexpr static StorageObjectType get_object_type()
+  {
     return StorageObjectType::kBytestring;
   }
 
@@ -30,11 +30,11 @@ public:
 // State of an item that is a nonnegative int
 class NNIntItem {
 public:
-
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
 
-  constexpr static StorageObjectType get_object_type() {
+  constexpr static StorageObjectType get_object_type()
+  {
     return StorageObjectType::kNonnegativeInt;
   }
 
@@ -46,16 +46,16 @@ public:
 class DeletedItem {
 
 public:
-  constexpr static StorageDelta get_delta() {
+  constexpr static StorageDelta get_delta()
+  {
     return StorageDelta(StorageDeltaType::kDelete);
   }
 
-  constexpr static SyscallStatus<void> validate() {
-    return {};
-  }
+  constexpr static SyscallStatus<void> validate() { return {}; }
 
-  constexpr static StorageObjectType get_object_type() {
-    return StorageObjectType::kDeleted;
+  constexpr static std::optional<StorageObjectType> get_object_type()
+  {
+    return std::nullopt;
   }
 };
 
@@ -65,8 +65,8 @@ public:
 // read outside.
 class UnmodifiedItem {
 public:
-
-  constexpr static std::optional<StorageDelta> get_delta() {
+  constexpr static std::optional<StorageDelta> get_delta()
+  {
     return std::nullopt;
   }
 
@@ -74,7 +74,7 @@ public:
 
   std::optional<StorageObjectType> get_object_type() const;
 
-  const StorageObject* const base_object_;
+  const StorageObject *const base_object_;
 };
 
 // Maintain the modifications of one InvocationFrame to one address.
@@ -83,37 +83,36 @@ public:
 // it.
 class ItemView {
 public:
-  ItemView(const StorageObject* base_object) : delta_args_(UnmodifiedItem{.base_object_ = base_object}) {}
+  ItemView(const StorageObject *base_object)
+    : delta_args_(UnmodifiedItem{.base_object_ = base_object})
+  {}
 
   std::optional<StorageObjectType> get_object_type() const;
 
-  template<typename ItemType>
-  auto *get(this auto &self)
+  template<typename ItemType> auto *get(this auto &self)
   {
     if (std::holds_alternative<ItemType>(self.delta_args_)) {
       return &std::get<ItemType>(self.delta_args_);
     }
-    return static_cast<decltype(&std::get<ItemType>(
-        self.delta_args_))>(nullptr);
+    return static_cast<decltype(&std::get<ItemType>(self.delta_args_))>(
+        nullptr);
   }
 
-  template<typename ItemType>
-  SyscallStatus<void>
-  set(ItemType const& type)
+  template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
   {
     auto validate_result = type.validate();
-
     if (!validate_result) {
       // Validation check asserts that the written item type is well-formed.
       return validate_result;
     }
+    delta_args_ = type;
+    return {};
   }
 
   std::optional<StorageDelta> get_delta() const;
 
 private:
-
-  std::variant<UnmodifiedItem, DeletedItem, BytestringItem>
+  std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem>
       delta_args_;
 };
 

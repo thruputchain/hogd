@@ -12,7 +12,7 @@ namespace hogd
 
   const kBytestringMaxLen = 1024;
 
-  typedef opaque Bytestring<kBytestringMaxLen>;
+  typedef opaque Bytestring<>;
 
   union StorageObject switch (StorageObjectType type)
   {

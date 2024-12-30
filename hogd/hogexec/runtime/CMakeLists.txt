@@ -23,7 +23,7 @@ add_executable(
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
-  item_cache_test.cc
+  item_view_test.cc
 )
 target_link_libraries(
   runtime
