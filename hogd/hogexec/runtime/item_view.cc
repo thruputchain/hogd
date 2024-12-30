@@ -24,8 +24,7 @@ namespace {
 StorageDelta
 make_bytestring_set(Bytestring const &string)
 {
-  StorageDelta out;
-  out.type(StorageDeltaType::kBytestringSet);
+  StorageDelta out(StorageDeltaType::kBytestringSet);
   out.bytestring() = string;
   return out;
 }
