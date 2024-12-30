@@ -1,16 +1,8 @@
 #include "hogd/hogexec/runtime/item_view.h"
 
-#include <cassert>
-#include <concepts>
-#include <cstddef>
-#include <limits>
 #include <optional>
-#include <span>
-#include <type_traits>
-#include <utility>
 #include <variant>
 
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
