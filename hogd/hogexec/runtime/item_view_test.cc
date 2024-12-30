@@ -1,11 +1,8 @@
 #include <cstring>
 #include <optional>
-#include <span>
-#include <vector>
 
 #include <gtest/gtest.h>
 
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "storage_object.hh"
 
@@ -25,6 +22,7 @@ TEST(ItemView, Exists)
 
   EXPECT_TRUE(proxy.set(write1));
   ASSERT_TRUE(proxy.get_object_type());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(*proxy.get_object_type(), StorageObjectType::kBytestring);
 }
 
