@@ -13,6 +13,16 @@
 
 namespace hogd {
 
+// Each of the item types has the following methods:
+// get_object_type()
+//   Return the type of the storage object, as it exists in the current view
+// get_delta()
+//   Return the storage delta that would be produced if this item view commits
+//   to the database.
+// validate()
+//   Validate the delta.  Called within set().  If validate() returns an error,
+//   the set() call in the ItemView is a no-op.
+
 // Representing the internal state of a bytestring item.
 class BytestringItem {
 public:

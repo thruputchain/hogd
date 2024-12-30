@@ -14,22 +14,17 @@ namespace hogd {
 TEST(ItemView, Exists)
 {
   ItemView proxy(nullptr);
-
   EXPECT_FALSE(proxy.get_object_type());
 
   Bytestring bytes{0, 1, 2, 3};
-
   auto *get_res = proxy.template get<BytestringItem>();
-
   ASSERT_FALSE(get_res);
 
   BytestringItem write1;
   write1.bytestring_ = bytes;
 
   EXPECT_TRUE(proxy.set(write1));
-
   ASSERT_TRUE(proxy.get_object_type());
-
   EXPECT_EQ(*proxy.get_object_type(), StorageObjectType::kBytestring);
 }
 
