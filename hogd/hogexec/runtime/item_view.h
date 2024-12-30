@@ -99,7 +99,7 @@ public:
 
   std::optional<StorageObjectType> get_object_type() const;
 
-  template<typename ItemType> auto *get(this auto &self)
+  template<typename ItemType> const auto *get(this auto &self)
   {
     if (std::holds_alternative<ItemType>(self.delta_args_)) {
       return &std::get<ItemType>(self.delta_args_);
