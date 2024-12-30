@@ -99,13 +99,11 @@ public:
 
   std::optional<StorageObjectType> get_object_type() const;
 
-  template<typename ItemType> const auto *get(this auto &self)
+  template<typename ItemType> const auto *get()
   {
-    if (std::holds_alternative<ItemType>(self.delta_args_)) {
-      return &std::get<ItemType>(self.delta_args_);
-    }
-    return static_cast<decltype(&std::get<ItemType>(self.delta_args_))>(
-        nullptr);
+    return std::holds_alternative<ItemType>(delta_args_)
+               ? &std::get<ItemType>(delta_args_)
+               : nullptr;
   }
 
   template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
