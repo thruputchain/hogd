@@ -14,7 +14,7 @@ TEST(ItemView, Exists)
   EXPECT_FALSE(proxy.get_object_type());
 
   Bytestring bytes{0, 1, 2, 3};
-  auto *get_res = proxy.template get<BytestringItem>();
+  const auto *get_res = proxy.template get<BytestringItem>();
   ASSERT_FALSE(get_res);
 
   BytestringItem write1;
@@ -34,7 +34,7 @@ TEST(ItemView, SetBytestring)
       bytes_long(kBytestringMaxLen + 10, 0);
   EXPECT_TRUE(proxy.set(BytestringItem(bytes)));
 
-  auto *get_res = proxy.template get<BytestringItem>();
+  const auto *get_res = proxy.template get<BytestringItem>();
   ASSERT_TRUE(get_res);
   EXPECT_EQ(get_res->bytestring_, bytes);
 
@@ -54,7 +54,7 @@ TEST(ItemView, NNIntSetAddPositiveSet)
   ASSERT_FALSE(proxy.template get<NNIntItem>());
   EXPECT_TRUE(proxy.set(NNIntItem(100, 10)));
 
-  auto *get_res = proxy.template get<NNIntItem>();
+  const auto *get_res = proxy.template get<NNIntItem>();
 
   ASSERT_TRUE(get_res);
   EXPECT_EQ(get_res->base_value_, 100);
