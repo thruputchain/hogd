@@ -42,27 +42,6 @@ pub extern "C" fn wasmi_get_memory(runtime_void: *mut c_void) -> MemorySlice {
 }
 
 #[no_mangle]
-pub extern "C" fn wasmi_consume_gas(
-    runtime_void: *mut c_void,
-    gas_consumed: u64,
-) -> bool {
-    assert!(runtime_void != core::ptr::null_mut());
-
-    let runtime: *mut WasmiRuntime =
-        unsafe { core::mem::transmute(runtime_void) };
-
-    let r = unsafe { &mut *runtime };
-
-    let cur_fuel: u64 = r.store.get_fuel().unwrap();
-    if cur_fuel > gas_consumed {
-        r.store.set_fuel(cur_fuel - gas_consumed).unwrap();
-        return true;
-    }
-    r.store.set_fuel(0).unwrap();
-    return false;
-}
-
-#[no_mangle]
 pub extern "C" fn wasmi_get_available_gas(runtime_void: *const c_void) -> u64 {
     assert!(runtime_void != core::ptr::null());
     let runtime: *const WasmiRuntime =

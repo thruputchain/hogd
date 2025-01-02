@@ -105,12 +105,6 @@ MemorySlice wasmi_get_memory(void *wasmi_runtime_ptr);
 
 /*
 #[no_mangle]
-pub extern "C" fn wasmi_consume_gas(runtime: *mut WasmiRuntime, gas_consumed:
-u64) -> bool;
-*/
-bool wasmi_consume_gas(void *wasmi_runtime_ptr, uint64_t gas_consumed);
-/*
-#[no_mangle]
 pub extern "C" fn wasmi_get_available_gas(runtime: *const c_void) -> u64
 */
 uint64_t wasmi_get_available_gas(const void *wasmi_runtime_ptr);
@@ -252,7 +246,15 @@ bool
 WasmiRuntime::consume_gas(uint64_t gas) noexcept
 {
   assert(wasmi_runtime_ptr_ != nullptr);
-  return wasmi_consume_gas(wasmi_runtime_ptr_, gas);
+  auto current_gas = get_available_gas();
+
+  if (current_gas >= gas) {
+    set_available_gas(current_gas - gas);
+    return true;
+  }
+
+  set_available_gas(0);
+  return false;
 }
 
 uint64_t
