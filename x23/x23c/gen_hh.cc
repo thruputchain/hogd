@@ -340,7 +340,7 @@ Gen::show_type(const StructBody &s, string t)
   size_t nonvoid_count = 0;
   for (auto const& decl : s) {
     if (decl.qual != Declaration::kVoid)
-      nonvoid_count ++;
+      ++nonvoid_count;
   }
 
   if (!namespaces_.empty())
@@ -360,7 +360,7 @@ get(T &&t)
   if constexpr (I == {})
     return (std::forward<T>(t).{});)",
                            nonvoid_idx, s[i].id);
-    nonvoid_idx ++;
+    ++nonvoid_idx;
   }
   bottom_ += "\n}\n";
 
