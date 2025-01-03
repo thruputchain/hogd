@@ -15,6 +15,7 @@ namespace hogd
   // The hash of this object should be unique within a block,
   // as this object should uniquely identify an action on-chain.
   struct Transaction {
+    void;
   };
 
   // Bundles a transaction with authentication metadata
@@ -27,6 +28,7 @@ namespace hogd
   // The nondeterminism attached to a transaction by a 
   // block proposer, if any.
   struct NondeterministicProposal {
+    void;
   };
 
   struct ProposedTransaction {
