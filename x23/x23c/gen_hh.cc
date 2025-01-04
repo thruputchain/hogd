@@ -384,7 +384,7 @@ struct x23::xdr_meta<struct {1}> {{
                          nonvoid_count, scope(true), t);
   for (const auto &d : s) {
     if (d.qual != Declaration::kVoid)
-      bottom_ += std::format("    \"{}sv\",\n", d.id);
+      bottom_ += std::format("    \"{}\",\n", d.id);
   }
   bottom_ += "  };\n";
   bottom_ += "};\n";
