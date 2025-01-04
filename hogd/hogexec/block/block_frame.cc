@@ -1,10 +1,11 @@
 #include "hogd/hogexec/block/block_frame.h"
 
 #include <atomic>
-#include <cstdint>
+#include <cassert>
 #include <stdexcept>
 #include <vector>
 
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -42,11 +43,13 @@ BlockProposalFrame::finish_add_transaction(
   it->second.proposal_data = proposal;
 }
 
+// NOLINTBEGIN(readability-convert-member-functions-to-static)
 SHA256Hash
 BlockProposalFrame::canonical_block_hash() const
 {
   throw std::runtime_error("unimplemented");
 }
+// NOLINTEND(readability-convert-member-functions-to-static)
 
 std::vector<ProposedTransaction>
 BlockProposalFrame::to_list()
