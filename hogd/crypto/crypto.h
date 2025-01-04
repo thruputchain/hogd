@@ -40,8 +40,9 @@ sha256(x23::is_bytespan auto const &span)
   return sha256(span.data(), span.size());
 }
 
+template<typename T> requires (x23::is_xdr_type<T> && !x23::is_bytespan<T>)
 inline SHA256Hash
-sha256(x23::is_xdr_type auto const &value)
+sha256(T const &value)
 {
   auto buf = x23::serialize(value);
   return sha256(buf);

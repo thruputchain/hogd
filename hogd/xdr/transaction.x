@@ -25,7 +25,7 @@ namespace hogd
     // Auth data goes here
   };
 
-  // The nondeterminism attached to a transaction by a 
+  // The nondeterminism attached to a transaction by a
   // block proposer, if any.
   struct NondeterministicProposal {
     void;
