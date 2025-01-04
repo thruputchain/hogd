@@ -26,8 +26,8 @@ sha256(const void *data, size_t size)
   SHA256Hash out;
 
   [[maybe_unused]]
-  int res = crypto_hash_sha256(out.data(),
-                               static_cast<const uint8_t *>(data), size);
+  int res =
+      crypto_hash_sha256(out.data(), static_cast<const uint8_t *>(data), size);
 
   // libsodium's version of sha256 (on release 1.20) never returns errors.
   assert(res == 0);

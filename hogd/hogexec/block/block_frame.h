@@ -1,6 +1,9 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <map>
+#include <vector>
 
 #include "hogd/base/xdr_util.h"
 #include "transaction.hh"
@@ -57,7 +60,7 @@ private:
 class BlockValidationFrame {
 public:
   BlockValidationFrame(std::vector<ProposedTransaction> txs)
-    : transactions_(txs)
+    : transactions_(std::move(txs))
   {}
 
   // returns nullptr if all transactions are validated.

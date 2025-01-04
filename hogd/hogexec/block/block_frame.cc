@@ -1,8 +1,13 @@
 #include "hogd/hogexec/block/block_frame.h"
 
-#include "hogd/crypto/crypto.h"
-
+#include <atomic>
+#include <cstdint>
 #include <stdexcept>
+#include <vector>
+
+#include "hogd/crypto/crypto.h"
+#include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
