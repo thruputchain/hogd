@@ -24,8 +24,7 @@ TEST(SHA256, SomeInput)
 {
   std::vector<uint8_t> bytes = {0, 1, 2, 3};
   std::vector<uint8_t> bytes2 = {3, 2, 1, 0};
-  EXPECT_NE(sha256(std::as_bytes(std::span(bytes))),
-            sha256(std::as_bytes(std::span(bytes2))));
+  EXPECT_NE(sha256(bytes), sha256(bytes2));
 }
 
 TEST(Siphash24, NullInput)
