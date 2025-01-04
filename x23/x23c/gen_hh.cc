@@ -379,12 +379,12 @@ template<>
 struct x23::xdr_meta<struct {1}> {{
   static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
   static constexpr const char *type_name = "{2}";
-  static constexpr std::array<std::string, {0}> field_names{{
+  static constexpr std::array<std::string_view, {0}> field_names{{
 )",
                          nonvoid_count, scope(true), t);
   for (const auto &d : s) {
     if (d.qual != Declaration::kVoid)
-      bottom_ += std::format("    \"{}\",\n", d.id);
+      bottom_ += std::format("    \"{}sv\",\n", d.id);
   }
   bottom_ += "  };\n";
   bottom_ += "};\n";
