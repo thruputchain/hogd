@@ -21,12 +21,13 @@ using Siphash24Key = std::array<uint8_t, 16>;
 
 // sha256 returns a SHA256 hash of the input.
 inline SHA256Hash
-sha256(const uint8_t *data, size_t size)
+sha256(const void *data, size_t size)
 {
   SHA256Hash out;
 
   [[maybe_unused]]
-  int res = crypto_hash_sha256(out.data(), data, size);
+  int res = crypto_hash_sha256(out.data(),
+                               reinterpret_cast<const uint8_t *>(data), size);
 
   // libsodium's version of sha256 (on release 1.20) never returns errors.
   assert(res == 0);
@@ -34,15 +35,9 @@ sha256(const uint8_t *data, size_t size)
 }
 
 inline SHA256Hash
-sha256(std::span<const std::byte> input)
-{
-  return sha256(reinterpret_cast<const uint8_t *>(input.data()), input.size());
-}
-
-inline SHA256Hash
 sha256(x23::is_bytespan auto const &span)
 {
-  return sha256(reinterpret_cast<const uint8_t *>(span.data()), span.size());
+  return sha256(span.data(), span.size());
 }
 
 inline SHA256Hash
