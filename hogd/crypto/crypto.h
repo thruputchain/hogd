@@ -12,6 +12,8 @@
 
 #include "hogd/base/types.h"
 #include "types.hh"
+#include "x23/serialize.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -31,6 +33,13 @@ sha256(std::span<const std::byte> input)
   // libsodium's version of sha256 (on release 1.20) never returns errors.
   assert(res == 0);
   return out;
+}
+
+inline SHA256Hash
+sha256(x23::is_xdr_type auto const &value)
+{
+  auto buf = x23::serialize(value);
+  return sha256(std::as_bytes(std::span(buf)));
 }
 
 // siphash24 returns a 64-bit message authentication code from a
