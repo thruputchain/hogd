@@ -61,6 +61,13 @@ public:
   {}
 
   // returns nullptr if all transactions are validated.
+  // The intended workflow would be of the form
+  //
+  // while (auto* next_tx = frame.get_next_validation_transaction()) {
+  //   if (!validate(next_tx)) return false;
+  // }
+  // return true;
+  //
   const ProposedTransaction *get_next_validation_transaction();
 
 private:
