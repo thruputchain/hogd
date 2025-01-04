@@ -59,6 +59,9 @@ struct Gen {
   void show_decl(const Declaration &d)
   {
     show_comment(d.comment, false);
+    if (d.qual == Declaration::kVoid) {
+      return;
+    }
     prtop("{} {};\n", type_name(d, true), d.id);
   }
 
@@ -334,6 +337,12 @@ Gen::show_type(const StructBody &s, string t)
     prtop("operator<=> (const {0} &, const {0} &);\n", t);
   }
 
+  size_t nonvoid_count = 0;
+  for (auto const& decl : s) {
+    if (decl.qual != Declaration::kVoid)
+      ++nonvoid_count;
+  }
+
   if (!namespaces_.empty())
     bottom_ += format("\nnamespace {} {{", ns());
   bottom_ += std::format(R"(
@@ -342,13 +351,18 @@ requires (I < {0})
 decltype(auto)
 get(T &&t)
 {{)",
-                         s.size(), scope());
-  for (std::size_t i = 0; i < s.size(); ++i)
+                         nonvoid_count, scope());
+  size_t nonvoid_idx = 0;
+  for (std::size_t i = 0; i < s.size(); ++i) {
+    if (s[i].qual == Declaration::kVoid)
+      continue;
     bottom_ += std::format(R"(
   if constexpr (I == {})
     return (std::forward<T>(t).{});)",
-                           i, s[i].id);
-  bottom_ += "\n}\n"s;
+                           nonvoid_idx, s[i].id);
+    ++nonvoid_idx;
+  }
+  bottom_ += "\n}\n";
 
   if (!namespaces_.empty())
     bottom_ += format("}} // namespace {}\n", ns());
@@ -365,11 +379,13 @@ template<>
 struct x23::xdr_meta<struct {1}> {{
   static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
   static constexpr const char *type_name = "{2}";
-  static constexpr std::array field_names{{
+  static constexpr std::array<std::string, {0}> field_names{{
 )",
-                         s.size(), scope(true), t);
-  for (const auto &d : s)
-    bottom_ += std::format("    \"{}\",\n", d.id);
+                         nonvoid_count, scope(true), t);
+  for (const auto &d : s) {
+    if (d.qual != Declaration::kVoid)
+      bottom_ += std::format("    \"{}\",\n", d.id);
+  }
   bottom_ += "  };\n";
   bottom_ += "};\n";
 
