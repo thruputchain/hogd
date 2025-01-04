@@ -36,10 +36,16 @@ sha256(std::span<const std::byte> input)
 }
 
 inline SHA256Hash
+sha256(x23::is_bytespan auto const &span)
+{
+  return sha256(std::as_bytes(std::span(span)));
+}
+
+inline SHA256Hash
 sha256(x23::is_xdr_type auto const &value)
 {
   auto buf = x23::serialize(value);
-  return sha256(std::as_bytes(std::span(buf)));
+  return sha256(buf);
 }
 
 // siphash24 returns a 64-bit message authentication code from a
