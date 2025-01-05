@@ -2,7 +2,9 @@
 
 #include <cassert>
 #include <string>
+#include <utility>
 
+#include "hogd/base/types.h"
 #include "syscall.hh"
 #include "x23/format.h"
 

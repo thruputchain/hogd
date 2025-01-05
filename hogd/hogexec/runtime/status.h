@@ -3,6 +3,7 @@
 #include <expected>
 
 #include "hogd/base/status.h"
+#include "hogd/base/types.h"
 #include "syscall.hh"
 
 namespace hogd {

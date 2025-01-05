@@ -1,7 +1,6 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
