@@ -15,9 +15,7 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
 {
   {
     auto cache = deployment_cache_.take();
-
     auto it = cache->find(addr);
-
     if (it != cache->end()) {
       return it->second;
     }
@@ -33,9 +31,7 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 {
   {
     auto cache = contract_cache_.take();
-
     auto it = cache->find(hash);
-
     if (it != cache->end()) {
       return it->second;
     }

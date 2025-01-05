@@ -42,14 +42,12 @@ extern "C" {
 #[no_mangle]
 pub extern "C" fn new_wasmi_context() -> *mut c_void;
 */
-
 void *new_wasmi_context();
 
 /*
 #[no_mangle]
 pub extern "C" fn free_wasmi_context(p: *mut c_void);
 */
-
 void free_wasmi_context(void *wasmi_context_ptr);
 
 /*
@@ -61,7 +59,6 @@ pub fn new_wasmi_runtime(
     wasmi_context_ptr: *const c_void
 ) -> *mut WasmiRuntime;
 */
-
 void *new_wasmi_runtime(const uint8_t *script_ptr, uint32_t script_len,
                         void *user_ctx_ptr, void *wasmi_context_ptr);
 
@@ -69,7 +66,6 @@ void *new_wasmi_runtime(const uint8_t *script_ptr, uint32_t script_len,
 #[no_mangle]
 pub extern "C" fn free_wasmi_runtime(p: *mut WasmiRuntime);
 */
-
 void free_wasmi_runtime(void *wasmi_runtime_ptr);
 
 /*
@@ -79,7 +75,6 @@ pub struct MemorySlice {
     sz: u32,
 }
 */
-
 struct MemorySlice {
   uint8_t *mem;
   uint32_t sz;
@@ -100,15 +95,8 @@ struct WasmiInvokeResult {
 #[no_mangle]
 pub extern "C" fn wasmi_get_memory(runtime: *mut WasmiRuntime) -> MemorySlice;
 */
-
 MemorySlice wasmi_get_memory(void *wasmi_runtime_ptr);
 
-/*
-#[no_mangle]
-pub extern "C" fn wasmi_consume_gas(runtime: *mut WasmiRuntime, gas_consumed:
-u64) -> bool;
-*/
-bool wasmi_consume_gas(void *wasmi_runtime_ptr, uint64_t gas_consumed);
 /*
 #[no_mangle]
 pub extern "C" fn wasmi_get_available_gas(runtime: *const c_void) -> u64
@@ -172,11 +160,9 @@ WasmiContext::make_new_runtime(ContractBlob const &contract,
   void *wasmi_runtime_ptr =
       new_wasmi_runtime(contract.data(), contract.size(),
                         host_call_context.get(), wasmi_context_ptr_);
-
   if (wasmi_runtime_ptr == nullptr) {
     return {};
   }
-
   return std::make_optional<WasmiRuntime>(std::move(host_call_context),
                                           wasmi_runtime_ptr);
 }
@@ -214,7 +200,6 @@ InvokeResult
 WasmiRuntime::invoke(uint32_t method_name, uint64_t gas_limit)
 {
   auto method_name_str = std::format("{:X}", method_name);
-
   return invoke(method_name_str, gas_limit);
 }
 
@@ -223,6 +208,9 @@ WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
 
+  // invoke does not commit changes to available gas amounts.  We assume
+  // that accounting is performed elsewhere.
+  // We therefore push the previous available gas amount onto the stack.
   uint64_t prev_gas_limit = wasmi_get_available_gas(wasmi_runtime_ptr_);
   wasmi_set_available_gas(wasmi_runtime_ptr_, gas_limit);
 
@@ -234,13 +222,12 @@ WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
   uint64_t gas_remaining = wasmi_get_available_gas(wasmi_runtime_ptr_);
 
   assert(gas_remaining <= gas_limit);
-
   uint64_t gas_consumed = gas_limit - gas_remaining;
 
+  // restore previous gas amount
   wasmi_set_available_gas(wasmi_runtime_ptr_, prev_gas_limit);
 
   InvokeErrorCode wasmi_error{res.error};
-
   if (wasmi_error != InvokeErrorCode::kNone) {
     return InvokeResult{.result_ = {InvokeError{wasmi_error}},
                         .gas_consumed_ = gas_consumed};
