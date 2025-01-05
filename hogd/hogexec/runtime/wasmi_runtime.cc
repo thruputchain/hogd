@@ -251,8 +251,13 @@ WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
 bool
 WasmiRuntime::consume_gas(uint64_t gas) noexcept
 {
-  assert(wasmi_runtime_ptr_ != nullptr);
-  return wasmi_consume_gas(wasmi_runtime_ptr_, gas);
+  uint64_t current_gas = get_available_gas();
+  if (current_gas >= gas) {
+    set_available_gas(current_gas - gas);
+    return true;
+  }
+  set_available_gas(0);
+  return false;
 }
 
 uint64_t
