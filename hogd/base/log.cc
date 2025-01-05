@@ -80,7 +80,7 @@ do_panic(std::string_view fmt, const std::source_location &loc,
 
 void
 ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
-                    const std::source_location &loc, std::format_args &&args)
+                    const std::source_location &loc, std::format_args args)
 {
   // check if the severity is high enough
   if (level > max_level_)

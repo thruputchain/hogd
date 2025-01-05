@@ -48,8 +48,7 @@ public:
 
   // vlog appends a log message.
   virtual void vlog(LogLevel level, std::string_view fmt,
-                    const std::source_location &loc,
-                    std::format_args &&args) = 0;
+                    const std::source_location &loc, std::format_args args) = 0;
   // flush forces writes to complete for any pending log messages.
   virtual void flush() = 0;
 };
@@ -63,7 +62,7 @@ public:
   {}
 
   void vlog(LogLevel level, std::string_view fmt,
-            const std::source_location &loc, std::format_args &&args) override;
+            const std::source_location &loc, std::format_args args) override;
   void flush() override;
 
   // set_log_level adjusts the maximum severity level to print at runtime

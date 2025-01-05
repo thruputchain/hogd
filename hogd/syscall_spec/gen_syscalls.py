@@ -207,10 +207,7 @@ def gen_validate_arg(inp, *, is_input):
                                      user_{arg2});
 
         
-      """, 
-      [f"user_{arg1}", f"user_{arg2}"],
-      arg1, 
-      f"std::optional<std::span<{const}std::byte>> {arg1}"
+      """, [f"user_{arg1}", f"user_{arg2}"], arg1, f"std::optional<std::span<{const}std::byte>> {arg1}"
 
     else:
 
