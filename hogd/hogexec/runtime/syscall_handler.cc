@@ -29,7 +29,11 @@ namespace hogd {
 
 SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
                                      StorageSnapshotCache &snapshot_cache)
-  : signed_tx_(std::move(signed_tx)), newly_created_contracts_([&] {
+  : signed_tx_(std::move(signed_tx)),
+    invocation_frame_stack_([this](InvocationFrame &last_frame) {
+      commit_last_call_frame_success(last_frame);
+    }),
+    newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
       for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
@@ -39,10 +43,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       }
       return contracts;
     }()),
-    snapshot_cache_(snapshot_cache),
-    invocation_frame_stack_([this](InvocationFrame &last_frame) {
-      commit_last_call_frame_success(last_frame);
-    })
+    snapshot_cache_(snapshot_cache)
 {
   wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
 }

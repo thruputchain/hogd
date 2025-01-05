@@ -83,8 +83,8 @@ public:
 private:
   WasmiContext wasmi_context_;
   const SignedTransaction signed_tx_;
-
   RuntimeCache runtimes_;
+  InvocationFrameStack invocation_frame_stack_;
 
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
@@ -95,8 +95,6 @@ private:
   std::vector<LogEntry> committed_logs_;
 
   StorageSnapshotCache &snapshot_cache_;
-
-  InvocationFrameStack invocation_frame_stack_;
 
   // Resolve the RuntimeCacheEntry associated with the queried address.
   // Creates a new entry if no entry exists, AND a contract is deployed at
