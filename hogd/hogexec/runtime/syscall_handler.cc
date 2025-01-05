@@ -23,7 +23,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -37,8 +36,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
       for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
-        auto serialized = x23::serialize(contract);
-        contracts.emplace(sha256(std::as_bytes(std::span(serialized))),
+        contracts.emplace(sha256(contract),
                           std::make_shared<const Contract>(contract));
       }
       return contracts;
@@ -52,7 +50,6 @@ InvokeResult
 SystemCallHandler::root_invoke()
 {
   auto *runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
-
   if (!runtime) {
     return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed_ = 0};
@@ -65,7 +62,6 @@ SystemCallHandler::root_invoke()
 
   if (!res.is_root_success())
     return res.to_root_error();
-
   return res;
 }
 
@@ -81,8 +77,7 @@ SystemCallHandler::get_current_address() const
 SHA256Hash
 SystemCallHandler::get_source_tx_hash() const
 {
-  auto buf = x23::serialize(signed_tx_.tx);
-  return sha256(std::as_bytes(std::span(buf)));
+  return sha256(signed_tx_.tx);
 }
 
 SyscallStatus<ContractAddress>
