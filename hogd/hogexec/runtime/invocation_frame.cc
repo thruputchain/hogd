@@ -9,7 +9,6 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime_cache.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
