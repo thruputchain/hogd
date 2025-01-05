@@ -258,7 +258,6 @@ SystemCallHandler::log(std::span<const std::byte> message)
   }
 
   invocation_frame_stack_.get_active_frame().log(message);
-
   return {};
 }
 
@@ -267,17 +266,9 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
                                              SHA256Hash const &nonce,
                                              SHA256Hash const &contract_hash)
 {
-  std::array<uint8_t,
-             sizeof(ContractAddress) + sizeof(SHA256Hash) + sizeof(SHA256Hash)>
-      hash_buffer;
-
-  std::memcpy(hash_buffer.data(), sender.data(), sizeof(ContractAddress));
-  std::memcpy(hash_buffer.data() + sizeof(ContractAddress), nonce.data(),
-              sizeof(SHA256Hash));
-  std::memcpy(hash_buffer.data() + sizeof(ContractAddress) + sizeof(SHA256Hash),
-              contract_hash.data(), sizeof(SHA256Hash));
-
-  return sha256(hash_buffer);
+  return sha256(ContractDeploymentHashPreimage{.deployer_address = sender,
+                                               .nonce = nonce,
+                                               .contract_hash = contract_hash});
 }
 
 SyscallStatus<ContractAddress>
