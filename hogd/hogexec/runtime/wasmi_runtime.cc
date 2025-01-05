@@ -153,33 +153,6 @@ WasmiInvokeResult wasmi_invoke(void *wasmi_runtime_ptr,
 
 } // namespace
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-InvokeResult::to_host_fn_result() const
-{
-  if (!result_.has_value()) {
-    using enum InvokeErrorCode;
-
-    switch (result_.error().code()) {
-    case kUnrecoverable:
-      return {HostFnError{HostFnErrorCode::kUnrecoverable}, gas_consumed_};
-    case kDeterministic:
-      // i.e. trap within Wasmi
-      return {SyscallErrorCode::kDeterministicWasm, gas_consumed_};
-    case kOutOfGas:
-      return {HostFnError{HostFnErrorCode::kOutOfGas}, gas_consumed_};
-    default:
-      return {HostFnError{HostFnErrorCode::kUnrecoverable}, gas_consumed_};
-    }
-    // unreachable
-    assert(false);
-  }
-
-  // This converts the user-defined return value to a syscall error code.
-  // We could do a check here (i.e. reserve < 2^16 for system, everything else
-  // for users) but this doesn't particularly matter for correctness.
-  return {static_cast<SyscallErrorCode>(*result_), gas_consumed_};
-}
-
 WasmiContext::WasmiContext() : wasmi_context_ptr_(new_wasmi_context())
 {}
 

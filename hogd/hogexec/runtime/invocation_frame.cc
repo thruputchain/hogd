@@ -89,7 +89,7 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
   // fairly invasive changes (We need to restore the entirety of the wasm
   // module's internal state -- not just memory, but also tables and globals.
   // The wasm stack is reset automatically).
-  if (result.should_revert()) {
+  if (result.should_frame_revert()) {
     assert(!frame_stack_.empty());
 
     frame_stack_.back().poison_visited_runtimes();
@@ -103,16 +103,17 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
   }
   else {
     // commit child invocation frame successfully
-    size_t stack_size = frame_stack_.size();
+    assert(result.is_frame_success());
 
+    size_t stack_size = frame_stack_.size();
     if (stack_size >= 2) {
       // Commit the frame to it's parent
       frame_stack_[stack_size - 2].commit_successful_child_frame(
           frame_stack_.back());
     }
     else if (stack_size == 1) {
-      // last frame -- push frame contents to external caller (SystemCallHandler),
-      // via the supplied lambda
+      // last frame -- push frame contents to external caller
+      // (SystemCallHandler), via the supplied lambda
       last_frame_action_(frame_stack_.back());
     }
 

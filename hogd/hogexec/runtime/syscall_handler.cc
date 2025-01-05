@@ -62,16 +62,8 @@ SystemCallHandler::root_invoke()
                                       signed_tx_.tx.invocation.gas_limit);
   invocation_frame_stack_.finish_frame(res);
 
-  if (!res.is_success()) {
-    if (!res.result_)
-      return res;
-
-    // return nonzero error code on root invocation => contract error
-    assert(*res.result_ != 0);
-
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
-                        .gas_consumed_ = res.gas_consumed_};
-  }
+  if (!res.is_root_success())
+    return res.to_root_error();
 
   return res;
 }
@@ -289,7 +281,7 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
   std::memcpy(hash_buffer.data() + sizeof(ContractAddress) + sizeof(SHA256Hash),
               contract_hash.data(), sizeof(SHA256Hash));
 
-  return sha256(std::as_bytes(std::span(hash_buffer)));
+  return sha256(hash_buffer);
 }
 
 SyscallStatus<ContractAddress>
