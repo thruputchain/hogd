@@ -66,7 +66,7 @@ public:
   RuntimeContext(const RuntimeContext &) = delete;
   RuntimeContext &operator=(const RuntimeContext &) = delete;
 
-  virtual ~RuntimeContext() {}
+  virtual ~RuntimeContext() = default;
 
   // Provide the functions that are made available to wasm modules(as function
   // imports). Imports in wasm are identified by "module name" and "function
@@ -85,7 +85,7 @@ public:
   bool link_fn(std::string_view module_name, std::string_view fn_name,
                HostFnResult (*f)(HostCallContext *, Args...))
   {
-    if (module_name.size() == 0 || fn_name.size() == 0 || (f == nullptr))
+    if (module_name.empty() || fn_name.empty() || (f == nullptr))
       return false;
     return link_fn_nargs(module_name, fn_name, reinterpret_cast<void *>(f),
                          (kArgCount<Args>() + ... + 0));
@@ -145,7 +145,7 @@ public:
   virtual std::span<std::byte> get_memory() noexcept = 0;
   virtual std::span<const std::byte> get_memory() const noexcept = 0;
 
-  virtual ~Runtime() {}
+  virtual ~Runtime() = default;
 
 protected:
   virtual InvokeStatus<int32_t>

@@ -2,7 +2,7 @@
 // exactly maintain, and very easy to mess up with a copy-paste bug.
 
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
@@ -94,7 +94,6 @@ protected:
   std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_P(InvokeArityTests, arity0)
 {
   auto res = runtime_->invoke("calltest0", UINT64_MAX);

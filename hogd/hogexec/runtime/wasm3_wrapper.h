@@ -35,11 +35,11 @@ SOFTWARE.
 #include <iterator>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <type_traits>
 #include <vector>
-#include <stdexcept>
 
 #include "wasm3.h"
 
@@ -309,7 +309,7 @@ private:
 // Cannot outlive lifetime of a Runtime.
 class Function {
 public:
-  Function(M3Runtime* m3runtime) : m3runtime_(m3runtime) {}
+  Function(M3Runtime *m3runtime) : m3runtime_(m3runtime) {}
 
   template<std::same_as<uint64_t>... Args>
   hogd::InvokeStatus<int32_t> call(Args... args)
@@ -328,7 +328,7 @@ public:
     const void *ret_ptrs[] = {&ret};
     res = m3_GetResults(m3func_, 1, ret_ptrs);
 
-    if (res != m3Err_none) 
+    if (res != m3Err_none)
       return m3_err_to_invoke_status(res);
     return ret;
   }
@@ -337,12 +337,10 @@ public:
   bool find_function(const char *name);
 
 private:
-
-  static hogd::InvokeStatus<int32_t>
-  m3_err_to_invoke_status(M3Result res);
+  static hogd::InvokeStatus<int32_t> m3_err_to_invoke_status(M3Result res);
 
   // does not own this pointer
-  M3Runtime* m3runtime_;
+  M3Runtime *m3runtime_;
 
   // Does not own the memory pointed to by m3func_.
   // The output of m3FindFunction, which sets this variable,

@@ -3,11 +3,10 @@
 #include <cassert>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
-#include <tuple>
 #include <type_traits>
 #include <vector>
-#include <stdexcept>
 
 #include "wasm3.h"
 
