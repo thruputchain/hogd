@@ -128,11 +128,10 @@ public:
   ~WasmiRuntime();
 
   // This API expects that the invoked function takes no arguments and returns
-  // a uint64_t. Syscalls will handle "returning" larger values from one
-  // smart contract to another.  The uint64 should be interpreted as an error
+  // an int32_t. Syscalls will handle "returning" larger values from one
+  // smart contract to another.  The int32_t should be interpreted as an error
   // code, which could be defined by the smart contract (just as system calls
-  // will return a uint64 error -- which is why link_fn demands a function
-  // with return type HostFnStatus<uint64>)
+  // will return an int32_t error)
   //
   // The gas counter is saved before calling this method(i.e. x =
   // get_available_gas(); invoke(something); assert(x == get_available_gas
