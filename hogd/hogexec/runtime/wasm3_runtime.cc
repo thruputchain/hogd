@@ -1,5 +1,11 @@
 #include "hogd/hogexec/runtime/wasm3_runtime.h"
 
+#include <cstdint>
+#include <memory>
+
+#include "hogd/hogexec/runtime/wasm3_wrapper.h"
+#include "hogd/hogexec/runtime/runtime.h"
+
 namespace hogd {
 
 [[nodiscard]] uint64_t

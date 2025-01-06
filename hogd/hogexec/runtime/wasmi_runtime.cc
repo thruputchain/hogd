@@ -2,17 +2,16 @@
 #include <cstddef>
 #include <format>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 
 namespace hogd {
 
@@ -149,7 +148,7 @@ WasmiInvokeResult wasmi_invoke(void *wasmi_runtime_ptr,
 } // namespace
 
 WasmiContext::WasmiContext()
-  : RuntimeContext(), wasmi_context_ptr_(new_wasmi_context())
+  : wasmi_context_ptr_(new_wasmi_context())
 {}
 
 WasmiContext::~WasmiContext()
