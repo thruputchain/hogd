@@ -2,14 +2,9 @@
 
 #include <cassert>
 #include <cstddef>
-#include <format>
 #include <memory>
-#include <optional>
-#include <span>
-#include <string_view>
-#include <utility>
+#include <string>
 
-#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -57,7 +52,7 @@ engine_to_string(RuntimeEngine engine)
 }
 
 InvokeResult
-Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
+Runtime::invoke(std::string const &method_name, uint64_t gas_limit)
 {
   uint64_t prev_gas_limit = get_available_gas();
   set_available_gas(gas_limit);

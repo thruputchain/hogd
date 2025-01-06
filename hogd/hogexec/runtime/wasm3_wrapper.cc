@@ -1,19 +1,18 @@
 #include "hogd/hogexec/runtime/wasm3_wrapper.h"
 
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
-#include <optional>
 #include <vector>
-#include <cstdint>
-
-#include "wasm3.h"
 
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime_trampoline/ffi_trampolines.h"
+#include "wasm3.h"
 
 /*
 Based on wasm3/platforms/cpp/wasm3_cpp.h
@@ -48,7 +47,7 @@ namespace wasm3 {
 
 namespace detail {
 inline thread_local int32_t wasm3_err_code = 0;
-}
+} // namespace detail
 
 namespace {
 bool
@@ -74,7 +73,7 @@ throw_nondeterministic_errors(M3Result result)
   }
 }
 
-}
+} // namespace
 
 hogd::InvokeStatus<int32_t>
 Function::m3_err_to_invoke_status(M3Result res)

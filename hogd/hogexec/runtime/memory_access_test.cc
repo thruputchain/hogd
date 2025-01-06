@@ -1,12 +1,12 @@
 #include <cstdint>
-#include <optional>
+#include <memory>
 
 #include <gtest/gtest.h>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "hogd/hogexec/runtime/runtime.h"
 
 namespace hogd {
 

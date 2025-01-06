@@ -57,7 +57,7 @@ namespace detail {
 
 extern thread_local int32_t wasm3_err_code;
 
-using stack_type = uint64_t*;
+using stack_type = uint64_t *;
 using mem_type = void *;
 
 template<typename T>
@@ -72,8 +72,7 @@ template<typename... Args>
 void
 get_args_from_stack(stack_type &sp, std::tuple<Args...> &tuple)
 {
-  std::apply([&](auto &...item) { (arg_from_stack(item, sp), ...); },
-             tuple);
+  std::apply([&](auto &...item) { (arg_from_stack(item, sp), ...); }, tuple);
 }
 
 template<std::same_as<uint64_t>... Args>

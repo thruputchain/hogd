@@ -4,7 +4,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
-#include <string_view>
+#include <string>
 
 #include "contract.hh"
 #include "hogd/hogexec/runtime/status.h"
@@ -58,7 +58,7 @@ engine_has_eager_link_guards(RuntimeEngine engine)
 
 class RuntimeContext {
 public:
-  RuntimeContext() {}
+  RuntimeContext() = default;
 
   // Disable move and copy.
   RuntimeContext(RuntimeContext &&) = delete;
@@ -122,7 +122,7 @@ public:
   // The gas counter is saved before calling this method
   // (i.e. x = get_available_gas(); invoke(something); assert(x ==
   // get_available_gas()))
-  InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
+  InvokeResult invoke(std::string const &method_name, uint64_t gas_limit);
 
   // Returns FALSE if gas consumption failed.
   //
@@ -149,7 +149,7 @@ public:
 
 protected:
   virtual InvokeStatus<int32_t>
-  invoke_internal(std::string_view method_name) = 0;
+  invoke_internal(std::string const &method_name) = 0;
 
   std::unique_ptr<HostCallContext> host_call_context_;
 };

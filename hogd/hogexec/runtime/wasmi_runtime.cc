@@ -1,6 +1,5 @@
 #include <cassert>
 #include <cstddef>
-#include <format>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -8,10 +7,10 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "hogd/hogexec/runtime/runtime.h"
 
 namespace hogd {
 
@@ -147,8 +146,7 @@ WasmiInvokeResult wasmi_invoke(void *wasmi_runtime_ptr,
 
 } // namespace
 
-WasmiContext::WasmiContext()
-  : wasmi_context_ptr_(new_wasmi_context())
+WasmiContext::WasmiContext() : wasmi_context_ptr_(new_wasmi_context())
 {}
 
 WasmiContext::~WasmiContext()
@@ -206,7 +204,7 @@ WasmiRuntime::get_memory() const noexcept
 }
 
 InvokeStatus<int32_t>
-WasmiRuntime::invoke_internal(std::string_view method_name)
+WasmiRuntime::invoke_internal(std::string const &method_name)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
 

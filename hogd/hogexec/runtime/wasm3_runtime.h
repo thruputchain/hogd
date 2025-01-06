@@ -45,7 +45,7 @@ private:
   }
 
   std::vector<LinkedFunction> functions_to_link_;
-  wasm3::Environment env;
+  wasm3::Environment wasm3_env_;
 };
 
 // Wrapper around one Wasm module (one wasmi instance). Can be invoked, and
@@ -60,7 +60,7 @@ public:
       wasm3_runtime_(std::move(wasm3_runtime))
   {}
 
-  ~Wasm3Runtime() override {};
+  ~Wasm3Runtime() override = default;
 
   [[nodiscard]] uint64_t get_available_gas() const noexcept override;
   void set_available_gas(uint64_t gas) noexcept override;
@@ -74,7 +74,8 @@ public:
   std::span<const std::byte> get_memory() const noexcept override;
 
 private:
-  InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
+  InvokeStatus<int32_t>
+  invoke_internal(std::string const &method_name) override;
 
   std::unique_ptr<wasm3::Runtime> wasm3_runtime_;
   uint64_t available_gas_ = 0;

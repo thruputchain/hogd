@@ -1,11 +1,16 @@
 #include "hogd/hogexec/runtime/wasm3_runtime.h"
 
-#include <cstdint>
+#include <cassert>
+#include <cstddef>
 #include <memory>
+#include <span>
+#include <string_view>
+#include <utility>
 
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasm3_wrapper.h"
-#include "hogd/hogexec/runtime/runtime.h"
 
 namespace hogd {
 
@@ -25,7 +30,7 @@ std::unique_ptr<Runtime>
 Wasm3Context::make_new_runtime(ContractBlob const &contract,
                                SystemCallHandler *syscall_handler)
 {
-  auto module = env.parse_module(contract.data(), contract.size());
+  auto module = wasm3_env_.parse_module(contract.data(), contract.size());
   if (!module) {
     return nullptr;
   }
@@ -35,7 +40,8 @@ Wasm3Context::make_new_runtime(ContractBlob const &contract,
   host_call_context->syscall_handler = syscall_handler;
 
   constexpr static uint32_t kMaxStackBytes = 65536;
-  auto runtime = env.new_runtime(kMaxStackBytes, host_call_context.get());
+  auto runtime =
+      wasm3_env_.new_runtime(kMaxStackBytes, host_call_context.get());
   if (!runtime->load(module)) {
     return nullptr;
   }
@@ -70,7 +76,7 @@ Wasm3Runtime::get_memory() const noexcept
 }
 
 InvokeStatus<int32_t>
-Wasm3Runtime::invoke_internal(std::string_view method_name)
+Wasm3Runtime::invoke_internal(std::string const &method_name)
 {
   auto fn = wasm3_runtime_->find_function(method_name.data());
   if (!fn) {
