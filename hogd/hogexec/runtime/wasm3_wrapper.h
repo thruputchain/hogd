@@ -39,6 +39,7 @@ SOFTWARE.
 #include <tuple>
 #include <type_traits>
 #include <vector>
+#include <stdexcept>
 
 #include "wasm3.h"
 
@@ -71,22 +72,6 @@ arg_from_stack(T &dest, stack_type &_sp, mem_type mem)
   m3ApiGetArg(T, tmp);
   dest = tmp;
 }
-
-template<typename T>
-void
-arg_from_stack(T *&dest, stack_type &_sp, mem_type _mem)
-{
-  m3ApiGetArgMem(T *, tmp);
-  dest = tmp;
-};
-
-template<typename T>
-void
-arg_from_stack(const T *&dest, stack_type &_sp, mem_type _mem)
-{
-  m3ApiGetArgMem(const T *, tmp);
-  dest = tmp;
-};
 
 template<typename... Args>
 static void
@@ -247,7 +232,7 @@ public:
   Runtime &operator=(Runtime &&) = delete;
 
   // Load the module into runtime
-  // @param mod  module parsed by environment::parse_module
+  // mod shouuld be a module parsed by Environment::parse_module
   //
   // If this function returns true, then this object takes
   // ownership of module, and the module cannot be loaded
@@ -261,8 +246,7 @@ public:
   // Get a function handle by name
   //
   // If the function is not found, returns nullopt
-  // @param name  name of a function, c-string
-  // @return function object
+  // name is the name of the target function, as a c-string
   std::optional<Function> find_function(const char *name);
 
   std::span<std::byte> get_memory();
@@ -346,23 +330,16 @@ public:
     const void *arg_ptrs[] = {reinterpret_cast<const void *>(&args)...};
     M3Result res = m3_Call(m3func_, sizeof...(args), arg_ptrs);
 
-    if (res != m3Err_none) {
+    if (res != m3Err_none)
       return m3_err_to_invoke_status(res);
-    }
 
     int32_t ret = 0;
     const void *ret_ptrs[] = {&ret};
     res = m3_GetResults(m3func_, 1, ret_ptrs);
 
-    if (res == m3Err_argumentCountMismatch) {
-      return hogd::InvokeError{hogd::InvokeErrorCode::kDeterministic};
-    }
-
-    if (res == m3Err_none) {
-      return ret;
-    }
-
-    return hogd::InvokeError{hogd::InvokeErrorCode::kUnrecoverable};
+    if (res != m3Err_none) 
+      return m3_err_to_invoke_status(res);
+    return ret;
   }
 
   friend class Runtime;
