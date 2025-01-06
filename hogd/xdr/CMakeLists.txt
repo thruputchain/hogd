@@ -5,7 +5,7 @@ add_xdr(
 	contract.x
 	ffi_enums.x)
 
-add_dependencies(protocol generate_syscall_x)
+add_dependencies(build_protocol generate_syscall_x)
 
 add_xdr_rs(
 	protocol_rs 
@@ -13,10 +13,11 @@ add_xdr_rs(
 	types.x 
 	syscall.x)
 
+add_dependencies(build_protocol_rs generate_syscall_x)
+
 add_xdr_rs(
 	ffi_enum_rs 
 	${CMAKE_SOURCE_DIR}/hogd/hogexec/wasmi/src
 	ffi_enums.x)
 
-add_dependencies(protocol_rs generate_syscall_x)
 
