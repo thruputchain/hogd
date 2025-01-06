@@ -89,15 +89,11 @@ wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
   m3ApiReturnType(int32_t);
 
   using args_tuple_t = std::tuple<Args...>;
-
   args_tuple_t args;
-
   get_args_from_stack(_sp, mem, args);
 
   void *fn_pointer = _ctx->userdata;
-
   constexpr size_t nargs = std::tuple_size_v<args_tuple_t>;
-
   hogd::detail::TrampolineResult result;
 
   if constexpr (nargs == 0) {
@@ -178,9 +174,6 @@ wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
 
 } // namespace detail
 
-hogd::InvokeStatus<int32_t>
-m3_err_to_invoke_status(M3Result res);
-
 class Module;
 class Runtime;
 class Function;
@@ -251,8 +244,6 @@ public:
 
   std::span<std::byte> get_memory();
   std::span<const std::byte> get_memory() const;
-
-  friend class environment;
 
 private:
   // runtime extends the lifetime of the environment
@@ -347,6 +338,9 @@ public:
 private:
   [[nodiscard]]
   bool initialize(const char *name);
+
+  static hogd::InvokeStatus<int32_t>
+  m3_err_to_invoke_status(M3Result res);
 
   std::shared_ptr<M3Runtime> m3runtime_;
   // Does not own the memory pointed to by m3func_.

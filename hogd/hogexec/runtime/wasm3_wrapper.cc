@@ -74,7 +74,7 @@ throw_nondeterministic_errors(M3Result result)
 } // namespace detail
 
 hogd::InvokeStatus<int32_t>
-m3_err_to_invoke_status(M3Result res)
+Function::m3_err_to_invoke_status(M3Result res)
 {
   assert(res != m3Err_none);
 
@@ -87,7 +87,7 @@ m3_err_to_invoke_status(M3Result res)
   if (res == m3Err_hogdExit) {
     return hogd::InvokeStatus<int32_t>{detail::wasm3_err_code};
   }
-  
+
   // all other errors
   return hogd::InvokeError{hogd::InvokeErrorCode::kDeterministic};
 }
