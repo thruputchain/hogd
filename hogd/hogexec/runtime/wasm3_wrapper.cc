@@ -6,7 +6,9 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <optional>
 #include <vector>
+#include <cstdint>
 
 #include "wasm3.h"
 
@@ -46,7 +48,9 @@ namespace wasm3 {
 
 namespace detail {
 inline thread_local int32_t wasm3_err_code = 0;
+}
 
+namespace {
 bool
 is_nondeterminisic_error(M3Result result)
 {
@@ -70,7 +74,7 @@ throw_nondeterministic_errors(M3Result result)
   }
 }
 
-} // namespace detail
+}
 
 hogd::InvokeStatus<int32_t>
 Function::m3_err_to_invoke_status(M3Result res)
@@ -80,7 +84,7 @@ Function::m3_err_to_invoke_status(M3Result res)
   if (res == m3Err_outOfGasError) {
     return hogd::InvokeError{hogd::InvokeErrorCode::kOutOfGas};
   }
-  if (detail::is_nondeterminisic_error(res)) {
+  if (is_nondeterminisic_error(res)) {
     return hogd::InvokeError{hogd::InvokeErrorCode::kUnrecoverable};
   }
   if (res == m3Err_hogdExit) {
@@ -101,7 +105,7 @@ static_link_nargs(IM3Module io_module, const char *const i_moduleName,
 {
   auto arg_sig = [&nargs]() -> std::string {
     std::string out = "i(";
-    for (auto i = 0u; i < nargs; i++) {
+    for (auto i = 0U; i < nargs; i++) {
       out += "I";
     }
     out += ")";
@@ -225,7 +229,7 @@ Module::parse()
   IM3Module p;
   M3Result err = m3_ParseModule(m3env_.get(), &p, module_raw_data_.data(),
                                 module_raw_data_.size());
-  detail::throw_nondeterministic_errors(err);
+  throw_nondeterministic_errors(err);
   if (err != m3Err_none) {
     return false;
   }
@@ -238,7 +242,7 @@ bool
 Module::load_into(IM3Runtime runtime)
 {
   M3Result err = m3_LoadModule(runtime, m3module_);
-  detail::throw_nondeterministic_errors(err);
+  throw_nondeterministic_errors(err);
   if (err != m3Err_none) {
     return false;
   }
@@ -258,7 +262,7 @@ bool
 Function::find_function(const char *name)
 {
   M3Result err = m3_FindFunction(&m3func_, m3runtime_, name);
-  detail::throw_nondeterministic_errors(err);
+  throw_nondeterministic_errors(err);
   return (m3func_ != nullptr);
 }
 
