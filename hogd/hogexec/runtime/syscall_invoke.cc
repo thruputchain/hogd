@@ -116,8 +116,8 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
     return {status.error().code(), 0};
   }
 
-  size_t write_len = std::min(output_buffer.size(), status->size());
-  std::memcpy(output_buffer.data(), status->data(), write_len);
+  size_t write_len = std::min(output_buffer.size(), (*status)->size());
+  std::memcpy(output_buffer.data(), (*status)->data(), write_len);
   output_written_len = write_len;
 
   return {SyscallErrorCode::kNone, 0};
@@ -132,7 +132,7 @@ syscall_GetReturnedBufferLen_inner(SystemCallHandler &syscall_handler,
     return {status.error().code(), 0};
   }
 
-  output_buffer_len = status->size();
+  output_buffer_len = (*status)->size();
   return {SyscallErrorCode::kNone, 0};
 }
 

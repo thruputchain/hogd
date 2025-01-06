@@ -146,16 +146,15 @@ SystemCallHandler::commit_last_call_frame_success(InvocationFrame &frame)
   committed_logs_ = frame.extract_logs();
 }
 
-SyscallStatus<const ReturnBuffer>
+SyscallStatus<const ReturnBuffer *>
 SystemCallHandler::get_return_buffer() const
 {
   assert(!invocation_frame_stack_.empty());
-
   auto const &top_frame = invocation_frame_stack_.get_active_frame();
 
   return top_frame.child_return_buffer_.has_value()
-             ? SyscallStatus<const ReturnBuffer>(
-                   *top_frame.child_return_buffer_)
+             ? SyscallStatus<const ReturnBuffer *>(
+                   &(*top_frame.child_return_buffer_))
              : SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
 }
 
