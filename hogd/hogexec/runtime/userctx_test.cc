@@ -3,9 +3,9 @@
 #include <gtest/gtest.h>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 namespace hogd {
 
@@ -24,22 +24,33 @@ foo(HostCallContext *ctx, uint64_t value)
 
 } // namespace
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST(WasmRuntimeTest, CheckCtxCorrect)
+class UserContextTest : public ::testing::TestWithParam<RuntimeEngine> {
+protected:
+  void SetUp() override
+  {
+    auto c = test::load_wasm_from_file("test_invoke.wasm");
+    auto context = make_runtime_context(GetParam());
+    context->link_fn("test", "redir_call", &foo);
+    runtime_ = context->make_new_runtime(c, ctx_check);
+
+    ASSERT_TRUE(runtime_);
+  }
+
+  std::unique_ptr<Runtime> runtime_;
+};
+
+TEST_P(UserContextTest, CheckCtxCorrect)
 {
-  auto c = test::load_wasm_from_file("test_invoke.wasm");
-  WasmiContext context;
-
-  context.link_fn("test", "redir_call", &foo);
-
-  auto runtime = context.make_new_runtime(c, ctx_check);
-
-  ASSERT_TRUE(!!runtime);
-
-  auto res = runtime->invoke("calltest", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
+  auto res = runtime_->invoke("calltest", UINT64_MAX);
+  EXPECT_TRUE(res.result);
   EXPECT_EQ(*res.result, 15U);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(AllEngines, UserContextTest,
+                         ::testing::Values(RuntimeEngine::kWasmi,
+                                           RuntimeEngine::kWasm3),
+                         [](const testing::TestParamInfo<RuntimeEngine> &info) {
+                           return engine_to_string(info.param);
+                         });
 
 } // namespace hogd

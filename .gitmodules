@@ -10,3 +10,6 @@
 [submodule "external/corrosion"]
 	path = external/corrosion
 	url = https://github.com/corrosion-rs/corrosion.git
+[submodule "external/wasm3"]
+	path = external/wasm3
+	url = https://github.com/groundhogchain/wasm3.git

@@ -9,6 +9,8 @@ set_source_files_properties(
 add_library(
   runtime
   wasmi_runtime.cc
+  wasm3_runtime.cc
+  runtime.cc
   status.cc
   syscall_crypto.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
@@ -23,10 +25,15 @@ add_executable(
   gas_api_test.cc
   memory_access_test.cc
 )
+
 target_link_libraries(
   runtime
   wasmi_lib
   protocol
+  m3 # wasm3
+  base
+  crypto
+  ${LIBSODIUM_LIBRARIES}
 )
 
 add_dependencies(

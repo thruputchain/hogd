@@ -10,21 +10,21 @@
 
 namespace hogd {
 
-class MemoryAccessTest : public ::testing::Test {
+class MemoryAccessTest : public ::testing::TestWithParam<RuntimeEngine> {
 protected:
   void SetUp() override
   {
-    // this wasm just invokes an external call.  We're just reusing it here.
     auto c = test::load_wasm_from_file("test_set_memory.wasm");
-    WasmiContext context;
-    runtime_ = context.make_new_runtime(c, nullptr);
-    ASSERT_TRUE(!!runtime_);
+    auto context = make_runtime_context(GetParam());
+    runtime_ = context->make_new_runtime(c, nullptr);
+
+    ASSERT_TRUE(runtime_);
   }
 
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_F(MemoryAccessTest, ReadWrites)
+
+TEST_P(MemoryAccessTest, ReadWrites)
 {
   // assert memory exists
   auto res = runtime_->invoke("size", UINT64_MAX);
@@ -57,6 +57,11 @@ TEST_F(MemoryAccessTest, ReadWrites)
   ASSERT_TRUE(!!res.result);
   EXPECT_EQ(*res.result, 0xABCDEF01);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
+INSTANTIATE_TEST_SUITE_P(AllEngines, MemoryAccessTest,
+                         ::testing::Values(RuntimeEngine::kWasmi,
+                                           RuntimeEngine::kWasm3),
+                         [](const testing::TestParamInfo<RuntimeEngine> &info) {
+                           return engine_to_string(info.param);
+                         });
 } // namespace hogd

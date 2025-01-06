@@ -60,6 +60,12 @@ set(BENCHMARK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/benchmark"
   CACHE PATH "Path to Google benchmark" FORCE)
 endif()
 
+# add wasm3
+set(BUILD_WASI none)
+add_subdirectory(external/wasm3)
+set(WASM3_INCLUDE_DIRS "external/wasm3/source")
+include_directories(${WASM3_INCLUDE_DIRS})
+
 # Detect number of cores - only needed for make-based ExternalProject
 include(ProcessorCount)
 ProcessorCount(N)
