@@ -189,8 +189,8 @@ Runtime::load(std::shared_ptr<Module> mod)
 std::optional<Function>
 Runtime::find_function(const char *name)
 {
-  auto f = Function(m3runtime_);
-  if (!f.initialize(name)) {
+  auto f = Function(m3runtime_.get());
+  if (!f.find_function(name)) {
     return std::nullopt;
   }
   return f;
@@ -256,9 +256,9 @@ Module::link_nargs(const char *module_name, const char *function_name,
 }
 
 bool
-Function::initialize(const char *name)
+Function::find_function(const char *name)
 {
-  M3Result err = m3_FindFunction(&m3func_, m3runtime_.get(), name);
+  M3Result err = m3_FindFunction(&m3func_, m3runtime_, name);
   detail::throw_nondeterministic_errors(err);
   return (m3func_ != nullptr);
 }

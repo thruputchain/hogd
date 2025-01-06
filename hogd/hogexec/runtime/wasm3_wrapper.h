@@ -289,14 +289,13 @@ public:
     }
   }
 
-  friend class Environment;
-  friend class Runtime;
-
-private:
+  // should be only called from within Environment::parse_module
   [[nodiscard]] bool parse();
 
+  // should be only called from within Runtime::load()
   [[nodiscard]] bool load_into(IM3Runtime runtime);
 
+private:
   // m_env exists only to extend lifetime of environment
   std::shared_ptr<M3Environment> m3env_;
   IM3Module m3module_ = nullptr;
@@ -305,11 +304,12 @@ private:
   const std::vector<uint8_t> module_raw_data_;
 };
 
-// Handle of a function. Can be obtained from runtime::find_function method by
+// Handle of a function. Can be obtained from Runtime::find_function method by
 // name.
+// Cannot outlive lifetime of a Runtime.
 class Function {
 public:
-  Function(const std::shared_ptr<M3Runtime> &runtime) : m3runtime_(runtime) {}
+  Function(M3Runtime* m3runtime) : m3runtime_(m3runtime) {}
 
   template<std::same_as<uint64_t>... Args>
   hogd::InvokeStatus<int32_t> call(Args... args)
@@ -333,16 +333,17 @@ public:
     return ret;
   }
 
-  friend class Runtime;
+  [[nodiscard]]
+  bool find_function(const char *name);
 
 private:
-  [[nodiscard]]
-  bool initialize(const char *name);
 
   static hogd::InvokeStatus<int32_t>
   m3_err_to_invoke_status(M3Result res);
 
-  std::shared_ptr<M3Runtime> m3runtime_;
+  // does not own this pointer
+  M3Runtime* m3runtime_;
+
   // Does not own the memory pointed to by m3func_.
   // The output of m3FindFunction, which sets this variable,
   // is valid for the lifetime of m3runtime_ (as per the wasm3 code).
