@@ -16,7 +16,6 @@ syscall_Log_inner(SystemCallHandler &syscall_handler,
                   std::span<const std::byte> input_buffer)
 {
   auto status = syscall_handler.log(input_buffer);
-
   if (!status) {
     return {status.error().code(), 0};
   }
