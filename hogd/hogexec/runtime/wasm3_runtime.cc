@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasm3_wrapper.h"
 #include "hogd/hogexec/runtime/runtime.h"
 
