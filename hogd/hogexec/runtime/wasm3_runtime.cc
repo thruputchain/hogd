@@ -29,9 +29,11 @@ Wasm3Context::make_new_runtime(ContractBlob const &contract,
 
   constexpr static uint32_t kMaxStackBytes = 65536;
   auto runtime = env.new_runtime(kMaxStackBytes, host_call_context.get());
-  if (!runtime->load(*module)) {
+  if (!runtime->load(module)) {
     return nullptr;
   }
+  // if runtime successfully loads module,
+  // it takes a reference to module (a shared_ptr).
 
   for (auto const &linked_fn : functions_to_link_) {
     if (!module->link_nargs(linked_fn.module_name_.c_str(),
@@ -42,10 +44,8 @@ Wasm3Context::make_new_runtime(ContractBlob const &contract,
   }
 
   // runtime owns module after loading
-  // However, module owns a copy of the wasm blob it's working off of,
-  // so we need to keep module around (at least in this impl)
   return std::make_unique<Wasm3Runtime>(std::move(host_call_context),
-                                        std::move(module), std::move(runtime));
+                                        std::move(runtime));
 }
 
 std::span<std::byte>

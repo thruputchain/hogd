@@ -1,21 +1,5 @@
 #pragma once
 
-/**
- * Copyright 2023 Geoffrey Ramseyer
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 /*
 
 Based on wasm3/platforms/cpp/wasm3_cpp.h
@@ -48,7 +32,6 @@ SOFTWARE.
 
 #include <algorithm>
 #include <cassert>
-#include <iostream>
 #include <iterator>
 #include <memory>
 #include <span>
@@ -69,10 +52,9 @@ struct HostCallContext;
 } // namespace hogd
 
 namespace wasm3 {
-/** @cond */
 namespace detail {
 
-static thread_local int32_t wasm3_err_code = 0;
+extern thread_local int32_t wasm3_err_code;
 
 typedef uint64_t *stack_type;
 typedef void *mem_type;
@@ -117,7 +99,7 @@ get_args_from_stack(stack_type &sp, mem_type mem, std::tuple<Args...> &tuple)
 template<std::same_as<uint64_t>... Args>
 const void *
 wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
-               mem_type mem)
+               mem_type mem) noexcept
 {
   m3ApiReturnType(int32_t);
 
@@ -209,293 +191,160 @@ wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
   std::terminate();
 }
 
-static bool
-is_nondeterminisic_error(M3Result result)
-{
-  if (result == m3Err_mallocFailed) {
-    return true;
-  }
-  if (result == m3Err_unrecoverableSystemError) {
-    return true;
-  }
-  if (result == m3Err_mallocFailedCodePage) {
-    return true;
-  }
-  return false;
-}
-
-static void
-throw_nondeterministic_errors(M3Result result)
-{
-  if (is_nondeterminisic_error(result)) {
-    throw std::runtime_error("nondeterministic error" + std::string(result));
-  }
-}
-
 } // namespace detail
-/** @endcond */
 
-static bool
-static_link_nargs(IM3Module io_module, const char *const i_moduleName,
-                  const char *const i_functionName,
-                  void *function, // expects signature of
-                                  // HostFnStatus<int32_t>(HostCallContext*,
-                                  // nargs repeated uint64)
-                  uint8_t nargs)
-{
-  auto arg_sig = [&nargs]() -> std::string {
-    std::string out = "i(";
-    for (auto i = 0u; i < nargs; i++) {
-      out += "I";
-    }
-    out += ")";
-    return out;
-  };
+hogd::InvokeStatus<int32_t>
+m3_err_to_invoke_status(M3Result res);
 
-  decltype(&detail::wrap_fn_return<>) wrapped_fn_pointer = nullptr;
+class Module;
+class Runtime;
+class Function;
 
-  // gross but it works
-  switch (nargs) {
-  case 0:
-    wrapped_fn_pointer = &detail::wrap_fn_return<>;
-    break;
-  case 1:
-    wrapped_fn_pointer = &detail::wrap_fn_return<uint64_t>;
-    break;
-  case 2:
-    wrapped_fn_pointer = &detail::wrap_fn_return<uint64_t, uint64_t>;
-    break;
-  case 3:
-    wrapped_fn_pointer = &detail::wrap_fn_return<uint64_t, uint64_t, uint64_t>;
-    break;
-  case 4:
-    wrapped_fn_pointer =
-        &detail::wrap_fn_return<uint64_t, uint64_t, uint64_t, uint64_t>;
-    break;
-  case 5:
-    wrapped_fn_pointer = &detail::wrap_fn_return<uint64_t, uint64_t, uint64_t,
-                                                 uint64_t, uint64_t>;
-    break;
-  case 6:
-    wrapped_fn_pointer = &detail::wrap_fn_return<uint64_t, uint64_t, uint64_t,
-                                                 uint64_t, uint64_t, uint64_t>;
-    break;
-  case 7:
-    wrapped_fn_pointer =
-        &detail::wrap_fn_return<uint64_t, uint64_t, uint64_t, uint64_t,
-                                uint64_t, uint64_t, uint64_t>;
-    break;
-  case 8:
-    wrapped_fn_pointer =
-        &detail::wrap_fn_return<uint64_t, uint64_t, uint64_t, uint64_t,
-                                uint64_t, uint64_t, uint64_t, uint64_t>;
-    break;
-  default:
-    return false;
-  }
-
-  auto cur_sig = arg_sig();
-
-  M3Result result =
-      m3_LinkRawFunctionEx(io_module, i_moduleName, i_functionName,
-                           cur_sig.c_str(), wrapped_fn_pointer, function);
-
-  return (result == m3Err_none || result == m3Err_functionLookupFailed);
-}
-
-inline static hogd::InvokeStatus<int32_t>
-m3_err_to_invoke_status(M3Result res)
-{
-  assert(res != m3Err_none);
-
-  if (res == m3Err_outOfGasError) {
-    return hogd::InvokeError{hogd::InvokeErrorCode::kOutOfGas};
-  }
-
-  if (detail::is_nondeterminisic_error(res)) {
-    return hogd::InvokeError{hogd::InvokeErrorCode::kUnrecoverable};
-  }
-
-  if (res == m3Err_hogdExit) {
-    return hogd::InvokeStatus<int32_t>{detail::wasm3_err_code};
-  }
-
-  // all other errors
-  return hogd::InvokeError{hogd::InvokeErrorCode::kDeterministic};
-}
-
-class module;
-class runtime;
-class function;
-
-/**
- * Wrapper for WASM3 environment.
- *
- * Runtimes, modules are owned by an environment.
- */
-class environment {
+// Wrapper for WASM3 environment.
+//
+// Runtimes, modules are owned by an environment.
+class Environment {
 public:
-  environment()
+  Environment()
   {
-    m_env.reset(m3_NewEnvironment(), m3_FreeEnvironment);
-    if (m_env == nullptr) {
+    m3env_.reset(m3_NewEnvironment(), m3_FreeEnvironment);
+    if (m3env_ == nullptr) {
       throw std::bad_alloc();
     }
   }
 
-  /**
-   * Create new runtime
-   *
-   * @param stack_size_bytes  size of the WASM stack for this runtime
-   * @return runtime object
-   */
-  std::unique_ptr<runtime> new_runtime(size_t stack_size_bytes, void *ctxp);
+  // Create new runtime
+  //
+  // stack_size_bytes is size of the WASM stack for this runtime.
+  // ctxp is the context pointer supplied to any linked function.
+  std::unique_ptr<Runtime> new_runtime(size_t stack_size_bytes, void *ctxp);
 
-  /**
-   * Parse a WASM module from binary data
-   *
-   * @param data  pointer to the start of the binary
-   * @param size  size of the binary
-   * @return module object
-   */
-  std::unique_ptr<module> parse_module(const uint8_t *data, size_t size);
+  // Parse a WASM module from binary data
+  std::shared_ptr<Module> parse_module(const uint8_t *data, size_t size);
 
-protected:
-  std::shared_ptr<struct M3Environment> m_env;
+private:
+  std::shared_ptr<struct M3Environment> m3env_;
 };
 
-/**
- * Wrapper for the runtime, where modules are loaded and executed.
- */
-class runtime {
+// Wrapper for the runtime, where modules are loaded and executed.
+class Runtime {
 public:
-  /**
-   * Load the module into runtime
-   * @param mod  module parsed by environment::parse_module
-   */
-  bool __attribute__((warn_unused_result)) load(module &mod);
+  Runtime(const std::shared_ptr<M3Environment> &env, size_t stack_size_bytes,
+          void *ctxp)
+    : m3env_(env)
+  {
+    m3runtime_.reset(m3_NewRuntime(m3env_.get(), stack_size_bytes, ctxp),
+                     &m3_FreeRuntime);
+    if (m3runtime_ == nullptr) {
+      throw std::bad_alloc();
+    }
+  }
 
-  /**
-   * Get a function handle by name
-   *
-   * If the function is not found, returns nullopt
-   * @param name  name of a function, c-string
-   * @return function object
-   */
-  std::optional<function> find_function(const char *name);
+  // Delete copy and move
+  Runtime(const Runtime &) = delete;
+  Runtime &operator=(const Runtime &) = delete;
+  Runtime(const Runtime &&) = delete;
+  Runtime &operator=(Runtime &&) = delete;
+
+  // Load the module into runtime
+  // @param mod  module parsed by environment::parse_module
+  //
+  // If this function returns true, then this object takes
+  // ownership of module, and the module cannot be loaded
+  // into another runtime.  The shared_ptr will be kept alive.
+  //
+  // wasm3 does not allow linking into a module
+  // before the module is loaded.  Thus we use shared_ptr here,
+  // instead of unique_ptr.
+  [[nodiscard]] bool load(std::shared_ptr<Module> mod);
+
+  // Get a function handle by name
+  //
+  // If the function is not found, returns nullopt
+  // @param name  name of a function, c-string
+  // @return function object
+  std::optional<Function> find_function(const char *name);
 
   std::span<std::byte> get_memory();
   std::span<const std::byte> get_memory() const;
 
   friend class environment;
 
-  runtime(const std::shared_ptr<M3Environment> &env, size_t stack_size_bytes,
-          void *ctxp)
-    : m_env(env)
-  {
-    m_runtime.reset(m3_NewRuntime(env.get(), stack_size_bytes, ctxp),
-                    &m3_FreeRuntime);
-    if (m_runtime == nullptr) {
-      throw std::bad_alloc();
-    }
-  }
-
-protected:
-  /* runtime extends the lifetime of the environment */
-  std::shared_ptr<M3Environment> m_env;
-  std::shared_ptr<M3Runtime> m_runtime;
+private:
+  // runtime extends the lifetime of the environment
+  std::shared_ptr<M3Environment> m3env_;
+  std::shared_ptr<M3Runtime> m3runtime_;
+  std::vector<std::shared_ptr<Module>> loaded_modules_;
 };
 
-/**
- * Module object holds a webassembly module
- *
- * It can be constructed by parsing a WASM binary using
- * environment::parse_module. Functions can be linked to the loaded module. Once
- * constructed, modules can be loaded into the runtime.
- */
-class module {
+// Module object holds a webassembly module
+//
+// It can be constructed by parsing a WASM binary using
+// environment::parse_module. Functions can be linked to the loaded module. Once
+// constructed, modules can be loaded into the runtime.
+//
+// The module_ variable is a nullptr until parse() is called.
+// Loading a module that has not been parsed into a runtime will always fail.
+class Module {
 public:
-  // expected signature: HostFnStatus<ret_type>(HostCallContext*, uint64t
-  // repeated nargs)
-  bool link_nargs(const char *module, const char *function_name,
-                  void *function_pointer, uint8_t nargs);
-
-  ~module()
-  {
-    // after loading, the Module object is owned by the Runtime (i.e. when
-    // m_loaded=true) and this wrapper class can be dropped.
-    if ((!m_loaded) && (m_module != nullptr)) {
-      m3_FreeModule(m_module);
-    }
-  }
-
-  friend class environment;
-  friend class runtime;
-
-  module(const uint8_t *data, size_t size,
-         const std::shared_ptr<M3Environment> &env) :m_env(env),
-      m_moduleRawData(data, data + size)
+  Module(const uint8_t *data, size_t size,
+         const std::shared_ptr<M3Environment> &env)
+    : m3env_(env), module_raw_data_(data, data + size)
   {}
 
-  bool __attribute__((warn_unused_result)) init() { return parse(); }
+  // Delete copy and move
+  Module(const Module &) = delete;
+  Module &operator=(const Module &) = delete;
+  Module(const Module &&) = delete;
+  Module &operator=(Module &&) = delete;
 
-protected:
-  module(module &&) = delete;
-  module(module &) = delete;
-  module &operator=(const module &) = delete;
+  // expected signature: HostFnResult(HostCallContext*, uint64_t
+  // repeated nargs)
+  bool link_nargs(const char *module_name, const char *function_name,
+                  void *function_pointer, uint8_t nargs);
 
-  // do not reuse module object
-  bool __attribute__((warn_unused_result)) parse()
+  ~Module()
   {
-    if (m_module) {
-      return false;
+    // after loading, the Module object is owned by the Runtime (i.e. when
+    // loaded_=true) and this wrapper class can be dropped.
+    // Loading also takes ownership of a reference to this object,
+    // so that module_raw_data_ is not dropped early.
+    if ((!loaded_) && (m3module_ != nullptr)) {
+      m3_FreeModule(m3module_);
     }
-
-    IM3Module p;
-    M3Result err = m3_ParseModule(m_env.get(), &p, m_moduleRawData.data(),
-                                  m_moduleRawData.size());
-    detail::throw_nondeterministic_errors(err);
-    if (err != m3Err_none) {
-      return false;
-    }
-
-    if (m_loaded) {
-      m3_FreeModule(m_module);
-    }
-    m_module = p;
-    return true;
   }
 
-  bool __attribute__((warn_unused_result)) load_into(IM3Runtime runtime)
-  {
-    M3Result err = m3_LoadModule(runtime, m_module);
-    detail::throw_nondeterministic_errors(err);
-    if (err != m3Err_none) {
-      return false;
-    }
-    m_loaded = true;
-    return true;
-  }
+  friend class Environment;
+  friend class Runtime;
+
+private:
+  [[nodiscard]] bool parse();
+
+  [[nodiscard]] bool load_into(IM3Runtime runtime);
 
   // m_env exists only to extend lifetime of environment
-  std::shared_ptr<M3Environment> m_env;
-  IM3Module m_module = nullptr;
+  std::shared_ptr<M3Environment> m3env_;
+  IM3Module m3module_ = nullptr;
 
-  bool m_loaded = false;
-  const std::vector<uint8_t> m_moduleRawData;
+  bool loaded_ = false;
+  const std::vector<uint8_t> module_raw_data_;
 };
 
-/**
- * Handle of a function. Can be obtained from runtime::find_function method by
- * name.
- */
-class function {
+// Handle of a function. Can be obtained from runtime::find_function method by
+// name.
+class Function {
 public:
+  Function(const std::shared_ptr<M3Runtime> &runtime) : m3runtime_(runtime) {}
+
   template<std::same_as<uint64_t>... Args>
   hogd::InvokeStatus<int32_t> call(Args... args)
   {
+    if (!m3func_) {
+      return hogd::InvokeError{hogd::InvokeErrorCode::kDeterministic};
+    }
+
     const void *arg_ptrs[] = {reinterpret_cast<const void *>(&args)...};
-    M3Result res = m3_Call(m_func, sizeof...(args), arg_ptrs);
+    M3Result res = m3_Call(m3func_, sizeof...(args), arg_ptrs);
 
     if (res != m3Err_none) {
       return m3_err_to_invoke_status(res);
@@ -503,7 +352,7 @@ public:
 
     int32_t ret = 0;
     const void *ret_ptrs[] = {&ret};
-    res = m3_GetResults(m_func, 1, ret_ptrs);
+    res = m3_GetResults(m3func_, 1, ret_ptrs);
 
     if (res == m3Err_argumentCountMismatch) {
       return hogd::InvokeError{hogd::InvokeErrorCode::kDeterministic};
@@ -516,79 +365,18 @@ public:
     return hogd::InvokeError{hogd::InvokeErrorCode::kUnrecoverable};
   }
 
-  friend class runtime;
+  friend class Runtime;
 
-  function(const std::shared_ptr<M3Runtime> &runtime) : m_runtime(runtime) {}
+private:
+  [[nodiscard]]
+  bool initialize(const char *name);
 
-  bool __attribute__((warn_unused_result)) initialize(const char *name)
-  {
-    M3Result err = m3_FindFunction(&m_func, m_runtime.get(), name);
-    detail::throw_nondeterministic_errors(err);
-    return (m_func != nullptr);
-  }
-
-protected:
-  std::shared_ptr<M3Runtime> m_runtime;
-  M3Function *m_func = nullptr;
+  std::shared_ptr<M3Runtime> m3runtime_;
+  // Does not own the memory pointed to by m3func_.
+  // The output of m3FindFunction, which sets this variable,
+  // is valid for the lifetime of m3runtime_ (as per the wasm3 code).
+  // Thus this object is freely copyable.
+  M3Function *m3func_ = nullptr;
 };
-
-inline std::unique_ptr<runtime>
-environment::new_runtime(size_t stack_size_bytes, void *ctxp)
-{
-  return std::make_unique<runtime>(m_env, stack_size_bytes, ctxp);
-}
-
-inline std::unique_ptr<module>
-environment::parse_module(const uint8_t *data, size_t size)
-{
-  auto out = std::make_unique<module>(data, size, m_env);
-  if (out->init()) {
-    return out;
-  }
-  return nullptr;
-}
-
-inline bool __attribute__((warn_unused_result))
-runtime::load(module &mod)
-{
-  return mod.load_into(m_runtime.get());
-}
-
-inline std::optional<function>
-runtime::find_function(const char *name)
-{
-  auto f = function(m_runtime);
-  if (!f.initialize(name)) {
-    return std::nullopt;
-  }
-  return f;
-}
-
-inline std::span<std::byte>
-runtime::get_memory()
-{
-  uint32_t len = 0;
-  uint8_t *mem = m3_GetMemory(m_runtime.get(), &len, 0);
-  return std::span<std::byte>{reinterpret_cast<std::byte *>(mem), len};
-}
-
-inline std::span<const std::byte>
-runtime::get_memory() const
-{
-  uint32_t len = 0;
-  const uint8_t *mem = m3_GetMemory(m_runtime.get(), &len, 0);
-  return std::span<const std::byte>{reinterpret_cast<const std::byte *>(mem),
-                                    len};
-}
-
-// expected signature: HostFnStatus<int32_t>(HostCallContext*, uint64t repeated
-// nargs)
-inline bool
-module::link_nargs(const char *module, const char *function_name,
-                   void *function_pointer, uint8_t nargs)
-{
-  return static_link_nargs(m_module, module, function_name, function_pointer,
-                           nargs);
-}
 
 } // namespace wasm3

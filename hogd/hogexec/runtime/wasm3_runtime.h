@@ -45,7 +45,7 @@ private:
   }
 
   std::vector<LinkedFunction> functions_to_link_;
-  wasm3::environment env;
+  wasm3::Environment env;
 };
 
 // Wrapper around one Wasm module (one wasmi instance). Can be invoked, and
@@ -55,10 +55,8 @@ class Wasm3Runtime : public Runtime {
 public:
   // should be called only from within WasmiContext::make_new_runtime
   Wasm3Runtime(std::unique_ptr<HostCallContext> host_call_context,
-               std::unique_ptr<wasm3::module> wasm3_module,
-               std::unique_ptr<wasm3::runtime> wasm3_runtime)
+               std::unique_ptr<wasm3::Runtime> wasm3_runtime)
     : Runtime(std::move(host_call_context)),
-      wasm3_module_(std::move(wasm3_module)),
       wasm3_runtime_(std::move(wasm3_runtime))
   {}
 
@@ -78,8 +76,7 @@ public:
 private:
   InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
 
-  std::unique_ptr<wasm3::module> wasm3_module_;
-  std::unique_ptr<wasm3::runtime> wasm3_runtime_;
+  std::unique_ptr<wasm3::Runtime> wasm3_runtime_;
   uint64_t available_gas_ = 0;
 };
 

@@ -75,7 +75,7 @@ public:
   // code from the syscall).
   //
   // Imported functions functions have a signature of
-  // std::pair<HostFnErrorCode, int32_t>
+  // HostFnResult
   // function(HostCallContext* context, uint64_t arg0,...);
   //
   // Context is the object contained in a WasmiRuntime. If the HostFnStatus is

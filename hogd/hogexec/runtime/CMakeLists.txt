@@ -10,6 +10,7 @@ add_library(
   runtime
   wasmi_runtime.cc
   wasm3_runtime.cc
+  wasm3_wrapper.cc
   runtime.cc
   status.cc
   syscall_crypto.cc
