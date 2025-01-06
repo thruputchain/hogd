@@ -74,7 +74,7 @@ arg_from_stack(T &dest, stack_type &_sp, mem_type mem)
 }
 
 template<typename... Args>
-static void
+void
 get_args_from_stack(stack_type &sp, mem_type mem, std::tuple<Args...> &tuple)
 {
   std::apply([&](auto &...item) { (arg_from_stack(item, sp, mem), ...); },
