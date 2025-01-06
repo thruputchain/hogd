@@ -57,17 +57,12 @@ namespace detail {
 
 extern thread_local int32_t wasm3_err_code;
 
-typedef uint64_t *stack_type;
-typedef void *mem_type;
-template<typename T, typename...> struct first_type {
-  typedef T type;
-};
-
-typedef const void *(*m3_api_raw_fn)(IM3Runtime, uint64_t *, void *);
+using stack_type = uint64_t*;
+using mem_type = void *;
 
 template<typename T>
 void
-arg_from_stack(T &dest, stack_type &_sp, mem_type mem)
+arg_from_stack(T &dest, stack_type &_sp)
 {
   m3ApiGetArg(T, tmp);
   dest = tmp;
@@ -75,68 +70,68 @@ arg_from_stack(T &dest, stack_type &_sp, mem_type mem)
 
 template<typename... Args>
 void
-get_args_from_stack(stack_type &sp, mem_type mem, std::tuple<Args...> &tuple)
+get_args_from_stack(stack_type &sp, std::tuple<Args...> &tuple)
 {
-  std::apply([&](auto &...item) { (arg_from_stack(item, sp, mem), ...); },
+  std::apply([&](auto &...item) { (arg_from_stack(item, sp), ...); },
              tuple);
 }
 
 template<std::same_as<uint64_t>... Args>
 const void *
 wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
-               mem_type mem) noexcept
+               mem_type /* unused */) noexcept
 {
   m3ApiReturnType(int32_t);
 
   using args_tuple_t = std::tuple<Args...>;
   args_tuple_t args;
-  get_args_from_stack(_sp, mem, args);
+  get_args_from_stack(_sp, args);
 
   void *fn_pointer = _ctx->userdata;
-  constexpr size_t nargs = std::tuple_size_v<args_tuple_t>;
+  constexpr size_t kNumArgs = std::tuple_size_v<args_tuple_t>;
   hogd::detail::TrampolineResult result;
 
-  if constexpr (nargs == 0) {
+  if constexpr (kNumArgs == 0) {
     result = hogd::detail::c_call_0args(fn_pointer, m3_GetUserData(rt));
   }
-  else if constexpr (nargs == 1) {
+  else if constexpr (kNumArgs == 1) {
     result = hogd::detail::c_call_1args(fn_pointer, m3_GetUserData(rt),
                                         std::get<0>(args));
   }
-  else if constexpr (nargs == 2) {
+  else if constexpr (kNumArgs == 2) {
     result = hogd::detail::c_call_2args(fn_pointer, m3_GetUserData(rt),
                                         std::get<0>(args), std::get<1>(args));
   }
-  else if constexpr (nargs == 3) {
+  else if constexpr (kNumArgs == 3) {
     result = hogd::detail::c_call_3args(fn_pointer, m3_GetUserData(rt),
                                         std::get<0>(args), std::get<1>(args),
                                         std::get<2>(args));
   }
-  else if constexpr (nargs == 4) {
+  else if constexpr (kNumArgs == 4) {
     result = hogd::detail::c_call_4args(fn_pointer, m3_GetUserData(rt),
                                         std::get<0>(args), std::get<1>(args),
                                         std::get<2>(args), std::get<3>(args));
   }
-  else if constexpr (nargs == 5) {
+  else if constexpr (kNumArgs == 5) {
     result = hogd::detail::c_call_5args(fn_pointer, m3_GetUserData(rt),
                                         std::get<0>(args), std::get<1>(args),
                                         std::get<2>(args), std::get<3>(args),
                                         std::get<4>(args));
   }
-  else if constexpr (nargs == 6) {
+  else if constexpr (kNumArgs == 6) {
     result = hogd::detail::c_call_6args(fn_pointer, m3_GetUserData(rt),
                                         std::get<0>(args), std::get<1>(args),
                                         std::get<2>(args), std::get<3>(args),
                                         std::get<4>(args), std::get<5>(args));
   }
-  else if constexpr (nargs == 7) {
+  else if constexpr (kNumArgs == 7) {
     result = hogd::detail::c_call_7args(fn_pointer, m3_GetUserData(rt),
                                         std::get<0>(args), std::get<1>(args),
                                         std::get<2>(args), std::get<3>(args),
                                         std::get<4>(args), std::get<5>(args),
                                         std::get<6>(args));
   }
-  else if constexpr (nargs == 8) {
+  else if constexpr (kNumArgs == 8) {
     result = hogd::detail::c_call_8args(fn_pointer, m3_GetUserData(rt),
                                         std::get<0>(args), std::get<1>(args),
                                         std::get<2>(args), std::get<3>(args),
