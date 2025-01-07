@@ -4,9 +4,10 @@
 #include <cstddef>
 #include <memory>
 #include <span>
-#include <string_view>
+#include <string>
 #include <utility>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"

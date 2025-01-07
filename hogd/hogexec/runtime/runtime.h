@@ -56,6 +56,13 @@ engine_has_eager_link_guards(RuntimeEngine engine)
   throw std::runtime_error("unknown engine");
 }
 
+// Abstract class that abstracts the context associated with a sandbox runtime.
+// Most sandbox implementations have some amount of shared state (i.e., a list
+// of function pointers to link, or an environment allocator).
+//
+// We assume each RuntimeContext can be used by multiple Runtimes, but do not
+// assume that (re)using RuntimeContext across transactions is deterministic,
+// nor do we assume that a RuntimeContext is threadsafe.
 class RuntimeContext {
 public:
   RuntimeContext() = default;
@@ -109,6 +116,8 @@ std::shared_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
 // create RuntimeContext, and initialize with hogexec's imported function(s)
 std::shared_ptr<RuntimeContext> make_hogexec_context(RuntimeEngine engine);
 
+// Virtual class that abstracts the interface required for an invocable
+// sandbox.  Can be created by an instance of RuntimeContext.
 class Runtime {
 public:
   Runtime(std::unique_ptr<HostCallContext> host_call_context);

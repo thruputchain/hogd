@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime_trampoline/ffi_trampolines.h"
 #include "wasm3.h"
 
 /*
@@ -71,27 +70,6 @@ throw_nondeterministic_errors(M3Result result)
   if (is_nondeterminisic_error(result)) {
     throw std::runtime_error("nondeterministic error" + std::string(result));
   }
-}
-
-} // namespace
-
-hogd::InvokeStatus<int32_t>
-Function::m3_err_to_invoke_status(M3Result res)
-{
-  assert(res != m3Err_none);
-
-  if (res == m3Err_outOfGasError) {
-    return hogd::InvokeError{hogd::InvokeErrorCode::kOutOfGas};
-  }
-  if (is_nondeterminisic_error(res)) {
-    return hogd::InvokeError{hogd::InvokeErrorCode::kUnrecoverable};
-  }
-  if (res == m3Err_hogdExit) {
-    return hogd::InvokeStatus<int32_t>{detail::wasm3_err_code};
-  }
-
-  // all other errors
-  return hogd::InvokeError{hogd::InvokeErrorCode::kDeterministic};
 }
 
 bool
@@ -162,6 +140,27 @@ static_link_nargs(IM3Module io_module, const char *const i_moduleName,
   return (result == m3Err_none || result == m3Err_functionLookupFailed);
 }
 
+} // namespace
+
+hogd::InvokeStatus<int32_t>
+Function::m3_err_to_invoke_status(M3Result res)
+{
+  assert(res != m3Err_none);
+
+  if (res == m3Err_outOfGasError) {
+    return hogd::InvokeError{hogd::InvokeErrorCode::kOutOfGas};
+  }
+  if (is_nondeterminisic_error(res)) {
+    return hogd::InvokeError{hogd::InvokeErrorCode::kUnrecoverable};
+  }
+  if (res == m3Err_hogdExit) {
+    return hogd::InvokeStatus<int32_t>{detail::wasm3_err_code};
+  }
+
+  // all other errors
+  return hogd::InvokeError{hogd::InvokeErrorCode::kDeterministic};
+}
+
 std::unique_ptr<Runtime>
 Environment::new_runtime(size_t stack_size_bytes, void *ctxp)
 {
@@ -183,7 +182,7 @@ Runtime::load(std::shared_ptr<Module> mod)
 {
   bool load_result = mod->load_into(m3runtime_.get());
   if (load_result) {
-    loaded_modules_.emplace_back(mod);
+    loaded_modules_.emplace_back(std::move(mod));
   }
   return load_result;
 }
