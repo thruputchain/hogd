@@ -4,6 +4,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <string>
 
 #include "contract.hh"
 #include "hogd/base/types.h"

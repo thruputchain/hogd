@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include "hogd/hogexec/runtime/status.h"
 #include "wasm3.h"
