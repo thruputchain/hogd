@@ -7,6 +7,8 @@
 #include <optional>
 
 #include "contract.hh"
+#include "hogd/base/xdr_util.h"
+#include "storage_object.hh"
 #include "types.hh"
 #include "x23/mvar.h"
 
@@ -25,6 +27,7 @@ public:
   try_get_contract_by_hash(SHA256Hash const &hash);
   std::optional<SHA256Hash>
   try_get_deployed_contract_hash(ContractAddress const &addr);
+  const StorageObject *try_get_snapshot_object(AddressAndKey const &addrkey);
 
 private:
   // Note: the contract_cache_ does not need to be reset (although it is not
@@ -35,6 +38,9 @@ private:
   // Neither does the deployment cache
   x23::MVar<std::map<ContractAddress, std::optional<SHA256Hash>>>
       deployment_cache_;
+  // snapshot cache needs to be reset after each block
+  x23::MVar<std::unordered_map<AddressAndKey, std::unique_ptr<StorageObject>>>
+      snapshot_object_cache_;
 };
 
 } // namespace hogd

@@ -9,6 +9,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime_cache.h"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -143,6 +144,60 @@ InvocationFrameStack::lookup_locally_deployed_contract(
     }
   }
   return std::nullopt;
+}
+
+ItemView *
+InvocationFrame::get_item_view(AddressAndKey const &addrkey)
+{
+  auto it = modified_items_.find(addrkey);
+
+  if (it != modified_items_.end()) {
+    return &(it->second);
+  }
+
+  return nullptr;
+}
+
+void
+InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
+{
+  assert(modified_items_.find(addrkey) == modified_items_.end());
+  modified_items_.emplace(addrkey, std::move(new_view));
+}
+
+ItemView &
+InvocationFrameStack::get_item_view(StorageKey const &key)
+{
+  const int32_t stack_depth = frame_stack_.size();
+  assert(stack_depth > 0);
+
+  auto &active_frame = get_active_frame();
+  AddressAndKey addrkey{.address =
+                            active_frame.active_invocation_.invoked_address,
+                        .key = key};
+
+  // do we already have a frame in the top active frame
+  if (auto *active_frame_view = active_frame.get_item_view(addrkey)) {
+    return *active_frame_view;
+  }
+
+  // otherwise create view in active frame, by either copying from
+  // a parent call frame or from storage
+  for (int32_t i = stack_depth - 2; i >= 0; --i) {
+    auto &frame = frame_stack_[i];
+
+    if (auto const *local_view = frame.get_item_view(addrkey)) {
+      active_frame.add_item_view(addrkey, *local_view);
+      return *active_frame.get_item_view(addrkey);
+    }
+  }
+
+  // item view not yet accessed in current transaction; looking up in snapshot
+  auto snapshot_item = snapshot_cache_.try_get_snapshot_object(addrkey);
+
+  // snapshot_item might be nullptr; this is handled in ItemView
+  frame_stack_.back().add_item_view(addrkey, ItemView(snapshot_item));
+  return *frame_stack_.back().get_item_view(addrkey);
 }
 
 } // namespace hogd

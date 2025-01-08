@@ -4,6 +4,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <variant>
 
 #include "hogd/base/xdr_util.h"
@@ -99,7 +100,7 @@ public:
 
   std::optional<StorageObjectType> get_object_type() const;
 
-  template<typename ItemType> const auto *get()
+  template<typename ItemType> const auto *get() const
   {
     return std::holds_alternative<ItemType>(delta_args_)
                ? &std::get<ItemType>(delta_args_)

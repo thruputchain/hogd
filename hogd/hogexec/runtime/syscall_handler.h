@@ -80,6 +80,11 @@ public:
 
   bool current_runtime_is_revert_poisoned() const;
 
+  SyscallStatus<const Bytestring> get_bytestring(StorageKey const &storage_key);
+  SyscallStatus<void>
+  set_bytestring(StorageKey const &storage_key,
+                 std::span<const std::byte> input_bytestring);
+
 private:
   WasmiContext wasmi_context_;
   const SignedTransaction signed_tx_;

@@ -9,12 +9,15 @@
 #include <unordered_set>
 #include <vector>
 
+#include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/item_view.h"
 #include "transaction.hh"
 
 namespace hogd {
 
 struct RuntimeCacheEntry;
 struct InvokeResult;
+class StorageSnapshotCache;
 
 // Stores all relevant data structures for one Invocation in a transaction.
 class InvocationFrame {
@@ -47,6 +50,10 @@ public:
 
   void poison_visited_runtimes();
 
+  // returned pointer is invalidated by any call to add_item_view
+  ItemView *get_item_view(AddressAndKey const &addrkey);
+  void add_item_view(AddressAndKey const &addrkey, ItemView new_view);
+
 private:
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
@@ -58,13 +65,17 @@ private:
   // runtimes, unless the runtime is marked UNWIND_SAFE (not this PR) Failed
   // call frames immediately poison their set of visited runtimes.
   std::unordered_set<RuntimeCacheEntry *> visited_runtimes_;
+
+  std::unordered_map<AddressAndKey, ItemView> modified_items_;
 };
 
 // Stack of invocation frames.
 class InvocationFrameStack {
 public:
-  InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action)
-    : last_frame_action_(std::move(last_frame_action))
+  InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action,
+                       StorageSnapshotCache &snapshot_cache)
+    : last_frame_action_(std::move(last_frame_action)),
+      snapshot_cache_(snapshot_cache)
   {}
 
   auto &get_active_frame(this auto &self)
@@ -90,9 +101,15 @@ public:
   std::optional<SHA256Hash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
+  // refreshes the itemview into top call frame
+  // Reference is invalidated by any other call to get_item_view
+  // or any new invocation frame.
+  ItemView &get_item_view(StorageKey const &key);
+
 private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &)> last_frame_action_;
+  StorageSnapshotCache &snapshot_cache_;
 };
 
 } // namespace hogd

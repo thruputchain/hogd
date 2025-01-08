@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "contract.hh"
+#include "storage_object.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -34,6 +35,22 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
     auto it = cache->find(hash);
     if (it != cache->end()) {
       return it->second;
+    }
+  }
+
+  // TODO(geoff): query from storage (unimplemented here)
+
+  return nullptr;
+}
+
+const StorageObject *
+StorageSnapshotCache::try_get_snapshot_object(AddressAndKey const &addrkey)
+{
+  {
+    auto cache = snapshot_object_cache_.take();
+    auto it = cache->find(addrkey);
+    if (it != cache->end()) {
+      return it->second.get();
     }
   }
 
