@@ -14,7 +14,8 @@
 
 namespace x23 {
 
-CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
+CoroPoll::CoroPoll(ThreadPool &pool)
+  : CoroPollImpl(pool), buflk_(pool)
 {
   pollthread_ = std::thread(&CoroPoll::loop, this);
 }

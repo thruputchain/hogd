@@ -10,6 +10,7 @@
 #include <x23/async.h>
 #include <x23/cleanup.h>
 #include <x23/config.h>
+#include <x23/corosync.h>
 #include <x23/err.h>
 #include <x23/fileio.h>
 #include <x23/mvar.h>
@@ -248,6 +249,7 @@ public:
                                                           std::string port);
 
 private:
+  CoroSharedLock<CoroLock> buflk_;
   void loop();
 
   std::thread pollthread_;

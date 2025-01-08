@@ -612,6 +612,19 @@ private:
   Detached() noexcept = default;
 };
 
+// A concept that's 99% likely to determine whether a type is
+// awaitable.  You could have types that are awaitable but only with
+// specific promise types not including Detached::promise_type, in
+// which case this will fail even if the type is awaitable in other
+// types of coroutine.
+template<typename A>
+concept is_awaitable =
+    requires(A a, std::coroutine_handle<Detached::promise_type> h) {
+      { a.await_ready() } -> std::same_as<bool>;
+      a.await_suspend(h);
+      a.await_resume();
+    };
+
 namespace detail {
 
 // If final_suspend doesn't suspend a coroutine, then the coroutine

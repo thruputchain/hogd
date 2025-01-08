@@ -16,7 +16,7 @@ class TestLock {
 public:
   using Holder = std::unique_lock<TestLock>;
 
-  bool try_lock(this auto &&self, bool want_notify = false)
+  bool try_lock(this auto &&self, bool want_notify = false) noexcept
   {
     int prev = self.status_.exchange(kLocked, std::memory_order_acquire);
     if (prev == kLockedWantNotify || (prev == kLocked && want_notify))
@@ -28,22 +28,22 @@ public:
       self.block_while_inhibited();
     return true;
   }
-  void lock(this auto &&self)
+  void lock(this auto &&self) noexcept
   {
     while (!self.try_lock(true))
       self.status_.wait(kLockedWantNotify);
   }
-  void unlock()
+  void unlock() noexcept
   {
     if (status_.exchange(kUnlocked) == kLockedWantNotify)
       status_.notify_all();
   }
 
-  bool busy() const
+  bool busy() const noexcept
   {
     return status_.load(std::memory_order_acquire) != kUnlocked;
   }
-  void block_until_free()
+  void block_until_free() noexcept
   {
     for (;;) {
       int prev = status_.load(std::memory_order_acquire);
@@ -68,13 +68,13 @@ private:
 // number of buckets for shared lockers, so that different shared
 // lockers can touch different cache lines.
 class SharedLock : public TestLock {
-  // One or more if these Inhibitor counters are used to delay an
+  // One or more of these Inhibitor counters are used to delay an
   // exclusive locker.
   struct alignas(hardware_destructive_interference_size) Inhibitor {
     std::atomic_uint count{0};
     std::atomic_bool want_wake{false};
 
-    void inc(TestLock *tl)
+    void inc(TestLock *tl) noexcept
     {
       for (;;) {
         count.fetch_add(1);
@@ -84,14 +84,14 @@ class SharedLock : public TestLock {
         tl->block_until_free();
       }
     }
-    void dec()
+    void dec() noexcept
     {
-      if (count.fetch_sub(1) == 0 && want_wake.load()) {
+      if (count.fetch_sub(1) == 1 && want_wake.load()) {
         want_wake = false;
         count.notify_all();
       }
     }
-    void block()
+    void block() noexcept
     {
       while (auto n = count.load()) {
         want_wake = true;
@@ -103,14 +103,14 @@ class SharedLock : public TestLock {
 public:
   const unsigned nshared_;
 
-  explicit SharedLock(unsigned nshared = 1)
+  explicit SharedLock(unsigned nshared = 1) noexcept
     : nshared_(nshared), inhibitors_(new Inhibitor[nshared_])
   {
     assert(nshared);
   }
   ~SharedLock() { delete[] inhibitors_; }
 
-  void block_while_inhibited()
+  void block_while_inhibited() noexcept
   {
     for (size_t i = 0; i < nshared_; ++i)
       inhibitors_[i].block();
@@ -136,13 +136,15 @@ public:
 
     SharedHolder &operator=(SharedHolder &&other) noexcept
     {
-      reset();
-      inh_ = std::exchange(other.inh_, nullptr);
-      return *this;
+      if (&other != this) {
+	reset();
+	inh_ = std::exchange(other.inh_, nullptr);
+	return *this;
+      }
     }
 
     // Release the lock immediately (if Holder contains one)
-    void reset()
+    void reset() noexcept
     {
       if (inh_) {
         inh_->dec();
@@ -156,45 +158,10 @@ public:
 
   // Don't call it lock_shared() because the interface is different
   // from shared_mutex.
-  SharedHolder hold_shared() { return *this; }
+  SharedHolder hold_shared() noexcept { return *this; }
 
 protected:
   Inhibitor *inhibitors_;
-};
-
-// A pointer that is good only until you suspend the current
-// coroutine, which is the duration of the mutual exclusion provided
-// by CoroSharedLock::coro_lock_shared.
-template<typename T> class CoroTempPtr {
-public:
-  using value_type = T;
-
-  CoroTempPtr(T *p = nullptr) : p_(p) { init(); }
-  CoroTempPtr &operator=(T *p)
-  {
-    p_ = p;
-    init();
-    return *this;
-  }
-
-  T *get() const
-  {
-    check();
-    return p_;
-  }
-  operator T &() const { return *get(); }
-  T *operator->() const { return get(); }
-
-private:
-  T *p_;
-#ifndef NDEBUG
-  ThreadPool::SuspendCount sc_;
-  void init() { sc_ = ThreadPool::get_suspend_count(); }
-  void check() const { assert(!p_ || sc_ == ThreadPool::get_suspend_count()); }
-#else  // NDEBUG
-  void init() {}
-  void check() const {}
-#endif // NDEBUG
 };
 
 } // namespace x23
