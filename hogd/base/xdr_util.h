@@ -5,7 +5,9 @@
 #include <array>
 #include <cstdint>
 
+#include "hogd/base/span.h"
 #include "hogd/base/types.h"
+
 #include "types.hh"
 
 namespace hogd {
@@ -43,5 +45,15 @@ template<std::size_t N> struct std::hash<std::array<uint8_t, N>> {
   {
     return std::hash<std::string_view>{}(
         std::string_view(reinterpret_cast<const char *>(array.data()), N));
+  }
+};
+
+// enable hashing of important XDR types
+template<> struct std::hash<hogd::AddressAndKey> {
+  std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept
+  {
+    return std::hash<std::string_view>{}(
+        {reinterpret_cast<const char *>(&addrkey),
+         sizeof(hogd::AddressAndKey)});
   }
 };

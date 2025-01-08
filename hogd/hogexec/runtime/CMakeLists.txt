@@ -16,6 +16,7 @@ add_library(
   syscall_invoke.cc
   syscall_log.cc
   syscall_contract.cc
+  item_view.cc
   syscall_crypto.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
@@ -28,6 +29,7 @@ add_executable(
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
+  item_view_test.cc
 )
 target_link_libraries(
   runtime

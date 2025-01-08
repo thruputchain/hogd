@@ -159,7 +159,7 @@ errors:
   - name: "InsufficientGasForInvocation"
     number: 7
     doc: "Insufficient gas in call frame to supply requested gas limit for child invocation"
-  - name: "InvalidSyscallInput"
+  - name: "InvalidInput"
     number: 8
     doc: "Invalid input to a syscall, such as subtracting below 0 on an nnint64"
 

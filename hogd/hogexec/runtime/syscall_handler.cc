@@ -252,7 +252,7 @@ SystemCallHandler::log(std::span<const std::byte> message)
 
   if (message.size() > kMaxLogMessageLen) {
     // log message too long, return error
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kInvalidInput};
   }
 
   invocation_frame_stack_.get_active_frame().log(message);

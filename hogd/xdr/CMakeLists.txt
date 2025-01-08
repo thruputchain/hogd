@@ -3,6 +3,7 @@ add_xdr(
 	types.x 
 	syscall.x 
 	contract.x
+	storage_object.x
 	ffi_enums.x
 	transaction.x)
 
