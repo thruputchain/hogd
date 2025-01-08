@@ -121,3 +121,18 @@ case kNonnegativeInt64SetAdd:
 
 typedef StorageDelta StorageDeltaVec<>;
 
+// empty struct is legal XDR, as per RFC4506
+struct VoidCheck {
+  void;
+};
+
+// Technically allowed by RFC4506, but unclear why this matters
+struct VoidCheckStrange {
+  void;
+  unsigned int x;
+  void;
+  unsigned int y;
+  void;
+};
+
+

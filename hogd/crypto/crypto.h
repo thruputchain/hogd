@@ -12,6 +12,8 @@
 
 #include "hogd/base/types.h"
 #include "types.hh"
+#include "x23/serialize.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -19,18 +21,31 @@ using Siphash24Key = std::array<uint8_t, 16>;
 
 // sha256 returns a SHA256 hash of the input.
 inline SHA256Hash
-sha256(std::span<const std::byte> input)
+sha256(const void *data, size_t size)
 {
   SHA256Hash out;
 
   [[maybe_unused]]
-  int res = crypto_hash_sha256(out.data(),
-                               reinterpret_cast<const uint8_t *>(input.data()),
-                               input.size());
+  int res =
+      crypto_hash_sha256(out.data(), static_cast<const uint8_t *>(data), size);
 
   // libsodium's version of sha256 (on release 1.20) never returns errors.
   assert(res == 0);
   return out;
+}
+
+inline SHA256Hash
+sha256(x23::is_bytespan auto const &span)
+{
+  return sha256(span.data(), span.size());
+}
+
+template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
+inline SHA256Hash
+sha256(T const &value)
+{
+  auto buf = x23::serialize(value);
+  return sha256(buf);
 }
 
 // siphash24 returns a 64-bit message authentication code from a

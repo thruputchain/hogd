@@ -213,14 +213,14 @@ enum_body: '{' enum_tag_list[list] opt_comma '}' { $$ = $list; }
 ;
 
 declaration_list:
-  declaration ';'[semicolon] {
+  void_declaration ';'[semicolon] {
     $$ = StructBody{{$1.move()}};
     $$->back().comment = combine($$->back().comment,
                                  $semicolon->eol_comment);
   }
-| declaration_list[old] declaration ';'[semicolon] {
+| declaration_list[old] void_declaration ';'[semicolon] {
     $$ = $old.move();
-    $$->push_back($declaration.move());
+    $$->push_back($void_declaration.move());
     $$->back().comment = combine($$->back().comment,
                                  $semicolon->eol_comment);
   }
