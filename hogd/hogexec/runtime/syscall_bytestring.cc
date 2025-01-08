@@ -21,6 +21,7 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
                             std::span<std::byte> output_bytestring,
                             RuntimeMemoryLength &output_written_len)
 {
+  // TODO(geoff) this has an extra copy
   SyscallStatus<const Bytestring> status =
       syscall_handler.get_bytestring(input_key);
   if (!status) {

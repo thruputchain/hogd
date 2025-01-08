@@ -113,4 +113,23 @@ UnmodifiedItem::get_object_type() const
   return base_object_->type();
 }
 
+SyscallStatus<void>
+ItemView::can_accept_type(std::optional<StorageObjectType> obj_type) const
+{
+  if (!obj_type) {
+    return {};
+  }
+
+  auto current_type = get_object_type();
+  if (!current_type) {
+    return {};
+  }
+
+  if (*current_type != *obj_type) {
+    return SyscallError{SyscallErrorCode::kInvalidInput};
+  }
+
+  return {};
+}
+
 } // namespace hogd

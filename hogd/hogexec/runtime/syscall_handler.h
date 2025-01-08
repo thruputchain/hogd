@@ -80,10 +80,16 @@ public:
 
   bool current_runtime_is_revert_poisoned() const;
 
+  // TODO(geoff) maybe this logic should move out of SyscallHandler
   SyscallStatus<const Bytestring> get_bytestring(StorageKey const &storage_key);
   SyscallStatus<void>
   set_bytestring(StorageKey const &storage_key,
                  std::span<const std::byte> input_bytestring);
+
+  SyscallStatus<std::pair<int128_t, int128_t>>
+  get_nnint(StorageKey const &storage_key);
+  SyscallStatus<void> set_nnint(StorageKey const &storage_key,
+                                int128_t set_value, int128_t add_value);
 
 private:
   WasmiContext wasmi_context_;

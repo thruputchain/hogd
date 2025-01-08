@@ -114,6 +114,14 @@ public:
       // Validation check asserts that the written item type is well-formed.
       return validate_result;
     }
+
+    auto validate_type = can_accept_type(type.get_object_type());
+    if (!validate_type) {
+      // no type mismatch; if you want to change an object's type,
+      // you must explicitly delete it first.
+      return validate_type;
+    }
+
     delta_args_ = type;
     return {};
   }
@@ -121,6 +129,9 @@ public:
   std::optional<StorageDelta> get_delta() const;
 
 private:
+  SyscallStatus<void>
+  can_accept_type(std::optional<StorageObjectType> obj_type) const;
+
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem>
       delta_args_;
 };

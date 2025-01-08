@@ -164,6 +164,32 @@ syscalls:
         span_argument: yes
     outputs:
     number: 15
+  - name: "NonnegativeIntGet"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+      - name: "current_set"
+        typename: "int128_t"
+        rust_typename: "i128"
+      - name: "current_add"
+        typename: "int128_t"
+        rust_typename: "i128"
+    number: 16
+  - name: "NonnegativeIntSetAdd"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+      - name: "set_value"
+        typename: "int128_t"
+        rust_typename: "i128"
+      - name: "add_value"
+        typename: "int128_t"
+        rust_typename: "i128"
+    outputs:
+    number: 17
 
 errors:
   - name: "None"

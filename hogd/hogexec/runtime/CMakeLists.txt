@@ -18,6 +18,8 @@ add_library(
   syscall_contract.cc
   item_view.cc
   syscall_crypto.cc
+  syscall_bytestring.cc
+  syscall_nnint.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
 
