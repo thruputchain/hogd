@@ -8,6 +8,131 @@ syscalls:
       - name: "hash"
         typename: "SHA256Hash"
     number: 0
+  - name: "GetMsgSender"
+    needs_context: yes
+    inputs:
+    outputs:
+      - name: "sender"
+        typename: "ContractAddress"
+    number: 1
+  - name: "GetCalldataLen"
+    needs_context: Yes
+    inputs:
+    outputs:
+      - name: "len"
+        typename: "RuntimeMemoryLength"
+    number: 2
+  - name: "GetCalldata"
+    needs_context: yes
+    inputs:
+    outputs:
+      - name: "buffer"
+        span_argument: yes
+      - name: "written_len"
+        typename: "RuntimeMemoryLength"
+        primitive_type: yes
+    number: 3
+  - name: "Log"
+    needs_context: yes
+    inputs:
+      - name: "buffer"
+        span_argument: yes
+    outputs:
+    number: 4
+  - name: "Invoke"
+    needs_context : yes
+    inputs:
+      - name: "address"
+        typename: "ContractAddress"
+      - name: "method"
+        typename: "MethodID"
+        primitive_type: yes
+      - name: "gas_limit"
+        typename: "GasAmount"
+        primitive_type: yes
+      - name: "calldata"
+        span_argument: yes
+    outputs:
+      # cannot return ReturnLen here:
+      # invoke(), if reentrant, could cause the contract memory ptr
+      # to become invalidated
+    syscall_return_type: "HostFnResult"
+    number: 5
+  - name: "Return"
+    needs_context: yes
+    inputs:
+      - name: "buffer"
+        span_argument: yes
+    outputs:
+    returns: no
+    number: 6
+  - name: "GetReturnedBuffer"
+    needs_context: yes
+    inputs:
+    outputs:
+      - name: "buffer"
+        span_argument: yes
+      - name: "written_len"
+        typename: "RuntimeMemoryLength"
+        primitive_type: yes
+    number: 7
+  - name: "GetReturnedBufferLen"
+    needs_context: yes
+    inputs:
+    outputs:
+      - name: "buffer_len"
+        typename: "RuntimeMemoryLength"
+        primitive_type: yes
+    number: 8
+  - name: "Exit"
+    needs_context: no
+    syscall_return_type: "HostFnResult"
+    inputs:
+      - name: "code"
+        fixed_size: yes
+        typename: "int32_t"
+        rust_typename: "i32"
+        primitive_type: yes
+    outputs:
+    returns: no
+    number: 9
+  - name: "GetDeployAddress"
+    needs_context : yes
+    inputs:
+      - name: "caller_address"
+        fixed_size: yes
+        typename: "ContractAddress"
+        optional: yes
+      - name: "nonce"
+        fixed_size: yes
+        typename: "SHA256Hash"
+      - name: "contract_hash"
+        fixed_size: yes
+        typename: "SHA256Hash"
+    outputs:
+      - name: "to_be_deployed"
+        typename: "ContractAddress"
+    number: 10
+  - name: "DeployContract"
+    needs_context : yes
+    inputs:
+      - name: "nonce"
+        fixed_size: yes
+        typename: "SHA256Hash"
+      - name: "contract_hash"
+        fixed_size: yes
+        typename: "SHA256Hash"
+    outputs:
+      - name: "deployed_address"
+        typename: "ContractAddress"
+    number: 11
+  - name: "GetSourceTransactionHash"
+    needs_context : yes
+    inputs:
+    outputs:
+      - name: "source_tx_hash"
+        typename: "SHA256Hash"
+    number: 12
 
 errors:
   - name: "None"
@@ -19,6 +144,24 @@ errors:
   - name: "NoSyscall"
     number: 2
     doc: "System call for supplied number is not supported"
+  - name: "IsRootTransaction"
+    number: 3
+    doc: "Cannot call get_msg_sender on root invocation"
+  - name: "ContractLookupFailed"
+    number: 4
+    doc: "Failed to find contract"
+  - name: "ContractAlreadyDeployed"
+    number: 5
+    doc: "Attempt made to deploy a contract twice (same nonce and contract hash, from same address)"
+  - name: "NoReturnBufferAvailable"
+    number: 6
+    doc: "No return buffer is available.  Either the most recent subcall failed, or there have been no subcalls within this call frame."
+  - name: "InsufficientGasForInvocation"
+    number: 7
+    doc: "Insufficient gas in call frame to supply requested gas limit for child invocation"
+  - name: "InvalidSyscallInput"
+    number: 8
+    doc: "Invalid input to a syscall, such as subtracting below 0 on an nnint64"
 
     # those that cause call frames to revert
   - name: "DeterministicWasm"

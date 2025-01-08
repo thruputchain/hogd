@@ -10,6 +10,7 @@
 
 #include "contract.hh"
 #include "hogd/hogexec/runtime/status.h"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -23,11 +24,6 @@ class WasmiRuntime;
 struct HostCallContext {
   WasmiRuntime *runtime = nullptr;
   SystemCallHandler *syscall_handler = nullptr;
-};
-
-struct InvokeResult {
-  InvokeStatus<int32_t> result;
-  uint64_t gas_consumed;
 };
 
 // Context shared between WasmiRuntime objects.

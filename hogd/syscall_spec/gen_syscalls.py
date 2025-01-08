@@ -261,7 +261,7 @@ def gen_validate_arg(inp, *, is_input):
   if optional:
     opt_typename = f"{const}{typename} *"
     return f"""
-    {const}auto* {arg1} = 
+  {const}auto* {arg1} = 
         check_user_argument<{const}{typename}>(contract_memory, user_{arg1},
                                       sizeof({typename}));
 

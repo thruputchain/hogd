@@ -8,8 +8,14 @@ set_source_files_properties(
 
 add_library(
   runtime
+  invocation_frame.cc
   wasmi_runtime.cc
+  syscall_handler.cc
   status.cc
+  storage_snapshot_cache.cc
+  syscall_invoke.cc
+  syscall_log.cc
+  syscall_contract.cc
   syscall_crypto.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
