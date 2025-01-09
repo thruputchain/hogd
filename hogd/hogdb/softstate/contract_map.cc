@@ -7,6 +7,7 @@
 #include "contract.hh"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/mvar.h"
 
 namespace hogd {
@@ -110,6 +111,46 @@ ContractMap::revert_block()
 {
   new_deployment_map_->clear();
   new_contract_map_->clear();
+}
+
+x23::Async<StorageRPCError>
+ContractStorageServer::commit_contract_create(Contract const &new_contract)
+{
+  contract_map_.add_contract(std::make_shared<const Contract>(new_contract));
+  co_return StorageRPCError::kNone;
+}
+
+x23::Async<StorageRPCError>
+ContractStorageServer::commit_contract_deploy(
+    ContractAddress const &new_address,
+    SHA256Hash const &deployed_contract_hash)
+{
+  contract_map_.deploy_contract(new_address, deployed_contract_hash);
+  co_return StorageRPCError::kNone;
+}
+
+x23::Async<ExpectedContract>
+ContractStorageServer::get_contract(SHA256Hash const &contract_hash)
+{
+  auto res = contract_map_.get_contract(contract_hash);
+  if (res) {
+    ExpectedContract out(StorageRPCError::kNone);
+    out.contract() = *res;
+    co_return out;
+  }
+  co_return ExpectedContract(StorageRPCError::kContractNExist);
+}
+
+x23::Async<ExpectedDeployment>
+ContractStorageServer::get_deployment(ContractAddress const &contract_address)
+{
+  auto res = contract_map_.get_deployment(contract_address);
+  if (res) {
+    ExpectedDeployment out(StorageRPCError::kNone);
+    out.deployed_hash() = *res;
+    co_return out;
+  }
+  co_return ExpectedDeployment(StorageRPCError::kNoContractDeployed);
 }
 
 } // namespace hogd

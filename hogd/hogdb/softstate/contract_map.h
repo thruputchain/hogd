@@ -9,6 +9,7 @@
 #include "hogd/base/xdr_util.h"
 #include "rpc.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/mvar.h"
 
 namespace hogd {
@@ -58,5 +59,29 @@ private:
   x23::MVar<std::unordered_map<SHA256Hash, RegisteredContract>>
       new_contract_map_;
 };
+
+class ContractStorageServer {
+public:
+  using rpc_service = ContractStorageInterfaceV1;
+
+  ContractStorageServer(ContractMap &contract_map) : contract_map_(contract_map)
+  {}
+
+  x23::Async<StorageRPCError>
+  commit_contract_create(Contract const &new_contract);
+  x23::Async<StorageRPCError>
+  commit_contract_deploy(ContractAddress const &new_address,
+                         SHA256Hash const &deployed_contract_hash);
+
+  x23::Async<ExpectedContract> get_contract(SHA256Hash const &contract_hash);
+  x23::Async<ExpectedDeployment>
+  get_deployment(ContractAddress const &contract_address);
+
+private:
+  ContractMap &contract_map_;
+};
+
+static_assert(
+    is_ContractStorageInterfaceV1<ContractStorageServer *, x23::Async>);
 
 } // namespace hogd
