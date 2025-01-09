@@ -9,13 +9,13 @@
 
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "storage_object.hh"
+#include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
 
 // Each of the item types has the following methods:
-// get_object_type()
+// get_item_type()
 //   Return the type of the storage object, as it exists in the current view
 // get_delta()
 //   Return the storage delta that would be produced if this item view commits
@@ -30,9 +30,9 @@ public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
 
-  constexpr static StorageObjectType get_object_type()
+  constexpr static StorageItemType get_item_type()
   {
-    return StorageObjectType::kBytestring;
+    return StorageItemType::kBytestring;
   }
 
   Bytestring bytestring_;
@@ -44,9 +44,9 @@ public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
 
-  constexpr static StorageObjectType get_object_type()
+  constexpr static StorageItemType get_item_type()
   {
-    return StorageObjectType::kNonnegativeInt;
+    return StorageItemType::kNonnegativeInt;
   }
 
   int128_t base_value_;
@@ -64,7 +64,7 @@ public:
 
   constexpr static SyscallStatus<void> validate() { return {}; }
 
-  constexpr static std::optional<StorageObjectType> get_object_type()
+  constexpr static std::optional<StorageItemType> get_item_type()
   {
     return std::nullopt;
   }
@@ -83,9 +83,9 @@ public:
 
   // no validate() method, to ensure that set<UnmodifiedType> does not compile
 
-  std::optional<StorageObjectType> get_object_type() const;
+  std::optional<StorageItemType> get_item_type() const;
 
-  const StorageObject *const base_object_;
+  const StorageItem *const base_item_;
 };
 
 // Maintain the modifications of one InvocationFrame to one address.
@@ -94,11 +94,11 @@ public:
 // it.
 class ItemView {
 public:
-  ItemView(const StorageObject *base_object)
-    : delta_args_(UnmodifiedItem{.base_object_ = base_object})
+  ItemView(const StorageItem *base_item)
+    : delta_args_(UnmodifiedItem{.base_item_ = base_item})
   {}
 
-  std::optional<StorageObjectType> get_object_type() const;
+  std::optional<StorageItemType> get_item_type() const;
 
   template<typename ItemType> const auto *get() const
   {
@@ -115,7 +115,7 @@ public:
       return validate_result;
     }
 
-    auto validate_type = can_accept_type(type.get_object_type());
+    auto validate_type = can_accept_type(type.get_item_type());
     if (!validate_type) {
       // no type mismatch; if you want to change an object's type,
       // you must explicitly delete it first.
@@ -130,7 +130,7 @@ public:
 
 private:
   SyscallStatus<void>
-  can_accept_type(std::optional<StorageObjectType> obj_type) const;
+  can_accept_type(std::optional<StorageItemType> item_type) const;
 
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem>
       delta_args_;

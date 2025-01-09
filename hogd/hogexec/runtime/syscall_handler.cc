@@ -22,7 +22,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "storage_object.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -329,14 +329,13 @@ SystemCallHandler::get_bytestring(StorageKey const &storage_key)
   }
 
   if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
-    if (!unmodified_item->base_object_) {
+    if (!unmodified_item->base_item_) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_object_->type() !=
-        StorageObjectType::kBytestring) {
+    if (unmodified_item->base_item_->type() != StorageItemType::kBytestring) {
       return SyscallError{SyscallErrorCode::kInvalidInput};
     }
-    return unmodified_item->base_object_->bytestring();
+    return unmodified_item->base_item_->bytestring();
   }
 
   return SyscallError{SyscallErrorCode::kInvalidInput};
@@ -367,14 +366,14 @@ SystemCallHandler::get_nnint(StorageKey const &storage_key)
   }
 
   if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
-    if (!unmodified_item->base_object_) {
+    if (!unmodified_item->base_item_) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_object_->type() !=
-        StorageObjectType::kNonnegativeInt) {
+    if (unmodified_item->base_item_->type() !=
+        StorageItemType::kNonnegativeInt) {
       return SyscallError{SyscallErrorCode::kInvalidInput};
     }
-    return std::make_pair(from_xdr(unmodified_item->base_object_->nnint()),
+    return std::make_pair(from_xdr(unmodified_item->base_item_->nnint()),
                           int128_t{0});
   }
 

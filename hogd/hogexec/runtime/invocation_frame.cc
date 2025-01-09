@@ -199,7 +199,7 @@ InvocationFrameStack::get_item_view(StorageKey const &key)
   }
 
   // item view not yet accessed in current transaction; looking up in snapshot
-  auto const *snapshot_item = snapshot_cache_.try_get_snapshot_object(addrkey);
+  auto const *snapshot_item = snapshot_cache_.try_get_snapshot_item(addrkey);
 
   // snapshot_item might be nullptr; this is handled in ItemView
   frame_stack_.back().add_item_view(addrkey, ItemView(snapshot_item));
