@@ -91,6 +91,8 @@ public:
   SyscallStatus<void> set_nnint(StorageKey const &storage_key,
                                 int128_t set_value, int128_t add_value);
 
+  SyscallStatus<void> delete_object(StorageKey const& storage_key);
+
 private:
   WasmiContext wasmi_context_;
   const SignedTransaction signed_tx_;

@@ -20,6 +20,7 @@ add_library(
   syscall_crypto.cc
   syscall_bytestring.cc
   syscall_nnint.cc
+  syscall_delete.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
 

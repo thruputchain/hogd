@@ -28,10 +28,9 @@ pub extern "C" fn log_bytestring() -> i32 {
         trap();
     }
 
-    let _bstring = sdk::BytestringGet(&key).unwrap();
+    let bstring = sdk::BytestringGet(&key).unwrap();
 
-    // log not yet impl
-    //sdk::Log(&bstring).unwrap();
+    sdk::Log(&bstring).unwrap();
 
     0
 }
