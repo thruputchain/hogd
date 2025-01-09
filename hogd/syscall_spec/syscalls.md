@@ -127,3 +127,36 @@ Returns the sha256 hash of the originating transaction.
 
 No other errors.
 
+# BytestringGetLen
+
+Signature: BytestringGetLen(key : StorageKey) -> u32
+
+Returns the length of the bytestring at key, if the bytestring exists.
+Error otherwise.
+
+# BytestringGet
+
+Signature: BytestringGet(key : StorageKey) -> Bytestring
+
+Gets the bytestring at key, if such bytestring exists.
+Error otherwise.
+
+# BytestringSet
+
+Signature: BytestringSet(key : StorageKey, string: Bytestring) -> ()
+
+Error if there exists an item at that key with a different type.
+
+# NNIntGet
+
+Signature: NNIntGet(key : StorageKey) -> (i128, i128)
+
+Returns the current (set, add) tuple for the nnint at key, if such an int exists.
+Error if key is empty or another type.
+Returns (value, 0) if reading from an unmodified snapshot value.
+
+# NNIntSetAdd
+
+Signature: NNIntSetAdd(key : StorageKey, set: i128, add: i128) -> ()
+
+Returns an error if the item at key is not an nnint type, or if the set_add is invalid.
