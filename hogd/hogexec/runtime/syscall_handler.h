@@ -4,6 +4,7 @@
 #include <map>
 
 #include "hogd/hogexec/runtime/invocation_frame.h"
+#include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -91,7 +92,7 @@ public:
   SyscallStatus<void> set_nnint(StorageKey const &storage_key,
                                 int128_t set_value, int128_t add_value);
 
-  SyscallStatus<void> delete_object(StorageKey const& storage_key);
+  SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
 private:
   WasmiContext wasmi_context_;
