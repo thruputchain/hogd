@@ -28,3 +28,7 @@ pub fn syscall_wrapper(
 pub(crate) fn to_offset_mut<T>(obj: &mut T) -> *mut u8 {
     unsafe { core::mem::transmute(obj) }
 }
+
+pub(crate) fn to_offset<T>(obj: & T) -> *const u8 {
+    unsafe { core::mem::transmute(obj) }
+}

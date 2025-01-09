@@ -98,6 +98,16 @@ rust_typename: string
   description: Used when rust names a type differently from the C++ code
   in the syscall.
 
+rust_input_requires_transmute : bool
+  required: no
+    default: false
+  description: Does the rust type, when used as a syscall input,
+  require an explicit transmute.
+
+  This is a special case for i128/u128.  &u128/&i128 do not have as_ptr()
+  methods, unlike most other input types, but are too big to be used as a
+  primitive type (like u64/i64)
+
 optional: bool
   required: no
     default: no
@@ -635,11 +645,17 @@ def gen_rs_syscall_binding(syscall):
         if "rust_typename" in inp:
           input_type = inp["rust_typename"]
         if optional:
-          syscallargs.append(f"""match {input_name} {{ Some(x) => {{x.as_ptr() as u64 }}, None => u64::MAX }}""")
+          if "rust_input_requires_transmute" in inp and inp["rust_input_requires_transmute"]:
+            syscallargs.append(f"""match {input_name} {{ Some(x) => {{to_offset(x) as u64 }}, None => u64::MAX }}""")
+          else:
+            syscallargs.append(f"""match {input_name} {{ Some(x) => {{x.as_ptr() as u64 }}, None => u64::MAX }}""")
           inputdecls.append(f"""{input_name} : Option<&{input_type}>""")
           uninit_args.append(f"""{input_name}""")
         else:
-          syscallargs.append(f"""{input_name}.as_ptr() as u64""")
+          if "rust_input_requires_transmute" in inp and inp["rust_input_requires_transmute"]:
+            syscallargs.append(f"""to_offset({input_name}) as u64""")
+          else:
+            syscallargs.append(f"""{input_name}.as_ptr() as u64""")
           inputdecls.append(f"""{input_name} : &{input_type}""")
           uninit_args.append(f"""{input_name}""")
       
@@ -754,7 +770,7 @@ def gen_rs_syscall_bindings(spec):
 
 #![allow(non_snake_case)]
 use rs_xdr::*;
-use crate::syscall::{{syscall_wrapper, to_offset_mut}};
+use crate::syscall::{{syscall_wrapper, to_offset, to_offset_mut}};
 use core::mem::MaybeUninit;
 use core::hint::unreachable_unchecked;
 

@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "basic",
+    "basic_alloc",
+    "test_bytestring",
+]
+
+[profile.dev]
+opt-level = "z"
+overflow-checks = false
+debug = 0
+strip = "debuginfo"
+panic = "abort"
+
+[profile.release]
+opt-level = 3
+overflow-checks = false
+debug = false
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+lto = true
+codegen-units = 1
+

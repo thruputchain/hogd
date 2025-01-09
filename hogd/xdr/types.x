@@ -1,11 +1,5 @@
 namespace hogd {
 
-typedef unsigned int RuntimeMemoryOffset; // uint32_t
-typedef unsigned int RuntimeMemoryLength; // uint32_t
-
-typedef unsigned hyper GasAmount; // uint64_t
-typedef unsigned int MethodID;    // uint32_t
-
 struct uint128_xdr {
   unsigned hyper highbits;
   unsigned hyper lowbits;
