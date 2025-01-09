@@ -55,7 +55,12 @@ ContractMap::bump_contract_refcount(SHA256Hash const &hash)
 
   auto old_c_map = contract_map_.take();
   auto it = old_c_map->find(hash);
-  assert(it != old_c_map->end());
+
+  if (it == old_c_map->end()) {
+    new_c_map->emplace(hash, RegisteredContract{.contract_ = nullptr,
+                                                .deployment_count_ = 1});
+    return;
+  }
 
   auto new_contract_entry = it->second;
   new_contract_entry.deployment_count_++;
@@ -68,7 +73,11 @@ ContractMap::add_contract(std::shared_ptr<const Contract> contract)
   auto contract_hash = sha256(*contract);
   auto new_c_map = new_contract_map_.take();
 
-  if (new_c_map->find(contract_hash) == new_c_map->end()) {
+  if (auto it = new_c_map->find(contract_hash); it != new_c_map->end()) {
+    assert(it->second.contract_ == nullptr);
+    it->second.contract_ = contract;
+  }
+  else {
     new_c_map->emplace(contract_hash,
                        RegisteredContract{.contract_ = contract,
                                           .deployment_count_ = 0});

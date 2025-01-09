@@ -23,9 +23,15 @@ public:
   std::optional<SHA256Hash> get_deployment(ContractAddress const &addr);
   std::shared_ptr<const Contract> get_contract(SHA256Hash const &hash);
 
+  // Make a modification to contract existence or deployment within the current
+  // block A transaction should never deploy a contract that does not exist.
+  // However, the implementation can account for messages from the executor
+  // arriving out of order, and a contract deployment arriving before its
+  // creation.
   void deploy_contract(ContractAddress const &addr, SHA256Hash const &hash);
   void add_contract(std::shared_ptr<const Contract> contract);
 
+  // commit or abandon the modifications made by the current block.
   void commit_block();
   void revert_block();
 
