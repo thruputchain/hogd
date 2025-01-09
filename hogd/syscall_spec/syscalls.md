@@ -160,3 +160,9 @@ Returns (value, 0) if reading from an unmodified snapshot value.
 Signature: NNIntSetAdd(key : StorageKey, set: i128, add: i128) -> ()
 
 Returns an error if the item at key is not an nnint type, or if the set_add is invalid.
+
+# DeleteObject
+
+Signature: DeleteObject(key: StorageKey) -> ()
+
+Deletes the StorageItem at the supplied key.
