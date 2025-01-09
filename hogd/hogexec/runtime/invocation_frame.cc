@@ -39,6 +39,11 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &frame)
         new_contract_deployments_.emplace(addr, hash);
     assert(inserted_new);
   }
+
+  for (auto &[addr, item] : frame.modified_items_) {
+    modified_items_.erase(addr);
+    modified_items_.emplace(addr, std::move(item));
+  }
 }
 
 void
