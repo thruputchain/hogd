@@ -5,7 +5,8 @@ add_xdr(
 	contract.x
 	storage_object.x
 	ffi_enums.x
-	transaction.x)
+	transaction.x
+	rpc.x)
 
 add_dependencies(build_protocol generate_syscall_x)
 

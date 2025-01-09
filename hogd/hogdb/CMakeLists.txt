@@ -1,3 +1,5 @@
+add_subdirectory(softstate)
+
 # Build the backend database (hogdb) executable
 add_executable(
   hogdb
