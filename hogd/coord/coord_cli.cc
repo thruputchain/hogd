@@ -1,8 +1,22 @@
-#include "coord.hh"
-#include <x23/fileio.h>
-#include <x23/rpc.h>
+#include <exception>
+#include <expected> //NOLINT
+#include <print>    //NOLINT
+#include <string>
+#include <system_error>
+#include <vector>
 
-using namespace hogd;
+#include <getopt.h> //NOLINT
+#include <stdlib.h> //NOLINT
+#include <unistd.h> //NOLINT
+
+#include <x23/event.h>
+#include <x23/rpc.h>
+#include <x23/threadpool.h>
+
+#include "coord.hh"
+
+using hogd::CoordV1;
+using hogd::kCoordPort;
 using x23::Async;
 
 std::string progname = "coord_cli";
@@ -19,7 +33,8 @@ usage(int err = 2)
   exit(err);
 }
 
-Async<std::expected<x23::RpcClient<CoordV1, x23::RpcLogger>, std::system_error>>
+Async<std::expected<x23::RpcClient<CoordV1, x23::RpcLogger>, // NOLINT
+                    std::system_error>>
 make_client(std::string host, std::string port)
 {
   auto fd = co_await co_await cp.tcpconnect(host, port);
@@ -49,8 +64,8 @@ go(std::string host, std::string port, std::vector<const char *> args)
 }
 
 int
-main(int argc, char **argv)
-{
+main(int argc, char **argv) // NOLINT
+try {
   if (argc > 0)
     progname = std::filesystem::path(argv[0]).filename();
 
@@ -58,16 +73,16 @@ main(int argc, char **argv)
   std::string host = "localhost";
 
   int opt;
-  while ((opt = getopt(argc, argv, "hs:p:")) != -1) {
+  while ((opt = getopt(argc, argv, "hs:p:")) != -1) { // NOLINT
     switch (opt) {
     case 'h':
       usage(0);
       break;
     case 's':
-      host = optarg;
+      host = optarg; // NOLINT
       break;
     case 'p':
-      port = optarg;
+      port = optarg; // NOLINT
       break;
     default:
       usage();
@@ -75,10 +90,15 @@ main(int argc, char **argv)
     }
   }
 
-  if (optind >= argc)
+  if (optind >= argc) // NOLINT
     usage();
 
   x23::RpcLogger::default_logfd = 1;
   return go(host, port,
-            std::vector<const char *>(argv + optind, argv + argc))();
+            std::vector<const char *>(argv + optind, argv + argc))(); // NOLINT
+} catch (const std::exception &e) {
+  std::println(stderr, "{}", e.what());
+  exit(1);
+} catch (...) {
+  std::terminate();
 }
