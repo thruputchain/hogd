@@ -1,13 +1,12 @@
-#include <expected> //NOLINT
-#include <print>    //NOLINT
+#include <unistd.h>
+
+#include <cstdlib>
+#include <expected> // NOLINT
+#include <print>
 #include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
-
-#include <getopt.h> //NOLINT
-#include <stdlib.h> //NOLINT
-#include <unistd.h> //NOLINT
 
 #include <x23/event.h>
 #include <x23/rpc.h>
@@ -17,15 +16,17 @@
 
 using x23::Async;
 
+namespace hogd {
+
+namespace {
+
 std::string progname = "coord_cli";
 
 x23::ThreadPool pool;
 x23::CoroPoll cp(pool);
 
-namespace hogd {
-
 [[noreturn]] void
-usage(int err = 2)
+usage(int err = STDERR_FILENO)
 {
   std::println(err == 0 ? stdout : stderr,
                "Usage: {} [-s <server>] [-p port] <method> [<arg> ...]",
@@ -33,8 +34,9 @@ usage(int err = 2)
   exit(err);
 }
 
-Async<std::expected<x23::RpcClient<CoordV1, x23::RpcLogger>, // NOLINT
-                    std::system_error>>
+// TODO(amb): this was already fixed in clang's main branch
+// NOLINTNEXTLINE(misc-include-cleaner)
+Async<std::expected<x23::RpcClient<CoordV1, x23::RpcLogger>, std::system_error>>
 make_client(std::string host, std::string port)
 {
   auto fd = co_await co_await cp.tcpconnect(std::move(host), std::move(port));
@@ -73,16 +75,17 @@ main(int argc, char **argv)
   std::string host = "localhost";
 
   int opt;
-  while ((opt = getopt(argc, argv, "hs:p:")) != -1) { // NOLINT
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  while ((opt = getopt(argc, argv, "hs:p:")) != -1) {
     switch (opt) {
     case 'h':
       usage(0);
       break;
     case 's':
-      host = optarg; // NOLINT
+      host = optarg; // NOLINT(misc-include-cleaner)
       break;
     case 'p':
-      port = optarg; // NOLINT
+      port = optarg; // NOLINT(misc-include-cleaner)
       break;
     default:
       usage();
@@ -90,13 +93,15 @@ main(int argc, char **argv)
     }
   }
 
-  if (optind >= argc) // NOLINT
+  if (optind >= argc) // NOLINT(misc-include-cleaner)
     usage();
 
-  x23::RpcLogger::default_logfd = 1;
+  x23::RpcLogger::default_logfd = STDOUT_FILENO;
   return go(std::move(host), std::move(port),
-            std::vector<const char *>(argv + optind, argv + argc))(); // NOLINT
+            std::vector<const char *>(argv + optind, argv + argc))();
 }
+
+} // namespace
 
 } // namespace hogd
 

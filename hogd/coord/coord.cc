@@ -1,11 +1,10 @@
+#include <unistd.h>
+
+#include <cstdio>
+#include <cstdlib>
 #include <print>
 #include <string>
 #include <utility>
-
-#include <getopt.h> //NOLINT
-#include <stdio.h>  //NOLINT
-#include <stdlib.h> //NOLINT
-#include <unistd.h> //NOLINT
 
 #include <x23/event.h>
 #include <x23/fileio.h>
@@ -16,12 +15,14 @@
 
 using x23::Async;
 
+namespace hogd {
+
+namespace {
+
 std::string progname = "coord";
 
 x23::ThreadPool pool;
 x23::CoroPoll cp(pool);
-
-namespace hogd {
 
 struct Coord {
   using rpc_service = CoordV1;
@@ -30,7 +31,7 @@ struct Coord {
 static_assert(is_CoordV1<Coord *, Async>);
 
 [[noreturn]] void
-usage(int err = 2)
+usage(int err = STDERR_FILENO)
 {
   std::println(err == 0 ? stdout : stderr, "Usage: {} [-p <port>]", progname);
   exit(err);
@@ -44,13 +45,15 @@ main(int argc, char **argv)
   std::string port = std::to_string(kCoordPort);
 
   int opt;
-  while ((opt = getopt(argc, argv, "hs:p:")) != -1) { // NOLINT
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  while ((opt = getopt(argc, argv, "hs:p:")) != -1) {
     switch (opt) {
     case 'h':
       usage(0);
       break;
     case 'p':
-      port = optarg; // NOLINT
+      // NOLINTNEXTLINE(misc-include-cleaner)
+      port = optarg;
       break;
     default:
       usage();
@@ -58,7 +61,8 @@ main(int argc, char **argv)
     }
   }
 
-  if (optind != argc) // NOLINT
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  if (optind != argc)
     usage();
 
   auto lfd = x23::tcplisten(atoi(port.c_str()));
@@ -75,6 +79,8 @@ main(int argc, char **argv)
   }()();
   return EXIT_SUCCESS;
 }
+
+} // namespace
 
 } // namespace hogd
 
