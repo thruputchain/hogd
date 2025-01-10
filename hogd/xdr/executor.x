@@ -47,11 +47,7 @@ namespace hogd
   // Each executor can set the lowbits locally.
   typedef unsigned hyper TransactionID;
 
-  enum ExecutorState {
-    kNone = 0,
-    kProposing = 1,
-    kValidating = 2
-  };
+  enum ExecutorState { kNone = 0, kProposing = 1, kValidating = 2 };
 
   // The interface that the executor exposes to the coordinator.
   program ExectutorInterface
@@ -73,7 +69,8 @@ namespace hogd
       // executor state to kNone, and clears data cached from database.
       void finish_block(void) = 4;
 
-      // Initialize takes an executor ID, which forms the top bits of the Transaction ID.
+      // Initialize takes an executor ID, which forms the top bits of the
+      // Transaction ID.
       // TODO(geoff): Information about storage server locations
       void initialize(ExecutorID) = 5;
     }
