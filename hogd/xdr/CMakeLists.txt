@@ -1,6 +1,7 @@
 add_xdr(
 	protocol
 	types.x
+	executor.x
 	syscall.x
 	contract.x
 	coord.x)
