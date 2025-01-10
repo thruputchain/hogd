@@ -77,6 +77,11 @@ namespace hogd
     void;
   };
 
+  typedef unsigned ExecutorID;
+  // First 32 bits of the TransactionID should be the ExecutorID.
+  // Each executor can set the lowbits locally.
+  typedef unsigned hyper TransactionID;
+
   // The interface that the executor exposes to the coordinator.
   program ExectutorInterface
   {
@@ -98,6 +103,10 @@ namespace hogd
       void open_validation_block(void) = 3;
 
       void finish_block(void) = 4;
+
+      // Initialize takes an executor ID, which forms the top bits of the Transaction ID.
+      // TODO(geoff): Information about storage server locations (?)
+      void initialize(ExecutorID) = 5;
     }
     = 1;
   }
