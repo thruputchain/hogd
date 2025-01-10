@@ -1,14 +1,10 @@
 #include "hogd/hogdb/softstate/storage_item_frame.h"
 
-#include <algorithm>
-#include <atomic>
 #include <cassert>
-#include <cstdint>
-#include <format>
-#include <functional>
 #include <optional>
-#include <set>
 #include <variant>
+#include <limits>
+#include <stdexcept>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
