@@ -126,19 +126,10 @@ private:
     }
   };
 
+  void clear_modifications();
+
   std::optional<StorageItem> committed_base_item_;
   x23::MVar<RefcountedVariant> variant_;
-
-  // bytestring
-  static bool try_reserve_bytestring_set(RefcountedVariant &v,
-                                         Bytestring const &bytestring_set);
-
-  // nnint64
-  static bool try_reserve_nnint_set_add(RefcountedVariant &v,
-                                        int128_t set_value, int128_t add_value);
-  static void revert_nnint_set_add(RefcountedVariant &v, int128_t add_value);
-
-  void clear_modifications();
 };
 
 } // namespace hogd
