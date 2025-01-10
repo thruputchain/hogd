@@ -6,14 +6,15 @@ add_xdr(
 	storage_item.x
 	ffi_enums.x
 	transaction.x
-	rpc.x)
+	rpc.x
+	coord.x)
 
 add_dependencies(build_protocol generate_syscall_x)
 
 add_xdr_rs(
-	protocol_rs 
-	${CMAKE_CURRENT_SOURCE_DIR}/rs_xdr/src 
-	types.x 
+	protocol_rs
+	${CMAKE_CURRENT_SOURCE_DIR}/rs_xdr/src
+	types.x
 	syscall.x)
 
 add_dependencies(build_protocol_rs generate_syscall_x)
