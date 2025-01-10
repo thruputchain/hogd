@@ -21,6 +21,10 @@
 
 namespace hogd {
 
+StorageItemFrame::StorageItemFrame(std::optional<StorageItem> const &snapshot_state)
+  : committed_base_item_(snapshot_state)
+  {}
+
 std::optional<StorageItem>
 StorageItemFrame::BytestringArgs::to_item() const
 {
