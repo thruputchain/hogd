@@ -2,6 +2,7 @@
 
 %#include "types.hh"
 %#include "contract.hh"
+%#include "transaction.hh"
 
 namespace hogd
 {
@@ -9,7 +10,8 @@ namespace hogd
 
   // This is obviously missing error codes.  Please expand or change as you
   // wish.
-  enum StorageRPCError {
+  // This probably should get moved to a different file?
+  enum RPCError {
     kNone = 0,
     // Lookup on contract that does not exist in database
     kContractNExist = 1,
@@ -18,7 +20,7 @@ namespace hogd
   };
 
   // Is this the XDR pattern we want?
-  union ExpectedContract switch (StorageRPCError error)
+  union ExpectedContract switch (RPCError error)
   {
   case kNone:
     Contract contract;
@@ -26,7 +28,7 @@ namespace hogd
     void;
   };
 
-  union ExpectedDeployment switch (StorageRPCError error)
+  union ExpectedDeployment switch (RPCError error)
   {
   case kNone:
     SHA256Hash deployed_hash;
@@ -47,14 +49,14 @@ namespace hogd
       // Arguments:
       //   New Contract
       // No-op whenever error is not kNone
-      StorageRPCError commit_contract_create(Contract) = 1;
+      RPCError commit_contract_create(Contract) = 1;
 
       // Create a new deployment.
       // Arguments:
       //   ContractAddress
       //   SHA256Hash of contract to be deployed
       // No-op whenever error is not kNone
-      StorageRPCError commit_contract_deploy(ContractAddress, SHA256Hash) = 2;
+      RPCError commit_contract_deploy(ContractAddress, SHA256Hash) = 2;
 
       // TODO(geoff) consider whether we want to combine these or not.
       // Tradeoff is messages vs maybe sending redundant contracts.
@@ -66,4 +68,39 @@ namespace hogd
     = 1;
   }
   = 11111111;
+
+  union ExpectedProposalData switch (RPCError error)
+  {
+  case kNone:
+    NondeterministicProposal proposal_data;
+  default:
+    void;
+  };
+
+  // The interface that the executor exposes to the coordinator.
+  program ExectutorInterface
+  {
+    version ExecutorInterfaceV1
+    {
+      ExpectedProposalData propose_transaction(SignedTransaction) = 0;
+      RPCError validate_transaction(ProposedTransaction) = 1;
+
+      // Executor can be in one of three states:
+      // None
+      // Proposing
+      // Validating
+      // open_xyz_block() methods set the executor state, or return an error
+      // if executor has already opened a block.
+      //
+      // finish_block() blocks until all running executor threads are finished,
+      // and stops the executor from accepting new transactions.
+      void open_proposal_block(void) = 2;
+      void open_validation_block(void) = 3;
+
+      void finish_block(void) = 4;
+    }
+    = 1;
+  }
+  = 22222222;
+
 } // namespace hogd

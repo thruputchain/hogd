@@ -67,9 +67,8 @@ public:
   ContractStorageServer(ContractMap &contract_map) : contract_map_(contract_map)
   {}
 
-  x23::Async<StorageRPCError>
-  commit_contract_create(Contract const &new_contract);
-  x23::Async<StorageRPCError>
+  x23::Async<RPCError> commit_contract_create(Contract const &new_contract);
+  x23::Async<RPCError>
   commit_contract_deploy(ContractAddress const &new_address,
                          SHA256Hash const &deployed_contract_hash);
 

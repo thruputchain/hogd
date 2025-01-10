@@ -113,20 +113,20 @@ ContractMap::revert_block()
   new_contract_map_->clear();
 }
 
-x23::Async<StorageRPCError>
+x23::Async<RPCError>
 ContractStorageServer::commit_contract_create(Contract const &new_contract)
 {
   contract_map_.add_contract(std::make_shared<const Contract>(new_contract));
-  co_return StorageRPCError::kNone;
+  co_return RPCError::kNone;
 }
 
-x23::Async<StorageRPCError>
+x23::Async<RPCError>
 ContractStorageServer::commit_contract_deploy(
     ContractAddress const &new_address,
     SHA256Hash const &deployed_contract_hash)
 {
   contract_map_.deploy_contract(new_address, deployed_contract_hash);
-  co_return StorageRPCError::kNone;
+  co_return RPCError::kNone;
 }
 
 x23::Async<ExpectedContract>
@@ -134,11 +134,11 @@ ContractStorageServer::get_contract(SHA256Hash const &contract_hash)
 {
   auto res = contract_map_.get_contract(contract_hash);
   if (res) {
-    ExpectedContract out(StorageRPCError::kNone);
+    ExpectedContract out(RPCError::kNone);
     out.contract() = *res;
     co_return out;
   }
-  co_return ExpectedContract(StorageRPCError::kContractNExist);
+  co_return ExpectedContract(RPCError::kContractNExist);
 }
 
 x23::Async<ExpectedDeployment>
@@ -146,11 +146,11 @@ ContractStorageServer::get_deployment(ContractAddress const &contract_address)
 {
   auto res = contract_map_.get_deployment(contract_address);
   if (res) {
-    ExpectedDeployment out(StorageRPCError::kNone);
+    ExpectedDeployment out(RPCError::kNone);
     out.deployed_hash() = *res;
     co_return out;
   }
-  co_return ExpectedDeployment(StorageRPCError::kNoContractDeployed);
+  co_return ExpectedDeployment(RPCError::kNoContractDeployed);
 }
 
 } // namespace hogd
