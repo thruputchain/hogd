@@ -22,7 +22,6 @@ public:
     if (integer_add_overflow<T>(lowbits_, v, &lowbits_)) {
       highbits_++;
     }
-
     return *this;
   }
 
@@ -44,7 +43,7 @@ public:
   auto get_capped() const
   {
     if (highbits_ > 0) {
-      return std::numeric_limits<decltype(lowbits_)>::max();
+      return std::numeric_limits<T>::max();
     }
     return lowbits_;
   }

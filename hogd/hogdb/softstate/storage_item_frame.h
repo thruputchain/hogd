@@ -10,6 +10,8 @@
 
 namespace hogd {
 
+// Manage concurrent accesses to a StorageItem in the database.
+//
 // Some data types will require internal data structures more complex than a
 // StorageItem,(which is really a serialization format more than an efficient
 // data structure). The internals may need reimplementation when we have a
@@ -60,6 +62,8 @@ private:
   // after a block commits(during commit_block()). This converts the
   // committed deltas to a StorageItem for the next block snapshot. All
   // transactions should either revert or commit before to_item() is called.
+
+  // Bytestring state
   struct BytestringArgs {
     const Bytestring bytestring_set_;
 
@@ -67,10 +71,10 @@ private:
     {
       return candidate_bytestring == bytestring_set_;
     }
-
     std::optional<StorageItem> to_item() const;
   };
 
+  // NNInt state
   struct NNIntSetAddArgs {
     const int128_t set_value_;
     // total subtracted by any pending or committed reservations
@@ -81,19 +85,19 @@ private:
     {
       return candidate_set_value == set_value_;
     }
-
     std::optional<StorageItem> to_item() const;
   };
 
+  // Deleted state
   struct DeleteArgs {
-
     static bool typeclass_match() { return true; }
-
     static std::optional<StorageItem> to_item() { return std::nullopt; }
   };
 
   using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs, DeleteArgs>;
 
+  // Contents of the variant are ignored if refcount_ is 0.
+  // Every successful try_reserve increases the refcount, and revert reduces it.
   class RefcountedVariant {
   public:
     variant_t variant_;
