@@ -5,11 +5,11 @@
 #include <cstring>
 #include <optional>
 
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/softstate/storage_item_frame.h"
 #include "storage_item.hh"
 #include "types.hh"
-#include "hogd/base/xdr_util.h"
-#include "hogd/base/types.h"
 
 namespace hogd {
 
