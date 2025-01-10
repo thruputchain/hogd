@@ -17,6 +17,8 @@ namespace hogd
     kContractNExist = 1,
     // Lookup deployment of contract on address that has no deployed contract
     kNoContractDeployed = 2,
+    // Executor in bad state to validate or propose
+    kBadExecutorState = 3,
   };
 
   // Is this the XDR pattern we want?
@@ -103,10 +105,6 @@ namespace hogd
       void open_validation_block(void) = 3;
 
       void finish_block(void) = 4;
-
-      // Initialize takes an executor ID, which forms the top bits of the Transaction ID.
-      // TODO(geoff): Information about storage server locations (?)
-      void initialize(ExecutorID) = 5;
     }
     = 1;
   }
