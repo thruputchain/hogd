@@ -1,13 +1,9 @@
 #include "hogd/hogdb/softstate/storage_item_frame.h"
 
-#include <algorithm>
-#include <atomic>
 #include <cassert>
-#include <cstdint>
-#include <format>
-#include <functional>
+#include <limits>
 #include <optional>
-#include <set>
+#include <stdexcept>
 #include <variant>
 
 #include "hogd/base/compiler.h"
@@ -17,13 +13,13 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
-#include "x23/format.h"
 
 namespace hogd {
 
-StorageItemFrame::StorageItemFrame(std::optional<StorageItem> const &snapshot_state)
+StorageItemFrame::StorageItemFrame(
+    std::optional<StorageItem> const &snapshot_state)
   : committed_base_item_(snapshot_state)
-  {}
+{}
 
 std::optional<StorageItem>
 StorageItemFrame::BytestringArgs::to_item() const
