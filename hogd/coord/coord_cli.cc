@@ -1,8 +1,8 @@
-#include <exception>
 #include <expected> //NOLINT
 #include <print>    //NOLINT
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <getopt.h> //NOLINT
@@ -15,14 +15,14 @@
 
 #include "coord.hh"
 
-using hogd::CoordV1;
-using hogd::kCoordPort;
 using x23::Async;
 
 std::string progname = "coord_cli";
 
 x23::ThreadPool pool;
 x23::CoroPoll cp(pool);
+
+namespace hogd {
 
 [[noreturn]] void
 usage(int err = 2)
@@ -37,7 +37,7 @@ Async<std::expected<x23::RpcClient<CoordV1, x23::RpcLogger>, // NOLINT
                     std::system_error>>
 make_client(std::string host, std::string port)
 {
-  auto fd = co_await co_await cp.tcpconnect(host, port);
+  auto fd = co_await co_await cp.tcpconnect(std::move(host), std::move(port));
   co_return rpc_stream_logged(cp, fd).client(CoordV1{});
 }
 
@@ -46,10 +46,10 @@ go(std::string host, std::string port, std::vector<const char *> args)
 {
   using namespace std::string_literals;
 
-  auto c = co_await make_client(host, port);
+  auto c = co_await make_client(std::move(host), std::move(port));
   if (!c) {
     std::println("{}", c.error().what());
-    co_return 1;
+    co_return EXIT_FAILURE;
   }
 
   std::string cmd = args[0];
@@ -60,12 +60,12 @@ go(std::string host, std::string port, std::vector<const char *> args)
     std::println(stderr, "unknown command {}", cmd);
     co_return 2;
   }
-  co_return 0;
+  co_return EXIT_SUCCESS;
 }
 
 int
-main(int argc, char **argv) // NOLINT
-try {
+main(int argc, char **argv)
+{
   if (argc > 0)
     progname = std::filesystem::path(argv[0]).filename();
 
@@ -94,11 +94,14 @@ try {
     usage();
 
   x23::RpcLogger::default_logfd = 1;
-  return go(host, port,
+  return go(std::move(host), std::move(port),
             std::vector<const char *>(argv + optind, argv + argc))(); // NOLINT
-} catch (const std::exception &e) {
-  std::println(stderr, "{}", e.what());
-  exit(1);
-} catch (...) {
-  std::terminate();
+}
+
+} // namespace hogd
+
+int
+main(int argc, char **argv) // NOLINT
+{
+  return hogd::main(argc, argv);
 }
