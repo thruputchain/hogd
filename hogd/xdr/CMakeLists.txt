@@ -2,7 +2,8 @@ add_xdr(
 	protocol 
 	types.x 
 	syscall.x 
-	contract.x)
+	contract.x
+	storage_item.x)
 
 add_dependencies(protocol generate_syscall_x)
 
