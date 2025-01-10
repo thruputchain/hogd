@@ -1,19 +1,15 @@
+namespace hogd {
 
-% #include "types.hh"
+const kCoordPort = 10078;
 
-    namespace hogd
+program CoordProg
 {
-
-  const kCoordPort = 10078;
-
-  program CoordProg
+  version CoordV1
   {
-    version CoordV1
-    {
-      void null(void) = 0;
-    }
-    = 1;
+    void null(void) = 0;
   }
-  = 0x1d88d309;
+  = 1;
+}
+= 0x1d88d309;
 
 } // namespace hogd
