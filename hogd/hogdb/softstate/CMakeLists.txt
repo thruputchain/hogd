@@ -1,6 +1,7 @@
 add_library(
   hogdb_softstate
   contract_map.cc
+  storage_item_frame.cc
 )
 
 target_link_libraries(
