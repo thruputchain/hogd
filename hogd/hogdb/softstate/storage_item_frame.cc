@@ -13,7 +13,6 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
-#include "x23/format.h"
 
 namespace hogd {
 

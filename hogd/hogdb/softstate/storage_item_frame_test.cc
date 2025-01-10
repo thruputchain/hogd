@@ -9,6 +9,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "hogd/base/xdr_util.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 
