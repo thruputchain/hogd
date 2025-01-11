@@ -5,6 +5,7 @@
 #include <string>
 
 #include "hogd/base/hashmap.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 
