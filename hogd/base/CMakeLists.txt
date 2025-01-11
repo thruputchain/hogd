@@ -14,6 +14,7 @@ add_executable(
   base_test
   bits_test.cc
   cpputil_test.cc
+  hashmap_test.cc
   perthread_test.cc
   status_test.cc
   string_test.cc
@@ -23,6 +24,7 @@ add_executable(
 target_link_libraries(
   base_test
   base
+  ${LIBSODIUM_LIBRARIES}
   GTest::gtest_main
 )
 gtest_discover_tests(base_test)
