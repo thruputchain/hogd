@@ -23,13 +23,13 @@ namespace hogd {
 // This version does not implement a size count, although nothing would prevent
 // that.
 template<typename T>
-concept HashMapObject = std::movable<T> && requires(T object) {
+concept hash_map_object = std::movable<T> && requires(T object) {
   { object.get_key() } -> std::same_as<std::span<const std::byte>>;
 };
 
-template<HashMapObject T> class HashMap {
+template<hash_map_object T> class HashMap {
 public:
-  using hash_t = uint32_t;
+  using hash_t = uint64_t;
   using key_t = std::span<const std::byte>;
   using bucket_entry_t = std::vector<T>;
 
@@ -39,7 +39,7 @@ public:
       hash_key_(siphash24_keygen())
   {
     assert(lg_bucket_count >= lg_mutex_count);
-    assert(lg_bucket_count <= 32);
+    assert(lg_bucket_count <= 64);
     assert(lg_mutex_count != 0);
   }
 
@@ -95,8 +95,8 @@ public:
 private:
   std::vector<bucket_entry_t> buckets_;
   std::vector<std::mutex> mutexes_;
-  std::atomic<uint32_t> expanded_idx_;
-  uint32_t old_size_;
+  std::atomic<size_t> expanded_idx_;
+  size_t old_size_;
 
   Siphash24Key hash_key_;
 
@@ -104,9 +104,9 @@ private:
   acquire_bucket(key_t key);
   std::mutex &get_mutex(uint64_t hash);
 
-  uint32_t hash(key_t key) const
+  uint64_t hash(key_t key) const
   {
-    return siphash24(key, hash_key_) & std::numeric_limits<uint32_t>::max();
+    return siphash24(key, hash_key_) & std::numeric_limits<uint64_t>::max();
   }
 
   static T *find_element(key_t key, bucket_entry_t &bucket)
@@ -120,7 +120,7 @@ private:
   }
 };
 
-template<HashMapObject T>
+template<hash_map_object T>
 std::pair<std::unique_lock<std::mutex>, typename HashMap<T>::bucket_entry_t *>
 HashMap<T>::acquire_bucket(key_t key)
 {
@@ -139,24 +139,22 @@ HashMap<T>::acquire_bucket(key_t key)
   return {std::move(ul), &buckets_[new_idx]};
 }
 
-template<HashMapObject T>
+template<hash_map_object T>
 std::mutex &
 HashMap<T>::get_mutex(uint64_t hash)
 {
-  uint32_t mask = mutexes_.size() - 1;
+  uint64_t mask = mutexes_.size() - 1;
   // assert mutexes_.size() is power of 2
   assert((mutexes_.size() & mask) == 0);
   return mutexes_[hash & mask];
 }
 
-template<HashMapObject T>
+template<hash_map_object T>
 bool
 HashMap<T>::prepare_expand(int lg_new_bucket_count)
 {
-  if (lg_new_bucket_count > 32) {
-    // otherwise too big for the hash values we use
-    lg_new_bucket_count = 32;
-  }
+  // more than 64 bits would be too big for the hash output
+  lg_new_bucket_count = std::min(lg_new_bucket_count, 64);
 
   if (1UL << lg_new_bucket_count <= buckets_.size()) {
     // shrinking unsupported
@@ -169,7 +167,7 @@ HashMap<T>::prepare_expand(int lg_new_bucket_count)
   return true;
 }
 
-template<HashMapObject T>
+template<hash_map_object T>
 void
 HashMap<T>::do_expand()
 {

@@ -1,11 +1,15 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <span>
+#include <string>
+
 #include "hogd/base/hashmap.h"
 
 namespace hogd {
 
 namespace {
-struct value_t {
+struct ValueT {
   std::string key;
   uint32_t value = 0;
 
@@ -18,7 +22,7 @@ struct value_t {
 
 TEST(HashMap, InsertAndGet)
 {
-  HashMap<value_t> map(1, 1);
+  HashMap<ValueT> map(1, 1);
 
   std::string a = "aaa", b = "bbb";
 
@@ -26,15 +30,17 @@ TEST(HashMap, InsertAndGet)
   EXPECT_TRUE(map.emplace(std::as_bytes(std::span(b)), b, 12));
 
   auto val = map.modify_element(std::as_bytes(std::span(a)),
-                                [](value_t const &v) { return v.value; });
+                                [](ValueT const &v) { return v.value; });
 
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(val);
   EXPECT_EQ(*val, 10);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 };
 
 TEST(HashMap, Modify)
 {
-  HashMap<value_t> map(1, 1);
+  HashMap<ValueT> map(1, 1);
 
   std::string a = "aaa", b = "bbb", c = "ccc", d = "ddd", e = "eee", f = "fff";
 
@@ -51,10 +57,10 @@ TEST(HashMap, Modify)
   EXPECT_FALSE(map.emplace(std::as_bytes(std::span(d)), d, 12));
 
   EXPECT_TRUE(map.modify_element(std::as_bytes(std::span(a)),
-                                 [](value_t &v) { v.value++; }));
+                                 [](ValueT &v) { v.value++; }));
 
   auto val = map.modify_element(std::as_bytes(std::span(a)),
-                                [](value_t const &v) { return v.value; });
+                                [](ValueT const &v) { return v.value; });
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(val);
