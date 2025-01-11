@@ -20,10 +20,12 @@ TEST(HashMap, InsertAndGet)
 {
   HashMap<value_t> map(1, 1);
 
-  EXPECT_TRUE(map.emplace(std::as_bytes(std::span("aaa")), "aaa", 10));
-  EXPECT_TRUE(map.emplace(std::as_bytes(std::span("bbb")), "bbb", 12));
+  std::string a = "aaa", b = "bbb";
 
-  auto val = map.modify_element(std::as_bytes(std::span("aaa")),
+  EXPECT_TRUE(map.emplace(std::as_bytes(std::span(a)), a, 10));
+  EXPECT_TRUE(map.emplace(std::as_bytes(std::span(b)), b, 12));
+
+  auto val = map.modify_element(std::as_bytes(std::span(a)),
                                 [](value_t const &v) { return v.value; });
 
   ASSERT_TRUE(val);
@@ -34,22 +36,24 @@ TEST(HashMap, Modify)
 {
   HashMap<value_t> map(1, 1);
 
+  std::string a = "aaa", b = "bbb", c = "ccc", d = "ddd", e = "eee", f = "fff";
+
   // there must be at least one bucket with multiple elements
-  EXPECT_TRUE(map.emplace(std::as_bytes(std::span("aaa")), "aaa", 10));
-  EXPECT_TRUE(map.emplace(std::as_bytes(std::span("bbb")), "bbb", 12));
-  EXPECT_TRUE(map.emplace(std::as_bytes(std::span("ccc")), "ccc", 14));
-  EXPECT_TRUE(map.emplace(std::as_bytes(std::span("ddd")), "ddd", 16));
-  EXPECT_TRUE(map.emplace(std::as_bytes(std::span("eee")), "eee", 18));
-  EXPECT_TRUE(map.emplace(std::as_bytes(std::span("fff")), "fff", 20));
+  EXPECT_TRUE(map.emplace(std::as_bytes(std::span(a)), a, 10));
+  EXPECT_TRUE(map.emplace(std::as_bytes(std::span(b)), b, 12));
+  EXPECT_TRUE(map.emplace(std::as_bytes(std::span(c)), c, 14));
+  EXPECT_TRUE(map.emplace(std::as_bytes(std::span(d)), d, 16));
+  EXPECT_TRUE(map.emplace(std::as_bytes(std::span(e)), e, 18));
+  EXPECT_TRUE(map.emplace(std::as_bytes(std::span(f)), f, 20));
 
-  EXPECT_FALSE(map.emplace(std::as_bytes(std::span("bbb")), "bbb", 12));
-  EXPECT_FALSE(map.emplace(std::as_bytes(std::span("ccc")), "ccc", 12));
-  EXPECT_FALSE(map.emplace(std::as_bytes(std::span("ddd")), "ddd", 12));
+  EXPECT_FALSE(map.emplace(std::as_bytes(std::span(b)), e, 12));
+  EXPECT_FALSE(map.emplace(std::as_bytes(std::span(c)), c, 12));
+  EXPECT_FALSE(map.emplace(std::as_bytes(std::span(d)), d, 12));
 
-  EXPECT_TRUE(map.modify_element(std::as_bytes(std::span("aaa")),
+  EXPECT_TRUE(map.modify_element(std::as_bytes(std::span(a)),
                                  [](value_t &v) { v.value++; }));
 
-  auto val = map.modify_element(std::as_bytes(std::span("aaa")),
+  auto val = map.modify_element(std::as_bytes(std::span(a)),
                                 [](value_t const &v) { return v.value; });
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)

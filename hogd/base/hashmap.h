@@ -62,7 +62,7 @@ public:
     if (T *ptr = find_element(key, *bucket)) {
       if constexpr (std::is_void_v<Ret>) {
         lambda(*ptr);
-        return false;
+        return true;
       }
       else {
         return std::make_optional<Ret>(lambda(*ptr));
@@ -77,7 +77,10 @@ public:
     }
   }
 
-  // returns true if a new object is constructed
+  // returns true if a new object is constructed.
+  // Warning: If you insert an element and then later, get_key() returns
+  // a different result than the key under which it was inserted,
+  // the element might be lost.
   template<typename... Args> bool emplace(key_t key, Args &&...args)
   {
     auto [lk, bucket] = acquire_bucket(key);
