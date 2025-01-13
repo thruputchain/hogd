@@ -17,8 +17,9 @@
 namespace hogd {
 
 StorageItemFrame::StorageItemFrame(
+    AddressAndKey const &addrkey,
     std::optional<StorageItem> const &snapshot_state)
-  : committed_base_item_(snapshot_state)
+  : addr_key_(addrkey), committed_item_(snapshot_state)
 {}
 
 std::optional<StorageItem>
@@ -149,16 +150,15 @@ StorageItemFrame::RefcountedVariant::revert_nnint_set_add(int128_t add_value)
 bool
 StorageItemFrame::try_reserve_delta(StorageDelta const &delta)
 {
-  auto v = variant_.take();
-
   switch (delta.type()) {
   case StorageDeltaType::kBytestringSet:
-    return v->try_reserve_bytestring_set(delta.bytestring());
+    return variant_.try_reserve_bytestring_set(delta.bytestring());
   case StorageDeltaType::kNonnegativeIntSetAdd:
-    return v->try_reserve_nnint_set_add(from_xdr(delta.nnint().set_value),
-                                        from_xdr(delta.nnint().add_value));
+    return variant_.try_reserve_nnint_set_add(from_xdr(delta.nnint().set_value),
+                                              from_xdr(
+                                                  delta.nnint().add_value));
   case StorageDeltaType::kDelete:
-    return v->try_reserve_delete();
+    return variant_.try_reserve_delete();
   default:
     throw std::runtime_error("unknown delta type");
   }
@@ -173,8 +173,7 @@ StorageItemFrame::commit_delta(StorageDelta const &delta)
 void
 StorageItemFrame::revert_delta(StorageDelta const &delta)
 {
-  auto v = variant_.take();
-  v->release_reference();
+  variant_.release_reference();
 
   switch (delta.type()) {
   case StorageDeltaType::kDelete:
@@ -183,7 +182,7 @@ StorageItemFrame::revert_delta(StorageDelta const &delta)
     // above
     return;
   case StorageDeltaType::kNonnegativeIntSetAdd:
-    v->revert_nnint_set_add(from_xdr(delta.nnint().add_value));
+    variant_.revert_nnint_set_add(from_xdr(delta.nnint().add_value));
     return;
   default:
     throw std::runtime_error("unimplemented");
@@ -193,35 +192,28 @@ StorageItemFrame::revert_delta(StorageDelta const &delta)
 std::optional<StorageItem> const &
 StorageItemFrame::get_snapshot_item() const
 {
-  return committed_base_item_;
+  assert(!round_committed_);
+  return committed_item_;
+}
+
+std::optional<StorageItem> const &
+StorageItemFrame::get_post_close_block_item()
+{
+  update_committed_item();
+  return committed_item_;
 }
 
 void
-StorageItemFrame::clear_modifications()
+StorageItemFrame::update_committed_item()
 {
-  variant_->refcount_ = 0;
-}
-
-void
-StorageItemFrame::commit_round()
-{
-  x23::Defer cleanup([&] { clear_modifications(); });
-
-  auto v = variant_.take();
-
-  if (v->refcount_ == 0) {
-    // no committed modifications.
-    return;
+  if (!round_committed_) {
+    if (variant_.refcount_ > 0) {
+      committed_item_ =
+          std::visit([&](auto const &arm) { return arm.to_item(); },
+                     variant_.variant_);
+    }
+    round_committed_ = true;
   }
-
-  committed_base_item_ =
-      std::visit([&](auto const &arm) { return arm.to_item(); }, v->variant_);
-}
-
-void
-StorageItemFrame::revert_round()
-{
-  clear_modifications();
 }
 
 } // namespace hogd

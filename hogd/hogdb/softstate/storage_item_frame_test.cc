@@ -16,7 +16,7 @@ namespace hogd {
 // Change the typeclass of a storage item during execution
 TEST(StorageItemFrame, RewriteVariantTypeNullStart)
 {
-  StorageItemFrame item(std::nullopt);
+  StorageItemFrame item(AddressAndKey{}, std::nullopt);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
@@ -65,7 +65,7 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
   base_item.type(StorageItemType::kBytestring);
   base_item.bytestring() = {0, 1, 2, 3};
 
-  StorageItemFrame item(base_item);
+  StorageItemFrame item(AddressAndKey{}, base_item);
 
   StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -94,9 +94,9 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
   EXPECT_FALSE(item.try_reserve_delta(nnint_set_add));
   EXPECT_TRUE(item.try_reserve_delta(bytestring_delta));
 
-  item.commit_round();
+  StorageItemFrame item2(AddressAndKey{}, item.get_post_close_block_item());
 
-  auto committed_item = item.get_snapshot_item();
+  auto committed_item = item2.get_snapshot_item();
 
   ASSERT_TRUE(committed_item.has_value());
 
@@ -114,23 +114,25 @@ TEST(StorageItemFrame, DeleteItem)
   base_item.type(StorageItemType::kBytestring);
   base_item.bytestring() = {0, 1, 2, 3};
 
-  StorageItemFrame item(base_item);
+  StorageItemFrame item(AddressAndKey{}, base_item);
   ASSERT_TRUE(item.get_snapshot_item());
 
   // committing an empty round keeps item active
-  item.commit_round();
-  ASSERT_TRUE(item.get_snapshot_item());
+  StorageItemFrame item2(AddressAndKey{}, item.get_post_close_block_item());
 
-  EXPECT_TRUE(item.try_reserve_delta(StorageDelta(StorageDeltaType::kDelete)));
+  ASSERT_TRUE(item2.get_snapshot_item());
+
+  EXPECT_TRUE(item2.try_reserve_delta(StorageDelta(StorageDeltaType::kDelete)));
 
   StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
+  EXPECT_FALSE(item2.try_reserve_delta(bytestring_delta));
 
-  EXPECT_FALSE(item.try_reserve_delta(bytestring_delta));
+  item2.commit_delta(StorageDelta(StorageDeltaType::kDelete));
 
-  item.commit_round();
+  StorageItemFrame item3(AddressAndKey{}, item2.get_post_close_block_item());
 
-  EXPECT_FALSE(item.get_snapshot_item());
+  EXPECT_FALSE(item3.get_snapshot_item());
 }
 
 } // namespace hogd

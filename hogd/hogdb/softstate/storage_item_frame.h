@@ -6,7 +6,6 @@
 
 #include "hogd/hogdb/softstate/uint256_reservation.h"
 #include "storage_item.hh"
-#include "x23/mvar.h"
 
 namespace hogd {
 
@@ -17,15 +16,20 @@ namespace hogd {
 // data structure). The internals may need reimplementation when we have a
 // database to interact with. However, the external interface should look
 // approximately like this.
+//
+// This structure is NOT threadsafe in itself.  We assume that this structure
+// will be guarded by some external lock.
 class StorageItemFrame {
 public:
-  StorageItemFrame(std::optional<StorageItem> const &snapshot_state);
+  StorageItemFrame(AddressAndKey const &addrkey,
+                   std::optional<StorageItem> const &snapshot_state);
 
-  // Disable move and copy
+  // Disable copy
   StorageItemFrame(const StorageItemFrame &) = delete;
   StorageItemFrame &operator=(StorageItemFrame const &) = delete;
-  StorageItemFrame(StorageItemFrame &&) = delete;
-  StorageItemFrame &operator=(StorageItemFrame &&) = delete;
+  // Allow move
+  StorageItemFrame(StorageItemFrame &&) noexcept = default;
+  StorageItemFrame &operator=(StorageItemFrame &&obj) noexcept = default;
 
   // Required usage pattern: A transaction calls try_reserve_delta() on a delta,
   // and then either calls commit or revert on the delta
@@ -44,13 +48,25 @@ public:
   void revert_delta(StorageDelta const &delta);
   void commit_delta(StorageDelta const &delta);
 
+  // Get the item, before any deltas of the current round were committed.
+  // Cannot be called after block close (after get_post_close_block_item() is
+  // called).
   std::optional<StorageItem> const &get_snapshot_item() const;
 
-  // All pending transactions should finish before commit_round is called.
-  // That is, every try_reserve_delta() is followed by a revert_delta or a
-  // commit_delta.
-  void commit_round();
-  void revert_round();
+  // All pending transactions should finish before get_post_close_block_item is
+  // called. That is, every try_reserve_delta() is followed by a revert_delta or
+  // a commit_delta.
+  //
+  // This method updates committed_item_ to be the value of the item
+  // after the end of the current block.
+  std::optional<StorageItem> const &get_post_close_block_item();
+
+  std::span<const std::byte> get_key() const
+  {
+    return std::as_bytes(
+        std::span(reinterpret_cast<const uint8_t *>(&addr_key_),
+                  sizeof(AddressAndKey)));
+  }
 
 private:
   // Each of the following types represents one possible state that the item
@@ -65,7 +81,7 @@ private:
 
   // Bytestring state
   struct BytestringArgs {
-    const Bytestring bytestring_set_;
+    Bytestring bytestring_set_;
 
     bool typeclass_match(Bytestring const &candidate_bytestring) const
     {
@@ -76,7 +92,7 @@ private:
 
   // NNInt state
   struct NNIntSetAddArgs {
-    const int128_t set_value_;
+    int128_t set_value_;
     // total subtracted by any pending or committed reservations
     int128_t total_subtracted_ = 0;
     UInt256Reservation total_added_;
@@ -100,8 +116,13 @@ private:
   // Every successful try_reserve increases the refcount, and revert reduces it.
   class RefcountedVariant {
   public:
-    variant_t variant_;
+    variant_t variant_ = DeleteArgs{};
     uint32_t refcount_ = 0;
+
+    RefcountedVariant() = default;
+
+    RefcountedVariant &operator=(RefcountedVariant &&) noexcept = default;
+    RefcountedVariant(RefcountedVariant &&) noexcept = default;
 
     void acquire_reference() { ++refcount_; }
 
@@ -130,10 +151,12 @@ private:
     }
   };
 
-  void clear_modifications();
+  void update_committed_item();
 
-  std::optional<StorageItem> committed_base_item_;
-  x23::MVar<RefcountedVariant> variant_;
+  bool round_committed_ = false;
+  AddressAndKey addr_key_;
+  std::optional<StorageItem> committed_item_;
+  RefcountedVariant variant_;
 };
 
 } // namespace hogd
