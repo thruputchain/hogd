@@ -3,6 +3,7 @@ add_library(
   contract_map.cc
   storage_item_frame.cc
   storage_view.cc
+  transaction_cache.cc
 )
 
 target_link_libraries(

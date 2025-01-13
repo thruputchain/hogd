@@ -10,7 +10,6 @@ namespace hogd {
 
 TEST(BlockManagerTest, CommitCleanup)
 {
-
   BlockManager m(0, std::make_shared<BlockState>());
 
   EXPECT_TRUE(m.get_block_data(0));

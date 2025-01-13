@@ -21,7 +21,7 @@ public:
   // committed block.
   BlockManager(BlockID root_id, std::shared_ptr<BlockState> initial_state);
 
-  // REquirement: The supplied id must be a direct child of the most recently
+  // Requirement: The supplied id must be a direct child of the most recently
   // committed block. Deletes from block_cache_ any entries that might not
   // commit in the future. (i.e. any siblings of the supplied id, and any of
   // their children).
