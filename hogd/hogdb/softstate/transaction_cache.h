@@ -19,6 +19,8 @@ private:
 
 class TransactionCache {
 public:
+  TransactionCache() : tx_entries_(8, 8) {}
+
   void add_delta(TransactionID txid, AddressAndKey const &addrkey,
                  StorageDelta const &delta);
 
@@ -26,7 +28,7 @@ public:
   // after all add_delta() calls for the txid have completed.
   // This powers calls to commit/abort the transaction.
   std::vector<std::pair<AddressAndKey, StorageDelta>>
-  get_transaction_deltas(TransactionID txid);
+  get_deltas(TransactionID txid);
 
 private:
   HashMap<TransactionCacheEntry> tx_entries_;

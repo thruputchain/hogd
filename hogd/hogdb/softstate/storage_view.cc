@@ -24,6 +24,7 @@ StorageView::get_snapshot_storage_item(AddressAndKey const &addrkey)
     return *local_res;
   }
 
+  std::shared_lock lk(mtx);
   return std::visit(
       [&addrkey](auto *parent) -> std::optional<StorageItem> {
         return parent->get_post_block_storage_item(addrkey);
@@ -47,6 +48,7 @@ StorageView::get_post_block_storage_item(AddressAndKey const &addrkey)
     return *local_res;
   }
 
+  std::shared_lock lk(mtx);
   return std::visit(
       [&addrkey](auto *parent) -> std::optional<StorageItem> {
         return parent->get_post_block_storage_item(addrkey);
@@ -69,13 +71,16 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
     return *res;
   }
 
-  // else, value was not present in cache.  Lookup from parent and emplace
-  auto parent_value = std::visit(
-      [&addrkey](auto *parent) -> std::optional<StorageItem> {
-        return parent->get_post_block_storage_item(addrkey);
-      },
-      parent_view_);
-
+  std::optional<StorageItem> parent_value;
+  {
+    std::shared_lock lk(mtx);
+    // else, value was not present in cache.  Lookup from parent and emplace
+    parent_value = std::visit(
+        [&addrkey](auto *parent) -> std::optional<StorageItem> {
+          return parent->get_post_block_storage_item(addrkey);
+        },
+        parent_view_);
+  }
   modified_items_.emplace(key, addrkey, parent_value);
 
   res = modified_items_.modify_element(key, [&delta](auto &v) -> bool {
@@ -104,6 +109,14 @@ StorageView::commit_storage_delta(AddressAndKey const &addrkey,
 
   modified_items_.modify_element(key,
                                  [&delta](auto &v) { v.commit_delta(delta); });
+}
+
+void
+StorageView::unlink_parent(InMemoryDatabase *new_parent)
+{
+  assert(closed_);
+  std::unique_lock lk(mtx);
+  parent_view_.emplace<InMemoryDatabase *>(new_parent);
 }
 
 } // namespace hogd

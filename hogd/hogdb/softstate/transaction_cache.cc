@@ -38,7 +38,7 @@ TransactionCache::add_delta(TransactionID txid, AddressAndKey const &addrkey,
 }
 
 std::vector<std::pair<AddressAndKey, StorageDelta>>
-TransactionCache::get_transaction_deltas(TransactionID txid)
+TransactionCache::get_deltas(TransactionID txid)
 {
   auto key = get_key(txid);
   auto res =

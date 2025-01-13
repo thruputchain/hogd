@@ -1,7 +1,9 @@
 #pragma once
 
-#include "hogd/base/hashmap.h"
+#include <memory>
 
+#include "hogd/base/hashmap.h"
+#include "hogd/hogdb/softstate/block_state.h"
 #include "rpc_types.hh"
 
 // Data structures to manage a possibly-forking tree of blocks.
@@ -9,9 +11,6 @@
 // Could probably be abstracted into a template if necessary.
 
 namespace hogd {
-
-// Placeholder
-struct BlockState {};
 
 class BlockManager {
 public:
