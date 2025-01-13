@@ -3,10 +3,17 @@
 namespace hogd {
 
 x23::Async<ExpectedProposalData>
-ExecutorRpcInterface::propose_transaction(SignedTransaction const &signed_tx)
+ExecutorRpcInterface::propose_transaction(BlockID block_id,
+                                          SignedTransaction const &signed_tx)
 {
-  if (executor_state_.try_acquire_run_lease(ExecutorMode::kProposing)) {
+  auto *exec_state = executor_states_.get_executor_state(block_id);
+  if (!exec_state) {
+    co_return ExpectedProposalData(RPCError::kBadExecutorState);
+  }
+
+  if (exec_state->try_acquire_run_lease(ExecutorMode::kProposing)) {
     // TODO: invoke the transaction, and so on and so forth
+    // allocate transaction id here
     throw std::runtime_error("unimplemented");
   }
   co_return ExpectedProposalData(RPCError::kBadExecutorState);
@@ -14,9 +21,14 @@ ExecutorRpcInterface::propose_transaction(SignedTransaction const &signed_tx)
 
 x23::Async<RPCError>
 ExecutorRpcInterface::validate_transaction(
-    ProposedTransaction const &proposed_tx)
+    BlockID block_id, ProposedTransaction const &proposed_tx)
 {
-  if (executor_state_.try_acquire_run_lease(ExecutorMode::kValidating)) {
+  auto *exec_state = executor_states_.get_executor_state(block_id);
+  if (!exec_state) {
+    co_return RPCError::kBadExecutorState;
+  }
+
+  if (exec_state->try_acquire_run_lease(ExecutorMode::kValidating)) {
     // TODO: invoke the transaction, and so on and so forth
     throw std::runtime_error("unimplemented");
   }
@@ -24,26 +36,23 @@ ExecutorRpcInterface::validate_transaction(
 }
 
 x23::Async<void>
-ExecutorRpcInterface::open_proposal_block()
+ExecutorRpcInterface::open_proposal_block(BlockID id)
 {
-  std::lock_guard lock(coord_control_mutex_);
-  executor_state_.start_proposing();
+  executor_states_.open_proposal(id);
   co_return;
 }
 
 x23::Async<void>
-ExecutorRpcInterface::open_validation_block()
+ExecutorRpcInterface::open_validation_block(BlockID id)
 {
-  std::lock_guard lock(coord_control_mutex_);
-  executor_state_.start_validating();
+  executor_states_.open_validation(id);
   co_return;
 }
 
 x23::Async<void>
-ExecutorRpcInterface::finish_block()
+ExecutorRpcInterface::finish_block(BlockID id)
 {
-  std::lock_guard lock(coord_control_mutex_);
-  executor_state_.await_finish();
+  executor_states_.await_finish(id);
   co_return;
 }
 

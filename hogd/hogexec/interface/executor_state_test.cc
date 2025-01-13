@@ -9,12 +9,10 @@ namespace hogd {
 
 TEST(ExecutorState, ProposalConditionVar)
 {
-  ExecutorState state;
+  ExecutorState state(ExecutorMode::kProposing);
 
   WorkerPool &pool = WorkerPool::get_default_pool();
   constexpr size_t kLeases = 10;
-
-  state.start_proposing();
 
   for (auto i = 0U; i < kLeases; i++) {
     ASSERT_TRUE(state.try_acquire_run_lease(ExecutorMode::kProposing));
@@ -36,7 +34,7 @@ TEST(ExecutorState, ProposalConditionVar)
 
   th.join();
 
-  EXPECT_EQ(state.get_state(), ExecutorMode::kNone);
+  EXPECT_EQ(state.get_state(), ExecutorMode::kDone);
 }
 
 } // namespace hogd

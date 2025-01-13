@@ -2,6 +2,7 @@ add_library(
   interface
   executor_state.cc
   rpc_interface.cc
+  executor_state_manager.cc
 )
 
 target_link_libraries(

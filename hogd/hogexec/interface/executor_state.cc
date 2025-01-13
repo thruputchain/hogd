@@ -30,7 +30,7 @@ ExecutorState::release_run_lease()
 
   if (running_transaction_count_ == 0 &&
       current_state_ == ExecutorMode::kFinishing) {
-    current_state_ = ExecutorMode::kNone;
+    current_state_ = ExecutorMode::kDone;
     cv.notify_all();
   }
 }
@@ -39,31 +39,15 @@ void
 ExecutorState::await_finish()
 {
   std::unique_lock lk(mtx);
-  assert(current_state_ != ExecutorMode::kNone);
+  assert(current_state_ != ExecutorMode::kDone);
   assert(current_state_ != ExecutorMode::kFinishing);
 
   current_state_ = ExecutorMode::kFinishing;
   if (running_transaction_count_ == 0) {
-    current_state_ = ExecutorMode::kNone;
+    current_state_ = ExecutorMode::kDone;
     return;
   }
-  cv.wait(lk, [this] { return current_state_ == ExecutorMode::kNone; });
-}
-
-void
-ExecutorState::start_proposing()
-{
-  std::lock_guard lock(mtx);
-  assert(current_state_ == ExecutorMode::kNone);
-  current_state_ = ExecutorMode::kProposing;
-}
-
-void
-ExecutorState::start_validating()
-{
-  std::lock_guard lock(mtx);
-  assert(current_state_ == ExecutorMode::kNone);
-  current_state_ = ExecutorMode::kValidating;
+  cv.wait(lk, [this] { return current_state_ == ExecutorMode::kDone; });
 }
 
 } // namespace hogd
