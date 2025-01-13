@@ -4,6 +4,7 @@ add_xdr(
 	coord.x
 	ffi_enums.x
 	rpc.x
+	rpc_types.x
 	storage_item.x
 	syscall.x
 	transaction.x

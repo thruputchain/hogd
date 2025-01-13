@@ -1,6 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <concepts>
+#include <cstdint>
+#include <mutex>
 
 #include "hogd/crypto/crypto.h"
 
@@ -90,6 +93,20 @@ public:
 
     bucket->emplace_back(std::forward<Args>(args)...);
     return true;
+  }
+
+  // returns true if an element is erased
+  bool erase(key_t key)
+  {
+    auto [lk, bucket] = acquire_bucket(key);
+    for (auto it = bucket->begin(); it != bucket->end(); ++it) {
+      if (std::ranges::equal(it->get_key(), key)) {
+        *it = std::move(bucket->back());
+        bucket->pop_back();
+        return true;
+      }
+    }
+    return false;
   }
 
 private:

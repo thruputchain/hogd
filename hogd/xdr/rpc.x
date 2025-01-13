@@ -4,43 +4,11 @@
 %#include "contract.hh"
 %#include "transaction.hh"
 %#include "storage_item.hh"
+%#include "rpc_types.hh"
 
 namespace hogd
 {
   // clang-format on
-
-  // An internal unique ID describing a block.
-  typedef unsigned hyper BlockID;
-
-  // This is obviously missing error codes.  Please expand or change as you
-  // wish.
-  // This probably should get moved to a different file?
-  enum RPCError {
-    kNone = 0,
-    // Lookup on contract that does not exist in database
-    kContractNExist = 1,
-    // Lookup deployment of contract on address that has no deployed contract
-    kNoContractDeployed = 2,
-    // Executor in bad state to validate or propose
-    kBadExecutorState = 3,
-  };
-
-  // Is this the XDR pattern we want?
-  union ExpectedContract switch (RPCError error)
-  {
-  case kNone:
-    Contract contract;
-  default:
-    void;
-  };
-
-  union ExpectedDeployment switch (RPCError error)
-  {
-  case kNone:
-    SHA256Hash deployed_hash;
-  default:
-    void;
-  };
 
   // Contract deploy and create are methods that cannot have conflicts,
   // and can only fail if there are catastrophic errors (like OOM) that would
@@ -74,19 +42,6 @@ namespace hogd
     = 1;
   }
   = 11111111;
-
-  union ExpectedProposalData switch (RPCError error)
-  {
-  case kNone:
-    NondeterministicProposal proposal_data;
-  default:
-    void;
-  };
-
-  typedef unsigned ExecutorID;
-  // First 32 bits of the TransactionID should be the ExecutorID.
-  // Each executor can set the lowbits locally.
-  typedef unsigned hyper TransactionID;
 
   // The interface that the executor exposes to the coordinator.
   program ExectutorInterface
@@ -136,14 +91,6 @@ namespace hogd
     = 1;
   }
   = 33333333;
-
-  union ExpectedStorageItem switch (RPCError error)
-  {
-  case kNone:
-    StorageItem item;
-  default:
-    void;
-  };
 
   program DatabaseToExecutorInterface
   {
