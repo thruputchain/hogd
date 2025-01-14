@@ -29,7 +29,8 @@ ExecutorStateManager::await_finish(BlockID block_id)
     map->erase(it);
   }
   // This executor might not have run transactions on this block,
-  // so it might not have an entry.
+  // and so might not have opened the block on this executor
+  // and might not have an entry.
 }
 
 void

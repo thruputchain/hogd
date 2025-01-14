@@ -6,6 +6,7 @@ add_subdirectory(db)
 add_executable(
   hogdb
   hogdb.cc
+  hogdb_core.cc
 )
 target_link_libraries(
   hogdb

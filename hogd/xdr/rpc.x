@@ -78,19 +78,20 @@ namespace hogd
       // The database will surface requests from the snapshot
       // that would be created if the parent block commits.
       // Parent block must be closed.
-      void open_database_snapshot(BlockID, BlockID) = 0;
-
-      void close_snapshot(BlockID) = 1;
+      RPCError open_database_snapshot(BlockID, BlockID) = 0;
 
       // Commits the blockID to disk.  Should only be called for e.g. finalized
       // blocks. Any BlockID that is not a descendant of this block will return
       // an error if accessed. This BlockID must be the immediate descendant of
       // the most recently committed block.
-      void commit_snapshot(BlockID) = 2;
+      void commit_snapshot(BlockID) = 1;
     }
     = 1;
   }
   = 33333333;
+
+  const kDBToExecutorPort = 10079;
+  const kGenesisBlockID = 0;
 
   program DatabaseToExecutorInterface
   {

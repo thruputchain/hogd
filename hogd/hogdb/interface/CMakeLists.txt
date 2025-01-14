@@ -2,6 +2,7 @@ add_library(
   hogdb_interface
   block_manager.cc
   db_to_executor_server.cc
+  db_to_coord_server.cc
 )
 
 target_link_libraries(

@@ -10,6 +10,11 @@
 
 namespace hogd {
 
+// note: The first block after reloading should be some block id that is
+// already persisted to the database. Creating a separate StorageView for
+// this means acquiring an extra shared_lock. This could be avoided, in
+// principle, at the cost of much more code complexity. This edge case
+// should disappear by the next block.
 BlockManager::BlockManager(BlockID root_id,
                            std::shared_ptr<BlockState> initial_state)
   : block_cache_(8, 8) // arbitrary init parameters
@@ -23,6 +28,8 @@ BlockManager::BlockManager(BlockID root_id,
 void
 BlockManager::commit_block(BlockID id)
 {
+  // TODO(geoff): put last_committed onto a queue
+  // of elements that can be committed to DB and then removed.
   auto children_to_remove = block_cache_.modify_element(
       std::as_bytes(std::span(&last_committed_id_, 1)),
       [id](Block &last_committed) {
