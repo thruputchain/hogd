@@ -1,6 +1,5 @@
 add_library(
   hogdb_softstate
-  contract_map.cc
   storage_item_frame.cc
   storage_view.cc
   transaction_cache.cc
