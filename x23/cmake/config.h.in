@@ -11,9 +11,6 @@
 // Set to 1 if you are on arm and the compiler supports __builtin_arm_yield.
 #cmakedefine01 HAVE_BUILTIN_ARM_YIELD
 
-// Set to 1 if <new> properly defines hardware_destructive_interference_size.
-#cmakedefine01 HAVE_HARDWARE_DESTRUCTIVE_INTERFERENCE_SIZE
-
 // Set to 1 if your operating system supports epoll
 #cmakedefine01 HAVE_EPOLL
 

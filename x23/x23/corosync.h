@@ -44,13 +44,14 @@
 // A CoroSharedLock<> csl is an RCU-like type derived from CoroLock.
 // You can lock it exclusively with a CoroGuard just like a CoroLock,
 // except the exclusive lock operation drains the threadpool (which is
-// expensive, but it is optimized for shared locks).
+// expensive, but CoroSharedLock is optimized for acquiring shared
+// locks and rarely needing the exclusive lock).
 //
 //    auto shared_holder = co_await csl.coro_lock_shared();
 //
 // Returns when there is no exclusive locker.  Since exclusive lockers
-// drain the thread pool, it the lock is effectively held in shared
-// mode until the coroutine is suspended.  shared_holder panics if the
+// drain the thread pool, the lock is effectively held in shared mode
+// until the coroutine is suspended.  shared_holder panics if the
 // coroutine has been suspended before it is destroyed.  (If it
 // doesn't go out of scope, you can call shared_holder.reset() when
 // you are done holding the shared lock.)
@@ -121,10 +122,15 @@ public:
       h();
   }
 
-  Async<void> await_free() {
+  Async<void> await_free()
+  {
     LockerState ls;
     co_await lock(&ls);
     unlock(&ls);
+    // Note: it's important that unlock resumes the next coroutine
+    // before returning.  Hence, if there's a big chain of threads
+    // each calling await_free() in a loop, then they will all return
+    // after from await_free after the last unlock has completed.
   }
 
 private:
@@ -132,9 +138,9 @@ private:
 
 public:
   // Release the lock and immediately destroy the invoking coroutine,
-  // resume the next coroutine in line for the lock.  If present, the
-  // second argument is passed to return_value in coroutines returning
-  // a value.
+  // resuming the next coroutine in line for the lock.  If present,
+  // the second argument is passed to return_value in coroutines
+  // returning a value.
   [[nodiscard]] AwaitReleaseAndReturn<void> unlock_and_return(LockerState *ls);
   template<typename T>
   [[nodiscard]] AwaitReleaseAndReturn<T> unlock_and_return(LockerState *ls,
@@ -145,15 +151,16 @@ public:
 
 private:
   // If last_ is NULL, the lock is free.  If last_ points to a
-  // LockerState then it belongs to the last coroutine in line to
+  // LockerState, then it belongs to the last coroutine in line to
   // acquire the lock, in which case a new coroutine can enqueue
   // itself by putting its own atomic_coroutine_handle into the last
   // LockerState and setting last_ to its own LockerState.
   std::atomic<LockerState *> last_{nullptr};
 
-  std::coroutine_handle<> next(LockerState *ls)
+  std::coroutine_handle<> next(LockerState *const ls)
   {
-    if (last_.compare_exchange_strong(ls, nullptr)) {
+    LockerState *lscopy = ls;
+    if (last_.compare_exchange_strong(lscopy, nullptr)) {
       assert(ls->next.load(std::memory_order_relaxed) == nullptr);
       return nullptr;
     }
@@ -175,9 +182,9 @@ void resume_in_another_thread(std::coroutine_handle<>);
 
 template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
   CoroLock &lk_;
-  LockerState *next_;
+  LockerState *ls_;
 
-  AwaitReleaseAndReturn(CoroLock &lk, LockerState *ls) : lk_(lk), next_(ls) {}
+  AwaitReleaseAndReturn(CoroLock &lk, LockerState *ls) : lk_(lk), ls_(ls) {}
   bool await_ready() noexcept { return false; }
 
   // Returns NULL if there is no other coroutine to resume, otherwise
@@ -186,7 +193,7 @@ template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
   std::coroutine_handle<>
   finish_suspend(std::coroutine_handle<Promise> moriturus) noexcept
   {
-    std::coroutine_handle<> next_locker = lk_.next(next_);
+    std::coroutine_handle<> next_locker = lk_.next(ls_);
     std::coroutine_handle<> next_coro = nullptr;
     if constexpr (requires {
                     next_coro = detail::emulate_final_suspend(moriturus);
@@ -310,10 +317,10 @@ struct CoroGuard : CoroLock::LockerState {
 // available.  coro_shared_lock() returns a "holder" value you must
 // keep in scope until you are done with the lock.  The shared lock is
 // only good until the next time your coroutine is suspended, but as a
-// result is heavily optimized within coroutines.  By contrast, this
-// is not optimized for exclusive locks, so is most suitable for
-// situations where you acquire the shared lock all the time and
-// rarely need an exclusive lock.
+// result is heavily optimized within coroutines.  By contrast,
+// CoroSharedLock is not optimized for exclusive locks, so is most
+// suitable for situations where you acquire the shared lock all the
+// time and rarely need an exclusive lock.
 template<typename ExLock = CoroLock> class CoroSharedLock : public ExLock {
 public:
   ThreadPool &pool_;
@@ -331,7 +338,7 @@ public:
   }
 
   // Note: there's nothing to do to unlock shared, because you give up
-  // the lock as soon as the coroutine is suspended.  But it's a
+  // the lock as soon as the coroutine is suspended.  However, it's a
   // serious error to hold the lock across suspension points, so we
   // return a CrashIfSuspended.
   using CoroSharedHolder = ThreadPool::CrashIfSuspended;
@@ -341,7 +348,7 @@ public:
       co_await pool_.bg();
     while (ExLock::busy()) {
       if constexpr (requires { this->await_free(); })
-	co_await this->await_free();
+        co_await this->await_free();
       else
         co_await pool_.async(&ExLock::block_until_free, this);
     }
@@ -357,6 +364,10 @@ public:
   using value_type = T;
 
   CoroTempPtr(T *p = nullptr) noexcept : p_(p) { init(); }
+  CoroTempPtr(T *p, const ThreadPool::CrashIfSuspended &cs) noexcept : p_(p)
+  {
+    init(cs);
+  }
   CoroTempPtr &operator=(T *p) noexcept
   {
     p_ = p;
@@ -377,12 +388,18 @@ private:
 #ifndef NDEBUG
   ThreadPool::SuspendCount sc_;
   void init() noexcept { sc_ = ThreadPool::get_suspend_count(); }
+  void init(const ThreadPool::CrashIfSuspended &cs) noexcept
+  {
+    sc_ = cs.start_;
+    assert(sc_.valid());
+  }
   void check() const noexcept
   {
     assert(!p_ || sc_ == ThreadPool::get_suspend_count());
   }
 #else  // NDEBUG
   void init() noexcept {}
+  void init(const ThreadPool::CrashIfSuspended &cs) noexcept {}
   void check() const noexcept {}
 #endif // NDEBUG
 };

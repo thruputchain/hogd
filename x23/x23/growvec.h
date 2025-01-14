@@ -7,6 +7,8 @@
 // number could theoretically grow dynamically, even though this will
 // happen versy seldom.
 
+#pragma once
+
 #include <x23/corosync.h>
 #include <x23/testlock.h>
 
@@ -20,16 +22,17 @@ template<typename V> struct GrowVec {
   using pointer = CoroTempPtr<value_type>;
 
   V v_;
-  CoroSharedLock<TestLock> slk_;
+  CoroSharedLock<> slk_;
 
   explicit GrowVec(ThreadPool &pool) : slk_(pool) {}
 
   Async<pointer> operator[](size_t i) {
     for (;;) {
-      co_await slk_.coro_lock_shared();
+      auto holder = co_await slk_.coro_lock_shared();
       if (i < v_.size())
-	co_return &v_[i];
-      auto guard = co_await slk_.coro_lock();
+	co_return {&v_[i], holder};
+      CoroGuard guard;
+      co_await guard(slk_);
       if (i <= v_.size())
 	v_.resize(i+1);
     }

@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <stop_token>
 #include <sys/socket.h>
-#include <thread>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
@@ -13,6 +12,7 @@
 #include <x23/corosync.h>
 #include <x23/err.h>
 #include <x23/fileio.h>
+#include <x23/growvec.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
 #include <x23/testlock.h>
@@ -159,7 +159,7 @@ private:
     docb(fdp, true);
   }
 
-#else // !HAVE_EPOLL
+#else  // !HAVE_EPOLL
 
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
                                                 POLLOUT | POLLERR};
@@ -221,15 +221,14 @@ public:
 #else  // !HAVE_ACCEPT4
       int fd = ::accept(lfd.get(), reinterpret_cast<sockaddr *>(addr), addrlen);
       if (fd >= 0) {
-	try {
-	  set_nonblock(fd);
-	}
-	catch (...) {
-	  close(fd);
-	  throw;
-	}
-	if (close_on_exec)
-	  fcntl(fd, F_SETFD, 1);
+        try {
+          set_nonblock(fd);
+        } catch (...) {
+          close(fd);
+          throw;
+        }
+        if (close_on_exec)
+          fcntl(fd, F_SETFD, 1);
       }
 #endif // !HAVE_ACCEPT4
       if (fd >= 0)

@@ -1,9 +1,10 @@
 // -*-C++-*-
 
+#pragma once
+
 #include <atomic>
 #include <cassert>
 
-#include <concepts>
 #include <x23/threadpool.h>
 
 namespace x23 {
@@ -12,6 +13,9 @@ namespace x23 {
 // whether or not the lock is busy without acquiring the lock or
 // exclusively caching it.  Also provides a block_while_inhibited()
 // hook for derived types implementing shared locks.
+//
+// Has the same interface as std::mutex, so can be used with
+// std::lock_guard.
 class TestLock {
 public:
   using Holder = std::unique_lock<TestLock>;
@@ -67,6 +71,26 @@ private:
 // A shared version of TestLock.  The constructor argument is the
 // number of buckets for shared lockers, so that different shared
 // lockers can touch different cache lines.
+//
+// *Not* compatible with std::shared_lock because it needs to keep
+// some per-locker state around, so instead it returns a
+// shared_lock-like RAII type.
+//
+//   SharedLock sl;
+//
+//   f() {
+//     {
+//       auto holder = sl.hold_shared();
+//       // lock held in shared mode
+//     }
+//   }
+//
+//   g() {
+//     auto holder = sl.hold_shared();
+//     // lock held in shared mode
+//     holder.reset();
+//     // lock released
+//   }
 class SharedLock : public TestLock {
   // One or more of these Inhibitor counters are used to delay an
   // exclusive locker.
@@ -141,6 +165,7 @@ public:
 	inh_ = std::exchange(other.inh_, nullptr);
 	return *this;
       }
+      return *this;
     }
 
     // Release the lock immediately (if Holder contains one)
