@@ -21,6 +21,7 @@ add_library(
   syscall_bytestring.cc
   syscall_nnint.cc
   syscall_delete.cc
+  database_proxy.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
 

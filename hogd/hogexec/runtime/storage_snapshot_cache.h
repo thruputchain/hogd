@@ -30,9 +30,8 @@ public:
   const StorageItem *try_get_snapshot_item(AddressAndKey const &addrkey);
 
 private:
-  // Note: the contract_cache_ does not need to be reset (although it is not
-  // incorrect to reset it) after every block.
-  // Future PRs will have a storage object cache, which will need to be reset.
+  // Note: the contract_cache_ does not strictly need to be reset (although it
+  // is not incorrect to reset it) after every block
   x23::MVar<std::map<SHA256Hash, std::shared_ptr<const Contract>>>
       contract_cache_;
   // Neither does the deployment cache
