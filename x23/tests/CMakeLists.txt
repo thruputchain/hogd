@@ -41,6 +41,7 @@ endmacro()
 endif()
 
 add_x23_gtest(xdr)
+add_x23_gtest(sync)
 
 if(BENCHMARK_PATH)
 add_executable(bench bench.cc xdrtest.x)
