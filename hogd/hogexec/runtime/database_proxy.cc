@@ -17,8 +17,6 @@ namespace hogd {
 DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp, std::string address,
                              std::string port)
   : db_client_([&] {
-      // using rpc_config_t = x23::RpcStream<x23::RpcLogger>::Configurator;
-
       auto fd = cp.tcpconnect(address, port)();
       if (!fd) {
         exit(-1);
