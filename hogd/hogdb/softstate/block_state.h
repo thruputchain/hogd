@@ -1,7 +1,9 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
+#include "contract.hh"
 #include "hogd/hogdb/db/in_memory_database.h"
 #include "hogd/hogdb/softstate/storage_view.h"
 #include "hogd/hogdb/softstate/transaction_cache.h"
@@ -9,6 +11,20 @@
 
 namespace hogd {
 
+// Wrapper class to manage all of the state associated with one
+// (pending or committed) block.
+// Holds reference to a parent block as long as necessary;
+// when the parent block is eventually committed to the database,
+// the parent can be unlinked, at which point the reference is released.
+//
+// Note:  As implemented,
+// the base database does not maintain versioning for blocks that do not commit
+// and have no possibility of committing (i.e., some directly preceeding
+// block had its sibling commit instead of it).
+// Any pending modifications on this block (from, e.g., delayed RPCs or slow
+// executors) may read invalid state (and give invalid try_reserve_storage_delta
+// results) as a result.  However, these blocks will never commit anyways, so
+// this does not affect correctness.
 class BlockState {
 public:
   BlockState(std::shared_ptr<BlockState> parent)
@@ -35,9 +51,19 @@ public:
   void commit_transaction(TransactionID txid);
   void abort_transaction(TransactionID txid);
 
+  void commit_contract_create(Contract const &contract);
+  void commit_contract_deploy(ContractAddress const &addr,
+                              SHA256Hash const &contract_hash);
+
+  std::optional<StorageItem>
+  get_snapshot_storage_item(AddressAndKey const &addrkey);
+  std::optional<SHA256Hash>
+  get_snapshot_deployment(ContractAddress const &addr);
+  std::shared_ptr<const Contract>
+  get_snapshot_contract(SHA256Hash const &contract_hash);
+
 private:
   StorageView storage_view_;
-
   TransactionCache transaction_cache_;
 
   // nullptr if parent has been unlinked

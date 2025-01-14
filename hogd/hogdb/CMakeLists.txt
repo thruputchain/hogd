@@ -1,5 +1,6 @@
 add_subdirectory(softstate)
 add_subdirectory(interface)
+add_subdirectory(db)
 
 # Build the backend database (hogdb) executable
 add_executable(
@@ -9,4 +10,7 @@ add_executable(
 target_link_libraries(
   hogdb
   hogd
+  hogdb_softstate
+  hogdb_interface
+  hogdb_db
 )

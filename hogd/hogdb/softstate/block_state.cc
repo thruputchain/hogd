@@ -48,4 +48,35 @@ BlockState::abort_transaction(TransactionID txid)
   }
 }
 
+std::optional<StorageItem>
+BlockState::get_snapshot_storage_item(AddressAndKey const &addrkey)
+{
+  return storage_view_.get_snapshot_storage_item(addrkey);
+}
+
+void
+BlockState::commit_contract_create(Contract const &contract)
+{
+  storage_view_.commit_contract_create(contract);
+}
+
+void
+BlockState::commit_contract_deploy(ContractAddress const &addr,
+                                   SHA256Hash const &contract_hash)
+{
+  storage_view_.commit_contract_deploy(addr, contract_hash);
+}
+
+std::optional<SHA256Hash>
+BlockState::get_snapshot_deployment(ContractAddress const &addr)
+{
+  return storage_view_.get_snapshot_deployment(addr);
+}
+
+std::shared_ptr<const Contract>
+BlockState::get_snapshot_contract(SHA256Hash const &contract_hash)
+{
+  return storage_view_.get_snapshot_contract(contract_hash);
+}
+
 } // namespace hogd

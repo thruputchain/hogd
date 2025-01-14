@@ -6,6 +6,7 @@
 #include <variant>
 
 #include "hogd/base/hashmap.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/db/in_memory_database.h"
 #include "hogd/hogdb/softstate/storage_item_frame.h"
 #include "types.hh"
@@ -49,6 +50,27 @@ public:
   std::optional<StorageItem>
   get_post_block_storage_item(AddressAndKey const &addrkey);
 
+  // Methods relevant for contracts
+  // TODO(geoff): is there a cleaner way to manage this than
+  // just method duplication?
+  // Read from snapshot data, not data created by concurrent operations.
+  // Should not be called after the block is closed.
+  std::optional<SHA256Hash>
+  get_snapshot_deployment(ContractAddress const &addr);
+  std::shared_ptr<const Contract> get_snapshot_contract(SHA256Hash const &hash);
+
+  // Read from post block snapshot data, after all operations in the block
+  // are applied.
+  // Cannot be called before the block is closed.
+  std::optional<SHA256Hash>
+  get_post_block_deployment(ContractAddress const &addr);
+  std::shared_ptr<const Contract>
+  get_post_block_contract(SHA256Hash const &hash);
+
+  void commit_contract_create(Contract const &contract);
+  void commit_contract_deploy(ContractAddress const &addr,
+                              SHA256Hash const &contract_hash);
+
   // TODO(geoff): This isn't strictly necessary, but useful sanity check
   void close_block() { closed_ = true; }
   void assert_block_closed() { assert(closed_); }
@@ -63,6 +85,12 @@ private:
 
   bool closed_ = false;
   HashMap<StorageItemFrame> modified_items_;
+
+  // simple impl, for now
+  x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>
+      contract_deployments_;
+  x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
+      contract_creates_;
 
   std::shared_mutex mtx;
   std::variant<StorageView *, InMemoryDatabase *> parent_view_;

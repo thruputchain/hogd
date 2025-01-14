@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 
+#include "contract.hh"
 #include "hogd/base/xdr_util.h"
 #include "storage_item.hh"
 #include "types.hh"
@@ -24,17 +25,14 @@ public:
   // and it must not begin to write to this until it has committed --
   // and thus any siblings are deactivated.
   std::optional<StorageItem>
-  get_post_block_storage_item(AddressAndKey const &addrkey)
-  {
-    auto map = items_.take();
-    if (auto it = map->find(addrkey); it != map->end()) {
-      return it->second;
-    }
-    return std::nullopt;
-  }
+  get_post_block_storage_item(AddressAndKey const &addrkey);
+  std::optional<SHA256Hash>
+  get_post_block_deployment(ContractAddress const &addr);
+  std::shared_ptr<const Contract>
+  get_post_block_contract(SHA256Hash const &hash);
 
-  void write(AddressAndKey const &addrkey,
-             std::optional<StorageItem> const &item)
+  void write_item(AddressAndKey const &addrkey,
+                  std::optional<StorageItem> const &item)
   {
     if (item) {
       items_->emplace(addrkey, *item);
@@ -46,6 +44,10 @@ public:
 
 private:
   x23::MVar<std::unordered_map<AddressAndKey, StorageItem>> items_;
+  x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>
+      contract_deployments_;
+  x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
+      contract_creates_;
 };
 
 } // namespace hogd

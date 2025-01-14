@@ -23,6 +23,12 @@ namespace hogd
     kNoContractDeployed = 2,
     // Executor in bad state to validate or propose
     kBadExecutorState = 3,
+    // BlockID does not exist, or is not in correct state
+    kBadBlockID = 4,
+    // bad storage modification
+    kStorageWriteFailed = 5,
+    // Requesting an item that doesn't exist
+    kNoStorageItem = 6,
   };
 
   // Is this the XDR pattern we want?

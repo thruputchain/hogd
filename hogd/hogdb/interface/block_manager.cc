@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 
+#include "hogd/base/hashmap.h"
 #include "rpc_types.hh"
 
 namespace hogd {

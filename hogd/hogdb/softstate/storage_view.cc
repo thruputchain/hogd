@@ -1,5 +1,13 @@
 #include "hogd/hogdb/softstate/storage_view.h"
 
+#include <cstddef>
+#include <optional>
+#include <span>
+
+#include "hogd/crypto/crypto.h"
+#include "storage_item.hh"
+#include "types.hh"
+
 namespace hogd {
 
 std::span<const std::byte>
@@ -117,6 +125,69 @@ StorageView::unlink_parent(InMemoryDatabase *new_parent)
   assert(closed_);
   std::unique_lock lk(mtx);
   parent_view_.emplace<InMemoryDatabase *>(new_parent);
+}
+
+std::optional<SHA256Hash>
+StorageView::get_snapshot_deployment(ContractAddress const &addr)
+{
+  std::shared_lock lock(mtx);
+  return std::visit(
+      [&addr](auto *parent) { return parent->get_post_block_deployment(addr); },
+      parent_view_);
+}
+
+std::shared_ptr<const Contract>
+StorageView::get_snapshot_contract(SHA256Hash const &hash)
+{
+  std::shared_lock lock(mtx);
+  return std::visit(
+      [&hash](auto *parent) { return parent->get_post_block_contract(hash); },
+      parent_view_);
+}
+
+// Read from post block snapshot data, after all operations in the block
+// are applied.
+// Cannot be called before the block is closed.
+std::optional<SHA256Hash>
+StorageView::get_post_block_deployment(ContractAddress const &addr)
+{
+  assert(closed_);
+  {
+    auto m = contract_deployments_.take();
+    if (auto it = m->find(addr); it != m->end()) {
+      return it->second;
+    }
+  }
+
+  return get_snapshot_deployment(addr);
+}
+std::shared_ptr<const Contract>
+StorageView::get_post_block_contract(SHA256Hash const &hash)
+{
+  assert(closed_);
+  {
+    auto m = contract_creates_.take();
+    if (auto it = m->find(hash); it != m->end()) {
+      return it->second;
+    }
+  }
+
+  return get_snapshot_contract(hash);
+}
+
+void
+StorageView::commit_contract_create(Contract const &contract)
+{
+  assert(!closed_);
+  auto hash = sha256(contract);
+  contract_creates_->emplace(hash, std::make_shared<const Contract>(contract));
+}
+void
+StorageView::commit_contract_deploy(ContractAddress const &addr,
+                                    SHA256Hash const &contract_hash)
+{
+  assert(!closed_);
+  contract_deployments_->emplace(addr, contract_hash);
 }
 
 } // namespace hogd
