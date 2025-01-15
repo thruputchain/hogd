@@ -147,7 +147,6 @@ TEST(CoroLock, ManyLockers)
   }()();
 }
 
-#if 0
 TEST(CoroSharedLock, MutualExclusion)
 {
   [] -> Async<void> {
@@ -166,10 +165,39 @@ TEST(CoroSharedLock, MutualExclusion)
     }(ready, n, lock);
     while (!ready)
       ready.wait(false);
-    auto holder = lock.coro_lock_shared();
+    auto holder = co_await lock.coro_lock_shared();
     EXPECT_EQ(n, 1);
     holder.reset();
     co_return;
   }()();
 }
-#endif
+
+TEST(CoroSharedLock, ManyReaders)
+{
+  [] -> Async<void> {
+    std::atomic_bool ready = false;
+    std::atomic_uint nthreads = 0x1'0000;
+    CoroSharedLock lock(pool);
+    [](auto &ready, auto &nthreads, CoroSharedLock<> &lock) -> Detached {
+      co_await pool.bg();
+      CoroGuard g;
+      co_await g(lock);
+      ready = true;
+      usleep(50'000);
+      nthreads = 0;
+    }(ready, nthreads, lock);
+
+    constexpr size_t nreaders = 64;
+    while (!ready)
+      co_await pool.bg();
+    auto go = [&] -> Detached {
+      auto holder = co_await lock.coro_lock_shared();
+      nthreads++;
+    };
+    for (auto i = 0UZ; i < nreaders; ++i)
+      go();
+    while (nthreads != nreaders)
+      co_await pool.bg();
+    co_await pool.async(&ThreadPool::drain, &pool);
+  }()();
+}
