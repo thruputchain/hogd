@@ -32,7 +32,7 @@ StorageView::get_snapshot_storage_item(AddressAndKey const &addrkey)
     return *local_res;
   }
 
-  std::shared_lock lk(mtx);
+  std::shared_lock lk(mtx_);
   return std::visit(
       [&addrkey](auto *parent) -> std::optional<StorageItem> {
         return parent->get_post_block_storage_item(addrkey);
@@ -56,7 +56,7 @@ StorageView::get_post_block_storage_item(AddressAndKey const &addrkey)
     return *local_res;
   }
 
-  std::shared_lock lk(mtx);
+  std::shared_lock lk(mtx_);
   return std::visit(
       [&addrkey](auto *parent) -> std::optional<StorageItem> {
         return parent->get_post_block_storage_item(addrkey);
@@ -81,7 +81,7 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
 
   std::optional<StorageItem> parent_value;
   {
-    std::shared_lock lk(mtx);
+    std::shared_lock lk(mtx_);
     // else, value was not present in cache.  Lookup from parent and emplace
     parent_value = std::visit(
         [&addrkey](auto *parent) -> std::optional<StorageItem> {
@@ -123,14 +123,14 @@ void
 StorageView::unlink_parent(InMemoryDatabase *new_parent)
 {
   assert(closed_);
-  std::unique_lock lk(mtx);
+  std::unique_lock lk(mtx_);
   parent_view_.emplace<InMemoryDatabase *>(new_parent);
 }
 
 std::optional<SHA256Hash>
 StorageView::get_snapshot_deployment(ContractAddress const &addr)
 {
-  std::shared_lock lock(mtx);
+  std::shared_lock lock(mtx_);
   return std::visit(
       [&addr](auto *parent) { return parent->get_post_block_deployment(addr); },
       parent_view_);
@@ -139,7 +139,7 @@ StorageView::get_snapshot_deployment(ContractAddress const &addr)
 std::shared_ptr<const Contract>
 StorageView::get_snapshot_contract(SHA256Hash const &hash)
 {
-  std::shared_lock lock(mtx);
+  std::shared_lock lock(mtx_);
   return std::visit(
       [&hash](auto *parent) { return parent->get_post_block_contract(hash); },
       parent_view_);

@@ -92,7 +92,7 @@ private:
   x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
       contract_creates_;
 
-  std::shared_mutex mtx;
+  std::shared_mutex mtx_;
   std::variant<StorageView *, InMemoryDatabase *> parent_view_;
 };
 
