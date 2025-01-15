@@ -49,8 +49,7 @@ struct Connection {
 };
 
 static_assert(is_blank_rpc_v1<Connection *, x23::Async>);
-
-}
+} // namespace
 
 TEST(ShutdownTest, AfterRPC)
 {
@@ -71,5 +70,4 @@ TEST(ShutdownTest, AfterRPC)
   auto client = x23::rpc_stream_logged(cp, *fd).template client<blank_rpc_v1>();
   client.null()();
 }
-
-}
+} // namespace x23
