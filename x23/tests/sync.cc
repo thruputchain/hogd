@@ -191,6 +191,7 @@ TEST(CoroSharedLock, ManyReaders)
     while (!ready)
       co_await pool.bg();
     auto go = [&] -> Detached {
+      co_await pool.bg();
       auto holder = co_await lock.coro_lock_shared();
       nthreads++;
     };
@@ -220,6 +221,7 @@ TEST(CoroSharedLock, TestLock)
     while (!ready)
       co_await pool.bg();
     auto go = [&] -> Detached {
+      co_await pool.bg();
       auto holder = co_await lock.coro_lock_shared();
       nthreads++;
     };
