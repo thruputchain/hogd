@@ -9,7 +9,11 @@ add_library(
 
 target_link_libraries(
   hogdb_core
+  hogd
   protocol
+  hogdb_softstate
+  hogdb_interface
+  hogdb_db
 )
 
 # Build the backend database (hogdb) executable
@@ -17,11 +21,8 @@ add_executable(
   hogdb
   hogdb.cc
 )
+
 target_link_libraries(
   hogdb
-  hogd
-  hogdb_softstate
-  hogdb_interface
-  hogdb_db
   hogdb_core
 )

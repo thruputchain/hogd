@@ -25,6 +25,9 @@ public:
   HogdbCore(HogdbCore &&) = delete;
   HogdbCore &operator=(HogdbCore &&) = delete;
 
+  // Needs to be exposed at least for test setup
+  auto &get_root_db() { return root_db_; }
+
 private:
   x23::ThreadPool pool_;
   x23::CoroPoll cp_;

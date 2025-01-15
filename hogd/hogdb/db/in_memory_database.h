@@ -42,6 +42,18 @@ public:
     }
   }
 
+  void write_contract(SHA256Hash const &hash,
+                      std::shared_ptr<const Contract> contract)
+  {
+    contract_creates_->emplace(hash, contract);
+  }
+
+  void write_deployment(ContractAddress const &addr,
+                        SHA256Hash const &contract_hash)
+  {
+    contract_deployments_->emplace(addr, contract_hash);
+  }
+
 private:
   x23::MVar<std::unordered_map<AddressAndKey, StorageItem>> items_;
   x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>

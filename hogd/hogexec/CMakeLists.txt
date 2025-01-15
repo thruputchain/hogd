@@ -12,7 +12,11 @@ add_library(
 
 target_link_libraries(
   hogexec_core
+  hogd
   protocol
+  runtime
+  runtime_trampoline
+  interface
 )
 
 # Build the frontend executor (hogexec) executable
@@ -22,8 +26,5 @@ add_executable(
 )
 target_link_libraries(
   hogexec
-  hogd
-  runtime
-  runtime_trampoline
   hogexec_core
 )
