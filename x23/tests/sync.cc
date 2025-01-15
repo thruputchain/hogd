@@ -201,3 +201,32 @@ TEST(CoroSharedLock, ManyReaders)
     co_await pool.async(&ThreadPool::drain, &pool);
   }()();
 }
+
+TEST(CoroSharedLock, TestLock)
+{
+  [] -> Async<void> {
+    std::atomic_bool ready = false;
+    std::atomic_uint nthreads = 0x1'0000;
+    CoroSharedLock<TestLock> lock(pool);
+    auto writer = [&] {
+      std::lock_guard g(lock);
+      ready = true;
+      usleep(50'000);
+      nthreads = 0;
+    };
+    std::jthread j(writer);
+
+    constexpr size_t nreaders = 64;
+    while (!ready)
+      co_await pool.bg();
+    auto go = [&] -> Detached {
+      auto holder = co_await lock.coro_lock_shared();
+      nthreads++;
+    };
+    for (auto i = 0UZ; i < nreaders; ++i)
+      go();
+    while (nthreads != nreaders)
+      co_await pool.bg();
+    co_await pool.async(&ThreadPool::drain, &pool);
+  }()();
+}
