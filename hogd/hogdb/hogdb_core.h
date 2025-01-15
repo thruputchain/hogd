@@ -10,10 +10,11 @@
 namespace hogd {
 
 // Normal usage pattern:
-// Step 1: Collect information from disk and from coordinator
+// Step 1: Collect information from coordinator
 // and from disk about database state
 // Step 2: Create this object, which runs the executor- and coordinator-facing
 // servers
+// TODO(geoff): pass any initialization params to root_db_
 class HogdbCore {
 public:
   HogdbCore(int nthreads, std::string exec_server_port,
@@ -24,11 +25,7 @@ public:
   HogdbCore(HogdbCore &&) = delete;
   HogdbCore &operator=(HogdbCore &&) = delete;
 
-  void connect_to_coord(std::string hostname, std::string port);
-
 private:
-  const std::string progname_ = "hogdb";
-
   x23::ThreadPool pool_;
   x23::CoroPoll cp_;
 

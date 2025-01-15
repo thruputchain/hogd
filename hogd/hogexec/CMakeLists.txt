@@ -5,6 +5,16 @@ add_subdirectory(runtime_trampoline)
 add_subdirectory(block)
 add_subdirectory(interface)
 
+add_library(
+  hogexec_core
+  hogexec_core.cc
+)
+
+target_link_libraries(
+  hogexec_core
+  protocol
+)
+
 # Build the frontend executor (hogexec) executable
 add_executable(
   hogexec
@@ -15,4 +25,5 @@ target_link_libraries(
   hogd
   runtime
   runtime_trampoline
+  hogexec_core
 )

@@ -6,12 +6,12 @@ x23::Async<ExpectedProposalData>
 ExecutorRpcInterface::propose_transaction(BlockID block_id,
                                           SignedTransaction const &signed_tx)
 {
-  auto *exec_state = executor_states_.get_executor_state(block_id);
-  if (!exec_state) {
+  auto *ctx = executor_states_.get_executor_context(block_id);
+  if (!ctx) {
     co_return ExpectedProposalData(RPCError::kBadExecutorState);
   }
 
-  if (exec_state->try_acquire_run_lease(ExecutorMode::kProposing)) {
+  if (ctx->state_.try_acquire_run_lease(ExecutorMode::kProposing)) {
     // TODO: invoke the transaction, and so on and so forth
     // allocate transaction id here
     throw std::runtime_error("unimplemented");
@@ -23,12 +23,12 @@ x23::Async<RPCError>
 ExecutorRpcInterface::validate_transaction(
     BlockID block_id, ProposedTransaction const &proposed_tx)
 {
-  auto *exec_state = executor_states_.get_executor_state(block_id);
-  if (!exec_state) {
+  auto *ctx = executor_states_.get_executor_context(block_id);
+  if (!ctx) {
     co_return RPCError::kBadExecutorState;
   }
 
-  if (exec_state->try_acquire_run_lease(ExecutorMode::kValidating)) {
+  if (ctx->state_.try_acquire_run_lease(ExecutorMode::kValidating)) {
     // TODO: invoke the transaction, and so on and so forth
     throw std::runtime_error("unimplemented");
   }

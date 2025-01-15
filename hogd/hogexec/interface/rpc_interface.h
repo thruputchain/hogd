@@ -2,6 +2,7 @@
 
 #include "hogd/hogexec/interface/executor_state.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "rpc.hh"
 #include "transaction.hh"
 #include "x23/async.h"
@@ -12,6 +13,8 @@ namespace hogd {
 class ExecutorRpcInterface {
 public:
   using rpc_service = ExecutorInterfaceV1;
+
+  ExecutorRpcInterface(DatabaseProxy &db_proxy) : executor_states_(db_proxy) {}
 
   // Disable copy and move
   ExecutorRpcInterface(ExecutorRpcInterface const &) = delete;
