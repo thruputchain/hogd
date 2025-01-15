@@ -40,6 +40,7 @@ macro(add_x23_gtest TEST_NAME)
 endmacro()
 endif()
 
+add_x23_gtest(shutdown)
 add_x23_gtest(xdr)
 
 if(BENCHMARK_PATH)
