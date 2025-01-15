@@ -16,23 +16,23 @@ namespace {
 constexpr static std::string kPort = "10234";
 
 struct Connection {
-	x23::ThreadPool pool_;
-	x23::CoroPoll cp_;
+  x23::ThreadPool pool_;
+  x23::CoroPoll cp_;
 
-	Connection(int nthreads)
-		: pool_(nthreads)
-		, cp_(pool_) {}
+  Connection(int nthreads)
+    : pool_(nthreads)
+    , cp_(pool_) {}
 
 
-	void start() {
+  void start() {
 
-	  auto lfd = x23::tcplisten(atoi(kPort.c_str()));
-	  if (!lfd) {
-	    perror("listen");
-	    exit(EXIT_FAILURE);
-	  }
+    auto lfd = x23::tcplisten(atoi(kPort.c_str()));
+    if (!lfd) {
+      perror("listen");
+      exit(EXIT_FAILURE);
+    }
 
-	 [](x23::CoroPoll &cp, x23::ThreadPool &pool,
+   [](x23::CoroPoll &cp, x23::ThreadPool &pool,
      Connection *server,
      x23::UniqueFd lfd) -> x23::Detached {
     co_await pool.bg();
@@ -40,12 +40,12 @@ struct Connection {
       x23::rpc_stream_logged(cp, *c).server(server);
     }
   }(cp_, pool_, this, std::move(lfd));
-	}
+  }
 
-	using rpc_service = blank_rpc_v1;
-	x23::Async<void> null() {
-		co_return;
-	}
+  using rpc_service = blank_rpc_v1;
+  x23::Async<void> null() {
+    co_return;
+  }
 };
 
 static_assert(is_blank_rpc_v1<Connection *, x23::Async>);
@@ -54,14 +54,14 @@ static_assert(is_blank_rpc_v1<Connection *, x23::Async>);
 
 TEST(ShutdownTest, AfterRPC)
 {
-	Connection c(1);
+  Connection c(1);
 
-	c.start();
+  c.start();
 
-	x23::ThreadPool pool(1);
-	x23::CoroPoll cp(pool);
+  x23::ThreadPool pool(1);
+  x23::CoroPoll cp(pool);
 
-	auto fd = cp.tcpconnect("localhost", kPort)();
+  auto fd = cp.tcpconnect("localhost", kPort)();
   if (!fd) {
     exit(-1);
   }
