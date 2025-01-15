@@ -17,13 +17,10 @@ namespace hogd {
 DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp, std::string address,
                              std::string port)
   : db_client_([&] {
-      std::printf("db proxy start here\n");
       auto fd = cp.tcpconnect(address, port)();
       if (!fd) {
-        std::printf("failed\n");
         exit(-1);
       }
-      std::printf("db proxy connected\n");
 
       auto client_config = x23::rpc_stream_logged(cp, *fd);
       return client_config.template client<DatabaseToExecutorInterfaceV1>();

@@ -21,9 +21,7 @@ CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
 
 CoroPoll::~CoroPoll()
 {
-  std::printf("start ~coropoll %p\n", this);
   request_stop();
-  std::printf("stop requested %p\n", this);
   pollthread_.join();
   destroy_wait();
 }
@@ -33,7 +31,6 @@ CoroPoll::loop()
 {
   while (!time_to_stop())
     check();
-  std::printf("done Coropoll:loop %p\n", this);
 }
 
 Async<std::expected<size_t, Errno>>

@@ -36,17 +36,6 @@ HogdbCore::HogdbCore(int nthreads, std::string exec_server_port,
     }
   }(cp_, pool_, &db_to_exec_server_, std::move(lfd));
 
-  /*
-    pool_.spawn([this, lfd{std::move(lfd)}] -> void {
-      std::printf("start pool task\n");
-      while (auto c = co_await cp_.accept(lfd)) {
-        std::printf("got connect attempt\n");
-        x23::rpc_stream_logged(cp_, *c).server(&db_to_exec_server_);
-      }
-      std::printf("shutdown\n");
-      return;
-    }); */
-
   lfd = x23::tcplisten(atoi(coord_server_port.c_str()));
   if (!lfd) {
     perror("listen");
