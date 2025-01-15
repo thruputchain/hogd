@@ -1,5 +1,8 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
+
 #include "hogd/hogexec/interface/executor_state.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -14,7 +17,10 @@ class ExecutorRpcInterface {
 public:
   using rpc_service = ExecutorInterfaceV1;
 
-  ExecutorRpcInterface(DatabaseProxy &db_proxy) : executor_states_(db_proxy) {}
+  ExecutorRpcInterface(uint16_t self_executor_id, DatabaseProxy &db_proxy)
+    : self_executor_id_(self_executor_id), db_proxy_(db_proxy),
+      executor_states_(db_proxy)
+  {}
 
   // Disable copy and move
   ExecutorRpcInterface(ExecutorRpcInterface const &) = delete;
@@ -33,6 +39,12 @@ public:
   x23::Async<void> finish_block(BlockID id);
 
 private:
+  TransactionID allocate_tx_id();
+
+  std::atomic<uint64_t> self_id_ = 0;
+  const uint16_t self_executor_id_;
+
+  DatabaseProxy &db_proxy_;
   ExecutorStateManager executor_states_;
 };
 

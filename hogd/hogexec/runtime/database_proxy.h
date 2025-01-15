@@ -51,4 +51,68 @@ private:
   client_t db_client_;
 };
 
+class PerTransactionDatabaseProxy {
+public:
+  PerTransactionDatabaseProxy(BlockID block_id, TransactionID tx_id,
+                              DatabaseProxy &db_proxy)
+    : block_id_(block_id), tx_id_(tx_id), db_proxy_(db_proxy)
+  {}
+
+  PerTransactionDatabaseProxy(PerTransactionDatabaseProxy const &) = delete;
+  PerTransactionDatabaseProxy &
+  operator=(PerTransactionDatabaseProxy const &) = delete;
+  PerTransactionDatabaseProxy(PerTransactionDatabaseProxy &&) = delete;
+  PerTransactionDatabaseProxy &
+  operator=(PerTransactionDatabaseProxy &&) = delete;
+
+  bool try_reserve_delta(AddressAndKey const &addrkey,
+                         StorageDelta const &delta)
+  {
+    assert(!committed_);
+    assert(!failed_);
+    auto res = db_proxy_.try_reserve_delta(block_id_, tx_id_, addrkey, delta);
+    if (!res) {
+      failed_ = true;
+    }
+    return res;
+  }
+
+  void create_contract(Contract const &contract)
+  {
+    assert(committed_);
+    assert(!failed_);
+    db_proxy_.commit_contract_create(block_id_, contract);
+  }
+
+  void deploy_contract(ContractAddress const &addr,
+                       SHA256Hash const &contract_hash)
+  {
+    assert(committed_);
+    assert(!failed_);
+    db_proxy_.commit_contract_deploy(block_id_, addr, contract_hash);
+  }
+
+  void commit_transaction()
+  {
+    assert(!failed_);
+    db_proxy_.commit_transaction(block_id_, tx_id_);
+    committed_ = true;
+  }
+
+  ~PerTransactionDatabaseProxy()
+  {
+    assert(failed_ || committed_);
+    if (!committed_) {
+      db_proxy_.abort_transaction(block_id_, tx_id_);
+    }
+  }
+
+private:
+  BlockID block_id_;
+  TransactionID tx_id_;
+  bool committed_ = false;
+  bool failed_ = false;
+  DatabaseProxy &db_proxy_;
+};
+
 } // namespace hogd

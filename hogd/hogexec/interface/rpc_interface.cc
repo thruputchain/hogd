@@ -1,5 +1,10 @@
 #include "hogd/hogexec/interface/rpc_interface.h"
 
+#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "rpc.hh"
+#include "rpc_types.hh"
+#include "x23/cleanup.h"
+
 namespace hogd {
 
 x23::Async<ExpectedProposalData>
@@ -12,9 +17,24 @@ ExecutorRpcInterface::propose_transaction(BlockID block_id,
   }
 
   if (ctx->state_.try_acquire_run_lease(ExecutorMode::kProposing)) {
-    // TODO: invoke the transaction, and so on and so forth
-    // allocate transaction id here
-    throw std::runtime_error("unimplemented");
+    x23::Defer d([&] { ctx->state_.release_run_lease(); });
+    // TODO(geoff): merge in proposal data handling code
+
+    SystemCallHandler syscall_handler(signed_tx, ctx->snapshot_cache_);
+
+    auto invoke_res = syscall_handler.root_invoke();
+
+    if (!invoke_res.is_root_success()) {
+      co_return ExpectedProposalData(RPCError::kTransactionFailed);
+    }
+
+    auto commit_res = syscall_handler.try_commit_transaction(
+        PerTransactionDatabaseProxy(block_id, allocate_tx_id(), db_proxy_));
+
+    if (commit_res) {
+      co_return ExpectedProposalData(RPCError::kNone);
+    }
+    co_return ExpectedProposalData(RPCError::kTransactionFailed);
   }
   co_return ExpectedProposalData(RPCError::kBadExecutorState);
 }
@@ -29,8 +49,25 @@ ExecutorRpcInterface::validate_transaction(
   }
 
   if (ctx->state_.try_acquire_run_lease(ExecutorMode::kValidating)) {
-    // TODO: invoke the transaction, and so on and so forth
-    throw std::runtime_error("unimplemented");
+    x23::Defer d([&] { ctx->state_.release_run_lease(); });
+
+    // TODO(geoff): merge in proposal data handling code
+    SystemCallHandler syscall_handler(proposed_tx.signed_tx,
+                                      ctx->snapshot_cache_);
+
+    auto invoke_res = syscall_handler.root_invoke();
+
+    if (!invoke_res.is_root_success()) {
+      co_return RPCError::kTransactionFailed;
+    }
+
+    auto commit_res = syscall_handler.try_commit_transaction(
+        PerTransactionDatabaseProxy(block_id, allocate_tx_id(), db_proxy_));
+
+    if (commit_res) {
+      co_return RPCError::kNone;
+    }
+    co_return RPCError::kTransactionFailed;
   }
   co_return RPCError::kBadExecutorState;
 }
@@ -54,6 +91,13 @@ ExecutorRpcInterface::finish_block(BlockID id)
 {
   executor_states_.await_finish(id);
   co_return;
+}
+
+TransactionID
+ExecutorRpcInterface::allocate_tx_id()
+{
+  uint64_t base = self_id_.fetch_add(1, std::memory_order_relaxed);
+  return TransactionID{base + (uint64_t{self_executor_id_} << 48)};
 }
 
 } // namespace hogd

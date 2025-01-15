@@ -152,6 +152,19 @@ InvocationFrameStack::lookup_locally_deployed_contract(
   return std::nullopt;
 }
 
+std::unordered_map<AddressAndKey, StorageDelta>
+InvocationFrame::extract_deltas()
+{
+  std::unordered_map<AddressAndKey, StorageDelta> out;
+  for (auto const &[k, v] : modified_items_) {
+    auto d = v.get_delta();
+    if (d) {
+      out.emplace(k, *d);
+    }
+  }
+  return out;
+}
+
 ItemView *
 InvocationFrame::get_item_view(AddressAndKey const &addrkey)
 {

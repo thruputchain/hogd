@@ -14,7 +14,7 @@ namespace hogd {
 // Step 2: Start hogexec core, start serving transaction requests
 class HogexecCore {
 public:
-  HogexecCore(int nthreads, std::string coord_server_port,
+  HogexecCore(int nthreads, uint16_t executor_id, std::string coord_server_port,
               std::string db_address, std::string db_port);
 
   HogexecCore(HogexecCore const &) = delete;

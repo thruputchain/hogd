@@ -16,6 +16,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -68,6 +69,25 @@ SystemCallHandler::root_invoke()
   if (!res.is_root_success())
     return res.to_root_error();
   return res;
+}
+
+bool
+SystemCallHandler::try_commit_transaction(PerTransactionDatabaseProxy db_proxy)
+{
+  // TODO(geoff): do something with committed_logs_
+  for (auto const &[k, d] : committed_deltas_) {
+    if (!db_proxy.try_reserve_delta(k, d)) {
+      return false;
+    }
+  }
+  db_proxy.commit_transaction();
+  for (auto const &[_, c] : newly_created_contracts_) {
+    db_proxy.create_contract(*c);
+  }
+  for (auto const &[a, h] : committed_deployments_) {
+    db_proxy.deploy_contract(a, h);
+  }
+  return true;
 }
 
 // can only be called when call_frame_stack_ is nonempty
@@ -150,6 +170,8 @@ void
 SystemCallHandler::commit_last_call_frame_success(InvocationFrame &frame)
 {
   committed_logs_ = frame.extract_logs();
+  committed_deltas_ = frame.extract_deltas();
+  committed_deployments_ = frame.extract_deployments();
 }
 
 SyscallStatus<const ReturnBuffer *>

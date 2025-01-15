@@ -29,6 +29,8 @@ namespace hogd
     kStorageWriteFailed = 5,
     // Requesting an item that doesn't exist
     kNoStorageItem = 6,
+    // tx validation or proposal failed
+    kTransactionFailed = 7,
   };
 
   // Is this the XDR pattern we want?

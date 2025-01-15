@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime_cache.h"
@@ -41,6 +42,8 @@ public:
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Starts the invocation that is specified within signed_tx_.
   InvokeResult root_invoke();
+
+  bool try_commit_transaction(PerTransactionDatabaseProxy db_proxy);
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
@@ -107,6 +110,8 @@ private:
 
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;
+  std::unordered_map<AddressAndKey, StorageDelta> committed_deltas_;
+  std::unordered_map<ContractAddress, SHA256Hash> committed_deployments_;
 
   StorageSnapshotCache &snapshot_cache_;
 

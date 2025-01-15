@@ -2,10 +2,10 @@
 
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <memory>
 #include <set>
 #include <span>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -26,7 +26,7 @@ public:
   const Invocation active_invocation_;
 
   // new deployments that were created during this (and child) call frames
-  std::map<ContractAddress, SHA256Hash> new_contract_deployments_;
+  std::unordered_map<ContractAddress, SHA256Hash> new_contract_deployments_;
 
   // The value of the last _child_ call frame's returned string.
   // Set to nullopt on failed calls, or before any child call happens.
@@ -47,6 +47,11 @@ public:
   void log(std::span<const std::byte> message);
 
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
+  std::unordered_map<AddressAndKey, StorageDelta> extract_deltas();
+  std::unordered_map<ContractAddress, SHA256Hash> extract_deployments()
+  {
+    return std::move(new_contract_deployments_);
+  }
 
   void poison_visited_runtimes();
 

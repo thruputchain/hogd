@@ -10,10 +10,11 @@
 
 namespace hogd {
 
-HogexecCore::HogexecCore(int nthreads, std::string coord_server_port,
-                         std::string db_address, std::string db_port)
+HogexecCore::HogexecCore(int nthreads, uint16_t executor_id,
+                         std::string coord_server_port, std::string db_address,
+                         std::string db_port)
   : pool_(nthreads), cp_(pool_), db_proxy_(cp_, db_address, db_port),
-    exec_to_coord_server_(db_proxy_)
+    exec_to_coord_server_(executor_id, db_proxy_)
 {
   auto lfd = x23::tcplisten(atoi(coord_server_port.c_str()));
   if (!lfd) {
