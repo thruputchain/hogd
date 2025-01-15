@@ -88,6 +88,7 @@ protected:
   bool stop_requested() { return ss_.stop_requested(); }
   void request_stop()
   {
+    std::printf("CoroPollImpl::request_stop() %p\n", this);
     ss_.request_stop();
     wake();
   }

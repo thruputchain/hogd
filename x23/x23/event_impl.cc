@@ -123,6 +123,7 @@ CoroPollImpl::always_eof()
 void
 CoroPollImpl::wake()
 {
+  std::printf("CoroPollImpl::wake()\n");
   struct epoll_event ev;
   ev.events = EPOLLIN | EPOLLONESHOT;
   ev.data.fd = always_eof().get();
@@ -348,8 +349,13 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem cb)
 void
 CoroPollImpl::wake()
 {
+  std::printf("Other coropoll wake %p\n", this);
   char z = '\0';
-  write(selfpipe_[1].get(), &z, 1);
+  ssize_t res = write(selfpipe_[1].get(), &z, 1);
+  std::printf("errno %d err %s\n", errno, strerror(errno));
+  if (res != 1) {
+    throw std::runtime_error("skldsd");
+  }
 }
 
 void

@@ -39,6 +39,7 @@ target_link_libraries(
   runtime
   wasmi_lib
   protocol
+  hogd
 )
 
 add_dependencies(

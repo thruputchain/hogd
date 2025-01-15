@@ -27,8 +27,10 @@ HogexecCore::HogexecCore(int nthreads, uint16_t executor_id,
      x23::UniqueFd lfd) -> x23::Detached {
     co_await pool.bg();
     while (auto c = co_await cp.accept(lfd)) {
+      std::printf("accept connection hogexec\n");
       x23::rpc_stream_logged(cp, *c).server(exec_to_coord_server);
     }
+    std::printf("done accept\n");
   }(cp_, pool_, &exec_to_coord_server_, std::move(lfd));
 }
 
