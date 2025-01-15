@@ -32,11 +32,14 @@ struct Connection {
 	    exit(EXIT_FAILURE);
 	  }
 
-	  pool_.spawn([this, lfd{std::move(lfd)}] -> x23::Detached {
-	    while (auto c = co_await cp_.accept(lfd)) {
-	      x23::rpc_stream_logged(cp_, *c).server(this);
-	    }
-	  });
+	 [](x23::CoroPoll &cp, x23::ThreadPool &pool,
+     Connection *server,
+     x23::UniqueFd lfd) -> x23::Detached {
+    co_await pool.bg();
+    while (auto c = co_await cp.accept(lfd)) {
+      x23::rpc_stream_logged(cp, *c).server(server);
+    }
+  }(cp_, pool_, this, std::move(lfd));
 	}
 
 	using rpc_service = blank_rpc_v1;
