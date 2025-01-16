@@ -13,48 +13,47 @@ namespace x23 {
 
 namespace {
 
-constexpr static std::string kPort = "10234";
-
 struct Connection {
   x23::ThreadPool pool_;
   x23::CoroPoll cp_;
 
   Connection(int nthreads) : pool_(nthreads), cp_(pool_) {}
 
-  void start()
+  std::uint16_t start(std::uint16_t portno = 0)
   {
-    auto lfd = x23::tcplisten(atoi(kPort.c_str()));
+    auto lfd = x23::tcplisten(portno);
     if (!lfd) {
       perror("listen");
       exit(EXIT_FAILURE);
     }
+    portno = get_port(local_addr(lfd));
 
-    [](x23::CoroPoll &cp, x23::ThreadPool &pool, Connection *server,
-       x23::UniqueFd lfd) -> x23::Detached {
-      co_await pool.bg();
-      while (auto c = co_await cp.accept(lfd)) {
-        x23::rpc_stream_logged(cp, *c).server(server);
+    [](Connection *server, x23::UniqueFd lfd) -> x23::Detached {
+      co_await server->cp_.pool_.bg();
+      while (auto c = co_await server->cp_.accept(lfd)) {
+        x23::rpc_stream_logged(server->cp_, *c).server(server);
       }
-    }(cp_, pool_, this, std::move(lfd));
+    }(this, std::move(lfd));
+    return portno;
   }
 
   using rpc_service = blank_rpc_v1;
   x23::Async<void> null() { co_return; }
 };
-
 static_assert(is_blank_rpc_v1<Connection *, x23::Async>);
+
 } // namespace
 
 TEST(ShutdownTest, AfterRPC)
 {
   Connection c(1);
 
-  c.start();
+  auto portno = c.start();
 
   x23::ThreadPool pool(1);
   x23::CoroPoll cp(pool);
 
-  auto fd = cp.tcpconnect("localhost", kPort)();
+  auto fd = cp.tcpconnect("localhost", std::to_string(portno))();
   if (!fd) {
     exit(-1);
   }
