@@ -6,6 +6,7 @@
 
 namespace hogd {
 
+// Store data relevant to the 2PC process for one transaction.
 class TransactionCacheEntry {
 public:
   TransactionCacheEntry(TransactionID txid) : txid_(txid) {}
@@ -17,6 +18,7 @@ private:
   TransactionID txid_;
 };
 
+// map transaction id -> TransactionCacheEntry
 class TransactionCache {
 public:
   TransactionCache() : tx_entries_(8, 8) {}
