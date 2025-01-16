@@ -81,7 +81,7 @@ template<typename... Cs>
 Calldata static make_calldata(std::vector<uint8_t> const &data,
                               Cs const &...additional)
 {
-  x23::Vec<uint8_t> out;
+  Calldata out;
 
   out.resize_uninitialized(data.size());
   std::memcpy(out.data(), data.data(), data.size());
@@ -96,7 +96,7 @@ template<typename C, typename... Cs> requires std::is_trivially_copyable_v<C>
 Calldata static make_calldata(C const &data, Cs const &...additional)
 {
   const auto *addr = reinterpret_cast<const uint8_t *>(&data);
-  x23::Vec<uint8_t> out;
+  Calldata out;
 
   if constexpr (!std::is_empty_v<C>) {
     out.resize_uninitialized(sizeof(C));

@@ -16,6 +16,7 @@ TEST(BlockManagerTest, CommitCleanup)
   EXPECT_FALSE(m.get_block_data(1));
 
   auto b0 = m.get_block_data(0);
+  b0->close_block();
 
   EXPECT_TRUE(m.add_child(0, 1, std::make_shared<BlockState>(b0)));
   EXPECT_TRUE(m.get_block_data(1));
@@ -27,6 +28,7 @@ TEST(BlockManagerTest, CommitCleanup)
   // 2 and 3 should get cleaned up by commit 1
   EXPECT_TRUE(m.add_child(0, 2, std::make_shared<BlockState>(b0)));
   auto b2 = m.get_block_data(2);
+  b2->close_block();
   EXPECT_TRUE(m.add_child(2, 3, std::make_shared<BlockState>(b2)));
 
   EXPECT_TRUE(m.get_block_data(2));

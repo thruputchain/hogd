@@ -28,7 +28,8 @@ namespace hogd {
 class BlockState {
 public:
   BlockState(std::shared_ptr<BlockState> parent)
-    : storage_view_(&(parent->storage_view_)), parent_state_(std::move(parent))
+    : storage_view_(parent->storage_view_.as_parent()),
+      parent_state_(std::move(parent))
   {}
 
   BlockState(InMemoryDatabase *base_db)
@@ -61,6 +62,8 @@ public:
   get_snapshot_deployment(ContractAddress const &addr);
   std::shared_ptr<const Contract>
   get_snapshot_contract(SHA256Hash const &contract_hash);
+
+  void close_block() { storage_view_.close_block(); }
 
 private:
   StorageView storage_view_;

@@ -11,14 +11,14 @@
 namespace hogd {
 
 std::span<const std::byte>
-StorageView::to_key(AddressAndKey const &addrkey)
+ParentBlockView::to_key(AddressAndKey const &addrkey)
 {
   return std::as_bytes(std::span(reinterpret_cast<const uint8_t *>(&addrkey),
                                  sizeof(AddressAndKey)));
 }
 
 std::optional<StorageItem>
-StorageView::get_snapshot_storage_item(AddressAndKey const &addrkey)
+ParentBlockView::get_snapshot_storage_item(AddressAndKey const &addrkey)
 {
   assert(!closed_);
   auto key = to_key(addrkey);
@@ -41,7 +41,7 @@ StorageView::get_snapshot_storage_item(AddressAndKey const &addrkey)
 }
 
 std::optional<StorageItem>
-StorageView::get_post_block_storage_item(AddressAndKey const &addrkey)
+ParentBlockView::get_post_block_storage_item(AddressAndKey const &addrkey)
 {
   assert(closed_);
   auto key = to_key(addrkey);
@@ -128,7 +128,7 @@ StorageView::unlink_parent(InMemoryDatabase *new_parent)
 }
 
 std::optional<SHA256Hash>
-StorageView::get_snapshot_deployment(ContractAddress const &addr)
+ParentBlockView::get_snapshot_deployment(ContractAddress const &addr)
 {
   std::shared_lock lock(mtx_);
   return std::visit(
@@ -137,7 +137,7 @@ StorageView::get_snapshot_deployment(ContractAddress const &addr)
 }
 
 std::shared_ptr<const Contract>
-StorageView::get_snapshot_contract(SHA256Hash const &hash)
+ParentBlockView::get_snapshot_contract(SHA256Hash const &hash)
 {
   std::shared_lock lock(mtx_);
   return std::visit(
@@ -149,7 +149,7 @@ StorageView::get_snapshot_contract(SHA256Hash const &hash)
 // are applied.
 // Cannot be called before the block is closed.
 std::optional<SHA256Hash>
-StorageView::get_post_block_deployment(ContractAddress const &addr)
+ParentBlockView::get_post_block_deployment(ContractAddress const &addr)
 {
   assert(closed_);
   {
@@ -162,7 +162,7 @@ StorageView::get_post_block_deployment(ContractAddress const &addr)
   return get_snapshot_deployment(addr);
 }
 std::shared_ptr<const Contract>
-StorageView::get_post_block_contract(SHA256Hash const &hash)
+ParentBlockView::get_post_block_contract(SHA256Hash const &hash)
 {
   assert(closed_);
   {
