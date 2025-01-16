@@ -135,4 +135,10 @@ struct VoidCheckStrange {
   void;
 };
 
+program blank_rpc {
+  version blank_rpc_v1 {
+    void null(void) = 0;
+  } = 1;
+} = 3123124;
+
 
