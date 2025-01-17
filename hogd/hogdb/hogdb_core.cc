@@ -17,6 +17,7 @@ HogdbCore::HogdbCore(int nthreads, std::string exec_server_port,
     block_manager_(kGenesisBlockID, std::make_shared<BlockState>(&root_db_)),
     db_to_exec_server_(block_manager_), db_to_coord_server_(block_manager_)
 {
+  x23::RpcLogger::default_logfd = 2;
 
   auto lfd = x23::tcplisten(atoi(exec_server_port.c_str()));
   if (!lfd) {

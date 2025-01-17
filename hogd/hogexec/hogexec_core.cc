@@ -22,14 +22,15 @@ HogexecCore::HogexecCore(int nthreads, uint16_t executor_id,
     exit(EXIT_FAILURE);
   }
 
-  [](x23::CoroPoll &cp, x23::ThreadPool &pool,
+  [](x23::CoroPoll &cp,
      ExecutorRpcInterface *exec_to_coord_server,
      x23::UniqueFd lfd) -> x23::Detached {
-    co_await pool.bg();
+    co_await cp.pool_.bg();
     while (auto c = co_await cp.accept(lfd)) {
       x23::rpc_stream_logged(cp, *c).server(exec_to_coord_server);
+      std::printf("accepted connection in executor\n");
     }
-  }(cp_, pool_, &exec_to_coord_server_, std::move(lfd));
+  }(cp_, &exec_to_coord_server_, std::move(lfd));
 }
 
 } // namespace hogd

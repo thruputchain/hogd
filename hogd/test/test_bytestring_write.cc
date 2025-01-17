@@ -19,6 +19,7 @@ namespace hogd {
 
 class TestBytestringWrite : public ::testing::Test,
                             public test::LocalTestHarness {
+
 protected:
   void SetUp() override
   {
@@ -32,7 +33,31 @@ protected:
   ContractAddress addr_ = ContractAddress{};
 };
 
-TEST_F(TestBytestringWrite, Nothing)
-{}
+TEST_F(TestBytestringWrite, ReadExpected)
+{
+  // Uses the direct coordinator API, which is annoying.
+  // TODO(geoff): wrap in a nicer API for coord
+
+  // Initial db snapshot is 0
+  ASSERT_EQ(db_client_.open_database_snapshot(0, 1)(), RPCError::kNone);
+  exec_client_.open_proposal_block(1)();
+
+  std::printf("got here\n");
+
+  StorageKey key{};
+
+  SignedTransaction write_tx;
+  write_tx.tx.invocation = {
+    .invoked_address = addr_,
+    .method = 0,
+    .gas_limit = UINT64_MAX,
+    .calldata = test::make_calldata(key, uint32_t{12})
+  };
+
+
+  auto res = exec_client_.propose_transaction(1, write_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+  std::printf("got to end\n");
+}
 
 } // namespace hogd

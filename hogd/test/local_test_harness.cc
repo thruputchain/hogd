@@ -7,6 +7,9 @@ LocalTestHarness::LocalTestHarness()
     exec_core_(1, uint16_t{0}, kExecToCoordPort, "localhost",
                kDBToExecutorPort),
     pool_(1), cp_(pool_), db_client_([this] {
+
+      x23::RpcLogger::default_logfd = 2;
+
       auto fd = cp_.tcpconnect("localhost", kDBToCoordPort)();
       if (!fd) {
         exit(-1);

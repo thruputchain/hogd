@@ -34,3 +34,20 @@ pub extern "C" fn log_bytestring() -> i32 {
 
     0
 }
+
+#[cfg_attr(target_family = "wasm", export_name = "2")]
+#[no_mangle]
+pub extern "C" fn expect_bytestring() -> i32 {
+    let calldata = sdk::GetCalldata().unwrap();
+
+    let key: sdk::StorageKey = calldata[0..32].try_into().unwrap();
+
+    let bstring = sdk::BytestringGet(&key).unwrap();
+    let expected_bstring = &calldata[32..];
+
+    if bstring.as_ref() != expected_bstring {
+        trap();
+    }
+
+    0
+}
