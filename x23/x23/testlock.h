@@ -53,7 +53,6 @@ public:
       int prev = status_.load(std::memory_order_acquire);
       if (prev == kLocked)
         status_.compare_exchange_weak(prev, kLockedWantNotify,
-                                      std::memory_order_relaxed,
                                       std::memory_order_acquire);
       if (prev == kUnlocked)
         return;
