@@ -16,7 +16,7 @@ TransactionCacheEntry::get_key() const
 }
 
 std::span<const std::byte>
-TransactionCache::get_key(TransactionID txid)
+TransactionCache::get_key(TransactionID const &txid)
 {
   return std::as_bytes(std::span(&txid, 1));
 }
@@ -25,6 +25,7 @@ void
 TransactionCache::add_delta(TransactionID txid, AddressAndKey const &addrkey,
                             StorageDelta const &delta)
 {
+  std::printf("txid lookup %llx\n", txid);
   auto key = get_key(txid);
   // no-op if element already exists
   tx_entries_.emplace(key, txid);

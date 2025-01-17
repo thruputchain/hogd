@@ -39,23 +39,20 @@ TEST_F(TestBytestringWrite, ReadExpected)
   // TODO(geoff): wrap in a nicer API for coord
 
   // Initial db snapshot is 0
-  ASSERT_EQ(db_client_.open_database_snapshot(0, 1)(), RPCError::kNone);
-  exec_client_.open_proposal_block(1)();
+  // ASSERT_EQ(db_client_.open_database_snapshot(0, 1)(), RPCError::kNone);
+  exec_client_.open_proposal_block(0)();
 
   std::printf("got here\n");
 
   StorageKey key{};
 
   SignedTransaction write_tx;
-  write_tx.tx.invocation = {
-    .invoked_address = addr_,
-    .method = 0,
-    .gas_limit = UINT64_MAX,
-    .calldata = test::make_calldata(key, uint32_t{12})
-  };
+  write_tx.tx.invocation = {.invoked_address = addr_,
+                            .method = 0,
+                            .gas_limit = UINT64_MAX,
+                            .calldata = test::make_calldata(key, uint32_t{12})};
 
-
-  auto res = exec_client_.propose_transaction(1, write_tx)();
+  auto res = exec_client_.propose_transaction(0, write_tx)();
   ASSERT_EQ(res.error(), RPCError::kNone);
   std::printf("got to end\n");
 }

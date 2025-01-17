@@ -35,7 +35,7 @@ public:
 private:
   HashMap<TransactionCacheEntry> tx_entries_;
 
-  static std::span<const std::byte> get_key(TransactionID txid);
+  static std::span<const std::byte> get_key(TransactionID const &txid);
 };
 
 } // namespace hogd

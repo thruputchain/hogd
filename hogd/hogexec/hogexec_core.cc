@@ -22,8 +22,7 @@ HogexecCore::HogexecCore(int nthreads, uint16_t executor_id,
     exit(EXIT_FAILURE);
   }
 
-  [](x23::CoroPoll &cp,
-     ExecutorRpcInterface *exec_to_coord_server,
+  [](x23::CoroPoll &cp, ExecutorRpcInterface *exec_to_coord_server,
      x23::UniqueFd lfd) -> x23::Detached {
     co_await cp.pool_.bg();
     while (auto c = co_await cp.accept(lfd)) {

@@ -24,20 +24,22 @@ public:
   DatabaseProxy(DatabaseProxy &&) = delete;
   DatabaseProxy &operator=(DatabaseProxy &&) = delete;
 
-  bool try_reserve_delta(BlockID block_id, TransactionID tx_id,
-                         AddressAndKey const &addrkey,
-                         StorageDelta const &delta);
+  x23::Async<bool> try_reserve_delta(BlockID block_id, TransactionID tx_id,
+                                     AddressAndKey const &addrkey,
+                                     StorageDelta const &delta);
 
-  void commit_transaction(BlockID block_id, TransactionID tx_id);
-  void abort_transaction(BlockID block_id, TransactionID tx_id);
+  x23::Async<void> commit_transaction(BlockID block_id, TransactionID tx_id);
+  x23::Async<void> abort_transaction(BlockID block_id, TransactionID tx_id);
 
   std::optional<StorageItem> get_item(BlockID block_id,
                                       AddressAndKey const &addrkey);
 
-  void commit_contract_create(BlockID block_id, Contract const &contract);
+  x23::Async<void> commit_contract_create(BlockID block_id,
+                                          Contract const &contract);
 
-  void commit_contract_deploy(BlockID block_id, ContractAddress const &addr,
-                              SHA256Hash const &contract_hash);
+  x23::Async<void> commit_contract_deploy(BlockID block_id,
+                                          ContractAddress const &addr,
+                                          SHA256Hash const &contract_hash);
 
   std::shared_ptr<const Contract> get_contract(BlockID block_id,
                                                SHA256Hash const &contract_hash);
@@ -65,52 +67,60 @@ public:
   PerTransactionDatabaseProxy &
   operator=(PerTransactionDatabaseProxy &&) = delete;
 
-  bool try_reserve_delta(AddressAndKey const &addrkey,
-                         StorageDelta const &delta)
+  x23::Async<bool> try_reserve_delta(AddressAndKey const &addrkey,
+                                     StorageDelta const &delta)
   {
     assert(!committed_);
     assert(!failed_);
-    auto res = db_proxy_.try_reserve_delta(block_id_, tx_id_, addrkey, delta);
+    auto res =
+        co_await db_proxy_.try_reserve_delta(block_id_, tx_id_, addrkey, delta);
     if (!res) {
       failed_ = true;
     }
-    return res;
+    co_return res;
   }
 
-  void create_contract(Contract const &contract)
+  x23::Async<void> create_contract(Contract const &contract)
   {
     assert(committed_);
     assert(!failed_);
-    db_proxy_.commit_contract_create(block_id_, contract);
+    return db_proxy_.commit_contract_create(block_id_, contract);
   }
 
-  void deploy_contract(ContractAddress const &addr,
-                       SHA256Hash const &contract_hash)
+  x23::Async<void> deploy_contract(ContractAddress const &addr,
+                                   SHA256Hash const &contract_hash)
   {
     assert(committed_);
     assert(!failed_);
-    db_proxy_.commit_contract_deploy(block_id_, addr, contract_hash);
+    return db_proxy_.commit_contract_deploy(block_id_, addr, contract_hash);
   }
 
-  void commit_transaction()
+  x23::Async<void> commit_transaction()
   {
     assert(!failed_);
-    db_proxy_.commit_transaction(block_id_, tx_id_);
+    assert(!committed_);
+    assert(!aborted_);
     committed_ = true;
+    co_await db_proxy_.commit_transaction(block_id_, tx_id_);
+    co_return;
   }
 
-  ~PerTransactionDatabaseProxy()
+  x23::Async<void> abort_transaction()
   {
-    assert(failed_ || committed_);
-    if (!committed_) {
-      db_proxy_.abort_transaction(block_id_, tx_id_);
-    }
+    assert(!committed_);
+    assert(!aborted_);
+    aborted_ = true;
+    co_await db_proxy_.abort_transaction(block_id_, tx_id_);
+    co_return;
   }
+
+  ~PerTransactionDatabaseProxy() { assert(aborted_ || committed_); }
 
 private:
   BlockID block_id_;
   TransactionID tx_id_;
   bool committed_ = false;
+  bool aborted_ = false;
   bool failed_ = false;
   DatabaseProxy &db_proxy_;
 };

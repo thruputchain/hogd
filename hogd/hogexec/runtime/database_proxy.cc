@@ -27,34 +27,36 @@ DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp, std::string address,
     }())
 {}
 
-bool
+x23::Async<bool>
 DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
                                  AddressAndKey const &addrkey,
                                  StorageDelta const &delta)
 {
-  auto res = db_client_.try_reserve_delta(block_id, tx_id, addrkey, delta)();
+  auto res =
+      co_await db_client_.try_reserve_delta(block_id, tx_id, addrkey, delta);
 
   if (res == RPCError::kNone) {
-    return true;
+    co_return true;
   }
   if (res == RPCError::kStorageWriteFailed) {
-    return false;
+    co_return false;
   }
   // This function could also return an expected, but somehow
   // this needs to get translated to a kUnrecoverable error.
   throw std::runtime_error("unhandleable error");
 }
 
-void
+x23::Async<void>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
 {
-  db_client_.commit_transaction(block_id, tx_id)();
+  co_await db_client_.commit_transaction(block_id, tx_id);
+  co_return;
 }
 
-void
+x23::Async<void>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
-  db_client_.abort_transaction(block_id, tx_id)();
+  return db_client_.abort_transaction(block_id, tx_id);
 }
 
 std::optional<StorageItem>
@@ -71,19 +73,19 @@ DatabaseProxy::get_item(BlockID block_id, AddressAndKey const &addrkey)
   throw std::runtime_error("unhandleable error");
 }
 
-void
+x23::Async<void>
 DatabaseProxy::commit_contract_create(BlockID block_id,
                                       Contract const &contract)
 {
-  db_client_.commit_contract_create(block_id, contract)();
+  return db_client_.commit_contract_create(block_id, contract);
 }
 
-void
+x23::Async<void>
 DatabaseProxy::commit_contract_deploy(BlockID block_id,
                                       ContractAddress const &addr,
                                       SHA256Hash const &contract_hash)
 {
-  db_client_.commit_contract_deploy(block_id, addr, contract_hash)();
+  return db_client_.commit_contract_deploy(block_id, addr, contract_hash);
 }
 
 std::shared_ptr<const Contract>

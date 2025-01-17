@@ -43,7 +43,8 @@ public:
   // Starts the invocation that is specified within signed_tx_.
   InvokeResult root_invoke();
 
-  bool try_commit_transaction(PerTransactionDatabaseProxy db_proxy);
+  x23::Async<bool>
+  try_commit_transaction(PerTransactionDatabaseProxy *db_proxy);
 
   // Create and run a child call frame.
   // Should be called from within a syscall.

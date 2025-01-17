@@ -71,23 +71,36 @@ SystemCallHandler::root_invoke()
   return res;
 }
 
-bool
-SystemCallHandler::try_commit_transaction(PerTransactionDatabaseProxy db_proxy)
+x23::Async<bool>
+SystemCallHandler::try_commit_transaction(PerTransactionDatabaseProxy *db_proxy)
 {
   // TODO(geoff): do something with committed_logs_
+  std::vector<x23::Async<bool>> reservations;
   for (auto const &[k, d] : committed_deltas_) {
-    if (!db_proxy.try_reserve_delta(k, d)) {
-      return false;
+    reservations.push_back(db_proxy->try_reserve_delta(k, d));
+  }
+
+  for (auto &r : reservations) {
+    if (!co_await r) {
+      co_await db_proxy->abort_transaction();
+      co_return false;
     }
   }
-  db_proxy.commit_transaction();
+
+  co_await db_proxy->commit_transaction();
+
+  std::vector<x23::Async<void>> commitments;
   for (auto const &[_, c] : newly_created_contracts_) {
-    db_proxy.create_contract(*c);
+    commitments.push_back(db_proxy->create_contract(*c));
   }
   for (auto const &[a, h] : committed_deployments_) {
-    db_proxy.deploy_contract(a, h);
+    commitments.push_back(db_proxy->deploy_contract(a, h));
   }
-  return true;
+
+  for (auto &v : commitments) {
+    co_await v;
+  }
+  co_return true;
 }
 
 // can only be called when call_frame_stack_ is nonempty

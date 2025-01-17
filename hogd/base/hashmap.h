@@ -3,6 +3,7 @@
 #include <atomic>
 #include <concepts>
 #include <cstdint>
+#include <format>
 #include <mutex>
 
 #include "hogd/crypto/crypto.h"
@@ -54,6 +55,18 @@ public:
   // Must only be called once after a prepare_expand returns true.
   void do_expand();
 
+  static std::string key_to_str(key_t key)
+  {
+    std::span<const uint8_t> s = {reinterpret_cast<const uint8_t *>(key.data()),
+                                  key.size()};
+
+    std::string out = "[";
+    for (auto i : s) {
+      out += std::format("{:02x}", i);
+    }
+    return out + "]";
+  }
+
   // Technically allowed but bad practice to block within the invoked call.
   // Returns nullopt if the object is not found.
   template<typename Func,
@@ -62,6 +75,8 @@ public:
   auto modify_element(key_t key, Func &&lambda)
   {
     auto [lk, bucket] = acquire_bucket(key);
+    std::printf("lookup on key %s\n", key_to_str(key).c_str());
+
     if (T *ptr = find_element(key, *bucket)) {
       if constexpr (std::is_void_v<Ret>) {
         lambda(*ptr);
@@ -129,6 +144,7 @@ private:
   static T *find_element(key_t key, bucket_entry_t &bucket)
   {
     for (auto &elt : bucket) {
+      std::printf("comparing with key %s\n", key_to_str(elt.get_key()).c_str());
       if (std::ranges::equal(elt.get_key(), key)) {
         return &elt;
       }
