@@ -23,7 +23,6 @@ class TestBytestringWrite : public ::testing::Test,
 protected:
   void SetUp() override
   {
-    std::printf("starting setup\n");
     auto [h, c] = test::load_built_rs_contract("test_bytestring.wasm");
 
     db_core_.get_root_db().write_contract(h, c);
@@ -42,8 +41,6 @@ TEST_F(TestBytestringWrite, ReadExpected)
   // ASSERT_EQ(db_client_.open_database_snapshot(0, 1)(), RPCError::kNone);
   exec_client_.open_proposal_block(0)();
 
-  std::printf("got here\n");
-
   StorageKey key{};
 
   SignedTransaction write_tx;
@@ -54,7 +51,6 @@ TEST_F(TestBytestringWrite, ReadExpected)
 
   auto res = exec_client_.propose_transaction(0, write_tx)();
   ASSERT_EQ(res.error(), RPCError::kNone);
-  std::printf("got to end\n");
 }
 
 } // namespace hogd

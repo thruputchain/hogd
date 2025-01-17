@@ -75,7 +75,6 @@ public:
   auto modify_element(key_t key, Func &&lambda)
   {
     auto [lk, bucket] = acquire_bucket(key);
-    std::printf("lookup on key %s\n", key_to_str(key).c_str());
 
     if (T *ptr = find_element(key, *bucket)) {
       if constexpr (std::is_void_v<Ret>) {
@@ -144,7 +143,6 @@ private:
   static T *find_element(key_t key, bucket_entry_t &bucket)
   {
     for (auto &elt : bucket) {
-      std::printf("comparing with key %s\n", key_to_str(elt.get_key()).c_str());
       if (std::ranges::equal(elt.get_key(), key)) {
         return &elt;
       }
