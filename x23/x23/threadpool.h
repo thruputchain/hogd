@@ -18,20 +18,18 @@
 
 namespace x23 {
 
-#if !HAVE_HARDWARE_DESTRUCTIVE_INTERFERENCE_SIZE
-// Not supported by clang
-constexpr size_t hardware_destructive_interference_size = 64;
-#else // HAVE_HARDWARE_DESTRUCTIVE_INTERFERENCE_SIZE
 // Note: this could break binary compatibility, but we don't have that
 // across compilers anyway because of how clang deals with
 // [[no_unique_address]]:
 // https://github.com/llvm/llvm-project/issues/50766
 #pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wunknown-warning-group"
 #pragma GCC diagnostic ignored "-Winterference-size"
 constexpr size_t hardware_destructive_interference_size =
     std::hardware_destructive_interference_size;
 #pragma GCC diagnostic pop
-#endif // HAVE_HARDWARE_DESTRUCTIVE_INTERFERENCE_SIZE
 
 class ThreadPool {
 public:
@@ -145,6 +143,26 @@ public:
   // If you are executing in a thread pool, return the pool.
   // Otherwise return NULL.
   static ThreadPool *get_thread_pool() { return my_thread_pool; }
+  // If you are executing in a thread pool, return a unique thread
+  // identifier in [0, nthreads_].  Otherwise return -1.
+  static ptrdiff_t get_thread_no()
+  {
+    return my_thread_pool ? my_thread_no : -1;
+  }
+
+  // A bucket index for the current thread.  Within a ThreadPool, if
+  // nbuckets is at least the size of the ThreadPool, each thread will
+  // have a unique bucket index.  Outside a ThreadPool, this just
+  // hashes the thread id, but the result will always be at least
+  // first_non_pool.
+  static size_t bucket_index(size_t nbuckets, size_t first_non_pool = 0)
+  {
+    if (my_thread_pool)
+      return my_thread_no % nbuckets;
+    constexpr std::hash<std::thread::id> hasher;
+    size_t i = hasher(std::this_thread::get_id());
+    return first_non_pool + i % (nbuckets - first_non_pool);
+  }
 
   class SuspendCount {
   public:
@@ -153,6 +171,7 @@ public:
       : thread_(tid), loop_count_(count)
     {}
     bool operator==(const SuspendCount &) const = default;
+    bool valid() const { return thread_ != std::thread::id{}; }
 
   private:
     std::thread::id thread_;
@@ -174,13 +193,18 @@ public:
   // constructed and destroyed.  Be sure to declare it
   // [[no_unique_address]] in data structures, as it compiles to empty
   // when NDEBUG is defined.
-  struct CrashIfSuspended {
+  struct [[nodiscard]] CrashIfSuspended {
 #ifndef NDEBUG
     SuspendCount start_;
     CrashIfSuspended() : start_(get_suspend_count()) {}
-    CrashIfSuspended(const CrashIfSuspended &) = delete;
-    ~CrashIfSuspended() { assert(start_ == get_suspend_count()); }
-#endif // !NDEBUG
+    ~CrashIfSuspended()
+    {
+      assert(start_ == get_suspend_count() || !start_.valid());
+    }
+    void reset() { start_ = SuspendCount{}; }
+#else  // NDEBUG
+    void reset() {}
+#endif // NDEBUG
   };
 
 private:

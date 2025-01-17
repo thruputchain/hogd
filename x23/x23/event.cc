@@ -14,7 +14,8 @@
 
 namespace x23 {
 
-CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
+CoroPoll::CoroPoll(ThreadPool &pool)
+  : CoroPollImpl(pool), buflk_(pool)
 {
   pollthread_ = std::thread(&CoroPoll::loop, this);
 }
@@ -22,6 +23,9 @@ CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
 CoroPoll::~CoroPoll()
 {
   request_stop();
+  for (int i = 0, e = get_max_fd(); i < e; ++i)
+    reset(i);
+  wake();
   pollthread_.join();
   destroy_wait();
 }

@@ -30,7 +30,6 @@ if(X23_IS_TOP_LEVEL)
 endif()
 
 include(cmake/pause.cmake)
-include(cmake/interference_size.cmake)
 include(cmake/epoll.cmake)
 include(cmake/accept4.cmake)
 

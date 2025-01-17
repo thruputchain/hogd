@@ -3,18 +3,20 @@
 #pragma once
 
 #include <cstdint>
-#include <shared_mutex>
 #include <stop_token>
+
 #include <sys/socket.h>
-#include <thread>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
 #include <x23/config.h>
+#include <x23/corosync.h>
 #include <x23/err.h>
 #include <x23/fileio.h>
+#include <x23/growvec.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
+#include <x23/testlock.h>
 #include <x23/threadpool.h>
 #include <x23/vec.h>
 
@@ -86,16 +88,13 @@ public:
 protected:
   void check(int timeout = -1);
   bool stop_requested() { return ss_.stop_requested(); }
-  void request_stop()
-  {
-    ss_.request_stop();
-    wake();
-  }
+  void request_stop() { ss_.request_stop(); }
   bool time_to_stop();
+  int get_max_fd();
+  void wake();
 
 private:
   std::stop_source ss_;
-  void wake();
   void clear(BorrowedFd fd, bool write);
   void setcb(BorrowedFd fd, bool write, WorkItem h);
 
@@ -125,17 +124,16 @@ private:
 
   UniqueFd epollfd_;
 
-  std::shared_mutex resize_lock_;
+  SharedLock resize_lock_{std::thread::hardware_concurrency()};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
-  std::atomic_uint want_resize_{0};
   std::atomic_uint numcoro_{0};
 
   std::stop_token st_;
 
   struct FdPtr {
     FdState *p_;
-    std::shared_lock<std::shared_mutex> lk_;
+    SharedLock::SharedHolder lk_;
     FdState *get() const { return p_; }
     FdState *operator->() const { return p_; }
   };
@@ -159,8 +157,7 @@ private:
     docb(fdp, true);
   }
 
-#else // !HAVE_EPOLL
-
+#else  // !HAVE_EPOLL
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
                                                 POLLOUT | POLLERR};
   struct FdState {
@@ -221,15 +218,14 @@ public:
 #else  // !HAVE_ACCEPT4
       int fd = ::accept(lfd.get(), reinterpret_cast<sockaddr *>(addr), addrlen);
       if (fd >= 0) {
-	try {
-	  set_nonblock(fd);
-	}
-	catch (...) {
-	  close(fd);
-	  throw;
-	}
-	if (close_on_exec)
-	  fcntl(fd, F_SETFD, 1);
+        try {
+          set_nonblock(fd);
+        } catch (...) {
+          close(fd);
+          throw;
+        }
+        if (close_on_exec)
+          fcntl(fd, F_SETFD, 1);
       }
 #endif // !HAVE_ACCEPT4
       if (fd >= 0)
@@ -249,6 +245,7 @@ public:
                                                           std::string port);
 
 private:
+  CoroSharedLock<CoroLock> buflk_;
   void loop();
 
   std::thread pollthread_;

@@ -1,6 +1,5 @@
 
 #include <fcntl.h>
-#include <netinet/in.h>
 #include <sys/socket.h>
 
 #include "x23/fileio.h"
@@ -89,6 +88,40 @@ tcplisten(std::uint16_t port)
     Errno{}.raise("listen");
   set_nonblock(lfd.get());
   return lfd;
+}
+
+sockaddr_storage
+local_addr(BorrowedFd s)
+{
+  sockaddr_storage ss;
+  socklen_t len{sizeof(ss)};
+  if (getsockname(s.get(), reinterpret_cast<sockaddr *>(&ss), &len) == -1)
+    Errno{}.raise("getsockname");
+  return ss;
+}
+
+sockaddr_storage
+remote_addr(BorrowedFd s)
+{
+  sockaddr_storage ss;
+  socklen_t len{sizeof(ss)};
+  if (getpeername(s.get(), reinterpret_cast<sockaddr *>(&ss), &len) == -1)
+    Errno{}.raise("getsockname");
+  return ss;
+}
+
+std::uint16_t
+get_port(const sockaddr_storage &ss)
+{
+  switch (ss.ss_family) {
+  case AF_INET:
+    return ntohs(reinterpret_cast<const sockaddr_in *>(&ss)->sin_port);
+  case AF_INET6:
+    return ntohs(reinterpret_cast<const sockaddr_in6 *>(&ss)->sin6_port);
+  default:
+    Errno(EINVAL).raise("Invalid address family {} does not have port number",
+                        ss.ss_family);
+  }
 }
 
 } // namespace x23

@@ -3,6 +3,7 @@ add_library(x23
   async.h
   cleanup.h
   corosync.h
+  corosync.cc
   err.h
   event.cc
   event.h
@@ -10,6 +11,7 @@ add_library(x23
   fileio.cc
   fileio.h
   format.h
+  growvec.h
   heap.h
   mvar.h
   refcnt.h
@@ -17,6 +19,7 @@ add_library(x23
   rpc.h
   rpc_msg.x
   serialize.h
+  testlock.h
   threadpool.cc
   threadpool.h
   utility.h

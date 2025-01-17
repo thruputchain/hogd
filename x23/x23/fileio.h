@@ -2,9 +2,12 @@
 
 #pragma once
 
+#include "x23/utility.h"
 #include <filesystem>
 
 #include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -98,5 +101,10 @@ void set_nonblock(BorrowedFd fd, bool on = true);
 
 // Listen on a TCP port on any IP address (allowing IPv4 and IPv6)
 UniqueFd tcplisten(std::uint16_t port);
+
+sockaddr_storage local_addr(BorrowedFd s);
+sockaddr_storage remote_addr(BorrowedFd s);
+
+std::uint16_t get_port(const sockaddr_storage &ss);
 
 } // namespace x23
