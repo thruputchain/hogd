@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <stop_token>
+
 #include <sys/socket.h>
 
 #include <x23/async.h>
@@ -87,17 +88,13 @@ public:
 protected:
   void check(int timeout = -1);
   bool stop_requested() { return ss_.stop_requested(); }
-  void request_stop()
-  {
-    ss_.request_stop();
-    wake();
-  }
+  void request_stop() { ss_.request_stop(); }
   bool time_to_stop();
-  int get_max_fd() const;
+  int get_max_fd();
+  void wake();
 
 private:
   std::stop_source ss_;
-  void wake();
   void clear(BorrowedFd fd, bool write);
   void setcb(BorrowedFd fd, bool write, WorkItem h);
 

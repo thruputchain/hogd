@@ -90,7 +90,7 @@ CoroPollImpl::time_to_stop()
 }
 
 int
-CoroPollImpl::get_max_fd() const
+CoroPollImpl::get_max_fd()
 {
   return state_size_;
 }
@@ -286,13 +286,12 @@ CoroPollImpl::check(int timeout)
 }
 
 int
-CoroPollImpl::get_max_fd() const
+CoroPollImpl::get_max_fd()
 {
   auto ptr = state_.take();
-  auto e = ptr->end();
-  if (ptr->begin() == e)
+  if (ptr->empty())
     return 0;
-  return (--e)->first + 1;
+  return 1 + std::ranges::max(*ptr | std::views::keys);
 }
 
 std::vector<std::coroutine_handle<>>

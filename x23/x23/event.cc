@@ -24,7 +24,8 @@ CoroPoll::~CoroPoll()
 {
   request_stop();
   for (int i = 0, e = get_max_fd(); i < e; ++i)
-    poison(i);
+    reset(i);
+  wake();
   pollthread_.join();
   destroy_wait();
 }

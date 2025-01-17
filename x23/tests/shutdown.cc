@@ -30,9 +30,8 @@ struct Connection {
 
     [](Connection *server, x23::UniqueFd lfd) -> x23::Detached {
       co_await server->cp_.pool_.bg();
-      while (auto c = co_await server->cp_.accept(lfd)) {
+      while (auto c = co_await server->cp_.accept(lfd))
         x23::rpc_stream_logged(server->cp_, *c).server(server);
-      }
     }(this, std::move(lfd));
     return portno;
   }
