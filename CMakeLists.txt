@@ -22,6 +22,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_link_options(-stdlib=libc++ -fexperimental-library)
 endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-interference-size")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
 endif()
 set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
@@ -43,7 +44,7 @@ check_ipo_supported()
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/built_headers)
 
-# Enable GoogleTest (google's unit testing library)
+# Enable GoogleTest (Google's unit testing library)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 option(INSTALL_GTEST "" OFF)
 add_subdirectory(external/googletest)
@@ -52,13 +53,20 @@ set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest"
 enable_testing()
 include(GoogleTest)
 
-# Enable performance (google's benchmarking library)
+# Enable performance (Google's benchmarking library)
 option(BENCHMARK_ENABLE_TESTING "" OFF)
 add_subdirectory(external/benchmark)
 if(BENCHMARK_ENABLE_TESTING)
 set(BENCHMARK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/benchmark"
   CACHE PATH "Path to Google benchmark" FORCE)
 endif()
+
+# Enable crc32c (Google's CRC library)
+option(CRC32C_BUILD_TESTS "" OFF)
+option(CRC32C_BUILD_BENCHMARKS "" OFF)
+option(CRC32C_USE_GLOG "" OFF)
+option(CRC32C_INSTALL "" OFF)
+add_subdirectory(external/crc32c)
 
 # Detect number of cores - only needed for make-based ExternalProject
 include(ProcessorCount)

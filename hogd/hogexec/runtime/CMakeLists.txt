@@ -27,6 +27,7 @@ target_link_libraries(
   runtime
   wasmi_lib
   protocol
+  crypto
 )
 
 add_dependencies(
