@@ -89,6 +89,12 @@ CoroPollImpl::time_to_stop()
   return !numcoro_;
 }
 
+int
+CoroPollImpl::get_max_fd() const
+{
+  return state_size_;
+}
+
 BorrowedFd
 CoroPollImpl::always_eof()
 {
@@ -104,8 +110,7 @@ CoroPollImpl::always_eof()
     int newfd = fds[0];
     try {
       set_nonblock(newfd);
-    }
-    catch (...) {
+    } catch (...) {
       close(newfd);
       throw;
     }
@@ -280,6 +285,16 @@ CoroPollImpl::check(int timeout)
   pool_.go(cbs);
 }
 
+int
+CoroPollImpl::get_max_fd() const
+{
+  auto ptr = state_.take();
+  auto e = ptr->end();
+  if (ptr->begin() == e)
+    return 0;
+  return (--e)->first + 1;
+}
+
 std::vector<std::coroutine_handle<>>
 CoroPollImpl::report_badfd(FdState &f)
 {
@@ -287,7 +302,7 @@ CoroPollImpl::report_badfd(FdState &f)
   for (unsigned write = 0; write < 2; ++write)
     if (f.callbacks[write])
       if (auto h = std::exchange(f.callbacks[write], nullptr)
-                       .set_result_without_resuming(0))
+                       .set_result_without_resuming(EBADF))
         ret.push_back(h);
   return ret;
 }
@@ -355,7 +370,7 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
     auto &f = (*ptr)[fd.get()];
     if (f.callbacks[write])
       h = std::exchange(f.callbacks[write], nullptr)
-	.set_result_without_resuming(err);
+              .set_result_without_resuming(err);
   }
   if (h)
     pool_.go(h);

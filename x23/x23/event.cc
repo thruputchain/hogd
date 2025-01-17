@@ -23,6 +23,8 @@ CoroPoll::CoroPoll(ThreadPool &pool)
 CoroPoll::~CoroPoll()
 {
   request_stop();
+  for (int i = 0, e = get_max_fd(); i < e; ++i)
+    poison(i);
   pollthread_.join();
   destroy_wait();
 }
