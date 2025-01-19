@@ -6,8 +6,6 @@
 
 #include <array>
 #include <cassert>
-#include <cstddef>
-#include <cstdint>
 #include <span>
 
 #include "x23/serialize.h"
