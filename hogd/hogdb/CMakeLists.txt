@@ -1,6 +1,6 @@
+add_subdirectory(db)
 add_subdirectory(softstate)
 add_subdirectory(interface)
-add_subdirectory(db)
 
 add_library(
   hogdb_core

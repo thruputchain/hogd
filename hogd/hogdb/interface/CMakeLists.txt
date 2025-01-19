@@ -9,6 +9,8 @@ target_link_libraries(
   hogdb_interface
   protocol
   hogd
+  hogdb_softstate
+  hogdb_db
 )
 
 add_executable(
