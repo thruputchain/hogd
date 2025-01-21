@@ -15,6 +15,7 @@ target_link_libraries(
   hogd
   protocol
   runtime
+  wasmi_lib
   runtime_trampoline
   interface
 )

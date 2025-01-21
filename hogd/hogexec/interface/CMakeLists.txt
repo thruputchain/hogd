@@ -10,7 +10,6 @@ target_link_libraries(
   protocol
   hogd
   runtime
-  wasmi_lib
 )
 
 add_executable(
