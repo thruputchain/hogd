@@ -1,7 +1,7 @@
 # Build hogexec modules
+add_subdirectory(runtime_trampoline)
 add_subdirectory(wasmi)
 add_subdirectory(runtime)
-add_subdirectory(runtime_trampoline)
 add_subdirectory(block)
 add_subdirectory(interface)
 
@@ -15,8 +15,6 @@ target_link_libraries(
   hogd
   protocol
   runtime
-  wasmi_lib
-  runtime_trampoline
   interface
 )
 

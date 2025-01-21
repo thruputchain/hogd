@@ -13,10 +13,3 @@ target_sources(
   wasmi_lib
   PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ffi_enums.rs)
-
-target_link_libraries(
-  wasmi_lib
-  INTERFACE
-  runtime_trampoline
-)
-

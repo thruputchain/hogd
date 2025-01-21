@@ -38,6 +38,7 @@ add_executable(
 target_link_libraries(
   runtime
   wasmi_lib
+  runtime_trampoline
   protocol
   hogd
 )
