@@ -30,32 +30,46 @@ TEST(StorageItemFrame, RewriteVariantTypeNullStart)
   StorageDelta nnint_set_add_2 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_3 = make_nnint_delta(5, -3);
 
-  EXPECT_TRUE(item.try_reserve_delta(bytestring_delta));
+  auto b_lock =
+      item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(b_lock);
 
   // type mismatch
-  EXPECT_FALSE(item.try_reserve_delta(nnint_set_add_1));
-  item.revert_delta(bytestring_delta);
+  EXPECT_FALSE(
+      item.try_reserve(nnint_set_add_1, StorageLock(StorageLockType::kNone)));
+  item.revert(*b_lock);
 
   // item in neutral state
-  EXPECT_TRUE(item.try_reserve_delta(nnint_set_add_1));
+  auto nnint_lock_1 =
+      item.try_reserve(nnint_set_add_1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(nnint_lock_1);
   // mismatch in nnint set value
-  EXPECT_FALSE(item.try_reserve_delta(nnint_set_add_2));
-  item.revert_delta(nnint_set_add_1);
+  EXPECT_FALSE(
+      item.try_reserve(nnint_set_add_2, StorageLock(StorageLockType::kNone)));
+  item.revert(*nnint_lock_1);
 
   // item in neutral state
-  EXPECT_TRUE(item.try_reserve_delta(nnint_set_add_2));
-  EXPECT_TRUE(item.try_reserve_delta(nnint_set_add_3));
-
+  auto nnint_lock_2 =
+      item.try_reserve(nnint_set_add_2, StorageLock(StorageLockType::kNone));
+  auto nnint_lock_3 =
+      item.try_reserve(nnint_set_add_3, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(nnint_lock_2);
+  ASSERT_TRUE(nnint_lock_3);
   // fails because too much subtraction
-  EXPECT_FALSE(item.try_reserve_delta(nnint_set_add_3));
-  item.revert_delta(nnint_set_add_3);
+  EXPECT_FALSE(
+      item.try_reserve(nnint_set_add_3, StorageLock(StorageLockType::kNone)));
+  item.revert(*nnint_lock_3);
 
-  EXPECT_TRUE(item.try_reserve_delta(nnint_set_add_3));
-  item.revert_delta(nnint_set_add_3);
-  item.revert_delta(nnint_set_add_2);
+  nnint_lock_3 =
+      item.try_reserve(nnint_set_add_3, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(nnint_lock_3);
+
+  item.revert(*nnint_lock_3);
+  item.revert(*nnint_lock_2);
   // item in neutral state
 
-  EXPECT_TRUE(item.try_reserve_delta(bytestring_delta));
+  EXPECT_TRUE(
+      item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone)));
 }
 
 TEST(StorageItemFrame, RewriteVariantFromBase)
@@ -82,17 +96,28 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
   // updated delete semantics allows changing type:
   // checks for mismatched writes go in transaction runtime,
   // not the storage item frame
-  EXPECT_TRUE(item.try_reserve_delta(nnint_set_add));
+  auto nnint_lock =
+      item.try_reserve(nnint_set_add, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(nnint_lock);
 
-  EXPECT_FALSE(item.try_reserve_delta(bytestring_delta));
-  item.revert_delta(nnint_set_add);
+  EXPECT_FALSE(
+      item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone)));
+  item.revert(*nnint_lock);
 
   // In neutral state now
 
-  EXPECT_TRUE(item.try_reserve_delta(bytestring_delta));
+  auto b_lock =
+      item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(b_lock);
 
-  EXPECT_FALSE(item.try_reserve_delta(nnint_set_add));
-  EXPECT_TRUE(item.try_reserve_delta(bytestring_delta));
+  EXPECT_FALSE(
+      item.try_reserve(nnint_set_add, StorageLock(StorageLockType::kNone)));
+  auto b_lock2 =
+      item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(b_lock2);
+
+  item.commit(bytestring_delta, *b_lock);
+  item.commit(bytestring_delta, *b_lock2);
 
   StorageItemFrame item2(AddressAndKey{}, item.get_post_close_block_item());
 
@@ -122,17 +147,45 @@ TEST(StorageItemFrame, DeleteItem)
 
   ASSERT_TRUE(item2.get_snapshot_item());
 
-  EXPECT_TRUE(item2.try_reserve_delta(StorageDelta(StorageDeltaType::kDelete)));
+  auto delete_lock = item2.try_reserve(StorageDelta(StorageDeltaType::kDelete),
+                                       StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(delete_lock);
 
   StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
-  EXPECT_FALSE(item2.try_reserve_delta(bytestring_delta));
+  EXPECT_FALSE(
+      item2.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone)));
 
-  item2.commit_delta(StorageDelta(StorageDeltaType::kDelete));
+  item2.commit(StorageDelta(StorageDeltaType::kDelete), *delete_lock);
 
   StorageItemFrame item3(AddressAndKey{}, item2.get_post_close_block_item());
 
   EXPECT_FALSE(item3.get_snapshot_item());
+}
+
+TEST(StorageItemFrame, ExclusiveLockAcquire)
+{
+  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+
+  auto lock1 = item.try_reserve(StorageDelta(StorageDeltaType::kDelete),
+                                StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock1);
+
+  StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
+  bytestring_delta.bytestring() = {3, 2, 1, 0};
+
+  auto lock2 = item.try_reserve(bytestring_delta, *lock1);
+  ASSERT_TRUE(lock2);
+
+  EXPECT_EQ(lock2->lock_type(), StorageLockType::kExclusiveLock);
+
+  item.commit(bytestring_delta, *lock2);
+
+  auto snapshot = item.get_post_close_block_item();
+
+  ASSERT_TRUE(snapshot);
+  EXPECT_EQ(snapshot->type(), StorageItemType::kBytestring);
+  EXPECT_EQ(snapshot->bytestring(), bytestring_delta.bytestring());
 }
 
 } // namespace hogd

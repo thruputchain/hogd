@@ -5,6 +5,7 @@
 #include <span>
 
 #include "storage_item.hh"
+#include "storage_lock.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -21,24 +22,40 @@ TransactionCache::get_key(TransactionID const &txid)
   return std::as_bytes(std::span(&txid, 1));
 }
 
+StorageLock
+TransactionCache::get_lock(TransactionID txid, AddressAndKey const &addrkey)
+{
+  auto key = get_key(txid);
+  auto res = tx_entries_.modify_element(key, [&addrkey](auto &v) {
+    auto it = v.deltas_.find(addrkey);
+    if (it == v.deltas_.end()) {
+      return StorageLock(StorageLockType::kNone);
+    }
+    return it->second.second;
+  });
+  if (!res) {
+    return StorageLock(StorageLockType::kNone);
+  }
+  return *res;
+}
+
 void
 TransactionCache::add_delta(TransactionID txid, AddressAndKey const &addrkey,
-                            StorageDelta const &delta)
+                            StorageDelta const &delta, StorageLock const &lock)
 {
-  std::printf("txid lookup %llx\n", txid);
   auto key = get_key(txid);
   // no-op if element already exists
   tx_entries_.emplace(key, txid);
 
   [[maybe_unused]]
   auto modify_res =
-      tx_entries_.modify_element(key, [&addrkey, &delta](auto &v) {
-        v.deltas_.emplace_back(addrkey, delta);
+      tx_entries_.modify_element(key, [&addrkey, &delta, &lock](auto &v) {
+        v.deltas_[addrkey] = {delta, lock};
       });
   assert(modify_res);
 }
 
-std::vector<std::pair<AddressAndKey, StorageDelta>>
+std::unordered_map<AddressAndKey, std::pair<StorageDelta, StorageLock>>
 TransactionCache::get_deltas(TransactionID txid)
 {
   auto key = get_key(txid);

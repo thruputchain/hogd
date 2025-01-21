@@ -22,20 +22,22 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
                                       AddressAndKey const &addrkey,
                                       StorageDelta const &delta)
 {
-  auto res = storage_view_.try_reserve_storage_delta(addrkey, delta);
+  auto lock = transaction_cache_.get_lock(txid, addrkey);
+  auto res = storage_view_.try_reserve_storage_delta(addrkey, delta, lock);
 
   if (res) {
-    transaction_cache_.add_delta(txid, addrkey, delta);
+    transaction_cache_.add_delta(txid, addrkey, delta, *res);
   }
-  return res;
+  return res.has_value();
 }
 
 void
 BlockState::commit_transaction(TransactionID txid)
 {
   auto deltas = transaction_cache_.get_deltas(txid);
-  for (auto const &[addr, delta] : deltas) {
-    storage_view_.revert_storage_delta(addr, delta);
+  for (auto const &[addr, delta_and_lock] : deltas) {
+    auto const &[delta, lock] = delta_and_lock;
+    storage_view_.revert_storage_lock(addr, lock);
   }
 }
 
@@ -43,8 +45,9 @@ void
 BlockState::abort_transaction(TransactionID txid)
 {
   auto deltas = transaction_cache_.get_deltas(txid);
-  for (auto const &[addr, delta] : deltas) {
-    storage_view_.commit_storage_delta(addr, delta);
+  for (auto const &[addr, delta_and_lock] : deltas) {
+    auto const &[delta, lock] = delta_and_lock;
+    storage_view_.commit_storage_delta(addr, delta, lock);
   }
 }
 

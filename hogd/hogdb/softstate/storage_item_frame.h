@@ -1,11 +1,11 @@
 #pragma once
 
-#include <cstdint>
 #include <optional>
-#include <set>
+#include <stdexcept>
 
 #include "hogd/hogdb/softstate/uint256_reservation.h"
 #include "storage_item.hh"
+#include "storage_lock.hh"
 
 namespace hogd {
 
@@ -31,22 +31,10 @@ public:
   StorageItemFrame(StorageItemFrame &&) noexcept = default;
   StorageItemFrame &operator=(StorageItemFrame &&obj) noexcept = default;
 
-  // Required usage pattern: A transaction calls try_reserve_delta() on a delta,
-  // and then either calls commit or revert on the delta
-  //
-  // Each transaction should call try_reserve_delta() at most ONCE per object.
-  // This means I need to condense things into one StorageDelta object
-  // (or I could swap for a list, but that's annoying).
-  //
-  // Returns true if reservation is successful.
-  //
-  // TODO(geoff): We can probably just remove the commit_delta() method
-  // entirely.  Will wait to remove until we
-  // have all the other StorageDelta types worked out.
-  [[nodiscard]] bool try_reserve_delta(StorageDelta const &delta);
-
-  void revert_delta(StorageDelta const &delta);
-  void commit_delta(StorageDelta const &delta);
+  std::optional<StorageLock> try_reserve(StorageDelta const &delta,
+                                         StorageLock const &previous_lock);
+  void commit(StorageDelta const &delta, StorageLock const &lock);
+  void revert(StorageLock const &lock);
 
   // Get the item, before any deltas of the current round were committed.
   // Cannot be called after block close (after get_post_close_block_item() is
@@ -69,6 +57,39 @@ public:
   }
 
 private:
+  // Required usage pattern: A transaction calls try_reserve_delta() on a delta,
+  // and then either calls commit or revert on the delta
+  //
+  // Each transaction should call try_reserve_delta() at most ONCE per object.
+  // This means I need to condense things into one StorageDelta object
+  // (or I could swap for a list, but that's annoying).
+  //
+  // Returns true if reservation is successful.
+  //
+  // TODO(geoff): We can probably just remove the commit_delta() method
+  // entirely.  Will wait to remove until we
+  // have all the other StorageDelta types worked out.
+  [[nodiscard]] bool try_reserve_delta(StorageDelta const &delta);
+
+  void revert_delta(StorageDelta const &delta);
+  void commit_delta(StorageDelta const &delta);
+
+  // Locking methods
+  // upgrade from previous_lock_type to kExclusiveLock
+  [[nodiscard]] bool
+  try_acquire_exclusive_lock(StorageLockType previous_lock_type);
+  // kNone -> kSetItemTypeClass via try_reserve_delta()
+
+  // kExclusiveLock -> kNone
+  void revert_exclusive_lock_to_none();
+  // kExclusiveLock -> kSetItemTypeClass
+  void revert_exclusive_lock_to_set_typeclass(StorageDelta const &delta);
+  // kSetItemTypeClass -> kSetItemTypeClass
+  void revert_set_typeclass_lock_to_set_typeclass(StorageLock const &lock,
+                                                  StorageDelta const &delta);
+  // kSetItemTypeClass -> kNone
+  void revert_set_typeclass_lock(TypeSpecificLock const &type_specific_lock);
+
   // Each of the following types represents one possible state that the item
   // may be in, given any pending reservations. Each has a typeclass_match()
   // method, which returns whether the variant can accept a delta of that
@@ -110,7 +131,20 @@ private:
     static std::optional<StorageItem> to_item() { return std::nullopt; }
   };
 
-  using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs, DeleteArgs>;
+  // Exclusive locked state
+  // For convenience, we maintain the invariant that the refcount is 1 whenever
+  // the variant is in this state (so i.e. there's never an ExclusiveLockedState
+  // with refcount 0).
+  struct ExclusiveLockedState {
+    static bool typeclass_match() { return false; }
+    static std::optional<StorageItem> to_item()
+    {
+      throw std::runtime_error("Impossible state");
+    }
+  };
+
+  using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs, DeleteArgs,
+                                 ExclusiveLockedState>;
 
   // Contents of the variant are ignored if refcount_ is 0.
   // Every successful try_reserve increases the refcount, and revert reduces it.
@@ -137,7 +171,15 @@ private:
     bool try_reserve_bytestring_set(Bytestring const &bytestring);
     bool try_reserve_nnint_set_add(int128_t set_value, int128_t add_value);
 
-    // does not release the reference
+    // only valid if refcount_ > 0
+    bool matches_typeclass(StorageItemTypeClass typeclass) const;
+
+    // does not change refcount
+    // REQUIRES: add_value < 0, and the variant is already in the NNIntSetAdd
+    // state
+    bool try_reserve_nnint_additional(int128_t add_value);
+
+    // does not change refcount
     void revert_nnint_set_add(int128_t add_value);
 
   private:

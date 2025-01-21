@@ -8,6 +8,7 @@ namespace hogd
   enum StorageItemType {
     kBytestring = 0,
     kNonnegativeInt = 1,
+    kDeleted = 2,
   };
 
   const kBytestringMaxLen = 1024;

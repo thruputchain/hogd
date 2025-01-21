@@ -6,6 +6,7 @@ add_xdr(
 	rpc.x
 	rpc_types.x
 	storage_item.x
+	storage_lock.x
 	syscall.x
 	transaction.x
 	types.x)

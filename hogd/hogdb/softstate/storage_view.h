@@ -9,6 +9,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/db/in_memory_database.h"
 #include "hogd/hogdb/softstate/storage_item_frame.h"
+#include "storage_lock.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -112,12 +113,13 @@ public:
     return this;
   }
 
-  bool try_reserve_storage_delta(AddressAndKey const &addrkey,
-                                 StorageDelta const &delta);
-  void revert_storage_delta(AddressAndKey const &addrkey,
-                            StorageDelta const &delta);
+  std::optional<StorageLock>
+  try_reserve_storage_delta(AddressAndKey const &addrkey,
+                            StorageDelta const &delta, StorageLock const &lock);
+  void revert_storage_lock(AddressAndKey const &addrkey,
+                           StorageLock const &lock);
   void commit_storage_delta(AddressAndKey const &addrkey,
-                            StorageDelta const &delta);
+                            StorageDelta const &delta, StorageLock const &lock);
 
   void commit_contract_create(Contract const &contract);
   void commit_contract_deploy(ContractAddress const &addr,

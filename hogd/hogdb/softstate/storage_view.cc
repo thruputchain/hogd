@@ -6,6 +6,7 @@
 
 #include "hogd/crypto/crypto.h"
 #include "storage_item.hh"
+#include "storage_lock.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -64,18 +65,23 @@ ParentBlockView::get_post_block_storage_item(AddressAndKey const &addrkey)
       parent_view_);
 }
 
-bool
+std::optional<StorageLock>
 StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
-                                       StorageDelta const &delta)
+                                       StorageDelta const &delta,
+                                       StorageLock const &lock)
 {
   assert(!closed_);
   auto key = to_key(addrkey);
 
-  auto res = modified_items_.modify_element(key, [&delta](auto &v) -> bool {
-    return v.try_reserve_delta(delta);
-  });
+  auto mod_lambda = [&delta, &lock](auto &v) -> std::optional<StorageLock> {
+    return v.try_reserve(delta, lock);
+  };
 
+  auto res = modified_items_.modify_element(key, mod_lambda);
   if (res.has_value()) {
+    // modified_items_ found the key.
+    // *res is std::optional<StorageLock>: has_value() is true if the operation
+    // succeeds, otherwise it is nullopt
     return *res;
   }
 
@@ -91,32 +97,34 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
   }
   modified_items_.emplace(key, addrkey, parent_value);
 
-  res = modified_items_.modify_element(key, [&delta](auto &v) -> bool {
-    return v.try_reserve_delta(delta);
-  });
-
+  res = modified_items_.modify_element(key, mod_lambda);
+  // lookup must succeed, we just added it
+  assert(res.has_value());
   return *res;
 }
 
 void
-StorageView::revert_storage_delta(AddressAndKey const &addrkey,
-                                  StorageDelta const &delta)
+StorageView::revert_storage_lock(AddressAndKey const &addrkey,
+                                 StorageLock const &lock)
 {
   assert(!closed_);
   auto key = to_key(addrkey);
 
-  modified_items_.modify_element(key,
-                                 [&delta](auto &v) { v.revert_delta(delta); });
+  modified_items_.modify_element(key, [&lock](auto &v) { v.revert(lock); });
 }
 void
 StorageView::commit_storage_delta(AddressAndKey const &addrkey,
-                                  StorageDelta const &delta)
+                                  StorageDelta const &delta,
+                                  StorageLock const &lock)
 {
   assert(!closed_);
   auto key = to_key(addrkey);
 
-  modified_items_.modify_element(key,
-                                 [&delta](auto &v) { v.commit_delta(delta); });
+  [[maybe_unused]]
+  auto res = modified_items_.modify_element(key, [&delta, &lock](auto &v) {
+    v.commit(delta, lock);
+  });
+  assert(res);
 }
 
 void
