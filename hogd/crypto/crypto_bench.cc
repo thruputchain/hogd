@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
+#include <span>
 #include <vector>
 
 #include "hogd/base/status.h"
@@ -14,32 +15,44 @@ namespace hogd {
 
 namespace {
 
+constexpr size_t kMin = 8;
+constexpr size_t kMax = 8 << 10;
+
+template<typename Func>
 void
-bm_sha256(benchmark::State &state)
+bench_hash(benchmark::State &state, Func hash_fn)
 {
   if (!crypto_init())
     std::terminate();
   std::vector<std::byte> in(state.range(0));
   for (auto _ : state)
-    sha256(in);
+    hash_fn(in);
   state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
                           static_cast<int64_t>(state.range(0)));
 }
-BENCHMARK(bm_sha256)->RangeMultiplier(2)->Range(8, 8 << 10); // NOLINT
+
+void
+bm_sha256(benchmark::State &state)
+{
+  bench_hash(state, [](std::span<std::byte> buf) { return sha256(buf); });
+}
+BENCHMARK(bm_sha256)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+
+void
+bm_crc32c(benchmark::State &state)
+{
+  bench_hash(state, [](std::span<std::byte> buf) { return crc32c(buf); });
+}
+BENCHMARK(bm_crc32c)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 
 void
 bm_siphash24(benchmark::State &state)
 {
-  if (!crypto_init())
-    std::terminate();
-  std::vector<std::byte> in(state.range(0));
-  Siphash24Key key = siphash24_keygen();
-  for (auto _ : state)
-    siphash24(in, key);
-  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
-                          static_cast<int64_t>(state.range(0)));
+  bench_hash(state, [](std::span<std::byte> buf) {
+    return SipHash24::get_default()(buf);
+  });
 }
-BENCHMARK(bm_siphash24)->RangeMultiplier(2)->Range(8, 8 << 10); // NOLINT
+BENCHMARK(bm_siphash24)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 
 } // namespace
 
