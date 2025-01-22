@@ -31,9 +31,19 @@ public:
   StorageItemFrame(StorageItemFrame &&) noexcept = default;
   StorageItemFrame &operator=(StorageItemFrame &&obj) noexcept = default;
 
+  // Try to reserve the storage item for the given delta operation.
+  // Returns a lock if successful, or nullopt if the reservation failed.
+  // The previous_lock parameter represents any existing lock held on this item.
   std::optional<StorageLock> try_reserve(StorageDelta const &delta,
                                          StorageLock const &previous_lock);
+
+  // Commit the delta operation under the given lock.
+  // This releases the lock and applies the changes from the delta.
+  // The lock must have been obtained from a successful try_reserve() call.
   void commit(StorageDelta const &delta, StorageLock const &lock);
+
+  // Revert/rollback any changes and release the given lock.
+  // The lock must have been obtained from a successful try_reserve() call.
   void revert(StorageLock const &lock);
 
   // Get the item, before any deltas of the current round were committed.
@@ -57,12 +67,9 @@ public:
   }
 
 private:
-  // Required usage pattern: A transaction calls try_reserve_delta() on a delta,
-  // and then either calls commit or revert on the delta
-  //
-  // Each transaction should call try_reserve_delta() at most ONCE per object.
-  // This means I need to condense things into one StorageDelta object
-  // (or I could swap for a list, but that's annoying).
+
+  // Performs a reservation of the storage item for the given delta operation.
+  // Should be performed only when the initial lock state is kNone.
   //
   // Returns true if reservation is successful.
   //
@@ -71,7 +78,6 @@ private:
   // have all the other StorageDelta types worked out.
   [[nodiscard]] bool try_reserve_delta(StorageDelta const &delta);
 
-  void revert_delta(StorageDelta const &delta);
   void commit_delta(StorageDelta const &delta);
 
   // Locking methods

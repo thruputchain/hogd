@@ -16,6 +16,21 @@ public:
   TransactionCacheEntry(TransactionID txid) : txid_(txid) {}
   std::span<const std::byte> get_key() const;
 
+  // Stores the most recently applied delta for this transaction,
+  // along with any held storage locks.
+  // To revert a delta, overwrite the delta with a new delta (which would
+  // be the previous delta, as calculated by the runtime.)
+  // TODO(geoff): this doesn't _release_ an acquired lock until the end of the transaction,
+  // whether we commit or revert.  This may not be _optimal_, but probably good enough.
+  // It's not an error to hold a lock for slightly too long.
+  //
+  // TODO(geoff): investigate whether caching in the executor would save rpcs.
+  // In this design, the executor must make a try_reserve() call for all modified
+  // items in a try_invoke frame, AND also a try_reserve() call for all items
+  // modified at the end of the transaction.
+  // Some (possibly bugprone) caching logic in the executor is plausible.
+  // (both on whether that last RPC needs to be sent, and whether the transaction
+  // already holds an exclusive lock).
   std::unordered_map<AddressAndKey, std::pair<StorageDelta, StorageLock>>
       deltas_;
 
