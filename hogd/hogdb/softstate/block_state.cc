@@ -24,6 +24,7 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
                                       RPCFlagSet flags)
 {
   auto lock = transaction_cache_.get_lock(txid, addrkey);
+
   auto res =
       storage_view_.try_reserve_storage_delta(addrkey, delta, lock, flags);
 

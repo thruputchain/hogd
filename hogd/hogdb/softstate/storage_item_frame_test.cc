@@ -283,4 +283,31 @@ TEST(StorageItemFrame, NNIntFromExclusiveLock)
   EXPECT_EQ(snapshot->nnint(), to_xdr(int128_t{6}));
 }
 
+TEST(StorageItemFrame, ExclusiveBytestring)
+{
+  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+
+  StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
+  bytestring_delta.bytestring() = {3, 2, 1, 0};
+
+  auto res = item.try_acquire_exclusive_lock(StorageLockType::kNone);
+  ASSERT_TRUE(res);
+
+  auto lock =
+      item.try_reserve(bytestring_delta,
+                       StorageLock(StorageLockType::kPermanentExclusiveLock));
+  ASSERT_TRUE(lock);
+
+  item.commit(bytestring_delta, *lock);
+
+  auto snapshot = item.get_post_close_block_item();
+  ASSERT_TRUE(snapshot);
+  EXPECT_EQ(snapshot->type(), StorageItemType::kBytestring);
+  EXPECT_EQ(snapshot->bytestring(), bytestring_delta.bytestring());
+
+  ASSERT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
+  ASSERT_FALSE(
+      item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone)));
+}
+
 } // namespace hogd

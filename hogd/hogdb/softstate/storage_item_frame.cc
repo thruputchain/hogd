@@ -225,7 +225,8 @@ StorageItemFrame::try_reserve_delta(StorageDelta const &delta)
 }
 
 void
-StorageItemFrame::commit_delta(StorageDelta const &delta)
+StorageItemFrame::commit_delta(StorageDelta const &delta,
+                               bool maintain_permanent_exclusive_lock)
 {
   switch (delta.type()) {
   case StorageDeltaType::kBytestringSet:
@@ -235,6 +236,10 @@ StorageItemFrame::commit_delta(StorageDelta const &delta)
     break;
   case StorageDeltaType::kDelete:
     break;
+  }
+
+  if (maintain_permanent_exclusive_lock) {
+    variant_.permanent_exclusive_lock_ = true;
   }
 }
 
@@ -268,6 +273,10 @@ StorageItemFrame::update_committed_item()
 bool
 StorageItemFrame::try_acquire_exclusive_lock(StorageLockType previous_lock_type)
 {
+  if (variant_.permanent_exclusive_lock_) {
+    assert(variant_.refcount_ > 0);
+    return false;
+  }
   if (variant_.refcount_ == 0) {
     assert(previous_lock_type == StorageLockType::kNone);
     variant_.variant_ = ExclusiveLockedState{};
@@ -370,6 +379,9 @@ StorageItemFrame::try_reserve(StorageDelta const &delta,
   switch (previous_lock.lock_type()) {
   case StorageLockType::kNone:
   {
+    if (variant_.permanent_exclusive_lock_) {
+      return std::nullopt;
+    }
     if (try_reserve_delta(delta)) {
       return to_lock(delta);
     }
@@ -377,6 +389,7 @@ StorageItemFrame::try_reserve(StorageDelta const &delta,
   }
   case StorageLockType::kSetItemTypeClass:
   {
+    assert(!variant_.permanent_exclusive_lock_);
     auto req_lock = to_lock(delta);
     assert(req_lock.lock_type() == StorageLockType::kSetItemTypeClass);
 
@@ -427,6 +440,7 @@ StorageItemFrame::try_reserve(StorageDelta const &delta,
   }
   // always succeeds
   case StorageLockType::kExclusiveLock:
+  case StorageLockType::kPermanentExclusiveLock:
     return previous_lock;
   default:
     throw std::runtime_error("unimplemented");
@@ -474,11 +488,15 @@ StorageItemFrame::commit(StorageDelta const &delta, StorageLock const &lock)
   switch (lock.lock_type()) {
   case StorageLockType::kSetItemTypeClass:
     revert_set_typeclass_lock_to_set_typeclass(lock, delta);
-    commit_delta(delta);
+    commit_delta(delta, false);
     return;
   case StorageLockType::kExclusiveLock:
     revert_exclusive_lock_to_set_typeclass(delta);
-    commit_delta(delta);
+    commit_delta(delta, false);
+    return;
+  case StorageLockType::kPermanentExclusiveLock:
+    revert_exclusive_lock_to_set_typeclass(delta);
+    commit_delta(delta, true);
     return;
   default:
     throw std::runtime_error("impossible");
@@ -501,6 +519,9 @@ StorageItemFrame::revert(StorageLock const &lock)
     revert_set_typeclass_lock(lock.full_typeclass_lock().extra_lock_data);
     break;
   case StorageLockType::kExclusiveLock:
+    revert_exclusive_lock_to_none();
+    break;
+  case StorageLockType::kPermanentExclusiveLock:
     revert_exclusive_lock_to_none();
     break;
   }

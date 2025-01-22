@@ -76,7 +76,8 @@ public:
   }
 
   // Locking methods
-  // upgrade from previous_lock_type to kExclusiveLock
+  // upgrade from previous_lock_type to kExclusiveLock or
+  // kPermanentExclusiveLock
   [[nodiscard]] bool
   try_acquire_exclusive_lock(StorageLockType previous_lock_type);
 
@@ -91,7 +92,8 @@ private:
   // have all the other StorageDelta types worked out.
   [[nodiscard]] bool try_reserve_delta(StorageDelta const &delta);
 
-  void commit_delta(StorageDelta const &delta);
+  void commit_delta(StorageDelta const &delta,
+                    bool maintain_permanent_exclusive_lock);
 
   // Locking methods
   // kExclusiveLock -> kNone
@@ -166,6 +168,7 @@ private:
   public:
     variant_t variant_ = DeleteArgs{};
     uint32_t refcount_ = 0;
+    bool permanent_exclusive_lock_ = false;
 
     RefcountedVariant() = default;
 

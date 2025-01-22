@@ -20,6 +20,7 @@ namespace hogd
     kNone = 0,
     kSetItemTypeClass = 1, // kind of like a readlock
     kExclusiveLock = 2,
+    kPermanentExclusiveLock = 3,
   };
 
   union TypeSpecificLock switch (StorageItemType item_type)
@@ -45,7 +46,8 @@ namespace hogd
     SetItemTypeClassLock full_typeclass_lock;
   case kExclusiveLock:
     void;
-    // is never instantiated for kNone
+  case kPermanentExclusiveLock:
+    void;
   };
 
 } // namespace hogd

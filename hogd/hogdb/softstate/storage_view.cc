@@ -78,7 +78,7 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
                      &flags](auto &v) -> std::optional<StorageLock> {
     if (flags & std::to_underlying(RPCFlags::kExclusiveLock)) {
       if (v.try_acquire_exclusive_lock(lock.lock_type())) {
-        return StorageLock(StorageLockType::kExclusiveLock);
+        return StorageLock(StorageLockType::kPermanentExclusiveLock);
       }
       return std::nullopt;
     }
