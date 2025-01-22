@@ -90,7 +90,7 @@ InvocationFrameStack::start_frame(Invocation const &invocation,
 bool
 InvocationFrame::handle_try_acquire_locks(PerTransactionDatabaseProxy &db_proxy)
 {
-
+  assert(is_try_invoke_frame());
   for (auto &[addr, item] : modified_items_) {
     auto delta = item.get_delta();
     if (delta) {
@@ -125,6 +125,10 @@ InvokeResult
 InvocationFrameStack::handle_try_invoke(InvokeResult const &prev_result,
                                         ExecutionModeData &execution_mode_data)
 {
+  assert(!frame_stack_.empty());
+  if (!frame_stack_.back().is_try_invoke_frame()) {
+    return prev_result;
+  }
   if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
     auto &proposal_mode_data = std::get<ProposalModeData>(execution_mode_data);
     bool res = frame_stack_.back().handle_try_acquire_locks(db_proxy_);

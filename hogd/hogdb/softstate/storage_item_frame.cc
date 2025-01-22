@@ -13,6 +13,7 @@
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -327,7 +328,11 @@ to_typeclass(StorageDelta const &delta)
 {
   switch (delta.type()) {
   case StorageDeltaType::kBytestringSet:
-    return StorageItemTypeClass(StorageItemType::kBytestring);
+  {
+    auto out = StorageItemTypeClass(StorageItemType::kBytestring);
+    out.bytestring() = delta.bytestring();
+    return out;
+  }
   case StorageDeltaType::kNonnegativeIntSetAdd:
   {
     auto out = StorageItemTypeClass(StorageItemType::kNonnegativeInt);
@@ -374,7 +379,7 @@ StorageItemFrame::try_reserve(StorageDelta const &delta,
   case StorageLockType::kSetItemTypeClass:
   {
     auto req_lock = to_lock(delta);
-    assert(req_lock.type() == StorageLockType::kSetItemTypeClass);
+    assert(req_lock.lock_type() == StorageLockType::kSetItemTypeClass);
 
     if (req_lock.full_typeclass_lock().typeclass !=
         previous_lock.full_typeclass_lock().typeclass) {
