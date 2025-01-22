@@ -20,13 +20,15 @@ BlockState::unlink_parent(InMemoryDatabase *base_database)
 bool
 BlockState::try_reserve_storage_delta(TransactionID txid,
                                       AddressAndKey const &addrkey,
-                                      StorageDelta const &delta)
+                                      StorageDelta const &delta,
+                                      RPCFlagSet flags)
 {
   auto lock = transaction_cache_.get_lock(txid, addrkey);
-  auto res = storage_view_.try_reserve_storage_delta(addrkey, delta, lock);
+  auto res =
+      storage_view_.try_reserve_storage_delta(addrkey, delta, lock, flags);
 
   if (res) {
-    transaction_cache_.add_delta(txid, addrkey, delta, *res);
+    transaction_cache_.add_delta(txid, addrkey, delta, *res, flags);
   }
   return res.has_value();
 }
@@ -34,20 +36,23 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
 void
 BlockState::commit_transaction(TransactionID txid)
 {
-  auto deltas = transaction_cache_.get_deltas(txid);
-  for (auto const &[addr, delta_and_lock] : deltas) {
-    auto const &[delta, lock] = delta_and_lock;
-    storage_view_.revert_storage_lock(addr, lock);
+  auto deltas = transaction_cache_.extract_deltas(txid);
+  for (auto const &[addr, entry] : deltas) {
+    if (entry.valid_for_final_commit) {
+      storage_view_.commit_storage_delta(addr, entry.delta, entry.lock);
+    }
+    else {
+      storage_view_.revert_storage_lock(addr, entry.lock);
+    }
   }
 }
 
 void
 BlockState::abort_transaction(TransactionID txid)
 {
-  auto deltas = transaction_cache_.get_deltas(txid);
-  for (auto const &[addr, delta_and_lock] : deltas) {
-    auto const &[delta, lock] = delta_and_lock;
-    storage_view_.commit_storage_delta(addr, delta, lock);
+  auto deltas = transaction_cache_.extract_deltas(txid);
+  for (auto const &[addr, entry] : deltas) {
+    storage_view_.revert_storage_lock(addr, entry.lock);
   }
 }
 

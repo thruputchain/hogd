@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <variant>
 
 #include "transaction.hh"
@@ -26,8 +27,8 @@ struct ProposalModeData {
 class ValidationModeData {
 public:
   // Constructs validation data with proposal to validate against
-  ValidationModeData(NondeterministicProposal const &proposal_data)
-    : proposal_data_(proposal_data)
+  ValidationModeData(NondeterministicProposal proposal_data)
+    : proposal_data_(std::move(proposal_data))
   {}
 
   // Consumes and returns the next try_invoke bit from the proposal

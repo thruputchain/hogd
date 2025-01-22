@@ -6,11 +6,14 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <variant>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime_cache.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -84,8 +87,43 @@ InvocationFrameStack::start_frame(Invocation const &invocation,
   frame_stack_.emplace_back(invocation, visited_entry);
 }
 
+bool
+InvocationFrame::handle_try_acquire_locks(PerTransactionDatabaseProxy &db_proxy)
+{
+
+  for (auto &[addr, item] : modified_items_) {
+    auto delta = item.get_delta();
+    if (delta) {
+      auto res =
+          db_proxy.try_reserve_delta(addr, *delta,
+                                     std::to_underlying(RPCFlags::kNone))();
+      if (!res) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 void
-InvocationFrameStack::finish_frame(InvokeResult const &result)
+InvocationFrameStack::revert_frame([[maybe_unused]] InvokeResult const &result)
+{
+  assert(result.should_frame_revert());
+
+  assert(!frame_stack_.empty());
+
+  frame_stack_.back().poison_visited_runtimes();
+  frame_stack_.pop_back();
+
+  if (!frame_stack_.empty()) {
+    frame_stack_.back().commit_failed_child_frame();
+  }
+}
+
+void
+InvocationFrameStack::finish_frame(InvokeResult const &result,
+                                   ExecutionModeData &execution_mode_data)
 {
   // If a contract has the REVERT_SAFE flag set, then it can be called again
   // after it has been reverted. A contract might not be REVERT_SAFE because
@@ -96,35 +134,76 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
   // module's internal state -- not just memory, but also tables and globals.
   // The wasm stack is reset automatically).
   if (result.should_frame_revert()) {
-    assert(!frame_stack_.empty());
+    revert_frame(result);
+    return;
+  }
 
-    frame_stack_.back().poison_visited_runtimes();
-    frame_stack_.pop_back();
+  InvokeResult post_try_invoke_result = result;
 
-    if (!frame_stack_.empty()) {
-      // Contents of the frame are entirely dropped. We just need to notify
-      // the parent (if there is one) that it had a failed frame.
-      frame_stack_.back().commit_failed_child_frame();
+  if (frame_stack_.back().is_try_invoke_frame()) {
+    if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
+      auto &proposal_mode_data =
+          std::get<ProposalModeData>(execution_mode_data);
+
+      bool res = frame_stack_.back().handle_try_acquire_locks(db_proxy_);
+
+      proposal_mode_data.log_try_invoke_bit(res);
+
+      if (!res) {
+        post_try_invoke_result =
+            InvokeResult{.result_ =
+                             InvokeError{InvokeErrorCode::kDeterministic},
+                         .gas_consumed_ = result.gas_consumed_};
+      }
+    }
+    else {
+
+      assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
+      auto &validation_mode_data =
+          std::get<ValidationModeData>(execution_mode_data);
+
+      std::optional<bool> res = validation_mode_data.consume_try_invoke_bit();
+      if (!res.has_value()) {
+        // we received bad validation data;  immediately terminate the whole
+        // transaction.
+        post_try_invoke_result =
+            InvokeResult{.result_ =
+                             InvokeError{InvokeErrorCode::kValidationFailure},
+                         .gas_consumed_ = result.gas_consumed_};
+      }
+      else if (!res.value()) {
+        // Replaying a failed try_invoke frame.
+        post_try_invoke_result =
+            InvokeResult{.result_ =
+                             InvokeError{InvokeErrorCode::kDeterministic},
+                         .gas_consumed_ = result.gas_consumed_};
+      }
     }
   }
-  else {
-    // commit child invocation frame successfully
-    assert(result.is_frame_success());
 
-    size_t stack_size = frame_stack_.size();
-    if (stack_size >= 2) {
-      // Commit the frame to it's parent
-      frame_stack_[stack_size - 2].commit_successful_child_frame(
-          frame_stack_.back());
-    }
-    else if (stack_size == 1) {
-      // last frame -- push frame contents to external caller
-      // (SystemCallHandler), via the supplied lambda
-      last_frame_action_(frame_stack_.back());
-    }
-
-    frame_stack_.pop_back();
+  if (post_try_invoke_result.should_frame_revert()) {
+    revert_frame(post_try_invoke_result);
+    return;
   }
+
+  // commit child invocation frame successfully
+  assert(post_try_invoke_result.is_frame_success());
+
+  size_t stack_size = frame_stack_.size();
+  if (stack_size >= 2) {
+    // Commit the frame to it's parent
+    frame_stack_[stack_size - 2].commit_successful_child_frame(
+        frame_stack_.back());
+  }
+  else if (stack_size == 1) {
+    // last frame can't be a try_invoke_frame
+    assert(!frame_stack_.back().is_try_invoke_frame());
+    // last frame -- push frame contents to external caller
+    // (SystemCallHandler), via the supplied lambda
+    last_frame_action_(frame_stack_.back());
+  }
+
+  frame_stack_.pop_back();
 }
 
 std::optional<ContractAddress>

@@ -1,5 +1,6 @@
 #include "hogd/hogexec/interface/rpc_interface.h"
 
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc.hh"
 #include "rpc_types.hh"
@@ -24,7 +25,10 @@ ExecutorRpcInterface::propose_transaction(BlockID block_id,
     auto *pool = x23::ThreadPool::get_thread_pool();
     assert(pool);
 
-    SystemCallHandler syscall_handler(signed_tx, ctx->snapshot_cache_);
+    PerTransactionDatabaseProxy proxy(block_id, allocate_tx_id(), db_proxy_);
+
+    SystemCallHandler syscall_handler(signed_tx, ctx->snapshot_cache_, proxy,
+                                      ProposalModeData{});
     auto invoke_res = co_await pool->async(
         [](SystemCallHandler *handler) -> InvokeResult {
           return handler->root_invoke();
@@ -35,12 +39,12 @@ ExecutorRpcInterface::propose_transaction(BlockID block_id,
       co_return ExpectedProposalData(RPCError::kTransactionFailed);
     }
 
-    PerTransactionDatabaseProxy proxy(block_id, allocate_tx_id(), db_proxy_);
-
-    auto commit_res = co_await syscall_handler.try_commit_transaction(&proxy);
+    auto commit_res = co_await syscall_handler.try_commit_transaction();
 
     if (commit_res) {
-      co_return ExpectedProposalData(RPCError::kNone);
+      auto out = ExpectedProposalData(RPCError::kNone);
+      out.proposal_data() = syscall_handler.get_proposal_data().proposal_data_;
+      co_return out;
     }
     co_return ExpectedProposalData(RPCError::kTransactionFailed);
   }

@@ -272,7 +272,10 @@ TEST(StorageItemFrame, NNIntFromExclusiveLock)
 
   EXPECT_EQ(lock2->lock_type(), StorageLockType::kExclusiveLock);
 
+  // check to assert only one exclusive lock can be given out.
+  EXPECT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
   item.commit(nnint_set_add_2, *lock2);
+  EXPECT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
 
   auto snapshot = item.get_post_close_block_item();
   ASSERT_TRUE(snapshot);

@@ -98,7 +98,7 @@ namespace hogd
     version DatabaseToExecutorInterfaceV1
     {
       RPCError try_reserve_delta(BlockID, TransactionID, AddressAndKey,
-                                 StorageDelta) = 0;
+                                 StorageDelta, RPCFlagSet) = 0;
       void commit_transaction(BlockID, TransactionID) = 1;
       void abort_transaction(BlockID, TransactionID) = 2;
 

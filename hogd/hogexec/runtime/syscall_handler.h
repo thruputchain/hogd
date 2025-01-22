@@ -1,11 +1,8 @@
 #pragma once
 
-#include <cstdint>
-#include <map>
-
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
-#include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -31,7 +28,9 @@ class StorageSnapshotCache;
 class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
-                    StorageSnapshotCache &snapshot_cache);
+                    StorageSnapshotCache &snapshot_cache,
+                    PerTransactionDatabaseProxy &db_proxy,
+                    ExecutionModeData execution_mode_data);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;
@@ -43,8 +42,7 @@ public:
   // Starts the invocation that is specified within signed_tx_.
   InvokeResult root_invoke();
 
-  x23::Async<bool>
-  try_commit_transaction(PerTransactionDatabaseProxy *db_proxy);
+  x23::Async<bool> try_commit_transaction();
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
@@ -98,11 +96,14 @@ public:
 
   SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
+  ProposalModeData get_proposal_data() const;
+
 private:
   WasmiContext wasmi_context_;
   const SignedTransaction signed_tx_;
   RuntimeCache runtimes_;
   InvocationFrameStack invocation_frame_stack_;
+  ExecutionModeData execution_mode_data_;
 
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
@@ -115,6 +116,7 @@ private:
   std::unordered_map<ContractAddress, SHA256Hash> committed_deployments_;
 
   StorageSnapshotCache &snapshot_cache_;
+  PerTransactionDatabaseProxy &db_proxy_;
 
   // Resolve the RuntimeCacheEntry associated with the queried address.
   // Creates a new entry if no entry exists, AND a contract is deployed at

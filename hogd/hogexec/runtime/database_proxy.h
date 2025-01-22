@@ -26,7 +26,8 @@ public:
 
   x23::Async<bool> try_reserve_delta(BlockID block_id, TransactionID tx_id,
                                      AddressAndKey const &addrkey,
-                                     StorageDelta const &delta);
+                                     StorageDelta const &delta,
+                                     RPCFlagSet flags);
 
   x23::Async<void> commit_transaction(BlockID block_id, TransactionID tx_id);
   x23::Async<void> abort_transaction(BlockID block_id, TransactionID tx_id);
@@ -68,12 +69,13 @@ public:
   operator=(PerTransactionDatabaseProxy &&) = delete;
 
   x23::Async<bool> try_reserve_delta(AddressAndKey const &addrkey,
-                                     StorageDelta const &delta)
+                                     StorageDelta const &delta,
+                                     RPCFlagSet flags)
   {
     assert(!committed_);
     assert(!failed_);
-    auto res =
-        co_await db_proxy_.try_reserve_delta(block_id_, tx_id_, addrkey, delta);
+    auto res = co_await db_proxy_.try_reserve_delta(block_id_, tx_id_, addrkey,
+                                                    delta, flags);
     if (!res) {
       failed_ = true;
     }

@@ -68,12 +68,21 @@ ParentBlockView::get_post_block_storage_item(AddressAndKey const &addrkey)
 std::optional<StorageLock>
 StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
                                        StorageDelta const &delta,
-                                       StorageLock const &lock)
+                                       StorageLock const &lock,
+                                       RPCFlagSet flags)
 {
   assert(!closed_);
   auto key = to_key(addrkey);
 
-  auto mod_lambda = [&delta, &lock](auto &v) -> std::optional<StorageLock> {
+  auto mod_lambda = [&delta, &lock,
+                     &flags](auto &v) -> std::optional<StorageLock> {
+    if (flags & std::to_underlying(RPCFlags::kExclusiveLock)) {
+      if (v.try_acquire_exclusive_lock(lock.lock_type())) {
+        return StorageLock(StorageLockType::kExclusiveLock);
+      }
+      return std::nullopt;
+    }
+    // otherwise regular work path
     return v.try_reserve(delta, lock);
   };
 

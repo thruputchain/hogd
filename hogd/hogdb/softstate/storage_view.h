@@ -9,6 +9,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/db/in_memory_database.h"
 #include "hogd/hogdb/softstate/storage_item_frame.h"
+#include "rpc_types.hh"
 #include "storage_lock.hh"
 #include "types.hh"
 
@@ -115,7 +116,8 @@ public:
 
   std::optional<StorageLock>
   try_reserve_storage_delta(AddressAndKey const &addrkey,
-                            StorageDelta const &delta, StorageLock const &lock);
+                            StorageDelta const &delta, StorageLock const &lock,
+                            RPCFlagSet flags);
   void revert_storage_lock(AddressAndKey const &addrkey,
                            StorageLock const &lock);
   void commit_storage_delta(AddressAndKey const &addrkey,

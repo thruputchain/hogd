@@ -10,7 +10,8 @@ namespace hogd {
 x23::Async<RPCError>
 DBToExecutorServer::try_reserve_delta(BlockID block_id, TransactionID txid,
                                       AddressAndKey const &addrkey,
-                                      StorageDelta const &delta)
+                                      StorageDelta const &delta,
+                                      RPCFlagSet flags)
 {
   auto block_data = block_manager_.get_block_data(block_id);
 
@@ -18,7 +19,7 @@ DBToExecutorServer::try_reserve_delta(BlockID block_id, TransactionID txid,
     co_return RPCError::kBadBlockID;
   }
 
-  auto res = block_data->try_reserve_storage_delta(txid, addrkey, delta);
+  auto res = block_data->try_reserve_storage_delta(txid, addrkey, delta, flags);
 
   if (res) {
     co_return RPCError::kNone;

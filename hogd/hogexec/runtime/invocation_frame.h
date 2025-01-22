@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "transaction.hh"
 
@@ -59,6 +61,10 @@ public:
   ItemView *get_item_view(AddressAndKey const &addrkey);
   void add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
+  // try invoke related methods
+  bool is_try_invoke_frame() const { return false; } // unimplemented
+  bool handle_try_acquire_locks(PerTransactionDatabaseProxy &db_proxy);
+
 private:
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
@@ -78,9 +84,10 @@ private:
 class InvocationFrameStack {
 public:
   InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action,
-                       StorageSnapshotCache &snapshot_cache)
+                       StorageSnapshotCache &snapshot_cache,
+                       PerTransactionDatabaseProxy &db_proxy)
     : last_frame_action_(std::move(last_frame_action)),
-      snapshot_cache_(snapshot_cache)
+      snapshot_cache_(snapshot_cache), db_proxy_(db_proxy)
   {}
 
   auto &get_active_frame(this auto &self)
@@ -92,7 +99,8 @@ public:
 
   void start_frame(Invocation const &invocation,
                    RuntimeCacheEntry *visited_entry);
-  void finish_frame(InvokeResult const &result);
+  void finish_frame(InvokeResult const &result,
+                    ExecutionModeData &execution_mode_data);
 
   std::optional<ContractAddress> get_msg_sender() const;
 
@@ -112,9 +120,12 @@ public:
   ItemView &get_item_view(StorageKey const &key);
 
 private:
+  void revert_frame(InvokeResult const &result);
+
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &)> last_frame_action_;
   StorageSnapshotCache &snapshot_cache_;
+  PerTransactionDatabaseProxy &db_proxy_;
 };
 
 } // namespace hogd

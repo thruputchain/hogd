@@ -10,6 +10,12 @@
 
 namespace hogd {
 
+struct LockedDeltaEntry {
+  bool valid_for_final_commit = false;
+  StorageDelta delta;
+  StorageLock lock;
+};
+
 // Store data relevant to the 2PC process for one transaction.
 class TransactionCacheEntry {
 public:
@@ -32,8 +38,8 @@ public:
   // caching logic in the executor is plausible. (both on whether that last RPC
   // needs to be sent, and whether the transaction already holds an exclusive
   // lock).
-  std::unordered_map<AddressAndKey, std::pair<StorageDelta, StorageLock>>
-      deltas_;
+
+  std::unordered_map<AddressAndKey, LockedDeltaEntry> deltas_;
 
 private:
   TransactionID txid_;
@@ -52,13 +58,15 @@ public:
   StorageLock get_lock(TransactionID txid, AddressAndKey const &addrkey);
 
   void add_delta(TransactionID txid, AddressAndKey const &addrkey,
-                 StorageDelta const &delta, StorageLock const &lock);
+                 StorageDelta const &delta, StorageLock const &lock,
+                 RPCFlagSet flags);
 
   // Should be called only after a transaction has finished -- i.e.
   // after all add_delta() calls for the txid have completed.
   // This powers calls to commit/abort the transaction.
-  std::unordered_map<AddressAndKey, std::pair<StorageDelta, StorageLock>>
-  get_deltas(TransactionID txid);
+  // Moves data out of the TransactionCacheEntry.
+  std::unordered_map<AddressAndKey, LockedDeltaEntry>
+  extract_deltas(TransactionID txid);
 
 private:
   HashMap<TransactionCacheEntry> tx_entries_;

@@ -19,7 +19,8 @@ public:
 
   x23::Async<RPCError> try_reserve_delta(BlockID block_id, TransactionID txid,
                                          AddressAndKey const &addrkey,
-                                         StorageDelta const &delta);
+                                         StorageDelta const &delta,
+                                         RPCFlagSet flags);
   x23::Async<void> commit_transaction(BlockID block_id, TransactionID txid);
   x23::Async<void> abort_transaction(BlockID block_id, TransactionID txid);
 

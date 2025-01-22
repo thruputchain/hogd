@@ -75,7 +75,8 @@ HostFnResult
 arity6(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5)
 {
-  if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 || arg5 != 6) {
+  if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
+      arg5 != 6) {
     throw std::runtime_error("invalid arity check");
   }
   return {HostFnErrorCode::kNoneOrRecoverable, 106};
@@ -86,8 +87,8 @@ arity7(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
        uint64_t arg6)
 {
-  if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 || arg5 != 6 ||
-      arg6 != 7) {
+  if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
+      arg5 != 6 || arg6 != 7) {
     throw std::runtime_error("invalid arity check");
   }
   return {HostFnErrorCode::kNoneOrRecoverable, 107};
@@ -98,8 +99,8 @@ arity8(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
        uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
        uint64_t arg6, uint64_t arg7)
 {
-  if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 || arg5 != 6 ||
-      arg6 != 7 || arg7 != 8) {
+  if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
+      arg5 != 6 || arg6 != 7 || arg7 != 8) {
     throw std::runtime_error("invalid arity check");
   }
   return {HostFnErrorCode::kNoneOrRecoverable, 108};

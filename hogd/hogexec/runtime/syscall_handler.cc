@@ -31,13 +31,16 @@
 namespace hogd {
 
 SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
-                                     StorageSnapshotCache &snapshot_cache)
+                                     StorageSnapshotCache &snapshot_cache,
+                                     PerTransactionDatabaseProxy &db_proxy,
+                                     ExecutionModeData execution_mode_data)
   : signed_tx_(std::move(signed_tx)),
     invocation_frame_stack_(
         [this](InvocationFrame &last_frame) {
           commit_last_call_frame_success(last_frame);
         },
-        snapshot_cache),
+        snapshot_cache, db_proxy),
+    execution_mode_data_(std::move(execution_mode_data)),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
@@ -47,7 +50,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       }
       return contracts;
     }()),
-    snapshot_cache_(snapshot_cache)
+    snapshot_cache_(snapshot_cache), db_proxy_(db_proxy)
 {
   wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
 }
@@ -64,7 +67,7 @@ SystemCallHandler::root_invoke()
   invocation_frame_stack_.start_frame(signed_tx_.tx.invocation, runtime);
   auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
                                       signed_tx_.tx.invocation.gas_limit);
-  invocation_frame_stack_.finish_frame(res);
+  invocation_frame_stack_.finish_frame(res, execution_mode_data_);
 
   if (!res.is_root_success())
     return res.to_root_error();
@@ -72,29 +75,30 @@ SystemCallHandler::root_invoke()
 }
 
 x23::Async<bool>
-SystemCallHandler::try_commit_transaction(PerTransactionDatabaseProxy *db_proxy)
+SystemCallHandler::try_commit_transaction()
 {
   // TODO(geoff): do something with committed_logs_
   std::vector<x23::Async<bool>> reservations;
   for (auto const &[k, d] : committed_deltas_) {
-    reservations.push_back(db_proxy->try_reserve_delta(k, d));
+    reservations.push_back(db_proxy_.try_reserve_delta(
+        k, d, std::to_underlying(RPCFlags::kFinalCommit)));
   }
 
   for (auto &r : reservations) {
     if (!co_await r) {
-      co_await db_proxy->abort_transaction();
+      co_await db_proxy_.abort_transaction();
       co_return false;
     }
   }
 
-  co_await db_proxy->commit_transaction();
+  co_await db_proxy_.commit_transaction();
 
   std::vector<x23::Async<void>> commitments;
   for (auto const &[_, c] : newly_created_contracts_) {
-    commitments.push_back(db_proxy->create_contract(*c));
+    commitments.push_back(db_proxy_.create_contract(*c));
   }
   for (auto const &[a, h] : committed_deployments_) {
-    commitments.push_back(db_proxy->deploy_contract(a, h));
+    commitments.push_back(db_proxy_.deploy_contract(a, h));
   }
 
   for (auto &v : commitments) {
@@ -165,7 +169,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
 
   invocation_frame_stack_.start_frame(invocation, runtime);
   auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
-  invocation_frame_stack_.finish_frame(res);
+  invocation_frame_stack_.finish_frame(res, execution_mode_data_);
 
   return res.to_host_fn_result();
 }
@@ -428,6 +432,13 @@ SystemCallHandler::delete_object(StorageKey const &storage_key)
 {
   auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
   return item_view.set(DeletedItem{});
+}
+
+ProposalModeData
+SystemCallHandler::get_proposal_data() const
+{
+  assert(std::holds_alternative<ProposalModeData>(execution_mode_data_));
+  return std::get<ProposalModeData>(execution_mode_data_);
 }
 
 } // namespace hogd

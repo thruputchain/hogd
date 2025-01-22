@@ -33,6 +33,14 @@ namespace hogd
     kTransactionFailed = 7,
   };
 
+  enum RPCFlags {
+    kNone = 0,
+    kFinalCommit = 0x00000001,
+    kExclusiveLock = 0x00000002
+  };
+
+  typedef int RPCFlagSet;
+
   // Is this the XDR pattern we want?
   union ExpectedContract switch (RPCError error)
   {

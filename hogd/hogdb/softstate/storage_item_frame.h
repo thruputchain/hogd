@@ -75,6 +75,11 @@ public:
                   sizeof(AddressAndKey)));
   }
 
+  // Locking methods
+  // upgrade from previous_lock_type to kExclusiveLock
+  [[nodiscard]] bool
+  try_acquire_exclusive_lock(StorageLockType previous_lock_type);
+
 private:
   // Performs a reservation of the storage item for the given delta operation.
   // Should be performed only when the initial lock state is kNone.
@@ -89,11 +94,6 @@ private:
   void commit_delta(StorageDelta const &delta);
 
   // Locking methods
-  // upgrade from previous_lock_type to kExclusiveLock
-  [[nodiscard]] bool
-  try_acquire_exclusive_lock(StorageLockType previous_lock_type);
-  // kNone -> kSetItemTypeClass via try_reserve_delta()
-
   // kExclusiveLock -> kNone
   void revert_exclusive_lock_to_none();
   // kExclusiveLock -> kSetItemTypeClass

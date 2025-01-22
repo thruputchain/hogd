@@ -47,6 +47,8 @@ InvokeResult::to_host_fn_result() const
     case kOutOfGas:
       return {HostFnError{HostFnErrorCode::kOutOfGas}, gas_consumed_};
     case kValidationFailure:
+      // we received bad validation data;  immediately terminate the whole
+      // transaction.
       return {HostFnError{HostFnErrorCode::kValidationFailure}, gas_consumed_};
     default:
       return {HostFnError{HostFnErrorCode::kUnrecoverable}, gas_consumed_};

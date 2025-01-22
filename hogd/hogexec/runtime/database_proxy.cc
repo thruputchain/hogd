@@ -30,10 +30,10 @@ DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp, std::string address,
 x23::Async<bool>
 DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
                                  AddressAndKey const &addrkey,
-                                 StorageDelta const &delta)
+                                 StorageDelta const &delta, RPCFlagSet flags)
 {
-  auto res =
-      co_await db_client_.try_reserve_delta(block_id, tx_id, addrkey, delta);
+  auto res = co_await db_client_.try_reserve_delta(block_id, tx_id, addrkey,
+                                                   delta, flags);
 
   if (res == RPCError::kNone) {
     co_return true;

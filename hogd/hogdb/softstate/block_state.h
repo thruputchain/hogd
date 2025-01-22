@@ -55,7 +55,7 @@ public:
   // same addrkey at the same time.  This is not enforced by the interface.
   bool try_reserve_storage_delta(TransactionID txid,
                                  AddressAndKey const &addrkey,
-                                 StorageDelta const &delta);
+                                 StorageDelta const &delta, RPCFlagSet flags);
   void commit_transaction(TransactionID txid);
   void abort_transaction(TransactionID txid);
 
