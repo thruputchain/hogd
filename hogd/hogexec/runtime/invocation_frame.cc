@@ -121,7 +121,44 @@ InvocationFrameStack::revert_frame([[maybe_unused]] InvokeResult const &result)
   }
 }
 
-void
+InvokeResult
+InvocationFrameStack::handle_try_invoke(InvokeResult const &prev_result,
+                                        ExecutionModeData &execution_mode_data)
+{
+  if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
+    auto &proposal_mode_data = std::get<ProposalModeData>(execution_mode_data);
+    bool res = frame_stack_.back().handle_try_acquire_locks(db_proxy_);
+
+    proposal_mode_data.log_try_invoke_bit(res);
+
+    if (!res) {
+      return InvokeResult{.result_ =
+                              InvokeError{InvokeErrorCode::kDeterministic},
+                          .gas_consumed_ = prev_result.gas_consumed_};
+    }
+
+    return prev_result;
+  }
+
+  assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
+  auto &validation_mode_data =
+      std::get<ValidationModeData>(execution_mode_data);
+  std::optional<bool> res = validation_mode_data.consume_try_invoke_bit();
+  if (!res.has_value()) {
+    return InvokeResult{.result_ =
+                            InvokeError{InvokeErrorCode::kValidationFailure},
+                        .gas_consumed_ = prev_result.gas_consumed_};
+  }
+  // otherwise, we got a bit from try_invoke replay, but it was false
+  if (!res.value()) {
+    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
+                        .gas_consumed_ = prev_result.gas_consumed_};
+  }
+
+  return prev_result;
+}
+
+InvokeResult
 InvocationFrameStack::finish_frame(InvokeResult const &result,
                                    ExecutionModeData &execution_mode_data)
 {
@@ -135,55 +172,15 @@ InvocationFrameStack::finish_frame(InvokeResult const &result,
   // The wasm stack is reset automatically).
   if (result.should_frame_revert()) {
     revert_frame(result);
-    return;
+    return result;
   }
 
-  InvokeResult post_try_invoke_result = result;
-
-  if (frame_stack_.back().is_try_invoke_frame()) {
-    if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
-      auto &proposal_mode_data =
-          std::get<ProposalModeData>(execution_mode_data);
-
-      bool res = frame_stack_.back().handle_try_acquire_locks(db_proxy_);
-
-      proposal_mode_data.log_try_invoke_bit(res);
-
-      if (!res) {
-        post_try_invoke_result =
-            InvokeResult{.result_ =
-                             InvokeError{InvokeErrorCode::kDeterministic},
-                         .gas_consumed_ = result.gas_consumed_};
-      }
-    }
-    else {
-
-      assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
-      auto &validation_mode_data =
-          std::get<ValidationModeData>(execution_mode_data);
-
-      std::optional<bool> res = validation_mode_data.consume_try_invoke_bit();
-      if (!res.has_value()) {
-        // we received bad validation data;  immediately terminate the whole
-        // transaction.
-        post_try_invoke_result =
-            InvokeResult{.result_ =
-                             InvokeError{InvokeErrorCode::kValidationFailure},
-                         .gas_consumed_ = result.gas_consumed_};
-      }
-      else if (!res.value()) {
-        // Replaying a failed try_invoke frame.
-        post_try_invoke_result =
-            InvokeResult{.result_ =
-                             InvokeError{InvokeErrorCode::kDeterministic},
-                         .gas_consumed_ = result.gas_consumed_};
-      }
-    }
-  }
+  InvokeResult post_try_invoke_result =
+      handle_try_invoke(result, execution_mode_data);
 
   if (post_try_invoke_result.should_frame_revert()) {
     revert_frame(post_try_invoke_result);
-    return;
+    return post_try_invoke_result;
   }
 
   // commit child invocation frame successfully
@@ -204,6 +201,7 @@ InvocationFrameStack::finish_frame(InvokeResult const &result,
   }
 
   frame_stack_.pop_back();
+  return post_try_invoke_result;
 }
 
 std::optional<ContractAddress>

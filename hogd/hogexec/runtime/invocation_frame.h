@@ -99,8 +99,9 @@ public:
 
   void start_frame(Invocation const &invocation,
                    RuntimeCacheEntry *visited_entry);
-  void finish_frame(InvokeResult const &result,
-                    ExecutionModeData &execution_mode_data);
+  [[nodiscard]] InvokeResult
+  finish_frame(InvokeResult const &result,
+               ExecutionModeData &execution_mode_data);
 
   std::optional<ContractAddress> get_msg_sender() const;
 
@@ -121,6 +122,8 @@ public:
 
 private:
   void revert_frame(InvokeResult const &result);
+  InvokeResult handle_try_invoke(InvokeResult const &prev_result,
+                                 ExecutionModeData &execution_mode_data);
 
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &)> last_frame_action_;

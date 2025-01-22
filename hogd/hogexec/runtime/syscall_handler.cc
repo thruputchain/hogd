@@ -67,7 +67,7 @@ SystemCallHandler::root_invoke()
   invocation_frame_stack_.start_frame(signed_tx_.tx.invocation, runtime);
   auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
                                       signed_tx_.tx.invocation.gas_limit);
-  invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
 
   if (!res.is_root_success())
     return res.to_root_error();
@@ -169,7 +169,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
 
   invocation_frame_stack_.start_frame(invocation, runtime);
   auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
-  invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
 
   return res.to_host_fn_result();
 }

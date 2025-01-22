@@ -2,7 +2,6 @@
 
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "rpc.hh"
 #include "rpc_types.hh"
 #include "x23/cleanup.h"
 
@@ -59,28 +58,35 @@ ExecutorRpcInterface::validate_transaction(
   if (!ctx) {
     co_return RPCError::kBadExecutorState;
   }
-  /*
-    if (ctx->state_.try_acquire_run_lease(ExecutorMode::kValidating)) {
-      x23::Defer d([&] { ctx->state_.release_run_lease(); });
 
-      // TODO(geoff): merge in proposal data handling code
-      SystemCallHandler syscall_handler(proposed_tx.signed_tx,
-                                        ctx->snapshot_cache_);
+  if (ctx->state_.try_acquire_run_lease(ExecutorMode::kValidating)) {
+    x23::Defer d([&] { ctx->state_.release_run_lease(); });
+    auto *pool = x23::ThreadPool::get_thread_pool();
+    assert(pool);
 
-      auto invoke_res = syscall_handler.root_invoke();
+    PerTransactionDatabaseProxy proxy(block_id, allocate_tx_id(), db_proxy_);
 
-      if (!invoke_res.is_root_success()) {
-        co_return RPCError::kTransactionFailed;
-      }
+    SystemCallHandler syscall_handler(proposed_tx.signed_tx,
+                                      ctx->snapshot_cache_, proxy,
+                                      ValidationModeData(
+                                          proposed_tx.proposal_data));
+    auto invoke_res = co_await pool->async(
+        [](SystemCallHandler *handler) -> InvokeResult {
+          return handler->root_invoke();
+        },
+        &syscall_handler);
 
-      auto commit_res = co_await syscall_handler.try_commit_transaction(
-          PerTransactionDatabaseProxy(block_id, allocate_tx_id(), db_proxy_));
-
-      if (commit_res) {
-        co_return RPCError::kNone;
-      }
+    if (!invoke_res.is_root_success()) {
       co_return RPCError::kTransactionFailed;
-    } */
+    }
+
+    auto commit_res = co_await syscall_handler.try_commit_transaction();
+
+    if (commit_res) {
+      co_return RPCError::kNone;
+    }
+    co_return RPCError::kTransactionFailed;
+  }
   co_return RPCError::kBadExecutorState;
 }
 
