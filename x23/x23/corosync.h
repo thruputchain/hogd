@@ -359,19 +359,18 @@ public:
 // A pointer that is good only until you suspend the current
 // coroutine, which is the duration of the mutual exclusion provided
 // by CoroSharedLock::coro_lock_shared.
-template<typename T> class CoroTempPtr {
+template<typename T> class CoroTempPtr : public ThreadPool::CrashIfSuspended {
 public:
   using value_type = T;
 
-  CoroTempPtr(T *p = nullptr) noexcept : p_(p) { init(); }
-  CoroTempPtr(T *p, const ThreadPool::CrashIfSuspended &cs) noexcept : p_(p)
-  {
-    init(cs);
-  }
+  CoroTempPtr(T *p = nullptr) noexcept : CrashIfSuspended(make_cis(p)), p_{p} {}
+  CoroTempPtr(T *p, const ThreadPool::CrashIfSuspended &cs) noexcept
+    : CrashIfSuspended(cs), p_(p)
+  {}
   CoroTempPtr &operator=(T *p) noexcept
   {
     p_ = p;
-    init();
+    CrashIfSuspended::operator=(make_cis(p_));
     return *this;
   }
 
@@ -382,26 +381,21 @@ public:
   }
   operator T &() const noexcept { return *get(); }
   T *operator->() const noexcept { return get(); }
+  explicit operator bool() const noexcept { return p_; }
+  void reset() noexcept
+  {
+    p_ = nullptr;
+    CrashIfSuspended::reset();
+  }
 
 private:
   T *p_;
-#ifndef NDEBUG
-  ThreadPool::SuspendCount sc_;
-  void init() noexcept { sc_ = ThreadPool::get_suspend_count(); }
-  void init(const ThreadPool::CrashIfSuspended &cs) noexcept
+  [[no_unique_address]] ThreadPool::CrashIfSuspended cis_;
+
+  static void make_cis(T *p)
   {
-    sc_ = cs.start_;
-    assert(sc_.valid());
+    return p ? CrashIfSuspended{} : CrashIfSuspended{nullptr};
   }
-  void check() const noexcept
-  {
-    assert(!p_ || sc_ == ThreadPool::get_suspend_count());
-  }
-#else  // NDEBUG
-  void init() noexcept {}
-  void init(const ThreadPool::CrashIfSuspended &cs) noexcept {}
-  void check() const noexcept {}
-#endif // NDEBUG
 };
 
 } // namespace x23

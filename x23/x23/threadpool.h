@@ -174,7 +174,7 @@ public:
     bool valid() const { return thread_ != std::thread::id{}; }
 
   private:
-    std::thread::id thread_;
+    std::thread::id thread_{};
     size_t loop_count_{};
   };
 
@@ -195,15 +195,22 @@ public:
   // when NDEBUG is defined.
   struct [[nodiscard]] CrashIfSuspended {
 #ifndef NDEBUG
-    SuspendCount start_;
-    CrashIfSuspended() : start_(get_suspend_count()) {}
-    ~CrashIfSuspended()
-    {
+    SuspendCount start_ = get_suspend_count();
+
+    CrashIfSuspended() noexcept = default;
+    explicit CrashIfSuspended(std::nullptr_t) noexcept : start_{} {}
+    ~CrashIfSuspended() { check(); }
+
+    void reset() noexcept { start_ = SuspendCount{}; }
+    void check() const {
       assert(start_ == get_suspend_count() || !start_.valid());
     }
-    void reset() { start_ = SuspendCount{}; }
+
 #else  // NDEBUG
-    void reset() {}
+    CrashIfSuspended() noexcept = default;
+    explicit CrashIfSuspended(std::nullptr_t) noexcept {}
+    void reset() noexcept {}
+    void check() const noexcept {}
 #endif // NDEBUG
   };
 
