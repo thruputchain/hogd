@@ -77,7 +77,9 @@ public:
 
   // Locking methods
   // upgrade from previous_lock_type to kExclusiveLock or
-  // kPermanentExclusiveLock
+  // kPermanentExclusiveLock.
+  // Caller can decide (externally) whether to make the lock kExclusiveLock or
+  // kPermanentExclusiveLock.
   [[nodiscard]] bool
   try_acquire_exclusive_lock(StorageLockType previous_lock_type);
 

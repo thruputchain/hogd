@@ -10,6 +10,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/softstate/uint256_reservation.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
@@ -284,12 +285,43 @@ StorageItemFrame::try_acquire_exclusive_lock(StorageLockType previous_lock_type)
     return true;
   }
 
-  if (previous_lock_type == StorageLockType::kSetItemTypeClass) {
-    // no need to acquire a new lock, we already have one
-    return variant_.refcount_ == 1;
+  switch (previous_lock_type) {
+  case StorageLockType::kNone:
+  {
+    if (variant_.refcount_ == 0) {
+      assert(!variant_.permanent_exclusive_lock_);
+      // no references outstanding, so we can acquire the exclusive lock
+      variant_.variant_ = ExclusiveLockedState{};
+      variant_.acquire_reference();
+      return true;
+    }
+    return false;
   }
-  assert(previous_lock_type != StorageLockType::kExclusiveLock);
-  return false;
+  case StorageLockType::kSetItemTypeClass:
+  {
+    // do we have the only exclusive lock?
+    bool res = (variant_.refcount_ == 1);
+    assert(!variant_.permanent_exclusive_lock_);
+    assert(!std::holds_alternative<ExclusiveLockedState>(variant_.variant_));
+
+    if (res) {
+      variant_.variant_ = ExclusiveLockedState{};
+      // no need to acquire an additional reference, as we already have one
+      return true;
+    }
+    return false;
+  }
+  case StorageLockType::kExclusiveLock:
+  case StorageLockType::kPermanentExclusiveLock:
+    // we already have the exclusive lock, so we can return true
+    // This technically seems like acquiring the lock that we already have
+    // but this lets the external logic be agnostic to whether we already have
+    // the lock or not.
+    return true;
+  }
+
+  assert(false);
+  throw std::runtime_error("unreachable");
 }
 
 void
@@ -451,6 +483,7 @@ void
 StorageItemFrame::revert_set_typeclass_lock_to_set_typeclass(
     StorageLock const &lock, StorageDelta const &delta)
 {
+  assert(lock.lock_type() == StorageLockType::kSetItemTypeClass);
   switch (delta.type()) {
   case StorageDeltaType::kBytestringSet:
     // nothing to do
@@ -498,6 +531,8 @@ StorageItemFrame::commit(StorageDelta const &delta, StorageLock const &lock)
     revert_exclusive_lock_to_set_typeclass(delta);
     commit_delta(delta, true);
     return;
+  case StorageLockType::kNone:
+    assert(false);
   default:
     throw std::runtime_error("impossible");
   }
@@ -519,8 +554,6 @@ StorageItemFrame::revert(StorageLock const &lock)
     revert_set_typeclass_lock(lock.full_typeclass_lock().extra_lock_data);
     break;
   case StorageLockType::kExclusiveLock:
-    revert_exclusive_lock_to_none();
-    break;
   case StorageLockType::kPermanentExclusiveLock:
     revert_exclusive_lock_to_none();
     break;

@@ -310,4 +310,30 @@ TEST(StorageItemFrame, ExclusiveBytestring)
       item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone)));
 }
 
+TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
+{
+  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+
+  ASSERT_TRUE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
+
+  ASSERT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
+  // Should never give out an exclusive lock and a SetItemTypeClass lock.
+  ASSERT_TRUE(item.try_acquire_exclusive_lock(StorageLockType::kExclusiveLock));
+  ASSERT_TRUE(item.try_acquire_exclusive_lock(
+      StorageLockType::kPermanentExclusiveLock));
+
+  item.commit(StorageDelta(StorageDeltaType::kDelete),
+              StorageLock(StorageLockType::kExclusiveLock));
+
+  ASSERT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
+  ASSERT_FALSE(
+      item.try_reserve(StorageDelta(StorageDeltaType::kNonnegativeIntSetAdd),
+                       StorageLock(StorageLockType::kNone)));
+
+  // exclusive lock was committed but released, so we can acquire shared lock.
+  // Was not written in permanent exclusive mode.
+  ASSERT_TRUE(item.try_reserve(StorageDelta(StorageDeltaType::kDelete),
+                               StorageLock(StorageLockType::kNone)));
+}
+
 } // namespace hogd
