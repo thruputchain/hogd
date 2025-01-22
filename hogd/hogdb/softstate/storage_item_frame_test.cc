@@ -336,4 +336,28 @@ TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
                                StorageLock(StorageLockType::kNone)));
 }
 
+TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
+{
+  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+
+  ASSERT_TRUE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
+
+  ASSERT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
+  // Should never give out an exclusive lock and a SetItemTypeClass lock.
+  ASSERT_TRUE(item.try_acquire_exclusive_lock(
+      StorageLockType::kPermanentExclusiveLock));
+
+  item.commit(StorageDelta(StorageDeltaType::kDelete),
+              StorageLock(StorageLockType::kPermanentExclusiveLock));
+
+  ASSERT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
+  ASSERT_FALSE(
+      item.try_reserve(StorageDelta(StorageDeltaType::kNonnegativeIntSetAdd),
+                       StorageLock(StorageLockType::kNone)));
+
+  // cannot reacquire lock after permament lock commits
+  ASSERT_FALSE(item.try_reserve(StorageDelta(StorageDeltaType::kDelete),
+                                StorageLock(StorageLockType::kNone)));
+}
+
 } // namespace hogd

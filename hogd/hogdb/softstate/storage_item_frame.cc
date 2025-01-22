@@ -211,6 +211,7 @@ StorageItemFrame::RefcountedVariant::matches_typeclass(
 bool
 StorageItemFrame::try_reserve_delta(StorageDelta const &delta)
 {
+  assert(!variant_.permanent_exclusive_lock_);
   switch (delta.type()) {
   case StorageDeltaType::kBytestringSet:
     return variant_.try_reserve_bytestring_set(delta.bytestring());
