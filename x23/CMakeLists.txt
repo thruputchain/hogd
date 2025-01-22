@@ -143,23 +143,42 @@ function(use_x23 target)
   endif()
 endfunction()
 
+set(SUBMODULE_DIRS ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/external)
+
+execute_process(
+  COMMAND git rev-parse --show-toplevel
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  RESULT_VARIABLE GIT_TOPLEVEL_RESULT
+  OUTPUT_VARIABLE GIT_TOPLEVEL
+  ERROR_QUIET
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if((GIT_TOPLEVEL_RESULT EQUAL 0) AND NOT (GIT_TOPLEVEL EQUAL CMAKE_SOURCE_DIR))
+  list(APPEND SUBMODULE_DIRS ${GIT_TOPLEVEL} ${GIT_TOPLEVEL}/external)
+endif()
+
 set(GOOGLETEST_PATH "" CACHE PATH "Path to googletest")
 set(BENCHMARK_PATH "" CACHE PATH "Path to Google benchmark")
 
 if(NOT GOOGLETEST_PATH)
-  if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/googletest)
-    set(GOOGLETEST_PATH ${CMAKE_SOURCE_DIR}/googletest
-      CACHE PATH "Path to googletest" FORCE)
-  endif()
+  foreach(dir IN LISTS SUBMODULE_DIRS)
+    if(IS_DIRECTORY ${dir}/googletest)
+      set(GOOGLETEST_PATH ${dir}/googletest
+	CACHE PATH "Path to googletest" FORCE)
+      break()
+    endif()
+  endforeach()
 endif()
 
-if(GOOGLETEST_PATH)
-  if(NOT BENCHMARK_PATH)
-    if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/benchmark)
-      set(BENCHMARK_PATH ${CMAKE_SOURCE_DIR}/benchmark
+if(GOOGLETEST_PATH AND NOT BENCHMARK_PATH)
+  foreach(dir IN LISTS SUBMODULE_DIRS)
+    if(IS_DIRECTORY ${dir}/benchmark)
+      set(BENCHMARK_PATH ${dir}/benchmark
 	CACHE PATH "Path to Google benchmark" FORCE)
+      break()
     endif()
-  endif()
+  endforeach()
 endif()
 
 if(X23_IS_TOP_LEVEL)
