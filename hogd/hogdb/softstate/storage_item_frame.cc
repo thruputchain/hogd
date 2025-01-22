@@ -97,9 +97,9 @@ bool
 StorageItemFrame::RefcountedVariant::try_reserve_nnint_set_add(
     int128_t set_value, int128_t add_value)
 {
-  if (auto *args = try_set_variant<NNIntSetAddArgs>(set_value)) {
+  if (try_set_variant<NNIntSetAddArgs>(set_value)) {
     if (add_value >= 0) {
-      args->total_added_ += add_value;
+      // modifying total_added_ is deferred to commit time
       acquire_reference();
       return true;
     }
@@ -149,6 +149,18 @@ StorageItemFrame::RefcountedVariant::try_reserve_nnint_additional(
 
   args.total_subtracted_ = desired_subtracted;
   return true;
+}
+
+void
+StorageItemFrame::RefcountedVariant::commit_nnint_add(int128_t add_value)
+{
+  auto &args = get_variant_arm_unchecked<NNIntSetAddArgs>();
+  assert(refcount_ > 0);
+  if (add_value < 0) {
+    return;
+  }
+
+  args.total_added_ += add_value;
 }
 
 void
@@ -215,7 +227,15 @@ StorageItemFrame::try_reserve_delta(StorageDelta const &delta)
 void
 StorageItemFrame::commit_delta(StorageDelta const &delta)
 {
-  // no op
+  switch(delta.type()) {
+  case StorageDeltaType::kBytestringSet:
+    break;
+  case StorageDeltaType::kNonnegativeIntSetAdd:
+    variant_.commit_nnint_add(from_xdr(delta.nnint().add_value));
+    break;
+  case StorageDeltaType::kDelete:
+    break;
+  }
 }
 
 std::optional<StorageItem> const &

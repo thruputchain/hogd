@@ -3,6 +3,7 @@
 #include <optional>
 #include <stdexcept>
 
+#include "hogd/base/types.h"
 #include "hogd/hogdb/softstate/uint256_reservation.h"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -184,9 +185,14 @@ private:
     // REQUIRES: add_value < 0, and the variant is already in the NNIntSetAdd
     // state
     bool try_reserve_nnint_additional(int128_t add_value);
+    // does not change refcount
+    // REQUIRES: add_value >= 0, and the variant is already in the NNIntSetAdd
+    // state
+    void commit_nnint_add(int128_t add_value);
 
     // does not change refcount
     void revert_nnint_set_add(int128_t add_value);
+
 
   private:
     // Does not manage adjusting the reference count
