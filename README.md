@@ -2,10 +2,45 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
 
 # Installation Instructions
 
-Tests require the `wat2wasm` utility, part of the [WebAssembly Binary Toolkit](https://github.com/WebAssembly/wabt).  Available in most package managers as `wabt`.
+1. Install the `wat2wasm` utility from the [WebAssembly Binary
+   Toolkit](https://github.com/WebAssembly/wabt).  Most OS package
+   managers led you do this by installing a package called `wabt`.
 
-Relies on rust-nightly and on rebuilding core and alloc crates, which requires installing a rust-src package via rustup.  CI has example commands in ubuntu.
-The following should install the correct components:
-`rustup +nightly target install wasm32-unknown-unknown && rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu`
-The SDK does not rely on many unstable features, but does require rebuilding core and alloc (this reduces the generated code size significantly)
+1. Install python-yaml, either with your OS package manager (e.g.,
+   `pacman -S python-yaml`) or with `pip install pyyaml`.
 
+1. Install [`rustup`](https://rustup.rs/) if you haven't already.  It
+   generally won't suffice to have your OS distribution's rust
+   packages installed, because they won't support WASM.  You can
+   install rustup with:
+
+    ~~~~ .sh
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    ~~~~
+
+1. Install the WASM target for rust.
+
+    ~~~~ .sh
+    rustup target add wasm32-unknown-unknown
+    ~~~~
+
+1. Install the rust sources so that the hogd build process can
+   recompile them in a more compact form to reduce code size.
+
+    ~~~~ .sh
+    rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
+    ~~~~
+
+1. Configure the build system using "`cmake -B `_builddir_", setting
+   the `CXX` and `CXXFLAGS` environment variables if you don't want to
+   use the default.  For instance, any of the following might be what
+   you want:
+
+    * `cmake -B build`
+    * `CXXFLAGS=-ggdb cmake -B debug-build`
+    * `CXX=clang++ cmake -B clang-build`
+
+1. Build the system by running `make` in the build directory, E.g.:
+
+    * `cd build && make`
+    * `make -C build -j$(nproc)`
