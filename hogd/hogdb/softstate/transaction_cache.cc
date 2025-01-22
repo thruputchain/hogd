@@ -32,7 +32,6 @@ TransactionCache::get_lock(TransactionID txid, AddressAndKey const &addrkey)
     if (it == v.deltas_.end()) {
       return StorageLock(StorageLockType::kNone);
     }
-    std::printf("found lock: type %d\n", it->second.lock.lock_type());
     return it->second.lock;
   });
   if (!res) {
