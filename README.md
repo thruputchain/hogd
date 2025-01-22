@@ -21,7 +21,7 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
 1. Install the WASM target for rust.
 
     ~~~~ .sh
-    rustup target add wasm32-unknown-unknown
+    rustup +nightly target add wasm32-unknown-unknown
     ~~~~
 
 1. Install the rust sources so that the hogd build process can
