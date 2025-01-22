@@ -17,6 +17,7 @@ add_dependencies(
 add_executable(
   hogd_test
   test_bytestring_write.cc
+  test_coord_to_db.cc
 )
 
 target_link_libraries(

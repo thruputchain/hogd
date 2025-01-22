@@ -28,6 +28,7 @@ BlockManager::BlockManager(BlockID root_id,
 void
 BlockManager::commit_block(BlockID id)
 {
+  assert(id != last_committed_id_);
   // TODO(geoff): put last_committed onto a queue
   // of elements that can be committed to DB and then removed.
   auto children_to_remove = block_cache_.modify_element(
@@ -59,6 +60,7 @@ BlockManager::commit_block(BlockID id)
   for (auto remove_id : *children_to_remove) {
     remove_subtree(remove_id);
   }
+  last_committed_id_ = id;
 }
 
 void
@@ -69,6 +71,8 @@ BlockManager::remove_subtree(BlockID root)
   while (!queue.empty()) {
     auto id = queue.back();
     queue.pop_back();
+
+    std::printf("remove_subtree block %llu\n", id);
 
     auto key = std::as_bytes(std::span(&id, 1));
 
@@ -89,7 +93,6 @@ BlockManager::get_block_data(BlockID id)
 {
   auto res = block_cache_.modify_element(std::as_bytes(std::span(&id, 1)),
                                          [](auto &v) { return v.block_data_; });
-
   if (res)
     return *res;
   return nullptr;
