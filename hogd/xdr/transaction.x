@@ -44,7 +44,8 @@ namespace hogd
   // The nondeterminism attached to a transaction by a
   // block proposer, if any.
   struct NondeterministicProposal {
-    void;
+    opaque try_invoke_results<>;
+    unsigned try_invoke_count;
   };
 
   struct ProposedTransaction {

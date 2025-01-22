@@ -8,32 +8,34 @@ set_source_files_properties(
 
 add_library(
   runtime
+  database_proxy.cc
+  execution_mode.cc
   invocation_frame.cc
-  wasmi_runtime.cc
-  syscall_handler.cc
+  item_view.cc
   status.cc
   storage_snapshot_cache.cc
+  syscall_bytestring.cc
+  syscall_contract.cc
+  syscall_crypto.cc
+  syscall_delete.cc
+  syscall_handler.cc
   syscall_invoke.cc
   syscall_log.cc
-  syscall_contract.cc
-  item_view.cc
-  syscall_crypto.cc
-  syscall_bytestring.cc
   syscall_nnint.cc
-  syscall_delete.cc
-  database_proxy.cc
+  wasmi_runtime.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
 
 add_executable(
   runtime_test
-  userctx_test.cc
-  instantiate_test.cc
   error_handling_test.cc
-  invoke_arity_test.cc
+  execution_mode_test.cc
   gas_api_test.cc
-  memory_access_test.cc
+  instantiate_test.cc
+  invoke_arity_test.cc
   item_view_test.cc
+  memory_access_test.cc
+  userctx_test.cc
 )
 target_link_libraries(
   runtime

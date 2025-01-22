@@ -38,6 +38,14 @@ public:
   std::optional<StorageLock> try_reserve(StorageDelta const &delta,
                                          StorageLock const &previous_lock);
 
+  // TODO(geoff): If we so desire (which we probably do? Unclear around DoS risk
+  // for contracts, will investigate) we may want to expose an interface of the
+  // form "release_lock" or "pop_lock", which would release a held lock,
+  // exchanging with a previously held (weaker) lock. That would require
+  // maintenance of a ''lock stack'' in the TransactionCache, and a fair amount
+  // of nontrivial (possibly bugprone) logic in the executor. We may add that
+  // later, but for now it is not crucial.
+
   // Commit the delta operation under the given lock.
   // This releases the lock and applies the changes from the delta.
   // The lock must have been obtained from a successful try_reserve() call.
