@@ -1,6 +1,6 @@
 # Build each shared module
-add_subdirectory(base)
 add_subdirectory(crypto)
+add_subdirectory(base)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
 
@@ -14,8 +14,9 @@ target_link_libraries(
   base
   crypto
   ${LIBSODIUM_LIBRARIES}
+  crc32c
 )
-add_dependencies(hogd libsodium)
+add_dependencies(hogd libsodium crc32c)
 
 # Then build the modules for the hogdb and hogexec executables
 add_subdirectory(coord)

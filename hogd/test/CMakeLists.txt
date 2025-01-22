@@ -5,7 +5,7 @@ add_library(
 
 target_link_libraries(
   hogd_test_lib
-  protocol
+  hogd
 )
 
 add_dependencies(
@@ -21,6 +21,7 @@ add_executable(
 
 target_link_libraries(
   hogd_test
+  hogd
   hogd_test_lib
   hogexec_core
   hogdb_core

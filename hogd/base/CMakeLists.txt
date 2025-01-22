@@ -7,7 +7,14 @@ add_library(
   string.cc
 )
 
-target_link_libraries(base protocol)
+target_link_libraries(
+  base
+  protocol
+  crypto
+  ${LIBSODIUM_LIBRARIES}
+  crc32c)
+
+add_dependencies(base crypto crc32c)
 
 # create base module test binary
 add_executable(

@@ -4,4 +4,4 @@ add_library(
   block_frame.cc
 )
 
-target_link_libraries(block protocol)
+target_link_libraries(block protocol crypto crc32c)

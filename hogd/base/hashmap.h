@@ -39,8 +39,7 @@ public:
 
   HashMap(int lg_mutex_count, int lg_bucket_count)
     : buckets_(1UL << lg_bucket_count), mutexes_(1UL << lg_mutex_count),
-      expanded_idx_(buckets_.size()), old_size_(buckets_.size()),
-      hash_key_(siphash24_keygen())
+      expanded_idx_(buckets_.size()), old_size_(buckets_.size())
   {
     assert(lg_bucket_count >= lg_mutex_count);
     assert(lg_bucket_count <= 64);
@@ -129,15 +128,13 @@ private:
   std::atomic<size_t> expanded_idx_;
   size_t old_size_;
 
-  Siphash24Key hash_key_;
-
   std::pair<std::unique_lock<std::mutex>, bucket_entry_t *>
   acquire_bucket(key_t key);
   std::mutex &get_mutex(uint64_t hash);
 
   uint64_t hash(key_t key) const
   {
-    return siphash24(key, hash_key_) & std::numeric_limits<uint64_t>::max();
+    return SipHash24::get_default()(key) & std::numeric_limits<uint64_t>::max();
   }
 
   static T *find_element(key_t key, bucket_entry_t &bucket)
