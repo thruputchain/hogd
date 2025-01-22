@@ -227,7 +227,7 @@ StorageItemFrame::try_reserve_delta(StorageDelta const &delta)
 void
 StorageItemFrame::commit_delta(StorageDelta const &delta)
 {
-  switch(delta.type()) {
+  switch (delta.type()) {
   case StorageDeltaType::kBytestringSet:
     break;
   case StorageDeltaType::kNonnegativeIntSetAdd:

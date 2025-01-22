@@ -204,10 +204,11 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
   StorageDelta nnint_set_add_3 = make_nnint_delta(5, -3);
   StorageDelta nnint_set_add_4 = make_nnint_delta(5, -5);
 
-  // Logic about set_add of a positive value offsetting a later negative value is
-  // handled in the runtime, not here.
+  // Logic about set_add of a positive value offsetting a later negative value
+  // is handled in the runtime, not here.
 
-  auto lock1 = item.try_reserve(nnint_set_add_1, StorageLock(StorageLockType::kNone));
+  auto lock1 =
+      item.try_reserve(nnint_set_add_1, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lock1);
 
   auto lock2 = item.try_reserve(nnint_set_add_2, *lock1);
@@ -220,15 +221,21 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
 
   ASSERT_EQ(lock3->lock_type(), StorageLockType::kSetItemTypeClass);
 
-  EXPECT_EQ(lock3->full_typeclass_lock().typeclass.item_type(), StorageItemTypeClass::kNonnegativeInt);
-  EXPECT_EQ(lock3->full_typeclass_lock().extra_lock_data.nnint_subtracted_amount(), to_xdr(int128_t{-4}));
+  EXPECT_EQ(lock3->full_typeclass_lock().typeclass.item_type(),
+            StorageItemTypeClass::kNonnegativeInt);
+  EXPECT_EQ(
+      lock3->full_typeclass_lock().extra_lock_data.nnint_subtracted_amount(),
+      to_xdr(int128_t{-4}));
 
   auto lock4 = item.try_reserve(nnint_set_add_4, *lock3);
   ASSERT_TRUE(lock4);
 
   EXPECT_EQ(lock4->lock_type(), StorageLockType::kSetItemTypeClass);
-  EXPECT_EQ(lock4->full_typeclass_lock().typeclass.item_type(), StorageItemTypeClass::kNonnegativeInt);
-  EXPECT_EQ(lock4->full_typeclass_lock().extra_lock_data.nnint_subtracted_amount(), to_xdr(int128_t{-5}));
+  EXPECT_EQ(lock4->full_typeclass_lock().typeclass.item_type(),
+            StorageItemTypeClass::kNonnegativeInt);
+  EXPECT_EQ(
+      lock4->full_typeclass_lock().extra_lock_data.nnint_subtracted_amount(),
+      to_xdr(int128_t{-5}));
 
   // return to nnint_set_add_2
   auto final_lock = item.try_reserve(nnint_set_add_2, *lock4);
@@ -240,6 +247,37 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
   ASSERT_TRUE(snapshot);
   EXPECT_EQ(snapshot->type(), StorageItemType::kNonnegativeInt);
   EXPECT_EQ(snapshot->nnint(), to_xdr(int128_t{1}));
+}
+
+TEST(StorageItemFrame, NNIntFromExclusiveLock)
+{
+  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+
+  auto make_nnint_delta = [](int128_t set, int128_t add) {
+    StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
+    delta.nnint().set_value = to_xdr(set);
+    delta.nnint().add_value = to_xdr(add);
+    return delta;
+  };
+
+  StorageDelta nnint_set_add_1 = make_nnint_delta(5, 10);
+  StorageDelta nnint_set_add_2 = make_nnint_delta(10, -4);
+
+  auto lock1 =
+      item.try_reserve(nnint_set_add_1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock1);
+
+  auto lock2 = item.try_reserve(nnint_set_add_2, *lock1);
+  ASSERT_TRUE(lock2);
+
+  EXPECT_EQ(lock2->lock_type(), StorageLockType::kExclusiveLock);
+
+  item.commit(nnint_set_add_2, *lock2);
+
+  auto snapshot = item.get_post_close_block_item();
+  ASSERT_TRUE(snapshot);
+  EXPECT_EQ(snapshot->type(), StorageItemType::kNonnegativeInt);
+  EXPECT_EQ(snapshot->nnint(), to_xdr(int128_t{6}));
 }
 
 } // namespace hogd

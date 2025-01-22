@@ -68,7 +68,6 @@ public:
   }
 
 private:
-
   // Performs a reservation of the storage item for the given delta operation.
   // Should be performed only when the initial lock state is kNone.
   //
@@ -192,7 +191,6 @@ private:
 
     // does not change refcount
     void revert_nnint_set_add(int128_t add_value);
-
 
   private:
     // Does not manage adjusting the reference count
