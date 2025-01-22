@@ -31,9 +31,10 @@ template<typename V> struct GrowVec {
       auto holder = co_await slk_.coro_lock_shared();
       if (i < v_.size())
 	co_return {&v_[i], holder};
+      holder.reset();
       CoroGuard guard;
       co_await guard(slk_);
-      if (i <= v_.size())
+      if (i >= v_.size())
 	v_.resize(i+1);
     }
   }

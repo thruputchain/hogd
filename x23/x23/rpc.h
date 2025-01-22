@@ -328,48 +328,49 @@ private:
     const rpc_msg &callmsg_;
     const BufView argbytes_;
 
-    template<std::same_as<void>> Async<Buf> operator()() const
+    template<std::same_as<void>> Async<Buf> operator()(this Executor self)
     {
       using enum accept_stat;
-      rpc_msg err{.xid = callmsg_.xid};
+      rpc_msg err{.xid = self.callmsg_.xid};
       msg_set_reply_stat(&err, PROC_UNAVAIL);
-      d_.logger_.template log_server<VersMeta>(callmsg_);
-      d_.logger_.template log_server<VersMeta>(err);
+      self.d_.logger_.template log_server<VersMeta>(self.callmsg_);
+      self.d_.logger_.template log_server<VersMeta>(err);
       co_return make_record(err);
     }
-    template<typename ProcMeta> Async<Buf> operator()() const
+    template<typename ProcMeta> Async<Buf> operator()(this Executor self)
     {
       using enum accept_stat;
       typename ProcMeta::arg_type args;
-      rpc_msg rmsg{.xid = callmsg_.xid};
+      rpc_msg rmsg{.xid = self.callmsg_.xid};
       try {
-        deserialize(&args, argbytes_);
+        deserialize(&args, self.argbytes_);
       } catch (const XdrException &e) {
         msg_set_reply_stat(&rmsg, GARBAGE_ARGS);
         if constexpr (!std::same_as<Logger, RpcNoLogger>) {
-          d_.logger_.template log_server<ProcMeta>(callmsg_);
-          d_.logger_.template log_server<ProcMeta>(
+          self.d_.logger_.template log_server<ProcMeta>(self.callmsg_);
+          self.d_.logger_.template log_server<ProcMeta>(
               rmsg, uformat(" deserialization error: {}", e.what()));
         }
         co_return make_record(rmsg);
       }
-      d_.logger_.template log_server<ProcMeta>(callmsg_, args);
+      self.d_.logger_.template log_server<ProcMeta>(self.callmsg_, args);
       try {
         auto res = co_await void_to_empty(std::apply(
             [&](auto &...ea) {
-              return ProcMeta::dispatch(*d_.impl_, args, ea...);
+              return ProcMeta::dispatch(*self.d_.impl_, args, ea...);
             },
-            d_.ea_));
+            self.d_.ea_));
         msg_set_reply_stat(&rmsg, SUCCESS);
-        d_.logger_.template log_server<ProcMeta>(rmsg, res);
+        self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
         co_return make_record(rmsg, res);
       } catch (const std::exception &e) {
         msg_set_reply_stat(&rmsg, SYSTEM_ERR);
         std::println(stderr, "{}::{}: {}", ProcMeta::version_meta::version_name,
                      ProcMeta::proc_name, e.what());
         if constexpr (!std::same_as<Logger, RpcNoLogger>)
-          d_.logger_.template log_server<ProcMeta>(rmsg,
-                                                   uformat(" {}", e.what()));
+          self.d_.logger_.template log_server<ProcMeta>(rmsg,
+                                                        uformat(" {}",
+                                                                e.what()));
         co_return make_record(rmsg);
       }
     }
@@ -596,8 +597,7 @@ rpc_stream(CoroPoll &cp, int fd, Logger logger = {})
 // pass logfd = -1 to suppress logging and most of the logging
 // overhead.
 inline RpcStream<RpcLogger>::Configurator
-rpc_stream_logged(CoroPoll &cp, int fd,
-                  int logfd = RpcLogger::default_logfd)
+rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
 {
   return RpcStream<RpcLogger>::make(cp, UniqueFd{fd}, RpcLogger(logfd));
 }
