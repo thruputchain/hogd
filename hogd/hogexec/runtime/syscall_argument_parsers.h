@@ -49,11 +49,10 @@ check_user_primitive_argument(uint64_t user_value)
 template<typename T, typename... Args>
 requires (std::same_as<Args, uint64_t> && ...)
 std::optional<const T>
-check_user_custom_input_argument(std::span<std::byte> contract_memory,
-                                 Args... args);
+check_user_custom_input_argument(std::span<std::byte> contract_memory, Args...);
 
 template<>
-std::optional<const Signature>
+inline std::optional<const Signature>
 check_user_custom_input_argument(std::span<std::byte> contract_memory,
                                  uint64_t user_discriminant,
                                  uint64_t user_offset)
@@ -80,7 +79,7 @@ check_user_custom_input_argument(std::span<std::byte> contract_memory,
 }
 
 template<>
-std::optional<const PublicKey>
+inline std::optional<const PublicKey>
 check_user_custom_input_argument(std::span<std::byte> contract_memory,
                                  uint64_t user_discriminant,
                                  uint64_t user_offset)

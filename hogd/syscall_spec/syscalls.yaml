@@ -8,6 +8,22 @@ syscalls:
       - name: "hash"
         typename: "SHA256Hash"
     number: 0
+  - name: "VerifySignature"
+    needs_context: no
+    inputs:
+      - name: "signature"
+        typename: "Signature"
+        custom_parsing: yes
+        custom_args_required: 2
+      - name: "public_key"
+        typename: "PublicKey"
+        custom_parsing: yes
+        custom_args_required: 2
+      - name: "message"
+        span_argument: yes
+    outputs:
+        # No outputs: check the error code returned
+    number: 1
 
 errors:
   - name: "None"
@@ -19,6 +35,9 @@ errors:
   - name: "NoSyscall"
     number: 2
     doc: "System call for supplied number is not supported"
+  - name: "InvalidInput"
+    number: 3
+    doc: "Invalid input for syscall"
 
     # those that cause call frames to revert
   - name: "DeterministicWasm"
