@@ -2,18 +2,12 @@
 
 #include <cstdint>
 #include <cstring>
-#include <span>
-#include <vector>
 
 #include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/test/local_test_harness.h"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -37,13 +31,13 @@ TEST_F(TestBytestringWrite, ReadExpected)
   // Uses the direct coordinator API, which is annoying.
   // TODO(geoff): wrap in a nicer API for coord
 
-  // This test runs two transactions that do not conflict in block 0,
+  // This test runs two transactions that do not conflict in block 1,
   // plus one that conflicts (and is rejected),
-  // then reads the result of the bytestring they wrote in block 1.
-  // Block 1 also writes a different bytestring, which should not be visible
+  // then reads the result of the bytestring they wrote in block 2.
+  // Block 2 also writes a different bytestring, which should not be visible
   // to the read.
-  // We then read the bytestring again in block 2, which should see the
-  // bytestring from block 1.
+  // We then read the bytestring again in block 3, which should see the
+  // bytestring from block 2.
 
   // Initial committed db snapshot is 0
   // open new db snapshot to start

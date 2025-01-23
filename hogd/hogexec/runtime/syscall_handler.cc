@@ -68,6 +68,7 @@ SystemCallHandler::root_invoke()
   auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
                                       signed_tx_.tx.invocation.gas_limit);
   res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  res = finish_nondeterminism_checks(res);
 
   if (!res.is_root_success())
     return res.to_root_error();
@@ -439,6 +440,23 @@ SystemCallHandler::get_proposal_data() const
 {
   assert(std::holds_alternative<ProposalModeData>(execution_mode_data_));
   return std::get<ProposalModeData>(execution_mode_data_);
+}
+
+InvokeResult
+SystemCallHandler::finish_nondeterminism_checks(InvokeResult const &res)
+{
+  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+    if (std::get<ValidationModeData>(execution_mode_data_)
+            .check_all_consumed()) {
+      // all proposal bits have been consumed, so validation succeeds.
+      return res;
+    }
+    // received bad proposal data.
+    return InvokeResult{.result_ =
+                            InvokeError{InvokeErrorCode::kValidationFailure},
+                        .gas_consumed_ = res.gas_consumed_};
+  }
+  return res;
 }
 
 } // namespace hogd

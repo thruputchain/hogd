@@ -137,6 +137,8 @@ private:
   // Extracts relevant data structures, to prepare for committing the
   // transaction.
   void commit_last_call_frame_success(InvocationFrame &frame);
+  [[nodiscard]] InvokeResult
+  finish_nondeterminism_checks(InvokeResult const &res);
 };
 
 } // namespace hogd

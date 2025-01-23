@@ -1,6 +1,5 @@
 #include "hogd/hogdb/interface/db_to_executor_server.h"
 
-#include "hogd/hogdb/softstate/block_state.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -119,7 +118,6 @@ x23::Async<ExpectedDeployment>
 DBToExecutorServer::get_deployment(BlockID block_id,
                                    ContractAddress const &addr)
 {
-  std::printf("start DBToExecutorServer::get_deployment\n");
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
     co_return ExpectedDeployment(RPCError::kBadBlockID);
@@ -132,7 +130,6 @@ DBToExecutorServer::get_deployment(BlockID block_id,
 
   auto out = ExpectedDeployment(RPCError::kNone);
   out.deployed_hash() = *hash;
-  std::printf("returning from DBToExecutorServer::get_deployment\n");
   co_return out;
 }
 
