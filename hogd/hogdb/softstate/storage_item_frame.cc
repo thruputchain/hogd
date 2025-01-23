@@ -130,7 +130,6 @@ StorageItemFrame::RefcountedVariant::try_reserve_nnint_additional(
 {
   auto &args = get_variant_arm_unchecked<NNIntSetAddArgs>();
   assert(add_value < 0);
-  assert(refcount_ > 0);
 
   int128_t desired_subtracted = 0;
 
@@ -422,6 +421,7 @@ StorageItemFrame::try_reserve(StorageDelta const &delta,
   }
   case StorageLockType::kSetItemTypeClass:
   {
+    assert(variant_.refcount_ > 0);
     assert(!variant_.permanent_exclusive_lock_);
     auto req_lock = to_lock(delta);
     assert(req_lock.lock_type() == StorageLockType::kSetItemTypeClass);

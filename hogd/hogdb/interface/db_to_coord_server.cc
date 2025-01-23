@@ -26,4 +26,13 @@ DBToCoordServer::commit_snapshot(BlockID id)
   co_return;
 }
 
+x23::Async<void>
+DBToCoordServer::close_snapshot(BlockID id)
+{
+  if (auto ptr = block_manager_.get_block_data(id)) {
+    ptr->close_block();
+  }
+  co_return;
+}
+
 } // namespace hogd

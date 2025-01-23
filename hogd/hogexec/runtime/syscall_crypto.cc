@@ -23,8 +23,8 @@ syscall_SHA256_inner(std::span<const std::byte> input_buffer,
 };
 
 // Verifies a cryptographic signature against a message using the provided
-// public key Returns: Status code indicating if verification succeeded and gas
-// cost
+// public key
+// Returns: Status code indicating if verification succeeded and gas cost
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_VerifySignature_inner(Signature const &signature,
                               PublicKey const &public_key,

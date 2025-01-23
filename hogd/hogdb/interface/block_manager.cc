@@ -21,6 +21,8 @@ BlockManager::BlockManager(BlockID root_id,
     ,
     last_committed_id_(root_id)
 {
+  assert(initial_state);
+  initial_state->assert_closed();
   block_cache_.emplace(std::as_bytes(std::span(&last_committed_id_, 1)),
                        last_committed_id_, std::move(initial_state));
 }
@@ -35,6 +37,8 @@ BlockManager::commit_block(BlockID id)
       std::as_bytes(std::span(&last_committed_id_, 1)),
       [id](Block &last_committed) {
         last_committed.closed_to_new_children_ = true;
+
+        last_committed.block_data_->assert_closed();
 
         std::vector<BlockID> out = std::move(last_committed.children_);
         last_committed.children_ = {id};

@@ -44,12 +44,15 @@ TEST(BlockManagerTest, AddSequenceOfChildren)
 {
   BlockManager m(0, std::make_shared<BlockState>(nullptr));
   auto b0 = m.get_block_data(0);
+  b0->close_block();
   EXPECT_TRUE(m.add_child(0, 1, std::make_shared<BlockState>(b0)));
   m.commit_block(1);
   auto b1 = m.get_block_data(1);
+  b1->close_block();
   EXPECT_TRUE(m.add_child(1, 2, std::make_shared<BlockState>(b1)));
   m.commit_block(2);
   auto b2 = m.get_block_data(2);
+  b2->close_block();
   EXPECT_TRUE(m.add_child(2, 3, std::make_shared<BlockState>(b2)));
   m.commit_block(3);
 }

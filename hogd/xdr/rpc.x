@@ -85,6 +85,12 @@ namespace hogd
       // an error if accessed. This BlockID must be the immediate descendant of
       // the most recently committed block.
       void commit_snapshot(BlockID) = 1;
+
+      // Call to close a block. This indicates that no more transactions
+      // will be added to this block. The block must have been previously opened
+      // with open_database_snapshot().
+      // A block cannot have a child opened before it is closed.
+      void close_snapshot(BlockID) = 2;
     }
     = 1;
   }

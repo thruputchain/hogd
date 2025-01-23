@@ -18,6 +18,8 @@ public:
                                               BlockID new_id);
   x23::Async<void> commit_snapshot(BlockID id);
 
+  x23::Async<void> close_snapshot(BlockID id);
+
 private:
   BlockManager &block_manager_;
 };

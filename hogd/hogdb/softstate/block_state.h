@@ -34,7 +34,13 @@ public:
 
   BlockState(InMemoryDatabase *base_db)
     : storage_view_(base_db), parent_state_(nullptr)
-  {}
+  {
+    // This is a hack to work around the fact that the initial block starts as
+    // committed, even though the initial block is empty. BlockManager needs a
+    // last_committed_id_. Alternative is to make last_committed_id_ optional,
+    // and have every commit do an appropriate check. This seemed simpler.
+    storage_view_.close_block();
+  }
 
   BlockState(BlockState const &) = delete;
   BlockState &operator=(BlockState const &) = delete;
@@ -71,6 +77,7 @@ public:
   get_snapshot_contract(SHA256Hash const &contract_hash);
 
   void close_block() { storage_view_.close_block(); }
+  void assert_closed() { storage_view_.assert_block_closed(); }
 
 private:
   StorageView storage_view_;
