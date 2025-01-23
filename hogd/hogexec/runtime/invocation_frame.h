@@ -46,7 +46,7 @@ public:
   void log(std::span<const std::byte> message);
 
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
-  std::unordered_map<AddressAndKey, StorageDelta> extract_deltas();
+  std::unordered_map<AddressAndKey, FlaggedStorageDelta> extract_deltas();
   std::unordered_map<ContractAddress, SHA256Hash> extract_deployments()
   {
     return std::move(new_contract_deployments_);

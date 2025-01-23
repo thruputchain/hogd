@@ -162,6 +162,9 @@ syscalls:
         typename: "StorageKey"
       - name: "bytestring"
         span_argument: yes
+      - name: "flags"
+        typename: "StorageDeltaFlags"
+        primitive_type: yes
     outputs:
     number: 15
   - name: "NonnegativeIntGet"

@@ -56,10 +56,11 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKey &input_key,
-                            std::span<const std::byte> input_bytestring)
+                            std::span<const std::byte> input_bytestring,
+                            StorageDeltaFlags flags)
 {
   SyscallStatus<void> status =
-      syscall_handler.set_bytestring(input_key, input_bytestring);
+      syscall_handler.set_bytestring(input_key, input_bytestring, flags);
   if (!status) {
     return {status.error().code(), 0};
   }

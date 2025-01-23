@@ -30,10 +30,14 @@ DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp, std::string address,
 x23::Async<bool>
 DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
                                  AddressAndKey const &addrkey,
-                                 StorageDelta const &delta, RPCFlagSet flags)
+                                 FlaggedStorageDelta const &delta,
+                                 RPCFlagSet flags)
 {
+  if (delta.flags & std::to_underlying(StorageDeltaModifier::kLockExclusive)) {
+    flags |= std::to_underlying(RPCFlags::kExclusiveLock);
+  }
   auto res = co_await db_client_.try_reserve_delta(block_id, tx_id, addrkey,
-                                                   delta, flags);
+                                                   delta.delta, flags);
 
   if (res == RPCError::kNone) {
     co_return true;
@@ -91,7 +95,6 @@ DatabaseProxy::commit_contract_deploy(BlockID block_id,
 std::shared_ptr<const Contract>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
-  std::printf("start get_contract\n");
   auto res = db_client_.get_contract(block_id, contract_hash)();
 
   if (res.error() == RPCError::kNone) {
@@ -100,16 +103,13 @@ DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
   if (res.error() == RPCError::kContractNExist) {
     return nullptr;
   }
-  std::printf("error contract\n");
   throw std::runtime_error("unhandleable error");
 }
 
 std::optional<SHA256Hash>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
-  std::printf("start get_deployment\n");
   auto res = db_client_.get_deployment(block_id, addr)();
-  std::printf("got deployment result\n");
 
   if (res.error() == RPCError::kNone) {
     return res.deployed_hash();
@@ -117,7 +117,6 @@ DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
   if (res.error() == RPCError::kNoContractDeployed) {
     return std::nullopt;
   }
-  std::printf("error deployment\n");
   throw std::runtime_error("unhandleable error");
 }
 

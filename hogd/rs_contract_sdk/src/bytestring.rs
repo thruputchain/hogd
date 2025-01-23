@@ -13,7 +13,7 @@ pub fn BytestringGetLen(key: &StorageKey) -> Result<RuntimeMemoryLength, i32> {
 }
 
 pub fn BytestringSet(key: &StorageKey, slice: &[u8]) -> Result<(), i32> {
-    syscall_bindings::raw_BytestringSet(key, slice)
+    syscall_bindings::raw_BytestringSet(key, slice, 0)
 }
 
 pub fn BytestringGet_Sized<const N: usize>(

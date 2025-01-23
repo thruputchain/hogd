@@ -1,16 +1,12 @@
 #pragma once
 
-#include <cstdint>
-#include <map>
 #include <optional>
-#include <set>
-#include <span>
 #include <variant>
 
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_item.hh"
-#include "types.hh"
 
 namespace hogd {
 
@@ -27,7 +23,7 @@ namespace hogd {
 // Representing the internal state of a bytestring item.
 class BytestringItem {
 public:
-  StorageDelta get_delta() const;
+  FlaggedStorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
 
   constexpr static StorageItemType get_item_type()
@@ -36,12 +32,13 @@ public:
   }
 
   Bytestring bytestring_;
+  bool lock_exclusive_ = false;
 };
 
 // State of an item that is a nonnegative int
 class NNIntItem {
 public:
-  StorageDelta get_delta() const;
+  FlaggedStorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
 
   constexpr static StorageItemType get_item_type()
@@ -57,9 +54,9 @@ public:
 class DeletedItem {
 
 public:
-  constexpr static StorageDelta get_delta()
+  constexpr static FlaggedStorageDelta get_delta()
   {
-    return StorageDelta(StorageDeltaType::kDelete);
+    return FlaggedStorageDelta{StorageDelta(StorageDeltaType::kDelete), 0};
   }
 
   constexpr static SyscallStatus<void> validate() { return {}; }
@@ -76,7 +73,7 @@ public:
 // read outside.
 class UnmodifiedItem {
 public:
-  constexpr static std::optional<StorageDelta> get_delta()
+  constexpr static std::optional<FlaggedStorageDelta> get_delta()
   {
     return std::nullopt;
   }
@@ -126,7 +123,7 @@ public:
     return {};
   }
 
-  std::optional<StorageDelta> get_delta() const;
+  std::optional<FlaggedStorageDelta> get_delta() const;
 
 private:
   SyscallStatus<void>

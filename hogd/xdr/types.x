@@ -65,4 +65,10 @@ struct AddressAndKey {
   StorageKey key;
 };
 
+enum StorageDeltaModifier {
+  kLockExclusive = 0x00000001,
+};
+
+typedef int StorageDeltaFlags;
+
 } // namespace hogd

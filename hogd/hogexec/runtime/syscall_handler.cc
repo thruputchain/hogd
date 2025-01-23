@@ -383,7 +383,8 @@ SystemCallHandler::get_bytestring(StorageKey const &storage_key)
 
 SyscallStatus<void>
 SystemCallHandler::set_bytestring(StorageKey const &storage_key,
-                                  std::span<const std::byte> input_bytestring)
+                                  std::span<const std::byte> input_bytestring,
+                                  StorageDeltaFlags flags)
 {
   auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
 
@@ -393,7 +394,13 @@ SystemCallHandler::set_bytestring(StorageKey const &storage_key,
               reinterpret_cast<const uint8_t *>(input_bytestring.data()),
               input_bytestring.size());
 
-  return item_view.set(BytestringItem(std::move(new_string)));
+  bool exclusive_lock =
+      (flags & std::to_underlying(StorageDeltaModifier::kLockExclusive)) != 0;
+  if (flags ^ std::to_underlying(StorageDeltaModifier::kLockExclusive)) {
+    // invalid flag supplied
+    return SyscallError{SyscallErrorCode::kInvalidInput};
+  }
+  return item_view.set(BytestringItem(std::move(new_string), exclusive_lock));
 }
 
 SyscallStatus<std::pair<int128_t, int128_t>>

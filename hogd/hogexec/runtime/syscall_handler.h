@@ -87,7 +87,8 @@ public:
   SyscallStatus<const Bytestring> get_bytestring(StorageKey const &storage_key);
   SyscallStatus<void>
   set_bytestring(StorageKey const &storage_key,
-                 std::span<const std::byte> input_bytestring);
+                 std::span<const std::byte> input_bytestring,
+                 StorageDeltaFlags flags);
 
   SyscallStatus<std::pair<int128_t, int128_t>>
   get_nnint(StorageKey const &storage_key);
@@ -112,7 +113,7 @@ private:
 
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;
-  std::unordered_map<AddressAndKey, StorageDelta> committed_deltas_;
+  std::unordered_map<AddressAndKey, FlaggedStorageDelta> committed_deltas_;
   std::unordered_map<ContractAddress, SHA256Hash> committed_deployments_;
 
   StorageSnapshotCache &snapshot_cache_;

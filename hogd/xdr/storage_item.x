@@ -44,4 +44,9 @@ namespace hogd
     void;
   };
 
+  struct FlaggedStorageDelta {
+    StorageDelta delta;
+    StorageDeltaFlags flags;
+  };
+
 } // namespace hogd

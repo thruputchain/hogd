@@ -43,26 +43,33 @@ ItemView::get_item_type() const
       delta_args_);
 }
 
-std::optional<StorageDelta>
+std::optional<FlaggedStorageDelta>
 ItemView::get_delta() const
 {
   return std::visit(
-      [](auto const &v) -> std::optional<StorageDelta> {
+      [](auto const &v) -> std::optional<FlaggedStorageDelta> {
         return v.get_delta();
       },
       delta_args_);
 }
 
-StorageDelta
+FlaggedStorageDelta
 BytestringItem::get_delta() const
 {
-  return make_bytestring_set(bytestring_);
+  return FlaggedStorageDelta{.delta = make_bytestring_set(bytestring_),
+                             .flags =
+                                 lock_exclusive_
+                                     ? std::to_underlying(
+                                           StorageDeltaModifier::kLockExclusive)
+                                     : 0};
 }
 
-StorageDelta
+FlaggedStorageDelta
 NNIntItem::get_delta() const
 {
-  return make_nnint128_set_add(base_value_, add_value_);
+  return FlaggedStorageDelta{.delta =
+                                 make_nnint128_set_add(base_value_, add_value_),
+                             .flags = 0};
 }
 
 SyscallStatus<void>

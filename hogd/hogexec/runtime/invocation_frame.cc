@@ -95,7 +95,7 @@ InvocationFrame::handle_try_acquire_locks(PerTransactionDatabaseProxy &db_proxy)
     auto delta = item.get_delta();
     if (delta) {
       auto res =
-          db_proxy.try_reserve_delta(addr, *delta,
+          db_proxy.try_reserve_delta(addr, (*delta),
                                      std::to_underlying(RPCFlags::kNone))();
       if (!res) {
         return false;
@@ -233,10 +233,10 @@ InvocationFrameStack::lookup_locally_deployed_contract(
   return std::nullopt;
 }
 
-std::unordered_map<AddressAndKey, StorageDelta>
+std::unordered_map<AddressAndKey, FlaggedStorageDelta>
 InvocationFrame::extract_deltas()
 {
-  std::unordered_map<AddressAndKey, StorageDelta> out;
+  std::unordered_map<AddressAndKey, FlaggedStorageDelta> out;
   for (auto const &[k, v] : modified_items_) {
     auto d = v.get_delta();
     if (d) {
