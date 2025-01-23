@@ -27,6 +27,8 @@
 //   initially connected to it.  You can think of it as a "future" in
 //   the generic sense of the word (though unfortunately the terms
 //   promise and future are confusingly overloaded with coroutines).
+//   (Note: the promise_type of an Async is a subtype of Awaitable,
+//   and the Async behaves like a unique reference to the Awaitable.)
 //
 // * CoroCB<T> is a trivially-copyable callback-like function taking
 //   an argument of type T.  It should fit in a register and be
@@ -60,6 +62,12 @@
 //         assert(n == 10);
 //       });
 //     }
+//
+// * The function make_async<R>() creates a matched
+//   std::pair<Async<R>, CoroCB<R>>.  This can be used for low-level
+//   event harness code:  return the Async for the invoking coroutine
+//   to co_await, and save the CoroCB to be invoked when the event
+//   fires.
 //
 // * Any funtion returning the vacuous type Detached can be a
 //   coroutine that uses co_await and co_return (co_returing void),
