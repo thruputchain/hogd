@@ -199,6 +199,22 @@ syscalls:
         typename: "StorageKey"
     outputs:
     number: 18
+  - name: "VerifySignature"
+    needs_context: no
+    inputs:
+      - name: "signature"
+        typename: "Signature"
+        custom_parsing: yes
+        custom_args_required: 2
+      - name: "public_key"
+        typename: "PublicKey"
+        custom_parsing: yes
+        custom_args_required: 2
+      - name: "message"
+        span_argument: yes
+    outputs:
+        # No outputs: check the error code returned
+    number: 19
 
 errors:
   - name: "None"

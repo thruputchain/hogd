@@ -166,3 +166,12 @@ Returns an error if the item at key is not an nnint type, or if the set_add is i
 Signature: DeleteObject(key: StorageKey) -> ()
 
 Deletes the StorageItem at the supplied key.
+
+# VerifySignature
+
+Signature: VerifySignature(signature: Signature, public_key: PublicKey, message: [u8]) -> ()
+
+Verifies the signature against the public key and message.
+
+Returns kInvalidInput if the signature or public key is invalid,
+or if the signature scheme does not match the public key scheme.
