@@ -27,6 +27,12 @@ public:
   x23::Async<ExpectedStorageItem> get_item(BlockID block_id,
                                            AddressAndKey const &addrkey);
 
+  x23::Async<ExpectedRetrocausalQueueBlock> get_next_retrocausal_queue_block(
+      BlockID block_id, AddressAndKey const &addrkey, uint64_t block_number);
+
+  x23::Async<ExpectedQueueEntry> get_concurrent_retrocausal_queue_entry(
+      BlockID block_id, AddressAndKey const &addrkey, uint32_t index);
+
   x23::Async<void> commit_contract_create(BlockID block_id,
                                           Contract const &contract);
   x23::Async<void> commit_contract_deploy(BlockID block_id,

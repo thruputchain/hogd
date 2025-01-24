@@ -108,25 +108,45 @@ namespace hogd
       void commit_transaction(BlockID, TransactionID) = 1;
       void abort_transaction(BlockID, TransactionID) = 2;
 
+      // Get items other than contents of the retrocausal queue.
+      // If the element is actually a retrocausal queue, the item returned
+      // has that type but does not give the contents.
       ExpectedStorageItem get_item(BlockID, AddressAndKey) = 3;
+
+      // Returns the next block in the retrocausal queue at or after the
+      // supplied block number. Returns kNoRetrocausalQueueBlock if there is no
+      // element in the queue at or after the supplied block number (and before
+      // the current block number).  Does not return data from the current
+      // block, (the retrocausal part), which should be accessed via
+      // get_concurrent_retrocausal_queue_entry().
+      ExpectedRetrocausalQueueBlock get_next_retrocausal_queue_block(
+          BlockID, AddressAndKey, unsigned hyper) = 4;
+
+      // Returns the next unconsumed entry in the retrocausal queue for the
+      // current block. The last argument is the index of the entry to return.
+      // The queried order is nondeterministic.
+      ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(BlockID,
+                                                                AddressAndKey,
+                                                                unsigned int) =
+          5;
 
       // Create a new contract.
       // Arguments:
       //   New Contract
-      void commit_contract_create(BlockID, Contract) = 4;
+      void commit_contract_create(BlockID, Contract) = 6;
 
       // Create a new deployment.
       // Arguments:
       //   ContractAddress
       //   SHA256Hash of contract to be deployed
-      void commit_contract_deploy(BlockID, ContractAddress, SHA256Hash) = 5;
+      void commit_contract_deploy(BlockID, ContractAddress, SHA256Hash) = 7;
 
       // TODO(geoff) consider whether we want to combine these or not.
       // Tradeoff is messages vs maybe sending redundant contracts.
       // Perhaps the sender could cache whether it expects the client to have
       // the contract, and optionally send accordingly.
-      ExpectedContract get_contract(BlockID, SHA256Hash) = 6;
-      ExpectedDeployment get_deployment(BlockID, ContractAddress) = 7;
+      ExpectedContract get_contract(BlockID, SHA256Hash) = 8;
+      ExpectedDeployment get_deployment(BlockID, ContractAddress) = 9;
     }
     = 1;
   }

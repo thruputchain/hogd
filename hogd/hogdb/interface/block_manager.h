@@ -41,7 +41,7 @@ private:
   // commit. Only one will commit; the others will be garbage collected.
   struct Block {
     Block(BlockID id, std::shared_ptr<BlockState> data)
-      : id_(id), children_(), block_data_(std::move(data))
+      : id_(id), block_data_(std::move(data))
     {}
 
     std::span<const std::byte> get_key() const

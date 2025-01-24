@@ -79,4 +79,20 @@ namespace hogd
     void;
   };
 
+  union ExpectedRetrocausalQueueBlock switch (RPCError error)
+  {
+  case kNone:
+    RetrocausalQueueBlock block;
+  default:
+    void;
+  };
+
+  union ExpectedQueueEntry switch (RPCError error)
+  {
+  case kNone:
+    QueueEntry entry;
+  default:
+    void;
+  };
+
 } // namespace hogd

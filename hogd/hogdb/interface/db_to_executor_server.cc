@@ -68,6 +68,20 @@ DBToExecutorServer::get_item(BlockID block_id, AddressAndKey const &addrkey)
   co_return out;
 }
 
+x23::Async<ExpectedRetrocausalQueueBlock>
+DBToExecutorServer::get_next_retrocausal_queue_block(
+    BlockID block_id, AddressAndKey const &addrkey, uint64_t block_number)
+{
+  co_return ExpectedRetrocausalQueueBlock(RPCError::kNoStorageItem);
+}
+
+x23::Async<ExpectedQueueEntry>
+DBToExecutorServer::get_concurrent_retrocausal_queue_entry(
+    BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
+{
+  co_return ExpectedQueueEntry(RPCError::kNoStorageItem);
+}
+
 x23::Async<void>
 DBToExecutorServer::commit_contract_create(BlockID block_id,
                                            Contract const &contract)
