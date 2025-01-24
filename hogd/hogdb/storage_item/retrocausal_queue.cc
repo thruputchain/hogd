@@ -10,7 +10,7 @@ RetrocausalQueue::RetrocausalQueue(RetrocausalQueue const &parent,
     blocks_.emplace(block_number, CoWBlockReference{.block_ = block.block_,
                                                     .is_modified_ = false});
   }
-  assert(current_block_number_ > 0);
+  assert(current_block_number_ > parent.current_block_number_);
 }
 
 RetrocausalQueue::RetrocausalQueue(uint64_t current_block_number)
@@ -94,6 +94,7 @@ RetrocausalQueue::canonicalize_and_commit_current_block()
 {
   std::set<QueueEntry> entries;
   entries.insert(current_block_entries_.begin(), current_block_entries_.end());
+
   for (auto const &entry : current_block_consumed_entries_) {
     [[maybe_unused]] auto n_erased = entries.erase(entry);
     assert(n_erased == 1);
