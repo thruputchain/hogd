@@ -1,7 +1,5 @@
 #include "hogd/hogdb/storage_item/retrocausal_queue.h"
 
-#include <algorithm>
-
 namespace hogd {
 
 RetrocausalQueue::RetrocausalQueue(RetrocausalQueue const &parent,
@@ -12,6 +10,13 @@ RetrocausalQueue::RetrocausalQueue(RetrocausalQueue const &parent,
     blocks_.emplace(block_number, CoWBlockReference{.block_ = block.block_,
                                                     .is_modified_ = false});
   }
+  assert(current_block_number_ > 0);
+}
+
+RetrocausalQueue::RetrocausalQueue(uint64_t current_block_number)
+  : current_block_number_(current_block_number)
+{
+  assert(current_block_number_ > 0);
 }
 
 RetrocausalQueueBlock &
@@ -79,8 +84,9 @@ RetrocausalQueue::apply_consume_delta(RetrocausalQueueConsumeDelta const &delta)
 void
 RetrocausalQueue::apply_insert_delta(RetrocausalQueueInsertDelta const &delta)
 {
-  auto &block = get_block(current_block_number_);
-  block.entries.append_range(delta.added_entries);
+  current_block_entries_.insert(current_block_entries_.end(),
+                                delta.added_entries.begin(),
+                                delta.added_entries.end());
 }
 
 void

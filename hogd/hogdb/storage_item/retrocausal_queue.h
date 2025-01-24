@@ -16,6 +16,8 @@ public:
   RetrocausalQueue(RetrocausalQueue const &parent,
                    uint64_t current_block_number);
 
+  RetrocausalQueue(uint64_t current_block_number);
+
   RetrocausalQueue(RetrocausalQueue &&) = delete;
   RetrocausalQueue &operator=(RetrocausalQueue &&) = delete;
   RetrocausalQueue &operator=(RetrocausalQueue const &) = delete;

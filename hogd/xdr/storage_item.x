@@ -46,11 +46,6 @@ namespace hogd
     unsigned hyper block_number;
   };
 
-  enum RetrocausalQueueConsumeType {
-    kPastBlock = 0,
-    kCurrentBlock = 1,
-  };
-
   // This delta consumes all of the retrocausal queue entries
   // in blocks less than or equal to max_fully_consumed_block_number,
   // and removes the first partial_consumed_number entries from the

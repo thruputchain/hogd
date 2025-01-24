@@ -45,7 +45,7 @@ namespace hogd
   // block proposer, if any.
   struct NondeterministicProposal {
     opaque try_invoke_results<>;
-    unsigned try_invoke_count;
+    unsigned int try_invoke_count;
   };
 
   struct ProposedTransaction {
