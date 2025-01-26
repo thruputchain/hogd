@@ -15,6 +15,13 @@ namespace hogd {
 // instantiated.  Every consume_entry can therefore set 0 as the
 // past_block_consume.max_fully_consumed_block_number, to be a no-op.
 // This could be fixed by making max_fully_consumed_block_number an optional.
+//
+// Note: The notion of "block number" here does not have to correspond to the
+// notion of block number on the main chain.  It has to monotonically increase
+// from one block to a subsequent one _when modifications are made_, but if the
+// object is not modified then it need not change.  This notion of block number
+// is used for internal tracking of which entries are consumed, and should
+// (probably) not be made visible to contracts.
 class RetrocausalQueue {
 public:
   RetrocausalQueue(RetrocausalQueue const &parent,
@@ -33,6 +40,8 @@ public:
   // Starts searching from block number search_start_number.
   // Does not refresh the block for copy-on-write.
   const RetrocausalQueueBlock *try_get_next_block(uint64_t search_start_number);
+
+  uint64_t get_current_block_number() const { return current_block_number_; }
 
 private:
   struct CoWBlockReference {

@@ -27,6 +27,8 @@ namespace hogd
   {
   case kNonnegativeInt:
     int128_xdr nnint_subtracted_amount;
+  case kRetrocausalQueue:
+    unsigned int consume_lock;
   default:
     void;
   };

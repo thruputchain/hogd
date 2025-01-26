@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <set>
 #include <stdexcept>
 
 #include "hogd/base/types.h"
@@ -127,7 +128,8 @@ private:
     {
       return candidate_bytestring == bytestring_set_;
     }
-    std::optional<StorageItemWrapper> to_item() const;
+    std::optional<StorageItemWrapper>
+    to_item(std::optional<StorageItemWrapper> const & /*unused*/) const;
   };
 
   // NNInt state
@@ -141,19 +143,36 @@ private:
     {
       return candidate_set_value == set_value_;
     }
-    std::optional<StorageItemWrapper> to_item() const;
+    std::optional<StorageItemWrapper>
+    to_item(std::optional<StorageItemWrapper> const & /*unused*/) const;
   };
 
   // Deleted state
   struct DeleteArgs {
     static bool typeclass_match() { return true; }
-    static std::optional<StorageItemWrapper> to_item() { return std::nullopt; }
+    static std::optional<StorageItemWrapper>
+    to_item(std::optional<StorageItemWrapper> const & /*unused*/)
+    {
+      return std::nullopt;
+    }
   };
 
   struct RetrocausalQueueArgs {
     // TODO(geoff) contents
     static bool typeclass_match() { return true; }
-    std::optional<StorageItemWrapper> to_item() const;
+    std::optional<StorageItemWrapper>
+    to_item(std::optional<StorageItemWrapper> const &previous_item);
+
+    // written upon commit.
+    std::optional<RetrocausalQueuePastBlockConsumeDelta> past_consume_delta_;
+    // Is there an active lock for the consumer position
+    bool consumer_lock_ = false;
+
+    // Stores the entries created in a block in a nondeterministic but stable
+    // order
+    std::vector<QueueEntry> new_entries_;
+    // new_entries_ \setminus consumed entries, in a stable order
+    std::set<QueueEntry> persistable_entries_;
   };
 
   // Exclusive locked state
@@ -162,7 +181,8 @@ private:
   // with refcount 0).
   struct ExclusiveLockedState {
     static bool typeclass_match() { return false; }
-    static std::optional<StorageItemWrapper> to_item()
+    static std::optional<StorageItemWrapper>
+    to_item(std::optional<StorageItemWrapper> const & /*unused*/)
     {
       throw std::runtime_error("Impossible state");
     }
@@ -190,12 +210,16 @@ private:
     {
       assert(refcount_ > 0);
       --refcount_;
+      if (refcount_ == 0) {
+        variant_ = DeleteArgs{};
+      }
     }
 
     // If these methods return true, a reference has been acquired
     bool try_reserve_delete();
     bool try_reserve_bytestring_set(Bytestring const &bytestring);
     bool try_reserve_nnint_set_add(int128_t set_value, int128_t add_value);
+    bool try_reserve_retrocausal_queue_delta(bool requires_consume);
 
     // only valid if refcount_ > 0
     bool matches_typeclass(StorageItemTypeClass typeclass) const;
@@ -212,6 +236,14 @@ private:
     // does not change refcount
     void revert_nnint_set_add(int128_t add_value);
 
+    // does not change refcount
+    bool try_reserve_retrocausal_queue_consume();
+    void release_retrocausal_queue_consume();
+
+    // does not change refcount
+    void
+    commit_retrocausal_queue_modify(RetrocausalQueueDelta const &queue_delta);
+
   private:
     // Does not manage adjusting the reference count
     template<typename VariantArm, typename... VariantArgs>
@@ -219,6 +251,7 @@ private:
 
     template<typename VariantArm> VariantArm &get_variant_arm_unchecked()
     {
+      assert(refcount_ > 0);
       return std::get<VariantArm>(variant_);
     }
   };

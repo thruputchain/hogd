@@ -23,13 +23,15 @@ StorageItemFrame::StorageItemFrame(
 {}
 
 std::optional<StorageItemWrapper>
-StorageItemFrame::BytestringArgs::to_item() const
+StorageItemFrame::BytestringArgs::to_item(
+    std::optional<StorageItemWrapper> const & /*unused*/) const
 {
   return StorageItemWrapper(bytestring_set_);
 }
 
 std::optional<StorageItemWrapper>
-StorageItemFrame::NNIntSetAddArgs::to_item() const
+StorageItemFrame::NNIntSetAddArgs::to_item(
+    std::optional<StorageItemWrapper> const & /*unused*/) const
 {
   int128_t new_value = set_value_ + total_subtracted_;
   int128_t total_add = total_added_.get_capped();
@@ -46,10 +48,52 @@ StorageItemFrame::NNIntSetAddArgs::to_item() const
   return StorageItemWrapper(out);
 }
 
-std::optional<StorageItemWrapper>
-StorageItemFrame::RetrocausalQueueArgs::to_item() const
+namespace {
+x23::Vec<QueueEntry>
+make_block(std::set<QueueEntry> &entries)
 {
-  throw std::runtime_error("unimplemented");
+  x23::Vec<QueueEntry> new_block;
+  for (auto entry : entries) {
+    new_block.emplace_back(std::move(entry));
+  }
+  return new_block;
+}
+} // namespace
+
+std::optional<StorageItemWrapper>
+StorageItemFrame::RetrocausalQueueArgs::to_item(
+    std::optional<StorageItemWrapper> const &previous_item)
+{
+  assert(!consumer_lock_);
+
+  RetrocausalQueuePastBlockConsumeDelta consume_delta{
+      .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
+  if (past_consume_delta_) {
+    assert(previous_item);
+    assert(previous_item->type() == StorageItemType::kRetrocausalQueue);
+    consume_delta = *past_consume_delta_;
+  }
+
+  if (previous_item.has_value() &&
+      previous_item->type() == StorageItemType::kRetrocausalQueue) {
+    uint64_t new_block_number =
+        previous_item->queue().get_current_block_number() + 1;
+    x23::Vec<QueueEntry> new_block = make_block(persistable_entries_);
+
+    return StorageItemWrapper(
+        RetrocausalQueue(previous_item->queue(), consume_delta,
+                         RetrocausalQueueBlock{.entries = new_block,
+                                               .block_number =
+                                                   new_block_number}));
+  }
+  // otherwise, no parent, so make empty one just for the ctor
+  RetrocausalQueue fake_parent(0);
+  assert(!past_consume_delta_);
+
+  return StorageItemWrapper(
+      RetrocausalQueue(fake_parent, consume_delta,
+                       {.entries = make_block(persistable_entries_),
+                        .block_number = 1}));
 }
 
 template<typename VariantArm, typename... VariantArgs>
@@ -57,6 +101,7 @@ VariantArm *
 StorageItemFrame::RefcountedVariant::try_set_variant(VariantArgs const &...args)
 {
   if (refcount_ == 0) {
+    assert(std::holds_alternative<DeleteArgs>(variant_));
     variant_.emplace<VariantArm>(args...);
     return &std::get<VariantArm>(variant_);
   }
@@ -97,18 +142,39 @@ StorageItemFrame::RefcountedVariant::try_reserve_delete()
 }
 
 bool
+StorageItemFrame::RefcountedVariant::try_reserve_retrocausal_queue_delta(
+    bool requires_consume)
+{
+  if ([[maybe_unused]] auto *args = try_set_variant<RetrocausalQueueArgs>()) {
+    if (requires_consume) {
+      if (args->past_consume_delta_) {
+        return false;
+      }
+      if (args->consumer_lock_) {
+        return false;
+      }
+      args->consumer_lock_ = true;
+    }
+    acquire_reference();
+    return true;
+  }
+  return false;
+}
+
+bool
 StorageItemFrame::RefcountedVariant::try_reserve_nnint_set_add(
     int128_t set_value, int128_t add_value)
 {
   if (try_set_variant<NNIntSetAddArgs>(set_value)) {
+    acquire_reference();
     if (add_value >= 0) {
       // modifying total_added_ is deferred to commit time
-      acquire_reference();
       return true;
     }
 
     // if set_value <=0 and add_value < 0, delta always fails
     if (set_value <= 0) {
+      release_reference();
       return false;
     }
 
@@ -116,10 +182,9 @@ StorageItemFrame::RefcountedVariant::try_reserve_nnint_set_add(
     // set_value > 0, add_value < 0
     auto res = try_reserve_nnint_additional(add_value);
     if (!res) {
+      release_reference();
       return false;
     }
-
-    acquire_reference();
     return true;
   }
   return false;
@@ -168,6 +233,7 @@ StorageItemFrame::RefcountedVariant::commit_nnint_add(int128_t add_value)
 void
 StorageItemFrame::RefcountedVariant::revert_nnint_set_add(int128_t add_value)
 {
+  assert(refcount_ > 0);
   auto &args = get_variant_arm_unchecked<NNIntSetAddArgs>();
 
   if (add_value >= 0) {
@@ -175,6 +241,37 @@ StorageItemFrame::RefcountedVariant::revert_nnint_set_add(int128_t add_value)
   }
   else {
     args.total_subtracted_ -= add_value;
+  }
+}
+
+void
+StorageItemFrame::RefcountedVariant::commit_retrocausal_queue_modify(
+    RetrocausalQueueDelta const &queue_delta)
+{
+  assert(std::holds_alternative<RetrocausalQueueArgs>(variant_));
+  assert(refcount_ > 0);
+  auto &args = get_variant_arm_unchecked<RetrocausalQueueArgs>();
+
+  for (auto const &entry : queue_delta.insert.added_entries) {
+    args.persistable_entries_.insert(entry);
+    args.new_entries_.push_back(entry);
+  }
+
+  if (queue_delta.consume) {
+    assert(!args.past_consume_delta_);
+    // not strictly necessary, but we maintain the invariant that at the end of
+    // the block consumer_lock_ is released, just to be careful.
+    if (args.consumer_lock_) {
+      args.consumer_lock_ = false;
+    }
+    args.past_consume_delta_.emplace(queue_delta.consume->past_block_consume);
+
+    for (auto const &consumed_entry :
+         queue_delta.consume->current_block_consumed) {
+      [[maybe_unused]]
+      auto res = args.persistable_entries_.erase(consumed_entry);
+      assert(res);
+    }
   }
 }
 
@@ -245,6 +342,9 @@ StorageItemFrame::commit_delta(StorageDelta const &delta,
     break;
   case StorageDeltaType::kDelete:
     break;
+  case StorageDeltaType::kRetrocausalQueueModify:
+    variant_.commit_retrocausal_queue_modify(delta.retrocausal_queue());
+    break;
   default:
     throw std::runtime_error("unimpl");
   }
@@ -274,7 +374,7 @@ StorageItemFrame::update_committed_item()
   if (!round_committed_) {
     if (variant_.refcount_ > 0) {
       committed_item_ =
-          std::visit([&](auto const &arm) { return arm.to_item(); },
+          std::visit([&](auto &arm) { return arm.to_item(committed_item_); },
                      variant_.variant_);
     }
     round_committed_ = true;
@@ -338,7 +438,6 @@ void
 StorageItemFrame::revert_exclusive_lock_to_none()
 {
   variant_.release_reference();
-  variant_.variant_ = DeleteArgs{};
   assert(variant_.refcount_ == 0);
 }
 
@@ -359,16 +458,50 @@ void
 StorageItemFrame::revert_set_typeclass_lock(
     TypeSpecificLock const &type_specific_lock)
 {
-  variant_.release_reference();
-
   switch (type_specific_lock.item_type()) {
   case StorageItemType::kNonnegativeInt:
     variant_.revert_nnint_set_add(
         from_xdr(type_specific_lock.nnint_subtracted_amount()));
-    return;
+    break;
+  case StorageItemType::kRetrocausalQueue:
+    if (type_specific_lock.consume_lock() == 1) {
+      variant_.release_retrocausal_queue_consume();
+    }
+    break;
   default:
-    return;
+    break;
   }
+
+  variant_.release_reference();
+}
+
+bool
+StorageItemFrame::RefcountedVariant::try_reserve_retrocausal_queue_consume()
+{
+  assert(std::holds_alternative<RetrocausalQueueArgs>(variant_));
+  assert(refcount_ > 0);
+  auto &args = get_variant_arm_unchecked<RetrocausalQueueArgs>();
+
+  if (args.consumer_lock_) {
+    return false;
+  }
+  // a consume delta already committed
+  if (args.past_consume_delta_) {
+    return false;
+  }
+
+  args.consumer_lock_ = true;
+  return true;
+}
+
+void
+StorageItemFrame::RefcountedVariant::release_retrocausal_queue_consume()
+{
+  assert(std::holds_alternative<RetrocausalQueueArgs>(variant_));
+  assert(refcount_ > 0);
+  auto &args = get_variant_arm_unchecked<RetrocausalQueueArgs>();
+  assert(args.consumer_lock_);
+  args.consumer_lock_ = false;
 }
 
 namespace {
@@ -403,11 +536,28 @@ to_lock(StorageDelta const &delta)
   StorageLock lock(StorageLockType::kSetItemTypeClass);
   lock.full_typeclass_lock().typeclass = to_typeclass(delta);
   switch (delta.type()) {
+  case StorageDeltaType::kBytestringSet:
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kBytestring);
+    return lock;
   case StorageDeltaType::kNonnegativeIntSetAdd:
     lock.full_typeclass_lock().extra_lock_data.item_type(
         StorageItemType::kNonnegativeInt);
     lock.full_typeclass_lock().extra_lock_data.nnint_subtracted_amount() =
         to_xdr(std::min<int128_t>(0, from_xdr(delta.nnint().add_value)));
+    return lock;
+  case StorageDeltaType::kRetrocausalQueueModify:
+  {
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kRetrocausalQueue);
+    if (delta.retrocausal_queue().consume) {
+      lock.full_typeclass_lock().extra_lock_data.consume_lock() = 1;
+    }
+    return lock;
+  }
+  case StorageDeltaType::kDelete:
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kDeleted);
     return lock;
   default:
     return lock;
@@ -452,43 +602,52 @@ StorageItemFrame::try_reserve(StorageDelta const &delta,
     assert(
         variant_.matches_typeclass(req_lock.full_typeclass_lock().typeclass));
 
-    if (req_lock.full_typeclass_lock().extra_lock_data.item_type() !=
-        StorageItemType::kNonnegativeInt) {
-      // nothing to do here, we already have the lock
-      // (and already have a reference included in refcount_)
+    switch (req_lock.full_typeclass_lock().extra_lock_data.item_type()) {
+    case StorageItemType::kNonnegativeInt:
+    {
+      int128_t prev_sub_amount =
+          from_xdr(previous_lock.full_typeclass_lock()
+                       .extra_lock_data.nnint_subtracted_amount());
+      int128_t req_sub_amount =
+          from_xdr(req_lock.full_typeclass_lock()
+                       .extra_lock_data.nnint_subtracted_amount());
+
+      assert(prev_sub_amount <= 0);
+      assert(req_sub_amount <= 0);
+      assert(prev_sub_amount != std::numeric_limits<int128_t>::min());
+      if (prev_sub_amount <= req_sub_amount) {
+        return previous_lock;
+      }
+
+      auto reserve_res = variant_.try_reserve_nnint_additional(req_sub_amount -
+                                                               prev_sub_amount);
+      if (!reserve_res) {
+        return std::nullopt;
+      }
+
+      return req_lock;
+    } break;
+    case StorageItemType::kRetrocausalQueue:
+    {
+      if (req_lock.full_typeclass_lock().extra_lock_data.consume_lock() == 1) {
+        if (variant_.try_reserve_retrocausal_queue_consume()) {
+          return req_lock;
+        }
+        return std::nullopt;
+      }
+      assert(req_lock == previous_lock);
       return previous_lock;
     }
-
-    // item_type == kNonnegativeInt
-
-    int128_t prev_sub_amount =
-        from_xdr(previous_lock.full_typeclass_lock()
-                     .extra_lock_data.nnint_subtracted_amount());
-    int128_t req_sub_amount =
-        from_xdr(req_lock.full_typeclass_lock()
-                     .extra_lock_data.nnint_subtracted_amount());
-
-    assert(prev_sub_amount <= 0);
-    assert(req_sub_amount <= 0);
-    assert(prev_sub_amount != std::numeric_limits<int128_t>::min());
-    if (prev_sub_amount <= req_sub_amount) {
+    default:
       return previous_lock;
     }
-
-    auto reserve_res =
-        variant_.try_reserve_nnint_additional(req_sub_amount - prev_sub_amount);
-    if (!reserve_res) {
-      return std::nullopt;
-    }
-
-    return req_lock;
   }
-  // always succeeds
+  // always succeeds if we have an exclusive lock
   case StorageLockType::kExclusiveLock:
   case StorageLockType::kPermanentExclusiveLock:
     return previous_lock;
   default:
-    throw std::runtime_error("unimplemented");
+    throw std::runtime_error("impossible");
   }
 }
 
@@ -524,6 +683,16 @@ StorageItemFrame::revert_set_typeclass_lock_to_set_typeclass(
   case StorageDeltaType::kDelete:
     // nothing to do
     break;
+  case StorageDeltaType::kRetrocausalQueueModify:
+  {
+    // If we took out the consume lock, but no longer need it
+    if (lock.full_typeclass_lock().extra_lock_data.consume_lock() == 1) {
+      if (!delta.retrocausal_queue().consume) {
+        variant_.release_retrocausal_queue_consume();
+      }
+    }
+    break;
+  }
   default:
     throw std::runtime_error("unimplemented");
   }
