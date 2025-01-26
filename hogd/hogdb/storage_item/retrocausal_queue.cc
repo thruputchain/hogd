@@ -1,23 +1,34 @@
 #include "hogd/hogdb/storage_item/retrocausal_queue.h"
+#include "storage_item.hh"
+
+#include <cassert>
+#include <utility>
 
 namespace hogd {
 
-RetrocausalQueue::RetrocausalQueue(RetrocausalQueue const &parent,
-                                   uint64_t current_block_number)
-  : current_block_number_(current_block_number)
+RetrocausalQueue::RetrocausalQueue(
+    RetrocausalQueue const &parent,
+    RetrocausalQueuePastBlockConsumeDelta const &consume_delta,
+    RetrocausalQueueBlock current_round_block)
+  : current_block_number_(current_round_block.block_number)
 {
   for (auto const &[block_number, block] : parent.blocks_) {
+    assert(block_number != current_round_block.block_number);
     blocks_.emplace(block_number, CoWBlockReference{.block_ = block.block_,
                                                     .is_modified_ = false});
   }
+  apply_consume_delta(consume_delta);
+  blocks_.emplace(current_round_block.block_number,
+                  CoWBlockReference{.block_ =
+                                        std::make_shared<RetrocausalQueueBlock>(
+                                            std::move(current_round_block)),
+                                    .is_modified_ = true});
   assert(current_block_number_ > parent.current_block_number_);
 }
 
 RetrocausalQueue::RetrocausalQueue(uint64_t current_block_number)
   : current_block_number_(current_block_number)
-{
-  assert(current_block_number_ > 0);
-}
+{}
 
 RetrocausalQueueBlock &
 RetrocausalQueue::get_block(uint64_t block_number)
@@ -58,53 +69,25 @@ RetrocausalQueue::try_get_next_block(uint64_t search_start_number)
 }
 
 void
-RetrocausalQueue::apply_consume_delta(RetrocausalQueueConsumeDelta const &delta)
+RetrocausalQueue::apply_consume_delta(
+    RetrocausalQueuePastBlockConsumeDelta const &delta)
 {
   assert(!committed_consume_);
   committed_consume_ = true;
-  auto past_clear = delta.past_block_consume;
 
   auto it = blocks_.begin();
   while (it != blocks_.end() &&
-         it->first <= past_clear.max_fully_consumed_block_number) {
+         it->first <= delta.max_fully_consumed_block_number) {
     it = blocks_.erase(it);
   }
 
-  if (delta.past_block_consume.partial_consumed_number > 0) {
+  if (delta.partial_consumed_number > 0) {
     assert(it != blocks_.end());
     it->second.refresh_for_cow();
     it->second.block_->entries = {it->second.block_->entries.begin() +
-                                      past_clear.partial_consumed_number,
+                                      delta.partial_consumed_number,
                                   it->second.block_->entries.end()};
   }
-
-  current_block_consumed_entries_ = delta.current_block_consumed;
-}
-
-void
-RetrocausalQueue::apply_insert_delta(RetrocausalQueueInsertDelta const &delta)
-{
-  current_block_entries_.insert(current_block_entries_.end(),
-                                delta.added_entries.begin(),
-                                delta.added_entries.end());
-}
-
-void
-RetrocausalQueue::canonicalize_and_commit_current_block()
-{
-  std::set<QueueEntry> entries;
-  entries.insert(current_block_entries_.begin(), current_block_entries_.end());
-
-  for (auto const &entry : current_block_consumed_entries_) {
-    [[maybe_unused]] auto n_erased = entries.erase(entry);
-    assert(n_erased == 1);
-  }
-  auto &block = get_block(current_block_number_);
-  assert(block.entries.empty());
-  for (auto const &entry : entries) {
-    block.entries.push_back(entry);
-  }
-  // block.entries is sorted bc entries is a set
 }
 
 } // namespace hogd

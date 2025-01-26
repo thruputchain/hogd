@@ -17,6 +17,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/flag_utils.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -386,6 +387,7 @@ SystemCallHandler::set_bytestring(StorageKey const &storage_key,
                                   std::span<const std::byte> input_bytestring,
                                   StorageDeltaFlags flags)
 {
+  std::printf("doing set bytestring op\n");
   auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
 
   Bytestring new_string;
@@ -396,8 +398,8 @@ SystemCallHandler::set_bytestring(StorageKey const &storage_key,
 
   bool exclusive_lock =
       (flags & std::to_underlying(StorageDeltaModifier::kLockExclusive)) != 0;
-  if (flags ^ std::to_underlying(StorageDeltaModifier::kLockExclusive)) {
-    // invalid flag supplied
+
+  if (!is_valid_storage_delta_flag(flags)) {
     return SyscallError{SyscallErrorCode::kInvalidInput};
   }
   return item_view.set(BytestringItem(std::move(new_string), exclusive_lock));

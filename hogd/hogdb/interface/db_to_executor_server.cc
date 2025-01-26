@@ -61,9 +61,10 @@ DBToExecutorServer::get_item(BlockID block_id, AddressAndKey const &addrkey)
   if (!item) {
     co_return ExpectedStorageItem(RPCError::kNoStorageItem);
   }
+  assert(item->type() != StorageItemType::kDeleted);
 
   auto out = ExpectedStorageItem(RPCError::kNone);
-  out.item() = *item;
+  out.item() = item->to_wire_item();
 
   co_return out;
 }

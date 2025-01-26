@@ -9,6 +9,7 @@ add_library(
 target_link_libraries(
   hogdb_softstate
   protocol
+  hogdb_storage_item
   hogdb_db
 )
 

@@ -9,7 +9,7 @@
 
 namespace hogd {
 
-std::optional<StorageItem>
+std::optional<StorageItemWrapper>
 InMemoryDatabase::get_post_block_storage_item(AddressAndKey const &addrkey)
 {
   auto map = items_.take();

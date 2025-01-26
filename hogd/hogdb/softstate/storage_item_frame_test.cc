@@ -74,10 +74,7 @@ TEST(StorageItemFrame, RewriteVariantTypeNullStart)
 
 TEST(StorageItemFrame, RewriteVariantFromBase)
 {
-  StorageItem base_item;
-
-  base_item.type(StorageItemType::kBytestring);
-  base_item.bytestring() = {0, 1, 2, 3};
+  StorageItemWrapper base_item({0, 1, 2, 3});
 
   StorageItemFrame item(AddressAndKey{}, base_item);
 
@@ -134,10 +131,7 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
 
 TEST(StorageItemFrame, DeleteItem)
 {
-  StorageItem base_item;
-
-  base_item.type(StorageItemType::kBytestring);
-  base_item.bytestring() = {0, 1, 2, 3};
+  StorageItemWrapper base_item({0, 1, 2, 3});
 
   StorageItemFrame item(AddressAndKey{}, base_item);
   ASSERT_TRUE(item.get_snapshot_item());
@@ -246,7 +240,7 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
   auto snapshot = item.get_post_close_block_item();
   ASSERT_TRUE(snapshot);
   EXPECT_EQ(snapshot->type(), StorageItemType::kNonnegativeInt);
-  EXPECT_EQ(snapshot->nnint(), to_xdr(int128_t{1}));
+  EXPECT_EQ(snapshot->nnint(), int128_t{1});
 }
 
 TEST(StorageItemFrame, NNIntFromExclusiveLock)
@@ -280,7 +274,7 @@ TEST(StorageItemFrame, NNIntFromExclusiveLock)
   auto snapshot = item.get_post_close_block_item();
   ASSERT_TRUE(snapshot);
   EXPECT_EQ(snapshot->type(), StorageItemType::kNonnegativeInt);
-  EXPECT_EQ(snapshot->nnint(), to_xdr(int128_t{6}));
+  EXPECT_EQ(snapshot->nnint(), int128_t{6});
 }
 
 TEST(StorageItemFrame, ExclusiveBytestring)

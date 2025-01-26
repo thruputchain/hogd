@@ -44,7 +44,7 @@ public:
 
   // The value of the item, after all modifications of the current block are
   // applied. Cannot be called before the block is closed.
-  std::optional<StorageItem>
+  std::optional<StorageItemWrapper>
   get_post_block_storage_item(AddressAndKey const &addrkey);
 
   // Read from post block snapshot data, after all operations in the block
@@ -65,7 +65,7 @@ protected:
 
   // the value of the item, before any modifications of the current block are
   // applied. Cannot be called after the block is closed.
-  std::optional<StorageItem>
+  std::optional<StorageItemWrapper>
   get_snapshot_storage_item(AddressAndKey const &addrkey);
 
   // Methods relevant for contracts

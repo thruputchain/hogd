@@ -10,7 +10,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/softstate/uint256_reservation.h"
-#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
@@ -19,35 +18,38 @@ namespace hogd {
 
 StorageItemFrame::StorageItemFrame(
     AddressAndKey const &addrkey,
-    std::optional<StorageItem> const &snapshot_state)
+    std::optional<StorageItemWrapper> const &snapshot_state)
   : addr_key_(addrkey), committed_item_(snapshot_state)
 {}
 
-std::optional<StorageItem>
+std::optional<StorageItemWrapper>
 StorageItemFrame::BytestringArgs::to_item() const
 {
-  StorageItem item(StorageItemType::kBytestring);
-  item.bytestring() = bytestring_set_;
-  return item;
+  return StorageItemWrapper(bytestring_set_);
 }
 
-std::optional<StorageItem>
+std::optional<StorageItemWrapper>
 StorageItemFrame::NNIntSetAddArgs::to_item() const
 {
-  StorageItem item;
-  item.type(StorageItemType::kNonnegativeInt);
-
   int128_t new_value = set_value_ + total_subtracted_;
   int128_t total_add = total_added_.get_capped();
 
+  int128_t out = 0;
+
   if (integer_add_overflow<int128_t>(new_value, total_add)) {
-    item.nnint() = to_xdr(std::numeric_limits<int128_t>::max());
+    out = std::numeric_limits<int128_t>::max();
   }
   else {
-    item.nnint() = to_xdr(new_value + total_add);
+    out = new_value + total_add;
   }
 
-  return item;
+  return StorageItemWrapper(out);
+}
+
+std::optional<StorageItemWrapper>
+StorageItemFrame::RetrocausalQueueArgs::to_item() const
+{
+  throw std::runtime_error("unimplemented");
 }
 
 template<typename VariantArm, typename... VariantArgs>
@@ -185,7 +187,8 @@ StorageItemFrame::RefcountedVariant::matches_typeclass(
   return std::visit(
       [&typeclass](auto const &args) {
         if constexpr (std::same_as<std::decay_t<decltype(args)>, DeleteArgs>) {
-          return typeclass.item_type() == StorageItemType::kDeleted;
+          return typeclass.item_type() == StorageItemType::kDeleted &&
+                 args.typeclass_match();
         }
         else if constexpr (std::same_as<std::decay_t<decltype(args)>,
                                         BytestringArgs>) {
@@ -196,6 +199,11 @@ StorageItemFrame::RefcountedVariant::matches_typeclass(
                                         NNIntSetAddArgs>) {
           return typeclass.item_type() == StorageItemType::kNonnegativeInt &&
                  args.typeclass_match(from_xdr(typeclass.nnint_set()));
+        }
+        else if constexpr (std::same_as<std::decay_t<decltype(args)>,
+                                        RetrocausalQueueArgs>) {
+          return typeclass.item_type() == StorageItemType::kRetrocausalQueue &&
+                 args.typeclass_match();
         }
         else {
           static_assert(
@@ -237,6 +245,8 @@ StorageItemFrame::commit_delta(StorageDelta const &delta,
     break;
   case StorageDeltaType::kDelete:
     break;
+  default:
+    throw std::runtime_error("unimpl");
   }
 
   if (maintain_permanent_exclusive_lock) {
@@ -244,14 +254,14 @@ StorageItemFrame::commit_delta(StorageDelta const &delta,
   }
 }
 
-std::optional<StorageItem> const &
+std::optional<StorageItemWrapper> const &
 StorageItemFrame::get_snapshot_item() const
 {
   assert(!round_committed_);
   return committed_item_;
 }
 
-std::optional<StorageItem> const &
+std::optional<StorageItemWrapper> const &
 StorageItemFrame::get_post_close_block_item()
 {
   update_committed_item();
@@ -381,8 +391,10 @@ to_typeclass(StorageDelta const &delta)
   }
   case StorageDeltaType::kDelete:
     return StorageItemTypeClass(StorageItemType::kDeleted);
+  default:
+    throw std::runtime_error("unimplemented");
   }
-  throw std::runtime_error("impossible");
+  // unreachable
 }
 
 StorageLock
@@ -512,6 +524,8 @@ StorageItemFrame::revert_set_typeclass_lock_to_set_typeclass(
   case StorageDeltaType::kDelete:
     // nothing to do
     break;
+  default:
+    throw std::runtime_error("unimplemented");
   }
 }
 

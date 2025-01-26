@@ -7,4 +7,5 @@ target_link_libraries(
   hogdb_db
   protocol
   hogd
+  hogdb_storage_item
 )

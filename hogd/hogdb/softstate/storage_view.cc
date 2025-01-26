@@ -18,14 +18,14 @@ ParentBlockView::to_key(AddressAndKey const &addrkey)
                                  sizeof(AddressAndKey)));
 }
 
-std::optional<StorageItem>
+std::optional<StorageItemWrapper>
 ParentBlockView::get_snapshot_storage_item(AddressAndKey const &addrkey)
 {
   assert(!closed_);
   auto key = to_key(addrkey);
 
   auto local_res = modified_items_.modify_element(
-      key, [](auto const &v) -> std::optional<StorageItem> {
+      key, [](auto const &v) -> std::optional<StorageItemWrapper> {
         return v.get_snapshot_item();
       });
 
@@ -35,23 +35,21 @@ ParentBlockView::get_snapshot_storage_item(AddressAndKey const &addrkey)
 
   std::shared_lock lk(mtx_);
   return std::visit(
-      [&addrkey](auto *parent) -> std::optional<StorageItem> {
+      [&addrkey](auto *parent) -> std::optional<StorageItemWrapper> {
         return parent->get_post_block_storage_item(addrkey);
       },
       parent_view_);
 }
 
-std::optional<StorageItem>
+std::optional<StorageItemWrapper>
 ParentBlockView::get_post_block_storage_item(AddressAndKey const &addrkey)
 {
   assert(closed_);
   auto key = to_key(addrkey);
 
-  auto local_res =
-      modified_items_.modify_element(key,
-                                     [](auto &v) -> std::optional<StorageItem> {
-                                       return v.get_post_close_block_item();
-                                     });
+  auto local_res = modified_items_.modify_element(key, [](auto &v) {
+    return v.get_post_close_block_item();
+  });
 
   if (local_res.has_value()) {
     return *local_res;
@@ -59,7 +57,7 @@ ParentBlockView::get_post_block_storage_item(AddressAndKey const &addrkey)
 
   std::shared_lock lk(mtx_);
   return std::visit(
-      [&addrkey](auto *parent) -> std::optional<StorageItem> {
+      [&addrkey](auto *parent) {
         return parent->get_post_block_storage_item(addrkey);
       },
       parent_view_);
@@ -94,12 +92,12 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
     return *res;
   }
 
-  std::optional<StorageItem> parent_value;
+  std::optional<StorageItemWrapper> parent_value;
   {
     std::shared_lock lk(mtx_);
     // else, value was not present in cache.  Lookup from parent and emplace
     parent_value = std::visit(
-        [&addrkey](auto *parent) -> std::optional<StorageItem> {
+        [&addrkey](auto *parent) {
           return parent->get_post_block_storage_item(addrkey);
         },
         parent_view_);

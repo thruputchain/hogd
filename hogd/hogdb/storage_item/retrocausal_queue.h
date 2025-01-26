@@ -2,7 +2,6 @@
 
 #include <map>
 #include <memory>
-#include <set>
 
 #include "hogd/base/types.h"
 #include "storage_item.hh"
@@ -11,42 +10,29 @@ namespace hogd {
 
 // copy on write interface to a retrocausal queue
 // None of the methods here are thread-safe.
+//
+// This implementation, for convenience, assumes that block number 0 is never
+// instantiated.  Every consume_entry can therefore set 0 as the
+// past_block_consume.max_fully_consumed_block_number, to be a no-op.
+// This could be fixed by making max_fully_consumed_block_number an optional.
 class RetrocausalQueue {
 public:
   RetrocausalQueue(RetrocausalQueue const &parent,
-                   uint64_t current_block_number);
-
+                   RetrocausalQueuePastBlockConsumeDelta const &consume_delta,
+                   RetrocausalQueueBlock current_round_block);
   RetrocausalQueue(uint64_t current_block_number);
 
-  RetrocausalQueue(RetrocausalQueue &&) = delete;
-  RetrocausalQueue &operator=(RetrocausalQueue &&) = delete;
-  RetrocausalQueue &operator=(RetrocausalQueue const &) = delete;
+  // allow move and copy
+  RetrocausalQueue(RetrocausalQueue &&) = default;
+  RetrocausalQueue &operator=(RetrocausalQueue &&) noexcept = default;
+  RetrocausalQueue(RetrocausalQueue const &) = default;
+  RetrocausalQueue &operator=(RetrocausalQueue const &) noexcept = default;
 
   // Returns the next block in the queue, or nullptr if the queue is empty.
   // Does not return current block entries.
   // Starts searching from block number search_start_number.
   // Does not refresh the block for copy-on-write.
   const RetrocausalQueueBlock *try_get_next_block(uint64_t search_start_number);
-
-  // Applies a consume delta to the retrocausal queue.
-  // The delta is applied atomically.
-  // It does not make sense to apply two consume deltas in the same block,
-  // given that these queues are single-consumer multi-producer.
-  void apply_consume_delta(RetrocausalQueueConsumeDelta const &delta);
-
-  // Applies an insert delta to the retrocausal queue.
-  // Not required to be unique in a block.
-  void apply_insert_delta(RetrocausalQueueInsertDelta const &delta);
-
-  // The order of elements here is NONDETERMINISTIC.
-  std::vector<QueueEntry> const &get_current_block_entries() const
-  {
-    return current_block_entries_;
-  }
-
-  // sorts the entries in the current block.
-  // This is not responsible for maintaining a per-block size limit.
-  void canonicalize_and_commit_current_block();
 
 private:
   struct CoWBlockReference {
@@ -56,12 +42,16 @@ private:
     void refresh_for_cow();
   };
 
+  // Applies a consume delta to the retrocausal queue.
+  // The delta is applied atomically.
+  // It does not make sense to apply two consume deltas in the same block,
+  // given that these queues are single-consumer multi-producer.
+  void apply_consume_delta(RetrocausalQueuePastBlockConsumeDelta const &delta);
+
   RetrocausalQueueBlock &get_block(uint64_t block_number);
 
   std::map<uint64_t, CoWBlockReference> blocks_;
-  const uint64_t current_block_number_;
-  std::vector<QueueEntry> current_block_entries_;
-  x23::Vec<QueueEntry> current_block_consumed_entries_;
+  uint64_t current_block_number_;
   bool committed_consume_ = false;
 };
 

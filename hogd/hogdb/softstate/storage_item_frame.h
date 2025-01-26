@@ -5,6 +5,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/softstate/uint256_reservation.h"
+#include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 
@@ -23,7 +24,7 @@ namespace hogd {
 class StorageItemFrame {
 public:
   StorageItemFrame(AddressAndKey const &addrkey,
-                   std::optional<StorageItem> const &snapshot_state);
+                   std::optional<StorageItemWrapper> const &snapshot_state);
 
   // Disable copy
   StorageItemFrame(const StorageItemFrame &) = delete;
@@ -58,7 +59,7 @@ public:
   // Get the item, before any deltas of the current round were committed.
   // Cannot be called after block close (after get_post_close_block_item() is
   // called).
-  std::optional<StorageItem> const &get_snapshot_item() const;
+  std::optional<StorageItemWrapper> const &get_snapshot_item() const;
 
   // All pending transactions should finish before get_post_close_block_item is
   // called. That is, every try_reserve_delta() is followed by a revert_delta or
@@ -66,7 +67,7 @@ public:
   //
   // This method updates committed_item_ to be the value of the item
   // after the end of the current block.
-  std::optional<StorageItem> const &get_post_close_block_item();
+  std::optional<StorageItemWrapper> const &get_post_close_block_item();
 
   std::span<const std::byte> get_key() const
   {
@@ -126,7 +127,7 @@ private:
     {
       return candidate_bytestring == bytestring_set_;
     }
-    std::optional<StorageItem> to_item() const;
+    std::optional<StorageItemWrapper> to_item() const;
   };
 
   // NNInt state
@@ -140,13 +141,19 @@ private:
     {
       return candidate_set_value == set_value_;
     }
-    std::optional<StorageItem> to_item() const;
+    std::optional<StorageItemWrapper> to_item() const;
   };
 
   // Deleted state
   struct DeleteArgs {
     static bool typeclass_match() { return true; }
-    static std::optional<StorageItem> to_item() { return std::nullopt; }
+    static std::optional<StorageItemWrapper> to_item() { return std::nullopt; }
+  };
+
+  struct RetrocausalQueueArgs {
+    // TODO(geoff) contents
+    static bool typeclass_match() { return true; }
+    std::optional<StorageItemWrapper> to_item() const;
   };
 
   // Exclusive locked state
@@ -155,14 +162,14 @@ private:
   // with refcount 0).
   struct ExclusiveLockedState {
     static bool typeclass_match() { return false; }
-    static std::optional<StorageItem> to_item()
+    static std::optional<StorageItemWrapper> to_item()
     {
       throw std::runtime_error("Impossible state");
     }
   };
 
   using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs, DeleteArgs,
-                                 ExclusiveLockedState>;
+                                 RetrocausalQueueArgs, ExclusiveLockedState>;
 
   // Contents of the variant are ignored if refcount_ is 0.
   // Every successful try_reserve increases the refcount, and revert reduces it.
@@ -220,7 +227,7 @@ private:
 
   bool round_committed_ = false;
   AddressAndKey addr_key_;
-  std::optional<StorageItem> committed_item_;
+  std::optional<StorageItemWrapper> committed_item_;
   RefcountedVariant variant_;
 };
 

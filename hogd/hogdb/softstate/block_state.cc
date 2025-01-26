@@ -57,7 +57,7 @@ BlockState::abort_transaction(TransactionID txid)
   }
 }
 
-std::optional<StorageItem>
+std::optional<StorageItemWrapper>
 BlockState::get_snapshot_storage_item(AddressAndKey const &addrkey)
 {
   return storage_view_.get_snapshot_storage_item(addrkey);

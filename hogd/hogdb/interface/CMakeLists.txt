@@ -9,6 +9,7 @@ target_link_libraries(
   hogdb_interface
   protocol
   hogd
+  hogdb_storage_item
   hogdb_softstate
   hogdb_db
 )

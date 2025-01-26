@@ -66,7 +66,7 @@ namespace hogd
     void;
   };
 
-  typedef unsigned ExecutorID;
+  typedef unsigned int ExecutorID;
   // First 32 bits of the TransactionID should be the ExecutorID.
   // Each executor can set the lowbits locally.
   typedef unsigned hyper TransactionID;

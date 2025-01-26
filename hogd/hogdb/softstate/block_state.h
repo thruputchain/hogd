@@ -69,7 +69,7 @@ public:
   void commit_contract_deploy(ContractAddress const &addr,
                               SHA256Hash const &contract_hash);
 
-  std::optional<StorageItem>
+  std::optional<StorageItemWrapper>
   get_snapshot_storage_item(AddressAndKey const &addrkey);
   std::optional<SHA256Hash>
   get_snapshot_deployment(ContractAddress const &addr);

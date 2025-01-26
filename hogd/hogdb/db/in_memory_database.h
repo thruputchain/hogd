@@ -4,6 +4,7 @@
 
 #include "contract.hh"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/mvar.h"
@@ -24,7 +25,10 @@ public:
   // it should no longer call get_post_block_storage_item(),
   // and it must not begin to write to this until it has committed --
   // and thus any siblings are deactivated.
-  std::optional<StorageItem>
+  //
+  // This interface will need to get expanded/modified, once we decide
+  // how to deal with retrocausal queue blocks.  TODO(geoff).
+  std::optional<StorageItemWrapper>
   get_post_block_storage_item(AddressAndKey const &addrkey);
   std::optional<SHA256Hash>
   get_post_block_deployment(ContractAddress const &addr);
@@ -32,7 +36,7 @@ public:
   get_post_block_contract(SHA256Hash const &hash);
 
   void write_item(AddressAndKey const &addrkey,
-                  std::optional<StorageItem> const &item)
+                  std::optional<StorageItemWrapper> const &item)
   {
     if (item) {
       items_->emplace(addrkey, *item);
@@ -55,7 +59,7 @@ public:
   }
 
 private:
-  x23::MVar<std::unordered_map<AddressAndKey, StorageItem>> items_;
+  x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
   x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>
       contract_deployments_;
   x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>

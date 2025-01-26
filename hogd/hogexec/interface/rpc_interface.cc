@@ -35,6 +35,7 @@ ExecutorRpcInterface::propose_transaction(BlockID block_id,
         &syscall_handler);
 
     if (!invoke_res.is_root_success()) {
+      co_await proxy.abort_transaction();
       co_return ExpectedProposalData(RPCError::kTransactionFailed);
     }
 
@@ -77,6 +78,7 @@ ExecutorRpcInterface::validate_transaction(
         &syscall_handler);
 
     if (!invoke_res.is_root_success()) {
+      co_await proxy.abort_transaction();
       co_return RPCError::kTransactionFailed;
     }
 
