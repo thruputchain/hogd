@@ -576,8 +576,12 @@ public:
   friend constexpr auto operator<=>(const Vec &a, const Vec &b)
       requires requires(const value_type v) { v <=> v; }
   {
+    // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=101361
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wstringop-overread"
     return std::lexicographical_compare_three_way(a.begin(), a.end(), b.begin(),
                                                   b.end());
+    #pragma GCC diagnostic pop
   }
   friend constexpr bool operator==(const Vec &a, const Vec &b)
       requires requires(const value_type v) { v == v; }

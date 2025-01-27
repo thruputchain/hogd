@@ -50,6 +50,8 @@ public:
   // Writes this block's state to the base database.
   // After this call, this block will read directly from the base database
   // instead of the parent.
+  // TODO(geoff): can clear out modified_items_ during this call, if we want to
+  // bother to do so.
   void commit_to_database(InMemoryDatabase *base_database);
 
   // It is an error to reserve a transaction delta for a txid and then

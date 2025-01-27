@@ -244,10 +244,7 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
 
   item.commit(nnint_set_add_2, *final_lock);
 
-  auto snapshot = item.get_post_close_block_item();
-  ASSERT_TRUE(snapshot);
-  EXPECT_EQ(snapshot->type(), StorageItemType::kNonnegativeInt);
-  EXPECT_EQ(snapshot->nnint(), int128_t{1});
+  expect_final(item, int128_t{1});
 }
 
 TEST(StorageItemFrame, NNIntFromExclusiveLock)

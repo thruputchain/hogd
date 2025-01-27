@@ -1,10 +1,10 @@
 #pragma once
 
 #include <atomic>
-#include <cstdint>
 #include <map>
 #include <vector>
 
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "transaction.hh"
 #include "types.hh"
