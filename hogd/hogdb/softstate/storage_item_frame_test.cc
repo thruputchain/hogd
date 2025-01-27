@@ -13,6 +13,25 @@
 
 namespace hogd {
 
+namespace {
+void
+expect_final(StorageItemFrame &item, Bytestring const &bytestring)
+{
+  auto snapshot = item.get_post_close_block_item();
+  ASSERT_TRUE(snapshot);
+  EXPECT_EQ(snapshot->type(), StorageItemType::kBytestring);
+  EXPECT_EQ(snapshot->bytestring(), bytestring);
+}
+void
+expect_final(StorageItemFrame &item, int128_t nnint)
+{
+  auto snapshot = item.get_post_close_block_item();
+  ASSERT_TRUE(snapshot);
+  EXPECT_EQ(snapshot->type(), StorageItemType::kNonnegativeInt);
+  EXPECT_EQ(snapshot->nnint(), nnint);
+}
+} // namespace
+
 // Change the typeclass of a storage item during execution
 TEST(StorageItemFrame, RewriteVariantTypeNullStart)
 {
@@ -117,16 +136,8 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
   item.commit(bytestring_delta, *b_lock2);
 
   StorageItemFrame item2(AddressAndKey{}, item.get_post_close_block_item());
-
-  auto committed_item = item2.get_snapshot_item();
-
-  ASSERT_TRUE(committed_item.has_value());
-
-  // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  EXPECT_EQ(committed_item->type(), StorageItemType::kBytestring);
-
-  EXPECT_EQ(committed_item->bytestring(), bytestring_delta.bytestring());
-  // NOLINTEND(bugprone-unchecked-optional-access)
+  expect_final(item, bytestring_delta.bytestring());
+  expect_final(item2, bytestring_delta.bytestring());
 }
 
 TEST(StorageItemFrame, DeleteItem)
@@ -175,11 +186,7 @@ TEST(StorageItemFrame, ExclusiveLockAcquire)
 
   item.commit(bytestring_delta, *lock2);
 
-  auto snapshot = item.get_post_close_block_item();
-
-  ASSERT_TRUE(snapshot);
-  EXPECT_EQ(snapshot->type(), StorageItemType::kBytestring);
-  EXPECT_EQ(snapshot->bytestring(), bytestring_delta.bytestring());
+  expect_final(item, bytestring_delta.bytestring());
 }
 
 TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
@@ -271,10 +278,7 @@ TEST(StorageItemFrame, NNIntFromExclusiveLock)
   item.commit(nnint_set_add_2, *lock2);
   EXPECT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
 
-  auto snapshot = item.get_post_close_block_item();
-  ASSERT_TRUE(snapshot);
-  EXPECT_EQ(snapshot->type(), StorageItemType::kNonnegativeInt);
-  EXPECT_EQ(snapshot->nnint(), int128_t{6});
+  expect_final(item, int128_t{6});
 }
 
 TEST(StorageItemFrame, ExclusiveBytestring)
@@ -294,14 +298,11 @@ TEST(StorageItemFrame, ExclusiveBytestring)
 
   item.commit(bytestring_delta, *lock);
 
-  auto snapshot = item.get_post_close_block_item();
-  ASSERT_TRUE(snapshot);
-  EXPECT_EQ(snapshot->type(), StorageItemType::kBytestring);
-  EXPECT_EQ(snapshot->bytestring(), bytestring_delta.bytestring());
-
   ASSERT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
   ASSERT_FALSE(
       item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone)));
+
+  expect_final(item, bytestring_delta.bytestring());
 }
 
 TEST(StorageItemFrame, ExclusiveLockMultiAcquire)

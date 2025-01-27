@@ -88,7 +88,13 @@ protected:
   x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
       contract_creates_;
 
-  // Does NOT own the parent StorageView
+  // Does NOT own the parent StorageView.
+  // The ParentBlockView is owned by BlockState and might be freed at any time
+  // (after unlink_parent is called).  As such, the ParentBlockView pointer
+  // should never be exposed outside of this interface. It is always accessed
+  // while mtx_ is held (in shared mode). unlink_parent acquires the mutex in
+  // exclusive mode, so by the time unlink_parent returns, any pending accesses
+  // to the parent_view_ have finished.
   std::shared_mutex mtx_;
   std::variant<ParentBlockView *, InMemoryDatabase *> parent_view_;
 };
@@ -103,10 +109,8 @@ public:
   void close_block() { closed_ = true; }
   void assert_block_closed() { assert(closed_); }
 
-  // Parent view has been committed to the persistent database.
-  // Rather than jump through the parent StorageView,
-  // at that point, we can just directly access the persistent database.
-  void unlink_parent(InMemoryDatabase *new_parent);
+  // parent must be an InMemoryDatabase
+  void commit_to_database(InMemoryDatabase *base_database);
 
   ParentBlockView *as_parent()
   {
@@ -130,6 +134,12 @@ public:
   using ParentBlockView::get_snapshot_contract;
   using ParentBlockView::get_snapshot_deployment;
   using ParentBlockView::get_snapshot_storage_item;
+
+private:
+  // Parent view has been committed to the persistent database.
+  // Rather than jump through the parent StorageView,
+  // at that point, we can just directly access the persistent database.
+  void unlink_parent(InMemoryDatabase *new_parent);
 };
 
 } // namespace hogd

@@ -15,10 +15,9 @@ namespace hogd {
 // principle, at the cost of much more code complexity. This edge case
 // should disappear by the next block.
 BlockManager::BlockManager(BlockID root_id,
-                           std::shared_ptr<BlockState> initial_state)
-  : block_cache_(8) // arbitrary init parameters
-    ,
-    last_committed_id_(root_id)
+                           std::shared_ptr<BlockState> initial_state,
+                           InMemoryDatabase *base_database)
+  : block_cache_(8), last_committed_id_(root_id), base_database_(base_database)
 {
   assert(initial_state);
   initial_state->assert_closed();
@@ -64,6 +63,12 @@ BlockManager::commit_block(BlockID id)
     remove_subtree(remove_id);
   }
   last_committed_id_ = id;
+
+  [[maybe_unused]]
+  auto res = block_cache_.modify_element(
+      std::as_bytes(std::span(&last_committed_id_, 1)),
+      [this](auto &v) { v.block_data_->commit_to_database(base_database_); });
+  assert(res);
 }
 
 void
@@ -74,8 +79,6 @@ BlockManager::remove_subtree(BlockID root)
   while (!queue.empty()) {
     auto id = queue.back();
     queue.pop_back();
-
-    std::printf("remove_subtree block %llu\n", id);
 
     auto key = std::as_bytes(std::span(&id, 1));
 

@@ -6,6 +6,7 @@
 #include <format>
 #include <mutex>
 
+#include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
 
 namespace hogd {
@@ -78,6 +79,29 @@ public:
     else {
       constexpr static std::optional<Ret> kOut = std::nullopt;
       return kOut;
+    }
+  }
+
+  // In most use cases (i.e. in storage view use case), this function is applied
+  // to all elements when there's already a guarantee that the map is not being
+  // modified.  But it does not particularly hurt to acquire the mutex.
+  template<typename Func> requires std::is_invocable_v<Func, T &>
+  void map_apply(Func lambda)
+  {
+    auto &pool = WorkerPool::get_default_pool();
+    std::vector<std::future<void>> futures;
+    for (size_t i = 0; i < buckets_.size(); ++i) {
+      auto &bucket = buckets_[i];
+      auto &mutex = mutexes_[i];
+      futures.push_back(pool.submit([&bucket, &mutex, lambda]() {
+        std::unique_lock lk(mutex);
+        for (auto &elt : bucket) {
+          lambda(elt);
+        }
+      }));
+    }
+    for (auto &future : futures) {
+      future.get();
     }
   }
 

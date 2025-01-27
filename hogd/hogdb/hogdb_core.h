@@ -17,8 +17,8 @@ namespace hogd {
 // TODO(geoff): pass any initialization params to root_db_
 class HogdbCore {
 public:
-  HogdbCore(int nthreads, std::string exec_server_port,
-            std::string coord_server_port);
+  HogdbCore(int nthreads, std::string const &exec_server_port,
+            std::string const &coord_server_port);
 
   HogdbCore(HogdbCore const &) = delete;
   HogdbCore &operator=(HogdbCore const &) = delete;

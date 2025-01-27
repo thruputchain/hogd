@@ -142,6 +142,25 @@ StorageView::unlink_parent(InMemoryDatabase *new_parent)
   parent_view_.emplace<InMemoryDatabase *>(new_parent);
 }
 
+void
+StorageView::commit_to_database(InMemoryDatabase *base_database)
+{
+  modified_items_.map_apply([base_database](auto &v) {
+    base_database->write_item(v.get_addr_key(), v.get_post_close_block_item());
+  });
+
+  auto contract_creates = contract_creates_.take();
+  for (auto &[hash, contract] : *contract_creates) {
+    base_database->write_contract(hash, contract);
+  }
+  auto contract_deployments = contract_deployments_.take();
+  for (auto &[addr, hash] : *contract_deployments) {
+    base_database->write_deployment(addr, hash);
+  }
+
+  unlink_parent(base_database);
+}
+
 std::optional<SHA256Hash>
 ParentBlockView::get_snapshot_deployment(ContractAddress const &addr)
 {

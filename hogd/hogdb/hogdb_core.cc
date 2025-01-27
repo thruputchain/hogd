@@ -11,10 +11,11 @@ namespace hogd {
 
 // The genesis block BlockState is immediately ready for being
 // GC'd from block manager, except that we need some block there as a root view.
-HogdbCore::HogdbCore(int nthreads, std::string exec_server_port,
-                     std::string coord_server_port)
+HogdbCore::HogdbCore(int nthreads, std::string const &exec_server_port,
+                     std::string const &coord_server_port)
   : pool_(nthreads), cp_(pool_),
-    block_manager_(kGenesisBlockID, std::make_shared<BlockState>(&root_db_)),
+    block_manager_(kGenesisBlockID, std::make_shared<BlockState>(&root_db_),
+                   &root_db_),
     db_to_exec_server_(block_manager_), db_to_coord_server_(block_manager_)
 {
   x23::RpcLogger::default_logfd = 2;

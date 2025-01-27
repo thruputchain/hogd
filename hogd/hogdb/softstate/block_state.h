@@ -47,12 +47,10 @@ public:
   BlockState(BlockState &&) = delete;
   BlockState &operator=(BlockState &&) = delete;
 
-  // Unlinks this block's parent state.  Does not modify the previous parent
-  // state, so the previous parent state must be already committed to the base
-  // database. After unlinking, this block will read directly from the base
-  // database instead of the parent. The parent block state will be destroyed
-  // once all references to it are released.
-  void unlink_parent(InMemoryDatabase *base_database);
+  // Writes this block's state to the base database.
+  // After this call, this block will read directly from the base database
+  // instead of the parent.
+  void commit_to_database(InMemoryDatabase *base_database);
 
   // It is an error to reserve a transaction delta for a txid and then
   // not call commit_transaction or abort_transaction before

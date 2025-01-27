@@ -85,6 +85,8 @@ public:
   [[nodiscard]] bool
   try_acquire_exclusive_lock(StorageLockType previous_lock_type);
 
+  AddressAndKey const &get_addr_key() const { return addr_key_; }
+
 private:
   // Performs a reservation of the storage item for the given delta operation.
   // Should be performed only when the initial lock state is kNone.

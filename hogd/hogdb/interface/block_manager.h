@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "hogd/base/hashmap.h"
+#include "hogd/hogdb/db/in_memory_database.h"
 #include "hogd/hogdb/softstate/block_state.h"
 #include "rpc_types.hh"
 
@@ -18,12 +19,14 @@ public:
   // TODO(geoff): This should be determined by some process in crash recovery
   // code. That initialization process should also provide block_data_ for that
   // committed block.
-  BlockManager(BlockID root_id, std::shared_ptr<BlockState> initial_state);
+  BlockManager(BlockID root_id, std::shared_ptr<BlockState> initial_state,
+               InMemoryDatabase *base_database);
 
   // Requirement: The supplied id must be a direct child of the most recently
   // committed block. Deletes from block_cache_ any entries that might not
   // commit in the future. (i.e. any siblings of the supplied id, and any of
   // their children).
+  // There should not be concurrent commits of any block.
   void commit_block(BlockID id);
 
   std::shared_ptr<BlockState> get_block_data(BlockID id);
@@ -68,8 +71,8 @@ private:
   void remove_subtree(BlockID root);
 
   HashMap<Block> block_cache_;
-
   BlockID last_committed_id_;
+  InMemoryDatabase *base_database_;
 };
 
 } // namespace hogd
