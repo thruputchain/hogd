@@ -18,11 +18,12 @@ RetrocausalQueue::RetrocausalQueue(
                                                     .is_modified_ = false});
   }
   apply_consume_delta(consume_delta);
-  blocks_.emplace(current_round_block.block_number,
-                  CoWBlockReference{.block_ =
-                                        std::make_shared<RetrocausalQueueBlock>(
-                                            std::move(current_round_block)),
-                                    .is_modified_ = true});
+  [[maybe_unused]] auto res = blocks_.emplace(
+      current_round_block.block_number,
+      CoWBlockReference{.block_ = std::make_shared<RetrocausalQueueBlock>(
+                            std::move(current_round_block)),
+                        .is_modified_ = true});
+  assert(res.second);
   assert(current_block_number_ > parent.current_block_number_);
 }
 

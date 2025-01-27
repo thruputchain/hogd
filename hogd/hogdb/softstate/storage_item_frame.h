@@ -168,10 +168,11 @@ private:
     // Is there an active lock for the consumer position
     bool consumer_lock_ = false;
 
-    // Stores the entries created in a block in a nondeterministic but stable
-    // order
+    // Stores the entries created in a block in a nondeterministic order,
+    // but the order has a stable indexing within a block (the first element is
+    // always first, etc).
     std::vector<QueueEntry> new_entries_;
-    // new_entries_ \setminus consumed entries, in a stable order
+    // new_entries_ \setminus consumed entries, in a canonical order
     std::set<QueueEntry> persistable_entries_;
   };
 
@@ -211,6 +212,7 @@ private:
       assert(refcount_ > 0);
       --refcount_;
       if (refcount_ == 0) {
+        assert(!permanent_exclusive_lock_);
         variant_ = DeleteArgs{};
       }
     }

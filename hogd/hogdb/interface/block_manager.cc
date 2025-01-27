@@ -17,7 +17,7 @@ namespace hogd {
 // should disappear by the next block.
 BlockManager::BlockManager(BlockID root_id,
                            std::shared_ptr<BlockState> initial_state)
-  : block_cache_(8, 8) // arbitrary init parameters
+  : block_cache_(8) // arbitrary init parameters
     ,
     last_committed_id_(root_id)
 {

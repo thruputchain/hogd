@@ -48,7 +48,7 @@ private:
 // map transaction id -> TransactionCacheEntry
 class TransactionCache {
 public:
-  TransactionCache() : tx_entries_(8, 8) {}
+  TransactionCache() : tx_entries_(8) {}
 
   // Returns a lock for the given transaction and address.
   // Lock may not be valid if a concurrent operation performs an add_delta().

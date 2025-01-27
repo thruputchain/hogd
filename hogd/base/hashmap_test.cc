@@ -32,7 +32,7 @@ struct ValueT {
 
 TEST(HashMap, InsertAndGet)
 {
-  HashMap<ValueT> map(1, 1);
+  HashMap<ValueT> map(1);
 
   std::string a = "aaa", b = "bbb";
 
@@ -50,7 +50,7 @@ TEST(HashMap, InsertAndGet)
 
 TEST(HashMap, Modify)
 {
-  HashMap<ValueT> map(1, 1);
+  HashMap<ValueT> map(1);
 
   std::string a = "aaa", b = "bbb", c = "ccc", d = "ddd", e = "eee", f = "fff";
 
@@ -80,7 +80,7 @@ TEST(HashMap, Modify)
 
 TEST(HashMap, Erase)
 {
-  HashMap<ValueT> map(1, 1);
+  HashMap<ValueT> map(1);
 
   std::string a = "aaa", b = "bbb", c = "ccc", d = "ddd", e = "eee";
 

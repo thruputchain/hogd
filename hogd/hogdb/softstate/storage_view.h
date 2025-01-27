@@ -57,10 +57,10 @@ public:
 
 protected:
   ParentBlockView(InMemoryDatabase *root_db)
-    : modified_items_(8, 8), parent_view_(root_db)
+    : modified_items_(8), parent_view_(root_db)
   {}
   ParentBlockView(ParentBlockView *parent_view)
-    : modified_items_(8, 8), parent_view_(parent_view)
+    : modified_items_(8), parent_view_(parent_view)
   {}
 
   // the value of the item, before any modifications of the current block are

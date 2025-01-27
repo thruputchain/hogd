@@ -325,6 +325,9 @@ StorageItemFrame::try_reserve_delta(StorageDelta const &delta)
                                                   delta.nnint().add_value));
   case StorageDeltaType::kDelete:
     return variant_.try_reserve_delete();
+  case StorageDeltaType::kRetrocausalQueueModify:
+    return variant_.try_reserve_retrocausal_queue_delta(
+        delta.retrocausal_queue().consume != nullptr);
   default:
     throw std::runtime_error("unknown delta type");
   }
@@ -384,6 +387,7 @@ StorageItemFrame::update_committed_item()
 bool
 StorageItemFrame::try_acquire_exclusive_lock(StorageLockType previous_lock_type)
 {
+  assert(!round_committed_);
   if (variant_.permanent_exclusive_lock_) {
     assert(variant_.refcount_ > 0);
     return false;
@@ -524,6 +528,8 @@ to_typeclass(StorageDelta const &delta)
   }
   case StorageDeltaType::kDelete:
     return StorageItemTypeClass(StorageItemType::kDeleted);
+  case StorageDeltaType::kRetrocausalQueueModify:
+    return StorageItemTypeClass(StorageItemType::kRetrocausalQueue);
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -570,6 +576,7 @@ std::optional<StorageLock>
 StorageItemFrame::try_reserve(StorageDelta const &delta,
                               StorageLock const &previous_lock)
 {
+  assert(!round_committed_);
   switch (previous_lock.lock_type()) {
   case StorageLockType::kNone:
   {
@@ -701,6 +708,7 @@ StorageItemFrame::revert_set_typeclass_lock_to_set_typeclass(
 void
 StorageItemFrame::commit(StorageDelta const &delta, StorageLock const &lock)
 {
+  assert(!round_committed_);
   assert(lock.lock_type() != StorageLockType::kNone);
   switch (lock.lock_type()) {
   case StorageLockType::kSetItemTypeClass:
@@ -725,6 +733,7 @@ StorageItemFrame::commit(StorageDelta const &delta, StorageLock const &lock)
 void
 StorageItemFrame::revert(StorageLock const &lock)
 {
+  assert(!round_committed_);
   [[maybe_unused]]
   auto initial_refcount = variant_.refcount_;
   assert(initial_refcount > 0);

@@ -9,7 +9,7 @@
 namespace hogd {
 
 // Wrapper around StorageItem that implements more complex data types
-// specifically the RetrocausalQueue.
+// (specifically the RetrocausalQueue).
 
 class StorageItemWrapper {
 public:
