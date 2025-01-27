@@ -118,7 +118,7 @@ public:
   ItemView &get_item_view(StorageKey const &key);
 
 private:
-  void revert_frame(InvokeResult const &result);
+  void revert_frame();
   InvokeResult handle_try_invoke(InvokeResult const &prev_result,
                                  ExecutionModeData &execution_mode_data);
 

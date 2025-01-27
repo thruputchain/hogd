@@ -107,10 +107,8 @@ InvocationFrame::handle_try_acquire_locks(PerTransactionDatabaseProxy &db_proxy)
 }
 
 void
-InvocationFrameStack::revert_frame([[maybe_unused]] InvokeResult const &result)
+InvocationFrameStack::revert_frame()
 {
-  assert(result.should_frame_revert());
-
   assert(!frame_stack_.empty());
 
   frame_stack_.back().poison_visited_runtimes();
@@ -125,7 +123,13 @@ InvokeResult
 InvocationFrameStack::handle_try_invoke(InvokeResult const &prev_result,
                                         ExecutionModeData &execution_mode_data)
 {
+  if (prev_result.should_frame_revert()) {
+    return prev_result;
+  }
+
+  assert(prev_result.is_frame_success());
   assert(!frame_stack_.empty());
+
   if (!frame_stack_.back().is_try_invoke_frame()) {
     return prev_result;
   }
@@ -174,16 +178,11 @@ InvocationFrameStack::finish_frame(InvokeResult const &result,
   // fairly invasive changes (We need to restore the entirety of the wasm
   // module's internal state -- not just memory, but also tables and globals.
   // The wasm stack is reset automatically).
-  if (result.should_frame_revert()) {
-    revert_frame(result);
-    return result;
-  }
 
-  InvokeResult post_try_invoke_result =
-      handle_try_invoke(result, execution_mode_data);
+  auto post_try_invoke_result = handle_try_invoke(result, execution_mode_data);
 
   if (post_try_invoke_result.should_frame_revert()) {
-    revert_frame(post_try_invoke_result);
+    revert_frame();
     return post_try_invoke_result;
   }
 
