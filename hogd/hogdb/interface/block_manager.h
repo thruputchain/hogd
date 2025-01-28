@@ -27,6 +27,11 @@ public:
   // commit in the future. (i.e. any siblings of the supplied id, and any of
   // their children).
   // There should not be concurrent commits of any block.
+  //
+  // TODO(geoff): This does not clean up the entry for the parent
+  // committed block.  This might be a reasonable thing to do.  Depends on
+  // whether there's any part of the state that needs to get kept around for a
+  // bit longer. Could be made a part of this, or could be a separate rpc.
   void commit_block(BlockID id);
 
   std::shared_ptr<BlockState> get_block_data(BlockID id);

@@ -3,6 +3,8 @@ add_library(
   block_frame.cc
   executor_manager.cc
   allocate_service.cc
+  coord_block_manager.cc
+  database_manager.cc
 )
 
 target_link_libraries(
