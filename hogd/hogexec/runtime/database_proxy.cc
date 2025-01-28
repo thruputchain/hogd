@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "coord.hh"
 #include "rpc.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -14,10 +15,10 @@
 
 namespace hogd {
 
-DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp, std::string address,
-                             std::string port)
+DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp, DatabaseInfo const &db_info)
   : db_client_([&] {
-      auto fd = cp.tcpconnect(address, port)();
+      auto fd = cp.tcpconnect(std::string(db_info.database_address),
+                              std::string(db_info.database_port))();
       if (!fd) {
         exit(-1);
       }

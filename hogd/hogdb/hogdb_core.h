@@ -25,6 +25,9 @@ public:
   HogdbCore(HogdbCore &&) = delete;
   HogdbCore &operator=(HogdbCore &&) = delete;
 
+  void announce_to_coordinator(std::string const &coordinator_address,
+                               std::string const &coordinator_port);
+
   // Needs to be exposed at least for test setup
   auto &get_root_db() { return root_db_; }
 
@@ -37,6 +40,7 @@ private:
 
   DBToExecutorServer db_to_exec_server_;
   DBToCoordServer db_to_coord_server_;
+  const std::string coord_server_port_;
 };
 
 } // namespace hogd

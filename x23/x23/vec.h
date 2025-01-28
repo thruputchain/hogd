@@ -578,6 +578,14 @@ public:
   {
     // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=101361
     #pragma GCC diagnostic push
+    // This is a GCC bug, but clang doesn't have the same warning
+    // option.  It doesn't have the bug, therefore,
+    // but it does warn about the unknown warning option. So it demands
+    // that we add Wunknown-warning-option.
+    // However, GCC doesn't like "Wunknown-warning-option",
+    // so we need to also ignore that on GCC.
+    #pragma GCC diagnostic ignored "-Wpragmas"
+    #pragma GCC diagnostic ignored "-Wunknown-warning-option"
     #pragma GCC diagnostic ignored "-Wstringop-overread"
     return std::lexicographical_compare_three_way(a.begin(), a.end(), b.begin(),
                                                   b.end());

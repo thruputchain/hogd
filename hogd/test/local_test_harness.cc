@@ -4,8 +4,13 @@ namespace hogd ::test {
 
 LocalTestHarness::LocalTestHarness()
   : db_core_(1, kDBToExecutorPort, kDBToCoordPort),
-    exec_core_(1, uint16_t{0}, kExecToCoordPort, "localhost",
-               kDBToExecutorPort),
+    exec_core_(
+        std::make_unique<PoolAndCoroPoll>(1), kExecToCoordPort,
+        ExecutorInitialization{
+            .database_info =
+                DatabaseInfo{.database_address = "localhost",
+                             .database_port = {kDBToExecutorPort.c_str(),
+                                               kDBToExecutorPort.size()}}}),
     pool_(1), cp_(pool_), db_client_([this] {
       x23::RpcLogger::default_logfd = 2;
 

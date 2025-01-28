@@ -34,9 +34,14 @@ default:
 };
 
 struct ExecutorReadyAnnouncement {
-  string executor_address<>;
+  // infer address from caller
   string executor_port<>;
   unsigned int nthreads;
+};
+
+struct DatabaseReadyAnnouncement {
+  // infer address from caller
+  string database_port<>;
 };
 
 program CoordinatorAllocate
@@ -46,7 +51,8 @@ program CoordinatorAllocate
     ExpectedExecutorInitialization request_new_executor(void) = 0;
     CoordinatorAllocateStatus executor_announce_ready(
         ExecutorReadyAnnouncement) = 1;
-    CoordinatorAllocateStatus database_announce_ready(DatabaseInfo) = 2;
+    CoordinatorAllocateStatus database_announce_ready(
+        DatabaseReadyAnnouncement) = 2;
   }
   = 1;
 }

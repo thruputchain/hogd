@@ -15,6 +15,7 @@ target_link_libraries(
   protocol
   runtime
   interface
+  coord_core
 )
 
 # Build the frontend executor (hogexec) executable

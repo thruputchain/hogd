@@ -1,5 +1,7 @@
 #include "hogd/hogdb/hogdb_core.h"
 
+#include "coord.hh"
+#include "hogd/coord/allocate_service.h"
 #include "hogd/hogdb/interface/block_manager.h"
 #include "rpc.hh"
 #include "x23/event.h"
@@ -16,7 +18,8 @@ HogdbCore::HogdbCore(int nthreads, std::string const &exec_server_port,
   : pool_(nthreads), cp_(pool_),
     block_manager_(kGenesisBlockID, std::make_shared<BlockState>(&root_db_),
                    &root_db_),
-    db_to_exec_server_(block_manager_), db_to_coord_server_(block_manager_)
+    db_to_exec_server_(block_manager_), db_to_coord_server_(block_manager_),
+    coord_server_port_(coord_server_port)
 {
   x23::RpcLogger::default_logfd = 2;
 
@@ -51,6 +54,25 @@ HogdbCore::HogdbCore(int nthreads, std::string const &exec_server_port,
       x23::rpc_stream_logged(cp, *c).server(db_to_coord_server);
     }
   }(cp_, pool_, &db_to_coord_server_, std::move(lfd));
+}
+
+void
+HogdbCore::announce_to_coordinator(std::string const &coordinator_address,
+                                   std::string const &coordinator_port)
+{
+  auto coord_client =
+      connect_to_coord_allocate_service(cp_, coordinator_address,
+                                        coordinator_port);
+  while (!coord_client) {
+    // TODO(geoff) retry timeout or some other strategy
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    coord_client = connect_to_coord_allocate_service(cp_, coordinator_address,
+                                                     coordinator_port);
+  }
+
+  coord_client->database_announce_ready(DatabaseReadyAnnouncement{
+      .database_port = {coord_server_port_.c_str(), coord_server_port_.size()},
+  })();
 }
 
 } // namespace hogd

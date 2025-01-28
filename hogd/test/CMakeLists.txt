@@ -26,6 +26,7 @@ target_link_libraries(
   hogd_test_lib
   hogexec_core
   hogdb_core
+  coord_core
   GTest::gtest_main
 )
 gtest_discover_tests(hogd_test)

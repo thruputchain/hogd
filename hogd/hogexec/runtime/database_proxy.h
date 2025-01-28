@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 
+#include "coord.hh"
 #include "rpc.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -16,8 +17,7 @@ namespace hogd {
 // Abstract away database sharding from the rest of the executor.
 class DatabaseProxy {
 public:
-  // TODO(geoff): swap in other connection details, once sharding is worked out
-  DatabaseProxy(x23::CoroPoll &cp, std::string address, std::string port);
+  DatabaseProxy(x23::CoroPoll &cp, DatabaseInfo const &db_info);
 
   DatabaseProxy(DatabaseProxy const &) = delete;
   DatabaseProxy &operator=(DatabaseProxy const &) = delete;
