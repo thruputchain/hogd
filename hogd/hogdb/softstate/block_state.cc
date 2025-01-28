@@ -20,6 +20,7 @@ BlockState::unlink_parent(InMemoryDatabase *base_database)
 void
 BlockState::commit_to_database()
 {
+  assert_closed();
   assert(parent_state_ == nullptr);
   storage_view_.commit_to_database();
 }
@@ -30,6 +31,7 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
                                       StorageDelta const &delta,
                                       RPCFlagSet flags)
 {
+  assert_not_closed();
   auto lock = transaction_cache_.get_lock(txid, addrkey);
 
   auto res =
@@ -58,6 +60,7 @@ BlockState::commit_transaction(TransactionID txid)
 void
 BlockState::abort_transaction(TransactionID txid)
 {
+  assert_not_closed();
   auto deltas = transaction_cache_.extract_deltas(txid);
   for (auto const &[addr, entry] : deltas) {
     storage_view_.revert_storage_lock(addr, entry.lock);
@@ -73,6 +76,7 @@ BlockState::get_snapshot_storage_item(AddressAndKey const &addrkey)
 void
 BlockState::commit_contract_create(Contract const &contract)
 {
+  assert_not_closed();
   storage_view_.commit_contract_create(contract);
 }
 
@@ -80,6 +84,7 @@ void
 BlockState::commit_contract_deploy(ContractAddress const &addr,
                                    SHA256Hash const &contract_hash)
 {
+  assert_not_closed();
   storage_view_.commit_contract_deploy(addr, contract_hash);
 }
 

@@ -80,6 +80,7 @@ public:
 
   void close_block() { storage_view_.close_block(); }
   void assert_closed() { storage_view_.assert_block_closed(); }
+  void assert_not_closed() { storage_view_.assert_block_not_closed(); }
 
 private:
   StorageView storage_view_;
