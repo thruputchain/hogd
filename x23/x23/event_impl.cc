@@ -154,7 +154,16 @@ CoroPollImpl::getfd(BorrowedFd fd)
   }
 
   auto sl = resize_lock_.hold_shared();
-  return FdPtr{state_ + fd.get(), std::move(sl)};
+  return FdPtr{.p_ = state_ + fd.get(), .lk_ = std::move(sl)};
+}
+
+std::shared_ptr<BufferedReader>
+CoroPollImpl::get_reader(BorrowedFd fd)
+{
+  auto fdp = getfd(fd);
+  if (fdp->mode == FdState::kPoisoned)
+    return nullptr;
+  return getfd(fd)->reader();
 }
 
 void
@@ -191,7 +200,9 @@ CoroPollImpl::check(int timeout)
 void
 CoroPollImpl::reset(BorrowedFd fd)
 {
-  setmode(getfd(fd), FdState::Mode::kFree);
+  auto fdp = getfd(fd);
+  fdp->buf_clear();
+  setmode(fdp, FdState::Mode::kFree);
 }
 
 void
@@ -232,6 +243,16 @@ CoroPollImpl::time_to_stop()
     return false;
   pool_.drain();
   return state_->empty();
+}
+
+std::shared_ptr<BufferedReader>
+CoroPollImpl::get_reader(BorrowedFd fd)
+{
+  auto s = state_.take();
+  auto &f = (*s)[fd.get()];
+  if (f.poisoned)
+    return nullptr;
+  return f.reader();
 }
 
 void

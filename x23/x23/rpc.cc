@@ -102,14 +102,14 @@ RpcStreamImpl::read_record()
 }
 
 std::uint32_t
-RpcStreamImpl::gen_call_xid(CoroCB<Buf> cb)
+RpcStreamImpl::gen_call_xid(Awaitable<Buf> &a)
 {
   auto cs = cstate_.take();
   if (ss_.stop_requested())
     throw XdrException("RPC call on failed file descriptor");
   for (;;) {
     std::uint32_t xid = ++cs->lastxid_;
-    if (auto r = cs->xidmap_.emplace(xid, cb); r.second) [[likely]]
+    if (auto r = cs->xidmap_.emplace(xid, a); r.second) [[likely]]
       return xid;
   }
 }

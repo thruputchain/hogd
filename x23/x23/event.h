@@ -31,6 +31,38 @@ namespace x23 {
 
 namespace detail {
 
+struct BufferedReader : std::enable_shared_from_this<BufferedReader> {
+  using Super = std::enable_shared_from_this<BufferedReader>;
+  using Mem = std::array<char, 4092 - sizeof(Super)>;
+
+  std::uint16_t start_{};
+  std::uint16_t stop_{};
+  Mem m_;
+
+  ssize_t operator()(int fd, void *buf, size_t len);
+  std::expected<size_t, Errno> read(BorrowedFd fd, is_bytevec auto *buf,
+                                    size_t len)
+  {
+    return x23::read(fd, buf, len, this);
+  }
+};
+
+struct BufHolder {
+  TestLock buflk_;
+  std::shared_ptr<BufferedReader> reader_;
+
+  std::shared_ptr<detail::BufferedReader> reader() {
+    std::lock_guard _g(buflk_);
+    if (!reader_)
+      reader_ = std::make_shared<detail::BufferedReader>();
+    return reader_;
+  }
+  void buf_clear() {
+    std::lock_guard _g(buflk_);
+    reader_.reset();
+  }
+};
+
 class CoroPollImpl : public DestroyInhibit {
 public:
   using WorkItem = CoroCB<Errno>;
@@ -92,6 +124,7 @@ protected:
   bool time_to_stop();
   int get_max_fd();
   void wake();
+  std::shared_ptr<BufferedReader> get_reader(BorrowedFd fd);
 
 private:
   std::stop_source ss_;
@@ -103,8 +136,8 @@ private:
                                                           EPOLLERR,
                                                       EPOLLOUT | EPOLLERR};
 
-  struct FdState {
-    enum Mode{kFree, kActive, kPoisoned};
+  struct FdState : BufHolder {
+    enum Mode { kFree, kActive, kPoisoned };
     std::atomic<Mode> mode{kFree};
     std::atomic<std::uint32_t> ready{0};
     // callbacks: [0] = reader, [1] = writer
@@ -160,7 +193,7 @@ private:
 #else  // !HAVE_EPOLL
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
                                                 POLLOUT | POLLERR};
-  struct FdState {
+  struct FdState : BufHolder {
     bool poisoned{false};
     std::array<WorkItem, 2> callbacks;
     short events() const
@@ -245,10 +278,9 @@ public:
                                                           std::string port);
 
 private:
-  CoroSharedLock<CoroLock> buflk_;
-  void loop();
-
   std::thread pollthread_;
+
+  void loop();
 };
 
 } // namespace x23

@@ -26,17 +26,27 @@ template<typename V> struct GrowVec {
 
   explicit GrowVec(ThreadPool &pool) : slk_(pool) {}
 
-  Async<pointer> operator[](size_t i) {
+  Async<pointer> operator[](size_t i)
+  {
     for (;;) {
       auto holder = co_await slk_.coro_lock_shared();
       if (i < v_.size())
-	co_return {&v_[i], holder};
+        co_return {&v_[i], holder};
       holder.reset();
       CoroGuard guard;
       co_await guard(slk_);
       if (i >= v_.size())
-	v_.resize(i+1);
+        v_.resize(i + 1);
     }
+  }
+
+  Async<pointer> try_at(size_t i)
+  {
+    auto holder = co_await slk_.coro_lock_shared();
+    if (i < v_.size())
+      co_return {&v_[i], holder};
+    else
+      co_return {nullptr, {}};
   }
 };
 

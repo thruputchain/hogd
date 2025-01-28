@@ -5,6 +5,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 
 #include "x23/async.h"
 #include "x23/err.h"
@@ -14,8 +15,40 @@
 
 namespace x23 {
 
-CoroPoll::CoroPoll(ThreadPool &pool)
-  : CoroPollImpl(pool), buflk_(pool)
+namespace detail {
+
+ssize_t
+BufferedReader::operator()(int fd, void *buf, size_t len)
+{
+  if (len == 0)
+    return 0;
+
+  auto _hold = shared_from_this();
+
+  if (size_t buflen = stop_ - start_) {
+    size_t n = std::min(len, buflen);
+    memcpy(buf, m_.data() + start_, n);
+    start_ += n;
+    return n;
+  }
+
+  start_ = stop_ = 0;
+
+  struct iovec iov[2];
+  iov[0].iov_base = buf;
+  iov[0].iov_len = len;
+  iov[1].iov_base = m_.data();
+  iov[1].iov_len = m_.size();
+  auto n = ::readv(fd, iov, 2);
+  if (n < 0 || n <= len)
+    return n;
+  stop_ = n - len;
+  return len;
+}
+
+} // namespace detail
+
+CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
 {
   pollthread_ = std::thread(&CoroPoll::loop, this);
 }
@@ -43,7 +76,10 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full)
   size_t startsize = out->size();
   while (len > 0) {
     read_clear(fd);
-    if (auto res = x23::read(fd, out, len)) {
+    auto r = get_reader(fd);
+    if (!r)
+      co_return EBADF;
+    if (auto res = r->read(fd, out, len)) {
       len -= *res;
       if (*res == 0 || !full)
         break;

@@ -397,7 +397,7 @@ protected:
 
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
-  [[nodiscard]] std::uint32_t gen_call_xid(CoroCB<Buf>);
+  [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
   Detached write_record(Buf b);
   Detached reader();
 

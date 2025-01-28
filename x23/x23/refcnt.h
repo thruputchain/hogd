@@ -42,8 +42,10 @@ public:
   }
   RefPtr &operator=(RefPtr &&other) noexcept
   {
-    clear();
-    p_ = std::exchange(other.p_, nullptr);
+    if (this != &other) {
+      clear();
+      p_ = std::exchange(other.p_, nullptr);
+    }
     return *this;
   }
   T *get() const { return p_; }

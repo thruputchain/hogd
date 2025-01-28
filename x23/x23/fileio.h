@@ -17,15 +17,19 @@
 
 namespace x23 {
 
-template<is_bytevec BufT>
+template<is_bytevec BufT, typename Read = decltype(&::read)>
 std::expected<size_t, Errno>
-read(BorrowedFd fd, BufT *buf, size_t len)
+read(BorrowedFd fd, BufT *buf, size_t len, Read readfn = &::read)
+    requires requires(int f, void *b, size_t l) {
+      { read(f, b, l) } -> std::convertible_to<ssize_t>;
+    }
 {
   size_t old_size = buf->size();
   std::expected<ssize_t, Errno> ret;
-  buf->resize_and_overwrite(old_size + len, [fd = fd.get(), len, old_size,
+  buf->resize_and_overwrite(old_size + len, [fd = fd.get(), len, &readfn,
+                                             old_size,
                                              &ret](auto *p, size_t count) {
-    if (ssize_t n = ::read(fd, p + old_size, len); n >= 0) {
+    if (ssize_t n = (*readfn)(fd, p + old_size, len); n >= 0) {
       ret = n;
       return old_size + n;
     }
