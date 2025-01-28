@@ -387,7 +387,6 @@ SystemCallHandler::set_bytestring(StorageKey const &storage_key,
                                   std::span<const std::byte> input_bytestring,
                                   StorageDeltaFlags flags)
 {
-  std::printf("doing set bytestring op\n");
   auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
 
   Bytestring new_string;

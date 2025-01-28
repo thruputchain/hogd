@@ -7,6 +7,7 @@
 #include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/mvar.h"
 
 namespace hogd {
@@ -38,11 +39,9 @@ public:
   void write_item(AddressAndKey const &addrkey,
                   std::optional<StorageItemWrapper> const &item)
   {
+    items_->erase(addrkey);
     if (item) {
       items_->emplace(addrkey, *item);
-    }
-    else {
-      items_->erase(addrkey);
     }
   }
 

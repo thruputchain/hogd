@@ -109,8 +109,13 @@ public:
   void close_block() { closed_ = true; }
   void assert_block_closed() { assert(closed_); }
 
-  // parent must be an InMemoryDatabase
-  void commit_to_database(InMemoryDatabase *base_database);
+  // parent must be an InMemoryDatabase (i.e. call unlink_parent first).
+  void commit_to_database();
+
+  // Parent view has been committed to the persistent database.
+  // Rather than jump through the parent StorageView,
+  // at that point, we can just directly access the persistent database.
+  void unlink_parent(InMemoryDatabase *new_parent);
 
   ParentBlockView *as_parent()
   {
@@ -134,12 +139,6 @@ public:
   using ParentBlockView::get_snapshot_contract;
   using ParentBlockView::get_snapshot_deployment;
   using ParentBlockView::get_snapshot_storage_item;
-
-private:
-  // Parent view has been committed to the persistent database.
-  // Rather than jump through the parent StorageView,
-  // at that point, we can just directly access the persistent database.
-  void unlink_parent(InMemoryDatabase *new_parent);
 };
 
 } // namespace hogd

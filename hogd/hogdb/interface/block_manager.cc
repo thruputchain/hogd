@@ -64,11 +64,23 @@ BlockManager::commit_block(BlockID id)
   }
   last_committed_id_ = id;
 
-  [[maybe_unused]]
-  auto res = block_cache_.modify_element(
-      std::as_bytes(std::span(&last_committed_id_, 1)),
-      [this](auto &v) { v.block_data_->commit_to_database(base_database_); });
-  assert(res);
+  auto children_to_unlink = block_cache_.modify_element(
+      std::as_bytes(std::span(&last_committed_id_, 1)), [](auto &v) {
+        v.block_data_->commit_to_database();
+        return v.children_;
+      });
+  assert(children_to_unlink);
+
+  for (auto child_to_unlink : *children_to_unlink) {
+
+    std::printf("unlinking child %llu\n", child_to_unlink);
+    // Child might get removed via a commit of a sibling.  That's ok,
+    // we don't have to bother unlinking parent in that case.
+    block_cache_.modify_element(std::as_bytes(std::span(&child_to_unlink, 1)),
+                                [this](auto &v) {
+                                  v.block_data_->unlink_parent(base_database_);
+                                });
+  }
 }
 
 void
@@ -108,6 +120,7 @@ bool
 BlockManager::add_child(BlockID parent_id, BlockID new_id,
                         std::shared_ptr<BlockState> block_state)
 {
+  assert(block_state);
   // first add the new block
 
   [[maybe_unused]]
@@ -117,19 +130,40 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
   // if this assertion fails, then new_id has been used before.
   assert(insert_res);
 
-  auto link_res =
-      block_cache_.modify_element(std::as_bytes(std::span(&parent_id, 1)),
-                                  [new_id](auto &parent) -> bool {
-                                    if (parent.closed_to_new_children_) {
-                                      return false;
-                                    }
+  auto link_res = block_cache_.modify_element(
+      std::as_bytes(std::span(&parent_id, 1)),
+      [new_id](auto &parent) -> std::pair<bool, bool> {
+        bool parent_is_committed =
+            parent.block_data_->is_committed_to_database();
 
-                                    parent.children_.push_back(new_id);
-                                    return true;
-                                  });
+        if (parent.closed_to_new_children_) {
+          return {false, parent_is_committed};
+        }
 
-  if (link_res.has_value() && *link_res) {
+        parent.children_.push_back(new_id);
+        return {true, parent_is_committed};
+      });
+  // Just to document that edge cases were considered:
+  // What if we add the child, and at that time the parent is
+  // not committed to the database, but then the parent is committed?
+  // In that case, though, the child is already linked in parent.children_,
+  // so the caller of the commit on the parent will unlink the child.
+  //
+  // On the other hand, if the parent is already committed, then we need to
+  // unlink the new child.
+  if (link_res.has_value() && link_res->first) {
     // successfully linked to parent
+
+    if (link_res->second) {
+      // might not exist, if a sibling is concurrently removed,
+      // but that's ok.
+      block_cache_.modify_element(std::as_bytes(std::span(&new_id, 1)),
+                                  [this](auto &v) {
+                                    v.block_data_->unlink_parent(
+                                        base_database_);
+                                  });
+    }
+
     return true;
   }
 

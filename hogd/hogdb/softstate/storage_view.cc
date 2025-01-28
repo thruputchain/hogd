@@ -137,14 +137,20 @@ StorageView::commit_storage_delta(AddressAndKey const &addrkey,
 void
 StorageView::unlink_parent(InMemoryDatabase *new_parent)
 {
-  assert(closed_);
   std::unique_lock lk(mtx_);
   parent_view_.emplace<InMemoryDatabase *>(new_parent);
 }
 
+// After this function, this object could be dropped.
 void
-StorageView::commit_to_database(InMemoryDatabase *base_database)
+StorageView::commit_to_database()
 {
+  assert(closed_);
+  assert(std::holds_alternative<InMemoryDatabase *>(parent_view_));
+  // parent_view is an InMemoryDatabase, so no need to acquire the lock.
+  // Once parent_view is an InMemoryDatabase, it will never be changed again.
+  auto *base_database = std::get<InMemoryDatabase *>(parent_view_);
+
   modified_items_.map_apply([base_database](auto &v) {
     base_database->write_item(v.get_addr_key(), v.get_post_close_block_item());
   });
@@ -157,8 +163,6 @@ StorageView::commit_to_database(InMemoryDatabase *base_database)
   for (auto &[addr, hash] : *contract_deployments) {
     base_database->write_deployment(addr, hash);
   }
-
-  unlink_parent(base_database);
 }
 
 std::optional<SHA256Hash>

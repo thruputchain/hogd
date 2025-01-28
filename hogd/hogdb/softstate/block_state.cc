@@ -3,7 +3,7 @@
 namespace hogd {
 
 void
-BlockState::commit_to_database(InMemoryDatabase *base_database)
+BlockState::unlink_parent(InMemoryDatabase *base_database)
 {
   // parent_state_ owns the parent StorageView inside storage_view_.
   // But storage_view, whenever this parent is accessed for reading,
@@ -13,8 +13,15 @@ BlockState::commit_to_database(InMemoryDatabase *base_database)
   // so by the time unlink_parent returns,
   // any pending accesses to the storage_view parent
   // have finished.
-  storage_view_.commit_to_database(base_database);
+  storage_view_.unlink_parent(base_database);
   parent_state_ = nullptr;
+}
+
+void
+BlockState::commit_to_database()
+{
+  assert(parent_state_ == nullptr);
+  storage_view_.commit_to_database();
 }
 
 bool
