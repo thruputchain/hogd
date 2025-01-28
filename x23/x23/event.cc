@@ -40,7 +40,7 @@ BufferedReader::operator()(int fd, void *buf, size_t len)
   iov[1].iov_base = m_.data();
   iov[1].iov_len = m_.size();
   auto n = ::readv(fd, iov, 2);
-  if (n < 0 || n <= len)
+  if (std::cmp_less_equal(n, len))
     return n;
   stop_ = n - len;
   return len;
