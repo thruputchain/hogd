@@ -69,7 +69,7 @@ Listener::accept_loop(this RefPtr<Listener> self)
 int
 main()
 {
-  RpcLogger::default_logfd = 1;
+  //RpcLogger::default_logfd = 1;
   Listener listener(cp);
   std::stop_source ss;
   for (int i = 0; i < 10; ++i)

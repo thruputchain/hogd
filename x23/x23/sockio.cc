@@ -1,7 +1,10 @@
 
+#include <system_error>
+
+#include <arpa/inet.h>
 #include <asm-generic/socket.h>
 #include <netdb.h>
-#include <system_error>
+#include <netinet/in.h>
 
 #include "x23/sockio.h"
 
@@ -102,6 +105,39 @@ get_port(const sockaddr_storage &ss)
   }
 }
 
+Str
+show_ipaddr(const sockaddr_storage &ss)
+{
+  auto ntop = []<int AF>(const void *in) -> Str {
+    Str ret;
+    ret.resize_uninitialized(AF == AF_INET ? INET_ADDRSTRLEN
+                                           : INET6_ADDRSTRLEN);
+    if (!inet_ntop(AF_INET, in, ret.data(), ret.size()))
+      Errno{}.raise("inet_ntop(family {})", AF);
+    ret.resize(ret.find('\0'));
+    return ret;
+  };
+
+  Str ret;
+  switch (ss.ss_family) {
+  case AF_INET6:
+    {
+      const auto *sin6 = reinterpret_cast<const sockaddr_in6 *>(&ss);
+      if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr))
+	return ntop.operator()<AF_INET>(&sin6->sin6_addr.s6_addr[12]);
+      return ntop.operator()<AF_INET6>(&sin6->sin6_addr);
+    }
+  case AF_INET:
+    {
+      const auto *sin = reinterpret_cast<const sockaddr_in *>(&ss);
+      return ntop.operator()<AF_INET>(&sin->sin_addr);
+    }
+  default:
+    Errno(EINVAL).raise("Invalid address family {} does not have IP address",
+                        ss.ss_family);
+  }
+}
+
 namespace detail {
 Str
 join_addr(std::string_view host, std::string_view port)
@@ -120,21 +156,8 @@ join_addr(std::string_view host, std::string_view port)
 }
 } // namespace detail
 
-GaiError
-HostPort::parse(const sockaddr_storage &ss) noexcept
-{
-  char hostbuf[NI_MAXHOST], portbuf[NI_MAXSERV];
-  if (int err = getnameinfo(reinterpret_cast<const sockaddr *>(&ss), sizeof(ss),
-                            hostbuf, sizeof(hostbuf), portbuf, sizeof(portbuf),
-                            NI_NUMERICHOST | NI_NUMERICSERV))
-    return err;
-  host = hostbuf;
-  port = portbuf;
-  return 0;
-}
-
 bool
-HostPort::parse(std::string_view s) noexcept
+HostPort::parse(std::string_view s)
 {
   auto colon = s.rfind(':');
   if (colon == std::string_view::npos || colon == 0)

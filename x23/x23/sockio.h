@@ -40,22 +40,19 @@ namespace detail {
 Str join_addr(std::string_view host, std::string_view port);
 } // namespace detail
 
+Str show_ipaddr(const sockaddr_storage &ss);
+
 struct HostPort {
   Str host;
   Str port;
 
   constexpr HostPort() noexcept = default;
   HostPort(const sockaddr_storage &ss)
-  {
-    if (GaiError err = parse(ss))
-      err.raise("getnameinfo");
-  }
+    : host(show_ipaddr(ss)), port(uformat("{}", get_port(ss)))
+  {}
 
   // Parse a joined HostPort, returns false if it fails to parse.
-  bool parse(std::string_view s) noexcept;
-
-  // Parse a socket address.
-  GaiError parse(const sockaddr_storage &ss) noexcept;
+  bool parse(std::string_view s);
 
   // Join host and port with a colon (putting brackets around an IPv6
   // host address).
