@@ -109,6 +109,21 @@ ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
                                              msg.size(), publickey.data()) == 0;
 }
 
+// Used for deterministic loadgen
+inline std::pair<Ed25519PublicKey, Ed25519SecretKey>
+deterministic_keypair(uint64_t nonce)
+{
+  Ed25519SecretKey secret_key;
+  Ed25519PublicKey public_key;
+  uint8_t seed[crypto_sign_ed25519_SEEDBYTES];
+  std::memcpy(seed, reinterpret_cast<uint8_t *>(&nonce), sizeof(nonce));
+  [[maybe_unused]]
+  int res = crypto_sign_ed25519_seed_keypair(public_key.data(),
+                                             secret_key.data(), seed);
+  assert(res == 0);
+  return std::make_pair(public_key, secret_key);
+}
+
 // crc32c calculates the CRC32C of buf.
 inline uint32_t
 crc32c(x23::is_bytespan auto buf)

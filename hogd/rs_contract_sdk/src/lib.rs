@@ -11,19 +11,21 @@ mod syscall;
 pub mod syscall_bindings;
 
 mod bytestring;
+mod contract;
 mod crypto;
 mod delete;
 mod invoke;
 mod log;
 mod nonnegative_int;
 
+pub mod parse_trait;
 pub mod rt;
 
 pub use bytestring::*;
+pub use contract::*;
 pub use crypto::*;
 pub use delete::*;
 pub use invoke::*;
 pub use log::*;
 pub use nonnegative_int::*;
-
 pub use rs_xdr::*;

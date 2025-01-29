@@ -39,6 +39,7 @@ public:
   }
 
   const BlockID block_id_;
+
 private:
   std::variant<BlockProposalFrame, BlockValidationFrame> current_frame_;
   CoordBlockState state_;

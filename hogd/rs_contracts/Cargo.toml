@@ -5,6 +5,7 @@ members = [
     "basic",
     "basic_alloc",
     "test_bytestring",
+    "genesis_deployer",
 ]
 
 [profile.dev]

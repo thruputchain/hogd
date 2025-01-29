@@ -251,6 +251,14 @@ errors:
     number: 9
     doc: "Storage key accessed that does not exist in the transaction's current view"
 
+    # errors within a wasm contract
+  - name: "CalldataParseError"
+    number: 100
+    doc: "Error parsing calldata"
+  - name: "ReturnParseError"
+    number: 101
+    doc: "Error parsing return value"
+
     # those that cause call frames to revert
   - name: "DeterministicWasm"
     number: -1

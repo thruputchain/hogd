@@ -52,7 +52,8 @@ CoordBlock::CoordBlock(BlockID block_id)
 
 CoordBlock::CoordBlock(BlockID block_id, std::vector<ProposedTransaction> txs)
   : block_id_(block_id),
-    current_frame_(std::in_place_type<BlockValidationFrame>, std::move(txs)), state_(CoordBlockState::kValidating)
+    current_frame_(std::in_place_type<BlockValidationFrame>, std::move(txs)),
+    state_(CoordBlockState::kValidating)
 {}
 
 std::unordered_map<BlockID, CoordinatorBlockManager::BlockEntry>::iterator

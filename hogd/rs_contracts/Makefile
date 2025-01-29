@@ -11,6 +11,6 @@ clean:
 rs_contracts : \
 	basic.wasm \
 	basic_alloc.wasm \
-	test_bytestring.wasm
-
+	test_bytestring.wasm \
+	genesis_deployer.wasm
 # rustup target install wasm32-unknown-unknown
