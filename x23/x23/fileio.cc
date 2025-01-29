@@ -75,6 +75,14 @@ tcplisten(std::uint16_t port)
   if (setsockopt(lfd.get(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
     Errno{}.raise("IPV6_V6ONLY");
 
+  opt = 1;
+  if (setsockopt(lfd.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    Errno{}.raise("SO_REUSEADDR");
+
+  opt = 1;
+  if (setsockopt(lfd.get(), SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) < 0)
+    Errno{}.raise("SO_REUSEPORT");
+
   struct sockaddr_in6 addr;
   memset(&addr, 0, sizeof(addr));
   addr.sin6_family = AF_INET6;
