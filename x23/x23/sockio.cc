@@ -110,18 +110,34 @@ show_addr(const sockaddr_storage &ss)
   return std::format("{}:{}", sv(host), sv(port));
 }
 
-/* work in progress...
 std::expected<sockaddr_storage, GaiError>
 parse_addr(std::string_view s)
 {
-  if (s.empty())
+  auto colon = s.rfind(':');
+  if (colon == std::string_view::npos || colon == 0)
     return GaiError{EAI_FAMILY};
 
-  std::string addr;
-  if (s[0] == '[') {
-    auto ae = s.rfind(1, ']');
-  }
+  std::string_view host = s.substr(0, colon - 1), port = s.substr(colon + 1);
+  if (host.front() == '[' && host.back() == ']')
+    host = host.substr(1, host.size() - 2);
+
+  addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV|AI_ADDRCONFIG;
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+
+  ManagedPtr<freeaddrinfo> ai(nullptr);
+
+  std::string shost(host), sport(port);
+  if (int err = getaddrinfo(shost.c_str(), sport.c_str(), &hints, &ai))
+    return GaiError{err};
+
+  sockaddr_storage ret{};
+  if (ai->ai_addrlen > sizeof(ret))
+    return GaiError{EAI_MEMORY};
+  memcpy(&ret, ai->ai_addr, ai->ai_addrlen);
+  return ret;
 }
-*/
 
 } // namespace x23
