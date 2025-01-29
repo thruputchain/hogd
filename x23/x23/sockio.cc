@@ -176,8 +176,7 @@ HostPort::to_addr(bool dns)
 {
   addrinfo hints;
   memset(&hints, 0, sizeof(hints));
-  hints.ai_flags = dns ? AI_NUMERICSERV | AI_ADDRCONFIG
-                       : AI_NUMERICHOST | AI_NUMERICSERV | AI_ADDRCONFIG;
+  hints.ai_flags = dns ? AI_ADDRCONFIG : AI_NUMERICHOST | AI_ADDRCONFIG;
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
 
