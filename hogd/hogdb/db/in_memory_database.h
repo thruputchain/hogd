@@ -5,9 +5,7 @@
 #include "contract.hh"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/storage_item/storage_item_wrapper.h"
-#include "storage_item.hh"
 #include "types.hh"
-#include "x23/format.h"
 #include "x23/mvar.h"
 
 namespace hogd {
@@ -56,6 +54,8 @@ public:
   {
     contract_deployments_->emplace(addr, contract_hash);
   }
+
+  void set_as_default_genesis();
 
 private:
   x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;

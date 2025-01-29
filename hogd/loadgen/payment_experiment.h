@@ -26,6 +26,9 @@ private:
 
   void generate_accounts();
 
+  std::vector<ProposedTransaction> make_deploy_wallet_transactions();
+  std::vector<ProposedTransaction> make_deploy_erc20_transaction();
+
   const uint32_t num_accounts_;
   // TODO(geoff): other distribution params
 

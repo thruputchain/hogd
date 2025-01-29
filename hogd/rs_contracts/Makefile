@@ -12,5 +12,6 @@ rs_contracts : \
 	basic.wasm \
 	basic_alloc.wasm \
 	test_bytestring.wasm \
-	genesis_deployer.wasm
-# rustup target install wasm32-unknown-unknown
+	genesis_deployer.wasm \
+	erc20.wasm \
+	simple_wallet.wasm

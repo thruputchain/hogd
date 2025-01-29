@@ -6,6 +6,8 @@ members = [
     "basic_alloc",
     "test_bytestring",
     "genesis_deployer",
+    "erc20",
+    "simple_wallet",
 ]
 
 [profile.dev]

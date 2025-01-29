@@ -30,6 +30,14 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
+                                ContractAddress &output_self_address)
+{
+  output_self_address = syscall_handler.get_current_address();
+  return {SyscallErrorCode::kNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetSourceTransactionHash_inner(SystemCallHandler &syscall_handler,
                                        SHA256Hash &output_source_tx_hash)
 {

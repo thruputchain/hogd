@@ -12,6 +12,13 @@ pub fn GetMsgSender() -> Result<ContractAddress, i32> {
     Ok(unsafe { out_addr.assume_init() })
 }
 
+pub fn GetCurrentAddress() -> Result<ContractAddress, i32> {
+    let mut out_addr: MaybeUninit<ContractAddress> =
+        MaybeUninit::<ContractAddress>::uninit();
+    syscall_bindings::uninit_GetCurrentAddress(&mut out_addr)?;
+    Ok(unsafe { out_addr.assume_init() })
+}
+
 pub fn GetCalldataLen() -> Result<RuntimeMemoryLength, i32> {
     let mut out: RuntimeMemoryLength = 0;
     syscall_bindings::raw_GetCalldataLen(&mut out)?;

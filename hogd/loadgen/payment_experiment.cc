@@ -23,6 +23,13 @@ PaymentExperiment::generate_accounts()
   }
 }
 
+std::vector<ProposedTransaction>
+PaymentExperiment::make_deploy_wallet_transactions()
+{
+  // TODO(geoff): implement
+  return {};
+}
+
 std::vector<std::vector<ProposedTransaction>>
 PaymentExperiment::produce_initialization_transactions()
 {

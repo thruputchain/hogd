@@ -1,0 +1,16 @@
+[package]
+name = "simple_wallet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rs_contract_sdk = {path = "../../rs_contract_sdk/", features=["alloc"]}
+rs_macros = {path = "../../rs_macros/"}
+erc20 = {path = "../erc20/", features = ["interface"]}
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+interface = []
+std = ["rs_contract_sdk/std"]

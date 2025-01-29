@@ -16,6 +16,17 @@ pub fn BytestringSet(key: &StorageKey, slice: &[u8]) -> Result<(), i32> {
     syscall_bindings::raw_BytestringSet(key, slice, 0)
 }
 
+pub fn BytestringSetExclusive(
+    key: &StorageKey,
+    slice: &[u8],
+) -> Result<(), i32> {
+    syscall_bindings::raw_BytestringSet(
+        key,
+        slice,
+        rs_xdr::StorageDeltaModifier::kLockExclusive as i32,
+    )
+}
+
 pub fn BytestringGet_Sized<const N: usize>(
     key: &StorageKey,
 ) -> Result<[u8; N], i32> {

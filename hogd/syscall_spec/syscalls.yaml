@@ -218,6 +218,13 @@ syscalls:
     outputs:
         # No outputs: check the error code returned
     number: 19
+  - name: "GetCurrentAddress"
+    needs_context: yes
+    inputs:
+    outputs:
+      - name: "address"
+        typename: "ContractAddress"
+    number: 20
 
 errors:
   - name: "None"

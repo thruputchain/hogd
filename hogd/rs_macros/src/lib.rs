@@ -368,7 +368,6 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                     method,
                     u64::MAX,
                     &calldata,
-                    0
                 )?;
 
                 // if raw_Invoke returns success, then it cannot be the case that
