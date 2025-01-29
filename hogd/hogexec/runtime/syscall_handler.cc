@@ -81,6 +81,7 @@ SystemCallHandler::try_commit_transaction()
 {
   // TODO(geoff): do something with committed_logs_
   std::vector<x23::Async<bool>> reservations;
+  reservations.reserve(committed_deltas_.size());
   for (auto const &[k, d] : committed_deltas_) {
     reservations.push_back(db_proxy_.try_reserve_delta(
         k, d, std::to_underlying(RPCFlags::kFinalCommit)));
@@ -96,6 +97,8 @@ SystemCallHandler::try_commit_transaction()
   co_await db_proxy_.commit_transaction();
 
   std::vector<x23::Async<void>> commitments;
+  commitments.reserve(newly_created_contracts_.size() +
+                      committed_deployments_.size());
   for (auto const &[_, c] : newly_created_contracts_) {
     commitments.push_back(db_proxy_.create_contract(*c));
   }

@@ -3,6 +3,7 @@ add_subdirectory(crypto)
 add_subdirectory(base)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
+add_subdirectory(shared_util)
 
 # Then combine them into the hogd library (used by all executables below)
 add_library(
@@ -15,6 +16,7 @@ target_link_libraries(
   crypto
   ${LIBSODIUM_LIBRARIES}
   crc32c
+  shared_util
 )
 add_dependencies(hogd libsodium crc32c)
 

@@ -4,7 +4,7 @@
 #include <cstring>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/shared_util/load_contracts.h"
 #include "hogd/test/local_test_harness.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -17,7 +17,7 @@ class TestBytestringWrite : public ::testing::Test,
 protected:
   void SetUp() override
   {
-    auto [h, c] = test::load_built_rs_contract("test_bytestring.wasm");
+    auto [h, c] = load_built_rs_contract("test_bytestring.wasm");
 
     db_core_.get_root_db().write_contract(h, c);
     db_core_.get_root_db().write_deployment(addr_, h);
@@ -50,7 +50,7 @@ TEST_F(TestBytestringWrite, ReadExpected)
   write_tx.tx.invocation = {.invoked_address = addr_,
                             .method = 0,
                             .gas_limit = UINT64_MAX,
-                            .calldata = test::make_calldata(key, uint32_t{12})};
+                            .calldata = make_calldata(key, uint32_t{12})};
 
   auto res = exec_client_.propose_transaction(1, write_tx)();
   ASSERT_EQ(res.error(), RPCError::kNone);
@@ -62,7 +62,7 @@ TEST_F(TestBytestringWrite, ReadExpected)
       .invoked_address = addr_,
       .method = 0,
       .gas_limit = UINT64_MAX,
-      .calldata = test::make_calldata(
+      .calldata = make_calldata(
           key, uint32_t{13})}; // write a different bytestring; will conflict.
 
   res = exec_client_.propose_transaction(1, write_tx2)();
@@ -83,7 +83,7 @@ TEST_F(TestBytestringWrite, ReadExpected)
   read_tx.tx.invocation = {.invoked_address = addr_,
                            .method = 2,
                            .gas_limit = UINT64_MAX,
-                           .calldata = test::make_calldata(key, uint32_t{12})};
+                           .calldata = make_calldata(key, uint32_t{12})};
 
   res = exec_client_.propose_transaction(2, read_tx)();
   ASSERT_EQ(res.error(), RPCError::kNone);
@@ -96,7 +96,7 @@ TEST_F(TestBytestringWrite, ReadExpected)
 
   exec_client_.open_proposal_block(3)();
 
-  read_tx.tx.invocation.calldata = test::make_calldata(key, uint32_t{13});
+  read_tx.tx.invocation.calldata = make_calldata(key, uint32_t{13});
   res = exec_client_.propose_transaction(3, read_tx)();
   ASSERT_EQ(res.error(), RPCError::kNone);
 

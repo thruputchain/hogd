@@ -4,7 +4,8 @@
 #include <optional>
 
 #include "contract.hh"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/shared_util/load_contracts.h"
 #include "types.hh"
 #include "x23/mvar.h"
 
@@ -45,9 +46,7 @@ InMemoryDatabase::get_post_block_contract(SHA256Hash const &hash)
 void
 InMemoryDatabase::set_as_default_genesis()
 {
-  auto wasm = test::load_wasm_from_file("genesis_deployer.wasm");
-  auto hash = sha256(wasm);
-  auto contract = std::make_shared<Contract>(wasm);
+  auto [hash, contract] = load_built_rs_contract("genesis_deployer.wasm");
   contract_creates_->emplace(hash, contract);
   contract_deployments_->emplace(ContractAddress{}, hash);
 }
