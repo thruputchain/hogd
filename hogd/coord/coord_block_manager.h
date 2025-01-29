@@ -38,9 +38,9 @@ public:
     state_ = CoordBlockState::kCommitted;
   }
 
+  const BlockID block_id_;
 private:
   std::variant<BlockProposalFrame, BlockValidationFrame> current_frame_;
-  const BlockID block_id_;
   CoordBlockState state_;
 };
 

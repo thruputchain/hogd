@@ -46,13 +46,13 @@ CoordBlock::ready_for_commit() const
 }
 
 CoordBlock::CoordBlock(BlockID block_id)
-  : current_frame_(std::in_place_type<BlockProposalFrame>), block_id_(block_id),
+  : block_id_(block_id), current_frame_(std::in_place_type<BlockProposalFrame>),
     state_(CoordBlockState::kOpenForProposal)
 {}
 
 CoordBlock::CoordBlock(BlockID block_id, std::vector<ProposedTransaction> txs)
-  : current_frame_(std::in_place_type<BlockValidationFrame>, std::move(txs)),
-    block_id_(block_id), state_(CoordBlockState::kValidating)
+  : block_id_(block_id),
+    current_frame_(std::in_place_type<BlockValidationFrame>, std::move(txs)), state_(CoordBlockState::kValidating)
 {}
 
 std::unordered_map<BlockID, CoordinatorBlockManager::BlockEntry>::iterator
