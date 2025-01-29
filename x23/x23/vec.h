@@ -287,7 +287,8 @@ public:
   constexpr Vec(Vec<value_type, MS, allocator_type> &&other)
       noexcept(max_size() >= Vec<value_type, MS, allocator_type>::max_size())
   {
-    if constexpr (std::remove_reference_t<decltype(other)>::max_size() > max_size())
+    if constexpr (std::remove_reference_t<decltype(other)>::max_size() >
+                  max_size())
       // Okay to throw, other will still delete memory
       check_size(other.size());
     b_ = other.b_;
@@ -348,7 +349,8 @@ public:
   constexpr Vec &operator=(Vec<T, MS, allocator_type> &&other)
       noexcept(max_size() <= Vec<T, MS, allocator_type>::max_size())
   {
-    if constexpr (std::remove_reference_t<decltype(other)>::max_size() > max_size())
+    if constexpr (std::remove_reference_t<decltype(other)>::max_size() >
+                  max_size())
       check_size(other.size());
     realloc(0);
     a_ = std::move(other.a_);
@@ -360,7 +362,8 @@ public:
   constexpr Vec &operator=(const Vec<T, MS, R> &other)
   {
     size_type new_size = other.size();
-    if constexpr (std::remove_reference_t<decltype(other)>::max_size() > max_size())
+    if constexpr (std::remove_reference_t<decltype(other)>::max_size() >
+                  max_size())
       check_size(new_size);
     if (new_size > capacity()) {
       realloc(0);

@@ -1,4 +1,5 @@
 
+#include <asm-generic/socket.h>
 #include <netdb.h>
 #include <system_error>
 
@@ -46,6 +47,11 @@ tcplisten(std::uint16_t port)
   int opt = 0;
   if (setsockopt(lfd.get(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
     Errno{}.raise("IPV6_V6ONLY");
+  if (port) {
+    opt = 1;
+    if (setsockopt(lfd.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+      Errno{}.raise("SO_REUSEADDR");
+  }
 
   struct sockaddr_in6 addr;
   memset(&addr, 0, sizeof(addr));
@@ -96,41 +102,65 @@ get_port(const sockaddr_storage &ss)
   }
 }
 
-std::string
-show_addr(const sockaddr_storage &ss)
+namespace detail {
+Str
+join_addr(std::string_view host, std::string_view port)
 {
-  char host[NI_MAXHOST], port[NI_MAXSERV];
+  Str ret;
+  if (host.find(':') == std::string_view::npos)
+    ret.append_range(host);
+  else {
+    ret.push_back('[');
+    ret.append_range(host);
+    ret.push_back(']');
+  }
+  ret.push_back(':');
+  ret.append_range(port);
+  return ret;
+}
+} // namespace detail
+
+GaiError
+HostPort::parse(const sockaddr_storage &ss) noexcept
+{
+  char hostbuf[NI_MAXHOST], portbuf[NI_MAXSERV];
   if (int err = getnameinfo(reinterpret_cast<const sockaddr *>(&ss), sizeof(ss),
-                            host, sizeof(host), port, sizeof(port),
+                            hostbuf, sizeof(hostbuf), portbuf, sizeof(portbuf),
                             NI_NUMERICHOST | NI_NUMERICSERV))
-    throw std::system_error{err, gai_category(), "getnameinfo"};
-  using sv = std::string_view;
-  if (strchr(host, ':'))
-    return std::format("[{}]:{}", sv(host), sv(port));
-  return std::format("{}:{}", sv(host), sv(port));
+    return err;
+  host = hostbuf;
+  port = portbuf;
+  return 0;
 }
 
-std::expected<sockaddr_storage, GaiError>
-parse_addr(std::string_view s)
+bool
+HostPort::parse(std::string_view s) noexcept
 {
   auto colon = s.rfind(':');
   if (colon == std::string_view::npos || colon == 0)
-    return GaiError{EAI_FAMILY};
+    return false;
 
-  std::string_view host = s.substr(0, colon - 1), port = s.substr(colon + 1);
-  if (host.front() == '[' && host.back() == ']')
-    host = host.substr(1, host.size() - 2);
+  if (s[0] == '[' && s[colon - 1] == ']')
+    host = Str(std::from_range, s.substr(1, colon - 2));
+  else
+    host = Str(std::from_range, s.substr(0, colon - 1));
+  port = Str(std::from_range, s.substr(colon + 1));
+  return true;
+}
 
+std::expected<sockaddr_storage, GaiError>
+HostPort::to_addr(bool dns)
+{
   addrinfo hints;
   memset(&hints, 0, sizeof(hints));
-  hints.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV|AI_ADDRCONFIG;
+  hints.ai_flags = dns ? AI_NUMERICSERV | AI_ADDRCONFIG
+                       : AI_NUMERICHOST | AI_NUMERICSERV | AI_ADDRCONFIG;
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
 
   ManagedPtr<freeaddrinfo> ai(nullptr);
 
-  std::string shost(host), sport(port);
-  if (int err = getaddrinfo(shost.c_str(), sport.c_str(), &hints, &ai))
+  if (int err = getaddrinfo(host.c_str(), port.c_str(), &hints, &ai))
     return GaiError{err};
 
   sockaddr_storage ret{};

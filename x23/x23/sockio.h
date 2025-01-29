@@ -16,6 +16,7 @@ public:
   GaiError(int err) noexcept : err_(err) {}
   int raw_code() const { return err_; }
   static const std::error_category &category() { return gai_category(); }
+  explicit operator bool() const { return err_; }
 
 private:
   int err_;
@@ -32,10 +33,38 @@ sockaddr_storage remote_addr(BorrowedFd s);
 
 std::uint16_t get_port(const sockaddr_storage &ss);
 
-// Convert the sockaddr to a string containing Address:Port, or
-// [Address]:Port for IPv6 addresses that contain : characters.
-std::string show_addr(const sockaddr_storage &ss);
+namespace detail {
+// Join a host address and port number with a colon.  If the address
+// itself contains colons (because it is IPv6), then place the address
+// in brackets.
+Str join_addr(std::string_view host, std::string_view port);
+} // namespace detail
 
-std::expected<sockaddr_storage, GaiError> parse_addr(std::string_view s);
+struct HostPort {
+  Str host;
+  Str port;
+
+  constexpr HostPort() noexcept = default;
+  HostPort(const sockaddr_storage &ss)
+  {
+    if (GaiError err = parse(ss))
+      err.raise("getnameinfo");
+  }
+
+  // Parse a joined HostPort, returns false if it fails to parse.
+  bool parse(std::string_view s) noexcept;
+
+  // Parse a socket address.
+  GaiError parse(const sockaddr_storage &ss) noexcept;
+
+  // Join host and port with a colon (putting brackets around an IPv6
+  // host address).
+  Str show() const { return detail::join_addr(host, port); }
+
+  // Convert to socket address.  If dns is true, will use domain name
+  // system to resolve host names and might block.  Otherwise, if dns
+  // is false, the host must be numeric.
+  std::expected<sockaddr_storage, GaiError> to_addr(bool dns = false);
+};
 
 } // namespace x23
