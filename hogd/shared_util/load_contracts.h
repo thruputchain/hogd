@@ -33,10 +33,8 @@ Calldata static make_calldata(C const &data, Cs const &...additional)
 {
   Calldata out;
 
-  if constexpr (!std::is_empty_v<C>) {
-    auto const *addr = reinterpret_cast<const uint8_t *>(&data);
-    out.resize_uninitialized(sizeof(C));
-    std::memcpy(out.data(), addr, sizeof(C));
+  if constexpr (std::is_empty_v<C>) {
+    // nothing to do
   }
   else if constexpr (std::is_trivially_copyable_v<C>) {
     const auto *addr = reinterpret_cast<const uint8_t *>(&data);
