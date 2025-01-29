@@ -5,6 +5,7 @@ add_library(
   allocate_service.cc
   coord_block_manager.cc
   database_manager.cc
+  coord_core.cc
 )
 
 target_link_libraries(
@@ -35,4 +36,3 @@ target_link_libraries(
   hogd
   coord_core
 )
-

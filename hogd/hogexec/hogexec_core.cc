@@ -14,7 +14,10 @@ HogexecCore::HogexecCore(std::unique_ptr<PoolAndCoroPoll> pool_cp,
     db_proxy_(pool_cp_->cp_, init_params.database_info),
     exec_to_coord_server_(init_params.executor_id, db_proxy_)
 {
+
   auto lfd = x23::tcplisten(atoi(coord_server_port.c_str()));
+
+  std::fflush(stdout);
   if (!lfd) {
     perror("listen");
     exit(EXIT_FAILURE);
@@ -25,7 +28,6 @@ HogexecCore::HogexecCore(std::unique_ptr<PoolAndCoroPoll> pool_cp,
     co_await cp.pool_.bg();
     while (auto c = co_await cp.accept(lfd)) {
       x23::rpc_stream_logged(cp, *c).server(exec_to_coord_server);
-      std::printf("accepted connection in executor\n");
     }
   }(pool_cp_->cp_, &exec_to_coord_server_, std::move(lfd));
 }
@@ -54,8 +56,11 @@ start_hogexec(int nthreads, std::string const &exec_to_coord_server_port,
       continue;
     }
     if (init_params.status() == CoordinatorAllocateStatus::kCatastropic) {
-      throw std::runtime_error("catastropic failure");
+      perror("catastropic failure");
+      exit(EXIT_FAILURE);
     }
+
+    assert(init_params.status() == CoordinatorAllocateStatus::kReady);
 
     return HogexecCore(std::move(pool_cp), exec_to_coord_server_port,
                        init_params.executor_init());

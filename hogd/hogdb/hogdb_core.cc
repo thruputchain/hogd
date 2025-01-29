@@ -19,7 +19,7 @@ HogdbCore::HogdbCore(int nthreads, std::string const &exec_server_port,
     block_manager_(kGenesisBlockID, std::make_shared<BlockState>(&root_db_),
                    &root_db_),
     db_to_exec_server_(block_manager_), db_to_coord_server_(block_manager_),
-    coord_server_port_(coord_server_port)
+    exec_server_port_(exec_server_port), coord_server_port_(coord_server_port)
 {
   x23::RpcLogger::default_logfd = 2;
 
@@ -71,7 +71,10 @@ HogdbCore::announce_to_coordinator(std::string const &coordinator_address,
   }
 
   coord_client->database_announce_ready(DatabaseReadyAnnouncement{
-      .database_port = {coord_server_port_.c_str(), coord_server_port_.size()},
+      .database_to_coord_port = {coord_server_port_.c_str(),
+                                 coord_server_port_.size()},
+      .database_to_exec_port = {exec_server_port_.c_str(),
+                                exec_server_port_.size()},
   })();
 }
 

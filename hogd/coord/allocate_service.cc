@@ -4,9 +4,15 @@
 #include <netdb.h>
 #include <sys/socket.h>
 
+#include "hogd/coord/database_manager.h"
 #include "x23/event.h"
 
 namespace hogd {
+
+CoordinatorAllocateService::CoordinatorAllocateService(
+    x23::CoroPoll &cp, ExecutorManager &executor_manager)
+  : cp_(cp), executor_manager_(executor_manager)
+{}
 
 x23::Async<ExpectedExecutorInitialization>
 CoordinatorAllocateService::request_new_executor(
@@ -58,7 +64,10 @@ CoordinatorAllocateService::database_announce_ready(
   database_info_ =
       DatabaseInfo{.database_address = {connection.caller_address.c_str(),
                                         connection.caller_address.size()},
-                   .database_port = announcement.database_port};
+                   .database_to_coord_port =
+                       announcement.database_to_coord_port,
+                   .database_to_exec_port = announcement.database_to_exec_port};
+  cv_.notify_one();
   co_return CoordinatorAllocateStatus::kReady;
 }
 
@@ -66,11 +75,15 @@ namespace {
 std::string
 read_client_address(struct sockaddr const &client_addr)
 {
-  char buf[NI_MAXHOST];
-  getnameinfo(&client_addr, sizeof(client_addr), buf, sizeof(buf), nullptr, 0,
-              NI_NUMERICHOST);
-  std::printf("client_address: %s\n", buf);
-  return std::string(buf);
+  const struct sockaddr *sa = &client_addr;
+  char hbuf[NI_MAXHOST];
+
+  if (getnameinfo(sa, sa->sa_len, hbuf, sizeof(hbuf), nullptr, 0,
+                  NI_NUMERICHOST)) {
+    perror("could not get numeric hostname");
+    exit(EXIT_FAILURE);
+  }
+  return std::format("{}", hbuf);
 }
 } // namespace
 
@@ -86,17 +99,70 @@ CoordinatorAllocateService::start(std::string const &coord_server_port)
   [](x23::CoroPoll &cp, CoordinatorAllocateService *service,
      x23::UniqueFd lfd) -> x23::Detached {
     co_await cp.pool_.bg();
-    struct sockaddr client_addr;
-    socklen_t addr_len = sizeof(client_addr);
 
-    while (auto c = co_await cp.accept(lfd, &client_addr, &addr_len)) {
+    while (true) {
+      struct sockaddr_storage client_addr;
+      socklen_t addr_len = sizeof(client_addr);
+      auto c = co_await cp.accept(lfd, &client_addr, &addr_len);
+      if (!c) {
+        break;
+      }
 
-      std::string client_address = read_client_address(client_addr);
+      std::string client_address = read_client_address(
+          reinterpret_cast<struct sockaddr const &>(client_addr));
       x23::rpc_stream_logged(cp, *c).server(
           service, CoordinatorAllocateV1{},
           CoordinatorAllocateServiceConnection{client_address});
     }
   }(cp_, this, std::move(lfd));
+}
+
+namespace {
+std::optional<hogd::DatabaseToCoordInterfaceV1::client<
+    x23::RpcStream<x23::RpcLogger>::ClientRef>>
+connect_to_database(x23::CoroPoll &cp, DatabaseInfo const &database_info)
+{
+  auto fd = cp.tcpconnect(std::string(database_info.database_address),
+                          std::string(database_info.database_to_coord_port))();
+  if (!fd) {
+    return std::nullopt;
+  }
+
+  auto client_config = x23::rpc_stream_logged(cp, *fd);
+  return std::make_optional(
+      client_config.template client<DatabaseToCoordInterfaceV1>());
+}
+} // namespace
+
+std::unique_ptr<DatabaseManager>
+CoordinatorAllocateService::make_database_manager()
+{
+  {
+    std::unique_lock lk(mtx_);
+    if (!database_info_) {
+      cv_.wait(lk, [this] { return database_info_.has_value(); });
+    }
+  }
+
+  std::unique_ptr<DatabaseManager> db_manager =
+      std::make_unique<DatabaseManager>();
+
+  auto db_client = connect_to_database(cp_, *database_info_);
+
+  while (!db_client) {
+    perror(
+        std::format(
+            "connect to database coord server {} port {} failed, retrying...",
+            std::string(database_info_->database_address),
+            std::string(database_info_->database_to_coord_port))
+            .c_str());
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    db_client = connect_to_database(cp_, *database_info_);
+  }
+
+  db_manager->add_database_shard(std::move(*db_client));
+
+  return db_manager;
 }
 
 std::optional<hogd::CoordinatorAllocateV1::client<

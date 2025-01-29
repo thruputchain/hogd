@@ -1,6 +1,7 @@
 #pragma once
 
 #include "coord.hh"
+#include "hogd/coord/database_manager.h"
 #include "hogd/coord/executor_manager.h"
 #include "x23/event.h"
 
@@ -35,12 +36,17 @@ public:
 
   void start(std::string const &coord_server_port);
 
+  // Waits until the database is ready, then returns a new DatabaseManager
+  // connected to the database.
+  std::unique_ptr<DatabaseManager> make_database_manager();
+
 private:
   x23::CoroPoll &cp_;
   ExecutorManager &executor_manager_;
   std::mutex mtx_;
+  std::condition_variable cv_; // for notify in make_database_manager
   uint16_t executor_id_ = 0;
-  std::optional<DatabaseInfo> database_info_;
+  std::optional<DatabaseInfo> database_info_ = std::nullopt;
 };
 
 static_assert(is_CoordinatorAllocateV1<CoordinatorAllocateService *, x23::Async,

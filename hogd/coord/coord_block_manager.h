@@ -6,12 +6,22 @@
 
 namespace hogd {
 
+// TODO(geoff): add systems to remove failed validation blocks at failure time.
+// They're already gc'd whenever a sibling block commits, so this is not high
+// priority.
+
 enum class CoordBlockState {
+  // Block is accepting new transactions for proposal
   kOpenForProposal,
+  // Block proposal phase is complete, no new transactions accepted
   kProposalClosed,
+  // Block is being validated by validators
   kValidating,
+  // Block validation completed successfully
   kValidateSuccess,
+  // Block validation failed
   kValidateFailure,
+  // Block has been committed to the database
   kCommitted
 };
 
@@ -54,16 +64,13 @@ private:
   };
 
   BlockID allocate_block_id() { return next_block_id_++; }
-
   std::unordered_map<BlockID, BlockEntry>::iterator
   open_block_guard(BlockID parent_id);
-
   void remove_children(std::vector<BlockID> children);
 
   DatabaseManager &database_manager_;
 
   std::mutex mtx_;
-
   std::unordered_map<BlockID, BlockEntry> blocks_;
   // TODO(geoff): initialize this with the same id the database is using
   // We could just keep this at 0, probably.  Depends on db load from disk code.

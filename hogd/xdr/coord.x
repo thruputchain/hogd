@@ -17,7 +17,8 @@ enum CoordinatorAllocateStatus { kReady = 0, kRetry = 1, kCatastropic = 2 };
 struct DatabaseInfo {
   // TODO(geoff): more complex initialization details for sharded db
   string database_address<>;
-  string database_port<>;
+  string database_to_coord_port<>;
+  string database_to_exec_port<>;
 };
 
 struct ExecutorInitialization {
@@ -41,7 +42,8 @@ struct ExecutorReadyAnnouncement {
 
 struct DatabaseReadyAnnouncement {
   // infer address from caller
-  string database_port<>;
+  string database_to_coord_port<>;
+  string database_to_exec_port<>;
 };
 
 program CoordinatorAllocate

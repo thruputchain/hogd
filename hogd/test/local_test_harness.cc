@@ -8,9 +8,12 @@ LocalTestHarness::LocalTestHarness()
         std::make_unique<PoolAndCoroPoll>(1), kExecToCoordPort,
         ExecutorInitialization{
             .database_info =
-                DatabaseInfo{.database_address = "localhost",
-                             .database_port = {kDBToExecutorPort.c_str(),
-                                               kDBToExecutorPort.size()}}}),
+                DatabaseInfo{
+                    .database_address = "localhost",
+                    .database_to_coord_port = {kDBToCoordPort.c_str(),
+                                               kDBToCoordPort.size()},
+                    .database_to_exec_port = {kDBToExecutorPort.c_str(),
+                                              kDBToExecutorPort.size()}}}),
     pool_(1), cp_(pool_), db_client_([this] {
       x23::RpcLogger::default_logfd = 2;
 

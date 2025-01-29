@@ -95,4 +95,8 @@ namespace hogd
     void;
   };
 
+  const kDBToExecutorPortNum = 10079;
+  const kDBToCoordPortNum = 10080;
+  const kExecToCoordPortNum = 10081;
+  const kCoordAnnouncePortNum = 10082;
 } // namespace hogd

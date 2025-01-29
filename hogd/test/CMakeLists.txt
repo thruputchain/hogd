@@ -18,6 +18,7 @@ add_executable(
   hogd_test
   test_bytestring_write.cc
   test_coord_to_db.cc
+  test_connect.cc
 )
 
 target_link_libraries(

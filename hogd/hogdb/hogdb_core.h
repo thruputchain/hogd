@@ -40,6 +40,7 @@ private:
 
   DBToExecutorServer db_to_exec_server_;
   DBToCoordServer db_to_coord_server_;
+  const std::string exec_server_port_;
   const std::string coord_server_port_;
 };
 

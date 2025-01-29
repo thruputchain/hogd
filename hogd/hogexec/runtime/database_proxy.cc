@@ -15,16 +15,37 @@
 
 namespace hogd {
 
+namespace {
+
+std::optional<DatabaseToExecutorInterfaceV1::client<
+    x23::RpcStream<x23::RpcLogger>::ClientRef>>
+connect_to_database(x23::CoroPoll &cp, DatabaseInfo const &db_info)
+{
+  auto fd = cp.tcpconnect(std::string(db_info.database_address),
+                          std::string(db_info.database_to_exec_port))();
+  if (!fd) {
+    return std::nullopt;
+  }
+  auto client_config = x23::rpc_stream_logged(cp, *fd);
+  return client_config.template client<DatabaseToExecutorInterfaceV1>();
+}
+
+} // namespace
+
 DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp, DatabaseInfo const &db_info)
   : db_client_([&] {
-      auto fd = cp.tcpconnect(std::string(db_info.database_address),
-                              std::string(db_info.database_port))();
-      if (!fd) {
-        exit(-1);
-      }
+      auto db_client = connect_to_database(cp, db_info);
 
-      auto client_config = x23::rpc_stream_logged(cp, *fd);
-      return client_config.template client<DatabaseToExecutorInterfaceV1>();
+      while (!db_client) {
+        perror(std::format("connect to database exec server {} port {} failed, "
+                           "retrying...",
+                           std::string(db_info.database_address),
+                           std::string(db_info.database_to_exec_port))
+                   .c_str());
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        db_client = connect_to_database(cp, db_info);
+      }
+      return *db_client;
     }())
 {}
 

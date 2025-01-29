@@ -3,6 +3,7 @@
 #include "hogd/hogdb/hogdb_core.h"
 #include "hogd/hogexec/hogexec_core.h"
 #include "rpc.hh"
+#include "rpc_types.hh"
 #include "x23/event.h"
 #include "x23/threadpool.h"
 
@@ -12,9 +13,11 @@ namespace hogd ::test {
 // within one binary.  Used only for testing.
 struct LocalTestHarness {
 
-  constexpr static std::string kDBToExecutorPort = "12000";
-  constexpr static std::string kDBToCoordPort = "12001";
-  constexpr static std::string kExecToCoordPort = "12002";
+  inline static std::string kDBToExecutorPort =
+      std::to_string(kDBToExecutorPortNum);
+  inline static std::string kDBToCoordPort = std::to_string(kDBToCoordPortNum);
+  inline static std::string kExecToCoordPort =
+      std::to_string(kExecToCoordPortNum);
 
   LocalTestHarness();
 

@@ -96,7 +96,6 @@ namespace hogd
   }
   = 33333333;
 
-  const kDBToExecutorPort = 10079;
   const kGenesisBlockID = 0;
 
   program DatabaseToExecutorInterface
