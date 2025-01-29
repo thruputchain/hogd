@@ -271,7 +271,12 @@ public:
     co_return Errno{EBADF};
   }
 
-  Async<std::expected<int, Errno>> tcpconnect(sockaddr *sa, socklen_t len);
+  Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,
+					      socklen_t len);
+  Async<std::expected<int, Errno>> tcpconnect(const sockaddr_storage *ss)
+  {
+    return tcpconnect(reinterpret_cast<const sockaddr *>(ss), sizeof(*ss));
+  }
 
   // Connect and return a file descriptor or a system error.
   Async<std::expected<int, std::system_error>> tcpconnect(std::string host,

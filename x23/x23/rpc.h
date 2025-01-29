@@ -305,7 +305,7 @@ struct RpcDispatcher : RpcService {
   RpcDispatcher(Impl impl, ExtraArgs... ea) : impl_(impl), ea_(std::move(ea)...)
   {}
   RpcDispatcher(Impl impl, Logger log, ExtraArgs... ea)
-    : impl_(impl), logger_(log), ea_(std::move(ea)...)
+    : impl_(std::move(impl)), logger_(log), ea_(std::move(ea)...)
   {}
 
   std::uint32_t program() const final { return version_meta::program; }
@@ -518,7 +518,7 @@ struct RpcStream : public detail::RpcStreamImpl {
       assert(!reader_running_);
       auto dispatch = new RpcDispatcher<VersMeta, Server, Logger,
                                         std::decay_t<ExtraArgs>...>(
-          srvr, s_->logger_, std::forward<ExtraArgs>(extra_args)...);
+          std::move(srvr), s_->logger_, std::forward<ExtraArgs>(extra_args)...);
       s_->srvmap_.emplace(dispatch->getpv(), dispatch);
       return *this;
     }
@@ -526,7 +526,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
     Configurator &server(Server srvr, ExtraArgs &&...ea)
     {
-      return server<Server, VersMeta, ExtraArgs...>(srvr, {},
+      return server<Server, VersMeta, ExtraArgs...>(std::move(srvr), {},
                                                     std::forward<ExtraArgs>(
                                                         ea)...);
     }
@@ -599,7 +599,7 @@ rpc_stream(CoroPoll &cp, int fd, Logger logger = {})
 inline RpcStream<RpcLogger>::Configurator
 rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
 {
-  return RpcStream<RpcLogger>::make(cp, UniqueFd{fd}, RpcLogger(logfd));
+  return RpcStream<RpcLogger>::make(cp, UniqueFd{fd}, RpcLogger(fd, logfd));
 }
 
 } // namespace x23

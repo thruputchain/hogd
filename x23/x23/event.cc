@@ -10,7 +10,7 @@
 #include "x23/async.h"
 #include "x23/err.h"
 #include "x23/event.h"
-#include "x23/fileio.h"
+#include "x23/sockio.h"
 #include "x23/threadpool.h"
 
 namespace x23 {
@@ -22,6 +22,7 @@ BufferedReader::operator()(int fd, void *buf, size_t len)
 {
   if (len == 0)
     return 0;
+  assert(len <= PTRDIFF_MAX);
 
   auto _hold = shared_from_this();
 
@@ -40,7 +41,7 @@ BufferedReader::operator()(int fd, void *buf, size_t len)
   iov[1].iov_base = m_.data();
   iov[1].iov_len = m_.size();
   auto n = ::readv(fd, iov, 2);
-  if (std::cmp_less_equal(n, len))
+  if (n <= ptrdiff_t(len))
     return n;
   stop_ = n - len;
   return len;
@@ -114,7 +115,7 @@ CoroPoll::write(BorrowedFd fd, BufView data)
 }
 
 Async<std::expected<int, Errno>>
-CoroPoll::tcpconnect(sockaddr *sa, socklen_t len)
+CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len)
 {
   if (stop_requested())
     co_return Errno{EBADF};
@@ -136,17 +137,6 @@ CoroPoll::tcpconnect(sockaddr *sa, socklen_t len)
       co_return Errno{};
   }
   co_return fd.release();
-}
-
-decltype(auto)
-gai_category()
-{
-  struct gai_category_impl : public std::error_category {
-    const char *name() const noexcept override { return "DNS"; }
-    std::string message(int err) const override { return gai_strerror(err); }
-  };
-  static const gai_category_impl cat;
-  return (cat);
 }
 
 Async<std::expected<int, std::system_error>>

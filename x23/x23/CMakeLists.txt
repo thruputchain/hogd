@@ -19,6 +19,8 @@ add_library(x23
   rpc.h
   rpc_msg.x
   serialize.h
+  sockio.h
+  sockio.cc
   testlock.h
   threadpool.cc
   threadpool.h

@@ -3,13 +3,13 @@
 #include <sys/socket.h>
 
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 
 namespace x23 {
 
 RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
 {
-  // XXX - use getsockname to show something more useful?
-  peername_ = std::format("fd {}", peerfd);
+  peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
 }
 
 std::string

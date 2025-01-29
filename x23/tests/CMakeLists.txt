@@ -24,6 +24,7 @@ add_x23_test(heap)
 add_x23_test(marshal)
 add_x23_test(rpc)
 add_x23_test(uvec)
+add_x23_test(rpcthroughput)
 add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_namespace_test3.x)
 
 if(GOOGLETEST_PATH)
