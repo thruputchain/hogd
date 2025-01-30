@@ -27,16 +27,21 @@ fn write_config_data(
     pk: &sdk::Ed25519PublicKey,
 ) {
     // guard against double initialization
+    sdk::Log(b"GGGGGGG").unwrap();
     if sdk::BytestringGet_Sized::<CONFIG_LEN>(&CONFIG_KEY).is_ok() {
+        sdk::Log(b"HHHHHHH").unwrap();
         trap();
     }
+    sdk::Log(b"IIIIIII").unwrap();
 
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
     sdk::parse_trait::serialize_to_calldata(&mut bytes_mu, (erc20_addr, pk))
         .unwrap();
+    sdk::Log(b"JJJJJJJ").unwrap();
     let bytes: [u8; CONFIG_LEN] = unsafe { core::mem::transmute(bytes_mu) };
 
     sdk::BytestringSetExclusive(&CONFIG_KEY, &bytes).unwrap();
+    sdk::Log(b"KKKKKKK").unwrap();
 }
 
 fn load_config_data() -> (sdk::ContractAddress, sdk::Ed25519PublicKey) {
@@ -63,7 +68,9 @@ pub fn initialize(
     pk: &sdk::Ed25519PublicKey,
     erc20_addr: &sdk::ContractAddress,
 ) -> () {
+    sdk::Log(b"AAAAAAA").unwrap();
     write_config_data(&erc20_addr, &pk);
+    sdk::Log(b"AAAAAAAB").unwrap();
 }
 
 #[public_method]

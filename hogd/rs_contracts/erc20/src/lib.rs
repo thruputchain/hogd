@@ -16,6 +16,7 @@ public_interface!();
 
 #[public_method(static_calldata_length = 32, static_return_length = 0)]
 pub fn initialize(owner: &sdk::ContractAddress) -> () {
+    sdk::Log(b"CCCCCCC").unwrap();
     config::write_config_data(&owner);
 }
 

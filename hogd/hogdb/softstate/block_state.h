@@ -50,7 +50,7 @@ public:
   // Writes this block's state to the base database.
   // After this call, any children can be unlinked.
   void commit_to_database();
-  bool is_committed_to_database() const { return parent_state_ == nullptr; }
+  bool is_committed_to_database() const { return is_committed_to_database_; }
 
   // after this call, the object will read directly from the base database
   // instead of the parent.
@@ -89,6 +89,7 @@ private:
   // nullptr if parent has been unlinked
   // Hold this shared_ptr to keep parent state alive.
   std::shared_ptr<BlockState> parent_state_;
+  bool is_committed_to_database_ = false;
 };
 
 } // namespace hogd

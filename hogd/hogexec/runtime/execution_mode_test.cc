@@ -1,5 +1,3 @@
-#include <cstdint>
-
 #include <gtest/gtest.h>
 
 #include "hogd/hogexec/runtime/execution_mode.h"

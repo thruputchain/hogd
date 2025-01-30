@@ -33,6 +33,8 @@ protected:
       HogdbCore db_core(1, kDBToExecutorPort, kDBToCoordPort);
       db_core.announce_to_coordinator("localhost", kCoordAnnouncePort);
 
+      db_core.get_root_db().set_as_default_genesis();
+
       std::unique_lock lk(mtx_);
       if (test_done_) {
         return;

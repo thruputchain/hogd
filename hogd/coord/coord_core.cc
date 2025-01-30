@@ -42,7 +42,9 @@ CoordinatorCore::validate_block(SHA256Hash const &parent_hash,
 
   if (frame->validation_success()) {
     block->mark_validation_success();
-    block_manager_->close_block(*block_id);
+    [[maybe_unused]] auto hash =
+        co_await block_manager_->close_block(*block_id);
+    assert(hash == block_hash);
   }
   else {
     block->mark_validation_failed();

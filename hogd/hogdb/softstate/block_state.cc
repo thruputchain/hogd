@@ -22,6 +22,8 @@ BlockState::commit_to_database()
 {
   assert_closed();
   assert(parent_state_ == nullptr);
+  assert(!is_committed_to_database_);
+  is_committed_to_database_ = true;
   storage_view_.commit_to_database();
 }
 
@@ -97,6 +99,8 @@ BlockState::get_snapshot_deployment(ContractAddress const &addr)
 std::shared_ptr<const Contract>
 BlockState::get_snapshot_contract(SHA256Hash const &contract_hash)
 {
+  std::printf("BlockState::get_snapshot_contract %s\n",
+              x23::show(contract_hash).c_str());
   return storage_view_.get_snapshot_contract(contract_hash);
 }
 

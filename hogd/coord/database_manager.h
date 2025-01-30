@@ -14,14 +14,14 @@ public:
 
   // close a block to new transactions.  Does not commit block to disk,
   // nor does it prevent sibling blocks from being opened.
-  void close_block(BlockID block_id);
+  x23::Async<void> close_block(BlockID block_id);
 
   // commit a block to disk.  This block must be the immediate descendant
   // of the most recently committed block.
   // Prevents sibling blocks from being opened.
-  void commit_block(BlockID block_id);
+  x23::Async<void> commit_block(BlockID block_id);
 
-  void open_block(BlockID parent_id, BlockID block_id);
+  x23::Async<void> open_block(BlockID parent_id, BlockID block_id);
 
 private:
   std::vector<database_client_t> database_clients_;

@@ -69,8 +69,11 @@ SystemCallHandler::root_invoke()
   auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
                                       signed_tx_.tx.invocation.gas_limit);
   res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  std::printf("root_invoke finish frame done %d\n",
+              res.is_root_success() ? 1 : 0);
   res = finish_nondeterminism_checks(res);
-
+  std::printf("root_invoke finish nondeterminism checks done %d\n",
+              res.is_root_success() ? 1 : 0);
   if (!res.is_root_success())
     return res.to_root_error();
   return res;
@@ -216,6 +219,18 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
       std::move(returned_buffer));
 }
 
+std::pair<std::optional<SHA256Hash>, bool>
+SystemCallHandler::lookup_deployed_contract_hash(ContractAddress const &addr)
+{
+  // lookuup local first, just to save an rpc in some cases
+  auto local_deployed_hash =
+      invocation_frame_stack_.lookup_locally_deployed_contract(addr);
+  if (local_deployed_hash) {
+    return {local_deployed_hash, true};
+  }
+  return {snapshot_cache_.try_get_deployed_contract_hash(addr), false};
+}
+
 RuntimeCacheEntry *
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
@@ -237,17 +252,9 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // No runtime cache entry exists; now try to create a new one.
 
-  auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
-
-  bool local_deployment = false;
-  if (!deployed_hash) {
-    // There was no deployment in the previous snapshot.
-    // Now check for the transaction's local context.
-    local_deployment = true;
-    deployed_hash =
-        invocation_frame_stack_.lookup_locally_deployed_contract(addr);
-  }
-
+  std::printf("start lookup for contract deployment\n");
+  auto [deployed_hash, local_deployment] = lookup_deployed_contract_hash(addr);
+  std::printf("lookup for contract deployment done\n");
   if (!deployed_hash) {
     // A deployment was not found in the local context
     // nor in the snapshot.
@@ -298,6 +305,10 @@ SystemCallHandler::get_calldata() const
 SyscallStatus<void>
 SystemCallHandler::log(std::span<const std::byte> message)
 {
+  LogEntry log_entry;
+  log_entry.message.resize_uninitialized(message.size());
+  std::memcpy(log_entry.message.data(), message.data(), message.size());
+  std::printf("logging msg %s\n", x23::show(log_entry).c_str());
   assert(!invocation_frame_stack_.empty());
 
   if (message.size() > kMaxLogMessageLen) {
@@ -344,6 +355,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
+  std::printf("doing deploy guard\n");
   if (snapshot_cache_.try_get_deployed_contract_hash(deploy_addr)) {
     // Contract has been deployed to query address in a previous block
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
@@ -354,6 +366,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
     // contract has already been deployed in this transaction
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
+  std::printf("deploy guard done\n");
 
   auto &frame = invocation_frame_stack_.get_active_frame();
 
@@ -368,20 +381,26 @@ SystemCallHandler::get_bytestring(StorageKey const &storage_key)
 {
   auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
 
+  std::printf("getting bytestring\n");
   if (auto const *bytestring_item = item_view.template get<BytestringItem>()) {
+    std::printf("bytestring item found\n");
     return (bytestring_item->bytestring_);
   }
 
   if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
     if (!unmodified_item->base_item_) {
+      std::printf("no storage item\n");
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
     if (unmodified_item->base_item_->type() != StorageItemType::kBytestring) {
+      std::printf("invalid input\n");
       return SyscallError{SyscallErrorCode::kInvalidInput};
     }
+    std::printf("returning bytestring\n");
     return unmodified_item->base_item_->bytestring();
   }
 
+  std::printf("invalid input\n");
   return SyscallError{SyscallErrorCode::kInvalidInput};
 }
 
@@ -457,11 +476,16 @@ InvokeResult
 SystemCallHandler::finish_nondeterminism_checks(InvokeResult const &res)
 {
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+    std::printf("finish_nondeterminism_checks validation mode\n");
     if (std::get<ValidationModeData>(execution_mode_data_)
             .check_all_consumed()) {
+      std::printf(
+          "finish_nondeterminism_checks validation mode all consumed\n");
       // all proposal bits have been consumed, so validation succeeds.
       return res;
     }
+    std::printf(
+        "finish_nondeterminism_checks validation mode not all consumed\n");
     // received bad proposal data.
     return InvokeResult{.result_ =
                             InvokeError{InvokeErrorCode::kValidationFailure},

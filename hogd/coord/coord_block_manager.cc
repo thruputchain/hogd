@@ -95,7 +95,7 @@ CoordinatorBlockManager::open_proposal(BlockID parent_id)
   auto block_id = allocate_block_id();
   parent_entry.children_.push_back(block_id);
 
-  database_manager_.open_block(parent_id, block_id);
+  database_manager_.open_block(parent_id, block_id)();
 
   blocks_.emplace(block_id,
                   BlockEntry{
@@ -123,7 +123,7 @@ CoordinatorBlockManager::add_block_to_validate(
   auto block_id = allocate_block_id();
   parent_entry.children_.push_back(block_id);
 
-  database_manager_.open_block(parent_id, block_id);
+  database_manager_.open_block(parent_id, block_id)();
 
   blocks_.emplace(block_id, BlockEntry{
                                 .block_ = std::make_shared<CoordBlock>(
@@ -148,7 +148,7 @@ CoordinatorBlockManager::commit_block(BlockID block_id)
   assert(!block.committed());
   assert(block.ready_for_commit());
   block.mark_as_committed();
-  database_manager_.commit_block(block_id);
+  database_manager_.commit_block(block_id)();
 
   // cleanup sibling blocks
   it = blocks_.find(last_committed_block_id_);
@@ -207,17 +207,22 @@ CoordinatorBlockManager::lookup_block_id(SHA256Hash hash) const
   return it->second;
 }
 
-SHA256Hash
+x23::Async<SHA256Hash>
 CoordinatorBlockManager::close_block(BlockID block_id)
 {
-  std::lock_guard lock(mtx_);
-  auto it = blocks_.find(block_id);
-  assert(it != blocks_.end());
-  auto &block = *it->second.block_;
+  SHA256Hash hash;
+  {
+    std::lock_guard lock(mtx_);
+    auto it = blocks_.find(block_id);
+    assert(it != blocks_.end());
+    auto &block = *it->second.block_;
 
-  auto hash = block.canonical_block_hash();
-  block_hash_to_id_[hash] = block_id;
-  return hash;
+    hash = block.canonical_block_hash();
+    block_hash_to_id_[hash] = block_id;
+  }
+
+  co_await database_manager_.close_block(block_id);
+  co_return hash;
 }
 
 void

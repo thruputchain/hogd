@@ -27,4 +27,5 @@ pub fn deploy_and_invoke(
         calldata,
     )
     .unwrap();
+    sdk::Log(b"ABCDEFG").unwrap();
 }

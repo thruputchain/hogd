@@ -125,6 +125,10 @@ private:
   // in the snapshot, or by a prior action of the current transaction that was
   // not rolled back by a revert).
   RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
+  // deployed hash for first arg, true for second arg if it was deployed in the
+  // current transaction
+  std::pair<std::optional<SHA256Hash>, bool>
+  lookup_deployed_contract_hash(ContractAddress const &addr);
 
   // Get the amount of gas available to a child invoke call.
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left.
