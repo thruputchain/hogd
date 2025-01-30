@@ -23,8 +23,6 @@ InMemoryDatabase::get_post_block_storage_item(AddressAndKey const &addrkey)
 std::optional<SHA256Hash>
 InMemoryDatabase::get_post_block_deployment(ContractAddress const &addr)
 {
-  std::printf("InMemoryDatabase::get_post_block_deployment %s\n",
-              x23::show(addr).c_str());
   auto m = contract_deployments_.take();
   if (auto it = m->find(addr); it != m->end()) {
     return it->second;
@@ -36,8 +34,6 @@ InMemoryDatabase::get_post_block_deployment(ContractAddress const &addr)
 std::shared_ptr<const Contract>
 InMemoryDatabase::get_post_block_contract(SHA256Hash const &hash)
 {
-  std::printf("InMemoryDatabase::get_post_block_contract %s\n",
-              x23::show(hash).c_str());
   auto m = contract_creates_.take();
   if (auto it = m->find(hash); it != m->end()) {
     return it->second;

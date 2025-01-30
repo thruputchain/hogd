@@ -16,17 +16,16 @@ public_interface!();
 
 #[public_method(static_calldata_length = 32, static_return_length = 0)]
 pub fn initialize(owner: &sdk::ContractAddress) -> () {
-    sdk::Log(b"CCCCCCC").unwrap();
     config::write_config_data(&owner);
 }
 
-#[public_method(static_calldata_length = 40, static_return_length = 0)]
+#[public_method(static_calldata_length = 48, static_return_length = 0)]
 pub fn transfer(to: &sdk::ContractAddress, amount: i128) {
     let sender = sdk::GetMsgSender().unwrap();
     do_transfer(&sender, &to, amount);
 }
 
-#[public_method(static_calldata_length = 72, static_return_length = 0)]
+#[public_method(static_calldata_length = 80, static_return_length = 0)]
 pub fn transfer_from(
     owner: &sdk::ContractAddress,
     to: &sdk::ContractAddress,
@@ -38,14 +37,14 @@ pub fn transfer_from(
     do_transfer(owner, to, amount);
 }
 
-#[public_method(static_calldata_length = 40, static_return_length = 0)]
+#[public_method(static_calldata_length = 48, static_return_length = 0)]
 pub fn adjust_allowance(spender: &sdk::ContractAddress, amount: i128) {
     let sender = sdk::GetMsgSender().unwrap();
 
     do_allowance_delta(&sender, spender, amount);
 }
 
-#[public_method(static_calldata_length = 32, static_return_length = 8)]
+#[public_method(static_calldata_length = 32, static_return_length = 16)]
 pub fn get_balance_of(addr: &sdk::ContractAddress) -> i128 {
     let balance_key = compute_balance_key(addr);
 
@@ -55,14 +54,14 @@ pub fn get_balance_of(addr: &sdk::ContractAddress) -> i128 {
     }
 }
 
-#[public_method(static_calldata_length = 0, static_return_length = 8)]
+#[public_method(static_calldata_length = 0, static_return_length = 16)]
 pub fn get_balance() -> i128 {
     let sender = sdk::GetMsgSender().unwrap();
 
     get_balance_of(&sender)
 }
 
-#[public_method(static_calldata_length = 40, static_return_length = 0)]
+#[public_method(static_calldata_length = 48, static_return_length = 0)]
 pub fn mint(to: &sdk::ContractAddress, amount: i128) {
     let sender = sdk::GetMsgSender().unwrap();
 
@@ -74,7 +73,7 @@ pub fn mint(to: &sdk::ContractAddress, amount: i128) {
     do_mint(&to, amount);
 }
 
-#[public_method(static_calldata_length = 40, static_return_length = 0)]
+#[public_method(static_calldata_length = 48, static_return_length = 0)]
 pub fn burn(to: &sdk::ContractAddress, amount: i128) {
     let sender = sdk::GetMsgSender().unwrap();
 

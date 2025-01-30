@@ -16,6 +16,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -63,6 +64,7 @@ InvocationFrame::log(std::span<const std::byte> message)
                                 message.size()};
   logs_.emplace_back(active_invocation_.invoked_address,
                      x23::Vec<uint8_t, kMaxLogMessageLen>(m.begin(), m.end()));
+  std::printf("logging msg %s\n", x23::show(logs_.back()).c_str());
 }
 
 void

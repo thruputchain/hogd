@@ -177,8 +177,6 @@ ParentBlockView::get_snapshot_deployment(ContractAddress const &addr)
 std::shared_ptr<const Contract>
 ParentBlockView::get_snapshot_contract(SHA256Hash const &hash)
 {
-  std::printf("ParentBlockView::get_snapshot_contract %s\n",
-              x23::show(hash).c_str());
   std::shared_lock lock(mtx_);
   return std::visit(
       [&hash](auto *parent) { return parent->get_post_block_contract(hash); },
@@ -204,15 +202,10 @@ ParentBlockView::get_post_block_deployment(ContractAddress const &addr)
 std::shared_ptr<const Contract>
 ParentBlockView::get_post_block_contract(SHA256Hash const &hash)
 {
-  std::printf("ParentBlockView::get_post_block_contract %s\n",
-              x23::show(hash).c_str());
   assert(closed_);
   {
     auto m = contract_creates_.take();
     if (auto it = m->find(hash); it != m->end()) {
-      std::printf(
-          "ParentBlockView::get_post_block_contract found in cache %s\n",
-          x23::show(hash).c_str());
       return it->second;
     }
   }
@@ -225,8 +218,6 @@ StorageView::commit_contract_create(Contract const &contract)
 {
   assert(!closed_);
   auto hash = sha256(contract);
-  std::printf("StorageView::commit_contract_create %p %s\n", this,
-              x23::show(hash).c_str());
   contract_creates_->emplace(hash, std::make_shared<const Contract>(contract));
 }
 void

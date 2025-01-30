@@ -694,11 +694,9 @@ pub fn parse_returns_from_calldata<'a, T: ParseableOwned>(
     bytes: &'a [u8],
 ) -> Result<T, i32> {
     let (arg, arglen) = T::parse_from(&bytes)?;
-
     if arglen != bytes.len() {
         return Err(SyscallErrorCode::kReturnParseError as i32);
     }
-
     Ok(arg)
 }
 

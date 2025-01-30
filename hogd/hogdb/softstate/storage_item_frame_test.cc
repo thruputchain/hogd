@@ -365,7 +365,8 @@ TEST(StorageItemFrame, NNIntSimpleSetAdd)
 
   StorageDelta nnint_set_add = make_nnint_delta(5, 10);
 
-  auto lock = item.try_reserve(nnint_set_add, StorageLock(StorageLockType::kNone));
+  auto lock =
+      item.try_reserve(nnint_set_add, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lock);
 
   item.commit(nnint_set_add, *lock);

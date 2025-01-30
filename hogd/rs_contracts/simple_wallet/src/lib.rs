@@ -27,32 +27,27 @@ fn write_config_data(
     pk: &sdk::Ed25519PublicKey,
 ) {
     // guard against double initialization
-    sdk::Log(b"GGGGGGG").unwrap();
     if sdk::BytestringGet_Sized::<CONFIG_LEN>(&CONFIG_KEY).is_ok() {
-        sdk::Log(b"HHHHHHH").unwrap();
         trap();
     }
-    sdk::Log(b"IIIIIII").unwrap();
 
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
     sdk::parse_trait::serialize_to_calldata(&mut bytes_mu, (erc20_addr, pk))
         .unwrap();
-    sdk::Log(b"JJJJJJJ").unwrap();
     let bytes: [u8; CONFIG_LEN] = unsafe { core::mem::transmute(bytes_mu) };
 
     sdk::BytestringSetExclusive(&CONFIG_KEY, &bytes).unwrap();
-    sdk::Log(b"KKKKKKK").unwrap();
 }
 
 fn load_config_data() -> (sdk::ContractAddress, sdk::Ed25519PublicKey) {
     // TODO(geoff) see marginal impact of rewriting without allocator
     let config = sdk::BytestringGet(&CONFIG_KEY).unwrap();
-
-    sdk::parse_trait::parse_returns_from_calldata::<(
+    let (addr, pk) = sdk::parse_trait::parse_returns_from_calldata::<(
         sdk::ContractAddress,
         sdk::Ed25519PublicKey,
     )>(&config)
-    .unwrap()
+    .unwrap();
+    (addr, pk)
 }
 
 #[public_method]
@@ -68,16 +63,13 @@ pub fn initialize(
     pk: &sdk::Ed25519PublicKey,
     erc20_addr: &sdk::ContractAddress,
 ) -> () {
-    sdk::Log(b"AAAAAAA").unwrap();
     write_config_data(&erc20_addr, &pk);
-    sdk::Log(b"AAAAAAAB").unwrap();
 }
 
 #[public_method]
 pub fn test_expect_balance(expect: i128) {
-    let (erc20addr, _) = load_config_data();
+    let (erc20addr, _foo) = load_config_data();
     let token = erc20::erc20::new(&erc20addr);
-
     if expect != token.get_balance().unwrap() {
         trap();
     }
@@ -152,6 +144,5 @@ pub fn mint(to_addr: &sdk::ContractAddress, amount: i128) {
     let (erc20addr, _) = load_config_data();
 
     let token = erc20::erc20::new(&erc20addr);
-
     token.mint(&to_addr, amount).unwrap();
 }

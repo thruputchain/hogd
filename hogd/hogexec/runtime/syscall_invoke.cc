@@ -31,9 +31,9 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
-                                ContractAddress &output_self_address)
+                                ContractAddress &output_address)
 {
-  output_self_address = syscall_handler.get_current_address();
+  output_address = syscall_handler.get_current_address();
   return {SyscallErrorCode::kNone, 0};
 }
 

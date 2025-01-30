@@ -47,15 +47,12 @@ public:
   void write_contract(SHA256Hash const &hash,
                       std::shared_ptr<const Contract> contract)
   {
-    std::printf("write_contract %s\n", x23::show(hash).c_str());
     contract_creates_->emplace(hash, contract);
   }
 
   void write_deployment(ContractAddress const &addr,
                         SHA256Hash const &contract_hash)
   {
-    std::printf("write_deployment %s %s\n", x23::show(addr).c_str(),
-                x23::show(contract_hash).c_str());
     contract_deployments_->emplace(addr, contract_hash);
   }
 

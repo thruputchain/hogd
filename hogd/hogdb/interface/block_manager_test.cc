@@ -13,7 +13,7 @@ TEST(BlockManagerTest, CommitCleanup)
   EXPECT_FALSE(m.get_block_data(1));
 
   auto b0 = m.get_block_data(0);
-  b0->close_block();
+  b0->assert_closed();
 
   EXPECT_TRUE(m.add_child(0, 1, std::make_shared<BlockState>(b0)));
   EXPECT_TRUE(m.get_block_data(1));

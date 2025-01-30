@@ -69,11 +69,8 @@ SystemCallHandler::root_invoke()
   auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
                                       signed_tx_.tx.invocation.gas_limit);
   res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
-  std::printf("root_invoke finish frame done %d\n",
-              res.is_root_success() ? 1 : 0);
   res = finish_nondeterminism_checks(res);
-  std::printf("root_invoke finish nondeterminism checks done %d\n",
-              res.is_root_success() ? 1 : 0);
+
   if (!res.is_root_success())
     return res.to_root_error();
   return res;
@@ -231,6 +228,16 @@ SystemCallHandler::lookup_deployed_contract_hash(ContractAddress const &addr)
   return {snapshot_cache_.try_get_deployed_contract_hash(addr), false};
 }
 
+std::shared_ptr<const Contract>
+SystemCallHandler::lookup_contract_by_hash(SHA256Hash const &hash)
+{
+  auto it = newly_created_contracts_.find(hash);
+  if (it != newly_created_contracts_.end()) {
+    return it->second;
+  }
+  return snapshot_cache_.try_get_contract_by_hash(hash);
+}
+
 RuntimeCacheEntry *
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
@@ -251,10 +258,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   }
 
   // No runtime cache entry exists; now try to create a new one.
-
-  std::printf("start lookup for contract deployment\n");
   auto [deployed_hash, local_deployment] = lookup_deployed_contract_hash(addr);
-  std::printf("lookup for contract deployment done\n");
   if (!deployed_hash) {
     // A deployment was not found in the local context
     // nor in the snapshot.
@@ -263,23 +267,13 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // At this point, we have a deployment and the hash of the contract.
   // We now resolve the actual contract code from the snapshot.
-  auto load_contract = snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
-
-  if (!load_contract) {
-    // Not found committed contract in the snapshot.
-    // Try loading from local context
-    auto it = newly_created_contracts_.find(*deployed_hash);
-
-    // contract deployment checks to see that a new deployment of a specific
-    // hash always is a hash of a contract that the runtime can access.
-    assert(it != newly_created_contracts_.end());
-
-    load_contract = it->second;
-  }
+  // Deployment makes sure that the contract exists.
+  auto contract = lookup_contract_by_hash(*deployed_hash);
+  assert(contract);
 
   // actually make the new runtime
   auto new_runtime =
-      wasmi_context_.make_new_runtime(load_contract->contract_data, this);
+      wasmi_context_.make_new_runtime(contract->contract_data, this);
 
   // Some error instantiating the runtime.
   // TODO(geoff) validate that failures here are deterministic.
@@ -305,10 +299,6 @@ SystemCallHandler::get_calldata() const
 SyscallStatus<void>
 SystemCallHandler::log(std::span<const std::byte> message)
 {
-  LogEntry log_entry;
-  log_entry.message.resize_uninitialized(message.size());
-  std::memcpy(log_entry.message.data(), message.data(), message.size());
-  std::printf("logging msg %s\n", x23::show(log_entry).c_str());
   assert(!invocation_frame_stack_.empty());
 
   if (message.size() > kMaxLogMessageLen) {
@@ -340,33 +330,18 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   // This causes a load of the contract to the cache,
   // but this is in most cases no-cost, as a deployed contract will _probably_
   // be immediately invoked with e.g. a constructor
-  auto load_contract = snapshot_cache_.try_get_contract_by_hash(contract_hash);
-
+  auto load_contract = lookup_contract_by_hash(contract_hash);
   if (!load_contract) {
-    // try loading from local context
-    auto it = newly_created_contracts_.find(contract_hash);
-    if (it == newly_created_contracts_.end()) {
-      // cannot find the contract in question, in either snapshot
-      // or in local context.
-      return SyscallError{SyscallErrorCode::kContractLookupFailed};
-    }
+    return SyscallError{SyscallErrorCode::kContractLookupFailed};
   }
 
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
-  std::printf("doing deploy guard\n");
-  if (snapshot_cache_.try_get_deployed_contract_hash(deploy_addr)) {
-    // Contract has been deployed to query address in a previous block
+  auto [deployed_hash, _] = lookup_deployed_contract_hash(deploy_addr);
+  if (deployed_hash) {
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
-
-  if (invocation_frame_stack_.lookup_locally_deployed_contract(deploy_addr)
-          .has_value()) {
-    // contract has already been deployed in this transaction
-    return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
-  }
-  std::printf("deploy guard done\n");
 
   auto &frame = invocation_frame_stack_.get_active_frame();
 
@@ -381,26 +356,20 @@ SystemCallHandler::get_bytestring(StorageKey const &storage_key)
 {
   auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
 
-  std::printf("getting bytestring\n");
   if (auto const *bytestring_item = item_view.template get<BytestringItem>()) {
-    std::printf("bytestring item found\n");
     return (bytestring_item->bytestring_);
   }
 
   if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
     if (!unmodified_item->base_item_) {
-      std::printf("no storage item\n");
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
     if (unmodified_item->base_item_->type() != StorageItemType::kBytestring) {
-      std::printf("invalid input\n");
       return SyscallError{SyscallErrorCode::kInvalidInput};
     }
-    std::printf("returning bytestring\n");
     return unmodified_item->base_item_->bytestring();
   }
 
-  std::printf("invalid input\n");
   return SyscallError{SyscallErrorCode::kInvalidInput};
 }
 
@@ -476,16 +445,11 @@ InvokeResult
 SystemCallHandler::finish_nondeterminism_checks(InvokeResult const &res)
 {
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
-    std::printf("finish_nondeterminism_checks validation mode\n");
     if (std::get<ValidationModeData>(execution_mode_data_)
             .check_all_consumed()) {
-      std::printf(
-          "finish_nondeterminism_checks validation mode all consumed\n");
       // all proposal bits have been consumed, so validation succeeds.
       return res;
     }
-    std::printf(
-        "finish_nondeterminism_checks validation mode not all consumed\n");
     // received bad proposal data.
     return InvokeResult{.result_ =
                             InvokeError{InvokeErrorCode::kValidationFailure},

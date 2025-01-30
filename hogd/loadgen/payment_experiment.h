@@ -1,8 +1,8 @@
 #pragma once
 
-#include <cstdint>
 #include <map>
 
+#include "hogd/base/types.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -28,14 +28,20 @@ private:
         SHA256Hash const &wallet_contract_hash,
         std::shared_ptr<const Contract> const &wallet_contract,
         ContractAddress const &erc20_address) const;
+
+    ProposedTransaction make_check_balance_transaction(int128_t amount) const;
   };
 
   void generate_accounts();
 
   // Workflow: Deploy ERC20 and owner, then deploy wallets.
   std::vector<ProposedTransaction> make_deploy_erc20_and_owner_transactions();
-
   std::vector<ProposedTransaction> make_deploy_wallet_transactions();
+  std::vector<ProposedTransaction> make_mint_transactions();
+  std::vector<ProposedTransaction> make_check_balance_transactions();
+
+  ProposedTransaction make_mint_transaction(int128_t amount,
+                                            Account const &to) const;
 
   SHA256Hash wallet_contract_hash_;
   SHA256Hash erc20_contract_hash_;

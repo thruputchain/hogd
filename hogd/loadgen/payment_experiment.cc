@@ -106,11 +106,63 @@ PaymentExperiment::make_deploy_erc20_and_owner_transactions()
   return {owner_tx, erc20_tx};
 }
 
+std::vector<ProposedTransaction>
+PaymentExperiment::make_mint_transactions()
+{
+  std::vector<ProposedTransaction> out;
+  out.reserve(accounts_.size());
+  for (auto const &[account_index, account] : accounts_) {
+    out.push_back(make_mint_transaction(1'000'000, account));
+  }
+  return out;
+}
+
+std::vector<ProposedTransaction>
+PaymentExperiment::make_check_balance_transactions()
+{
+  std::vector<ProposedTransaction> out;
+  out.reserve(accounts_.size());
+  for (auto const &[account_index, account] : accounts_) {
+    out.push_back(account.make_check_balance_transaction(1'000'000));
+  }
+  return out;
+}
+
 std::vector<std::vector<ProposedTransaction>>
 PaymentExperiment::produce_initialization_transactions()
 {
   return {make_deploy_erc20_and_owner_transactions(),
-          make_deploy_wallet_transactions()};
+          make_deploy_wallet_transactions(), make_mint_transactions(),
+          make_check_balance_transactions()};
+}
+
+ProposedTransaction
+PaymentExperiment::make_mint_transaction(int128_t amount,
+                                         Account const &to) const
+{
+  return ProposedTransaction{
+      .signed_tx = SignedTransaction{
+          .tx = Transaction{
+              .invocation =
+                  Invocation{.invoked_address = erc20_owner_.wallet_address_,
+                             .method = compute_sdk_name("mint"),
+                             .gas_limit = UINT64_MAX,
+                             .calldata =
+                                 make_calldata(to.wallet_address_, amount)}}}};
+}
+
+ProposedTransaction
+PaymentExperiment::Account::make_check_balance_transaction(
+    int128_t amount) const
+{
+  return ProposedTransaction{
+      .signed_tx = SignedTransaction{
+          .tx = Transaction{
+              .invocation =
+                  Invocation{.invoked_address = wallet_address_,
+                             .method = compute_sdk_name("test_expect_balance"),
+                             .gas_limit = UINT64_MAX,
+                             .calldata = make_calldata(amount)}}}};
 }
 
 } // namespace hogd

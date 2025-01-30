@@ -23,7 +23,16 @@ pub fn NonnegativeIntSetAdd(
 }
 
 pub fn NonnegativeIntAdd(key: &StorageKey, add_value: i128) -> Result<(), i32> {
-    let (set, prev_add) = NonnegativeIntGet(key)?;
+    let (set, prev_add) = match NonnegativeIntGet(key) {
+        Ok(x) => x,
+        Err(e) => {
+            if e == rs_xdr::SyscallErrorCode::kStorageKeyNotExist as i32 {
+                (0, 0)
+            } else {
+                return Err(e);
+            }
+        }
+    };
 
     NonnegativeIntSetAdd(key, set, prev_add + add_value)
 }

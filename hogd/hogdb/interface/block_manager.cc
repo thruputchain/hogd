@@ -21,6 +21,7 @@ BlockManager::BlockManager(BlockID root_id,
 {
   assert(initial_state);
   initial_state->assert_closed();
+  assert(initial_state->is_committed_to_database());
   block_cache_.emplace(std::as_bytes(std::span(&last_committed_id_, 1)),
                        last_committed_id_, std::move(initial_state));
 }

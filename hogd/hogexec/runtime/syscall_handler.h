@@ -129,6 +129,8 @@ private:
   // current transaction
   std::pair<std::optional<SHA256Hash>, bool>
   lookup_deployed_contract_hash(ContractAddress const &addr);
+  std::shared_ptr<const Contract>
+  lookup_contract_by_hash(SHA256Hash const &hash);
 
   // Get the amount of gas available to a child invoke call.
   // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left.

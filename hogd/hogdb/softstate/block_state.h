@@ -33,7 +33,8 @@ public:
   {}
 
   BlockState(InMemoryDatabase *base_db)
-    : storage_view_(base_db), parent_state_(nullptr)
+    : storage_view_(base_db), parent_state_(nullptr),
+      is_committed_to_database_(true)
   {
     // This is a hack to work around the fact that the initial block starts as
     // committed, even though the initial block is empty. BlockManager needs a
