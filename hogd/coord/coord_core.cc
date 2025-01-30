@@ -14,4 +14,52 @@ CoordinatorCore::start(std::string const &coord_server_port)
   block_manager_ = std::make_unique<CoordinatorBlockManager>(*db_manager_);
 }
 
+x23::Async<bool>
+CoordinatorCore::validate_block(SHA256Hash const &parent_hash,
+                                std::vector<ProposedTransaction> txs,
+                                SHA256Hash const &block_hash)
+{
+  auto parent_id = block_manager_->lookup_block_id(parent_hash);
+  if (!parent_id) {
+    co_return false;
+  }
+
+  auto block_id =
+      block_manager_->add_block_to_validate(*parent_id, txs, block_hash);
+  if (!block_id) {
+    co_return false;
+  }
+
+  auto block = block_manager_->get_block(*block_id);
+  // possible that the block gets pruned immediately before we start validation
+  if (!block) {
+    co_return false;
+  }
+
+  auto *frame = block->get_validation_frame();
+
+  co_await executor_manager_.enqueue_validation_request(*block_id, frame);
+
+  if (frame->validation_success()) {
+    block->mark_validation_success();
+    block_manager_->close_block(*block_id);
+  }
+  else {
+    block->mark_validation_failed();
+    block_manager_->prune_block(*block_id);
+  }
+
+  // frame is still a valid pointer because we hold a shared_ptr to the block
+  // (the block variable).
+  co_return frame->validation_success();
+}
+
+void
+CoordinatorCore::commit_block(SHA256Hash const &block_hash)
+{
+  auto block_id = block_manager_->lookup_block_id(block_hash);
+  assert(block_id);
+  block_manager_->get_block(*block_id)->mark_as_committed();
+}
+
 } // namespace hogd

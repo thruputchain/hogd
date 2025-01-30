@@ -16,6 +16,7 @@ CoordinatorBlockManager::CoordinatorBlockManager(
                       .children_ = {},
                       .closed_to_new_children_ = false,
                   });
+  block_hash_to_id_.emplace(kGenesisBlockHash, last_committed_block_id_);
 }
 
 bool
@@ -50,11 +51,23 @@ CoordBlock::CoordBlock(BlockID block_id)
     state_(CoordBlockState::kOpenForProposal)
 {}
 
-CoordBlock::CoordBlock(BlockID block_id, std::vector<ProposedTransaction> txs)
+CoordBlock::CoordBlock(BlockID block_id, std::vector<ProposedTransaction> txs,
+                       SHA256Hash block_hash)
   : block_id_(block_id),
-    current_frame_(std::in_place_type<BlockValidationFrame>, std::move(txs)),
+    current_frame_(std::in_place_type<BlockValidationFrame>, std::move(txs),
+                   block_hash),
     state_(CoordBlockState::kValidating)
 {}
+
+SHA256Hash
+CoordBlock::canonical_block_hash() const
+{
+  if (std::holds_alternative<BlockProposalFrame>(current_frame_)) {
+    throw std::runtime_error("unimplemented");
+  }
+  assert(std::holds_alternative<BlockValidationFrame>(current_frame_));
+  return std::get<BlockValidationFrame>(current_frame_).canonical_block_hash();
+}
 
 std::unordered_map<BlockID, CoordinatorBlockManager::BlockEntry>::iterator
 CoordinatorBlockManager::open_block_guard(BlockID parent_id)
@@ -96,7 +109,8 @@ CoordinatorBlockManager::open_proposal(BlockID parent_id)
 
 std::optional<BlockID>
 CoordinatorBlockManager::add_block_to_validate(
-    BlockID parent_id, std::vector<ProposedTransaction> txs)
+    BlockID parent_id, std::vector<ProposedTransaction> txs,
+    SHA256Hash const &block_hash)
 {
   std::lock_guard lock(mtx_);
   auto it = open_block_guard(parent_id);
@@ -111,13 +125,12 @@ CoordinatorBlockManager::add_block_to_validate(
 
   database_manager_.open_block(parent_id, block_id);
 
-  blocks_.emplace(block_id,
-                  BlockEntry{
-                      .block_ = std::make_shared<CoordBlock>(block_id,
-                                                             std::move(txs)),
-                      .children_ = {},
-                      .closed_to_new_children_ = false,
-                  });
+  blocks_.emplace(block_id, BlockEntry{
+                                .block_ = std::make_shared<CoordBlock>(
+                                    block_id, std::move(txs), block_hash),
+                                .children_ = {},
+                                .closed_to_new_children_ = false,
+                            });
 
   return block_id;
 }
@@ -167,6 +180,47 @@ CoordinatorBlockManager::commit_block(BlockID block_id)
 }
 
 void
+CoordinatorBlockManager::prune_block(BlockID block_id)
+{
+  std::lock_guard lock(mtx_);
+
+  auto it = blocks_.find(block_id);
+  if (it == blocks_.end()) {
+    return;
+  }
+  assert(!it->second.block_->committed());
+  // hasn't been closed
+  assert(block_hash_to_id_.find(it->second.block_->canonical_block_hash()) ==
+         block_hash_to_id_.end());
+
+  remove_children(it->second.children_);
+  blocks_.erase(it);
+}
+
+std::optional<BlockID>
+CoordinatorBlockManager::lookup_block_id(SHA256Hash hash) const
+{
+  auto it = block_hash_to_id_.find(hash);
+  if (it == block_hash_to_id_.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
+SHA256Hash
+CoordinatorBlockManager::close_block(BlockID block_id)
+{
+  std::lock_guard lock(mtx_);
+  auto it = blocks_.find(block_id);
+  assert(it != blocks_.end());
+  auto &block = *it->second.block_;
+
+  auto hash = block.canonical_block_hash();
+  block_hash_to_id_[hash] = block_id;
+  return hash;
+}
+
+void
 CoordinatorBlockManager::remove_children(std::vector<BlockID> children)
 {
   while (!children.empty()) {
@@ -174,7 +228,11 @@ CoordinatorBlockManager::remove_children(std::vector<BlockID> children)
     children.pop_back();
 
     auto it = blocks_.find(child);
-    assert(it != blocks_.end());
+    if (it == blocks_.end()) {
+      // This might happen if a block is pruned
+      continue;
+    }
+    assert(!it->second.block_->committed());
     auto entry = it->second;
     children.insert(children.end(), entry.children_.begin(),
                     entry.children_.end());

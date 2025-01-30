@@ -59,8 +59,9 @@ private:
 // interface (i.e. get_next_10_transactions or the like).
 class BlockValidationFrame {
 public:
-  BlockValidationFrame(std::vector<ProposedTransaction> txs)
-    : transactions_(std::move(txs))
+  BlockValidationFrame(std::vector<ProposedTransaction> txs,
+                       SHA256Hash block_hash)
+    : transactions_(std::move(txs)), canonical_block_hash_(block_hash)
   {}
 
   BlockValidationFrame(BlockValidationFrame const &) = delete;
@@ -93,11 +94,16 @@ public:
     return validation_finished_ && !validation_failed_;
   }
 
+  SHA256Hash canonical_block_hash() const { return canonical_block_hash_; }
+
 private:
   const std::vector<ProposedTransaction> transactions_;
   std::atomic<uint32_t> validation_index_ = 0;
   std::atomic<bool> validation_failed_ = false;
   bool validation_finished_ = false;
+  // TODO(geoff): this should be replaced by a hash of a block header,
+  // and probably also store the header/other data
+  const SHA256Hash canonical_block_hash_;
 };
 
 } // namespace hogd

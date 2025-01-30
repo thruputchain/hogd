@@ -12,7 +12,8 @@ HogexecCore::HogexecCore(std::unique_ptr<PoolAndCoroPoll> pool_cp,
                          ExecutorInitialization const &init_params)
   : pool_cp_(std::move(pool_cp)),
     db_proxy_(pool_cp_->cp_, init_params.database_info),
-    exec_to_coord_server_(init_params.executor_id, db_proxy_)
+    exec_to_coord_server_(init_params.executor_id, db_proxy_),
+    exec_to_coord_server_port_(coord_server_port)
 {
 
   auto lfd = x23::tcplisten(atoi(coord_server_port.c_str()));
@@ -30,6 +31,31 @@ HogexecCore::HogexecCore(std::unique_ptr<PoolAndCoroPoll> pool_cp,
       x23::rpc_stream_logged(cp, *c).server(exec_to_coord_server);
     }
   }(pool_cp_->cp_, &exec_to_coord_server_, std::move(lfd));
+}
+
+ExecutorReadyAnnouncement
+HogexecCore::make_ready_announcement() const
+{
+  return ExecutorReadyAnnouncement{
+      .executor_port =
+          x23::BoundedStr<4294967295U>{exec_to_coord_server_port_.c_str(),
+                                       exec_to_coord_server_port_.size()},
+      .nthreads = static_cast<std::uint32_t>(pool_cp_->pool_.nthreads_),
+  };
+}
+
+void
+HogexecCore::announce_ready_to_coord(std::string const &coord_address,
+                                     std::string const &coord_allocate_port)
+{
+  auto ready_announcement = make_ready_announcement();
+  auto conn = connect_to_coord_allocate_service(pool_cp_->cp_, coord_address,
+                                                coord_allocate_port);
+  if (!conn) {
+    perror("failed to connect to coord allocate service");
+    exit(EXIT_FAILURE);
+  }
+  conn->executor_announce_ready(ready_announcement)();
 }
 
 HogexecCore

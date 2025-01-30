@@ -13,6 +13,12 @@ public:
 
   void start(std::string const &coord_server_port);
 
+  x23::Async<bool> validate_block(SHA256Hash const &parent_hash,
+                                  std::vector<ProposedTransaction> txs,
+                                  SHA256Hash const &block_hash);
+
+  void commit_block(SHA256Hash const &block_hash);
+
 private:
   x23::ThreadPool pool_;
   x23::CoroPoll cp_;

@@ -38,6 +38,10 @@ ExecutorQueue::enqueue_validation_request(BlockID block_id,
 
   std::vector<x23::Async<void>> results;
 
+  // This is one loop running transactions on the executor.
+  // It just runs until all transactions are validated or validation failed.
+  // At the end of the loop, it notifies _all_ pending coroutines on the
+  // executor, and decrements the running coroutine count.
   auto validation_coro = [this, frame, block_id]() -> x23::Async<void> {
     co_await cp_.pool_.bg();
 
@@ -70,6 +74,14 @@ ExecutorQueue::enqueue_validation_request(BlockID block_id,
     co_return;
   };
 
+  // This is the main loop that enqueues validation coroutines.
+  // This is the _only_ coroutine that gets added to the pending coroutine
+  // queue. It keeps adding validation_coro instances to the executor (adding
+  // the appropriate asyncs to results) until all transactions are validated or
+  // validation failed. It stops adding coroutines when the maximum number of
+  // running coroutines is hit (where again, the number of running coroutines
+  // refers to the validation_coro instances), and suspends itself on the
+  // pending coroutine queue.
   auto enqueue_coro = [this, frame, &results,
                        &validation_coro] -> x23::Async<void> {
     co_await cp_.pool_.bg();
@@ -148,9 +160,11 @@ x23::Async<void>
 ExecutorManager::enqueue_validation_request(BlockID block_id,
                                             BlockValidationFrame *frame)
 {
+  assert(frame);
   std::vector<x23::Async<void>> results;
   {
     std::shared_lock lock(mutex_);
+    assert(!executors_.empty());
     results.reserve(executors_.size());
     for (const auto &executor : executors_) {
       results.push_back(executor->enqueue_validation_request(block_id, frame));

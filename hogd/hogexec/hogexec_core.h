@@ -30,12 +30,16 @@ public:
   HogexecCore(HogexecCore &&) = delete;
   HogexecCore &operator=(HogexecCore &&) = delete;
 
+  void announce_ready_to_coord(std::string const &coord_address,
+                               std::string const &coord_allocate_port);
+
 private:
+  ExecutorReadyAnnouncement make_ready_announcement() const;
+
   std::unique_ptr<PoolAndCoroPoll> pool_cp_;
-
   DatabaseProxy db_proxy_;
-
   ExecutorRpcInterface exec_to_coord_server_;
+  const std::string exec_to_coord_server_port_;
 };
 
 HogexecCore start_hogexec(int nthreads,

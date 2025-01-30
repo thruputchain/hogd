@@ -37,8 +37,9 @@ CoordinatorAllocateService::executor_announce_ready(
     ExecutorReadyAnnouncement const &announcement,
     CoordinatorAllocateServiceConnection const &connection)
 {
-  auto fd = cp_.tcpconnect(connection.caller_address,
-                           std::string(announcement.executor_port))();
+  auto fd = co_await cp_.tcpconnect(connection.caller_address,
+                                    std::string(announcement.executor_port));
+
   if (!fd) {
     co_return CoordinatorAllocateStatus::kCatastropic;
   }

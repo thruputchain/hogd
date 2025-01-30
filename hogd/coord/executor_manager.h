@@ -48,8 +48,6 @@ private:
   };
 
   ExecutorStats stats_;
-  // Not strictly enforced.  Caller should probably check queue stats before
-  // adding a transaction.
   const uint32_t max_pending_transactions_;
   client_t client_;
   x23::CoroPoll &cp_;
@@ -66,4 +64,5 @@ private:
   std::shared_mutex mutex_;
   std::unordered_set<std::unique_ptr<ExecutorQueue>> executors_;
 };
+
 } // namespace hogd
