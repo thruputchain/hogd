@@ -43,6 +43,10 @@ ExecutorQueue::enqueue_validation_request(BlockID block_id,
 
     while (!frame->all_txs_queried() && !frame->validation_failed()) {
       auto const *tx = frame->get_next_validation_transaction();
+      if (!tx) {
+        break;
+      }
+
       auto res = co_await client_.validate_transaction(block_id, *tx);
       if (res != RPCError::kNone) {
         frame->mark_validation_failed();
