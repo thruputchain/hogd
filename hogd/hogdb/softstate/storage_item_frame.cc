@@ -682,9 +682,12 @@ StorageItemFrame::revert_set_typeclass_lock_to_set_typeclass(
     assert(locked_sub_amount <= 0);
     assert(actual_sub_amount >= locked_sub_amount);
     // so locked_sub_amount - actual_sub_amount is negative
-    assert(locked_sub_amount - actual_sub_amount < 0);
+    assert(locked_sub_amount - actual_sub_amount <= 0);
 
-    variant_.revert_nnint_set_add(locked_sub_amount - actual_sub_amount);
+    int128_t diff = locked_sub_amount - actual_sub_amount;
+    if (diff < 0) {
+      variant_.revert_nnint_set_add(diff);
+    }
     break;
   }
   case StorageDeltaType::kDelete:

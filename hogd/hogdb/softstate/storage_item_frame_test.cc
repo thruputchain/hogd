@@ -352,4 +352,25 @@ TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
                                 StorageLock(StorageLockType::kNone)));
 }
 
+TEST(StorageItemFrame, NNIntSimpleSetAdd)
+{
+  auto make_nnint_delta = [](int128_t set, int128_t add) {
+    StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
+    delta.nnint().set_value = to_xdr(set);
+    delta.nnint().add_value = to_xdr(add);
+    return delta;
+  };
+
+  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+
+  StorageDelta nnint_set_add = make_nnint_delta(5, 10);
+
+  auto lock = item.try_reserve(nnint_set_add, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock);
+
+  item.commit(nnint_set_add, *lock);
+
+  expect_final(item, int128_t{15});
+}
+
 } // namespace hogd
