@@ -46,7 +46,7 @@ CoordinatorAllocateService::executor_announce_ready(
   auto client_config = x23::rpc_stream_logged(cp_, *fd);
   auto executor = std::make_unique<ExecutorQueue>(
       announcement.nthreads,
-      client_config.template client<ExecutorInterfaceV1>());
+      client_config.template client<ExecutorInterfaceV1>(), cp_);
   executor_manager_.add_executor(std::move(executor));
   co_return CoordinatorAllocateStatus::kReady;
 }

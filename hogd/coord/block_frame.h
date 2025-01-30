@@ -63,6 +63,11 @@ public:
     : transactions_(std::move(txs))
   {}
 
+  BlockValidationFrame(BlockValidationFrame const &) = delete;
+  BlockValidationFrame &operator=(BlockValidationFrame const &) = delete;
+  BlockValidationFrame(BlockValidationFrame &&) = delete;
+  BlockValidationFrame &operator=(BlockValidationFrame &&) = delete;
+
   // returns nullptr if all transactions are validated.
   // The intended workflow would be of the form
   //
@@ -73,9 +78,26 @@ public:
   //
   const ProposedTransaction *get_next_validation_transaction();
 
+  bool all_txs_queried()
+  {
+    return validation_index_.load(std::memory_order_relaxed) ==
+           transactions_.size();
+  }
+
+  void mark_validation_failed() { validation_failed_ = true; }
+  bool validation_failed() const { return validation_failed_; }
+  void mark_validation_finished() { validation_finished_ = true; }
+
+  bool validation_success() const
+  {
+    return validation_finished_ && !validation_failed_;
+  }
+
 private:
   const std::vector<ProposedTransaction> transactions_;
   std::atomic<uint32_t> validation_index_ = 0;
+  std::atomic<bool> validation_failed_ = false;
+  bool validation_finished_ = false;
 };
 
 } // namespace hogd

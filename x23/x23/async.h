@@ -61,8 +61,8 @@
 //       });
 //     }
 //
-// * Any funtion returning the vacuous type Detached can be a
-//   coroutine that uses co_await and co_return (co_returing void),
+// * Any function returning the vacuous type Detached can be a
+//   coroutine that uses co_await and co_return (co_returning void),
 //   but cannot itself be co_awaited.  This is useful for completing
 //   work in the background.
 //

@@ -32,7 +32,6 @@ template<typename C, typename... Cs>
 Calldata static make_calldata(C const &data, Cs const &...additional)
 {
   Calldata out;
-
   if constexpr (std::is_empty_v<C>) {
     // nothing to do
   }
