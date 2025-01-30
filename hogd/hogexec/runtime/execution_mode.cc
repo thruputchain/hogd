@@ -41,8 +41,8 @@ ValidationModeData::consume_try_invoke_bit()
     return std::nullopt;
   }
 
-  bool out = proposal_data_.try_invoke_results[byte_idx] &
-             offset_bit(next_try_invoke_index_);
+  bool out = (proposal_data_.try_invoke_results[byte_idx] &
+             offset_bit(next_try_invoke_index_)) != 0;
   next_try_invoke_index_++;
   return out;
 }
@@ -53,7 +53,7 @@ ValidationModeData::check_all_consumed() const
   if (proposal_data_.try_invoke_count != next_try_invoke_index_)
     return false;
   if (proposal_data_.try_invoke_results.size() !=
-      (proposal_data_.try_invoke_count / 8) + 1)
+      (proposal_data_.try_invoke_count / 8) + (proposal_data_.try_invoke_count % 8 == 0 ? 0 : 1))
     return false;
   return true;
 }

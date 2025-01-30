@@ -51,4 +51,11 @@ TEST(ExecutionModeTest, ProposalBitStoredCorrectly)
   ASSERT_TRUE(validation.check_all_consumed());
 }
 
+TEST(ExecutionModeTest, ValidationModeEmptyCheck)
+{
+  NondeterministicProposal proposal{};
+  ValidationModeData validation(proposal);
+  ASSERT_TRUE(validation.check_all_consumed());
+}
+
 } // namespace hogd
