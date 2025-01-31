@@ -2,11 +2,11 @@
 
 #include <atomic>
 #include <concepts>
-#include <cstdint>
 #include <format>
 #include <mutex>
 #include <unordered_set>
 
+#include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
 
@@ -250,5 +250,7 @@ HashMap<T>::get_mutex(uint64_t hash)
   assert((mutexes_.size() & mask) == 0);
   return mutexes_[hash & mask];
 }
+
+#undef VECTOR
 
 } // namespace hogd

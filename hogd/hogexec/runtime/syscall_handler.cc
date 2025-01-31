@@ -412,7 +412,7 @@ SystemCallHandler::get_nnint(StorageKey const &storage_key)
         StorageItemType::kNonnegativeInt) {
       return SyscallError{SyscallErrorCode::kInvalidInput};
     }
-    return std::make_pair(from_xdr(unmodified_item->base_item_->nnint()),
+    return std::make_pair(unmodified_item->base_item_->nnint(),
                           int128_t{0});
   }
 

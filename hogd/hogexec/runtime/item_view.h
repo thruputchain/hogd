@@ -6,7 +6,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "storage_item.hh"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 
 namespace hogd {
 
@@ -56,7 +56,7 @@ class DeletedItem {
 public:
   constexpr static FlaggedStorageDelta get_delta()
   {
-    return FlaggedStorageDelta{StorageDelta(StorageDeltaType::kDelete), 0};
+    return FlaggedStorageDelta{.delta=StorageDelta(StorageDeltaType::kDelete), .flags=0};
   }
 
   constexpr static SyscallStatus<void> validate() { return {}; }
@@ -64,6 +64,23 @@ public:
   constexpr static std::optional<StorageItemType> get_item_type()
   {
     return std::nullopt;
+  }
+};
+
+class RetrocausalQueueItem {
+public:
+  RetrocausalQueueDelta queue_delta;
+
+  FlaggedStorageDelta get_delta() const {
+    StorageDelta delta = StorageDelta(StorageDeltaType::kRetrocausalQueueModify);
+    delta.retrocausal_queue() = queue_delta;
+    return FlaggedStorageDelta{.delta=delta, .flags=0};
+  }
+
+  constexpr static SyscallStatus<void> validate() { return {}; }
+
+  constexpr static StorageItemType get_item_type() {
+    return StorageItemType::kRetrocausalQueue;
   }
 };
 
@@ -82,7 +99,7 @@ public:
 
   std::optional<StorageItemType> get_item_type() const;
 
-  const StorageItem *const base_item_;
+  const StorageSnapshotCacheEntry *const base_item_;
 };
 
 // Maintain the modifications of one InvocationFrame to one address.
@@ -91,7 +108,7 @@ public:
 // it.
 class ItemView {
 public:
-  ItemView(const StorageItem *base_item)
+  ItemView(const StorageSnapshotCacheEntry *base_item)
     : delta_args_(UnmodifiedItem{.base_item_ = base_item})
   {}
 
@@ -129,7 +146,7 @@ private:
   SyscallStatus<void>
   can_accept_type(std::optional<StorageItemType> item_type) const;
 
-  std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem>
+  std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem, RetrocausalQueueItem>
       delta_args_;
 };
 

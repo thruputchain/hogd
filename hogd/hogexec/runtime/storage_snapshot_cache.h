@@ -1,6 +1,5 @@
 #pragma once
 
-#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -13,9 +12,41 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/mvar.h"
 
 namespace hogd {
+
+class StorageSnapshotCacheEntry {
+public:
+  StorageSnapshotCacheEntry(const StorageItem& wire_item);
+
+  StorageSnapshotCacheEntry(const StorageSnapshotCacheEntry&) = delete;
+  StorageSnapshotCacheEntry& operator=(const StorageSnapshotCacheEntry&) = delete;
+  StorageSnapshotCacheEntry(StorageSnapshotCacheEntry&&) = delete;
+  StorageSnapshotCacheEntry& operator=(StorageSnapshotCacheEntry&&) = delete;
+
+  StorageItemType type() const;
+
+  Bytestring const& bytestring() const;
+  int128_t nnint() const;
+
+private:
+  struct BytestringEntry {
+    Bytestring bytestring_;
+    constexpr static StorageItemType kItemType = StorageItemType::kBytestring;
+  };
+
+  struct NNIntEntry {
+    int128_t base_value_;
+    constexpr static StorageItemType kItemType = StorageItemType::kNonnegativeInt;
+  };
+
+  struct RetrocausalQueueEntry {
+    std::map<uint64_t, RetrocausalQueueBlock> blocks_;
+    constexpr static StorageItemType kItemType = StorageItemType::kRetrocausalQueue;
+  };
+
+  std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry> entry_;
+};
 
 // Root cache for objects read from the ledger.
 // Can be shared between concurrent transactions,
@@ -35,7 +66,7 @@ public:
   try_get_contract_by_hash(SHA256Hash const &hash);
   std::optional<SHA256Hash>
   try_get_deployed_contract_hash(ContractAddress const &addr);
-  const StorageItem *try_get_snapshot_item(AddressAndKey const &addrkey);
+  const StorageSnapshotCacheEntry *try_get_snapshot_item(AddressAndKey const &addrkey);
 
 private:
   struct ContractMapEntry {
@@ -62,7 +93,7 @@ private:
 
   struct StorageItemMapEntry {
     AddressAndKey addrkey_;
-    std::unique_ptr<StorageItem> item_;
+    std::unique_ptr<StorageSnapshotCacheEntry> entry_;
 
     static_assert(std::is_trivially_copyable_v<AddressAndKey>);
     static std::span<const std::byte> get_key(AddressAndKey const &addrkey)
