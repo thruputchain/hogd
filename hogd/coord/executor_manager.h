@@ -5,6 +5,7 @@
 #include <unordered_set>
 
 #include "hogd/coord/block_frame.h"
+#include "hogd/coord/coro_queue.h"
 #include "rpc.hh"
 #include "rpc_types.hh"
 #include "x23/async.h"
@@ -18,8 +19,7 @@ public:
 
   ExecutorQueue(uint32_t max_pending_transactions, client_t client,
                 x23::CoroPoll &cp)
-    : max_pending_transactions_(max_pending_transactions),
-      client_(std::move(client)), cp_(cp)
+    : queue_(max_pending_transactions, cp), client_(std::move(client))
   {}
 
   // sets the result by marking frame as validation success or validation
@@ -36,7 +36,7 @@ private:
   x23::Async<void> open_proposal_block(BlockID block_id);
   x23::Async<void> open_validation_block(BlockID block_id);
 
-  class ExecutorStats {
+  /*class ExecutorStats {
   public:
     x23::CoroLock lock_;
     uint32_t running_coroutine_count_ = 0;
@@ -45,12 +45,13 @@ private:
     // should be called with lock_ held
     std::coroutine_handle<> awake_one_pending();
     std::vector<std::coroutine_handle<>> awake_all_pending();
-  };
+  };*/
 
-  ExecutorStats stats_;
-  const uint32_t max_pending_transactions_;
+  // ExecutorStats stats_;
+  CoroQueue queue_;
+  // const uint32_t max_pending_transactions_;
   client_t client_;
-  x23::CoroPoll &cp_;
+  // x23::CoroPoll &cp_;
 };
 
 class ExecutorManager {

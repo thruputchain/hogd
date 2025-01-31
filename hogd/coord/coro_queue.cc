@@ -38,6 +38,7 @@ CoroQueue::enqueue(std::function<x23::Async<void>()> work,
 
   std::vector<x23::Async<void>> results;
 
+
   auto work_coro = [this, &work] -> x23::Async<void> {
     co_await cp_.pool_.bg();
     co_await work();
@@ -45,6 +46,13 @@ CoroQueue::enqueue(std::function<x23::Async<void>()> work,
     co_return;
   };
 
+  // This is the main loop that enqueues work coroutines.
+  // This is the _only_ coroutine that gets added to the pending coroutine
+  // queue. It keeps adding work_coro instances to the executor (adding
+  // the appropriate asyncs to results) until all work is done. It stops adding
+  // coroutines when the maximum number of running coroutines is hit (where
+  // again, the number of running coroutines refers to the work_coro instances),
+  // and suspends itself on the pending coroutine queue.
   auto enqueue_coro = [this, &work_coro, &done, &results] -> x23::Async<void> {
     co_await cp_.pool_.bg();
 

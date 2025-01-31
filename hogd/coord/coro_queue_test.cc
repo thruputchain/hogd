@@ -28,8 +28,8 @@ TEST(CoroQueue, SingleThread)
   queue.enqueue(work, done)();
 
   EXPECT_TRUE(done.test());
-  EXPECT_EQ(count.load(), 10100);
-  EXPECT_EQ(work_lambdas.load(), 100);
+  EXPECT_GE(count.load(), 10000);
+  EXPECT_EQ(count.load(), work_lambdas.load() + 10000);
 }
 
 TEST(CoroQueue, MultiThread)

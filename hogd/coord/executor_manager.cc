@@ -7,124 +7,39 @@
 
 namespace hogd {
 
-std::coroutine_handle<>
-ExecutorQueue::ExecutorStats::awake_one_pending()
-{
-  if (pending_coroutines_.empty())
-    return nullptr;
-  auto back = pending_coroutines_.back();
-  pending_coroutines_.pop_back();
-
-  return back.set_result_without_resuming();
-}
-
-std::vector<std::coroutine_handle<>>
-ExecutorQueue::ExecutorStats::awake_all_pending()
-{
-  std::vector<std::coroutine_handle<>> handles;
-  while (!pending_coroutines_.empty()) {
-    if (auto h = awake_one_pending()) {
-      handles.push_back(h);
-    }
-  }
-  return handles;
-}
-
 x23::Async<void>
 ExecutorQueue::enqueue_validation_request(BlockID block_id,
                                           BlockValidationFrame *frame)
 {
+  std::atomic_flag done = false;
   co_await open_validation_block(block_id);
 
-  std::vector<x23::Async<void>> results;
+  co_await queue_.enqueue(
+      [this, frame, block_id, &done]() -> x23::Async<void> {
+        while (!frame->all_txs_queried() && !frame->validation_failed()) {
+          auto const *tx = frame->get_next_validation_transaction();
+          if (!tx) {
+            break;
+          }
 
-  // This is one loop running transactions on the executor.
-  // It just runs until all transactions are validated or validation failed.
-  // At the end of the loop, it notifies _all_ pending coroutines on the
-  // executor, and decrements the running coroutine count.
-  auto validation_coro = [this, frame, block_id]() -> x23::Async<void> {
-    co_await cp_.pool_.bg();
-
-    while (!frame->all_txs_queried() && !frame->validation_failed()) {
-      auto const *tx = frame->get_next_validation_transaction();
-      if (!tx) {
-        break;
-      }
-
-      auto res = co_await client_.validate_transaction(block_id, *tx);
-      if (res != RPCError::kNone) {
-        frame->mark_validation_failed();
-        break;
-      }
-    }
-
-    x23::CoroGuard g;
-    co_await g(stats_.lock_);
-    stats_.running_coroutine_count_--;
-
-    auto handles = stats_.awake_all_pending();
-    g.reset();
-
-    for (auto h : handles) {
-      if (h) {
-        h.resume();
-      }
-    }
-
-    co_return;
-  };
-
-  // This is the main loop that enqueues validation coroutines.
-  // This is the _only_ coroutine that gets added to the pending coroutine
-  // queue. It keeps adding validation_coro instances to the executor (adding
-  // the appropriate asyncs to results) until all transactions are validated or
-  // validation failed. It stops adding coroutines when the maximum number of
-  // running coroutines is hit (where again, the number of running coroutines
-  // refers to the validation_coro instances), and suspends itself on the
-  // pending coroutine queue.
-  auto enqueue_coro = [this, frame, &results,
-                       &validation_coro] -> x23::Async<void> {
-    co_await cp_.pool_.bg();
-
-    while (true) {
-      x23::CoroGuard g;
-      co_await g(stats_.lock_);
-
-      if (frame->all_txs_queried() || frame->validation_failed()) {
+          auto res = co_await client_.validate_transaction(block_id, *tx);
+          if (res != RPCError::kNone) {
+            frame->mark_validation_failed();
+            break;
+          }
+        }
+        done.test_and_set();
         co_return;
-      }
-
-      if (stats_.running_coroutine_count_ < max_pending_transactions_) {
-        stats_.running_coroutine_count_++;
-        results.push_back(validation_coro());
-        continue;
-      }
-
-      auto [async, cb] = x23::make_async<void>();
-      stats_.pending_coroutines_.push_back(cb);
-      g.reset();
-
-      co_await async;
-    }
-    co_return;
-  };
-
-  co_await enqueue_coro();
+      },
+      done);
 
   co_await client_.finish_block(block_id);
-
-  for (auto &r : results) {
-    co_await r;
-  }
-
-  co_return;
 }
 
 x23::Async<ExpectedProposalData>
 ExecutorQueue::propose_transaction(BlockID block_id,
                                    SignedTransaction const &signed_tx)
 {
-
   return client_.propose_transaction(block_id, signed_tx);
 }
 
