@@ -78,7 +78,7 @@ public:
   add_block_to_validate(BlockID parent_id, std::vector<ProposedTransaction> txs,
                         SHA256Hash const &block_hash);
 
-  constexpr static SHA256Hash const &kGenesisBlockHash = SHA256Hash{};
+  constexpr static SHA256Hash kGenesisBlockHash = SHA256Hash{};
 
   // Each block should be either pruned or closed.
   // Do not call both.

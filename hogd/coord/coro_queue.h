@@ -24,7 +24,7 @@ public:
   // work to be done. Many copies of the work function will be executed. The
   // done flag signals when the work threads are done. It is the responsibility
   // of the caller to ensure that the done flag is set when all work finishes;
-  // otherwise, the coro_queue will block.
+  // otherwise, enqueue will block forever.
   x23::Async<void> enqueue(std::function<x23::Async<void>()> work,
                            std::atomic_flag &done);
 
