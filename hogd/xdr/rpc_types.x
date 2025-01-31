@@ -31,6 +31,8 @@ namespace hogd
     kNoStorageItem = 6,
     // tx validation or proposal failed
     kTransactionFailed = 7,
+    // No next retrocausal queue item
+    kNoRetrocausalQueueItem = 8,
   };
 
   enum RPCFlags {

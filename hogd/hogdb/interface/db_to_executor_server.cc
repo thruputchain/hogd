@@ -73,14 +73,52 @@ x23::Async<ExpectedRetrocausalQueueBlock>
 DBToExecutorServer::get_next_retrocausal_queue_block(
     BlockID block_id, AddressAndKey const &addrkey, uint64_t block_number)
 {
-  co_return ExpectedRetrocausalQueueBlock(RPCError::kNoStorageItem);
+
+  auto block_data = block_manager_.get_block_data(block_id);
+  if (!block_data) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kBadBlockID);
+  }
+
+  auto item = block_data->get_snapshot_storage_item(addrkey);
+  if (!item) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kNoStorageItem);
+  }
+
+  if (item->type() != StorageItemType::kRetrocausalQueue) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kNoRetrocausalQueueItem);
+  }
+
+  auto &queue = item->queue();
+
+  const auto *next_block = queue.try_get_next_block(block_number);
+  if (!next_block) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kNoRetrocausalQueueItem);
+  }
+
+  auto out = ExpectedRetrocausalQueueBlock(RPCError::kNone);
+  out.block() = *next_block;
+
+  co_return out;
 }
 
 x23::Async<ExpectedQueueEntry>
 DBToExecutorServer::get_concurrent_retrocausal_queue_entry(
     BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
 {
-  co_return ExpectedQueueEntry(RPCError::kNoStorageItem);
+  auto block_data = block_manager_.get_block_data(block_id);
+  if (!block_data) {
+    co_return ExpectedQueueEntry(RPCError::kBadBlockID);
+  }
+
+  auto res = block_data->get_concurrent_retrocausal_queue_entry(addrkey, index);
+
+  if (res) {
+    auto out = ExpectedQueueEntry(RPCError::kNone);
+    out.entry() = *res;
+    co_return out;
+  }
+
+  co_return ExpectedQueueEntry(RPCError::kNoRetrocausalQueueItem);
 }
 
 x23::Async<void>

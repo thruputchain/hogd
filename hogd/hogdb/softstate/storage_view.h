@@ -137,6 +137,11 @@ public:
   void commit_contract_deploy(ContractAddress const &addr,
                               SHA256Hash const &contract_hash);
 
+  // WARNING: nondeterministic
+  std::optional<QueueEntry>
+  get_concurrent_retrocausal_queue_entry(AddressAndKey const &addrkey,
+                                         uint32_t index);
+
   using ParentBlockView::get_snapshot_contract;
   using ParentBlockView::get_snapshot_deployment;
   using ParentBlockView::get_snapshot_storage_item;

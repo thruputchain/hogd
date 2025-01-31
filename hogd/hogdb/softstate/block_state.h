@@ -79,6 +79,11 @@ public:
   std::shared_ptr<const Contract>
   get_snapshot_contract(SHA256Hash const &contract_hash);
 
+  // WARNING: nondeterministic
+  std::optional<QueueEntry>
+  get_concurrent_retrocausal_queue_entry(AddressAndKey const &addrkey,
+                                         uint32_t index);
+
   void close_block() { storage_view_.close_block(); }
   void assert_closed() { storage_view_.assert_block_closed(); }
   void assert_not_closed() { storage_view_.assert_block_not_closed(); }

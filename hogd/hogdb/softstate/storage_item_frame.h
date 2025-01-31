@@ -87,6 +87,10 @@ public:
 
   AddressAndKey const &get_addr_key() const { return addr_key_; }
 
+  // WARNING: nondeterministic
+  std::optional<QueueEntry>
+  get_concurrent_retrocausal_queue_entry(uint32_t index);
+
 private:
   // Performs a reservation of the storage item for the given delta operation.
   // Should be performed only when the initial lock state is kNone.
@@ -247,6 +251,10 @@ private:
     // does not change refcount
     void
     commit_retrocausal_queue_modify(RetrocausalQueueDelta const &queue_delta);
+
+    // WARNING: nondeterministic
+    std::optional<QueueEntry>
+    get_concurrent_retrocausal_queue_entry(uint32_t index);
 
   private:
     // Does not manage adjusting the reference count

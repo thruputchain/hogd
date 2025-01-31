@@ -99,9 +99,14 @@ BlockState::get_snapshot_deployment(ContractAddress const &addr)
 std::shared_ptr<const Contract>
 BlockState::get_snapshot_contract(SHA256Hash const &contract_hash)
 {
-  std::printf("BlockState::get_snapshot_contract %s\n",
-              x23::show(contract_hash).c_str());
   return storage_view_.get_snapshot_contract(contract_hash);
+}
+
+std::optional<QueueEntry>
+BlockState::get_concurrent_retrocausal_queue_entry(AddressAndKey const &addrkey,
+                                                   uint32_t index)
+{
+  return storage_view_.get_concurrent_retrocausal_queue_entry(addrkey, index);
 }
 
 } // namespace hogd

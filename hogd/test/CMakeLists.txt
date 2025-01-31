@@ -20,6 +20,7 @@ add_executable(
   test_coord_to_db.cc
   test_connect.cc
   test_db_cache_coherence.cc
+  test_db_retrocausal_queue.cc
 )
 
 target_link_libraries(

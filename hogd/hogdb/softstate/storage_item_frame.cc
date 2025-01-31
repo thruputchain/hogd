@@ -758,4 +758,36 @@ StorageItemFrame::revert(StorageLock const &lock)
   assert(variant_.refcount_ == initial_refcount - 1);
 }
 
+std::optional<QueueEntry>
+StorageItemFrame::get_concurrent_retrocausal_queue_entry(uint32_t index)
+{
+  // This is a read method, not a write method.  Therefore, this does not check
+  // for locks held by this or other threads (including the
+  // permanent_exclusive_lock_).
+
+  if (!std::holds_alternative<RetrocausalQueueArgs>(variant_.variant_)) {
+    return std::nullopt;
+  }
+
+  // if refcount is 0, then this should be a DeletedArgs item, not a
+  // RetrocausalQueueArgs.
+  assert(variant_.refcount_ > 0);
+  return variant_.get_concurrent_retrocausal_queue_entry(index);
+}
+
+std::optional<QueueEntry>
+StorageItemFrame::RefcountedVariant::get_concurrent_retrocausal_queue_entry(
+    uint32_t index)
+{
+  assert(std::holds_alternative<RetrocausalQueueArgs>(variant_));
+  assert(refcount_ > 0);
+  auto &args = get_variant_arm_unchecked<RetrocausalQueueArgs>();
+
+  if (index >= args.new_entries_.size()) {
+    return std::nullopt;
+  }
+
+  return args.new_entries_[index];
+}
+
 } // namespace hogd

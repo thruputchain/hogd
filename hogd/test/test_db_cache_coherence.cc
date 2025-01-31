@@ -1,58 +1,15 @@
 #include <gtest/gtest.h>
 
-#include "hogd/hogdb/hogdb_core.h"
+#include "hogd/test/local_test_harness.h"
 #include "rpc.hh"
 #include "rpc_types.hh"
 
 namespace hogd {
 
-class TestDbCacheCoherence : public ::testing::Test {
+class TestDbCacheCoherence : public ::testing::Test,
+                             public test::DatabaseWrapper {
 protected:
-  using coord_t = DatabaseToCoordInterfaceV1::client<
-      x23::RpcStream<x23::RpcLogger>::ClientRef>;
-  using exec_t = DatabaseToExecutorInterfaceV1::client<
-      x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
-  const std::string kDBToExecutorPort = std::to_string(kDBToExecutorPortNum);
-  const std::string kDBToCoordPort = std::to_string(kDBToCoordPortNum);
-
-  exec_t connect_from_exec()
-  {
-    auto fd = cp_->tcpconnect(std::string("localhost"),
-                              std::string(kDBToExecutorPort))();
-    assert(fd);
-    return x23::rpc_stream_logged(*cp_, *fd)
-        .template client<DatabaseToExecutorInterfaceV1>();
-  }
-
-  coord_t connect_from_coord()
-  {
-    auto fd = cp_->tcpconnect(std::string("localhost"),
-                              std::string(kDBToCoordPort))();
-    assert(fd);
-    return x23::rpc_stream_logged(*cp_, *fd)
-        .template client<DatabaseToCoordInterfaceV1>();
-  }
-
-  void SetUp() override
-  {
-    pool_ = std::make_unique<x23::ThreadPool>(1);
-    cp_ = std::make_unique<x23::CoroPoll>(*pool_);
-
-    db_core_ =
-        std::make_unique<HogdbCore>(1, kDBToExecutorPort, kDBToCoordPort);
-
-    coord_client_ = std::make_unique<coord_t>(connect_from_coord());
-    exec_client_ = std::make_unique<exec_t>(connect_from_exec());
-  }
-
-  std::unique_ptr<x23::ThreadPool> pool_;
-  std::unique_ptr<x23::CoroPoll> cp_;
-
-  std::unique_ptr<HogdbCore> db_core_;
-
-  std::unique_ptr<coord_t> coord_client_;
-  std::unique_ptr<exec_t> exec_client_;
+  void SetUp() override { test::DatabaseWrapper::initialize(); }
 
   constexpr static RPCFlagSet kFlags =
       std::to_underlying(RPCFlags::kFinalCommit);
@@ -60,7 +17,6 @@ protected:
 
 TEST_F(TestDbCacheCoherence, Basic)
 {
-
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
     delta.nnint().set_value = to_xdr(set);

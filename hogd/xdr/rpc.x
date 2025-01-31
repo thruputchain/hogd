@@ -10,39 +10,6 @@ namespace hogd
 {
   // clang-format on
 
-  // Contract deploy and create are methods that cannot have conflicts,
-  // and can only fail if there are catastrophic errors (like OOM) that would
-  // cause us to abort the whole block.  As such, _at the moment_, they do not
-  // have a 2PC interface, nor a TXID, although we could add those if we find a
-  // reason to do so.
-  program ContractStorageInterface
-  {
-    version ContractStorageInterfaceV1
-    {
-      // Create a new contract.
-      // Arguments:
-      //   New Contract
-      // No-op whenever error is not kNone
-      RPCError commit_contract_create(Contract) = 1;
-
-      // Create a new deployment.
-      // Arguments:
-      //   ContractAddress
-      //   SHA256Hash of contract to be deployed
-      // No-op whenever error is not kNone
-      RPCError commit_contract_deploy(ContractAddress, SHA256Hash) = 2;
-
-      // TODO(geoff) consider whether we want to combine these or not.
-      // Tradeoff is messages vs maybe sending redundant contracts.
-      // Perhaps the sender could cache whether it expects the client to have
-      // the contract, and optionally send accordingly.
-      ExpectedContract get_contract(SHA256Hash) = 3;
-      ExpectedDeployment get_deployment(ContractAddress) = 4;
-    }
-    = 1;
-  }
-  = 11111111;
-
   // The interface that the executor exposes to the coordinator.
   program ExectutorInterface
   {
