@@ -35,3 +35,14 @@ target_link_libraries(
   GTest::gtest_main
 )
 gtest_discover_tests(base_test)
+
+
+add_executable(
+  hashmap_bench
+  hashmap_bench.cc
+)
+target_link_libraries(
+  hashmap_bench
+  base
+  benchmark::benchmark
+)

@@ -38,7 +38,6 @@ CoroQueue::enqueue(std::function<x23::Async<void>()> work,
 
   std::vector<x23::Async<void>> results;
 
-
   auto work_coro = [this, &work] -> x23::Async<void> {
     co_await cp_.pool_.bg();
     co_await work();

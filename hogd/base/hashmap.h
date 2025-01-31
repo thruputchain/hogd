@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <format>
 #include <mutex>
+#include <unordered_set>
 
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
@@ -21,21 +22,49 @@ namespace hogd {
 // but a lock will be held while movement is occuring.
 //
 // TODO(geoff): investigate whether this should also use a custom allocator
-//
-// Loosely based on @abelay's design in
-// https://github.com/groundhogchain/hogd/pull/67
-// This version does not implement a size count, although nothing would prevent
-// that.
 template<typename T>
 concept hash_map_object = std::movable<T> && requires(T object) {
   { object.get_key() } -> std::same_as<std::span<const std::byte>>;
 };
 
+#define VECTOR 1
+
 template<hash_map_object T> class HashMap {
 public:
   using hash_t = uint64_t;
   using key_t = std::span<const std::byte>;
+
+  struct CustomHash {
+    using is_transparent = void;
+    static std::size_t operator()(T const &obj) { return hash(obj.get_key()); }
+    static std::size_t operator()(key_t key) { return hash(key); }
+  };
+
+  struct CustomEqual {
+    using is_transparent = void;
+    static bool operator()(T const &lhs, T const &rhs)
+    {
+      return std::ranges::equal(lhs.get_key(), rhs.get_key());
+    }
+    static bool operator()(key_t lhs, key_t rhs)
+    {
+      return std::ranges::equal(lhs, rhs);
+    }
+    static bool operator()(T const &lhs, key_t rhs)
+    {
+      return std::ranges::equal(lhs.get_key(), rhs);
+    }
+    static bool operator()(key_t lhs, T const &rhs)
+    {
+      return std::ranges::equal(lhs, rhs.get_key());
+    }
+  };
+
+#if VECTOR
   using bucket_entry_t = std::vector<T>;
+#else
+  using bucket_entry_t = std::unordered_set<T, CustomHash, CustomEqual>;
+#endif
 
   HashMap(int lg_bucket_count)
     : buckets_(1UL << lg_bucket_count), mutexes_(1UL << lg_bucket_count)
@@ -85,6 +114,8 @@ public:
   // In most use cases (i.e. in storage view use case), this function is applied
   // to all elements when there's already a guarantee that the map is not being
   // modified.  But it does not particularly hurt to acquire the mutex.
+  // This method CANNOT modify the key of the object.  That would break the
+  // unordered_set.
   template<typename Func> requires std::is_invocable_v<Func, T &>
   void map_apply(Func lambda)
   {
@@ -96,7 +127,7 @@ public:
       futures.push_back(pool.submit([&bucket, &mutex, lambda]() {
         std::unique_lock lk(mutex);
         for (auto &elt : bucket) {
-          lambda(elt);
+          lambda(const_cast<T &>(elt));
         }
       }));
     }
@@ -116,7 +147,11 @@ public:
       return false;
     }
 
+#if VECTOR
     bucket->emplace_back(std::forward<Args>(args)...);
+#else
+    bucket->emplace(std::forward<Args>(args)...);
+#endif
     return true;
   }
 
@@ -124,6 +159,18 @@ public:
   bool erase(key_t key)
   {
     auto [lk, bucket] = acquire_bucket(key);
+
+#if !VECTOR
+    // transparent erase not yet supported
+    // auto res = bucket->erase(key);
+    auto it = bucket->find(key);
+    if (it != bucket->end()) {
+      bucket->erase(it);
+      return true;
+    }
+    return false;
+  }
+#else
     for (auto it = bucket->begin(); it != bucket->end(); ++it) {
       if (std::ranges::equal(it->get_key(), key)) {
         *it = std::move(bucket->back());
@@ -133,6 +180,7 @@ public:
     }
     return false;
   }
+#endif
 
 private:
   std::vector<bucket_entry_t> buckets_;
@@ -144,12 +192,31 @@ private:
   acquire_bucket(key_t key);
   std::mutex &get_mutex(uint64_t hash);
 
-  uint64_t hash(key_t key) const
+  static uint64_t hash(key_t key)
   {
     return SipHash24::get_default()(key) & std::numeric_limits<uint64_t>::max();
   }
+#if !VECTOR
+  const T *find_element(key_t key, bucket_entry_t const &bucket) const
+  {
+    auto it = bucket.find(key);
+    if (it != bucket.end()) {
+      return &(*it);
+    }
+    return nullptr;
+  }
 
-  static T *find_element(key_t key, bucket_entry_t &bucket)
+  T *find_element(key_t key, bucket_entry_t &bucket)
+  {
+    auto it = bucket.find(key);
+    if (it != bucket.end()) {
+      return const_cast<T *>(&(*it));
+    }
+    return nullptr;
+  }
+#else
+
+  T *find_element(key_t key, bucket_entry_t &bucket)
   {
     for (auto &elt : bucket) {
       if (std::ranges::equal(elt.get_key(), key)) {
@@ -158,6 +225,8 @@ private:
     }
     return nullptr;
   }
+
+#endif
 };
 
 template<hash_map_object T>
