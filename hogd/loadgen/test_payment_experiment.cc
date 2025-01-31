@@ -47,15 +47,12 @@ protected:
       exec_core.announce_ready_to_coord("localhost", kCoordAnnouncePort);
 
       std::unique_lock lk(mtx_);
-      std::printf("executor connected\n");
       executor_connected_ = true;
       cv_.notify_all();
       if (test_done_) {
-        std::printf("executor done\n");
         return;
       }
       cv_.wait(lk, [&] { return test_done_; });
-      std::printf("executor done\n");
     });
 
     coord_ = std::make_unique<CoordinatorCore>(1);
@@ -71,7 +68,10 @@ protected:
 
   void TearDown() override
   {
-    test_done_ = true;
+    {
+      std::unique_lock lk(mtx_);
+      test_done_ = true;
+    }
     cv_.notify_all();
     db_thread_.join();
     exec_thread_.join();
