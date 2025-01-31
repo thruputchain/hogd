@@ -182,6 +182,11 @@ public:
   }
 #endif
 
+  static uint64_t hash(key_t key)
+  {
+    return SipHash24::get_default()(key) & std::numeric_limits<uint64_t>::max();
+  }
+
 private:
   std::vector<bucket_entry_t> buckets_;
   std::vector<std::mutex> mutexes_;
@@ -192,10 +197,6 @@ private:
   acquire_bucket(key_t key);
   std::mutex &get_mutex(uint64_t hash);
 
-  static uint64_t hash(key_t key)
-  {
-    return SipHash24::get_default()(key) & std::numeric_limits<uint64_t>::max();
-  }
 #if !VECTOR
   const T *find_element(key_t key, bucket_entry_t const &bucket) const
   {

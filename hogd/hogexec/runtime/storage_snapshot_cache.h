@@ -1,12 +1,13 @@
 #pragma once
 
-#include <array>
-#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
+#include <type_traits>
 
 #include "contract.hh"
+#include "hogd/base/hashmap.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "rpc_types.hh"
@@ -37,16 +38,50 @@ public:
   const StorageItem *try_get_snapshot_item(AddressAndKey const &addrkey);
 
 private:
+  struct ContractMapEntry {
+    SHA256Hash hash_;
+    std::shared_ptr<const Contract> contract_;
+
+    static std::span<const std::byte> get_key(SHA256Hash const &hash)
+    {
+      return std::as_bytes(std::span(hash.data(), hash.size()));
+    }
+    std::span<const std::byte> get_key() const { return get_key(hash_); }
+  };
+
+  struct DeploymentMapEntry {
+    ContractAddress addr_;
+    std::optional<SHA256Hash> hash_;
+
+    static std::span<const std::byte> get_key(ContractAddress const &addr)
+    {
+      return std::as_bytes(std::span(addr.data(), addr.size()));
+    }
+    std::span<const std::byte> get_key() const { return get_key(addr_); }
+  };
+
+  struct StorageItemMapEntry {
+    AddressAndKey addrkey_;
+    std::unique_ptr<StorageItem> item_;
+
+    static_assert(std::is_trivially_copyable_v<AddressAndKey>);
+    static std::span<const std::byte> get_key(AddressAndKey const &addrkey)
+    {
+      return std::span<const std::byte, std::dynamic_extent>(
+          reinterpret_cast<const std::byte *>(&addrkey), sizeof(addrkey));
+    }
+    std::span<const std::byte> get_key() const { return get_key(addrkey_); }
+  };
+
   // Note: the contract_cache_ does not strictly need to be reset (although it
   // is not incorrect to reset it) after every block.
-  x23::MVar<std::map<SHA256Hash, std::shared_ptr<const Contract>>>
-      contract_cache_;
+  HashMap<ContractMapEntry> contract_cache_ = HashMap<ContractMapEntry>(8);
   // Neither does the deployment cache
-  x23::MVar<std::map<ContractAddress, std::optional<SHA256Hash>>>
-      deployment_cache_;
+  HashMap<DeploymentMapEntry> deployment_cache_ =
+      HashMap<DeploymentMapEntry>(8);
   // snapshot cache needs to be reset after each block
-  x23::MVar<std::unordered_map<AddressAndKey, std::unique_ptr<StorageItem>>>
-      snapshot_item_cache_;
+  HashMap<StorageItemMapEntry> snapshot_item_cache_ =
+      HashMap<StorageItemMapEntry>(8);
 
   const BlockID block_id_;
   DatabaseProxy &db_proxy_;
