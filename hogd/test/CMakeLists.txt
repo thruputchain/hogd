@@ -19,6 +19,7 @@ add_executable(
   test_bytestring_write.cc
   test_coord_to_db.cc
   test_connect.cc
+  test_db_cache_coherence.cc
 )
 
 target_link_libraries(

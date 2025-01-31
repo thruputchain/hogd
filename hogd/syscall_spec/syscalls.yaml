@@ -253,7 +253,7 @@ errors:
     doc: "Insufficient gas in call frame to supply requested gas limit for child invocation"
   - name: "InvalidInput"
     number: 8
-    doc: "Invalid input to a syscall, such as subtracting below 0 on an nnint64 or a type mismatch"
+    doc: "Invalid input to a syscall, such as subtracting below 0 on an nnint or a type mismatch"
   - name: "StorageKeyNotExist"
     number: 9
     doc: "Storage key accessed that does not exist in the transaction's current view"
