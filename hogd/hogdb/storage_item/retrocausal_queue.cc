@@ -27,6 +27,22 @@ RetrocausalQueue::RetrocausalQueue(
   assert(current_block_number_ > parent.current_block_number_);
 }
 
+RetrocausalQueue::RetrocausalQueue(
+    RetrocausalQueue const &parent,
+    RetrocausalQueuePastBlockConsumeDelta const &consume_delta)
+  : current_block_number_(parent.current_block_number_ + 1)
+{
+  for (auto const &[block_number, block] : parent.blocks_) {
+    blocks_.emplace(block_number, CoWBlockReference{.block_ = block.block_,
+                                                    .is_modified_ = false});
+  }
+  apply_consume_delta(consume_delta);
+  // Not strictly necessary.  The current block number need only be
+  // monotonically increasing when there's actually a block.  It should never be
+  // exposed to the runtime anyways.
+  assert(current_block_number_ > parent.current_block_number_);
+}
+
 RetrocausalQueue::RetrocausalQueue(uint64_t current_block_number)
   : current_block_number_(current_block_number)
 {}

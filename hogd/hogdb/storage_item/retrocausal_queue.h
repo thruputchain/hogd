@@ -24,9 +24,15 @@ namespace hogd {
 // (probably) not be made visible to contracts.
 class RetrocausalQueue {
 public:
+  // Ctor if current block is not empty
   RetrocausalQueue(RetrocausalQueue const &parent,
                    RetrocausalQueuePastBlockConsumeDelta const &consume_delta,
                    RetrocausalQueueBlock current_round_block);
+
+  // Ctor if current block is empty
+  RetrocausalQueue(RetrocausalQueue const &parent,
+                   RetrocausalQueuePastBlockConsumeDelta const &consume_delta);
+
   RetrocausalQueue(uint64_t current_block_number);
 
   // allow move and copy

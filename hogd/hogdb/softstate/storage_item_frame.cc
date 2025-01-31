@@ -79,21 +79,27 @@ StorageItemFrame::RetrocausalQueueArgs::to_item(
     uint64_t new_block_number =
         previous_item->queue().get_current_block_number() + 1;
     x23::Vec<QueueEntry> new_block = make_block(persistable_entries_);
-
+    if (new_block.size() > 0) {
+      return StorageItemWrapper(
+          RetrocausalQueue(previous_item->queue(), consume_delta,
+                           RetrocausalQueueBlock{.entries = new_block,
+                                                 .block_number =
+                                                     new_block_number}));
+    }
     return StorageItemWrapper(
-        RetrocausalQueue(previous_item->queue(), consume_delta,
-                         RetrocausalQueueBlock{.entries = new_block,
-                                               .block_number =
-                                                   new_block_number}));
+        RetrocausalQueue(previous_item->queue(), consume_delta));
   }
   // otherwise, no parent, so make empty one just for the ctor
   RetrocausalQueue fake_parent(0);
   assert(!past_consume_delta_);
 
-  return StorageItemWrapper(
-      RetrocausalQueue(fake_parent, consume_delta,
-                       {.entries = make_block(persistable_entries_),
-                        .block_number = 1}));
+  x23::Vec<QueueEntry> new_block = make_block(persistable_entries_);
+  if (new_block.size() > 0) {
+    return StorageItemWrapper(
+        RetrocausalQueue(fake_parent, consume_delta,
+                         {.entries = new_block, .block_number = 1}));
+  }
+  return StorageItemWrapper(RetrocausalQueue(fake_parent, consume_delta));
 }
 
 template<typename VariantArm, typename... VariantArgs>
@@ -147,7 +153,7 @@ StorageItemFrame::RefcountedVariant::try_reserve_retrocausal_queue_delta(
 {
   if ([[maybe_unused]] auto *args = try_set_variant<RetrocausalQueueArgs>()) {
     if (requires_consume) {
-      if (args->past_consume_delta_) {
+      if (args->consume_has_committed_) {
         return false;
       }
       if (args->consumer_lock_) {
@@ -258,13 +264,19 @@ StorageItemFrame::RefcountedVariant::commit_retrocausal_queue_modify(
   }
 
   if (queue_delta.consume) {
-    assert(!args.past_consume_delta_);
+    assert(!args.consume_has_committed_);
     // not strictly necessary, but we maintain the invariant that at the end of
     // the block consumer_lock_ is released, just to be careful.
     if (args.consumer_lock_) {
       args.consumer_lock_ = false;
     }
-    args.past_consume_delta_.emplace(queue_delta.consume->past_block_consume);
+    args.consume_has_committed_ = true;
+    if (queue_delta.consume->past_block_consume !=
+        RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number =
+                                                  0,
+                                              .partial_consumed_number = 0}) {
+      args.past_consume_delta_.emplace(queue_delta.consume->past_block_consume);
+    }
 
     for (auto const &consumed_entry :
          queue_delta.consume->current_block_consumed) {

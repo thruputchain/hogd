@@ -173,6 +173,7 @@ private:
     std::optional<RetrocausalQueuePastBlockConsumeDelta> past_consume_delta_;
     // Is there an active lock for the consumer position
     bool consumer_lock_ = false;
+    bool consume_has_committed_ = false;
 
     // Stores the entries created in a block in a nondeterministic order,
     // but the order has a stable indexing within a block (the first element is
