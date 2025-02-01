@@ -412,8 +412,7 @@ SystemCallHandler::get_nnint(StorageKey const &storage_key)
         StorageItemType::kNonnegativeInt) {
       return SyscallError{SyscallErrorCode::kInvalidInput};
     }
-    return std::make_pair(unmodified_item->base_item_->nnint(),
-                          int128_t{0});
+    return std::make_pair(unmodified_item->base_item_->nnint(), int128_t{0});
   }
 
   return SyscallError{SyscallErrorCode::kInvalidInput};
@@ -425,6 +424,38 @@ SystemCallHandler::set_nnint(StorageKey const &storage_key, int128_t set_value,
 {
   auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
   return item_view.set(NNIntItem(set_value, add_value));
+}
+
+SyscallStatus<void>
+SystemCallHandler::retrocausal_queue_insert(
+    StorageKey const &key, std::span<const std::byte> queue_entry)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(key);
+
+  if (!item_view.can_accept_type(StorageItemType::kRetrocausalQueue)) {
+    return SyscallError{SyscallErrorCode::kInvalidInput};
+  }
+
+  if (queue_entry.size() > kQueueEntryMaxLen) {
+    return SyscallError{SyscallErrorCode::kInvalidInput};
+  }
+
+  QueueEntry new_entry;
+  new_entry.resize_uninitialized(queue_entry.size());
+  std::memcpy(new_entry.data(), queue_entry.data(), queue_entry.size());
+
+  if (auto const *retrocausal_queue_item =
+          item_view.template get<RetrocausalQueueItem>()) {
+    RetrocausalQueueItem new_item = *retrocausal_queue_item;
+    new_item.queue_delta.insert.added_entries.push_back(new_entry);
+    return item_view.set(new_item);
+  }
+
+  assert(item_view.template get<UnmodifiedItem>());
+
+  RetrocausalQueueItem new_item;
+  new_item.queue_delta.insert.added_entries.push_back(new_entry);
+  return item_view.set(new_item);
 }
 
 SyscallStatus<void>

@@ -11,7 +11,8 @@
 
 namespace hogd {
 
-StorageSnapshotCacheEntry::StorageSnapshotCacheEntry(const StorageItem& wire_item)
+StorageSnapshotCacheEntry::StorageSnapshotCacheEntry(
+    const StorageItem &wire_item, DatabaseProxy &db_proxy, BlockID block_id)
 {
   switch (wire_item.type()) {
   case StorageItemType::kBytestring:
@@ -21,12 +22,57 @@ StorageSnapshotCacheEntry::StorageSnapshotCacheEntry(const StorageItem& wire_ite
     entry_.emplace<NNIntEntry>(from_xdr(wire_item.nnint()));
     break;
   case StorageItemType::kRetrocausalQueue:
-    entry_.emplace<RetrocausalQueueEntry>();
+    entry_.emplace<RetrocausalQueueEntry>(db_proxy, block_id);
     break;
   case StorageItemType::kDeleted:
     assert(false);
     exit(EXIT_FAILURE);
   }
+}
+
+StorageSnapshotCacheEntry::RetrocausalQueueEntry::RetrocausalQueueEntry(
+    DatabaseProxy &db_proxy, BlockID block_id)
+  : db_proxy_(db_proxy), block_id_(block_id)
+{}
+
+const RetrocausalQueueBlock *
+StorageSnapshotCacheEntry::RetrocausalQueueEntry::get_next_block(
+    AddressAndKey const &addrkey, uint64_t search_start_index)
+{
+  auto it = blocks_.upper_bound(search_start_index);
+  if (it != blocks_.end()) {
+    return it->second.get();
+  }
+
+  auto db_res = db_proxy_.get_retrocausal_queue_block(block_id_, addrkey,
+                                                      search_start_index);
+
+  if (db_res) {
+    auto block = std::make_unique<RetrocausalQueueBlock>(std::move(*db_res));
+    auto *out = block.get();
+    blocks_.emplace(search_start_index, std::move(block));
+    return out;
+  }
+  return nullptr;
+}
+
+std::optional<QueueEntry>
+StorageSnapshotCacheEntry::RetrocausalQueueEntry::get_concurrent_entry(
+    AddressAndKey const &addrkey, uint64_t index)
+{
+  if (index < concurrent_items_.size()) {
+    return concurrent_items_[index];
+  }
+
+  auto next_item =
+      db_proxy_.get_concurrent_retrocausal_queue_entry(block_id_, addrkey,
+                                                       index);
+  if (next_item) {
+    // don't cache a negative result, as a concurrent transaction might insert
+    // something before block close.
+    concurrent_items_.push_back(*next_item);
+  }
+  return next_item;
 }
 
 StorageItemType
@@ -35,7 +81,7 @@ StorageSnapshotCacheEntry::type() const
   return std::visit([](auto const &entry) { return entry.kItemType; }, entry_);
 }
 
-Bytestring const&
+Bytestring const &
 StorageSnapshotCacheEntry::bytestring() const
 {
   assert(std::holds_alternative<BytestringEntry>(entry_));
@@ -96,7 +142,9 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   // cache positive and negative lookups
   auto db_res = db_proxy_.get_item(block_id_, addrkey);
   std::unique_ptr<StorageSnapshotCacheEntry> entry =
-      db_res ? std::make_unique<StorageSnapshotCacheEntry>(*db_res) : nullptr;
+      db_res ? std::make_unique<StorageSnapshotCacheEntry>(*db_res, db_proxy_,
+                                                           block_id_)
+             : nullptr;
   auto const *out = entry.get();
 
   snapshot_item_cache_.emplace(key, addrkey, std::move(entry));

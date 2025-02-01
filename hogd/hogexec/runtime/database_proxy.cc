@@ -99,6 +99,39 @@ DatabaseProxy::get_item(BlockID block_id, AddressAndKey const &addrkey)
   throw std::runtime_error("unhandleable error");
 }
 
+std::optional<RetrocausalQueueBlock>
+DatabaseProxy::get_retrocausal_queue_block(BlockID block_id,
+                                           AddressAndKey const &addrkey,
+                                           uint64_t index)
+{
+  auto res =
+      db_client_.get_next_retrocausal_queue_block(block_id, addrkey, index)();
+  if (res.error() == RPCError::kNone) {
+    return res.block();
+  }
+  if (res.error() == RPCError::kNoRetrocausalQueueItem ||
+      res.error() == RPCError::kNoStorageItem) {
+    return std::nullopt;
+  }
+  throw std::runtime_error("unhandleable error");
+}
+// WARNING: nondeterministic
+std::optional<QueueEntry>
+DatabaseProxy::get_concurrent_retrocausal_queue_entry(
+    BlockID block_id, AddressAndKey const &addrkey, uint64_t index)
+{
+  auto res =
+      db_client_.get_concurrent_retrocausal_queue_entry(block_id, addrkey,
+                                                        index)();
+  if (res.error() == RPCError::kNone) {
+    return res.entry();
+  }
+  if (res.error() == RPCError::kNoRetrocausalQueueItem) {
+    return std::nullopt;
+  }
+  throw std::runtime_error("unhandleable error");
+}
+
 x23::Async<void>
 DatabaseProxy::commit_contract_create(BlockID block_id,
                                       Contract const &contract)

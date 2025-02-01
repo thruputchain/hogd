@@ -35,6 +35,13 @@ public:
   std::optional<StorageItem> get_item(BlockID block_id,
                                       AddressAndKey const &addrkey);
 
+  std::optional<RetrocausalQueueBlock>
+  get_retrocausal_queue_block(BlockID block_id, AddressAndKey const &addrkey,
+                              uint64_t index);
+  // WARNING: nondeterministic
+  std::optional<QueueEntry> get_concurrent_retrocausal_queue_entry(
+      BlockID block_id, AddressAndKey const &addrkey, uint64_t index);
+
   x23::Async<void> commit_contract_create(BlockID block_id,
                                           Contract const &contract);
 

@@ -56,7 +56,8 @@ class DeletedItem {
 public:
   constexpr static FlaggedStorageDelta get_delta()
   {
-    return FlaggedStorageDelta{.delta=StorageDelta(StorageDeltaType::kDelete), .flags=0};
+    return FlaggedStorageDelta{.delta = StorageDelta(StorageDeltaType::kDelete),
+                               .flags = 0};
   }
 
   constexpr static SyscallStatus<void> validate() { return {}; }
@@ -71,15 +72,18 @@ class RetrocausalQueueItem {
 public:
   RetrocausalQueueDelta queue_delta;
 
-  FlaggedStorageDelta get_delta() const {
-    StorageDelta delta = StorageDelta(StorageDeltaType::kRetrocausalQueueModify);
+  FlaggedStorageDelta get_delta() const
+  {
+    StorageDelta delta =
+        StorageDelta(StorageDeltaType::kRetrocausalQueueModify);
     delta.retrocausal_queue() = queue_delta;
-    return FlaggedStorageDelta{.delta=delta, .flags=0};
+    return FlaggedStorageDelta{.delta = delta, .flags = 0};
   }
 
   constexpr static SyscallStatus<void> validate() { return {}; }
 
-  constexpr static StorageItemType get_item_type() {
+  constexpr static StorageItemType get_item_type()
+  {
     return StorageItemType::kRetrocausalQueue;
   }
 };
@@ -142,11 +146,12 @@ public:
 
   std::optional<FlaggedStorageDelta> get_delta() const;
 
-private:
   SyscallStatus<void>
   can_accept_type(std::optional<StorageItemType> item_type) const;
 
-  std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem, RetrocausalQueueItem>
+private:
+  std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
+               RetrocausalQueueItem>
       delta_args_;
 };
 

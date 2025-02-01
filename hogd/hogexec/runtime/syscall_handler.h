@@ -95,6 +95,10 @@ public:
   SyscallStatus<void> set_nnint(StorageKey const &storage_key,
                                 int128_t set_value, int128_t add_value);
 
+  SyscallStatus<void>
+  retrocausal_queue_insert(StorageKey const &key,
+                           std::span<const std::byte> queue_entry);
+
   SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
   ProposalModeData get_proposal_data() const;

@@ -17,17 +17,28 @@ namespace hogd {
 
 class StorageSnapshotCacheEntry {
 public:
-  StorageSnapshotCacheEntry(const StorageItem& wire_item);
+  StorageSnapshotCacheEntry(const StorageItem &wire_item,
+                            DatabaseProxy &db_proxy, BlockID block_id);
 
-  StorageSnapshotCacheEntry(const StorageSnapshotCacheEntry&) = delete;
-  StorageSnapshotCacheEntry& operator=(const StorageSnapshotCacheEntry&) = delete;
-  StorageSnapshotCacheEntry(StorageSnapshotCacheEntry&&) = delete;
-  StorageSnapshotCacheEntry& operator=(StorageSnapshotCacheEntry&&) = delete;
+  StorageSnapshotCacheEntry(const StorageSnapshotCacheEntry &) = delete;
+  StorageSnapshotCacheEntry &
+  operator=(const StorageSnapshotCacheEntry &) = delete;
+  StorageSnapshotCacheEntry(StorageSnapshotCacheEntry &&) = delete;
+  StorageSnapshotCacheEntry &operator=(StorageSnapshotCacheEntry &&) = delete;
 
   StorageItemType type() const;
 
-  Bytestring const& bytestring() const;
+  Bytestring const &bytestring() const;
   int128_t nnint() const;
+
+  std::span<const std::byte> get_key() const { return get_key(addrkey_); }
+
+  static_assert(std::is_trivially_copyable_v<AddressAndKey>);
+  static std::span<const std::byte> get_key(AddressAndKey const &addrkey)
+  {
+    return std::span<const std::byte, std::dynamic_extent>(
+        reinterpret_cast<const std::byte *>(&addrkey), sizeof(addrkey));
+  }
 
 private:
   struct BytestringEntry {
@@ -37,15 +48,33 @@ private:
 
   struct NNIntEntry {
     int128_t base_value_;
-    constexpr static StorageItemType kItemType = StorageItemType::kNonnegativeInt;
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kNonnegativeInt;
   };
 
-  struct RetrocausalQueueEntry {
-    std::map<uint64_t, RetrocausalQueueBlock> blocks_;
-    constexpr static StorageItemType kItemType = StorageItemType::kRetrocausalQueue;
+  class RetrocausalQueueEntry {
+  public:
+    RetrocausalQueueEntry(DatabaseProxy &db_proxy, BlockID block_id);
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kRetrocausalQueue;
+
+    // only returns from past blocks
+    const RetrocausalQueueBlock *get_next_block(AddressAndKey const &addrkey,
+                                                uint64_t search_start_index);
+    // only returns from concurrent items
+    // WARNING: nondeterministic
+    std::optional<QueueEntry> get_concurrent_entry(AddressAndKey const &addrkey,
+                                                   uint64_t index);
+
+  private:
+    std::map<uint64_t, std::unique_ptr<RetrocausalQueueBlock>> blocks_;
+    std::vector<QueueEntry> concurrent_items_;
+    DatabaseProxy &db_proxy_;
+    const BlockID block_id_;
   };
 
   std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry> entry_;
+  AddressAndKey addrkey_;
 };
 
 // Root cache for objects read from the ledger.
@@ -66,7 +95,8 @@ public:
   try_get_contract_by_hash(SHA256Hash const &hash);
   std::optional<SHA256Hash>
   try_get_deployed_contract_hash(ContractAddress const &addr);
-  const StorageSnapshotCacheEntry *try_get_snapshot_item(AddressAndKey const &addrkey);
+  const StorageSnapshotCacheEntry *
+  try_get_snapshot_item(AddressAndKey const &addrkey);
 
 private:
   struct ContractMapEntry {
