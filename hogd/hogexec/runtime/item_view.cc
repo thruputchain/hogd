@@ -139,4 +139,106 @@ ItemView::can_accept_type(std::optional<StorageItemType> item_type) const
   return {};
 }
 
+// The logic here should mirror that of advance_cursor()
+std::optional<QueueEntry>
+RetrocausalQueueItem::get_next_item() const
+{
+  // Step 1: try consume from past blocks
+  // the index where we start searching from
+  uint64_t block_index = 0;
+  uint64_t partial_consume_quantity = 0;
+  if (queue_delta_.consume) {
+    block_index = queue_delta_.consume->past_block_consume
+                      .max_fully_consumed_block_number +
+                  1;
+    partial_consume_quantity =
+        queue_delta_.consume->past_block_consume.partial_consumed_number;
+  }
+
+  auto const *next_block =
+      queue_snapshot_cache_entry_->get_next_block(addrkey_, block_index);
+
+  if (next_block) {
+    size_t blk_size = next_block->entries.size();
+    assert(partial_consume_quantity < blk_size);
+    return next_block->entries[partial_consume_quantity];
+  }
+  // otherwise, nothing in past block to consume.  Try current block.
+  assert(partial_consume_quantity == 0);
+
+  // Step 2: first look to consume entries created within the transaction
+  if (locally_consumed_index_ < queue_delta_.insert.added_entries.size()) {
+    return queue_delta_.insert.added_entries[locally_consumed_index_];
+  }
+
+  // Step 3: try to consume concurrent entries not from this transaction
+  auto concurrent_entry = queue_snapshot_cache_entry_->get_concurrent_entry(
+      addrkey_, locally_consumed_index_);
+  if (concurrent_entry) {
+    return concurrent_entry;
+  }
+
+  // Step 4: nothing to consume
+  return std::nullopt;
+}
+
+void
+RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
+{
+  queue_delta_.insert.added_entries.push_back(entry);
+}
+
+void
+RetrocausalQueueItem::advance_cursor()
+{
+  // Step 1: try consume from past blocks
+  // the index where we start searching from
+
+  if (!queue_delta_.consume) {
+    queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
+        .past_block_consume = {.max_fully_consumed_block_number = 0,
+                               .partial_consumed_number = 0},
+        .current_block_consumed = {}});
+  }
+
+  auto const *next_block = queue_snapshot_cache_entry_->get_next_block(
+      addrkey_,
+      queue_delta_.consume->past_block_consume.max_fully_consumed_block_number +
+          1);
+
+  if (next_block) {
+    size_t blk_size = next_block->entries.size();
+    assert(queue_delta_.consume->past_block_consume.partial_consumed_number <
+           blk_size);
+    queue_delta_.consume->past_block_consume.partial_consumed_number++;
+    if (queue_delta_.consume->past_block_consume.partial_consumed_number ==
+        blk_size) {
+      queue_delta_.consume->past_block_consume.max_fully_consumed_block_number =
+          next_block->block_number;
+      queue_delta_.consume->past_block_consume.partial_consumed_number = 0;
+    }
+    return;
+  }
+  // otherwise, nothing in past block to consume.  Try current block.
+  assert(queue_delta_.consume->past_block_consume.partial_consumed_number == 0);
+
+  // Step 2: first look to consume entries created within the transaction
+  if (locally_consumed_index_ < queue_delta_.insert.added_entries.size()) {
+    queue_delta_.consume->current_block_consumed.push_back(
+        queue_delta_.insert.added_entries[locally_consumed_index_]);
+    locally_consumed_index_++;
+    return;
+  }
+
+  // Step 3: try to consume concurrent entries not from this transaction
+  auto concurrent_entry = queue_snapshot_cache_entry_->get_concurrent_entry(
+      addrkey_, locally_consumed_index_);
+  if (concurrent_entry) {
+    queue_delta_.consume->current_block_consumed.push_back(*concurrent_entry);
+    return;
+  }
+
+  assert(false);
+}
+
 } // namespace hogd

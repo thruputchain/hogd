@@ -22,7 +22,7 @@ StorageSnapshotCacheEntry::StorageSnapshotCacheEntry(
     entry_.emplace<NNIntEntry>(from_xdr(wire_item.nnint()));
     break;
   case StorageItemType::kRetrocausalQueue:
-    entry_.emplace<RetrocausalQueueEntry>(db_proxy, block_id);
+    entry_.emplace<RetrocausalQueueSnapshotCacheEntry>(db_proxy, block_id);
     break;
   case StorageItemType::kDeleted:
     assert(false);
@@ -30,14 +30,14 @@ StorageSnapshotCacheEntry::StorageSnapshotCacheEntry(
   }
 }
 
-StorageSnapshotCacheEntry::RetrocausalQueueEntry::RetrocausalQueueEntry(
+RetrocausalQueueSnapshotCacheEntry::RetrocausalQueueSnapshotCacheEntry(
     DatabaseProxy &db_proxy, BlockID block_id)
   : db_proxy_(db_proxy), block_id_(block_id)
 {}
 
 const RetrocausalQueueBlock *
-StorageSnapshotCacheEntry::RetrocausalQueueEntry::get_next_block(
-    AddressAndKey const &addrkey, uint64_t search_start_index)
+RetrocausalQueueSnapshotCacheEntry::get_next_block(
+    AddressAndKey const &addrkey, uint64_t search_start_index) const
 {
   auto it = blocks_.upper_bound(search_start_index);
   if (it != blocks_.end()) {
@@ -57,8 +57,8 @@ StorageSnapshotCacheEntry::RetrocausalQueueEntry::get_next_block(
 }
 
 std::optional<QueueEntry>
-StorageSnapshotCacheEntry::RetrocausalQueueEntry::get_concurrent_entry(
-    AddressAndKey const &addrkey, uint64_t index)
+RetrocausalQueueSnapshotCacheEntry::get_concurrent_entry(
+    AddressAndKey const &addrkey, uint64_t index) const
 {
   if (index < concurrent_items_.size()) {
     return concurrent_items_[index];
@@ -93,6 +93,13 @@ StorageSnapshotCacheEntry::nnint() const
 {
   assert(std::holds_alternative<NNIntEntry>(entry_));
   return std::get<NNIntEntry>(entry_).base_value_;
+}
+
+RetrocausalQueueSnapshotCacheEntry const &
+StorageSnapshotCacheEntry::queue() const
+{
+  assert(std::holds_alternative<RetrocausalQueueSnapshotCacheEntry>(entry_));
+  return std::get<RetrocausalQueueSnapshotCacheEntry>(entry_);
 }
 
 std::optional<SHA256Hash>

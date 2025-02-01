@@ -257,6 +257,9 @@ errors:
   - name: "StorageKeyNotExist"
     number: 9
     doc: "Storage key accessed that does not exist in the transaction's current view"
+  - name: "NoQueueEntry"
+    number: 10
+    doc: "No queue entry to consume"
 
     # errors within a wasm contract
   - name: "CalldataParseError"

@@ -15,6 +15,28 @@
 
 namespace hogd {
 
+class RetrocausalQueueSnapshotCacheEntry {
+public:
+  RetrocausalQueueSnapshotCacheEntry(DatabaseProxy &db_proxy, BlockID block_id);
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kRetrocausalQueue;
+
+  // only returns from past blocks
+  const RetrocausalQueueBlock *
+  get_next_block(AddressAndKey const &addrkey,
+                 uint64_t search_start_index) const;
+  // only returns from concurrent items
+  // WARNING: nondeterministic
+  std::optional<QueueEntry> get_concurrent_entry(AddressAndKey const &addrkey,
+                                                 uint64_t index) const;
+
+private:
+  mutable std::map<uint64_t, std::unique_ptr<RetrocausalQueueBlock>> blocks_;
+  mutable std::vector<QueueEntry> concurrent_items_;
+  DatabaseProxy &db_proxy_;
+  const BlockID block_id_;
+};
+
 class StorageSnapshotCacheEntry {
 public:
   StorageSnapshotCacheEntry(const StorageItem &wire_item,
@@ -30,6 +52,8 @@ public:
 
   Bytestring const &bytestring() const;
   int128_t nnint() const;
+
+  RetrocausalQueueSnapshotCacheEntry const &queue() const;
 
   std::span<const std::byte> get_key() const { return get_key(addrkey_); }
 
@@ -52,28 +76,8 @@ private:
         StorageItemType::kNonnegativeInt;
   };
 
-  class RetrocausalQueueEntry {
-  public:
-    RetrocausalQueueEntry(DatabaseProxy &db_proxy, BlockID block_id);
-    constexpr static StorageItemType kItemType =
-        StorageItemType::kRetrocausalQueue;
-
-    // only returns from past blocks
-    const RetrocausalQueueBlock *get_next_block(AddressAndKey const &addrkey,
-                                                uint64_t search_start_index);
-    // only returns from concurrent items
-    // WARNING: nondeterministic
-    std::optional<QueueEntry> get_concurrent_entry(AddressAndKey const &addrkey,
-                                                   uint64_t index);
-
-  private:
-    std::map<uint64_t, std::unique_ptr<RetrocausalQueueBlock>> blocks_;
-    std::vector<QueueEntry> concurrent_items_;
-    DatabaseProxy &db_proxy_;
-    const BlockID block_id_;
-  };
-
-  std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry> entry_;
+  std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueSnapshotCacheEntry>
+      entry_;
   AddressAndKey addrkey_;
 };
 

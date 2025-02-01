@@ -99,6 +99,8 @@ public:
   retrocausal_queue_insert(StorageKey const &key,
                            std::span<const std::byte> queue_entry);
 
+  SyscallStatus<QueueEntry> retrocausal_queue_consume(StorageKey const &key);
+
   SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
   ProposalModeData get_proposal_data() const;

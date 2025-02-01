@@ -70,13 +70,17 @@ public:
 
 class RetrocausalQueueItem {
 public:
-  RetrocausalQueueDelta queue_delta;
+  RetrocausalQueueItem(
+      RetrocausalQueueSnapshotCacheEntry const *queue_snapshot_cache_entry,
+      AddressAndKey const &addrkey)
+    : queue_snapshot_cache_entry_(queue_snapshot_cache_entry), addrkey_(addrkey)
+  {}
 
   FlaggedStorageDelta get_delta() const
   {
     StorageDelta delta =
         StorageDelta(StorageDeltaType::kRetrocausalQueueModify);
-    delta.retrocausal_queue() = queue_delta;
+    delta.retrocausal_queue() = queue_delta_;
     return FlaggedStorageDelta{.delta = delta, .flags = 0};
   }
 
@@ -86,6 +90,16 @@ public:
   {
     return StorageItemType::kRetrocausalQueue;
   }
+
+  std::optional<QueueEntry> get_next_item() const;
+  void advance_cursor();
+  void insert_entry(QueueEntry const &entry);
+
+private:
+  RetrocausalQueueDelta queue_delta_;
+  uint32_t locally_consumed_index_ = 0;
+  RetrocausalQueueSnapshotCacheEntry const *queue_snapshot_cache_entry_;
+  const AddressAndKey addrkey_;
 };
 
 // Represent state of an ItemView that has not been modified during
@@ -125,7 +139,7 @@ public:
                : nullptr;
   }
 
-  template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
+  template<typename ItemType> SyscallStatus<void> set(ItemType type)
   {
     auto validate_result = type.validate();
     if (!validate_result) {
@@ -140,7 +154,7 @@ public:
       return validate_type;
     }
 
-    delta_args_ = type;
+    delta_args_.emplace<ItemType>(std::move(type));
     return {};
   }
 

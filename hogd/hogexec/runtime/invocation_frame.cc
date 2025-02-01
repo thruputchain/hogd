@@ -301,4 +301,12 @@ InvocationFrameStack::get_item_view(StorageKey const &key)
   return *frame_stack_.back().get_item_view(addrkey);
 }
 
+AddressAndKey
+InvocationFrameStack::get_current_addrkey(StorageKey const &key) const
+{
+  return AddressAndKey{
+      .address = get_active_frame().active_invocation_.invoked_address,
+      .key = key};
+}
+
 } // namespace hogd

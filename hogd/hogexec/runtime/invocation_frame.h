@@ -117,6 +117,8 @@ public:
   // or any new invocation frame.
   ItemView &get_item_view(StorageKey const &key);
 
+  AddressAndKey get_current_addrkey(StorageKey const &key) const;
+
 private:
   void revert_frame();
   InvokeResult handle_try_invoke(InvokeResult const &prev_result,

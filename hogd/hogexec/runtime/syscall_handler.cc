@@ -447,15 +447,69 @@ SystemCallHandler::retrocausal_queue_insert(
   if (auto const *retrocausal_queue_item =
           item_view.template get<RetrocausalQueueItem>()) {
     RetrocausalQueueItem new_item = *retrocausal_queue_item;
-    new_item.queue_delta.insert.added_entries.push_back(new_entry);
+    new_item.insert_entry(new_entry);
     return item_view.set(new_item);
   }
 
-  assert(item_view.template get<UnmodifiedItem>());
+  auto const *unmodified_item = item_view.template get<UnmodifiedItem>();
+  assert(unmodified_item);
 
-  RetrocausalQueueItem new_item;
-  new_item.queue_delta.insert.added_entries.push_back(new_entry);
+  auto addrkey = invocation_frame_stack_.get_current_addrkey(key);
+
+  RetrocausalQueueItem new_item(&unmodified_item->base_item_->queue(), addrkey);
+
+  new_item.insert_entry(new_entry);
   return item_view.set(new_item);
+}
+
+SyscallStatus<QueueEntry>
+SystemCallHandler::retrocausal_queue_consume(StorageKey const &key)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(key);
+  auto addrkey = invocation_frame_stack_.get_current_addrkey(key);
+
+  if (auto const *retrocausal_queue_item =
+          item_view.template get<RetrocausalQueueItem>()) {
+    RetrocausalQueueItem new_item = *retrocausal_queue_item;
+    auto next_entry = new_item.get_next_item();
+    if (!next_entry) {
+      return SyscallError{SyscallErrorCode::kNoQueueEntry};
+    }
+
+    new_item.advance_cursor();
+
+    auto set = item_view.set(new_item);
+    if (!set) {
+      return set.error();
+    }
+    return SyscallStatus<QueueEntry>(*next_entry);
+  }
+
+  if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
+    if (!unmodified_item->base_item_) {
+      return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
+    }
+    if (unmodified_item->base_item_->type() !=
+        StorageItemType::kRetrocausalQueue) {
+      return SyscallError{SyscallErrorCode::kInvalidInput};
+    }
+
+    RetrocausalQueueItem new_item(&unmodified_item->base_item_->queue(),
+                                  addrkey);
+    auto next_entry = new_item.get_next_item();
+    if (!next_entry) {
+      return SyscallError{SyscallErrorCode::kNoQueueEntry};
+    }
+    new_item.advance_cursor();
+
+    auto set = item_view.set(new_item);
+    if (!set) {
+      return set.error();
+    }
+    return SyscallStatus<QueueEntry>(*next_entry);
+  }
+
+  return SyscallError{SyscallErrorCode::kInvalidInput};
 }
 
 SyscallStatus<void>
