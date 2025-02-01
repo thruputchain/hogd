@@ -98,8 +98,9 @@ public:
   SyscallStatus<void>
   retrocausal_queue_insert(StorageKey const &key,
                            std::span<const std::byte> queue_entry);
-
-  SyscallStatus<QueueEntry> retrocausal_queue_consume(StorageKey const &key);
+  // if peek is true, return the next entry without advancing the cursor
+  SyscallStatus<QueueEntry> retrocausal_queue_consume(StorageKey const &key,
+                                                      bool peek);
 
   SyscallStatus<void> delete_object(StorageKey const &storage_key);
 

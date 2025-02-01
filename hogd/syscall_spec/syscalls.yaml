@@ -225,6 +225,30 @@ syscalls:
       - name: "address"
         typename: "ContractAddress"
     number: 20
+  - name: "RetrocausalQueueInsert"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+      - name: "queue_entry"
+        span_argument: yes
+    outputs:
+    number: 21
+  - name: "RetrocausalQueueConsume"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+      - name: "peek"
+        typename: "bool"
+        primitive_type: yes
+    outputs:
+      - name: "queue_entry"
+        span_argument: yes
+      - name: "written_len"
+        typename: "RuntimeMemoryLength"
+        primitive_type: yes
+    number: 22
 
 errors:
   - name: "None"

@@ -22,6 +22,7 @@ add_library(
   syscall_invoke.cc
   syscall_log.cc
   syscall_nnint.cc
+  syscall_retrocausal_queue.cc
   wasmi_runtime.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )

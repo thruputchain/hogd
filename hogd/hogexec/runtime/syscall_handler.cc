@@ -463,7 +463,7 @@ SystemCallHandler::retrocausal_queue_insert(
 }
 
 SyscallStatus<QueueEntry>
-SystemCallHandler::retrocausal_queue_consume(StorageKey const &key)
+SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
 {
   auto &item_view = invocation_frame_stack_.get_item_view(key);
   auto addrkey = invocation_frame_stack_.get_current_addrkey(key);
@@ -476,7 +476,9 @@ SystemCallHandler::retrocausal_queue_consume(StorageKey const &key)
       return SyscallError{SyscallErrorCode::kNoQueueEntry};
     }
 
-    new_item.advance_cursor();
+    if (!peek) {
+      new_item.advance_cursor();
+    }
 
     auto set = item_view.set(new_item);
     if (!set) {
@@ -500,7 +502,9 @@ SystemCallHandler::retrocausal_queue_consume(StorageKey const &key)
     if (!next_entry) {
       return SyscallError{SyscallErrorCode::kNoQueueEntry};
     }
-    new_item.advance_cursor();
+    if (!peek) {
+      new_item.advance_cursor();
+    }
 
     auto set = item_view.set(new_item);
     if (!set) {
