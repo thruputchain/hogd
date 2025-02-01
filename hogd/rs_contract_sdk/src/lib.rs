@@ -17,6 +17,7 @@ mod delete;
 mod invoke;
 mod log;
 mod nonnegative_int;
+mod retrocausal_queue;
 
 pub mod parse_trait;
 pub mod rt;
@@ -28,4 +29,5 @@ pub use delete::*;
 pub use invoke::*;
 pub use log::*;
 pub use nonnegative_int::*;
+pub use retrocausal_queue::*;
 pub use rs_xdr::*;
