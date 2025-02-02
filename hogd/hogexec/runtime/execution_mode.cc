@@ -1,5 +1,9 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 
+#include <format>
+
+#include "x23/format.h"
+
 namespace hogd {
 
 namespace {
@@ -29,6 +33,54 @@ ProposalModeData::log_try_invoke_bit(bool bit)
   proposal_data_.try_invoke_count++;
 }
 
+void
+ProposalModeData::log_queue_entry_observation(AddressAndKey const &addrkey,
+                                              uint64_t sequence_no,
+                                              QueueEntry const &entry)
+{
+  std::printf(
+      std::format("ProposalModeData::log_queue_entry_observation {} {} {}\n",
+                  x23::show(addrkey), sequence_no, x23::show(entry))
+          .c_str());
+  auto &vec = queue_entry_observations_[addrkey];
+  assert(vec.size() >= sequence_no);
+
+  if (vec.size() == sequence_no) {
+    vec.push_back(entry);
+    proposal_data_.observed_queue_entry_sequence.push_back(entry);
+  }
+  else {
+    assert(vec[sequence_no] == entry);
+  }
+}
+
+std::optional<QueueEntry>
+ValidationModeData::get_queue_entry_observation(AddressAndKey const &addrkey,
+                                                uint64_t sequence_no)
+{
+  auto &vec = queue_entry_observations_[addrkey];
+  assert(vec.size() >= sequence_no);
+
+  if (sequence_no < vec.size()) {
+    // re-observing a cached observation.  E.g. the case of consume() then
+    // revert() then consume().
+    return vec[sequence_no];
+  }
+
+  // otherwise, observing a new queue entry
+
+  if (next_queue_entry_index_ >=
+      proposal_data_.observed_queue_entry_sequence.size()) {
+    return std::nullopt;
+  }
+
+  auto const &out =
+      proposal_data_.observed_queue_entry_sequence[next_queue_entry_index_];
+  next_queue_entry_index_++;
+  queue_entry_observations_[addrkey].push_back(out);
+  return out;
+}
+
 std::optional<bool>
 ValidationModeData::consume_try_invoke_bit()
 {
@@ -55,6 +107,9 @@ ValidationModeData::check_all_consumed() const
   if (proposal_data_.try_invoke_results.size() !=
       (proposal_data_.try_invoke_count / 8) +
           (proposal_data_.try_invoke_count % 8 == 0 ? 0 : 1))
+    return false;
+  if (next_queue_entry_index_ !=
+      proposal_data_.observed_queue_entry_sequence.size())
     return false;
   return true;
 }

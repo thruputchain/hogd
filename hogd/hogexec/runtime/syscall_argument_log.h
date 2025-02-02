@@ -42,9 +42,7 @@ log_syscall_argument(T const &arg)
     if (arg) {
       return log_syscall_argument_noopt(*arg);
     }
-    else {
-      return "NULLPTR";
-    }
+    return "NULLPTR";
   }
   else {
     return log_syscall_argument_noopt(arg);

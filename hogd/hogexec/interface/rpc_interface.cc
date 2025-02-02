@@ -43,7 +43,7 @@ ExecutorRpcInterface::propose_transaction(BlockID block_id,
 
     if (commit_res) {
       auto out = ExpectedProposalData(RPCError::kNone);
-      out.proposal_data() = syscall_handler.get_proposal_data().proposal_data_;
+      out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
       co_return out;
     }
     co_return ExpectedProposalData(RPCError::kTransactionFailed);

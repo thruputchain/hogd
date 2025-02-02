@@ -5,6 +5,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -141,9 +142,9 @@ ItemView::can_accept_type(std::optional<StorageItemType> item_type) const
 
 // The logic here should mirror that of advance_cursor()
 std::optional<QueueEntry>
-RetrocausalQueueItem::get_next_item() const
+RetrocausalQueueItem::get_next_item(
+    ExecutionModeData &execution_mode_data) const
 {
-  std::printf("RetrocausalQueueItem::get_next_item()\n");
   // Step 1: try consume from past blocks
   // the index where we start searching from
   uint64_t block_index = 0;
@@ -172,7 +173,8 @@ RetrocausalQueueItem::get_next_item() const
   }
 
   // Step 3: try to consume concurrent entries not from this transaction
-  auto concurrent_entry = get_next_concurrent_entry(locally_consumed_index_);
+  auto concurrent_entry =
+      get_next_concurrent_entry(locally_consumed_index_, execution_mode_data);
   if (concurrent_entry) {
     return concurrent_entry;
   }
@@ -199,17 +201,29 @@ RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 }
 
 std::optional<QueueEntry>
-RetrocausalQueueItem::get_next_concurrent_entry(uint32_t index) const
+RetrocausalQueueItem::get_next_concurrent_entry(
+    uint32_t index, ExecutionModeData &execution_mode_data) const
 {
-  std::printf("RetrocausalQueueItem::get_next_concurrent_entry(%d)\n", index);
-  if (queue_snapshot_cache_entry_) {
-    return queue_snapshot_cache_entry_->get_concurrent_entry(addrkey_, index);
+  if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
+    if (queue_snapshot_cache_entry_) {
+      auto out =
+          queue_snapshot_cache_entry_->get_concurrent_entry(addrkey_, index);
+      if (out) {
+        auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
+        proposal_data.log_queue_entry_observation(addrkey_, index, *out);
+      }
+      return out;
+    }
+    return std::nullopt;
   }
-  return std::nullopt;
+  // else validation mode
+  assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
+  auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
+  return validation_data.get_queue_entry_observation(addrkey_, index);
 }
 
 void
-RetrocausalQueueItem::advance_cursor()
+RetrocausalQueueItem::advance_cursor(ExecutionModeData &execution_mode_data)
 {
   std::printf("RetrocausalQueueItem::advance_cursor()\n");
   // Step 1: try consume from past blocks
@@ -253,7 +267,8 @@ RetrocausalQueueItem::advance_cursor()
   }
 
   // Step 3: try to consume concurrent entries not from this transaction
-  auto concurrent_entry = get_next_concurrent_entry(locally_consumed_index_);
+  auto concurrent_entry =
+      get_next_concurrent_entry(locally_consumed_index_, execution_mode_data);
   if (concurrent_entry) {
     ++locally_consumed_index_;
     queue_delta_.consume->current_block_consumed.push_back(*concurrent_entry);

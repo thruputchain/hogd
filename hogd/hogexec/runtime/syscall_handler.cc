@@ -473,22 +473,25 @@ SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
   auto &item_view = invocation_frame_stack_.get_item_view(key);
   auto addrkey = invocation_frame_stack_.get_current_addrkey(key);
 
+  if (!item_view.can_accept_type(StorageItemType::kRetrocausalQueue)) {
+    return SyscallError{SyscallErrorCode::kInvalidInput};
+  }
+
   if (auto const *retrocausal_queue_item =
           item_view.template get<RetrocausalQueueItem>()) {
     RetrocausalQueueItem new_item = *retrocausal_queue_item;
-    auto next_entry = new_item.get_next_item();
+    auto next_entry = new_item.get_next_item(execution_mode_data_);
     if (!next_entry) {
       return SyscallError{SyscallErrorCode::kNoQueueEntry};
     }
 
     if (!peek) {
-      new_item.advance_cursor();
+      new_item.advance_cursor(execution_mode_data_);
     }
 
+    [[maybe_unused]]
     auto set = item_view.set(new_item);
-    if (!set) {
-      return set.error();
-    }
+    assert(set);
     return SyscallStatus<QueueEntry>(*next_entry);
   }
 
@@ -496,10 +499,9 @@ SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
     if (!unmodified_item->base_item_) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_item_->type() !=
-        StorageItemType::kRetrocausalQueue) {
-      return SyscallError{SyscallErrorCode::kInvalidInput};
-    }
+    // must be true because can_accept_type() returned true
+    assert(unmodified_item->base_item_->type() ==
+           StorageItemType::kRetrocausalQueue);
 
     RetrocausalQueueSnapshotCacheEntry const *queue = nullptr;
     if (unmodified_item->base_item_) {
@@ -508,21 +510,23 @@ SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
 
     RetrocausalQueueItem new_item(queue, addrkey);
 
-    auto next_entry = new_item.get_next_item();
+    auto next_entry = new_item.get_next_item(execution_mode_data_);
     if (!next_entry) {
       return SyscallError{SyscallErrorCode::kNoQueueEntry};
     }
     if (!peek) {
-      new_item.advance_cursor();
+      new_item.advance_cursor(execution_mode_data_);
     }
 
+    assert(new_item.validate());
+    [[maybe_unused]]
     auto set = item_view.set(new_item);
-    if (!set) {
-      return set.error();
-    }
+    assert(set);
+
     return SyscallStatus<QueueEntry>(*next_entry);
   }
 
+  assert(false);
   return SyscallError{SyscallErrorCode::kInvalidInput};
 }
 
@@ -533,7 +537,7 @@ SystemCallHandler::delete_object(StorageKey const &storage_key)
   return item_view.set(DeletedItem{});
 }
 
-ProposalModeData
+ProposalModeData const &
 SystemCallHandler::get_proposal_data() const
 {
   assert(std::holds_alternative<ProposalModeData>(execution_mode_data_));

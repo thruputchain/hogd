@@ -45,11 +45,16 @@ TEST_F(TestRCQ, ReadSelfItem)
 
   auto res = exec_client_.propose_transaction(1, write_tx)();
   ASSERT_EQ(res.error(), RPCError::kNone);
+
+  // reading self inserts does not create proposal data
+  auto const &proposal_data = res.proposal_data();
+  ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0);
+
   // assert that two consumes conflict
   res = exec_client_.propose_transaction(1, write_tx)();
   ASSERT_NE(res.error(), RPCError::kNone);
 
-  // TODO(geoff): check NondeterministicProposalData.
+  exec_client_.finish_block(1)();
 
   exec_client_.finish_block(1)();
   db_client_.close_snapshot(1)();
@@ -103,6 +108,10 @@ TEST_F(TestRCQ, ConsumeAcrossBlocks)
 
   res = exec_client_.propose_transaction(3, consume_tx)();
   ASSERT_EQ(res.error(), RPCError::kNone);
+  {
+    auto const &proposal_data = res.proposal_data();
+    ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0);
+  }
 
   exec_client_.finish_block(3)();
   db_client_.close_snapshot(3)();
@@ -117,6 +126,11 @@ TEST_F(TestRCQ, ConsumeAcrossBlocks)
 
   res = exec_client_.propose_transaction(4, consume_tx)();
   ASSERT_EQ(res.error(), RPCError::kNone);
+
+  {
+    auto const &proposal_data = res.proposal_data();
+    ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0);
+  }
 
   exec_client_.finish_block(4)();
   db_client_.close_snapshot(4)();
@@ -135,6 +149,12 @@ TEST_F(TestRCQ, ConsumeAcrossBlocks)
 
   res = exec_client_.propose_transaction(5, consume_tx)();
   ASSERT_EQ(res.error(), RPCError::kNone);
+  {
+    auto const &proposal_data = res.proposal_data();
+    ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 2);
+    EXPECT_EQ(proposal_data.observed_queue_entry_sequence[0], QueueEntry{11});
+    EXPECT_EQ(proposal_data.observed_queue_entry_sequence[1], QueueEntry{12});
+  }
 
   exec_client_.finish_block(5)();
   db_client_.close_snapshot(5)();

@@ -2,6 +2,7 @@
 // clang-format off
 %#include "types.hh"
 %#include "contract.hh"
+%#include "storage_item.hh"
 
 namespace hogd
 {
@@ -46,6 +47,7 @@ namespace hogd
   struct NondeterministicProposal {
     opaque try_invoke_results<>;
     unsigned int try_invoke_count;
+    QueueEntry observed_queue_entry_sequence<>;
   };
 
   struct ProposedTransaction {

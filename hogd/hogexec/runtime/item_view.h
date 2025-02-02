@@ -5,6 +5,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 
@@ -91,14 +92,17 @@ public:
     return StorageItemType::kRetrocausalQueue;
   }
 
-  std::optional<QueueEntry> get_next_item() const;
-  void advance_cursor();
+  std::optional<QueueEntry>
+  get_next_item(ExecutionModeData &execution_mode_data) const;
+  void advance_cursor(ExecutionModeData &execution_mode_data);
   void insert_entry(QueueEntry const &entry);
 
 private:
   const RetrocausalQueueBlock *
   get_next_block(uint64_t search_start_index) const;
-  std::optional<QueueEntry> get_next_concurrent_entry(uint32_t index) const;
+  std::optional<QueueEntry>
+  get_next_concurrent_entry(uint32_t index,
+                            ExecutionModeData &execution_mode_data) const;
 
   RetrocausalQueueDelta queue_delta_;
   uint32_t locally_consumed_index_ = 0;

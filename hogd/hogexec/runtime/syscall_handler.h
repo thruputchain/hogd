@@ -104,7 +104,7 @@ public:
 
   SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
-  ProposalModeData get_proposal_data() const;
+  ProposalModeData const &get_proposal_data() const;
 
 private:
   WasmiContext wasmi_context_;
