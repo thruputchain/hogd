@@ -44,6 +44,12 @@ RetrocausalQueueSnapshotCacheEntry::get_next_block(
     return it->second.get();
   }
 
+  if (block_number_upper_bound_) {
+    if (search_start_index >= *block_number_upper_bound_) {
+      return nullptr;
+    }
+  }
+
   auto db_res = db_proxy_.get_retrocausal_queue_block(block_id_, addrkey,
                                                       search_start_index);
 
@@ -51,10 +57,15 @@ RetrocausalQueueSnapshotCacheEntry::get_next_block(
     auto block = std::make_unique<RetrocausalQueueBlock>(std::move(*db_res));
     auto *out = block.get();
     [[maybe_unused]]
-    auto res = blocks_.emplace(block->block_number, std::move(block));
+    auto res = blocks_.emplace(out->block_number, std::move(block));
     assert(res.second);
+
+    max_observed_block_number_ =
+        std::max(max_observed_block_number_, out->block_number);
     return out;
   }
+  block_number_upper_bound_ =
+      std::max(max_observed_block_number_ + 1, search_start_index);
   return nullptr;
 }
 

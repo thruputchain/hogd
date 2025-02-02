@@ -33,6 +33,9 @@ public:
 private:
   mutable std::map<uint64_t, std::unique_ptr<RetrocausalQueueBlock>> blocks_;
   mutable std::vector<QueueEntry> concurrent_items_;
+  mutable uint64_t max_observed_block_number_ = 0;
+  // no need to repeatedly query for blocks above this number.
+  mutable std::optional<uint64_t> block_number_upper_bound_ = std::nullopt;
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
 };
