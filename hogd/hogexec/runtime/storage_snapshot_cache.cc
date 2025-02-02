@@ -39,7 +39,7 @@ const RetrocausalQueueBlock *
 RetrocausalQueueSnapshotCacheEntry::get_next_block(
     AddressAndKey const &addrkey, uint64_t search_start_index) const
 {
-  auto it = blocks_.upper_bound(search_start_index);
+  auto it = blocks_.lower_bound(search_start_index);
   if (it != blocks_.end()) {
     return it->second.get();
   }
@@ -50,7 +50,9 @@ RetrocausalQueueSnapshotCacheEntry::get_next_block(
   if (db_res) {
     auto block = std::make_unique<RetrocausalQueueBlock>(std::move(*db_res));
     auto *out = block.get();
-    blocks_.emplace(search_start_index, std::move(block));
+    [[maybe_unused]]
+    auto res = blocks_.emplace(block->block_number, std::move(block));
+    assert(res.second);
     return out;
   }
   return nullptr;

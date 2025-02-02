@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <cstring>
 
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/shared_util/load_contracts.h"
 #include "hogd/test/local_test_harness.h"
@@ -23,6 +22,8 @@ protected:
 
     db_core_.get_root_db().write_contract(h, c);
     db_core_.get_root_db().write_deployment(addr_, h);
+
+    syscall_logfd = 1;
   }
 
   ContractAddress addr_ = ContractAddress{};
@@ -53,6 +54,91 @@ TEST_F(TestRCQ, ReadSelfItem)
   exec_client_.finish_block(1)();
   db_client_.close_snapshot(1)();
   db_client_.commit_snapshot(1)();
+}
+
+TEST_F(TestRCQ, ConsumeAcrossBlocks)
+{
+  // populate with two blocks of elements
+  ASSERT_EQ(db_client_.open_database_snapshot(0, 1)(), RPCError::kNone);
+  exec_client_.open_proposal_block(1)();
+
+  SignedTransaction write_tx;
+  write_tx.tx.invocation = {.invoked_address = addr_,
+                            .method = compute_sdk_name("make_several_inserts"),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = make_calldata(
+                                std::vector<uint8_t>{0, 1, 2, 3, 4, 5})};
+
+  auto res = exec_client_.propose_transaction(1, write_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  exec_client_.finish_block(1)();
+  db_client_.close_snapshot(1)();
+  db_client_.commit_snapshot(1)();
+
+  ASSERT_EQ(db_client_.open_database_snapshot(1, 2)(), RPCError::kNone);
+  exec_client_.open_proposal_block(2)();
+
+  write_tx.tx.invocation.calldata =
+      make_calldata(std::vector<uint8_t>{6, 7, 8, 9, 10});
+
+  res = exec_client_.propose_transaction(2, write_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  exec_client_.finish_block(2)();
+  db_client_.close_snapshot(2)();
+  db_client_.commit_snapshot(2)();
+
+  // consume part of the first block of elements
+  ASSERT_EQ(db_client_.open_database_snapshot(2, 3)(), RPCError::kNone);
+  exec_client_.open_proposal_block(3)();
+
+  SignedTransaction consume_tx;
+  consume_tx.tx.invocation = {.invoked_address = addr_,
+                              .method =
+                                  compute_sdk_name("expect_several_consumes"),
+                              .gas_limit = UINT64_MAX,
+                              .calldata =
+                                  make_calldata(std::vector<uint8_t>{0, 1, 2})};
+
+  res = exec_client_.propose_transaction(3, consume_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  exec_client_.finish_block(3)();
+  db_client_.close_snapshot(3)();
+  db_client_.commit_snapshot(3)();
+
+  // consume the rest of the first block and part of the second
+  ASSERT_EQ(db_client_.open_database_snapshot(3, 4)(), RPCError::kNone);
+  exec_client_.open_proposal_block(4)();
+
+  consume_tx.tx.invocation.calldata =
+      make_calldata(std::vector<uint8_t>{3, 4, 5, 6, 7});
+
+  res = exec_client_.propose_transaction(4, consume_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  exec_client_.finish_block(4)();
+  db_client_.close_snapshot(4)();
+  db_client_.commit_snapshot(4)();
+
+  // consume the rest of the second block, and some concurrent elements
+  ASSERT_EQ(db_client_.open_database_snapshot(4, 5)(), RPCError::kNone);
+  exec_client_.open_proposal_block(5)();
+
+  consume_tx.tx.invocation.calldata =
+      make_calldata(std::vector<uint8_t>{8, 9, 10, 11, 12});
+
+  write_tx.tx.invocation.calldata = make_calldata(std::vector<uint8_t>{11, 12});
+  res = exec_client_.propose_transaction(5, write_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  res = exec_client_.propose_transaction(5, consume_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  exec_client_.finish_block(5)();
+  db_client_.close_snapshot(5)();
+  db_client_.commit_snapshot(5)();
 }
 
 } // namespace hogd

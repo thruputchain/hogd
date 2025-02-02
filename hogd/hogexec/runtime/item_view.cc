@@ -143,6 +143,7 @@ ItemView::can_accept_type(std::optional<StorageItemType> item_type) const
 std::optional<QueueEntry>
 RetrocausalQueueItem::get_next_item() const
 {
+  std::printf("RetrocausalQueueItem::get_next_item()\n");
   // Step 1: try consume from past blocks
   // the index where we start searching from
   uint64_t block_index = 0;
@@ -200,6 +201,7 @@ RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 std::optional<QueueEntry>
 RetrocausalQueueItem::get_next_concurrent_entry(uint32_t index) const
 {
+  std::printf("RetrocausalQueueItem::get_next_concurrent_entry(%d)\n", index);
   if (queue_snapshot_cache_entry_) {
     return queue_snapshot_cache_entry_->get_concurrent_entry(addrkey_, index);
   }
@@ -209,6 +211,7 @@ RetrocausalQueueItem::get_next_concurrent_entry(uint32_t index) const
 void
 RetrocausalQueueItem::advance_cursor()
 {
+  std::printf("RetrocausalQueueItem::advance_cursor()\n");
   // Step 1: try consume from past blocks
   // the index where we start searching from
 
@@ -252,6 +255,7 @@ RetrocausalQueueItem::advance_cursor()
   // Step 3: try to consume concurrent entries not from this transaction
   auto concurrent_entry = get_next_concurrent_entry(locally_consumed_index_);
   if (concurrent_entry) {
+    ++locally_consumed_index_;
     queue_delta_.consume->current_block_consumed.push_back(*concurrent_entry);
     return;
   }

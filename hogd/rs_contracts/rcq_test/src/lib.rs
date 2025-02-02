@@ -3,6 +3,8 @@
 use rs_contract_sdk as sdk;
 use rs_macros::{public_interface, public_method, static_key};
 
+extern crate alloc;
+
 const CONFIG_KEY: sdk::StorageKey = static_key!("queue key");
 
 public_interface!();
@@ -26,5 +28,21 @@ pub fn test_read_self_item() {
             sdk::rt::trap();
         }
         Err(_) => {}
+    }
+}
+
+#[public_method]
+pub fn make_several_inserts(inserts: &[u8]) {
+    for i in inserts {
+        sdk::RetrocausalQueueInsert(&CONFIG_KEY, &[*i]).unwrap();
+    }
+}
+
+#[public_method]
+pub fn expect_several_consumes(expected: &[u8]) {
+    for i in expected {
+        let item =
+            sdk::RetrocausalQueueConsume_Sized::<1>(&CONFIG_KEY).unwrap();
+        assert_eq!(item[0], *i);
     }
 }
