@@ -96,6 +96,10 @@ public:
   void insert_entry(QueueEntry const &entry);
 
 private:
+  const RetrocausalQueueBlock *
+  get_next_block(uint64_t search_start_index) const;
+  std::optional<QueueEntry> get_next_concurrent_entry(uint32_t index) const;
+
   RetrocausalQueueDelta queue_delta_;
   uint32_t locally_consumed_index_ = 0;
   RetrocausalQueueSnapshotCacheEntry const *queue_snapshot_cache_entry_;

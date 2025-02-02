@@ -1,0 +1,15 @@
+[package]
+name = "rcq_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rs_contract_sdk = {path = "../../rs_contract_sdk/"}
+rs_macros = {path = "../../rs_macros/"}
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+interface = []
+std = ["rs_contract_sdk/std"]

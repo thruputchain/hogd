@@ -8,6 +8,7 @@ members = [
     "genesis_deployer",
     "erc20",
     "simple_wallet",
+    "rcq_test",
 ]
 
 [profile.dev]

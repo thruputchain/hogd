@@ -21,6 +21,7 @@ add_executable(
   test_connect.cc
   test_db_cache_coherence.cc
   test_db_retrocausal_queue.cc
+  test_rcq.cc
 )
 
 target_link_libraries(

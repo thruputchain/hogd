@@ -74,6 +74,14 @@ template<typename T> using SyscallStatus = std::expected<T, SyscallError>;
 // within this object.
 using HostFnResult = std::pair<HostFnErrorCode, int32_t>;
 
+// If true, syscall handler will print args as unformatted uint64s
+inline bool
+is_host_fn_parse_error(HostFnResult const &res)
+{
+  return res.first == HostFnErrorCode::kNoneOrRecoverable &&
+         res.second == static_cast<int32_t>(SyscallErrorCode::kFault);
+}
+
 // Total result of one contract invocation.
 //
 // A frame is successful (non-reverting) if the result_ is an expected

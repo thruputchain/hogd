@@ -14,4 +14,5 @@ rs_contracts : \
 	test_bytestring.wasm \
 	genesis_deployer.wasm \
 	erc20.wasm \
-	simple_wallet.wasm
+	simple_wallet.wasm \
+	rcq_test.wasm

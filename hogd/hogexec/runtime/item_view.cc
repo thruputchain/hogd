@@ -155,8 +155,7 @@ RetrocausalQueueItem::get_next_item() const
         queue_delta_.consume->past_block_consume.partial_consumed_number;
   }
 
-  auto const *next_block =
-      queue_snapshot_cache_entry_->get_next_block(addrkey_, block_index);
+  auto const *next_block = get_next_block(block_index);
 
   if (next_block) {
     size_t blk_size = next_block->entries.size();
@@ -172,8 +171,7 @@ RetrocausalQueueItem::get_next_item() const
   }
 
   // Step 3: try to consume concurrent entries not from this transaction
-  auto concurrent_entry = queue_snapshot_cache_entry_->get_concurrent_entry(
-      addrkey_, locally_consumed_index_);
+  auto concurrent_entry = get_next_concurrent_entry(locally_consumed_index_);
   if (concurrent_entry) {
     return concurrent_entry;
   }
@@ -186,6 +184,26 @@ void
 RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
 {
   queue_delta_.insert.added_entries.push_back(entry);
+}
+
+const RetrocausalQueueBlock *
+RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
+{
+  if (queue_snapshot_cache_entry_) {
+    return queue_snapshot_cache_entry_->get_next_block(addrkey_,
+                                                       search_start_index);
+  }
+
+  return nullptr;
+}
+
+std::optional<QueueEntry>
+RetrocausalQueueItem::get_next_concurrent_entry(uint32_t index) const
+{
+  if (queue_snapshot_cache_entry_) {
+    return queue_snapshot_cache_entry_->get_concurrent_entry(addrkey_, index);
+  }
+  return std::nullopt;
 }
 
 void
@@ -201,10 +219,11 @@ RetrocausalQueueItem::advance_cursor()
         .current_block_consumed = {}});
   }
 
-  auto const *next_block = queue_snapshot_cache_entry_->get_next_block(
-      addrkey_,
+  auto const *next_block = get_next_block(
       queue_delta_.consume->past_block_consume.max_fully_consumed_block_number +
-          1);
+      1);
+
+  assert(queue_delta_.consume);
 
   if (next_block) {
     size_t blk_size = next_block->entries.size();
@@ -231,8 +250,7 @@ RetrocausalQueueItem::advance_cursor()
   }
 
   // Step 3: try to consume concurrent entries not from this transaction
-  auto concurrent_entry = queue_snapshot_cache_entry_->get_concurrent_entry(
-      addrkey_, locally_consumed_index_);
+  auto concurrent_entry = get_next_concurrent_entry(locally_consumed_index_);
   if (concurrent_entry) {
     queue_delta_.consume->current_block_consumed.push_back(*concurrent_entry);
     return;

@@ -317,6 +317,10 @@ def gen_inner_outer(syscall):
       call_arg_strs.append(local_call_arg)
       inner_arg_decl_strs.append(inner_arg_decl)
 
+  # all the input argument to the syscall, except the SyscallHandler reference
+  log_syscall_arg_strs = ["SyscallNo::k" + name] + call_arg_strs
+  log_syscall_args = ", ".join(log_syscall_arg_strs)
+
   if syscall["outputs"] is not None:
     for arg in syscall["outputs"]:
       validate_str, local_user_args, local_call_arg, inner_arg_decl  = gen_validate_arg(arg, is_input = False)
@@ -332,6 +336,7 @@ def gen_inner_outer(syscall):
     user_args += ["/*unused*/"] * (syscall_argcount - len(user_args))
 
   syscall_handler_ref = "/*syscall_handler*/"
+
   if syscall["needs_context"]:
     call_arg_strs = ["syscall_handler"] + call_arg_strs
     inner_arg_decl_strs = ["SystemCallHandler& syscall_handler"] + inner_arg_decl_strs
@@ -357,6 +362,7 @@ syscall_{name}_outer(SystemCallHandler& {syscall_handler_ref},
                      uint64_t {user_args[4]},
                      uint64_t {user_args[5]})
 {{{inner_body}
+  log_syscall({log_syscall_args});
   auto res = syscall_{name}_inner({inner_args});
 
   return {{convert_return_t(res.first), res.second}};
@@ -449,6 +455,7 @@ def gen_syscall_entry_cc(spec):
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_argument_log.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -456,6 +463,8 @@ def gen_syscall_entry_cc(spec):
 #include "types.hh"
 
 namespace hogd {{
+
+int syscall_logfd = -1;
 
 namespace {{
 
@@ -487,6 +496,7 @@ syscall_entry_inner(HostCallContext *call_context, {syscall_uint64_arg_decls_str
 {{
   if (arg0 >= syscall_table.size()) {{
     // invalid syscall
+    log_syscall_parse_failure(arg0, {syscall_uint64_args_nozero_str});
     return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kNoSyscall)}}, kNoSyscallCost}};
   }}
 
@@ -514,6 +524,10 @@ syscall_entry(HostCallContext *call_context, {syscall_uint64_arg_decls_str})
 {{
   auto [err, gas_consumed] =
       syscall_entry_inner(call_context, {syscall_uint64_args_str});
+
+  if (syscall_logfd != -1 && is_host_fn_parse_error(err)) {{
+    log_syscall_parse_failure(arg0, {syscall_uint64_args_nozero_str});
+  }}
 
   if (!call_context->runtime->consume_gas(gas_consumed)) {{
     return {{HostFnErrorCode::kOutOfGas, 0}};

@@ -456,7 +456,12 @@ SystemCallHandler::retrocausal_queue_insert(
 
   auto addrkey = invocation_frame_stack_.get_current_addrkey(key);
 
-  RetrocausalQueueItem new_item(&unmodified_item->base_item_->queue(), addrkey);
+  RetrocausalQueueSnapshotCacheEntry const *queue = nullptr;
+  if (unmodified_item->base_item_) {
+    queue = &unmodified_item->base_item_->queue();
+  }
+
+  RetrocausalQueueItem new_item(queue, addrkey);
 
   new_item.insert_entry(new_entry);
   return item_view.set(new_item);
@@ -496,8 +501,13 @@ SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
       return SyscallError{SyscallErrorCode::kInvalidInput};
     }
 
-    RetrocausalQueueItem new_item(&unmodified_item->base_item_->queue(),
-                                  addrkey);
+    RetrocausalQueueSnapshotCacheEntry const *queue = nullptr;
+    if (unmodified_item->base_item_) {
+      queue = &unmodified_item->base_item_->queue();
+    }
+
+    RetrocausalQueueItem new_item(queue, addrkey);
+
     auto next_entry = new_item.get_next_item();
     if (!next_entry) {
       return SyscallError{SyscallErrorCode::kNoQueueEntry};

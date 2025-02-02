@@ -25,3 +25,17 @@ pub fn RetrocausalQueueConsume_Sized<const N: usize>(
     )?;
     Ok(unsafe { MaybeUninit::array_assume_init(queue_entry) })
 }
+
+pub fn RetrocausalQueuePeek_Sized<const N: usize>(
+    key: &StorageKey,
+) -> Result<[u8; N], i32> {
+    let mut queue_entry = [MaybeUninit::uninit(); N];
+    let mut written_len: RuntimeMemoryLength = 0;
+    syscall_bindings::uninit_RetrocausalQueueConsume(
+        key,
+        true,
+        &mut queue_entry,
+        &mut written_len,
+    )?;
+    Ok(unsafe { MaybeUninit::array_assume_init(queue_entry) })
+}
