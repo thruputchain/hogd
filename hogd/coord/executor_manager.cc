@@ -1,6 +1,5 @@
 #include "hogd/coord/executor_manager.h"
 
-#include <atomic>
 #include <cassert>
 #include <memory>
 #include <mutex>
@@ -15,28 +14,32 @@
 
 namespace hogd {
 
+ExecutorQueue::~ExecutorQueue()
+{
+  client_.signal_shutdown()();
+}
+
 x23::Async<void>
 ExecutorQueue::enqueue_validation_request(BlockID block_id,
                                           BlockValidationFrame *frame)
 {
   co_await open_validation_block(block_id);
 
-  co_await queue_.enqueue(
-      [this, frame, block_id]() -> x23::Async<void> {
-        while (!frame->all_txs_queried() && !frame->validation_failed()) {
-          auto const *tx = frame->get_next_validation_transaction();
-          if (!tx) {
-            break;
-          }
+  co_await queue_.enqueue([this, frame, block_id]() -> x23::Async<void> {
+    while (!frame->all_txs_queried() && !frame->validation_failed()) {
+      auto const *tx = frame->get_next_validation_transaction();
+      if (!tx) {
+        break;
+      }
 
-          auto res = co_await client_.validate_transaction(block_id, *tx);
-          if (res != RPCError::kNone) {
-            frame->mark_validation_failed();
-            break;
-          }
-        }
-        co_return;
-      });
+      auto res = co_await client_.validate_transaction(block_id, *tx);
+      if (res != RPCError::kNone) {
+        frame->mark_validation_failed();
+        break;
+      }
+    }
+    co_return;
+  });
 
   co_await client_.finish_block(block_id);
 }

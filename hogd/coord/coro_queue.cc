@@ -43,16 +43,22 @@ CoroQueue::awake_all_pending(uint16_t release_count)
   }
 }
 
-x23::Async<void>
+x23::Async<bool>
 CoroQueue::enqueue(std::function<x23::Async<void>()> work)
 {
   std::atomic_flag done = false;
   std::atomic<uint16_t> currently_running_coroutines = max_pending_operations_;
 
+  if (!co_await acquire_reference()) {
+    co_return false;
+  }
+
   auto [shutdown_async, shutdown_cb] = x23::make_async<void>();
 
-  auto release_one = [&] (uint16_t release_count) {
-    uint16_t currently_running = currently_running_coroutines.fetch_sub(release_count, std::memory_order_relaxed);
+  auto release_one = [&](uint16_t release_count) {
+    uint16_t currently_running =
+        currently_running_coroutines.fetch_sub(release_count,
+                                               std::memory_order_relaxed);
     assert(currently_running >= release_count);
     if (currently_running == release_count) {
       // last coro is this one
@@ -107,6 +113,9 @@ CoroQueue::enqueue(std::function<x23::Async<void>()> work)
   uint16_t count = co_await enqueue_coro();
   co_await shutdown_async;
   co_await awake_all_pending(count);
+  co_await release_reference();
+
+  co_return true;
 }
 
 } // namespace hogd

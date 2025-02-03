@@ -55,10 +55,10 @@ protected:
       std::unique_lock lk(mtx_);
       executor_connected_ = true;
       cv_.notify_all();
-      if (test_done_) {
-        return;
+      if (!test_done_) {
+        cv_.wait(lk, [&] { return test_done_; });
       }
-      cv_.wait(lk, [&] { return test_done_; });
+      exec_core.await_shutdown();
     });
 
     coord_ = std::make_unique<CoordinatorCore>(1);
@@ -79,6 +79,7 @@ protected:
       test_done_ = true;
     }
     cv_.notify_all();
+    coord_.reset();
     db_thread_.join();
     exec_thread_.join();
   }

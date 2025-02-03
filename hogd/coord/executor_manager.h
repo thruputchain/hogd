@@ -31,6 +31,8 @@ public:
   x23::Async<void> enqueue_validation_request(BlockID block_id,
                                               BlockValidationFrame *frame);
 
+  ~ExecutorQueue();
+
 private:
   x23::Async<ExpectedProposalData>
   propose_transaction(BlockID block_id, SignedTransaction const &signed_tx);
@@ -40,22 +42,8 @@ private:
   x23::Async<void> open_proposal_block(BlockID block_id);
   x23::Async<void> open_validation_block(BlockID block_id);
 
-  /*class ExecutorStats {
-  public:
-    x23::CoroLock lock_;
-    uint32_t running_coroutine_count_ = 0;
-    std::vector<x23::CoroCB<void>> pending_coroutines_;
-
-    // should be called with lock_ held
-    std::coroutine_handle<> awake_one_pending();
-    std::vector<std::coroutine_handle<>> awake_all_pending();
-  };*/
-
-  // ExecutorStats stats_;
   CoroQueue queue_;
-  // const uint32_t max_pending_transactions_;
   client_t client_;
-  // x23::CoroPoll &cp_;
 };
 
 class ExecutorManager {

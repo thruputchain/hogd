@@ -63,4 +63,4 @@ TEST(CoroQueue, MultiThread)
   EXPECT_EQ(count.load(), work_lambdas.load() + 10000);
 }
 
-}
+} // namespace hogd

@@ -30,6 +30,11 @@ namespace hogd
       void open_proposal_block(BlockID) = 2;
       void open_validation_block(BlockID) = 3;
       void finish_block(BlockID) = 4;
+
+      // Coord should call this to shutdown the executor.
+      // Shutdown will not occur until all pending transactions complete.
+      // No new transactions or blocks can be opened after shutdown.
+      void signal_shutdown(void) = 5;
     }
     = 1;
   }

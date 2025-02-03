@@ -47,22 +47,21 @@ TEST(TestConnect, Basic)
     std::unique_lock lk(mtx);
     executor_connected = true;
     cv.notify_all();
-    if (test_done) {
-      return;
+    if (!test_done) {
+      cv.wait(lk, [&] { return test_done; });
     }
-    cv.wait(lk, [&] { return test_done; });
+    exec_core.await_shutdown();
   });
-
-  CoordinatorCore coord(1);
-
-  coord.start(k_coord_announce_port);
-
   {
-    std::unique_lock lk(mtx);
-    if (!executor_connected) {
-      cv.wait(lk, [&] { return executor_connected; });
+    CoordinatorCore coord(1);
+    coord.start(k_coord_announce_port);
+    {
+      std::unique_lock lk(mtx);
+      if (!executor_connected) {
+        cv.wait(lk, [&] { return executor_connected; });
+      }
+      test_done = true;
     }
-    test_done = true;
   }
   cv.notify_all();
   exec_thread.join();

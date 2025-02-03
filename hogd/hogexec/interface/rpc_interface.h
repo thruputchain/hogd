@@ -1,12 +1,12 @@
 #pragma once
 
 #include <atomic>
-#include <cstdint>
 
-#include "hogd/hogexec/interface/executor_state.h"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "rpc.hh"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
 
@@ -37,6 +37,10 @@ public:
   x23::Async<void> open_proposal_block(BlockID id);
   x23::Async<void> open_validation_block(BlockID id);
   x23::Async<void> finish_block(BlockID id);
+
+  x23::Async<void> signal_shutdown();
+
+  void await_shutdown();
 
 private:
   TransactionID allocate_tx_id();

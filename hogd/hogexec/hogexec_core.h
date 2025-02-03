@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include "coord.hh"
@@ -33,6 +34,8 @@ public:
   void announce_ready_to_coord(std::string const &coord_address,
                                std::string const &coord_allocate_port);
 
+  void await_shutdown();
+
 private:
   ExecutorReadyAnnouncement make_ready_announcement() const;
 
@@ -42,6 +45,8 @@ private:
   const std::string exec_to_coord_server_port_;
 };
 
+// After receiving a HogexecCore object,
+// caller should call announce_ready_to_coord() and then await_shutdown()
 HogexecCore start_hogexec(int nthreads,
                           std::string const &exec_to_coord_server_port,
                           std::string const &coord_address,

@@ -73,6 +73,12 @@ HogexecCore::announce_ready_to_coord(std::string const &coord_address,
   conn->executor_announce_ready(ready_announcement)();
 }
 
+void
+HogexecCore::await_shutdown()
+{
+  exec_to_coord_server_.await_shutdown();
+}
+
 HogexecCore
 start_hogexec(int nthreads, std::string const &exec_to_coord_server_port,
               std::string const &coord_address,

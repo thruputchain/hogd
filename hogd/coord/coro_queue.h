@@ -1,6 +1,6 @@
 #pragma once
 
-#include <atomic>
+#include <cassert>
 #include <functional>
 #include <vector>
 
@@ -8,6 +8,7 @@
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/event.h"
+#include "x23/refcnt.h"
 
 namespace hogd {
 
@@ -29,13 +30,50 @@ public:
   // done flag signals when the work threads are done. It is the responsibility
   // of the caller to ensure that the done flag is set when all work finishes;
   // otherwise, enqueue will block forever.
-  x23::Async<void> enqueue(std::function<x23::Async<void>()> work);
+  //
+  // Returns true if the work actually runs, false if it fails to launch
+  // (such as if the queue is shutting down).
+  x23::Async<bool> enqueue(std::function<x23::Async<void>()> work);
+
+  ~CoroQueue()
+  {
+    signal_shutdown()();
+    dtor_.destroy_wait();
+    assert(pending_coroutines_.empty());
+    assert(running_coroutine_count_ == 0);
+  }
 
 private:
   const uint32_t max_pending_operations_;
   x23::CoroPoll &cp_;
 
+  x23::Async<void> signal_shutdown()
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    shutting_down_ = true;
+  }
+
+  x23::Async<bool> acquire_reference()
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    if (!shutting_down_) {
+      dtor_.incref();
+      co_return true;
+    }
+    co_return false;
+  }
+  x23::Async<void> release_reference()
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    dtor_.decref();
+  }
+
   x23::CoroLock lock_;
+  bool shutting_down_ = false;
+  x23::DestroyInhibit dtor_;
 
   uint32_t running_coroutine_count_ = 0;
   std::vector<x23::CoroCB<void>> pending_coroutines_;
