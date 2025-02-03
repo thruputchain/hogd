@@ -139,7 +139,7 @@ InvocationFrameStack::handle_try_invoke(InvokeResult const &prev_result,
     auto &proposal_mode_data = std::get<ProposalModeData>(execution_mode_data);
     bool res = frame_stack_.back().handle_try_acquire_locks(db_proxy_);
 
-    proposal_mode_data.log_try_invoke_bit(res);
+    proposal_mode_data.log_nondeterministic_bit(res);
 
     if (!res) {
       return InvokeResult{.result_ =
@@ -153,7 +153,7 @@ InvocationFrameStack::handle_try_invoke(InvokeResult const &prev_result,
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
   auto &validation_mode_data =
       std::get<ValidationModeData>(execution_mode_data);
-  std::optional<bool> res = validation_mode_data.consume_try_invoke_bit();
+  std::optional<bool> res = validation_mode_data.consume_nondeterministic_bit();
   if (!res.has_value()) {
     return InvokeResult{.result_ =
                             InvokeError{InvokeErrorCode::kValidationFailure},

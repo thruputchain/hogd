@@ -69,7 +69,7 @@ TEST_F(TestBytestringWrite, ReadExpected)
   ASSERT_EQ(res.error(), RPCError::kTransactionFailed);
 
   exec_client_.finish_block(1)();
-  db_client_.close_snapshot(1)();
+  ASSERT_EQ(db_client_.close_snapshot(1)(), RPCError::kNone);
   db_client_.commit_snapshot(1)();
 
   ASSERT_EQ(db_client_.open_database_snapshot(1, 2)(), RPCError::kNone);
@@ -89,7 +89,7 @@ TEST_F(TestBytestringWrite, ReadExpected)
   ASSERT_EQ(res.error(), RPCError::kNone);
 
   exec_client_.finish_block(2)();
-  db_client_.close_snapshot(2)();
+  ASSERT_EQ(db_client_.close_snapshot(2)(), RPCError::kNone);
   db_client_.commit_snapshot(2)();
 
   ASSERT_EQ(db_client_.open_database_snapshot(2, 3)(), RPCError::kNone);
@@ -101,7 +101,7 @@ TEST_F(TestBytestringWrite, ReadExpected)
   ASSERT_EQ(res.error(), RPCError::kNone);
 
   exec_client_.finish_block(3)();
-  db_client_.close_snapshot(3)();
+  ASSERT_EQ(db_client_.close_snapshot(3)(), RPCError::kNone);
   db_client_.commit_snapshot(3)();
 }
 

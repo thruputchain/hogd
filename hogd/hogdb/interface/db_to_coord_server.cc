@@ -26,13 +26,17 @@ DBToCoordServer::commit_snapshot(BlockID id)
   co_return;
 }
 
-x23::Async<void>
+x23::Async<RPCError>
 DBToCoordServer::close_snapshot(BlockID id)
 {
   if (auto ptr = block_manager_.get_block_data(id)) {
+    if (ptr->has_bad_item()) {
+      co_return RPCError::kValidationFailure;
+    }
     ptr->close_block();
+    co_return RPCError::kNone;
   }
-  co_return;
+  co_return RPCError::kBadBlockID;
 }
 
 } // namespace hogd

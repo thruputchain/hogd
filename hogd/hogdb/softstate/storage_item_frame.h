@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -25,7 +26,8 @@ namespace hogd {
 class StorageItemFrame {
 public:
   StorageItemFrame(AddressAndKey const &addrkey,
-                   std::optional<StorageItemWrapper> const &snapshot_state);
+                   std::optional<StorageItemWrapper> const &snapshot_state,
+                   std::atomic<uint32_t> *bad_state_counter);
 
   // Disable copy
   StorageItemFrame(const StorageItemFrame &) = delete;
@@ -181,6 +183,10 @@ private:
     std::vector<QueueEntry> new_entries_;
     // new_entries_ \setminus consumed entries, in a canonical order
     std::set<QueueEntry> persistable_entries_;
+    // During validation, we might try to consume entries before the
+    // corresponding insert transaction executes. At the end of the block, we
+    // assert that this set is empty.
+    std::set<QueueEntry> consumed_but_not_inserted_entries_;
   };
 
   // Exclusive locked state
@@ -207,7 +213,11 @@ private:
     uint32_t refcount_ = 0;
     bool permanent_exclusive_lock_ = false;
 
-    RefcountedVariant() = default;
+    RefcountedVariant(std::atomic<uint32_t> *bad_state_counter)
+      : bad_state_count_(bad_state_counter)
+    {
+      assert(bad_state_count_);
+    }
 
     RefcountedVariant &operator=(RefcountedVariant &&) noexcept = default;
     RefcountedVariant(RefcountedVariant &&) noexcept = default;
@@ -257,6 +267,15 @@ private:
     std::optional<QueueEntry>
     get_concurrent_retrocausal_queue_entry(uint32_t index);
 
+    void mark_as_in_bad_state()
+    {
+      bad_state_count_->fetch_add(1, std::memory_order_relaxed);
+    }
+    void unmark_as_in_bad_state()
+    {
+      bad_state_count_->fetch_sub(1, std::memory_order_relaxed);
+    }
+
   private:
     // Does not manage adjusting the reference count
     template<typename VariantArm, typename... VariantArgs>
@@ -267,6 +286,8 @@ private:
       assert(refcount_ > 0);
       return std::get<VariantArm>(variant_);
     }
+
+    std::atomic<uint32_t> *bad_state_count_;
   };
 
   void update_committed_item();

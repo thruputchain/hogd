@@ -18,8 +18,10 @@ namespace hogd {
 
 StorageItemFrame::StorageItemFrame(
     AddressAndKey const &addrkey,
-    std::optional<StorageItemWrapper> const &snapshot_state)
-  : addr_key_(addrkey), committed_item_(snapshot_state)
+    std::optional<StorageItemWrapper> const &snapshot_state,
+    std::atomic<uint32_t> *bad_state_counter)
+  : addr_key_(addrkey), committed_item_(snapshot_state),
+    variant_(bad_state_counter)
 {}
 
 std::optional<StorageItemWrapper>
@@ -66,6 +68,8 @@ StorageItemFrame::RetrocausalQueueArgs::to_item(
 {
   assert(!consumer_lock_);
 
+  std::printf("RetrocausalQueueArgs::to_item\n");
+
   RetrocausalQueuePastBlockConsumeDelta consume_delta{
       .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
   if (past_consume_delta_) {
@@ -94,7 +98,10 @@ StorageItemFrame::RetrocausalQueueArgs::to_item(
   assert(!past_consume_delta_);
 
   x23::Vec<QueueEntry> new_block = make_block(persistable_entries_);
+  std::printf("RetrocausalQueueArgs::to_item: new_block.size() %ld\n",
+              new_block.size());
   if (new_block.size() > 0) {
+    std::printf("RetrocausalQueueArgs::to_item: returning new_block\n");
     return StorageItemWrapper(
         RetrocausalQueue(fake_parent, consume_delta,
                          {.entries = new_block, .block_number = 1}));
@@ -259,7 +266,16 @@ StorageItemFrame::RefcountedVariant::commit_retrocausal_queue_modify(
   auto &args = get_variant_arm_unchecked<RetrocausalQueueArgs>();
 
   for (auto const &entry : queue_delta.insert.added_entries) {
-    args.persistable_entries_.insert(entry);
+    auto it = args.consumed_but_not_inserted_entries_.find(entry);
+    if (it == args.consumed_but_not_inserted_entries_.end()) {
+      args.persistable_entries_.insert(entry);
+    }
+    else {
+      args.consumed_but_not_inserted_entries_.erase(it);
+      if (args.consumed_but_not_inserted_entries_.empty()) {
+        unmark_as_in_bad_state();
+      }
+    }
     args.new_entries_.push_back(entry);
   }
 
@@ -280,9 +296,13 @@ StorageItemFrame::RefcountedVariant::commit_retrocausal_queue_modify(
 
     for (auto const &consumed_entry :
          queue_delta.consume->current_block_consumed) {
-      [[maybe_unused]]
       auto res = args.persistable_entries_.erase(consumed_entry);
-      assert(res);
+      if (res == 0) {
+        if (args.consumed_but_not_inserted_entries_.empty()) {
+          mark_as_in_bad_state();
+        }
+        args.consumed_but_not_inserted_entries_.insert(consumed_entry);
+      }
     }
   }
 }
@@ -387,6 +407,7 @@ void
 StorageItemFrame::update_committed_item()
 {
   if (!round_committed_) {
+    std::printf("update_committed_item: refcount %d\n", variant_.refcount_);
     if (variant_.refcount_ > 0) {
       committed_item_ =
           std::visit([&](auto &arm) { return arm.to_item(committed_item_); },

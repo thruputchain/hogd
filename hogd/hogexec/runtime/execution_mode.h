@@ -26,7 +26,7 @@ public:
 
   // Records a nondeterministic boolean choice (e.g., does a try_invoke frame
   // succeed?) made during try_invoke
-  void log_try_invoke_bit(bool bit);
+  void log_nondeterministic_bit(bool bit);
   void log_queue_entry_observation(AddressAndKey const &addrkey,
                                    uint64_t sequence_no,
                                    QueueEntry const &entry);
@@ -54,9 +54,9 @@ public:
     : proposal_data_(std::move(proposal_data))
   {}
 
-  // Consumes and returns the next try_invoke bit from the proposal
+  // Consumes and returns the next nondeterministic bit from the proposal
   // Returns nullopt if no more bits are available
-  std::optional<bool> consume_try_invoke_bit();
+  std::optional<bool> consume_nondeterministic_bit();
 
   // Returns true if all proposal bits have been consumed
   bool check_all_consumed() const;

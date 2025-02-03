@@ -14,6 +14,7 @@ RetrocausalQueue::RetrocausalQueue(
 {
   for (auto const &[block_number, block] : parent.blocks_) {
     assert(block_number != current_round_block.block_number);
+    std::printf("RCQ carry over block %llu\n", block_number);
     blocks_.emplace(block_number, CoWBlockReference{.block_ = block.block_,
                                                     .is_modified_ = false});
   }
@@ -23,6 +24,9 @@ RetrocausalQueue::RetrocausalQueue(
       CoWBlockReference{.block_ = std::make_shared<RetrocausalQueueBlock>(
                             std::move(current_round_block)),
                         .is_modified_ = true});
+  for (auto const &[block_number, block] : blocks_) {
+    std::printf("post consume RCQ has block %llu\n", block_number);
+  }
   assert(res.second);
   assert(current_block_number_ > parent.current_block_number_);
 }

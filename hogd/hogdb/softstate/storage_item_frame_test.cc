@@ -35,7 +35,8 @@ expect_final(StorageItemFrame &item, int128_t nnint)
 // Change the typeclass of a storage item during execution
 TEST(StorageItemFrame, RewriteVariantTypeNullStart)
 {
-  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+  std::atomic<uint32_t> counter = 0;
+  StorageItemFrame item(AddressAndKey{}, std::nullopt, &counter);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
@@ -89,13 +90,16 @@ TEST(StorageItemFrame, RewriteVariantTypeNullStart)
 
   EXPECT_TRUE(
       item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone)));
+
+  ASSERT_EQ(counter, 0);
 }
 
 TEST(StorageItemFrame, RewriteVariantFromBase)
 {
+  std::atomic<uint32_t> counter = 0;
   StorageItemWrapper base_item({0, 1, 2, 3});
 
-  StorageItemFrame item(AddressAndKey{}, base_item);
+  StorageItemFrame item(AddressAndKey{}, base_item, &counter);
 
   StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -135,20 +139,25 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
   item.commit(bytestring_delta, *b_lock);
   item.commit(bytestring_delta, *b_lock2);
 
-  StorageItemFrame item2(AddressAndKey{}, item.get_post_close_block_item());
+  StorageItemFrame item2(AddressAndKey{}, item.get_post_close_block_item(),
+                         &counter);
   expect_final(item, bytestring_delta.bytestring());
   expect_final(item2, bytestring_delta.bytestring());
+
+  ASSERT_EQ(counter, 0);
 }
 
 TEST(StorageItemFrame, DeleteItem)
 {
+  std::atomic<uint32_t> bad_item_count = 0;
   StorageItemWrapper base_item({0, 1, 2, 3});
 
-  StorageItemFrame item(AddressAndKey{}, base_item);
+  StorageItemFrame item(AddressAndKey{}, base_item, &bad_item_count);
   ASSERT_TRUE(item.get_snapshot_item());
 
   // committing an empty round keeps item active
-  StorageItemFrame item2(AddressAndKey{}, item.get_post_close_block_item());
+  StorageItemFrame item2(AddressAndKey{}, item.get_post_close_block_item(),
+                         &bad_item_count);
 
   ASSERT_TRUE(item2.get_snapshot_item());
 
@@ -163,14 +172,18 @@ TEST(StorageItemFrame, DeleteItem)
 
   item2.commit(StorageDelta(StorageDeltaType::kDelete), *delete_lock);
 
-  StorageItemFrame item3(AddressAndKey{}, item2.get_post_close_block_item());
+  StorageItemFrame item3(AddressAndKey{}, item2.get_post_close_block_item(),
+                         &bad_item_count);
 
   EXPECT_FALSE(item3.get_snapshot_item());
+
+  ASSERT_EQ(bad_item_count, 0);
 }
 
 TEST(StorageItemFrame, ExclusiveLockAcquire)
 {
-  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+  std::atomic<uint32_t> bad_item_count = 0;
+  StorageItemFrame item(AddressAndKey{}, std::nullopt, &bad_item_count);
 
   auto lock1 = item.try_reserve(StorageDelta(StorageDeltaType::kDelete),
                                 StorageLock(StorageLockType::kNone));
@@ -187,11 +200,13 @@ TEST(StorageItemFrame, ExclusiveLockAcquire)
   item.commit(bytestring_delta, *lock2);
 
   expect_final(item, bytestring_delta.bytestring());
+  ASSERT_EQ(bad_item_count, 0);
 }
 
 TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
 {
-  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+  std::atomic<uint32_t> bad_item_count = 0;
+  StorageItemFrame item(AddressAndKey{}, std::nullopt, &bad_item_count);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
@@ -245,11 +260,13 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
   item.commit(nnint_set_add_2, *final_lock);
 
   expect_final(item, int128_t{1});
+  ASSERT_EQ(bad_item_count, 0);
 }
 
 TEST(StorageItemFrame, NNIntFromExclusiveLock)
 {
-  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+  std::atomic<uint32_t> bad_item_count = 0;
+  StorageItemFrame item(AddressAndKey{}, std::nullopt, &bad_item_count);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
@@ -276,11 +293,13 @@ TEST(StorageItemFrame, NNIntFromExclusiveLock)
   EXPECT_FALSE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
 
   expect_final(item, int128_t{6});
+  ASSERT_EQ(bad_item_count, 0);
 }
 
 TEST(StorageItemFrame, ExclusiveBytestring)
 {
-  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+  std::atomic<uint32_t> bad_item_count = 0;
+  StorageItemFrame item(AddressAndKey{}, std::nullopt, &bad_item_count);
 
   StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -300,11 +319,13 @@ TEST(StorageItemFrame, ExclusiveBytestring)
       item.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone)));
 
   expect_final(item, bytestring_delta.bytestring());
+  ASSERT_EQ(bad_item_count, 0);
 }
 
 TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
 {
-  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+  std::atomic<uint32_t> bad_item_count = 0;
+  StorageItemFrame item(AddressAndKey{}, std::nullopt, &bad_item_count);
 
   ASSERT_TRUE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
 
@@ -326,11 +347,14 @@ TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
   // Was not written in permanent exclusive mode.
   ASSERT_TRUE(item.try_reserve(StorageDelta(StorageDeltaType::kDelete),
                                StorageLock(StorageLockType::kNone)));
+
+  ASSERT_EQ(bad_item_count, 0);
 }
 
 TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
 {
-  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+  std::atomic<uint32_t> bad_item_count = 0;
+  StorageItemFrame item(AddressAndKey{}, std::nullopt, &bad_item_count);
 
   ASSERT_TRUE(item.try_acquire_exclusive_lock(StorageLockType::kNone));
 
@@ -350,6 +374,7 @@ TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
   // cannot reacquire lock after permament lock commits
   ASSERT_FALSE(item.try_reserve(StorageDelta(StorageDeltaType::kDelete),
                                 StorageLock(StorageLockType::kNone)));
+  ASSERT_EQ(bad_item_count, 0);
 }
 
 TEST(StorageItemFrame, NNIntSimpleSetAdd)
@@ -360,8 +385,8 @@ TEST(StorageItemFrame, NNIntSimpleSetAdd)
     delta.nnint().add_value = to_xdr(add);
     return delta;
   };
-
-  StorageItemFrame item(AddressAndKey{}, std::nullopt);
+  std::atomic<uint32_t> bad_item_count = 0;
+  StorageItemFrame item(AddressAndKey{}, std::nullopt, &bad_item_count);
 
   StorageDelta nnint_set_add = make_nnint_delta(5, 10);
 
@@ -372,6 +397,7 @@ TEST(StorageItemFrame, NNIntSimpleSetAdd)
   item.commit(nnint_set_add, *lock);
 
   expect_final(item, int128_t{15});
+  ASSERT_EQ(bad_item_count, 0);
 }
 
 } // namespace hogd

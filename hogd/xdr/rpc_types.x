@@ -33,6 +33,9 @@ namespace hogd
     kTransactionFailed = 7,
     // No next retrocausal queue item
     kNoRetrocausalQueueItem = 8,
+    // Some error during validation, beyond just an error in the transaction,
+    // such as a nondeterministic RCQ consume not backed by a concurrent insert.
+    kValidationFailure = 9,
   };
 
   enum RPCFlags {

@@ -4,7 +4,6 @@
 #include "rpc.hh"
 #include "rpc_types.hh"
 #include "x23/async.h"
-#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -18,7 +17,7 @@ public:
                                               BlockID new_id);
   x23::Async<void> commit_snapshot(BlockID id);
 
-  x23::Async<void> close_snapshot(BlockID id);
+  x23::Async<RPCError> close_snapshot(BlockID id);
 
 private:
   BlockManager &block_manager_;

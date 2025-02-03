@@ -15,7 +15,7 @@ offset_bit(uint32_t idx)
 } // namespace
 
 void
-ProposalModeData::log_try_invoke_bit(bool bit)
+ProposalModeData::log_nondeterministic_bit(bool bit)
 {
   uint8_t byte_count = (proposal_data_.try_invoke_count / 8) + 1;
   if (byte_count != proposal_data_.try_invoke_results.size()) {
@@ -38,10 +38,6 @@ ProposalModeData::log_queue_entry_observation(AddressAndKey const &addrkey,
                                               uint64_t sequence_no,
                                               QueueEntry const &entry)
 {
-  std::printf(
-      std::format("ProposalModeData::log_queue_entry_observation {} {} {}\n",
-                  x23::show(addrkey), sequence_no, x23::show(entry))
-          .c_str());
   auto &vec = queue_entry_observations_[addrkey];
   assert(vec.size() >= sequence_no);
 
@@ -82,7 +78,7 @@ ValidationModeData::get_queue_entry_observation(AddressAndKey const &addrkey,
 }
 
 std::optional<bool>
-ValidationModeData::consume_try_invoke_bit()
+ValidationModeData::consume_nondeterministic_bit()
 {
   if (next_try_invoke_index_ >= proposal_data_.try_invoke_count) {
     return std::nullopt;

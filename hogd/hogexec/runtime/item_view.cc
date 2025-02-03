@@ -141,10 +141,11 @@ ItemView::can_accept_type(std::optional<StorageItemType> item_type) const
 }
 
 // The logic here should mirror that of advance_cursor()
-std::optional<QueueEntry>
+HostFnStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_item(
     ExecutionModeData &execution_mode_data) const
 {
+  std::printf("RetrocausalQueueItem::get_next_item()\n");
   // Step 1: try consume from past blocks
   // the index where we start searching from
   uint64_t block_index = 0;
@@ -167,16 +168,30 @@ RetrocausalQueueItem::get_next_item(
   // otherwise, nothing in past block to consume.  Try current block.
   assert(partial_consume_quantity == 0);
 
-  // Step 2: first look to consume entries created within the transaction
-  if (locally_consumed_index_ < queue_delta_.insert.added_entries.size()) {
-    return queue_delta_.insert.added_entries[locally_consumed_index_];
-  }
+  std::printf("RetrocausalQueueItem::get_next_item() - looking for concurrent "
+              "entries in current block\n");
 
-  // Step 3: try to consume concurrent entries not from this transaction
+  // Step 2: try to consume concurrent entries not from this transaction
   auto concurrent_entry =
       get_next_concurrent_entry(locally_consumed_index_, execution_mode_data);
-  if (concurrent_entry) {
-    return concurrent_entry;
+  if (!concurrent_entry.has_value()) {
+    return HostFnError{concurrent_entry.error()};
+  }
+  if (*concurrent_entry) {
+    return {**concurrent_entry};
+  }
+
+  std::printf(
+      "RetrocausalQueueItem::get_next_item() - looking for self entries\n");
+
+  // Step 3: look to consume entries created within the transaction
+  auto self_consume_res =
+      get_next_self_entry(self_consumed_index_, execution_mode_data);
+  if (!self_consume_res.has_value()) {
+    return HostFnError{self_consume_res.error()};
+  }
+  if (*self_consume_res) {
+    return {**self_consume_res};
   }
 
   // Step 4: nothing to consume
@@ -193,36 +208,87 @@ const RetrocausalQueueBlock *
 RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 {
   if (queue_snapshot_cache_entry_) {
-    return queue_snapshot_cache_entry_->get_next_block(addrkey_,
-                                                       search_start_index);
+    assert(queue_snapshot_cache_entry_->type() ==
+           StorageItemType::kRetrocausalQueue);
+    return queue_snapshot_cache_entry_->queue().get_next_block(
+        queue_snapshot_cache_entry_->addrkey(), search_start_index);
   }
 
   return nullptr;
 }
 
-std::optional<QueueEntry>
+HostFnStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
   if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
-    if (queue_snapshot_cache_entry_) {
-      auto out =
-          queue_snapshot_cache_entry_->get_concurrent_entry(addrkey_, index);
-      if (out) {
-        auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
-        proposal_data.log_queue_entry_observation(addrkey_, index, *out);
-      }
-      return out;
+    std::printf("proposal data query for index %u\n", index);
+    auto out =
+        nondeterministic_read_cache_entry_.get_concurrent_queue_entry(index);
+    auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
+
+    if (out) {
+      std::printf("got out\n");
+      proposal_data.log_queue_entry_observation(
+          nondeterministic_read_cache_entry_.addrkey(), index, *out);
+      proposal_data.log_nondeterministic_bit(true);
     }
-    return std::nullopt;
+    else {
+      std::printf("no out\n");
+      proposal_data.log_nondeterministic_bit(false);
+    }
+
+    return out;
   }
+  std::printf("validation mode\n");
   // else validation mode
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
-  return validation_data.get_queue_entry_observation(addrkey_, index);
+  auto bit_res = validation_data.consume_nondeterministic_bit();
+  if (!bit_res.has_value()) {
+    return HostFnError{HostFnErrorCode::kValidationFailure};
+  }
+  if (*bit_res) {
+    auto res = validation_data.get_queue_entry_observation(
+        nondeterministic_read_cache_entry_.addrkey(), index);
+    if (!res.has_value()) {
+      return HostFnError{HostFnErrorCode::kValidationFailure};
+    }
+    return *res;
+  }
+  return {std::nullopt};
 }
 
-void
+HostFnStatus<const QueueEntry *>
+RetrocausalQueueItem::get_next_self_entry(
+    uint32_t index, ExecutionModeData &execution_mode_data) const
+{
+  if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
+    auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
+    if (index < queue_delta_.insert.added_entries.size()) {
+      proposal_data.log_nondeterministic_bit(true);
+      return &queue_delta_.insert.added_entries[index];
+    }
+    proposal_data.log_nondeterministic_bit(false);
+    return {nullptr};
+  }
+  // else validation mode
+  assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
+  if (index < queue_delta_.insert.added_entries.size()) {
+    auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
+
+    auto validation_bit = validation_data.consume_nondeterministic_bit();
+    if (!validation_bit.has_value()) {
+      return HostFnError{HostFnErrorCode::kValidationFailure};
+    }
+    if (*validation_bit) {
+      return &queue_delta_.insert.added_entries[index];
+    }
+  }
+  return {nullptr};
+}
+
+HostFnStatus<void>
 RetrocausalQueueItem::advance_cursor(ExecutionModeData &execution_mode_data)
 {
   std::printf("RetrocausalQueueItem::advance_cursor()\n");
@@ -243,6 +309,7 @@ RetrocausalQueueItem::advance_cursor(ExecutionModeData &execution_mode_data)
   assert(queue_delta_.consume);
 
   if (next_block) {
+    std::printf("RCQ advance_cursor from past block\n");
     size_t blk_size = next_block->entries.size();
     assert(queue_delta_.consume->past_block_consume.partial_consumed_number <
            blk_size);
@@ -253,29 +320,40 @@ RetrocausalQueueItem::advance_cursor(ExecutionModeData &execution_mode_data)
           next_block->block_number;
       queue_delta_.consume->past_block_consume.partial_consumed_number = 0;
     }
-    return;
+    return {};
   }
   // otherwise, nothing in past block to consume.  Try current block.
   assert(queue_delta_.consume->past_block_consume.partial_consumed_number == 0);
 
-  // Step 2: first look to consume entries created within the transaction
-  if (locally_consumed_index_ < queue_delta_.insert.added_entries.size()) {
-    queue_delta_.consume->current_block_consumed.push_back(
-        queue_delta_.insert.added_entries[locally_consumed_index_]);
-    locally_consumed_index_++;
-    return;
-  }
-
-  // Step 3: try to consume concurrent entries not from this transaction
+  // Step 2: try to consume concurrent entries not from this transaction
   auto concurrent_entry =
       get_next_concurrent_entry(locally_consumed_index_, execution_mode_data);
-  if (concurrent_entry) {
+  if (!concurrent_entry.has_value()) {
+    std::printf("concurrent entry host fn error\n");
+    return HostFnError{concurrent_entry.error()};
+  }
+  if (*concurrent_entry) {
     ++locally_consumed_index_;
-    queue_delta_.consume->current_block_consumed.push_back(*concurrent_entry);
-    return;
+    queue_delta_.consume->current_block_consumed.push_back(**concurrent_entry);
+    return {};
+  }
+
+  // Step 3: look to consume entries created within the transaction
+  auto self_consume_res =
+      get_next_self_entry(self_consumed_index_, execution_mode_data);
+  if (!self_consume_res.has_value()) {
+    std::printf("hostfn error selfconsume\n");
+    return HostFnError{self_consume_res.error()};
+  }
+  if (*self_consume_res) {
+    std::printf("self consume succeed\n");
+    ++self_consumed_index_;
+    queue_delta_.consume->current_block_consumed.push_back(**self_consume_res);
+    return {};
   }
 
   assert(false);
+  return HostFnError{HostFnErrorCode::kUnrecoverable};
 }
 
 } // namespace hogd

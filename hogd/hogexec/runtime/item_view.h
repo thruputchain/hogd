@@ -72,10 +72,16 @@ public:
 class RetrocausalQueueItem {
 public:
   RetrocausalQueueItem(
-      RetrocausalQueueSnapshotCacheEntry const *queue_snapshot_cache_entry,
-      AddressAndKey const &addrkey)
-    : queue_snapshot_cache_entry_(queue_snapshot_cache_entry), addrkey_(addrkey)
-  {}
+      StorageSnapshotCacheEntry const *queue_snapshot_cache_entry,
+      NondeterministicReadCacheEntry &nondeterministic_read_cache_entry)
+    : queue_snapshot_cache_entry_(queue_snapshot_cache_entry),
+      nondeterministic_read_cache_entry_(nondeterministic_read_cache_entry)
+  {
+    if (queue_snapshot_cache_entry_) {
+      assert(queue_snapshot_cache_entry_->type() ==
+             StorageItemType::kRetrocausalQueue);
+    }
+  }
 
   FlaggedStorageDelta get_delta() const
   {
@@ -92,22 +98,28 @@ public:
     return StorageItemType::kRetrocausalQueue;
   }
 
-  std::optional<QueueEntry>
+  HostFnStatus<std::optional<QueueEntry>>
   get_next_item(ExecutionModeData &execution_mode_data) const;
-  void advance_cursor(ExecutionModeData &execution_mode_data);
+  HostFnStatus<void> advance_cursor(ExecutionModeData &execution_mode_data);
   void insert_entry(QueueEntry const &entry);
 
 private:
   const RetrocausalQueueBlock *
   get_next_block(uint64_t search_start_index) const;
-  std::optional<QueueEntry>
+
+  HostFnStatus<std::optional<QueueEntry>>
   get_next_concurrent_entry(uint32_t index,
                             ExecutionModeData &execution_mode_data) const;
 
+  HostFnStatus<const QueueEntry *>
+  get_next_self_entry(uint32_t index,
+                      ExecutionModeData &execution_mode_data) const;
+
   RetrocausalQueueDelta queue_delta_;
+  uint32_t self_consumed_index_ = 0;
   uint32_t locally_consumed_index_ = 0;
-  RetrocausalQueueSnapshotCacheEntry const *queue_snapshot_cache_entry_;
-  const AddressAndKey addrkey_;
+  StorageSnapshotCacheEntry const *queue_snapshot_cache_entry_;
+  NondeterministicReadCacheEntry &nondeterministic_read_cache_entry_;
 };
 
 // Represent state of an ItemView that has not been modified during

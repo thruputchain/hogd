@@ -431,11 +431,9 @@ SystemCallHandler::retrocausal_queue_insert(
     StorageKey const &key, std::span<const std::byte> queue_entry)
 {
   auto &item_view = invocation_frame_stack_.get_item_view(key);
-
   if (!item_view.can_accept_type(StorageItemType::kRetrocausalQueue)) {
     return SyscallError{SyscallErrorCode::kInvalidInput};
   }
-
   if (queue_entry.size() > kQueueEntryMaxLen) {
     return SyscallError{SyscallErrorCode::kInvalidInput};
   }
@@ -444,30 +442,25 @@ SystemCallHandler::retrocausal_queue_insert(
   new_entry.resize_uninitialized(queue_entry.size());
   std::memcpy(new_entry.data(), queue_entry.data(), queue_entry.size());
 
-  if (auto const *retrocausal_queue_item =
-          item_view.template get<RetrocausalQueueItem>()) {
-    RetrocausalQueueItem new_item = *retrocausal_queue_item;
-    new_item.insert_entry(new_entry);
-    return item_view.set(new_item);
-  }
+  RetrocausalQueueItem new_item = [this, &item_view, &key] {
+    if (auto const *retrocausal_queue_item =
+            item_view.template get<RetrocausalQueueItem>()) {
+      return *retrocausal_queue_item;
+    }
+    auto addrkey = invocation_frame_stack_.get_current_addrkey(key);
 
-  auto const *unmodified_item = item_view.template get<UnmodifiedItem>();
-  assert(unmodified_item);
+    auto const *unmodified_item = item_view.template get<UnmodifiedItem>();
+    assert(unmodified_item);
 
-  auto addrkey = invocation_frame_stack_.get_current_addrkey(key);
-
-  RetrocausalQueueSnapshotCacheEntry const *queue = nullptr;
-  if (unmodified_item->base_item_) {
-    queue = &unmodified_item->base_item_->queue();
-  }
-
-  RetrocausalQueueItem new_item(queue, addrkey);
-
+    return RetrocausalQueueItem(
+        unmodified_item->base_item_,
+        snapshot_cache_.get_nondeterministic_read_cache_entry(addrkey));
+  }();
   new_item.insert_entry(new_entry);
   return item_view.set(new_item);
 }
 
-SyscallStatus<QueueEntry>
+HostFnStatus<SyscallStatus<QueueEntry>>
 SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
 {
   auto &item_view = invocation_frame_stack_.get_item_view(key);
@@ -476,58 +469,42 @@ SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
   if (!item_view.can_accept_type(StorageItemType::kRetrocausalQueue)) {
     return SyscallError{SyscallErrorCode::kInvalidInput};
   }
+  // implies item_view is currently RetrocausalQueueItem or UnmodifiedItem
 
-  if (auto const *retrocausal_queue_item =
-          item_view.template get<RetrocausalQueueItem>()) {
-    RetrocausalQueueItem new_item = *retrocausal_queue_item;
-    auto next_entry = new_item.get_next_item(execution_mode_data_);
-    if (!next_entry) {
-      return SyscallError{SyscallErrorCode::kNoQueueEntry};
+  RetrocausalQueueItem new_item = [this, &item_view, &addrkey] {
+    if (auto const *retrocausal_queue_item =
+            item_view.template get<RetrocausalQueueItem>()) {
+      return *retrocausal_queue_item;
     }
 
-    if (!peek) {
-      new_item.advance_cursor(execution_mode_data_);
-    }
+    auto const *unmodified_item = item_view.template get<UnmodifiedItem>();
+    assert(unmodified_item);
 
-    [[maybe_unused]]
-    auto set = item_view.set(new_item);
-    assert(set);
-    return SyscallStatus<QueueEntry>(*next_entry);
+    return RetrocausalQueueItem(
+        unmodified_item->base_item_,
+        snapshot_cache_.get_nondeterministic_read_cache_entry(addrkey));
+  }();
+
+  auto next_entry = new_item.get_next_item(execution_mode_data_);
+  if (!next_entry.has_value()) {
+    return next_entry.error(); // HostFnError
+  }
+  std::optional<QueueEntry> const &real_queue_entry = *next_entry;
+  if (!real_queue_entry.has_value()) {
+    return SyscallError{SyscallErrorCode::kNoQueueEntry};
   }
 
-  if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
-    if (!unmodified_item->base_item_) {
-      return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
+  if (!peek) {
+    auto advance_status = new_item.advance_cursor(execution_mode_data_);
+    if (!advance_status) {
+      return advance_status.error();
     }
-    // must be true because can_accept_type() returned true
-    assert(unmodified_item->base_item_->type() ==
-           StorageItemType::kRetrocausalQueue);
-
-    RetrocausalQueueSnapshotCacheEntry const *queue = nullptr;
-    if (unmodified_item->base_item_) {
-      queue = &unmodified_item->base_item_->queue();
-    }
-
-    RetrocausalQueueItem new_item(queue, addrkey);
-
-    auto next_entry = new_item.get_next_item(execution_mode_data_);
-    if (!next_entry) {
-      return SyscallError{SyscallErrorCode::kNoQueueEntry};
-    }
-    if (!peek) {
-      new_item.advance_cursor(execution_mode_data_);
-    }
-
-    assert(new_item.validate());
-    [[maybe_unused]]
-    auto set = item_view.set(new_item);
-    assert(set);
-
-    return SyscallStatus<QueueEntry>(*next_entry);
   }
 
-  assert(false);
-  return SyscallError{SyscallErrorCode::kInvalidInput};
+  [[maybe_unused]]
+  auto set = item_view.set(new_item);
+  assert(set);
+  return SyscallStatus<QueueEntry>(*real_queue_entry);
 }
 
 SyscallStatus<void>

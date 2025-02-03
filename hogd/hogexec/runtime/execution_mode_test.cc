@@ -11,23 +11,23 @@ TEST(ExecutionModeTest, ProposalBitStoredCorrectly)
   ProposalModeData proposal;
 
   // 10 bits, i.e. overflow 1 byte
-  proposal.log_try_invoke_bit(false);
-  proposal.log_try_invoke_bit(false);
-  proposal.log_try_invoke_bit(false);
-  proposal.log_try_invoke_bit(true);
+  proposal.log_nondeterministic_bit(false);
+  proposal.log_nondeterministic_bit(false);
+  proposal.log_nondeterministic_bit(false);
+  proposal.log_nondeterministic_bit(true);
 
-  proposal.log_try_invoke_bit(true);
-  proposal.log_try_invoke_bit(false);
-  proposal.log_try_invoke_bit(true);
-  proposal.log_try_invoke_bit(false);
+  proposal.log_nondeterministic_bit(true);
+  proposal.log_nondeterministic_bit(false);
+  proposal.log_nondeterministic_bit(true);
+  proposal.log_nondeterministic_bit(false);
 
-  proposal.log_try_invoke_bit(false);
-  proposal.log_try_invoke_bit(true);
+  proposal.log_nondeterministic_bit(false);
+  proposal.log_nondeterministic_bit(true);
 
   ValidationModeData validation(proposal.proposal_data());
 
   auto check = [&](bool bit) {
-    auto res = validation.consume_try_invoke_bit();
+    auto res = validation.consume_nondeterministic_bit();
     ASSERT_TRUE(res);
     EXPECT_EQ(*res, bit);
   };
@@ -45,7 +45,7 @@ TEST(ExecutionModeTest, ProposalBitStoredCorrectly)
   check(false);
   check(true);
 
-  ASSERT_FALSE(validation.consume_try_invoke_bit());
+  ASSERT_FALSE(validation.consume_nondeterministic_bit());
   ASSERT_TRUE(validation.check_all_consumed());
 }
 

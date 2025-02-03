@@ -12,7 +12,9 @@
 namespace hogd {
 
 StorageSnapshotCacheEntry::StorageSnapshotCacheEntry(
-    const StorageItem &wire_item, DatabaseProxy &db_proxy, BlockID block_id)
+    const StorageItem &wire_item, DatabaseProxy &db_proxy, BlockID block_id,
+    AddressAndKey const &addrkey)
+  : addrkey_(addrkey)
 {
   switch (wire_item.type()) {
   case StorageItemType::kBytestring:
@@ -70,20 +72,19 @@ RetrocausalQueueSnapshotCacheEntry::get_next_block(
 }
 
 std::optional<QueueEntry>
-RetrocausalQueueSnapshotCacheEntry::get_concurrent_entry(
-    AddressAndKey const &addrkey, uint64_t index) const
+NondeterministicReadCacheEntry::get_concurrent_queue_entry(uint64_t index) const
 {
-  if (index < concurrent_items_.size()) {
-    return concurrent_items_[index];
+  if (index < concurrent_queue_entries_.size()) {
+    return concurrent_queue_entries_[index];
   }
 
   auto next_item =
-      db_proxy_.get_concurrent_retrocausal_queue_entry(block_id_, addrkey,
+      db_proxy_.get_concurrent_retrocausal_queue_entry(block_id_, addrkey_,
                                                        index);
   if (next_item) {
     // don't cache a negative result, as a concurrent transaction might insert
     // something before block close.
-    concurrent_items_.push_back(*next_item);
+    concurrent_queue_entries_.push_back(*next_item);
   }
   return next_item;
 }
@@ -152,6 +153,8 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 const StorageSnapshotCacheEntry *
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
+  std::printf("try_get_snapshot_item: addrkey %s\n",
+              x23::show(addrkey).c_str());
   auto key = StorageItemMapEntry::get_key(addrkey);
   if (auto res = snapshot_item_cache_.modify_element(key, [](auto const &v) {
         return v.entry_.get();
@@ -163,11 +166,32 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   auto db_res = db_proxy_.get_item(block_id_, addrkey);
   std::unique_ptr<StorageSnapshotCacheEntry> entry =
       db_res ? std::make_unique<StorageSnapshotCacheEntry>(*db_res, db_proxy_,
-                                                           block_id_)
+                                                           block_id_, addrkey)
              : nullptr;
   auto const *out = entry.get();
 
   snapshot_item_cache_.emplace(key, addrkey, std::move(entry));
   return out;
 }
+
+NondeterministicReadCacheEntry &
+StorageSnapshotCache::get_nondeterministic_read_cache_entry(
+    AddressAndKey const &addrkey)
+{
+  auto key = NondeterministicReadCacheMapEntry::get_key(addrkey);
+  if (auto res = nondeterministic_read_cache_.modify_element(key, [](auto &v) {
+        return v.entry_.get();
+      })) {
+    return **res;
+  }
+
+  std::unique_ptr<NondeterministicReadCacheEntry> entry =
+      std::make_unique<NondeterministicReadCacheEntry>(db_proxy_, block_id_,
+                                                       addrkey);
+  auto *out = entry.get();
+
+  nondeterministic_read_cache_.emplace(key, addrkey, std::move(entry));
+  return *out;
+}
+
 } // namespace hogd

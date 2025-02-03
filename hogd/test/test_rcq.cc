@@ -161,4 +161,100 @@ TEST_F(TestRCQ, ConsumeAcrossBlocks)
   db_client_.commit_snapshot(5)();
 }
 
+TEST_F(TestRCQ, ConcurrentConsume)
+{
+  ASSERT_EQ(db_client_.open_database_snapshot(0, 1)(), RPCError::kNone);
+  exec_client_.open_proposal_block(1)();
+
+  SignedTransaction write_tx;
+  write_tx.tx.invocation = {.invoked_address = addr_,
+                            .method = compute_sdk_name("make_several_inserts"),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = make_calldata(
+                                std::vector<uint8_t>{0, 1, 2, 3, 4, 5})};
+
+  auto res = exec_client_.propose_transaction(1, write_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  SignedTransaction consume_tx;
+  consume_tx.tx.invocation = {.invoked_address = addr_,
+                              .method =
+                                  compute_sdk_name("expect_several_consumes"),
+                              .gas_limit = UINT64_MAX,
+                              .calldata = make_calldata(
+                                  std::vector<uint8_t>{0, 1, 2, 3})};
+
+  res = exec_client_.propose_transaction(1, consume_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  exec_client_.finish_block(1)();
+  db_client_.close_snapshot(1)();
+  db_client_.commit_snapshot(1)();
+
+  db_client_.open_database_snapshot(1, 2)();
+  exec_client_.open_proposal_block(2)();
+
+  consume_tx.tx.invocation.calldata = make_calldata(std::vector<uint8_t>{4, 5});
+
+  res = exec_client_.propose_transaction(2, consume_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  exec_client_.finish_block(2)();
+  db_client_.close_snapshot(2)();
+  db_client_.commit_snapshot(2)();
+}
+
+TEST_F(TestRCQ, ReadWeirdOrder)
+{
+  // prep_for_test_read_weird_order
+  ASSERT_EQ(db_client_.open_database_snapshot(0, 1)(), RPCError::kNone);
+  exec_client_.open_proposal_block(1)();
+
+  SignedTransaction prep_tx;
+  prep_tx.tx.invocation = {.invoked_address = addr_,
+                           .method = compute_sdk_name(
+                               "prep_for_test_read_weird_order"),
+                           .gas_limit = UINT64_MAX,
+                           .calldata = make_calldata()};
+
+  auto res = exec_client_.propose_transaction(1, prep_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+
+  // test_read_weird_order
+
+  SignedTransaction read_tx;
+  read_tx.tx.invocation = {.invoked_address = addr_,
+                           .method = compute_sdk_name("test_read_weird_order"),
+                           .gas_limit = UINT64_MAX,
+                           .calldata = make_calldata()};
+
+  res = exec_client_.propose_transaction(1, read_tx)();
+  ASSERT_EQ(res.error(), RPCError::kNone);
+  auto proposal_data = res.proposal_data();
+
+  exec_client_.finish_block(1)();
+  db_client_.close_snapshot(1)();
+
+  // now replay with validation mode
+  ASSERT_EQ(db_client_.open_database_snapshot(0, 2)(), RPCError::kNone);
+  exec_client_.open_validation_block(2)();
+
+  ProposedTransaction proposed_tx{.signed_tx = read_tx,
+                                  .proposal_data = proposal_data};
+
+  auto validate_res = exec_client_.validate_transaction(2, proposed_tx)();
+  ASSERT_EQ(validate_res, RPCError::kNone);
+
+  // we consumed entries we did not insert.
+  EXPECT_NE(db_client_.close_snapshot(2)(), RPCError::kNone);
+
+  validate_res = exec_client_.validate_transaction(
+      2, ProposedTransaction{.signed_tx = prep_tx, .proposal_data = {}})();
+  ASSERT_EQ(validate_res, RPCError::kNone);
+
+  EXPECT_EQ(db_client_.close_snapshot(2)(), RPCError::kNone);
+
+  exec_client_.finish_block(2)();
+}
+
 } // namespace hogd

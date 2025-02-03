@@ -102,7 +102,7 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
         },
         parent_view_);
   }
-  modified_items_.emplace(key, addrkey, parent_value);
+  modified_items_.emplace(key, addrkey, parent_value, &bad_item_count_);
 
   res = modified_items_.modify_element(key, mod_lambda);
   // lookup must succeed, we just added it

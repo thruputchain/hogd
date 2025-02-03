@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <optional>
 #include <shared_mutex>
@@ -80,6 +81,7 @@ protected:
   static std::span<const std::byte> to_key(AddressAndKey const &addrkey);
 
   HashMap<StorageItemFrame> modified_items_;
+  std::atomic<uint32_t> bad_item_count_ = 0;
   bool closed_ = false;
 
   // simple impl, for now
@@ -136,6 +138,11 @@ public:
   void commit_contract_create(Contract const &contract);
   void commit_contract_deploy(ContractAddress const &addr,
                               SHA256Hash const &contract_hash);
+
+  bool has_bad_item() const
+  {
+    return bad_item_count_.load(std::memory_order_relaxed) != 0;
+  }
 
   // WARNING: nondeterministic
   std::optional<QueueEntry>
