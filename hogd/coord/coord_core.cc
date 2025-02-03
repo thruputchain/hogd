@@ -41,10 +41,14 @@ CoordinatorCore::validate_block(SHA256Hash const &parent_hash,
   co_await executor_manager_.enqueue_validation_request(*block_id, frame);
 
   if (frame->validation_success()) {
+    auto finish_result = co_await block_manager_->close_block(*block_id);
+    if (!finish_result) {
+      block->mark_validation_failed();
+      block_manager_->prune_block(*block_id);
+    }
+
     block->mark_validation_success();
-    [[maybe_unused]] auto hash =
-        co_await block_manager_->close_block(*block_id);
-    assert(hash == block_hash);
+    assert(*finish_result == block_hash);
   }
   else {
     block->mark_validation_failed();
