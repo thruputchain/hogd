@@ -1,9 +1,20 @@
 #include "hogd/hogexec/interface/rpc_interface.h"
 
+#include <atomic>
+#include <cassert>
+#include <optional>
+
+#include "hogd/base/types.h"
+#include "hogd/hogexec/interface/executor_state.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
+#include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -11,7 +22,6 @@ x23::Async<ExpectedProposalData>
 ExecutorRpcInterface::propose_transaction(BlockID block_id,
                                           SignedTransaction const &signed_tx)
 {
-  std::printf("start propose_transaction\n");
   auto *ctx = executor_states_.get_executor_context(block_id);
   if (!ctx) {
     co_return ExpectedProposalData(RPCError::kBadExecutorState);
@@ -27,7 +37,7 @@ ExecutorRpcInterface::propose_transaction(BlockID block_id,
     PerTransactionDatabaseProxy proxy(block_id, allocate_tx_id(), db_proxy_);
 
     SystemCallHandler syscall_handler(signed_tx, ctx->snapshot_cache_, proxy,
-                                      ProposalModeData{});
+                                      std::nullopt);
     auto invoke_res = co_await pool->async(
         [](SystemCallHandler *handler) -> InvokeResult {
           return handler->root_invoke();
@@ -69,8 +79,7 @@ ExecutorRpcInterface::validate_transaction(
 
     SystemCallHandler syscall_handler(proposed_tx.signed_tx,
                                       ctx->snapshot_cache_, proxy,
-                                      ValidationModeData(
-                                          proposed_tx.proposal_data));
+                                      proposed_tx.proposal_data);
     auto invoke_res = co_await pool->async(
         [](SystemCallHandler *handler) -> InvokeResult {
           return handler->root_invoke();

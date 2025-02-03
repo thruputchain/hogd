@@ -1,12 +1,17 @@
 #pragma once
 
+#include <cstddef>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
 #include <type_traits>
+#include <variant>
+#include <vector>
 
 #include "contract.hh"
 #include "hogd/base/hashmap.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "rpc_types.hh"

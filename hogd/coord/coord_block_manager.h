@@ -3,6 +3,17 @@
 #include "hogd/coord/block_frame.h"
 #include "hogd/coord/database_manager.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/async.h"
+#include <atomic>
+#include <cassert>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <unordered_map>
+#include <variant>
+#include <vector>
 
 namespace hogd {
 

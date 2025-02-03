@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "storage_item.hh"
+#include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 

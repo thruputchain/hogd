@@ -5,7 +5,11 @@
 #include "rpc.hh"
 #include "rpc_types.hh"
 #include "x23/event.h"
+#include "x23/rpc.h"
 #include "x23/threadpool.h"
+#include <cassert>
+#include <memory>
+#include <string>
 
 namespace hogd ::test {
 
@@ -13,10 +17,11 @@ namespace hogd ::test {
 // within one binary.  Used only for testing.
 struct LocalTestHarness {
 
-  inline static std::string kDBToExecutorPort =
+  const inline static std::string db_to_executor_port_ =
       std::to_string(kDBToExecutorPortNum);
-  inline static std::string kDBToCoordPort = std::to_string(kDBToCoordPortNum);
-  inline static std::string kExecToCoordPort =
+  const inline static std::string db_to_coord_port_ =
+      std::to_string(kDBToCoordPortNum);
+  inline static std::string exec_to_coord_port_ =
       std::to_string(kExecToCoordPortNum);
 
   LocalTestHarness();
@@ -45,13 +50,13 @@ protected:
   using exec_t = DatabaseToExecutorInterfaceV1::client<
       x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  const std::string kDBToExecutorPort = std::to_string(kDBToExecutorPortNum);
-  const std::string kDBToCoordPort = std::to_string(kDBToCoordPortNum);
+  const std::string kDBToExecutorPort_ = std::to_string(kDBToExecutorPortNum);
+  const std::string kDBToCoordPort_ = std::to_string(kDBToCoordPortNum);
 
   exec_t connect_from_exec()
   {
     auto fd = cp_->tcpconnect(std::string("localhost"),
-                              std::string(kDBToExecutorPort))();
+                              std::string(kDBToExecutorPort_))();
     assert(fd);
     return x23::rpc_stream_logged(*cp_, *fd)
         .template client<DatabaseToExecutorInterfaceV1>();
@@ -60,7 +65,7 @@ protected:
   coord_t connect_from_coord()
   {
     auto fd = cp_->tcpconnect(std::string("localhost"),
-                              std::string(kDBToCoordPort))();
+                              std::string(kDBToCoordPort_))();
     assert(fd);
     return x23::rpc_stream_logged(*cp_, *fd)
         .template client<DatabaseToCoordInterfaceV1>();
@@ -72,7 +77,7 @@ protected:
     cp_ = std::make_unique<x23::CoroPoll>(*pool_);
 
     db_core_ =
-        std::make_unique<HogdbCore>(1, kDBToExecutorPort, kDBToCoordPort);
+        std::make_unique<HogdbCore>(1, kDBToExecutorPort_, kDBToCoordPort_);
 
     coord_client_ = std::make_unique<coord_t>(connect_from_coord());
     exec_client_ = std::make_unique<exec_t>(connect_from_exec());

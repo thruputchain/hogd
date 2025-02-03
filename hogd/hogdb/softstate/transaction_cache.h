@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <span>
 #include <unordered_map>
 
 #include "hogd/base/hashmap.h"
@@ -7,6 +9,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "types.hh"
 
 namespace hogd {
 

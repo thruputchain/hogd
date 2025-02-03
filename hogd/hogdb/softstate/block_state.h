@@ -2,12 +2,17 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogdb/db/in_memory_database.h"
 #include "hogd/hogdb/softstate/storage_view.h"
 #include "hogd/hogdb/softstate/transaction_cache.h"
+#include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
+#include "types.hh"
 
 namespace hogd {
 

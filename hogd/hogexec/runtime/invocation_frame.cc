@@ -5,18 +5,22 @@
 #include <iterator>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime_cache.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/format.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -65,7 +69,6 @@ InvocationFrame::log(std::span<const std::byte> message)
                                 message.size()};
   logs_.emplace_back(active_invocation_.invoked_address,
                      x23::Vec<uint8_t, kMaxLogMessageLen>(m.begin(), m.end()));
-  std::printf("logging msg %s\n", x23::show(logs_.back()).c_str());
 }
 
 void

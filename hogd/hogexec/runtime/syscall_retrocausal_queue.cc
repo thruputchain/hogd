@@ -1,6 +1,8 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <utility>
 
@@ -48,8 +50,6 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
   std::memcpy(output_queue_entry.data(), queue_entry.data(),
               output_written_len);
 
-  std::printf("got queue entry from rcq consume: %s\n",
-              x23::show(queue_entry).c_str());
   return {SyscallErrorCode::kNone, 0};
 }
 

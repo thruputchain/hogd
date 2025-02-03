@@ -2,9 +2,13 @@
 
 #include <cassert>
 #include <memory>
+#include <span>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/hashmap.h"
+#include "hogd/hogdb/db/in_memory_database.h"
+#include "hogd/hogdb/softstate/block_state.h"
 #include "rpc_types.hh"
 
 namespace hogd {
@@ -73,8 +77,6 @@ BlockManager::commit_block(BlockID id)
   assert(children_to_unlink);
 
   for (auto child_to_unlink : *children_to_unlink) {
-
-    std::printf("unlinking child %llu\n", child_to_unlink);
     // Child might get removed via a commit of a sibling.  That's ok,
     // we don't have to bother unlinking parent in that case.
     block_cache_.modify_element(std::as_bytes(std::span(&child_to_unlink, 1)),
@@ -124,8 +126,6 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
   assert(block_state);
   // first add the new block
 
-  std::printf("add_child %llu %llu\n", parent_id, new_id);
-
   [[maybe_unused]]
   bool insert_res = block_cache_.emplace(std::as_bytes(std::span(&new_id, 1)),
                                          new_id, std::move(block_state));
@@ -138,9 +138,6 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
       [new_id](auto &parent) -> std::pair<bool, bool> {
         bool parent_is_committed =
             parent.block_data_->is_committed_to_database();
-
-        std::printf("add_child %llu parent_is_committed %d\n", new_id,
-                    parent_is_committed);
 
         if (parent.closed_to_new_children_) {
           return {false, parent_is_committed};
@@ -161,7 +158,6 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
     // successfully linked to parent
 
     if (link_res->second) {
-      std::printf("unlinking child %llu\n", new_id);
       // might not exist, if a sibling is concurrently removed,
       // but that's ok.
       block_cache_.modify_element(std::as_bytes(std::span(&new_id, 1)),

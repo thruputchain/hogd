@@ -1,5 +1,10 @@
 #include "hogd/hogdb/storage_item/storage_item_wrapper.h"
+
+#include <variant>
+
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogdb/storage_item/retrocausal_queue.h"
 #include "storage_item.hh"
 
 namespace hogd {

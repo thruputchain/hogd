@@ -3,6 +3,8 @@
 #include <cassert>
 #include <cstddef>
 #include <span>
+#include <unordered_map>
+#include <utility>
 
 #include "rpc_types.hh"
 #include "storage_item.hh"

@@ -1,7 +1,10 @@
 #pragma once
 
 #include "rpc.hh"
+#include "rpc_types.hh"
+#include "x23/async.h"
 #include "x23/rpc.h"
+#include <vector>
 
 namespace hogd {
 

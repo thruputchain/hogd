@@ -9,6 +9,7 @@
 
 #include "storage_item.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -43,10 +44,9 @@ private:
 // choices against a proposal
 class ValidationModeData {
 public:
-  ValidationModeData() = delete;
   ValidationModeData(const ValidationModeData &) = delete;
   ValidationModeData &operator=(const ValidationModeData &) = delete;
-  ValidationModeData(ValidationModeData &&) = default;
+  ValidationModeData(ValidationModeData &&) = delete;
   ValidationModeData &operator=(ValidationModeData &&) = delete;
 
   // Constructs validation data with proposal to validate against

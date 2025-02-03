@@ -1,5 +1,14 @@
 #include "hogd/coord/coord_core.h"
 
+#include "hogd/coord/coord_block_manager.h"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/async.h"
+#include <cassert>
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace hogd {
 
 CoordinatorCore::CoordinatorCore(int nthreads)
@@ -42,18 +51,22 @@ CoordinatorCore::validate_block(SHA256Hash const &parent_hash,
 
   if (frame->validation_success()) {
     auto finish_result = co_await block_manager_->close_block(*block_id);
-    if (!finish_result) {
+    if (!finish_result.has_value()) {
       block->mark_validation_failed();
       block_manager_->prune_block(*block_id);
+      co_return false;
     }
 
     block->mark_validation_success();
     assert(*finish_result == block_hash);
+    co_return true;
   }
   else {
     block->mark_validation_failed();
     block_manager_->prune_block(*block_id);
+    co_return false;
   }
+  // otherwise, return false
 
   // frame is still a valid pointer because we hold a shared_ptr to the block
   // (the block variable).

@@ -1,9 +1,24 @@
 #include "hogd/hogexec/hogexec_core.h"
 
+#include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
 #include <string>
+#include <thread>
+#include <utility>
 
+#include "coord.hh"
 #include "hogd/coord/allocate_service.h"
 #include "hogd/hogexec/interface/rpc_interface.h"
+#include "x23/async.h"
+#include "x23/cleanup.h"
+#include "x23/event.h"
+#include "x23/fileio.h"
+#include "x23/rpc.h"
+#include "x23/vec.h"
 
 namespace hogd {
 

@@ -1,8 +1,12 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 
-#include <format>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
 
-#include "x23/format.h"
+#include "storage_item.hh"
+#include "types.hh"
 
 namespace hogd {
 

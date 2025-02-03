@@ -10,13 +10,15 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/flag_utils.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
@@ -24,24 +26,32 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
-SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
-                                     StorageSnapshotCache &snapshot_cache,
-                                     PerTransactionDatabaseProxy &db_proxy,
-                                     ExecutionModeData execution_mode_data)
+SystemCallHandler::SystemCallHandler(
+    SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
+    PerTransactionDatabaseProxy &db_proxy,
+    std::optional<NondeterministicProposal> proposal)
   : signed_tx_(std::move(signed_tx)),
     invocation_frame_stack_(
         [this](InvocationFrame &last_frame) {
           commit_last_call_frame_success(last_frame);
         },
         snapshot_cache, db_proxy),
-    execution_mode_data_(std::move(execution_mode_data)),
+    execution_mode_data_([&proposal] -> ExecutionModeData {
+      if (proposal.has_value()) {
+        return ExecutionModeData(std::in_place_type_t<ValidationModeData>{},
+                                 std::move(*proposal));
+      }
+      return ExecutionModeData(std::in_place_type_t<ProposalModeData>{});
+    }()),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 

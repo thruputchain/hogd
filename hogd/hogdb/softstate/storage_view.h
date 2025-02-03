@@ -2,17 +2,26 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstddef>
+#include <memory>
 #include <optional>
 #include <shared_mutex>
+#include <span>
+#include <unordered_map>
 #include <variant>
 
+#include "contract.hh"
 #include "hogd/base/hashmap.h"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/db/in_memory_database.h"
 #include "hogd/hogdb/softstate/storage_item_frame.h"
+#include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
+#include "x23/mvar.h"
 
 namespace hogd {
 

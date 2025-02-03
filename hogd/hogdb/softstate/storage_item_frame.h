@@ -1,15 +1,21 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
+#include <cstddef>
 #include <optional>
 #include <set>
+#include <span>
 #include <stdexcept>
+#include <variant>
+#include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/softstate/uint256_reservation.h"
 #include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "types.hh"
 
 namespace hogd {
 

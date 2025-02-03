@@ -6,7 +6,7 @@
 #include "hogd/hogexec/interface/executor_state.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "rpc.hh"
+#include "rpc_types.hh"
 #include "x23/mvar.h"
 
 namespace hogd {

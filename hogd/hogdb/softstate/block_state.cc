@@ -1,5 +1,17 @@
 #include "hogd/hogdb/softstate/block_state.h"
 
+#include <cassert>
+#include <memory>
+#include <optional>
+
+#include "contract.hh"
+#include "hogd/base/types.h"
+#include "hogd/hogdb/db/in_memory_database.h"
+#include "hogd/hogdb/storage_item/storage_item_wrapper.h"
+#include "rpc_types.hh"
+#include "storage_item.hh"
+#include "types.hh"
+
 namespace hogd {
 
 void

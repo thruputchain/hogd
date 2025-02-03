@@ -1,12 +1,22 @@
 #include "hogd/shared_util/load_contracts.h"
 
+#include <bit>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 

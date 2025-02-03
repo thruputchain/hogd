@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <utility>
+
 #include "types.hh"
 
 namespace hogd {

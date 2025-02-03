@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <map>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/types.h"

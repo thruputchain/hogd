@@ -1,7 +1,10 @@
 #pragma once
 
 #include <map>
+#include <memory>
+#include <vector>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "transaction.hh"
 #include "types.hh"

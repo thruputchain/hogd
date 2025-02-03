@@ -1,14 +1,25 @@
 #pragma once
 
+#include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <span>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace hogd {
 
@@ -30,7 +41,7 @@ public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy &db_proxy,
-                    ExecutionModeData execution_mode_data);
+                    std::optional<NondeterministicProposal> proposal);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;

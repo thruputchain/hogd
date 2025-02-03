@@ -1,8 +1,16 @@
 #include "hogd/coord/executor_manager.h"
 
+#include <atomic>
+#include <cassert>
+#include <memory>
 #include <mutex>
+#include <shared_mutex>
+#include <utility>
+#include <vector>
 
+#include "hogd/coord/block_frame.h"
 #include "rpc_types.hh"
+#include "transaction.hh"
 #include "x23/async.h"
 
 namespace hogd {

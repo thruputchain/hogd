@@ -2,8 +2,10 @@
 
 #include <cassert>
 #include <map>
+#include <memory>
 
-#include "rpc.hh"
+#include "hogd/hogexec/interface/executor_state.h"
+#include "rpc_types.hh"
 
 namespace hogd {
 

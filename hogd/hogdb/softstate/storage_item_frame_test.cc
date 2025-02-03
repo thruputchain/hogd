@@ -1,3 +1,4 @@
+#include <atomic>
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -8,10 +9,15 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/softstate/storage_item_frame.h"
+#include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
+#include "storage_lock.hh"
 #include "types.hh"
 
 namespace hogd {
+
+// ASSERT_TRUE(x) doesn't show up to clangd as a check for the optional
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 namespace {
 void
@@ -399,5 +405,6 @@ TEST(StorageItemFrame, NNIntSimpleSetAdd)
   expect_final(item, int128_t{15});
   ASSERT_EQ(bad_item_count, 0);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

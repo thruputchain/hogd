@@ -6,6 +6,7 @@
 #include "hogd/base/types.h"
 #include "hogd/shared_util/load_contracts.h"
 #include "hogd/test/local_test_harness.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 

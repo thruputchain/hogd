@@ -1,11 +1,16 @@
 #pragma once
 
+#include <cstdint>
 #include <cstring>
+#include <memory>
+#include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include "contract.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 

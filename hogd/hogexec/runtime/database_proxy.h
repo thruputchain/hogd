@@ -1,14 +1,18 @@
 #pragma once
 
+#include <cassert>
+#include <cstdint>
 #include <memory>
 #include <optional>
-#include <string>
+#include <utility>
 
+#include "contract.hh"
 #include "coord.hh"
 #include "rpc.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 

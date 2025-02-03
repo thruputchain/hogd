@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "contract.hh"
+#include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "hogd/shared_util/load_contracts.h"
 #include "types.hh"
 #include "x23/mvar.h"

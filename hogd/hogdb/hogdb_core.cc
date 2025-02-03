@@ -1,9 +1,22 @@
 #include "hogd/hogdb/hogdb_core.h"
 
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
+#include <string>
+#include <thread>
+#include <utility>
+
 #include "coord.hh"
 #include "hogd/coord/allocate_service.h"
 #include "hogd/hogdb/interface/block_manager.h"
+#include "hogd/hogdb/interface/db_to_coord_server.h"
+#include "hogd/hogdb/interface/db_to_executor_server.h"
+#include "hogd/hogdb/softstate/block_state.h"
 #include "rpc.hh"
+#include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/fileio.h"
 #include "x23/rpc.h"

@@ -1,16 +1,22 @@
 #pragma once
 
+#include <cassert>
+#include <cstddef>
 #include <functional>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
+#include "storage_item.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 

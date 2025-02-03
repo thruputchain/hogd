@@ -1,18 +1,27 @@
 #include "hogd/hogdb/softstate/storage_item_frame.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cassert>
+#include <concepts>
 #include <limits>
 #include <optional>
+#include <set>
 #include <stdexcept>
+#include <type_traits>
+#include <utility>
 #include <variant>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/softstate/uint256_reservation.h"
+#include "hogd/hogdb/storage_item/retrocausal_queue.h"
+#include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -68,8 +77,6 @@ StorageItemFrame::RetrocausalQueueArgs::to_item(
 {
   assert(!consumer_lock_);
 
-  std::printf("RetrocausalQueueArgs::to_item\n");
-
   RetrocausalQueuePastBlockConsumeDelta consume_delta{
       .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
   if (past_consume_delta_) {
@@ -83,7 +90,7 @@ StorageItemFrame::RetrocausalQueueArgs::to_item(
     uint64_t new_block_number =
         previous_item->queue().get_current_block_number() + 1;
     x23::Vec<QueueEntry> new_block = make_block(persistable_entries_);
-    if (new_block.size() > 0) {
+    if (!new_block.empty()) {
       return StorageItemWrapper(
           RetrocausalQueue(previous_item->queue(), consume_delta,
                            RetrocausalQueueBlock{.entries = new_block,
@@ -98,10 +105,8 @@ StorageItemFrame::RetrocausalQueueArgs::to_item(
   assert(!past_consume_delta_);
 
   x23::Vec<QueueEntry> new_block = make_block(persistable_entries_);
-  std::printf("RetrocausalQueueArgs::to_item: new_block.size() %ld\n",
-              new_block.size());
-  if (new_block.size() > 0) {
-    std::printf("RetrocausalQueueArgs::to_item: returning new_block\n");
+
+  if (!new_block.empty()) {
     return StorageItemWrapper(
         RetrocausalQueue(fake_parent, consume_delta,
                          {.entries = new_block, .block_number = 1}));
@@ -407,7 +412,6 @@ void
 StorageItemFrame::update_committed_item()
 {
   if (!round_committed_) {
-    std::printf("update_committed_item: refcount %d\n", variant_.refcount_);
     if (variant_.refcount_ > 0) {
       committed_item_ =
           std::visit([&](auto &arm) { return arm.to_item(committed_item_); },

@@ -1,6 +1,10 @@
 #include "hogd/hogdb/interface/db_to_coord_server.h"
 
+#include <memory>
+
+#include "hogd/hogdb/softstate/block_state.h"
 #include "rpc_types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 

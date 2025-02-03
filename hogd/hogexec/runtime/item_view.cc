@@ -1,14 +1,18 @@
 #include "hogd/hogexec/runtime/item_view.h"
 
+#include <cassert>
 #include <optional>
+#include <utility>
 #include <variant>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "storage_item.hh"
 #include "syscall.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -145,7 +149,6 @@ HostFnStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_item(
     ExecutionModeData &execution_mode_data) const
 {
-  std::printf("RetrocausalQueueItem::get_next_item()\n");
   // Step 1: try consume from past blocks
   // the index where we start searching from
   uint64_t block_index = 0;
@@ -161,15 +164,11 @@ RetrocausalQueueItem::get_next_item(
   auto const *next_block = get_next_block(block_index);
 
   if (next_block) {
-    size_t blk_size = next_block->entries.size();
-    assert(partial_consume_quantity < blk_size);
+    assert(partial_consume_quantity < next_block->entries.size());
     return next_block->entries[partial_consume_quantity];
   }
   // otherwise, nothing in past block to consume.  Try current block.
   assert(partial_consume_quantity == 0);
-
-  std::printf("RetrocausalQueueItem::get_next_item() - looking for concurrent "
-              "entries in current block\n");
 
   // Step 2: try to consume concurrent entries not from this transaction
   auto concurrent_entry =
@@ -177,12 +176,11 @@ RetrocausalQueueItem::get_next_item(
   if (!concurrent_entry.has_value()) {
     return HostFnError{concurrent_entry.error()};
   }
-  if (*concurrent_entry) {
-    return {**concurrent_entry};
+  // avoid clang-tidy optional false positive
+  auto const &concurrent_entry_unwrapped = *concurrent_entry;
+  if (concurrent_entry_unwrapped.has_value()) {
+    return {*concurrent_entry_unwrapped};
   }
-
-  std::printf(
-      "RetrocausalQueueItem::get_next_item() - looking for self entries\n");
 
   // Step 3: look to consume entries created within the transaction
   auto self_consume_res =
@@ -222,25 +220,21 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
   if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
-    std::printf("proposal data query for index %u\n", index);
     auto out =
         nondeterministic_read_cache_entry_.get_concurrent_queue_entry(index);
     auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
 
     if (out) {
-      std::printf("got out\n");
       proposal_data.log_queue_entry_observation(
           nondeterministic_read_cache_entry_.addrkey(), index, *out);
       proposal_data.log_nondeterministic_bit(true);
     }
     else {
-      std::printf("no out\n");
       proposal_data.log_nondeterministic_bit(false);
     }
 
     return out;
   }
-  std::printf("validation mode\n");
   // else validation mode
   assert(std::holds_alternative<ValidationModeData>(execution_mode_data));
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
@@ -291,7 +285,6 @@ RetrocausalQueueItem::get_next_self_entry(
 HostFnStatus<void>
 RetrocausalQueueItem::advance_cursor(ExecutionModeData &execution_mode_data)
 {
-  std::printf("RetrocausalQueueItem::advance_cursor()\n");
   // Step 1: try consume from past blocks
   // the index where we start searching from
 
@@ -309,7 +302,6 @@ RetrocausalQueueItem::advance_cursor(ExecutionModeData &execution_mode_data)
   assert(queue_delta_.consume);
 
   if (next_block) {
-    std::printf("RCQ advance_cursor from past block\n");
     size_t blk_size = next_block->entries.size();
     assert(queue_delta_.consume->past_block_consume.partial_consumed_number <
            blk_size);
@@ -329,12 +321,14 @@ RetrocausalQueueItem::advance_cursor(ExecutionModeData &execution_mode_data)
   auto concurrent_entry =
       get_next_concurrent_entry(locally_consumed_index_, execution_mode_data);
   if (!concurrent_entry.has_value()) {
-    std::printf("concurrent entry host fn error\n");
     return HostFnError{concurrent_entry.error()};
   }
-  if (*concurrent_entry) {
+  // avoid clang-tidy bugprone-optional false positive
+  auto const &concurrent_entry_unwrapped = *concurrent_entry;
+  if (concurrent_entry_unwrapped.has_value()) {
     ++locally_consumed_index_;
-    queue_delta_.consume->current_block_consumed.push_back(**concurrent_entry);
+    queue_delta_.consume->current_block_consumed.push_back(
+        *concurrent_entry_unwrapped);
     return {};
   }
 
@@ -342,11 +336,9 @@ RetrocausalQueueItem::advance_cursor(ExecutionModeData &execution_mode_data)
   auto self_consume_res =
       get_next_self_entry(self_consumed_index_, execution_mode_data);
   if (!self_consume_res.has_value()) {
-    std::printf("hostfn error selfconsume\n");
     return HostFnError{self_consume_res.error()};
   }
   if (*self_consume_res) {
-    std::printf("self consume succeed\n");
     ++self_consumed_index_;
     queue_delta_.consume->current_block_consumed.push_back(**self_consume_res);
     return {};

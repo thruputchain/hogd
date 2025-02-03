@@ -38,15 +38,15 @@ public:
 
   ExecutorMode get_state()
   {
-    std::lock_guard lock(mtx);
+    std::lock_guard lock(mtx_);
     return current_state_;
   }
 
   ~ExecutorState() { assert(running_transaction_count_ == 0); }
 
 private:
-  std::mutex mtx;
-  std::condition_variable cv;
+  std::mutex mtx_;
+  std::condition_variable cv_;
 
   ExecutorMode current_state_;
 

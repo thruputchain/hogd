@@ -59,8 +59,8 @@ pub fn prep_for_test_read_weird_order() {
 pub fn test_read_weird_order() {
     // Expected ndet proposal queue orders:
     // Key1: 1, 2, 3
-    // Key2: 4, 6
-    // Key2 inserts a 5 after reading the 4.
+    // Key2: 4, 5
+    // Key2 inserts a 6
 
     let item = sdk::RetrocausalQueueConsume_Sized::<1>(&KEY1).unwrap();
     assert_eq!(item[0], 1);

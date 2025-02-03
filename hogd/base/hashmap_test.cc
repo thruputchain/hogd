@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <span>
 #include <string>
+#include <utility>
 
 #include "hogd/base/hashmap.h"
 #include "hogd/base/types.h"
@@ -14,7 +15,8 @@ struct ValueT {
   std::string key_;
   uint32_t value_ = 0;
 
-  ValueT(std::string key, uint32_t value) : key_(key), value_(value) {}
+  ValueT(std::string key, uint32_t value) : key_(std::move(key)), value_(value)
+  {}
 
   std::span<const std::byte> get_key() const
   {

@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
+#include "hogd/hogdb/db/in_memory_database.h"
 #include "hogd/hogdb/interface/block_manager.h"
+#include "hogd/hogdb/softstate/block_state.h"
 
 namespace hogd {
 

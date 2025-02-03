@@ -1,8 +1,12 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
+#include <vector>
 
 #include "hogd/base/types.h"
+#include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/event.h"
 
 namespace hogd {

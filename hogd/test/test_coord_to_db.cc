@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "hogd/test/local_test_harness.h"
+#include "rpc_types.hh"
 
 namespace hogd {
 
@@ -56,9 +57,10 @@ TEST_F(TestCoordToDb, DelayedCommit)
   ASSERT_EQ(db_client_.open_database_snapshot(0, 1)(), RPCError::kNone);
   ASSERT_EQ(db_client_.open_database_snapshot(0, 2)(), RPCError::kNone);
   ASSERT_EQ(db_client_.open_database_snapshot(0, 3)(), RPCError::kNone);
-  db_client_.close_snapshot(1)();
-  db_client_.close_snapshot(2)();
-  db_client_.close_snapshot(3)();
+
+  ASSERT_EQ(db_client_.close_snapshot(1)(), RPCError::kNone);
+  ASSERT_EQ(db_client_.close_snapshot(2)(), RPCError::kNone);
+  ASSERT_EQ(db_client_.close_snapshot(3)(), RPCError::kNone);
 
   ASSERT_EQ(db_client_.open_database_snapshot(1, 11)(), RPCError::kNone);
   ASSERT_EQ(db_client_.open_database_snapshot(2, 21)(), RPCError::kNone);

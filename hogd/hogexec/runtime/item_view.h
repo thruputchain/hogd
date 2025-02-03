@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <optional>
 #include <variant>
 
@@ -8,6 +9,7 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "storage_item.hh"
 
 namespace hogd {
 

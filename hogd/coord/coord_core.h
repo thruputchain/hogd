@@ -4,6 +4,14 @@
 #include "hogd/coord/coord_block_manager.h"
 #include "hogd/coord/database_manager.h"
 #include "hogd/coord/executor_manager.h"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/async.h"
+#include "x23/event.h"
+#include "x23/threadpool.h"
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace hogd {
 

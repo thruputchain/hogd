@@ -1,7 +1,15 @@
 #include "hogd/loadgen/payment_experiment.h"
 
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/shared_util/load_contracts.h"
+#include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 

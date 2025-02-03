@@ -1,10 +1,26 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <format>
+#include <future>
+#include <limits>
 #include <mutex>
+#include <optional>
+#include <span>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#define VECTOR 1
+
+#if VECTOR
 #include <unordered_set>
+#endif
 
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -26,8 +42,6 @@ template<typename T>
 concept hash_map_object = std::movable<T> && requires(T object) {
   { object.get_key() } -> std::same_as<std::span<const std::byte>>;
 };
-
-#define VECTOR 1
 
 template<hash_map_object T> class HashMap {
 public:

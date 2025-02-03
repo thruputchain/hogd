@@ -1,12 +1,14 @@
 #pragma once
 
+#include <memory>
+#include <optional>
 #include <unordered_map>
+#include <utility>
 
 #include "contract.hh"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/storage_item/storage_item_wrapper.h"
 #include "types.hh"
-#include "x23/format.h"
 #include "x23/mvar.h"
 
 namespace hogd {
@@ -47,7 +49,7 @@ public:
   void write_contract(SHA256Hash const &hash,
                       std::shared_ptr<const Contract> contract)
   {
-    contract_creates_->emplace(hash, contract);
+    contract_creates_->emplace(hash, std::move(contract));
   }
 
   void write_deployment(ContractAddress const &addr,

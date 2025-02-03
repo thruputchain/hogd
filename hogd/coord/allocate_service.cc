@@ -1,11 +1,30 @@
 #include "hogd/coord/allocate_service.h"
 
-#include <arpa/inet.h>
+#include <cassert>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <format>
+#include <limits>
+#include <memory>
+#include <mutex>
 #include <netdb.h>
+#include <optional>
+#include <string>
 #include <sys/socket.h>
+#include <thread>
+#include <utility>
 
+#include "coord.hh"
+#include "hogd/base/types.h"
 #include "hogd/coord/database_manager.h"
+#include "hogd/coord/executor_manager.h"
+#include "rpc.hh"
+#include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/event.h"
+#include "x23/fileio.h"
+#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -103,7 +122,7 @@ CoordinatorAllocateService::start(std::string const &coord_server_port)
 
     while (true) {
       struct sockaddr_storage client_addr;
-      socklen_t addr_len = sizeof(client_addr);
+      unsigned int addr_len = sizeof(client_addr);
       auto c = co_await cp.accept(lfd, &client_addr, &addr_len);
       if (!c) {
         break;
@@ -144,6 +163,7 @@ CoordinatorAllocateService::make_database_manager()
       cv_.wait(lk, [this] { return database_info_.has_value(); });
     }
   }
+  assert(database_info_.has_value());
 
   std::unique_ptr<DatabaseManager> db_manager =
       std::make_unique<DatabaseManager>();

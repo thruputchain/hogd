@@ -1,11 +1,18 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 
+#include <algorithm>
 #include <cassert>
+#include <cstdlib>
 #include <memory>
 #include <optional>
+#include <utility>
+#include <variant>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -153,8 +160,6 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 const StorageSnapshotCacheEntry *
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
-  std::printf("try_get_snapshot_item: addrkey %s\n",
-              x23::show(addrkey).c_str());
   auto key = StorageItemMapEntry::get_key(addrkey);
   if (auto res = snapshot_item_cache_.modify_element(key, [](auto const &v) {
         return v.entry_.get();

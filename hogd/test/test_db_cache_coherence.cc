@@ -1,8 +1,14 @@
 #include <gtest/gtest.h>
 
+#include <utility>
+
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/test/local_test_harness.h"
 #include "rpc.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
+#include "types.hh"
 
 namespace hogd {
 

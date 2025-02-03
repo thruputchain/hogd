@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <barrier>
+#include <future>
+#include <thread>
+#include <vector>
 
+#include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_state.h"
 

@@ -1,8 +1,12 @@
 #include "hogd/hogdb/interface/db_to_executor_server.h"
 
+#include "contract.hh"
+#include "hogd/base/types.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include <cassert>
 
 namespace hogd {
 

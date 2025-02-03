@@ -2,10 +2,14 @@
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/shared_util/load_contracts.h"
 #include "hogd/test/local_test_harness.h"
+#include "rpc_types.hh"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -188,7 +192,7 @@ TEST_F(TestRCQ, ConcurrentConsume)
   ASSERT_EQ(res.error(), RPCError::kNone);
 
   exec_client_.finish_block(1)();
-  db_client_.close_snapshot(1)();
+  ASSERT_EQ(db_client_.close_snapshot(1)(), RPCError::kNone);
   db_client_.commit_snapshot(1)();
 
   db_client_.open_database_snapshot(1, 2)();
@@ -200,7 +204,7 @@ TEST_F(TestRCQ, ConcurrentConsume)
   ASSERT_EQ(res.error(), RPCError::kNone);
 
   exec_client_.finish_block(2)();
-  db_client_.close_snapshot(2)();
+  ASSERT_EQ(db_client_.close_snapshot(2)(), RPCError::kNone);
   db_client_.commit_snapshot(2)();
 }
 

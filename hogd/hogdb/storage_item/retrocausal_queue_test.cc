@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <memory>
+
 #include "hogd/base/types.h"
 #include "hogd/hogdb/storage_item/retrocausal_queue.h"
 #include "storage_item.hh"

@@ -1,9 +1,18 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <format>
+#include <print>
+#include <span>
+#include <string>
+#include <unistd.h>
+
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
+#include "syscall.hh"
 #include "x23/format.h"
 #include "x23/x23.h"
-#include <print>
 
 template<> struct std::formatter<std::span<const std::byte>> {
   constexpr static auto parse(auto &ctx) noexcept { return ctx.begin(); }
@@ -13,7 +22,7 @@ template<> struct std::formatter<std::span<const std::byte>> {
     // NOLINTNEXTLINE(readability-qualified-auto)
     auto out = ctx.out();
     for (auto v : obj) {
-      uint8_t byte = static_cast<uint8_t>(v);
+      auto byte = static_cast<uint8_t>(v);
       out = std::format_to(out, "{:02x}", byte);
     }
     return out;

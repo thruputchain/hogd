@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <condition_variable>
+#include <mutex>
+#include <string>
 #include <thread>
 
 #include "hogd/coord/coord_core.h"
@@ -13,10 +16,12 @@ namespace hogd {
 // executors This test has the coordinator start up last.
 TEST(TestConnect, Basic)
 {
-  const std::string kDBToExecutorPort = std::to_string(kDBToExecutorPortNum);
-  const std::string kDBToCoordPort = std::to_string(kDBToCoordPortNum);
-  const std::string kExecToCoordPort = std::to_string(kExecToCoordPortNum);
-  const std::string kCoordAnnouncePort = std::to_string(kCoordAnnouncePortNum);
+  const std::string k_db_to_executor_port =
+      std::to_string(kDBToExecutorPortNum);
+  const std::string k_db_to_coord_port = std::to_string(kDBToCoordPortNum);
+  const std::string k_exec_to_coord_port = std::to_string(kExecToCoordPortNum);
+  const std::string k_coord_announce_port =
+      std::to_string(kCoordAnnouncePortNum);
 
   std::mutex mtx;
   std::condition_variable cv;
@@ -24,9 +29,9 @@ TEST(TestConnect, Basic)
   bool executor_connected = false;
 
   std::thread db_thread([&] {
-    HogdbCore db_core(1, kDBToExecutorPort, kDBToCoordPort);
+    HogdbCore db_core(1, k_db_to_executor_port, k_db_to_coord_port);
 
-    db_core.announce_to_coordinator("localhost", kCoordAnnouncePort);
+    db_core.announce_to_coordinator("localhost", k_coord_announce_port);
 
     std::unique_lock lk(mtx);
     if (test_done) {
@@ -36,9 +41,9 @@ TEST(TestConnect, Basic)
   });
 
   std::thread exec_thread([&] {
-    HogexecCore exec_core =
-        start_hogexec(1, kExecToCoordPort, "localhost", kCoordAnnouncePort);
-    exec_core.announce_ready_to_coord("localhost", kCoordAnnouncePort);
+    HogexecCore exec_core = start_hogexec(1, k_exec_to_coord_port, "localhost",
+                                          k_coord_announce_port);
+    exec_core.announce_ready_to_coord("localhost", k_coord_announce_port);
     std::unique_lock lk(mtx);
     executor_connected = true;
     cv.notify_all();
@@ -50,7 +55,7 @@ TEST(TestConnect, Basic)
 
   CoordinatorCore coord(1);
 
-  coord.start(kCoordAnnouncePort);
+  coord.start(k_coord_announce_port);
 
   {
     std::unique_lock lk(mtx);

@@ -1,6 +1,10 @@
+#include <atomic>
 #include <gtest/gtest.h>
 
 #include "hogd/coord/coro_queue.h"
+#include "x23/async.h"
+#include "x23/event.h"
+#include "x23/threadpool.h"
 
 TEST(CoroQueue, SingleThread)
 {

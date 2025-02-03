@@ -1,23 +1,29 @@
 #include <gtest/gtest.h>
 
 #include <condition_variable>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 
+#include "hogd/coord/coord_block_manager.h"
 #include "hogd/coord/coord_core.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/hogdb_core.h"
 #include "hogd/hogexec/hogexec_core.h"
 #include "hogd/loadgen/payment_experiment.h"
 #include "rpc_types.hh"
+#include "types.hh"
 
 namespace hogd {
 
 class PaymentExperimentTest : public ::testing::Test {
 protected:
-  const std::string kDBToExecutorPort = std::to_string(kDBToExecutorPortNum);
-  const std::string kDBToCoordPort = std::to_string(kDBToCoordPortNum);
-  const std::string kExecToCoordPort = std::to_string(kExecToCoordPortNum);
-  const std::string kCoordAnnouncePort = std::to_string(kCoordAnnouncePortNum);
+  const std::string db_to_exec_port_ = std::to_string(kDBToExecutorPortNum);
+  const std::string db_to_coord_port_ = std::to_string(kDBToCoordPortNum);
+  const std::string exec_to_coord_port_ = std::to_string(kExecToCoordPortNum);
+  const std::string coord_announce_port_ =
+      std::to_string(kCoordAnnouncePortNum);
 
   std::mutex mtx_;
   std::condition_variable cv_;
@@ -30,8 +36,8 @@ protected:
   void SetUp() override
   {
     db_thread_ = std::thread([&] {
-      HogdbCore db_core(1, kDBToExecutorPort, kDBToCoordPort);
-      db_core.announce_to_coordinator("localhost", kCoordAnnouncePort);
+      HogdbCore db_core(1, db_to_exec_port_, db_to_coord_port_);
+      db_core.announce_to_coordinator("localhost", coord_announce_port_);
 
       db_core.get_root_db().set_as_default_genesis();
 
@@ -42,9 +48,9 @@ protected:
       cv_.wait(lk, [&] { return test_done_; });
     });
     exec_thread_ = std::thread([&] {
-      HogexecCore exec_core =
-          start_hogexec(1, kExecToCoordPort, "localhost", kCoordAnnouncePort);
-      exec_core.announce_ready_to_coord("localhost", kCoordAnnouncePort);
+      HogexecCore exec_core = start_hogexec(1, exec_to_coord_port_, "localhost",
+                                            coord_announce_port_);
+      exec_core.announce_ready_to_coord("localhost", coord_announce_port_);
 
       std::unique_lock lk(mtx_);
       executor_connected_ = true;
@@ -57,7 +63,7 @@ protected:
 
     coord_ = std::make_unique<CoordinatorCore>(1);
 
-    coord_->start(kCoordAnnouncePort);
+    coord_->start(coord_announce_port_);
     {
       std::unique_lock lk(mtx_);
       if (!executor_connected_) {

@@ -1,5 +1,11 @@
 #include "hogd/coord/database_manager.h"
 
+#include <stdexcept>
+#include <utility>
+
+#include "rpc_types.hh"
+#include "x23/async.h"
+
 namespace hogd {
 
 void
