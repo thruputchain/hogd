@@ -29,8 +29,7 @@ public:
   // done flag signals when the work threads are done. It is the responsibility
   // of the caller to ensure that the done flag is set when all work finishes;
   // otherwise, enqueue will block forever.
-  x23::Async<void> enqueue(std::function<x23::Async<void>()> work,
-                           std::atomic_flag &done);
+  x23::Async<void> enqueue(std::function<x23::Async<void>()> work);
 
 private:
   const uint32_t max_pending_operations_;
@@ -41,7 +40,7 @@ private:
   uint32_t running_coroutine_count_ = 0;
   std::vector<x23::CoroCB<void>> pending_coroutines_;
 
-  x23::Async<void> awake_all_pending_and_release_one();
+  x23::Async<void> awake_all_pending(uint16_t release_count);
 };
 
 } // namespace hogd

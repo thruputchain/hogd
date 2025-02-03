@@ -19,11 +19,10 @@ x23::Async<void>
 ExecutorQueue::enqueue_validation_request(BlockID block_id,
                                           BlockValidationFrame *frame)
 {
-  std::atomic_flag done = false;
   co_await open_validation_block(block_id);
 
   co_await queue_.enqueue(
-      [this, frame, block_id, &done]() -> x23::Async<void> {
+      [this, frame, block_id]() -> x23::Async<void> {
         while (!frame->all_txs_queried() && !frame->validation_failed()) {
           auto const *tx = frame->get_next_validation_transaction();
           if (!tx) {
@@ -36,10 +35,8 @@ ExecutorQueue::enqueue_validation_request(BlockID block_id,
             break;
           }
         }
-        done.test_and_set();
         co_return;
-      },
-      done);
+      });
 
   co_await client_.finish_block(block_id);
 }

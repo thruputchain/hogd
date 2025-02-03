@@ -18,14 +18,15 @@ CoroQueue::CoroQueue(uint32_t max_pending_operations, x23::CoroPoll &cp)
 {}
 
 x23::Async<void>
-CoroQueue::awake_all_pending_and_release_one()
+CoroQueue::awake_all_pending(uint16_t release_count)
 {
   std::vector<std::coroutine_handle<>> handles;
 
   x23::CoroGuard g;
   co_await g(lock_);
-  assert(running_coroutine_count_ > 0);
-  running_coroutine_count_--;
+
+  assert(running_coroutine_count_ >= release_count);
+  running_coroutine_count_ -= release_count;
 
   while (!pending_coroutines_.empty()) {
     auto back = pending_coroutines_.back();
@@ -43,42 +44,54 @@ CoroQueue::awake_all_pending_and_release_one()
 }
 
 x23::Async<void>
-CoroQueue::enqueue(std::function<x23::Async<void>()> work,
-                   std::atomic_flag &done)
+CoroQueue::enqueue(std::function<x23::Async<void>()> work)
 {
+  std::atomic_flag done = false;
+  std::atomic<uint16_t> currently_running_coroutines = max_pending_operations_;
 
-  std::vector<x23::Async<void>> results;
+  auto [shutdown_async, shutdown_cb] = x23::make_async<void>();
 
-  auto work_coro = [this, &work] -> x23::Async<void> {
+  auto release_one = [&] (uint16_t release_count) {
+    uint16_t currently_running = currently_running_coroutines.fetch_sub(release_count, std::memory_order_relaxed);
+    assert(currently_running >= release_count);
+    if (currently_running == release_count) {
+      // last coro is this one
+      shutdown_cb();
+    }
+    return;
+  };
+
+  auto work_coro = [&] -> x23::Detached {
     co_await cp_.pool_.bg();
     co_await work();
-    co_await awake_all_pending_and_release_one();
+
+    done.test_and_set();
+    release_one(1);
+
     co_return;
   };
 
-  // This is the main loop that enqueues work coroutines.
-  // This is the _only_ coroutine that gets added to the pending coroutine
-  // queue. It keeps adding work_coro instances to the executor (adding
-  // the appropriate asyncs to results) until all work is done. It stops adding
-  // coroutines when the maximum number of running coroutines is hit (where
-  // again, the number of running coroutines refers to the work_coro instances),
-  // and suspends itself on the pending coroutine queue.
-  auto enqueue_coro = [this, &work_coro, &done, &results] -> x23::Async<void> {
+  auto enqueue_coro = [&] -> x23::Async<uint16_t> {
     co_await cp_.pool_.bg();
 
-    while (true) {
+    uint16_t enqueued_count = 0;
+
+    while (enqueued_count < max_pending_operations_) {
       x23::CoroGuard g;
       co_await g(lock_);
 
-      if (done.test()) {
-        // This thread doesn't have to wake the other threads,
-        // because the end of the work coroutines will wake them up.
-        co_return;
+      if (done.test(std::memory_order_relaxed)) {
+        uint16_t extra = max_pending_operations_ - enqueued_count;
+        uint16_t out = enqueued_count;
+        enqueued_count = max_pending_operations_;
+        release_one(extra);
+        co_return out;
       }
 
       if (running_coroutine_count_ < max_pending_operations_) {
         running_coroutine_count_++;
-        results.push_back(work_coro());
+        enqueued_count++;
+        work_coro();
         continue;
       }
 
@@ -88,14 +101,12 @@ CoroQueue::enqueue(std::function<x23::Async<void>()> work,
 
       co_await async;
     }
-    co_return;
+    co_return enqueued_count;
   };
 
-  co_await enqueue_coro();
-
-  for (auto &r : results) {
-    co_await r;
-  }
+  uint16_t count = co_await enqueue_coro();
+  co_await shutdown_async;
+  co_await awake_all_pending(count);
 }
 
 } // namespace hogd
