@@ -71,4 +71,11 @@ enum StorageDeltaModifier {
 
 typedef int StorageDeltaFlags;
 
+enum InvocationFlags {
+  kNone = 0,
+  kTryInvoke = 1,
+};
+
+typedef int InvocationFlagSet;
+
 } // namespace hogd

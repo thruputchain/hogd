@@ -22,8 +22,9 @@
 namespace hogd {
 
 InvocationFrame::InvocationFrame(Invocation invocation,
-                                 RuntimeCacheEntry *visited_entry)
-  : active_invocation_(std::move(invocation))
+                                 RuntimeCacheEntry *visited_entry,
+                                 InvocationFlagSet flags)
+  : active_invocation_(std::move(invocation)), flags_(flags)
 {
   visited_runtimes_.insert(visited_entry);
 }
@@ -84,9 +85,10 @@ InvocationFrame::poison_visited_runtimes()
 
 void
 InvocationFrameStack::start_frame(Invocation const &invocation,
-                                  RuntimeCacheEntry *visited_entry)
+                                  RuntimeCacheEntry *visited_entry,
+                                  InvocationFlagSet flags)
 {
-  frame_stack_.emplace_back(invocation, visited_entry);
+  frame_stack_.emplace_back(invocation, visited_entry, flags);
 }
 
 bool

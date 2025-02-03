@@ -31,7 +31,8 @@ public:
   // Set to nullopt on failed calls, or before any child call happens.
   std::optional<ReturnBuffer> child_return_buffer_ = std::nullopt;
 
-  InvocationFrame(Invocation invocation, RuntimeCacheEntry *visited_entry);
+  InvocationFrame(Invocation invocation, RuntimeCacheEntry *visited_entry,
+                  InvocationFlagSet flags);
 
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &frame);
@@ -59,7 +60,10 @@ public:
   void add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
   // try invoke related methods
-  bool is_try_invoke_frame() const { return false; } // unimplemented
+  bool is_try_invoke_frame() const
+  {
+    return (flags_ & std::to_underlying(InvocationFlags::kTryInvoke)) != 0;
+  }
   bool handle_try_acquire_locks(PerTransactionDatabaseProxy &db_proxy);
 
 private:
@@ -75,6 +79,8 @@ private:
   std::unordered_set<RuntimeCacheEntry *> visited_runtimes_;
 
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
+
+  InvocationFlagSet flags_;
 };
 
 // Stack of invocation frames.
@@ -95,7 +101,7 @@ public:
   bool empty() const { return frame_stack_.empty(); }
 
   void start_frame(Invocation const &invocation,
-                   RuntimeCacheEntry *visited_entry);
+                   RuntimeCacheEntry *visited_entry, InvocationFlagSet flags);
   [[nodiscard]] InvokeResult
   finish_frame(InvokeResult const &result,
                ExecutionModeData &execution_mode_data);

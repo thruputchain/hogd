@@ -72,7 +72,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const ContractAddress &input_address,
                      const MethodID input_method,
                      const GasAmount input_gas_limit,
-                     std::span<const std::byte> input_calldata)
+                     std::span<const std::byte> input_calldata,
+                     const InvocationFlagSet input_flags)
 {
   Calldata calldata;
   calldata.resize_uninitialized(input_calldata.size());
@@ -80,8 +81,10 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
               reinterpret_cast<const uint8_t *>(input_calldata.data()),
               input_calldata.size());
 
-  auto [invoke_res, gas_amount] = syscall_handler.invoke(
-      Invocation(input_address, input_method, input_gas_limit, calldata));
+  auto [invoke_res, gas_amount] =
+      syscall_handler.invoke(Invocation(input_address, input_method,
+                                        input_gas_limit, calldata),
+                             input_flags);
 
   if (syscall_handler.current_runtime_is_revert_poisoned()) {
     return {{HostFnErrorCode::kExit,

@@ -67,7 +67,7 @@ pub fn public_interface(_item: TokenStream) -> TokenStream {
         #[cfg(feature="interface")]
         pub struct #crate_name <'a> {
             call_address: &'a ::rs_contract_sdk::ContractAddress,
-            flags: u64,
+            flags: i32,
         }
 
         #[cfg(feature="interface")]
@@ -79,7 +79,7 @@ pub fn public_interface(_item: TokenStream) -> TokenStream {
 
             pub fn set_try_invoke(self) -> Self {
                 Self{call_address : self.call_address,
-                    flags : self.flags | 1
+                    flags : self.flags | (::rs_contract_sdk::InvocationFlags::kTryInvoke as i32)
                 }
             }
         }
@@ -368,6 +368,7 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
                     method,
                     u64::MAX,
                     &calldata,
+                    self.flags
                 )?;
 
                 // if raw_Invoke returns success, then it cannot be the case that

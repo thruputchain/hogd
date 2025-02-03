@@ -47,7 +47,7 @@ public:
   // Create and run a child call frame.
   // Should be called from within a syscall.
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-  invoke(Invocation const &invocation);
+  invoke(Invocation const &invocation, InvocationFlagSet flags);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)

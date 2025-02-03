@@ -65,7 +65,9 @@ SystemCallHandler::root_invoke()
                         .gas_consumed_ = 0};
   }
 
-  invocation_frame_stack_.start_frame(signed_tx_.tx.invocation, runtime);
+  invocation_frame_stack_.start_frame(signed_tx_.tx.invocation, runtime,
+                                      std::to_underlying(
+                                          InvocationFlags::kNone));
   auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
                                       signed_tx_.tx.invocation.gas_limit);
   res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
@@ -158,12 +160,16 @@ SystemCallHandler::get_invoke_gas_limit(GasAmount call_specified_gas_limit)
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke(Invocation const &invocation)
+SystemCallHandler::invoke(Invocation const &invocation, InvocationFlagSet flags)
 {
   auto gas_limit = get_invoke_gas_limit(invocation.gas_limit);
 
   if (!gas_limit) {
     return std::pair{gas_limit.error().code(), 0};
+  }
+
+  if (!is_valid_invoke_flag(flags)) {
+    return std::pair{SyscallErrorCode::kInvalidInput, 0};
   }
 
   auto *runtime = resolve_runtime(invocation.invoked_address);
@@ -172,7 +178,7 @@ SystemCallHandler::invoke(Invocation const &invocation)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  invocation_frame_stack_.start_frame(invocation, runtime);
+  invocation_frame_stack_.start_frame(invocation, runtime, flags);
   auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
   res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
 

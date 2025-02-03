@@ -52,6 +52,9 @@ syscalls:
         primitive_type: yes
       - name: "calldata"
         span_argument: yes
+      - name: "flags"
+        typename: "InvocationFlagSet"
+        primitive_type: yes
     outputs:
       # cannot return ReturnLen here:
       # invoke(), if reentrant, could cause the contract memory ptr
