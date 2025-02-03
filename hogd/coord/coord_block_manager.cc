@@ -207,9 +207,11 @@ CoordinatorBlockManager::lookup_block_id(SHA256Hash hash) const
   return it->second;
 }
 
-x23::Async<SHA256Hash>
+x23::Async<std::optional<SHA256Hash>>
 CoordinatorBlockManager::close_block(BlockID block_id)
 {
+  auto block_close_res = database_manager_.close_block(block_id);
+
   SHA256Hash hash;
   {
     std::lock_guard lock(mtx_);
@@ -221,7 +223,9 @@ CoordinatorBlockManager::close_block(BlockID block_id)
     block_hash_to_id_[hash] = block_id;
   }
 
-  co_await database_manager_.close_block(block_id);
+  if (!co_await block_close_res) {
+    co_return std::nullopt;
+  }
   co_return hash;
 }
 

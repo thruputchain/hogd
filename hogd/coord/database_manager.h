@@ -14,7 +14,7 @@ public:
 
   // close a block to new transactions.  Does not commit block to disk,
   // nor does it prevent sibling blocks from being opened.
-  x23::Async<void> close_block(BlockID block_id);
+  x23::Async<bool> close_block(BlockID block_id);
 
   // commit a block to disk.  This block must be the immediate descendant
   // of the most recently committed block.

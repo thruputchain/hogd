@@ -86,7 +86,7 @@ public:
   // Marks a proposal as closed, and returns the root hash.
   // Marks a validation as finished successfully (meaning the hash
   // supplied with the block should be verified to be correct).
-  x23::Async<SHA256Hash> close_block(BlockID block_id);
+  x23::Async<std::optional<SHA256Hash>> close_block(BlockID block_id);
   // Remove a block that either failed validation or a proposal that was
   // cancelled.
   void prune_block(BlockID block_id);

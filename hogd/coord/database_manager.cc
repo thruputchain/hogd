@@ -20,12 +20,16 @@ DatabaseManager::open_block(BlockID parent_id, BlockID block_id)
   co_return;
 }
 
-x23::Async<void>
+x23::Async<bool>
 DatabaseManager::close_block(BlockID block_id)
 {
+  bool close_success = true;
   for (auto &client : database_clients_) {
-    co_await client.close_snapshot(block_id);
+    if (co_await client.close_snapshot(block_id) != RPCError::kNone) {
+      close_success = false;
+    }
   }
+  co_return close_success;
 }
 
 x23::Async<void>
