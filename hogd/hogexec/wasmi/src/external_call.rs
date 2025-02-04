@@ -33,8 +33,9 @@ use core::fmt;
 pub enum TrampolineErrorEnum {
     OutOfGas = 1,
     Unrecoverable = 2,
-    Exit { code: i32 } = 3,
-    ValidationFailure = 4,
+    Return = 3,
+    Exit { code: i32 } = 4,
+    ValidationFailure = 5,
 }
 
 #[repr(C)]
@@ -140,6 +141,11 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
         x if x == HostFnErrorCode::kOutOfGas as i32 => {
             Err(Error::host(TrampolineError {
                 error: TrampolineErrorEnum::OutOfGas,
+            }))
+        }
+        x if x == HostFnErrorCode::kReturn as i32 => {
+            Err(Error::host(TrampolineError {
+                error: TrampolineErrorEnum::Return,
             }))
         }
         x if x == HostFnErrorCode::kExit as i32 => {

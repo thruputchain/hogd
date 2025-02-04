@@ -57,6 +57,11 @@ enum HostFnErrorCode {
   // Result: the WebAssembly runtime immediately returns an
   // InvokeErrorCode::kUnrecoverable
   kUnrecoverable = 2,
+  // Return from a WebAssembly invocation to the caller.  Registers a byte
+  // buffer to be passed back to the caller.
+  //
+  // Result: Runtime immediately returns an {InvokeErrorCode::kNone, 0}.
+  kReturn = 3,
   // Return from a WebAssembly invocation to the caller, with some (int32_t)
   // error code.
   //
@@ -64,13 +69,13 @@ enum HostFnErrorCode {
   //
   // On a root smart contract invocation, a nonzero code is converted to a
   // InvokeErrorCode::kDeterministic.
-  kExit = 3,
+  kExit = 4,
   // Validation fails because a proposer submitted bad nondeterministic
   // proposal data.
   //
   // Result: the WebAssembly runtime immediately returns an
   // InvokeErrorCode::kValidationFailure
-  kValidationFailure = 4,
+  kValidationFailure = 5,
 };
 
 } // namespace hogd

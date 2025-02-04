@@ -339,15 +339,10 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             use ::rs_contract_sdk::parse_trait::OutputReturnable;
 
-            let result = ::rs_contract_sdk::parse_trait::#parse_from_calldata_name::<
+            ::rs_contract_sdk::parse_trait::#parse_from_calldata_name::<
                 #args
                 #return_type
-            >(&calldata, #function_name);
-
-            return match result.return_self() {
-                Ok(_) => 0,
-                Err(x) => x
-            };
+            >(&calldata, #function_name).return_self();
         }
 
         #[cfg(not(feature = "interface"))]

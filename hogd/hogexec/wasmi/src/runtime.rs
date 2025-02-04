@@ -132,6 +132,9 @@ impl WasmiRuntime {
                     external_call::TrampolineErrorEnum::Exit { code } => {
                         return WasmiInvokeResult::success(code);
                     }
+                    external_call::TrampolineErrorEnum::Return => {
+                        return WasmiInvokeResult::success(0);
+                    }
                     external_call::TrampolineErrorEnum::ValidationFailure => {
                         return WasmiInvokeResult::error(
                             InvokeErrorCode::kValidationFailure,
@@ -165,18 +168,6 @@ pub extern "C" fn wasmi_invoke(
             return x;
         }
     };
-
-    /* if method_name == core::ptr::null() {
-        return WasmiInvokeResult::error(InvokeErrorCode::kDeterministic);
-    }
-
-    let method_name_slice =
-        unsafe { slice::from_raw_parts(method_name, method_name_len as usize) };
-
-    let string = match std::str::from_utf8(&method_name_slice) {
-        Ok(v) => v,
-        _ => return WasmiInvokeResult::error(InvokeErrorCode::kDeterministic),
-    }; */
 
     let r = unsafe { &mut *runtime };
 

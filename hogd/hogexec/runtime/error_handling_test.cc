@@ -49,6 +49,12 @@ exit_call(HostCallContext * /*unused*/)
   return {HostFnErrorCode::kExit, 10};
 }
 
+HostFnResult
+return_call(HostCallContext * /*unused*/)
+{
+  return {HostFnErrorCode::kReturn, 10};
+}
+
 // Wasmi doesn't necessarily insert a "consume gas" instruction into its
 // internal bytecode at the end of a call instruction. So if a host function
 // uses all gas, it has to return kOutOfGas.
@@ -122,6 +128,19 @@ TEST_F(WasmiErrorHandlingTest, ExitHandling)
 
   EXPECT_TRUE(res.result_);
   EXPECT_EQ(*res.result_, 10);
+}
+
+TEST_F(WasmiErrorHandlingTest, ReturnHandling)
+{
+  context_.link_fn("test", "external_call", &return_call);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
+
+  ASSERT_TRUE(runtime_);
+
+  auto res = runtime_->invoke("call1", UINT64_MAX);
+
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 0);
 }
 
 TEST_F(WasmiErrorHandlingTest, HostError)

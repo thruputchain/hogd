@@ -68,7 +68,7 @@ syscalls:
       - name: "buffer"
         span_argument: yes
     outputs:
-    returns: yes
+    returns:  no
     syscall_return_type: "HostFnResult"
     number: 6
   - name: "GetReturnedBuffer"
