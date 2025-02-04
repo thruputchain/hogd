@@ -69,6 +69,7 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
 
 std::pair<HostFnResult, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
+                     GasAmount remaining_gas,
                      const ContractAddress &input_address,
                      const MethodID input_method,
                      const GasAmount input_gas_limit,
@@ -84,13 +85,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(Invocation(input_address, input_method,
                                         input_gas_limit, calldata),
-                             input_flags);
+                             remaining_gas, input_flags);
 
-  if (syscall_handler.current_runtime_is_revert_poisoned()) {
-    return {{HostFnErrorCode::kExit,
-             static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)},
-            0};
-  }
   if (invoke_res) {
     return {{HostFnErrorCode::kNoneOrRecoverable,
              static_cast<int32_t>(*invoke_res)},
@@ -107,13 +103,6 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_buffer)
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {{HostFnErrorCode::kExit,
-             std::to_underlying(SyscallErrorCode::kDeterministicWasm)},
-            0};
-  }
-
-  // guard against calling Return twice in one invocation
-  if (syscall_handler.has_frame_return_been_set()) {
     return {{HostFnErrorCode::kExit,
              std::to_underlying(SyscallErrorCode::kDeterministicWasm)},
             0};

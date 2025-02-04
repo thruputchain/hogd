@@ -1,6 +1,15 @@
+#include <cstddef>
+#include <format>
+#include <iterator>
 #include <map>
 #include <print>
 #include <ranges>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <variant>
 
 #include "x23/cleanup.h"
 #include "x23c/defs.h"
@@ -15,6 +24,8 @@ struct GenRs {
   std::size_t indent_{};
   vector<string> namespaces_;
   vector<string> scopes_;
+
+  bool needs_alloc_ = false;
 
   constexpr static int INDENT_WIDTH = 4;
 
@@ -423,10 +434,12 @@ GenRs::type_name(const Declaration &d, bool generate)
   case kScalar:
     return tname;
   case kPtr:
+    needs_alloc_ = true;
     return std::format("alloc::boxed::Box<{}>", tname);
   case kArray:
     return std::format("[{}; {}]", tname, d.bound);
   case kVec:
+    needs_alloc_ = true;
     if (tname == "string"s)
       return std::format("alloc::boxed::Box<[u8]>");// ignoring bounds, for now : map_bound(d.bound));
     return std::format("alloc::boxed::Box<[{}]>", tname); // Ignoring bounds, for nowmap_bound(d.bound));
@@ -439,14 +452,20 @@ string
 gen_rs(vector<Definition> *defs)
 {
   GenRs gs;
-  gs.prtop(R"(// -*-Rust-*-
+  std::string preamble = R"(// -*-Rust-*-
 // Generated Code: DO NOT CHECK IN
 
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
-)");
+)";
+
   gs.process(*defs);
-  return gs.top_ + R"(
+
+  if (gs.needs_alloc_) {
+    preamble += "\nextern crate alloc;\n";
+  }
+
+  return preamble + gs.top_ + R"(
 //
 // XDR internals below this point
 //

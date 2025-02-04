@@ -14,7 +14,6 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
-#include "hogd/hogexec/runtime/runtime_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
@@ -25,19 +24,13 @@
 
 namespace hogd {
 
-InvocationFrame::InvocationFrame(Invocation invocation,
-                                 RuntimeCacheEntry *visited_entry,
-                                 InvocationFlagSet flags)
+InvocationFrame::InvocationFrame(Invocation invocation, InvocationFlagSet flags)
   : active_invocation_(std::move(invocation)), flags_(flags)
-{
-  visited_runtimes_.insert(visited_entry);
-}
+{}
 
 void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &frame)
 {
-  visited_runtimes_.insert(frame.visited_runtimes_.begin(),
-                           frame.visited_runtimes_.end());
 
   child_return_buffer_ = frame.to_return_;
   logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
@@ -74,26 +67,14 @@ InvocationFrame::log(std::span<const std::byte> message)
 void
 InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
 {
-  assert(!return_buffer_set_);
   to_return_ = std::move(return_buffer);
-  return_buffer_set_ = true;
-}
-
-void
-InvocationFrame::poison_visited_runtimes()
-{
-  for (auto *runtime : visited_runtimes_) {
-    // TODO(geoff) metadata allowing revert_safe declarations
-    runtime->revert_poisoned_ = true;
-  }
 }
 
 void
 InvocationFrameStack::start_frame(Invocation const &invocation,
-                                  RuntimeCacheEntry *visited_entry,
                                   InvocationFlagSet flags)
 {
-  frame_stack_.emplace_back(invocation, visited_entry, flags);
+  frame_stack_.emplace_back(invocation, flags);
 }
 
 bool
@@ -120,7 +101,6 @@ InvocationFrameStack::revert_frame()
 {
   assert(!frame_stack_.empty());
 
-  frame_stack_.back().poison_visited_runtimes();
   frame_stack_.pop_back();
 
   if (!frame_stack_.empty()) {

@@ -5,7 +5,6 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
-#include "hogd/hogexec/runtime/runtime_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_item.hh"
@@ -58,7 +57,8 @@ public:
   // Create and run a child call frame.
   // Should be called from within a syscall.
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-  invoke(Invocation const &invocation, InvocationFlagSet flags);
+  invoke(Invocation const &invocation, GasAmount remaining_gas,
+         InvocationFlagSet flags);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -121,7 +121,6 @@ public:
 private:
   WasmiContext wasmi_context_;
   const SignedTransaction signed_tx_;
-  RuntimeCache runtimes_;
   InvocationFrameStack invocation_frame_stack_;
   ExecutionModeData execution_mode_data_;
 
@@ -143,21 +142,13 @@ private:
   // that address in the current context (i.e. if a contract is deployed there
   // in the snapshot, or by a prior action of the current transaction that was
   // not rolled back by a revert).
-  RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
+  std::optional<WasmiRuntime> resolve_runtime(ContractAddress const &addr);
   // deployed hash for first arg, true for second arg if it was deployed in the
   // current transaction
   std::pair<std::optional<SHA256Hash>, bool>
   lookup_deployed_contract_hash(ContractAddress const &addr);
   std::shared_ptr<const Contract>
   lookup_contract_by_hash(SHA256Hash const &hash);
-
-  // Get the amount of gas available to a child invoke call.
-  // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left.
-  // Otherwise, checks the current runtime's available gas,
-  // and returns an error if it has insufficient gas to supply
-  // the requested amount.
-  SyscallStatus<GasAmount>
-  get_invoke_gas_limit(GasAmount call_specified_gas_limit);
 
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the

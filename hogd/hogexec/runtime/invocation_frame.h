@@ -6,7 +6,6 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -37,8 +36,7 @@ public:
   // Set to nullopt on failed calls, or before any child call happens.
   std::optional<ReturnBuffer> child_return_buffer_ = std::nullopt;
 
-  InvocationFrame(Invocation invocation, RuntimeCacheEntry *visited_entry,
-                  InvocationFlagSet flags);
+  InvocationFrame(Invocation invocation, InvocationFlagSet flags);
 
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &frame);
@@ -47,7 +45,6 @@ public:
 
   // set the value returned from the current call frame.
   void set_frame_return(ReturnBuffer &&return_buffer);
-  bool has_frame_return_been_set() const { return return_buffer_set_; }
 
   // add a log message to the output of the transaction, associated with the
   // current call frame.
@@ -59,8 +56,6 @@ public:
   {
     return std::move(new_contract_deployments_);
   }
-
-  void poison_visited_runtimes();
 
   // returned pointer is invalidated by any call to add_item_view
   ItemView *get_item_view(AddressAndKey const &addrkey);
@@ -76,15 +71,8 @@ public:
 private:
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
-  bool return_buffer_set_ = false;
 
   std::vector<LogEntry> logs_;
-
-  // The set of all runtimes visited by the current call frame
-  // and _successful_ children. Failed calls poison the set of visited
-  // runtimes, unless the runtime is marked UNWIND_SAFE (not this PR) Failed
-  // call frames immediately poison their set of visited runtimes.
-  std::unordered_set<RuntimeCacheEntry *> visited_runtimes_;
 
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
 
@@ -108,8 +96,7 @@ public:
   }
   bool empty() const { return frame_stack_.empty(); }
 
-  void start_frame(Invocation const &invocation,
-                   RuntimeCacheEntry *visited_entry, InvocationFlagSet flags);
+  void start_frame(Invocation const &invocation, InvocationFlagSet flags);
   [[nodiscard]] InvokeResult
   finish_frame(InvokeResult const &result,
                ExecutionModeData &execution_mode_data);

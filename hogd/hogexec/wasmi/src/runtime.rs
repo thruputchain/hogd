@@ -4,6 +4,7 @@ use wasmi::{Instance, Module, Store, Val};
 
 use crate::context::WasmiContext;
 use crate::external_call;
+use crate::ffi;
 use crate::ffi_enums::InvokeErrorCode;
 use crate::invoke_result::WasmiInvokeResult;
 
@@ -158,7 +159,14 @@ pub extern "C" fn wasmi_invoke(
 
     assert_runtime_not_null(runtime);
 
-    if method_name == core::ptr::null() {
+    let string = match ffi::str_from_c_str(&method_name, method_name_len) {
+        Ok(s) => s,
+        Err(x) => {
+            return x;
+        }
+    };
+
+    /* if method_name == core::ptr::null() {
         return WasmiInvokeResult::error(InvokeErrorCode::kDeterministic);
     }
 
@@ -168,7 +176,7 @@ pub extern "C" fn wasmi_invoke(
     let string = match std::str::from_utf8(&method_name_slice) {
         Ok(v) => v,
         _ => return WasmiInvokeResult::error(InvokeErrorCode::kDeterministic),
-    };
+    }; */
 
     let r = unsafe { &mut *runtime };
 

@@ -7,6 +7,8 @@ pub mod ffi_enums;
 pub mod invoke_result;
 pub mod runtime;
 
+mod ffi;
+
 use crate::runtime::WasmiRuntime;
 
 #[repr(C)]

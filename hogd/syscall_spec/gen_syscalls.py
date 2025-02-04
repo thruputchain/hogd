@@ -337,24 +337,28 @@ def gen_inner_outer(syscall):
 
   syscall_handler_ref = "/*syscall_handler*/"
 
+  needs_gas_decl = "GasAmount /*unused*/,"
+  if "needs_gas" in syscall and syscall["needs_gas"]:
+    needs_gas_decl = "GasAmount remaining_gas,"
+    call_arg_strs = ["remaining_gas"] + call_arg_strs
+    inner_arg_decl_strs = ["GasAmount remaining_gas"] + inner_arg_decl_strs
+
   if syscall["needs_context"]:
     call_arg_strs = ["syscall_handler"] + call_arg_strs
     inner_arg_decl_strs = ["SystemCallHandler& syscall_handler"] + inner_arg_decl_strs
     syscall_handler_ref="syscall_handler"
 
-  inner_args = ", ".join(call_arg_strs)
-  inner_arg_decls = ", ".join(inner_arg_decl_strs);
-
   contract_mem = "contract_memory"
   if len(user_args) == 0:
     contract_mem = "/*contract_memory*/"
 
-
-
+  inner_args = ", ".join(call_arg_strs)
+  inner_arg_decls = ", ".join(inner_arg_decl_strs);
 
   outer= f"""std::pair<HostFnResult, GasAmount>
 syscall_{name}_outer(SystemCallHandler& {syscall_handler_ref},
                      std::span<std::byte> {contract_mem},
+                     {needs_gas_decl}
                      uint64_t {user_args[0]}, 
                      uint64_t {user_args[1]},
                      uint64_t {user_args[2]}, 
@@ -369,11 +373,11 @@ syscall_{name}_outer(SystemCallHandler& {syscall_handler_ref},
 }}
 """
   inner = f"""std::pair<{inner_return_type}, GasAmount>
-syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
+syscall_{name}_inner({inner_arg_decls});
 
 """
   frame = f"""std::pair<{inner_return_type}, GasAmount>
-syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls})
+syscall_{name}_inner({inner_arg_decls})
 {{
   throw std::runtime_error("unimplemented");
 }}
@@ -486,7 +490,7 @@ convert_return_t(T const& value) {{
 {syscall_outers}
 
 using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
-    SystemCallHandler&, std::span<std::byte>, {", ".join(["uint64_t"] * (syscall_argcount))});
+    SystemCallHandler&, std::span<std::byte>, GasAmount, {", ".join(["uint64_t"] * (syscall_argcount))});
 
 {syscall_table}
 
@@ -508,12 +512,14 @@ syscall_entry_inner(HostCallContext *call_context, {syscall_uint64_arg_decls_str
   assert(syscall_expect == static_cast<SyscallNo>(arg0));
 
   std::span<std::byte> contract_memory = call_context->runtime->get_memory();
+  GasAmount remaining_gas = call_context->runtime->get_available_gas();
 
   assert(call_context -> syscall_handler);
 
   return syscall_fn_outer(
     *call_context->syscall_handler, 
     contract_memory, 
+    remaining_gas,
     {syscall_uint64_args_nozero_str});
 }}
 

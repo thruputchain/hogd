@@ -41,6 +41,7 @@ syscalls:
     number: 4
   - name: "Invoke"
     needs_context : yes
+    needs_gas: yes
     inputs:
       - name: "address"
         typename: "ContractAddress"

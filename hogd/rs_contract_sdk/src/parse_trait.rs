@@ -377,12 +377,8 @@ impl OutputReturnable for &[u8] {
 impl<T: OutputReturnable> OutputReturnable for Result<T, i32> {
     fn return_self(&self) -> Result<(), i32> {
         match self {
-            Ok(x) => {
-                x.return_self()
-            }
-            Err(code) => {
-                Err(*code)
-            }
+            Ok(x) => x.return_self(),
+            Err(code) => Err(*code),
         }
     }
 }
@@ -390,12 +386,8 @@ impl<T: OutputReturnable> OutputReturnable for Result<T, i32> {
 impl<T: OutputReturnable> OutputReturnable for Option<T> {
     fn return_self(&self) -> Result<(), i32> {
         match self {
-            Some(x) => {
-                x.return_self()
-            }
-            None => {
-                Err(-1)
-            }
+            Some(x) => x.return_self(),
+            None => Err(-1),
         }
     }
 }
