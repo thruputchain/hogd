@@ -26,4 +26,5 @@ add_executable(
 target_link_libraries(
   hogdb
   hogdb_core
+  coord_core
 )

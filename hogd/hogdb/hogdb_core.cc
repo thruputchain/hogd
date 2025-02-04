@@ -1,9 +1,11 @@
 #include "hogd/hogdb/hogdb_core.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -89,6 +91,15 @@ HogdbCore::announce_to_coordinator(std::string const &coordinator_address,
       .database_to_exec_port = {exec_server_port_.c_str(),
                                 exec_server_port_.size()},
   })();
+}
+
+void
+HogdbCore::await_shutdown()
+{
+  std::mutex mtx;
+  std::unique_lock lock(mtx);
+  std::condition_variable cv;
+  cv.wait(lock, [] { return false; });
 }
 
 } // namespace hogd

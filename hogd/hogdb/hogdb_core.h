@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "hogd/hogdb/db/in_memory_database.h"
 #include "hogd/hogdb/interface/block_manager.h"
 #include "hogd/hogdb/interface/db_to_coord_server.h"
@@ -30,6 +32,9 @@ public:
 
   // Needs to be exposed at least for test setup
   auto &get_root_db() { return root_db_; }
+
+  // TODO(geoff) shutdown code
+  static void await_shutdown();
 
 private:
   x23::ThreadPool pool_;

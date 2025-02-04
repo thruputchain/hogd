@@ -4,14 +4,18 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <condition_variable>
-#include <functional>
+#include <exception>
 #include <future>
 #include <mutex>
 #include <queue>
+#include <stop_token>
 #include <thread>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/unique_function.h"

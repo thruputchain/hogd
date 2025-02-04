@@ -21,7 +21,8 @@ usage(int err = STDERR_FILENO)
              "Usage: {} \n"
              "-s --exec_server_port <port>\n"
              "-c --coord_server_address <address>\n"
-             "-p --coord_server_port <port>\n",
+             "-p --coord_server_port <port>\n"
+             "-n --nthreads <num>\n",
              progname);
   exit(err);
 }
@@ -54,7 +55,7 @@ hogexec_main(int argc, char **argv)
 
   int long_index = 0;
   int opt;
-  const char *shortopts = "hs:c:p:";
+  const char *shortopts = "hs:c:p:n:";
 
   // parameters
   std::string exec_server_port;
