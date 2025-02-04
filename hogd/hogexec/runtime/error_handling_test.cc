@@ -126,7 +126,7 @@ TEST_F(WasmiErrorHandlingTest, ExitHandling)
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(res.result_);
+  ASSERT_TRUE(res.result_);
   EXPECT_EQ(*res.result_, 10);
 }
 
@@ -139,7 +139,7 @@ TEST_F(WasmiErrorHandlingTest, ReturnHandling)
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(res.result_);
+  ASSERT_TRUE(res.result_);
   EXPECT_EQ(*res.result_, 0);
 }
 

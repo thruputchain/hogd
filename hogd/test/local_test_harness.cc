@@ -13,7 +13,7 @@ namespace hogd ::test {
 LocalTestHarness::LocalTestHarness()
   : db_core_(1, db_to_executor_port_, db_to_coord_port_),
     exec_core_(
-        std::make_unique<PoolAndCoroPoll>(1), exec_to_coord_port_,
+        std::make_unique<PoolAndCoroPoll>(1), 1, exec_to_coord_port_,
         ExecutorInitialization{
             .database_info =
                 DatabaseInfo{

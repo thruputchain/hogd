@@ -39,11 +39,15 @@ ExecutorRpcInterface::propose_transaction(BlockID block_id,
 
   SystemCallHandler syscall_handler(signed_tx, ctx->snapshot_cache_, proxy,
                                     std::nullopt);
-  auto invoke_res = co_await pool->async(
-      [](SystemCallHandler *handler) -> InvokeResult {
-        return handler->root_invoke();
-      },
-      &syscall_handler);
+
+  auto [async, cb] = x23::make_async<InvokeResult>();
+
+  main_worker_pool_.submit([&syscall_handler, &cb] -> void {
+    auto res = syscall_handler.root_invoke();
+    cb(res);
+  });
+
+  auto invoke_res = co_await async;
 
   if (!invoke_res.is_root_success()) {
     co_await proxy.abort_transaction();
@@ -79,11 +83,15 @@ ExecutorRpcInterface::validate_transaction(
 
   SystemCallHandler syscall_handler(proposed_tx.signed_tx, ctx->snapshot_cache_,
                                     proxy, proposed_tx.proposal_data);
-  auto invoke_res = co_await pool->async(
-      [](SystemCallHandler *handler) -> InvokeResult {
-        return handler->root_invoke();
-      },
-      &syscall_handler);
+
+  auto [async, cb] = x23::make_async<InvokeResult>();
+
+  main_worker_pool_.submit([&syscall_handler, &cb] -> void {
+    auto res = syscall_handler.root_invoke();
+    cb(res);
+  });
+
+  auto invoke_res = co_await async;
 
   if (!invoke_res.is_root_success()) {
     co_await proxy.abort_transaction();

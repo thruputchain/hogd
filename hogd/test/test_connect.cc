@@ -41,8 +41,8 @@ TEST(TestConnect, Basic)
   });
 
   std::thread exec_thread([&] {
-    HogexecCore exec_core = start_hogexec(1, k_exec_to_coord_port, "localhost",
-                                          k_coord_announce_port);
+    HogexecCore exec_core = start_hogexec(1, 1, k_exec_to_coord_port,
+                                          "localhost", k_coord_announce_port);
     exec_core.announce_ready_to_coord("localhost", k_coord_announce_port);
     std::unique_lock lk(mtx);
     executor_connected = true;

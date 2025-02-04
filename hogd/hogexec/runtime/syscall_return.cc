@@ -71,11 +71,7 @@ syscall_GetReturnedBufferLen_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnResult, GasAmount>
 syscall_Exit_inner(const int32_t input_code)
 {
-  int32_t guarded_code = input_code;
-  if (guarded_code > 0) {
-    guarded_code = std::to_underlying(SyscallErrorCode::kDeterministicWasm);
-  }
-  return {{HostFnErrorCode::kExit, guarded_code}, 0};
+  return {{HostFnErrorCode::kExit, input_code}, 0};
 }
 
 } // namespace hogd

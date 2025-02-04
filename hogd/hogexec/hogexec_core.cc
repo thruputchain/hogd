@@ -23,11 +23,11 @@
 namespace hogd {
 
 HogexecCore::HogexecCore(std::unique_ptr<PoolAndCoroPoll> pool_cp,
-                         std::string const &coord_server_port,
+                         int nworkthreads, std::string const &coord_server_port,
                          ExecutorInitialization const &init_params)
-  : pool_cp_(std::move(pool_cp)),
+  : pool_cp_(std::move(pool_cp)), worker_pool_(nworkthreads),
     db_proxy_(pool_cp_->cp_, init_params.database_info),
-    exec_to_coord_server_(init_params.executor_id, db_proxy_),
+    exec_to_coord_server_(init_params.executor_id, worker_pool_, db_proxy_),
     exec_to_coord_server_port_(coord_server_port)
 {
 
@@ -80,11 +80,12 @@ HogexecCore::await_shutdown()
 }
 
 HogexecCore
-start_hogexec(int nthreads, std::string const &exec_to_coord_server_port,
+start_hogexec(int ncorothreads, int nworkthreads,
+              std::string const &exec_to_coord_server_port,
               std::string const &coord_address,
               std::string const &coord_allocate_port)
 {
-  auto pool_cp = std::make_unique<PoolAndCoroPoll>(nthreads);
+  auto pool_cp = std::make_unique<PoolAndCoroPoll>(ncorothreads);
   auto coord_client =
       connect_to_coord_allocate_service(pool_cp->cp_, coord_address,
                                         coord_allocate_port);
@@ -109,8 +110,8 @@ start_hogexec(int nthreads, std::string const &exec_to_coord_server_port,
 
     assert(init_params.status() == CoordinatorAllocateStatus::kReady);
 
-    return HogexecCore(std::move(pool_cp), exec_to_coord_server_port,
-                       init_params.executor_init());
+    return HogexecCore(std::move(pool_cp), nworkthreads,
+                       exec_to_coord_server_port, init_params.executor_init());
   }
 }
 

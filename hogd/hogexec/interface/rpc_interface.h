@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "rpc.hh"
@@ -17,9 +18,10 @@ class ExecutorRpcInterface {
 public:
   using rpc_service = ExecutorInterfaceV1;
 
-  ExecutorRpcInterface(uint16_t self_executor_id, DatabaseProxy &db_proxy)
-    : self_executor_id_(self_executor_id), db_proxy_(db_proxy),
-      executor_states_(db_proxy)
+  ExecutorRpcInterface(uint16_t self_executor_id, WorkerPool &main_worker_pool,
+                       DatabaseProxy &db_proxy)
+    : self_executor_id_(self_executor_id), main_worker_pool_(main_worker_pool),
+      db_proxy_(db_proxy), executor_states_(db_proxy)
   {}
 
   // Disable copy and move
@@ -48,6 +50,7 @@ private:
   std::atomic<uint64_t> self_id_ = 0;
   const uint16_t self_executor_id_;
 
+  WorkerPool &main_worker_pool_;
   DatabaseProxy &db_proxy_;
   ExecutorStateManager executor_states_;
 };

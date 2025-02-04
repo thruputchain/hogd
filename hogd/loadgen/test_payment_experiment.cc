@@ -48,8 +48,8 @@ protected:
       cv_.wait(lk, [&] { return test_done_; });
     });
     exec_thread_ = std::thread([&] {
-      HogexecCore exec_core = start_hogexec(1, exec_to_coord_port_, "localhost",
-                                            coord_announce_port_);
+      HogexecCore exec_core = start_hogexec(1, 1, exec_to_coord_port_,
+                                            "localhost", coord_announce_port_);
       exec_core.announce_ready_to_coord("localhost", coord_announce_port_);
 
       std::unique_lock lk(mtx_);

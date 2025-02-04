@@ -99,7 +99,7 @@ hogexec_main(int argc, char **argv)
   }
 
   HogexecCore core =
-      start_hogexec(nthreads, exec_server_port, coord_address, coord_port);
+      start_hogexec(nthreads, 1, exec_server_port, coord_address, coord_port);
 
   core.announce_ready_to_coord(coord_address, coord_port);
   core.await_shutdown();
