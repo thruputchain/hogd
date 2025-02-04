@@ -12,6 +12,10 @@ mod implementation;
 #[cfg(not(feature = "interface"))]
 use implementation::*;
 
+//#[cfg(not(feature="interface"))]
+//#[no_mangle]
+//pub extern mut __stack_pointer: u32 = 0;
+
 public_interface!();
 
 #[public_method(static_calldata_length = 32, static_return_length = 0)]

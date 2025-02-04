@@ -79,6 +79,7 @@ public:
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.
   void set_return_buffer(ReturnBuffer &&returned_buffer);
+  bool has_frame_return_been_set() const;
 
   SyscallStatus<void> log(std::span<const std::byte> message);
 

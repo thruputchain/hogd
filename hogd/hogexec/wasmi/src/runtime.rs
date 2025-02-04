@@ -128,10 +128,6 @@ impl WasmiRuntime {
                             InvokeErrorCode::kOutOfGas,
                         );
                     }
-                    external_call::TrampolineErrorEnum::Return => {
-                        // Return no error code if successful return
-                        return WasmiInvokeResult::success(0);
-                    }
                     external_call::TrampolineErrorEnum::Exit { code } => {
                         return WasmiInvokeResult::success(code);
                     }

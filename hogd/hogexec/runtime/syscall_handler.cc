@@ -224,6 +224,13 @@ SystemCallHandler::get_return_buffer() const
              : SyscallError{SyscallErrorCode::kNoReturnBufferAvailable};
 }
 
+bool
+SystemCallHandler::has_frame_return_been_set() const
+{
+  assert(!invocation_frame_stack_.empty());
+  return invocation_frame_stack_.get_active_frame().has_frame_return_been_set();
+}
+
 void
 SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
 {

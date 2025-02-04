@@ -345,6 +345,7 @@ pub fn public_method(attr: TokenStream, item: TokenStream) -> TokenStream {
             >(&calldata, #function_name);
 
             result.return_self();
+            return 0;
         }
 
         #[cfg(not(feature = "interface"))]

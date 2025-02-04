@@ -99,13 +99,24 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   return {{invoke_res.error().code(), 0}, gas_amount};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+// The earlier version of Return immediately exiting the wasm
+// causes UB under repeated (nominally successful) invocations.
+// Destructors aren't called, __stack_pointer isn't reset, etc.
+std::pair<HostFnResult, GasAmount>
 syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_buffer)
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {HostFnError{HostFnErrorCode::kExit},
-            static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)};
+    return {{HostFnErrorCode::kExit,
+             std::to_underlying(SyscallErrorCode::kDeterministicWasm)},
+            0};
+  }
+
+  // guard against calling Return twice in one invocation
+  if (syscall_handler.has_frame_return_been_set()) {
+    return {{HostFnErrorCode::kExit,
+             std::to_underlying(SyscallErrorCode::kDeterministicWasm)},
+            0};
   }
 
   ReturnBuffer buffer;
@@ -115,7 +126,9 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
               input_buffer.size());
   syscall_handler.set_return_buffer(std::move(buffer));
 
-  return {HostFnError{HostFnErrorCode::kReturn}, 0};
+  return {{HostFnErrorCode::kNoneOrRecoverable,
+           std::to_underlying(SyscallErrorCode::kNone)},
+          0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -151,7 +164,11 @@ syscall_GetReturnedBufferLen_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnResult, GasAmount>
 syscall_Exit_inner(const int32_t input_code)
 {
-  return {{HostFnErrorCode::kExit, input_code}, 0};
+  int32_t guarded_code = input_code;
+  if (guarded_code > 0) {
+    guarded_code = std::to_underlying(SyscallErrorCode::kDeterministicWasm);
+  }
+  return {{HostFnErrorCode::kExit, guarded_code}, 0};
 }
 
 } // namespace hogd

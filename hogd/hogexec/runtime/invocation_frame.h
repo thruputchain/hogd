@@ -47,6 +47,7 @@ public:
 
   // set the value returned from the current call frame.
   void set_frame_return(ReturnBuffer &&return_buffer);
+  bool has_frame_return_been_set() const { return return_buffer_set_; }
 
   // add a log message to the output of the transaction, associated with the
   // current call frame.
@@ -75,6 +76,7 @@ public:
 private:
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
+  bool return_buffer_set_ = false;
 
   std::vector<LogEntry> logs_;
 

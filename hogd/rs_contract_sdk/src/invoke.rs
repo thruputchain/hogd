@@ -42,10 +42,6 @@ pub fn GetCalldata_Sized<const N: usize>() -> Result<[u8; N], i32> {
     Ok(calldata)
 }
 
-pub fn Return(return_buf: &[u8]) -> ! {
-    syscall_bindings::raw_Return(return_buf);
-}
-
 pub fn Exit(code: i32) -> ! {
     syscall_bindings::raw_Exit(code);
 }

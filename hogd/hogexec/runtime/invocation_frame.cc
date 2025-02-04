@@ -74,7 +74,9 @@ InvocationFrame::log(std::span<const std::byte> message)
 void
 InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
 {
+  assert(!return_buffer_set_);
   to_return_ = std::move(return_buffer);
+  return_buffer_set_ = true;
 }
 
 void
