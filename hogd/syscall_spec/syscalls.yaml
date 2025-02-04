@@ -291,10 +291,10 @@ errors:
 
     # errors within a wasm contract
   - name: "CalldataParseError"
-    number: 100
+    number: -100
     doc: "Error parsing calldata"
   - name: "ReturnParseError"
-    number: 101
+    number: -101
     doc: "Error parsing return value"
 
     # those that cause call frames to revert

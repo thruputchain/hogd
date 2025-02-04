@@ -56,7 +56,7 @@ trait SizedSerializable {
 // This does not immediately terminate the function.
 // Should be called at the end of an invocation.
 pub trait OutputReturnable {
-    fn return_self(&self) -> ();
+    fn return_self(&self) -> Result<(), i32>;
 }
 
 #[cfg(feature = "alloc")]
@@ -110,8 +110,8 @@ macro_rules! impl_generic_int {
         }
 
         impl OutputReturnable for $t {
-            fn return_self(&self) -> () {
-                crate::syscall_bindings::raw_Return(&<$t>::to_le_bytes(*self)).unwrap();
+            fn return_self(&self) -> Result<(), i32> {
+                crate::syscall_bindings::raw_Return(&<$t>::to_le_bytes(*self))
             }
         }
 
@@ -363,38 +363,38 @@ impl<
 }
 
 impl OutputReturnable for () {
-    fn return_self(&self) -> () {
-        crate::syscall_bindings::raw_Return(&[]).unwrap();
+    fn return_self(&self) -> Result<(), i32> {
+        crate::syscall_bindings::raw_Return(&[])
     }
 }
 
 impl OutputReturnable for &[u8] {
-    fn return_self(&self) -> () {
-        crate::syscall_bindings::raw_Return(self).unwrap();
+    fn return_self(&self) -> Result<(), i32> {
+        crate::syscall_bindings::raw_Return(self)
     }
 }
 
 impl<T: OutputReturnable> OutputReturnable for Result<T, i32> {
-    fn return_self(&self) -> () {
+    fn return_self(&self) -> Result<(), i32> {
         match self {
             Ok(x) => {
-                x.return_self();
+                x.return_self()
             }
             Err(code) => {
-                Exit(*code);
+                Err(*code)
             }
         }
     }
 }
 
 impl<T: OutputReturnable> OutputReturnable for Option<T> {
-    fn return_self(&self) -> () {
+    fn return_self(&self) -> Result<(), i32> {
         match self {
             Some(x) => {
-                x.return_self();
+                x.return_self()
             }
             None => {
-                Exit(-1);
+                Err(-1)
             }
         }
     }
