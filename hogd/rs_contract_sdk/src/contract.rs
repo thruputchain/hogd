@@ -1,46 +1,53 @@
-#![allow(non_snake_case)]
+//! A wrapper around a storage object that only
+//! needs to be stored once, upon contract initialization.
+//! (Objects with references, such as `Vec` and `Map`,
+//! may allow manipulating sub-objects without re-storing
+//! the root object.)
 
-use crate::syscall_bindings::{uninit_DeployContract, uninit_GetDeployAddress};
-use core::mem::MaybeUninit;
-use rs_xdr::{ContractAddress, SHA256Hash};
+use crate::types::StorageKey;
+use crate::io::{Serialize, Deserialize};
+use crate::storage::{load, store};
+use core::cell::OnceCell;
+use core::fmt::Debug;
 
-pub fn GetDeployAddress(
-    nonce: &SHA256Hash,
-    contract_hash: &SHA256Hash,
-) -> Result<ContractAddress, i32> {
-    let mut out_addr: MaybeUninit<ContractAddress> =
-        MaybeUninit::<ContractAddress>::uninit();
+// Maybe todo: A version of this type where the storage key is referenced or boxed,
+// to save copying it onto the stack.
 
-    uninit_GetDeployAddress(None, nonce, contract_hash, &mut out_addr)?;
-
-    Ok(unsafe { out_addr.assume_init() })
+#[derive(Debug)]
+pub struct ContractWithStorage<S> {
+    #[allow(unused)]
+    key: StorageKey,
+    storage: OnceCell<S>,
 }
 
-pub fn GetDeployAddressForOther(
-    other_address: &ContractAddress,
-    nonce: &SHA256Hash,
-    contract_hash: &SHA256Hash,
-) -> Result<ContractAddress, i32> {
-    let mut out_addr: MaybeUninit<ContractAddress> =
-        MaybeUninit::<ContractAddress>::uninit();
+impl<S> ContractWithStorage<S>
+    where S: Debug + Serialize + Deserialize
+{
+    pub fn new(key: &StorageKey) -> Self {
+        let storage = OnceCell::new();
+        let key = key.clone();
+        Self { key, storage }
+    }
 
-    uninit_GetDeployAddress(
-        Some(other_address),
-        nonce,
-        contract_hash,
-        &mut out_addr,
-    )?;
+    pub fn storage_key(&self) -> &StorageKey {
+        &self.key
+    }
 
-    Ok(unsafe { out_addr.assume_init() })
-}
+    /// Retrieve the storage value, getting it from contract
+    /// storage if necessary.  Panic if `set_storage` was not
+    /// called first.
+    pub fn storage(&self) -> &S {
+        self.storage.get().unwrap_or_else(|| {
+            let s = load(&self.key).expect("Failed to load contract data");
+            self.storage.set(s).expect("Storage may only be requested after `set_storage()` is called");
+            self.storage.get().unwrap()
+        })
+    }
 
-pub fn DeployContract(
-    nonce: &SHA256Hash,
-    contract_hash: &SHA256Hash,
-) -> Result<ContractAddress, i32> {
-    let mut out_addr: MaybeUninit<ContractAddress> =
-        MaybeUninit::<ContractAddress>::uninit();
-    uninit_DeployContract(nonce, contract_hash, &mut out_addr)?;
-
-    Ok(unsafe { out_addr.assume_init() })
+    /// Set the storage value.
+    pub fn set_storage(&self, storage: S) {
+        self.storage.set(storage).expect("Can't re-install storage");
+        let storage = self.storage.get().unwrap();
+        store(&self.key, storage).expect("Failed to store contract data");
+    }
 }

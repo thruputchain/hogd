@@ -1,27 +1,26 @@
 #![allow(non_snake_case)]
 
-use crate::syscall_bindings;
-
+use crate::sys;
+use crate::types::{ContractAddress, RuntimeMemoryLength, SHA256Hash};
 use core::mem::MaybeUninit;
-use rs_xdr::{ContractAddress, RuntimeMemoryLength, SHA256Hash};
 
 pub fn GetMsgSender() -> Result<ContractAddress, i32> {
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
-    syscall_bindings::uninit_GetMsgSender(&mut out_addr)?;
+    sys::uninit_GetMsgSender(&mut out_addr)?;
     Ok(unsafe { out_addr.assume_init() })
 }
 
 pub fn GetCurrentAddress() -> Result<ContractAddress, i32> {
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
-    syscall_bindings::uninit_GetCurrentAddress(&mut out_addr)?;
+    sys::uninit_GetCurrentAddress(&mut out_addr)?;
     Ok(unsafe { out_addr.assume_init() })
 }
 
 pub fn GetCalldataLen() -> Result<RuntimeMemoryLength, i32> {
     let mut out: RuntimeMemoryLength = 0;
-    syscall_bindings::raw_GetCalldataLen(&mut out)?;
+    sys::raw_GetCalldataLen(&mut out)?;
     Ok(out)
 }
 
@@ -30,11 +29,10 @@ pub fn GetCalldata_Sized<const N: usize>() -> Result<[u8; N], i32> {
 
     let mut calldata_len: RuntimeMemoryLength = 0;
 
-    syscall_bindings::uninit_GetCalldata(&mut calldata_mu, &mut calldata_len)?;
+    sys::uninit_GetCalldata(&mut calldata_mu, &mut calldata_len)?;
 
     if calldata_len != N as u32 {
-        // TODO: what does error handling look like here?
-        crate::rt::trap();
+        panic!("Unexpected calldata size");
     }
 
     let calldata: [u8; N] =
@@ -42,12 +40,16 @@ pub fn GetCalldata_Sized<const N: usize>() -> Result<[u8; N], i32> {
     Ok(calldata)
 }
 
+pub fn Return(buf: &[u8]) -> ! {
+    sys::raw_Return(buf);
+}
+
 pub fn Exit(code: i32) -> ! {
-    syscall_bindings::raw_Exit(code);
+    sys::raw_Exit(code);
 }
 
 pub fn Revert() -> ! {
-    syscall_bindings::raw_Exit(
+    sys::raw_Exit(
         rs_xdr::SyscallErrorCode::kDeterministicWasm as i32,
     );
 }
@@ -55,11 +57,11 @@ pub fn Revert() -> ! {
 pub fn GetSourceTransactionHash() -> Result<SHA256Hash, i32> {
     let mut out_hash: MaybeUninit<SHA256Hash> =
         MaybeUninit::<SHA256Hash>::uninit();
-    syscall_bindings::uninit_GetSourceTransactionHash(&mut out_hash)?;
+    sys::uninit_GetSourceTransactionHash(&mut out_hash)?;
     Ok(unsafe { out_hash.assume_init() })
 }
 
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "alloc", feature = "std"))]
 mod get_calldata_alloc {
 
     use rs_xdr::RuntimeMemoryLength;
@@ -67,8 +69,7 @@ mod get_calldata_alloc {
     extern crate alloc;
     use alloc::boxed::Box;
 
-    use crate::rt::trap;
-    use crate::syscall_bindings;
+    use crate::sys;
 
     pub fn GetCalldata() -> Result<Box<[u8]>, i32> {
         let len: RuntimeMemoryLength = crate::invoke::GetCalldataLen()?;
@@ -77,10 +78,10 @@ mod get_calldata_alloc {
 
         let mut written_len: RuntimeMemoryLength = 0;
 
-        syscall_bindings::uninit_GetCalldata(&mut vec, &mut written_len)?;
+        sys::uninit_GetCalldata(&mut vec, &mut written_len)?;
 
         if written_len != len {
-            trap();
+            panic!("Unexpected calldata size");
         }
 
         Ok(unsafe { vec.assume_init() })
@@ -88,21 +89,125 @@ mod get_calldata_alloc {
 
     pub fn GetReturnedBuffer() -> Result<Box<[u8]>, i32> {
         let mut expected_len: RuntimeMemoryLength = 0;
-        syscall_bindings::raw_GetReturnedBufferLen(&mut expected_len)?;
+        sys::raw_GetReturnedBufferLen(&mut expected_len)?;
 
         let mut vec = Box::<[u8]>::new_uninit_slice(expected_len as usize);
 
         let mut written_len: RuntimeMemoryLength = 0;
 
-        syscall_bindings::uninit_GetReturnedBuffer(&mut vec, &mut written_len)?;
+        sys::uninit_GetReturnedBuffer(&mut vec, &mut written_len)?;
 
         if written_len != expected_len {
-            trap();
+            panic!("Unexpected return buffer size");
         }
 
         Ok(unsafe { vec.assume_init() })
     }
 }
 
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "alloc", feature = "std"))]
 pub use get_calldata_alloc::*;
+
+#[cfg(any(feature = "alloc", feature = "std"))]
+mod handle {
+
+    use serde::Serialize;
+    use serde::de::DeserializeOwned;
+    use bcs;
+
+    use super::{GetCalldata, Return};
+    use crate::types::SyscallErrorCode;
+
+    // Run a handler function on the invocation arguments
+    // available in serialized form via `GetCalldata`,
+    // and serialize the result for passing to `Return`.
+    pub fn handle_call<F, ARGS, RES>(f: F) -> i32
+        where F: FnOnce(ARGS) -> RES,
+              ARGS: DeserializeOwned,
+              RES: Serialize
+    {
+        let call_data = match GetCalldata() {
+            Ok(x) => x,
+            Err(e) => return e, // SyscallErrorCode::kCalldataParseError
+        };
+        let args: ARGS = match bcs::from_bytes(&call_data) {
+            Ok(args) => args,
+            Err(_) => return SyscallErrorCode::kCalldataParseError as i32
+        };
+        let result: RES = f(args);
+        let result_bytes = match bcs::to_bytes(&result) {
+            Ok(bytes) => bytes,
+            Err(_) => return SyscallErrorCode::kCalldataParseError as i32
+        };
+        Return(result_bytes.as_slice());
+    }
+}
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use handle::handle_call;
+
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub mod cross_call {
+    use crate::types::{ContractAddress, RuntimeMemoryLength};
+    use crate::sys;
+    use alloc::vec::Vec;
+    use serde::Serialize;
+    use serde::de::DeserializeOwned;
+    use bcs;
+
+    pub fn invoke<ARGS, RET>(
+        address: &ContractAddress,
+        method: u32,
+        gas_limit: u64,
+        args: &ARGS) -> RET
+        where ARGS: Serialize, RET: DeserializeOwned
+    {
+        // Encode the args
+        let call_data = bcs::to_bytes(args)
+            .expect("Couldn't serialize call data");
+
+        // Invoke the method
+        let return_buf =
+            invoke_inner(address, method, gas_limit, call_data.as_slice());
+
+        // Deserialize the buffer into a return value ...
+        let return_buf = &return_buf.as_slice();
+        let return_value = bcs::from_bytes(return_buf)
+            .expect("Couldn't deserialize return value");
+
+        return_value
+    }
+
+    fn invoke_inner(
+        address: &ContractAddress,
+        method: u32,
+        gas_limit: u64,
+        call_data: &[u8],
+        ) -> Vec<u8>
+    {
+        // Perform the cross-contract call
+
+        sys::raw_Invoke(
+            address,
+            method,
+            gas_limit,
+            call_data,
+        ).expect("Contract invocation failed");
+
+        // Retrieve the return-value buffer
+
+        let mut return_len = 0;
+        sys::raw_GetReturnedBufferLen(&mut return_len)
+            .expect("Couldn't get returned buffer len");
+
+        let mut return_buf = Vec::with_capacity(return_len as usize);
+        let mut written: RuntimeMemoryLength = 0;
+        sys::raw_GetReturnedBuffer(return_buf.as_mut_slice(), &mut written)
+            .expect("Couldn't get returned buffer");
+
+        if written != return_len {
+            panic!("Unexpected return buffer length");
+        }
+
+        return_buf
+    }
+}

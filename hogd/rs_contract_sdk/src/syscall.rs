@@ -1,5 +1,7 @@
 use rs_xdr::SyscallNo;
 
+pub type SysErr = i32;
+
 #[link(wasm_import_module = "marmot")]
 extern "C" {
     pub(crate) fn syscall(
@@ -10,7 +12,7 @@ extern "C" {
         arg4: u64,
         arg5: u64,
         arg6: u64,
-    ) -> i32;
+    ) -> SysErr;
 }
 
 pub fn syscall_wrapper(
@@ -21,7 +23,7 @@ pub fn syscall_wrapper(
     arg4: u64,
     arg5: u64,
     arg6: u64,
-) -> i32 {
+) -> SysErr {
     unsafe { syscall(syscall_no as u64, arg1, arg2, arg3, arg4, arg5, arg6) }
 }
 

@@ -1,3 +1,5 @@
+cargo-features = ["trim-paths"]
+
 [workspace]
 resolver = "2"
 
@@ -7,6 +9,7 @@ members = [
     "test_bytestring",
     "genesis_deployer",
     "erc20",
+    "caller",
     "simple_wallet",
     "rcq_test",
 ]
@@ -14,9 +17,12 @@ members = [
 [profile.dev]
 opt-level = "z"
 overflow-checks = false
-debug = 0
+debug = false
 strip = "debuginfo"
 panic = "abort"
+
+[profile.test]
+# settings inherited from profile.dev
 
 [profile.release]
 opt-level = 3
@@ -27,4 +33,4 @@ debug-assertions = false
 panic = "abort"
 lto = true
 codegen-units = 1
-
+trim-paths = "all"  # unstable

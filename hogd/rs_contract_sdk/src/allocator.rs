@@ -67,7 +67,7 @@ impl BumpPointerLocal {
     fn alloc_slow_inline(&mut self, bytes: usize, align: usize) -> *mut u8 {
         let pages = (bytes + Self::PAGE_SIZE - 1) / Self::PAGE_SIZE;
         if core::arch::wasm32::memory_grow(Self::MEM, pages) == usize::MAX {
-            crate::rt::trap();
+            panic!("Out of memory");
         }
         self.limit = unsafe { self.limit.add(pages * Self::PAGE_SIZE) };
         self.alloc(bytes, align)

@@ -13,3 +13,6 @@
 [submodule "external/crc32c"]
 	path = external/crc32c
 	url = https://github.com/google/crc32c.git
+[submodule "hogd/rs_contract_sdk/external/bcs"]
+	path = hogd/rs_contract_sdk/external/bcs
+	url = git@github.com:groundhogchain/bcs.git

@@ -1,0 +1,18 @@
+[package]
+name = "caller"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/" }
+erc20 = { path = "../erc20", default-features = false, features = ["client", "alloc"] }
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["guest", "alloc"]
+client = []
+guest = []
+alloc = ["sdk/alloc"]
+std = ["sdk/std"]

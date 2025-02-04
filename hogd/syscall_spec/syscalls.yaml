@@ -207,6 +207,7 @@ syscalls:
         typename: "StorageKey"
     outputs:
     number: 18
+<<<<<<< HEAD
   - name: "VerifySignature"
     needs_context: no
     inputs:
@@ -254,6 +255,19 @@ syscalls:
         typename: "RuntimeMemoryLength"
         primitive_type: yes
     number: 22
+=======
+  - name: "HasKey"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+      - name: "status"
+        typename: "StorageObjectType"
+        rust_typename: "i32"
+        primitive_type: yes
+    number: 19
+>>>>>>> 3d259c1 (rework sdk)
 
 errors:
   - name: "None"
