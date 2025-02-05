@@ -203,21 +203,18 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
     return out;
   }
 
+  // We don't want to hold the lock on the bucket while waiting for the rpc
+
   // cache positive and negative lookups
   auto db_res = db_proxy_.get_item(block_id_, addrkey);
   std::unique_ptr<StorageSnapshotCacheEntry> entry =
       db_res ? std::make_unique<StorageSnapshotCacheEntry>(*db_res, db_proxy_,
                                                            block_id_, addrkey)
              : nullptr;
-  auto const *out = entry.get();
-  auto emplace_res =
-      snapshot_item_cache_.emplace(key, addrkey, std::move(entry));
-  if (emplace_res) {
-    return out;
-  }
-  auto const *cached = get_cached_storage_item_map_entry(key);
-  assert(cached);
-  return cached;
+
+  return snapshot_item_cache_.emplace_and_modify(
+      key, [](auto const &v) { return v.entry_.get(); }, addrkey,
+      std::move(entry));
 }
 
 NondeterministicReadCacheEntry &

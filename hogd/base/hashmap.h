@@ -125,6 +125,21 @@ public:
     }
   }
 
+  template<typename Func,
+           typename Ret = std::invoke_result_t<std::decay_t<Func>, T &>,
+           typename... Args>
+  requires std::is_invocable_r_v<Ret, Func, T &>
+  auto emplace_and_modify(key_t key, Func &&lambda, Args &&...args)
+  {
+    auto [lk, bucket] = acquire_bucket(key);
+
+    if (T *ptr = find_element(key, *bucket)) {
+      return lambda(*ptr);
+    }
+    bucket->emplace_back(std::forward<Args>(args)...);
+    return lambda(bucket->back());
+  }
+
   // In most use cases (i.e. in storage view use case), this function is applied
   // to all elements when there's already a guarantee that the map is not being
   // modified.  But it does not particularly hurt to acquire the mutex.
