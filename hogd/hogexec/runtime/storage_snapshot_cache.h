@@ -183,6 +183,14 @@ private:
     AddressAndKey addrkey_;
     std::unique_ptr<NondeterministicReadCacheEntry> entry_;
 
+    NondeterministicReadCacheMapEntry(AddressAndKey const &addrkey,
+                                      DatabaseProxy &db_proxy, BlockID block_id)
+      : addrkey_(addrkey),
+        entry_(std::make_unique<NondeterministicReadCacheEntry>(db_proxy,
+                                                                block_id,
+                                                                addrkey))
+    {}
+
     static_assert(std::is_trivially_copyable_v<AddressAndKey>);
     static std::span<const std::byte> get_key(AddressAndKey const &addrkey)
     {

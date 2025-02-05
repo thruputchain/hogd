@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -180,19 +181,9 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 
   // cache positive and negative lookups
   auto db_res = db_proxy_.get_contract(block_id_, hash);
-  auto emplace_res = contract_cache_.emplace(key, hash, db_res);
 
-  if (!emplace_res) {
-    // Not strictly necessary, for now, as the caller could keep the shared_ptr
-    // alive as long as necessary. However, not every wasm engine makes the same
-    // requirements on keeping alive the contract memory, and this guarantees
-    // that the returned memory will be alive for the entirety of the block.
-    auto out = get_cached_contract_map_entry(key);
-    assert(out);
-    return out;
-  }
-
-  return db_res;
+  return contract_cache_.emplace_and_modify(
+      key, [](auto const &v) { return v.contract_; }, hash, db_res);
 }
 
 const StorageSnapshotCacheEntry *
@@ -222,28 +213,10 @@ StorageSnapshotCache::get_nondeterministic_read_cache_entry(
     AddressAndKey const &addrkey)
 {
   auto key = NondeterministicReadCacheMapEntry::get_key(addrkey);
-  if (auto res = nondeterministic_read_cache_.modify_element(key, [](auto &v) {
-        return v.entry_.get();
-      })) {
-    return **res;
-  }
 
-  std::unique_ptr<NondeterministicReadCacheEntry> entry =
-      std::make_unique<NondeterministicReadCacheEntry>(db_proxy_, block_id_,
-                                                       addrkey);
-  auto *out = entry.get();
-
-  auto emplace_res =
-      nondeterministic_read_cache_.emplace(key, addrkey, std::move(entry));
-  if (emplace_res) {
-    return *out;
-  }
-
-  auto res = nondeterministic_read_cache_.modify_element(key, [](auto &v) {
-    return v.entry_.get();
-  });
-  assert(res);
-  return **res;
+  return *nondeterministic_read_cache_.emplace_and_modify(
+      key, [](auto &v) { return v.entry_.get(); }, addrkey, db_proxy_,
+      block_id_);
 }
 
 } // namespace hogd
