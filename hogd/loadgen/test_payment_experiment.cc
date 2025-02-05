@@ -6,6 +6,7 @@
 #include <string>
 #include <thread>
 
+#include "hogd/base/types.h"
 #include "hogd/coord/coord_block_manager.h"
 #include "hogd/coord/coord_core.h"
 #include "hogd/crypto/crypto.h"
@@ -98,6 +99,15 @@ TEST_F(PaymentExperimentTest, Basic)
   for (auto const &block : init_blocks) {
     SHA256Hash block_hash = sha256(parent_hash);
     auto res = coord_->validate_block(parent_hash, block, block_hash)();
+    ASSERT_TRUE(res);
+    parent_hash = block_hash;
+  }
+
+  for (size_t i = 0; i < 10; i++) {
+    SHA256Hash block_hash = sha256(parent_hash);
+
+    auto vec = experiment.make_random_pairwise_payments(100);
+    auto res = coord_->validate_block(parent_hash, vec, block_hash)();
     ASSERT_TRUE(res);
     parent_hash = block_hash;
   }

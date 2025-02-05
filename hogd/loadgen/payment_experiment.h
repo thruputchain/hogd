@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <random>
 #include <vector>
 
 #include "contract.hh"
@@ -19,6 +20,10 @@ public:
 
   std::vector<std::vector<ProposedTransaction>>
   produce_initialization_transactions();
+
+  // Does not validate whether balances are sufficient.
+  std::vector<ProposedTransaction>
+  make_random_pairwise_payments(uint32_t count);
 
 private:
   struct Account {
@@ -45,6 +50,12 @@ private:
 
   ProposedTransaction make_mint_transaction(int128_t amount,
                                             Account const &to) const;
+
+  static ProposedTransaction make_pairwise_payment(Account const &from,
+                                                   Account const &to,
+                                                   int128_t amount);
+
+  std::minstd_rand gen_;
 
   SHA256Hash wallet_contract_hash_;
   SHA256Hash erc20_contract_hash_;

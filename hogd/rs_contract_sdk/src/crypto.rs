@@ -21,11 +21,19 @@ pub fn VerifySignature(
     signature: &rs_xdr::Signature,
     message: &[u8],
 ) -> Result<(), i32> {
-    uninit_VerifySignature(
-        pk.scheme() as u64,
-        to_offset(pk) as u64,
-        signature.scheme() as u64,
-        to_offset(signature) as u64,
-        message,
-    )
+    match (pk, signature) {
+        (
+            ::rs_xdr::PublicKey::Ed25519 { ed25519: pk_local },
+            ::rs_xdr::Signature::Ed25519 { ed25519: sig_local },
+        ) => {
+            return uninit_VerifySignature(
+                signature.scheme() as u64,
+                to_offset(sig_local) as u64,
+                pk.scheme() as u64,
+                to_offset(pk_local) as u64,
+                message,
+            );
+        }
+        _ => Err(::rs_xdr::SyscallErrorCode::kInvalidInput as i32),
+    }
 }

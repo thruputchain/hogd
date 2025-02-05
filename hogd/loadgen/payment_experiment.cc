@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <random>
 #include <vector>
 
 #include "contract.hh"
@@ -10,6 +11,7 @@
 #include "hogd/shared_util/load_contracts.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -35,7 +37,7 @@ compute_deploy_address(uint32_t account_index, SHA256Hash const &contract_hash)
 } // namespace
 
 PaymentExperiment::PaymentExperiment(uint32_t num_accounts)
-  : num_accounts_(num_accounts)
+  : gen_(0), num_accounts_(num_accounts)
 {
   auto [wallet_hash, wallet_contract] =
       load_built_rs_contract("simple_wallet.wasm");
@@ -59,6 +61,7 @@ PaymentExperiment::generate_accounts()
     auto [public_key, secret_key] = deterministic_keypair(i);
     ContractAddress wallet_address =
         compute_deploy_address(i, wallet_contract_hash_);
+    std::printf("wallet addr %u %s\n", i, x23::show(wallet_address).c_str());
     accounts_.emplace(i, Account{.account_index_ = i,
                                  .wallet_address_ = wallet_address,
                                  .public_key_ = public_key,
@@ -171,6 +174,46 @@ PaymentExperiment::Account::make_check_balance_transaction(
                              .method = compute_sdk_name("test_expect_balance"),
                              .gas_limit = UINT64_MAX,
                              .calldata = make_calldata(amount)}}}};
+}
+
+ProposedTransaction
+PaymentExperiment::make_pairwise_payment(Account const &from, Account const &to,
+                                         int128_t amount)
+{
+
+  auto message =
+      make_calldata(from.wallet_address_, to.wallet_address_, amount);
+
+  Ed25519Signature signature = ed25519_sign(from.secret_key_, message);
+
+  return ProposedTransaction{
+      .signed_tx = SignedTransaction{
+          .tx = Transaction{
+              .invocation =
+                  Invocation{.invoked_address = from.wallet_address_,
+                             .method = compute_sdk_name("send_payment"),
+                             .gas_limit = UINT64_MAX,
+                             .calldata = make_calldata(to.wallet_address_,
+                                                       amount, signature)}}}};
+}
+
+// Does not validate whether balances are sufficient.
+std::vector<ProposedTransaction>
+PaymentExperiment::make_random_pairwise_payments(uint32_t count)
+{
+  std::vector<ProposedTransaction> out;
+  out.reserve(count);
+  std::uniform_int_distribution<> account_dist(0, accounts_.size() - 1);
+  for (size_t i = 0; i < count; i++) {
+    uint32_t sender = account_dist(gen_) + 1;
+    uint32_t receiver = sender;
+    while (sender == receiver) {
+      receiver = account_dist(gen_) + 1;
+    }
+    out.emplace_back(
+        make_pairwise_payment(accounts_.at(sender), accounts_.at(receiver), 1));
+  }
+  return out;
 }
 
 } // namespace hogd

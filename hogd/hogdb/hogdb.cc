@@ -8,6 +8,7 @@
 
 #include "hogd/hogdb/hogdb_core.h"
 #include "hogd/init.h"
+#include "rpc_types.hh"
 
 namespace hogd {
 
@@ -63,10 +64,10 @@ hogdb_main(int argc, char **argv)
   const char *shortopts = "he:c:a:p:n:";
 
   // parameters
-  std::string to_coord_server_port;
-  std::string to_exec_server_port;
-  std::string coord_address;
-  std::string coord_port;
+  std::string to_coord_server_port = std::to_string(kDBToCoordPortNum);
+  std::string to_exec_server_port = std::to_string(kDBToExecutorPortNum);
+  std::string coord_address = "localhost";
+  std::string coord_port = std::to_string(kCoordAnnouncePortNum);
 
   unsigned int nthreads = 1;
 

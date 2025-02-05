@@ -7,14 +7,16 @@
 #include <array>
 #include <cassert>
 #include <span>
+#include <utility>
 
-#include "x23/serialize.h"
-#include "x23/x23.h"
 #include <crc32c/crc32c.h>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "types.hh"
+#include "x23/serialize.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -122,6 +124,17 @@ deterministic_keypair(uint64_t nonce)
                                              secret_key.data(), seed);
   assert(res == 0);
   return std::make_pair(public_key, secret_key);
+}
+
+inline Ed25519Signature
+ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
+{
+  Ed25519Signature out;
+  [[maybe_unused]]
+  auto res = crypto_sign_ed25519_detached(out.data(), nullptr, msg.data(),
+                                          msg.size(), sk.data());
+  assert(res == 0);
+  return out;
 }
 
 // crc32c calculates the CRC32C of buf.

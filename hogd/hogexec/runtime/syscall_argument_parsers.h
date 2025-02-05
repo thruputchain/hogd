@@ -1,9 +1,12 @@
 #pragma once
 
+#include <cstddef>
 #include <optional>
+#include <span>
 #include <type_traits>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/types.h"
 #include "types.hh"
 
 // Provides a set of tools to check that arguments provided by the

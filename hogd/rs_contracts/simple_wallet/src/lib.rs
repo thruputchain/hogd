@@ -78,15 +78,16 @@ pub fn test_expect_balance(expect: i128) {
 pub fn compute_auth_message(
     to_addr: &sdk::ContractAddress,
     amount: i128,
-) -> [u8; 96] {
+) -> [u8; 80] {
     // TODO(geoff) this will eventually need a nonce and a domain separator(?)
-    let mut bytes_mu = [MaybeUninit::<u8>::uninit(); 96];
+    let mut bytes_mu = [MaybeUninit::<u8>::uninit(); 80];
     let self_addr = sdk::GetCurrentAddress().unwrap();
     (&self_addr, to_addr, amount)
         .do_serialize(&mut bytes_mu)
         .unwrap();
 
-    let bytes: [u8; 96] = unsafe { core::mem::transmute(bytes_mu) };
+    let bytes: [u8; 80] = unsafe { core::mem::transmute(bytes_mu) };
+
     bytes
 }
 

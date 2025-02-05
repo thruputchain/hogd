@@ -8,6 +8,7 @@
 
 #include "hogd/hogexec/hogexec_core.h"
 #include "hogd/init.h"
+#include "rpc_types.hh"
 
 namespace hogd {
 
@@ -22,7 +23,8 @@ usage(int err = STDERR_FILENO)
              "-s --exec_server_port <port>\n"
              "-c --coord_server_address <address>\n"
              "-p --coord_server_port <port>\n"
-             "-n --nthreads <num>\n",
+             "-n --ncorothreads <num>\n"
+             "-m --nworkthreads <num\n",
              progname);
   exit(err);
 }
@@ -47,22 +49,27 @@ hogexec_main(int argc, char **argv)
        .has_arg = required_argument,
        .flag = nullptr,
        .val = 'p'},
-      {.name = "nthreads",
+      {.name = "ncorothreads",
        .has_arg = required_argument,
        .flag = nullptr,
        .val = 'n'},
+      {.name = "nworkthreads",
+       .has_arg = required_argument,
+       .flag = nullptr,
+       .val = 'm'},
       {.name = nullptr, .has_arg = 0, .flag = nullptr, .val = 0}};
 
   int long_index = 0;
   int opt;
-  const char *shortopts = "hs:c:p:n:";
+  const char *shortopts = "hs:c:p:n:m:";
 
   // parameters
-  std::string exec_server_port;
-  std::string coord_address;
-  std::string coord_port;
+  std::string exec_server_port = std::to_string(kExecToCoordPortNum);
+  std::string coord_address = "localhost";
+  std::string coord_port = std::to_string(kCoordAnnouncePortNum);
 
   unsigned int nthreads = 1;
+  unsigned int nworkthreads = 1;
 
   // NOLINTNEXTLINE(misc-include-cleaner)
   while ((opt = getopt_long(argc, argv, shortopts, long_options,
@@ -87,6 +94,10 @@ hogexec_main(int argc, char **argv)
       // NOLINTNEXTLINE(misc-include-cleaner)
       nthreads = atoi(optarg);
       break;
+    case 'm':
+      // NOLINTNEXTLINE(misc-include-cleaner)
+      nworkthreads = atoi(optarg);
+      break;
     default:
       usage(0);
       return EXIT_FAILURE;
@@ -98,8 +109,8 @@ hogexec_main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  HogexecCore core =
-      start_hogexec(nthreads, 1, exec_server_port, coord_address, coord_port);
+  HogexecCore core = start_hogexec(nthreads, nworkthreads, exec_server_port,
+                                   coord_address, coord_port);
 
   core.announce_ready_to_coord(coord_address, coord_port);
   core.await_shutdown();
