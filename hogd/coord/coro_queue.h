@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <functional>
+#include <print>
 #include <vector>
 
 #include "hogd/base/types.h"

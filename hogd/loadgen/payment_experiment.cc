@@ -11,7 +11,6 @@
 #include "hogd/shared_util/load_contracts.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/format.h"
 
 namespace hogd {
 
