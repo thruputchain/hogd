@@ -1,6 +1,6 @@
 check:
 	cargo +nightly check \
-		--features "std" \
+		--features "std,alloc" \
 		--target-dir "../../build/rs_contracts" \
 
 clean:

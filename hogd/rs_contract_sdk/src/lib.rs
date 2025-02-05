@@ -1,6 +1,9 @@
-#![cfg_attr(not(feature = "std"), no_std)]
+#![no_std]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_array_assume_init)]
+
+#[cfg(feature = "std")]
+extern crate std;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 extern crate alloc;

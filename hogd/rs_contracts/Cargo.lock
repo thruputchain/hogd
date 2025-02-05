@@ -67,6 +67,7 @@ name = "erc20"
 version = "0.1.0"
 dependencies = [
  "rs_contract_sdk",
+ "serde",
 ]
 
 [[package]]

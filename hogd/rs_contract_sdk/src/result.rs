@@ -1,5 +1,6 @@
 use crate::syscall::SysErr;
 use thiserror::Error;
+use bcs::Error as SerializationError;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -20,6 +21,9 @@ pub enum Error {
 
     #[error("Initialization guard failed")]
     InitGuardFailure,
+
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] SerializationError),
 }
 
 impl From<SysErr> for Error {

@@ -1,13 +1,14 @@
 use crate::types::StorageKey;
-use crate::BytestringSet;
+use crate::{
+    BytestringGet,
+    BytestringSet,
+    NonnegativeIntGet,
+};
 use crate::crypto::{SHA256, SHA256Hash};
 use crate::result::{Error, Result, with_context};
-use crate::io::{Read, Write, Cursor, Serialize, Deserialize, deserialize};
 use crate::sys;
-
-// Size of temporary buffers on the stack
-// XXX: replace with static or allocated buffers
-const TMP_SZ: usize = 1000;
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use bcs;
 
 // ------------------ Hash ------------------
 
@@ -27,34 +28,24 @@ impl<T> Hash for T
     where T: Serialize
 {
     fn hash(&self) -> Result<Hash256> {
-        let mut cur = Cursor::new([0; TMP_SZ]);
-        self.serialize(&mut cur)
-            .map_err(with_context("Serialize failed"))?;
-        let pos = cur.position();
-        let buf = cur.into_inner();
-        SHA256(&buf[0..pos])
-            .map_err(From::from)
-            .map_err(with_context("SHA256 failed"))
+        let buf = bcs::to_bytes(&self)?;
+        let hash = SHA256(&buf)?;
+        Ok(hash)
     }
 }
 
 // ------------------- Storage -----------------
 
 pub fn store<V: Serialize>(k: &StorageKey, v: &V) -> Result<()> {
-    let mut cur = Cursor::new([0; TMP_SZ]);
-    v.serialize(&mut cur)?;
-    let pos = cur.position();
-    let buf = cur.into_inner();
-    BytestringSet(k, &buf[0..pos]).map_err(From::from)
+    let buf = bcs::to_bytes(v)?;
+    BytestringSet(k, buf.as_slice())?;
+    Ok(())
 }
 
-pub fn load<V: Deserialize>(k: &StorageKey) -> Result<V> {
-    let mut buf = [0; TMP_SZ];
-    let mut len = TMP_SZ as u32;
-    sys::raw_BytestringGet(&k, &mut buf, &mut len)?;
-
-    let mut cur = Cursor::new(&buf[0..len as usize]);
-    deserialize(&mut cur)
+pub fn load<V: DeserializeOwned>(k: &StorageKey) -> Result<V> {
+    let buf = BytestringGet(k)?;
+    let v = bcs::from_bytes(&*buf)?;
+    Ok(v)
 }
 
 // -------------------- AsKey / FromKey -----------------------
@@ -63,30 +54,13 @@ pub trait AsKey {
     fn as_key(&self) -> &StorageKey;
 }
 
-impl<T> Serialize for T
-    where T: AsKey
-{
-    fn serialize<W: Write>(&self, writer: &mut W) -> Result<()> {
-        self.as_key().serialize(writer)
-    }
-}
-
 pub trait FromKey {
     fn from_key(_: StorageKey) -> Self;
 }
 
-impl<T> Deserialize for T
-    where T: FromKey
-{
-    fn deserialize<R: Read>(reader: &mut R) -> Result<Self> {
-        let key = StorageKey::deserialize(reader)?;
-        Ok(Self::from_key(key))
-    }
-}
-
 // ------------------------- NNInt -----------------------
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct NNInt {
     key: StorageKey
 }
@@ -94,14 +68,8 @@ pub struct NNInt {
 impl NNInt
 {
     pub fn get_both(&self) -> Result<(i128, i128)> {
-        let mut set_result: i128 = 0;
-        let mut add_result: i128 = 0;
-        sys::raw_NonnegativeIntGet(
-            &self.key,
-            &mut set_result,
-            &mut add_result,
-        ).map_err(<Error as From<i32>>::from)?;
-        Ok((set_result, add_result))
+        NonnegativeIntGet(&self.key)
+            .map_err(<Error as From<i32>>::from)
     }
 
     pub fn get(&self) -> Result<i128> {
@@ -136,7 +104,7 @@ impl FromKey for NNInt {
 
 // ------------------- Map ---------------------
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Map<K, V> {
     container_key: StorageKey,
     phantom: core::marker::PhantomData<(K, V)>
@@ -160,7 +128,7 @@ impl<K, V> FromKey for Map<K, V> {
 impl<K, V> Map<K, V>
 {
     pub fn get(&self, entry_key: &K) -> Result<V>
-        where K: Serialize, V: Deserialize
+        where K: Serialize, V: DeserializeOwned
     {
         let value_key: StorageKey = try_item_key(&self.container_key, entry_key)?;
         load(&value_key)

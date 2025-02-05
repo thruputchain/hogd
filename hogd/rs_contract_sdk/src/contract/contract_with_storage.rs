@@ -5,23 +5,22 @@
 //! the root object.)
 
 use crate::types::StorageKey;
-use crate::io::{Serialize, Deserialize};
 use crate::storage::{load, store};
 use core::cell::OnceCell;
 use core::fmt::Debug;
+use serde::{Serialize, de::DeserializeOwned};
 
 // Maybe todo: A version of this type where the storage key is referenced or boxed,
 // to save copying it onto the stack.
 
 #[derive(Debug)]
 pub struct ContractWithStorage<S> {
-    #[allow(unused)]
     key: StorageKey,
     storage: OnceCell<S>,
 }
 
 impl<S> ContractWithStorage<S>
-    where S: Debug + Serialize + Deserialize
+    where S: Debug + Serialize + DeserializeOwned
 {
     pub fn new(key: &StorageKey) -> Self {
         let storage = OnceCell::new();
