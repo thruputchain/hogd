@@ -121,6 +121,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcq_test"
+version = "0.1.0"
+dependencies = [
+ "rs_contract_sdk",
+]
+
+[[package]]
 name = "rs_contract_sdk"
 version = "0.0.1"
 dependencies = [

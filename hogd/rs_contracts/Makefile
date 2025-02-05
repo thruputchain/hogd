@@ -1,12 +1,12 @@
 rs_contracts : \
 	erc20.wasm \
 	caller.wasm \
-	genesis_deployer.wasm
+	genesis_deployer.wasm \
+	rcq_test.wasm
 
 # To be upgraded to new sdk:
 #	test_bytestring.wasm \
 #	simple_wallet.wasm \
-#	rcq_test.wasm
 
 %.wasm : Makefile $(wildcard $</src/*.rs)
 	cargo +nightly rustc \
