@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <string_view>
+
 #include <x23/err.h>
 #include <x23/fileio.h>
 
@@ -50,6 +52,9 @@ struct HostPort {
   HostPort(const sockaddr_storage &ss)
     : host(show_ipaddr(ss)), port(uformat("{}", get_port(ss)))
   {}
+  HostPort(const sockaddr *sa)
+    : HostPort(*reinterpret_cast<const sockaddr_storage *>(sa))
+  {}
 
   // Parse a joined HostPort, returns false if it fails to parse.
   bool parse(std::string_view s);
@@ -65,3 +70,12 @@ struct HostPort {
 };
 
 } // namespace x23
+
+template<>
+struct std::formatter<x23::HostPort> : std::formatter<std::string_view> {
+  using super = std::formatter<std::string_view>;
+  auto format(const x23::HostPort &hp, auto &ctx) const
+  {
+    return super::format(hp.show(), ctx);
+  }
+};
