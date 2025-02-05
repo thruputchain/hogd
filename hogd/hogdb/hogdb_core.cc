@@ -36,8 +36,6 @@ HogdbCore::HogdbCore(int nthreads, std::string const &exec_server_port,
     db_to_exec_server_(block_manager_), db_to_coord_server_(block_manager_),
     exec_server_port_(exec_server_port), coord_server_port_(coord_server_port)
 {
-  x23::RpcLogger::default_logfd = 2;
-
   auto lfd = x23::tcplisten(atoi(exec_server_port.c_str()));
   if (!lfd) {
     perror("listen");

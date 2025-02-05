@@ -1,4 +1,6 @@
 #![allow(non_snake_case)]
+#![allow(unreachable_patterns)]
+
 
 use crate::syscall::to_offset;
 use crate::syscall_bindings::uninit_SHA256;

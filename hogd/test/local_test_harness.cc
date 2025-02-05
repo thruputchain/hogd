@@ -23,7 +23,6 @@ LocalTestHarness::LocalTestHarness()
                     .database_to_exec_port = {db_to_executor_port_.c_str(),
                                               db_to_executor_port_.size()}}}),
     pool_(1), cp_(pool_), db_client_([this] {
-      x23::RpcLogger::default_logfd = 2;
 
       auto fd = cp_.tcpconnect("localhost", db_to_coord_port_)();
       if (!fd) {

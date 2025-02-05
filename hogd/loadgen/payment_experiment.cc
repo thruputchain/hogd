@@ -61,7 +61,6 @@ PaymentExperiment::generate_accounts()
     auto [public_key, secret_key] = deterministic_keypair(i);
     ContractAddress wallet_address =
         compute_deploy_address(i, wallet_contract_hash_);
-    std::printf("wallet addr %u %s\n", i, x23::show(wallet_address).c_str());
     accounts_.emplace(i, Account{.account_index_ = i,
                                  .wallet_address_ = wallet_address,
                                  .public_key_ = public_key,
