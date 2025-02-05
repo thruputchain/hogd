@@ -84,7 +84,7 @@ private:
 
   std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueSnapshotCacheEntry>
       entry_;
-  AddressAndKey addrkey_;
+  const AddressAndKey addrkey_;
 };
 
 // Note: the elements of the nondeterministic concurrent read cache
@@ -191,6 +191,11 @@ private:
     }
     std::span<const std::byte> get_key() const { return get_key(addrkey_); }
   };
+
+  std::shared_ptr<const Contract>
+  get_cached_contract_map_entry(std::span<const std::byte> key);
+  const StorageSnapshotCacheEntry *
+  get_cached_storage_item_map_entry(std::span<const std::byte> key);
 
   // Note: the contract_cache_ does not strictly need to be reset (although it
   // is not incorrect to reset it) after every block.

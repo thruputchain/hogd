@@ -14,7 +14,6 @@
 #include "transaction.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -31,9 +30,6 @@ ExecutorRpcInterface::propose_transaction(BlockID block_id,
   // ctx is guaranteed to be a valid pointer until release_run_lease() is called
 
   x23::Defer d([&] { ctx->state_.release_run_lease(); });
-
-  auto *pool = x23::ThreadPool::get_thread_pool();
-  assert(pool);
 
   PerTransactionDatabaseProxy proxy(block_id, allocate_tx_id(), db_proxy_);
 
@@ -76,8 +72,6 @@ ExecutorRpcInterface::validate_transaction(
   // at this point, we have a run lease for ctx, so
   // ctx is guaranteed to be a valid pointer until release_run_lease() is called
   x23::Defer d([&] { ctx->state_.release_run_lease(); });
-  auto *pool = x23::ThreadPool::get_thread_pool();
-  assert(pool);
 
   PerTransactionDatabaseProxy proxy(block_id, allocate_tx_id(), db_proxy_);
 
@@ -138,12 +132,15 @@ x23::Async<void>
 ExecutorRpcInterface::signal_shutdown()
 {
   executor_states_.initiate_shutdown();
+  shutdown_flag_ = true;
+  shutdown_flag_.notify_one();
   co_return;
 }
 
 void
 ExecutorRpcInterface::await_shutdown()
 {
+  shutdown_flag_.wait(false);
   executor_states_.await_all_pending_blocks();
 }
 

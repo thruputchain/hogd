@@ -25,21 +25,26 @@ ExecutorQueue::enqueue_validation_request(BlockID block_id,
 {
   co_await open_validation_block(block_id);
 
-  co_await queue_.enqueue([this, frame, block_id]() -> x23::Async<void> {
-    while (!frame->all_txs_queried() && !frame->validation_failed()) {
-      auto const *tx = frame->get_next_validation_transaction();
-      if (!tx) {
-        break;
-      }
+  auto res =
+      co_await queue_.enqueue([this, frame, block_id]() -> x23::Async<void> {
+        while (!frame->all_txs_queried() && !frame->validation_failed()) {
+          auto const *tx = frame->get_next_validation_transaction();
+          if (!tx) {
+            break;
+          }
 
-      auto res = co_await client_.validate_transaction(block_id, *tx);
-      if (res != RPCError::kNone) {
-        frame->mark_validation_failed();
-        break;
-      }
-    }
-    co_return;
-  });
+          auto res = co_await client_.validate_transaction(block_id, *tx);
+          if (res != RPCError::kNone) {
+            frame->mark_validation_failed();
+            break;
+          }
+        }
+        co_return;
+      });
+  if (!res) {
+    throw std::runtime_error(
+        "Failed to enqueue work in coord! (TODO(geoff): handle gracefully)");
+  }
 
   co_await client_.finish_block(block_id);
 }

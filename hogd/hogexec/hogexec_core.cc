@@ -55,7 +55,9 @@ HogexecCore::make_ready_announcement() const
       .executor_port =
           x23::BoundedStr<4294967295U>{exec_to_coord_server_port_.c_str(),
                                        exec_to_coord_server_port_.size()},
-      .nthreads = static_cast<std::uint32_t>(pool_cp_->pool_.nthreads_),
+      // Request twice as many concurrent transactions
+      // to run as there are threads in the pool
+      .nthreads = static_cast<std::uint32_t>(worker_pool_.worker_count()) * 2,
   };
 }
 
@@ -85,6 +87,8 @@ start_hogexec(int ncorothreads, int nworkthreads,
               std::string const &coord_address,
               std::string const &coord_allocate_port)
 {
+  assert(ncorothreads > 0);
+  assert(nworkthreads > 0);
   auto pool_cp = std::make_unique<PoolAndCoroPoll>(ncorothreads);
   auto coord_client =
       connect_to_coord_allocate_service(pool_cp->cp_, coord_address,

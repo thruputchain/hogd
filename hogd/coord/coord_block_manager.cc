@@ -58,6 +58,7 @@ CoordBlock::ready_for_commit() const
   default:
     assert(false);
   }
+  throw std::runtime_error("invalid state");
 }
 
 CoordBlock::CoordBlock(BlockID block_id)

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <variant>
 
@@ -123,11 +124,36 @@ StorageSnapshotCacheEntry::queue() const
   return std::get<RetrocausalQueueSnapshotCacheEntry>(entry_);
 }
 
+std::shared_ptr<const Contract>
+StorageSnapshotCache::get_cached_contract_map_entry(
+    std::span<const std::byte> key)
+{
+  if (auto res = contract_cache_.modify_element(key, [](auto const &v) {
+        return v.contract_;
+      })) {
+    return *res;
+  }
+  return nullptr;
+}
+
+const StorageSnapshotCacheEntry *
+StorageSnapshotCache::get_cached_storage_item_map_entry(
+    std::span<const std::byte> key)
+{
+  if (auto res = snapshot_item_cache_.modify_element(key, [](auto const &v) {
+        return v.entry_.get();
+      })) {
+    return *res;
+  }
+  return nullptr;
+}
+
 std::optional<SHA256Hash>
 StorageSnapshotCache::try_get_deployed_contract_hash(
     ContractAddress const &addr)
 {
   auto key = DeploymentMapEntry::get_key(addr);
+
   if (auto res = deployment_cache_.modify_element(key, [](auto const &v) {
         return v.hash_;
       })) {
@@ -137,6 +163,9 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
   // cache positive and negative lookups
   auto db_res = db_proxy_.get_deployment(block_id_, addr);
   deployment_cache_.emplace(key, addr, db_res);
+
+  // This is ok to return directly: if a concurrent request gets the deployment,
+  // it'll return the same result
   return db_res;
 }
 
@@ -145,15 +174,24 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 {
 
   auto key = ContractMapEntry::get_key(hash);
-  if (auto res = contract_cache_.modify_element(key, [](auto const &v) {
-        return v.contract_;
-      })) {
-    return *res;
+  if (auto out = get_cached_contract_map_entry(key)) {
+    return out;
   }
 
   // cache positive and negative lookups
   auto db_res = db_proxy_.get_contract(block_id_, hash);
-  contract_cache_.emplace(key, hash, db_res);
+  auto emplace_res = contract_cache_.emplace(key, hash, db_res);
+
+  if (!emplace_res) {
+    // Not strictly necessary, for now, as the caller could keep the shared_ptr
+    // alive as long as necessary. However, not every wasm engine makes the same
+    // requirements on keeping alive the contract memory, and this guarantees
+    // that the returned memory will be alive for the entirety of the block.
+    auto out = get_cached_contract_map_entry(key);
+    assert(out);
+    return out;
+  }
+
   return db_res;
 }
 
@@ -161,10 +199,8 @@ const StorageSnapshotCacheEntry *
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
   auto key = StorageItemMapEntry::get_key(addrkey);
-  if (auto res = snapshot_item_cache_.modify_element(key, [](auto const &v) {
-        return v.entry_.get();
-      })) {
-    return *res;
+  if (auto const *out = get_cached_storage_item_map_entry(key)) {
+    return out;
   }
 
   // cache positive and negative lookups
@@ -174,9 +210,14 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
                                                            block_id_, addrkey)
              : nullptr;
   auto const *out = entry.get();
-
-  snapshot_item_cache_.emplace(key, addrkey, std::move(entry));
-  return out;
+  auto emplace_res =
+      snapshot_item_cache_.emplace(key, addrkey, std::move(entry));
+  if (emplace_res) {
+    return out;
+  }
+  auto const *cached = get_cached_storage_item_map_entry(key);
+  assert(cached);
+  return cached;
 }
 
 NondeterministicReadCacheEntry &
@@ -195,8 +236,17 @@ StorageSnapshotCache::get_nondeterministic_read_cache_entry(
                                                        addrkey);
   auto *out = entry.get();
 
-  nondeterministic_read_cache_.emplace(key, addrkey, std::move(entry));
-  return *out;
+  auto emplace_res =
+      nondeterministic_read_cache_.emplace(key, addrkey, std::move(entry));
+  if (emplace_res) {
+    return *out;
+  }
+
+  auto res = nondeterministic_read_cache_.modify_element(key, [](auto &v) {
+    return v.entry_.get();
+  });
+  assert(res);
+  return **res;
 }
 
 } // namespace hogd

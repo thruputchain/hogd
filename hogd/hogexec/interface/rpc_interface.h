@@ -53,6 +53,8 @@ private:
   WorkerPool &main_worker_pool_;
   DatabaseProxy &db_proxy_;
   ExecutorStateManager executor_states_;
+
+  std::atomic<bool> shutdown_flag_ = false;
 };
 
 static_assert(is_ExecutorInterfaceV1<ExecutorRpcInterface *, x23::Async>);

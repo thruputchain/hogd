@@ -24,3 +24,19 @@ target_link_libraries(
     GTest::gtest_main
 )
 gtest_discover_tests(test_loadgen)
+
+add_executable(
+  payments_bench
+  payments_bench.cc
+)
+target_link_libraries(
+  payments_bench
+  loadgen
+  hogd
+  hogexec_core
+  hogdb_core
+  coord_core
+  benchmark::benchmark
+)
+
+set_property(TARGET payments_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

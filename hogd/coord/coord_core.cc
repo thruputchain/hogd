@@ -28,6 +28,7 @@ CoordinatorCore::validate_block(SHA256Hash const &parent_hash,
                                 std::vector<ProposedTransaction> txs,
                                 SHA256Hash const &block_hash)
 {
+  assert(block_manager_);
   auto parent_id = block_manager_->lookup_block_id(parent_hash);
   if (!parent_id) {
     co_return false;

@@ -23,7 +23,7 @@ usage(int err = STDERR_FILENO)
              "-s --exec_server_port <port>\n"
              "-c --coord_server_address <address>\n"
              "-p --coord_server_port <port>\n"
-             "-n --ncorothreads <num>\n"
+             "-n --ncorothreads <num> (default: 1+nworkthreads/4)\n"
              "-m --nworkthreads <num\n",
              progname);
   exit(err);
@@ -68,7 +68,7 @@ hogexec_main(int argc, char **argv)
   std::string coord_address = "localhost";
   std::string coord_port = std::to_string(kCoordAnnouncePortNum);
 
-  unsigned int nthreads = 1;
+  unsigned int nthreads = 0;
   unsigned int nworkthreads = 1;
 
   // NOLINTNEXTLINE(misc-include-cleaner)
@@ -102,6 +102,10 @@ hogexec_main(int argc, char **argv)
       usage(0);
       return EXIT_FAILURE;
     }
+  }
+
+  if (nthreads == 0) {
+    nthreads = (nworkthreads / 4) + 1;
   }
 
   if (exec_server_port.empty() || coord_address.empty() || coord_port.empty()) {
