@@ -147,7 +147,12 @@ pub use handle::handle_call;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod cross_call {
-    use crate::types::{ContractAddress, RuntimeMemoryLength};
+    use crate::types::{
+        ContractAddress,
+        RuntimeMemoryLength,
+        InvocationFlagSet,
+        InvocationFlags,
+    };
     use crate::sys;
     use alloc::vec::Vec;
     use serde::Serialize;
@@ -186,11 +191,13 @@ pub mod cross_call {
     {
         // Perform the cross-contract call
 
+        let flags: InvocationFlagSet = InvocationFlags::kNone as InvocationFlagSet;
         sys::raw_Invoke(
             address,
             method,
             gas_limit,
             call_data,
+            flags
         ).expect("Contract invocation failed");
 
         // Retrieve the return-value buffer
@@ -211,3 +218,5 @@ pub mod cross_call {
         return_buf
     }
 }
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use cross_call::invoke;

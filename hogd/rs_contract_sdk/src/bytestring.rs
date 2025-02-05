@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use crate::sys;
-use crate::types::{StorageKey, RuntimeMemoryLength, StorageKey, StorageDeltaModifier};
+use crate::types::{StorageKey, RuntimeMemoryLength, StorageDeltaModifier};
 use core::mem::MaybeUninit;
 
 #[cfg(feature = "alloc")]

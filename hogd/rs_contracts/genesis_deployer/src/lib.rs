@@ -1,32 +1,47 @@
 #![no_std]
 
-use rs_contract_sdk as sdk;
+extern crate alloc;
 
-use rs_macros::{public_interface, public_method};
+use sdk::contract::Contract;
+use sdk::types::{StorageKey, SHA256Hash, MethodID};
+use sdk::deploy::DeployContract;
+use sdk::log::Log;
+use sdk::sys;
+use sdk::macros::contract;
+use alloc::vec::Vec;
 
-public_interface! {}
+struct GenesisDeployer;
 
-#[public_method(static_calldata_length = 64, static_return_length = 0)]
-pub fn deploy(nonce: &sdk::SHA256Hash, contract_hash: &sdk::SHA256Hash) {
-    sdk::DeployContract(nonce, contract_hash).unwrap();
+impl Contract for GenesisDeployer {
+    fn new(_: &StorageKey) -> Self {
+        Self
+    }
 }
 
-#[public_method]
-pub fn deploy_and_invoke(
-    nonce: &sdk::SHA256Hash,
-    contract_hash: &sdk::SHA256Hash,
-    method: sdk::MethodID,
-    calldata: &[u8],
-) {
-    let deployed_addr = sdk::DeployContract(nonce, contract_hash).unwrap();
+#[contract(export)]
+impl GenesisDeployer
+{
+    pub fn deploy(self, nonce: &SHA256Hash, contract_hash: &SHA256Hash) {
+        DeployContract(nonce, contract_hash).unwrap();
+    }
 
-    sdk::syscall_bindings::raw_Invoke(
-        &deployed_addr,
-        method,
-        u64::MAX,
-        calldata,
-        0,
-    )
-    .unwrap();
-    sdk::Log(b"ABCDEFG").unwrap();
+    pub fn deploy_and_invoke(
+        self,
+        nonce: &SHA256Hash,
+        contract_hash: &SHA256Hash,
+        method: MethodID,
+        calldata: Vec<u8>,
+    ) {
+        let deployed_addr = DeployContract(nonce, contract_hash).unwrap();
+
+        sys::raw_Invoke(
+            &deployed_addr,
+            method,
+            u64::MAX,
+            calldata.as_slice(),
+            0,
+        )
+        .unwrap();
+        Log(b"ABCDEFG").unwrap();
+    }
 }

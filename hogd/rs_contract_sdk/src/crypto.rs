@@ -20,7 +20,8 @@ pub fn SHA256(input: &[u8]) -> Result<SHA256Hash, i32> {
 }
 
 use crate::syscall::to_offset;
-use crate::types::{PublicKey, Signature, SyscallErrorCode};
+use crate::types::{PublicKey, Signature};
+use crate::sys;
 
 pub fn VerifySignature(
     pk: &PublicKey,
@@ -28,17 +29,13 @@ pub fn VerifySignature(
     message: &[u8],
 ) -> Result<(), i32>
 {
-    if let (PublicKey::Ed25519 { ed25519: pk_local },
-            Signature::Ed25519 { ed25519: sig_local }) = (pk, signature)
-    {
-        uninit_VerifySignature(
-            signature.scheme() as u64,
-            to_offset(sig_local) as u64,
-            pk.scheme() as u64,
-            to_offset(pk_local) as u64,
-            message
-            )
-    } else {
-        Err(SyscallErrorCode::kInvalidInput as i32)
-    }
+    let PublicKey::Ed25519 { ed25519: pk_local } = pk;
+    let Signature::Ed25519 { ed25519: sig_local } = signature;
+    sys::uninit_VerifySignature(
+        signature.scheme() as u64,
+        to_offset(sig_local) as u64,
+        pk.scheme() as u64,
+        to_offset(pk_local) as u64,
+        message
+        )
 }

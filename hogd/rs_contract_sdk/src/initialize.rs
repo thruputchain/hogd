@@ -1,20 +1,22 @@
-use crate::types::StorageKey;
+use crate::types::{StorageKey, SyscallErrorCode};
 use crate::macros::static_key;
 use crate::result::{Result, Error};
+use crate::sys;
 
 const INITIALIZE_GUARD_KEY: StorageKey =
     static_key!("initialization guard key");
 
 // a function that can only execute on one transaction, ever
 pub fn initialization_guard() -> Result<()> {
-    let mut has_key_res: i32 = 0;
-    match crate::syscall_bindings::raw_HasKey(
+    let (mut current_set, mut current_add) = (0,0);
+    match sys::raw_NonnegativeIntGet(
         &INITIALIZE_GUARD_KEY,
-        &mut has_key_res,
-    ) {
+        &mut current_set,
+        &mut current_add)
+    {
         Err(x) => {
-            if x != rs_xdr::SyscallErrorCode::kStorageKeyNotExist as i32 {
-                panic!("Unexpected HasKey failure: {}", x);
+            if x != SyscallErrorCode::kStorageKeyNotExist as i32 {
+                panic!("Unexpected initialization failure: {}", x);
             }
         }
         _ => {

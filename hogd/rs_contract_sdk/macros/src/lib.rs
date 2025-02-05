@@ -84,16 +84,10 @@ mod sig {
     #[derive(Debug)]
     pub struct ContractImpl {
         pub span: proc_macro2::Span,
-        pub trait_: syn::Path,
+        pub trait_: Option<syn::Path>,
         pub generics: syn::Generics,
         pub self_ty: Box<syn::Type>,
         pub methods: Vec<Method>,
-    }
-
-    #[derive(Debug)]
-    pub struct MethodF {
-        pub ident: syn::Ident,
-        pub args: Vec<syn::FnArg>,
     }
 
     #[derive(Debug)]
@@ -146,19 +140,21 @@ mod parse {
     pub fn contract_signature_from_impl(item: &ItemImpl)
         -> Result<sig::ContractImpl>
     {
-        // Get the contract trait being implemented
-        let trait_ =
-            if let Some(trait_) = item.trait_.clone().map(|(_, path, _)| path) {
-                trait_
-            } else {
-                return err(item, "Contract implementation requires contract-trait implementation");
-            };
+        // Get the contract trait being implemented, if any
+        let trait_ = item.trait_.clone().map(|(_, path, _)| path);
 
         // Pull out the function items
         let methods = (&item.items).into_iter()
             .filter_map(|item|
                 if let syn::ImplItem::Fn(ref impl_fn) = item {
-                    method_signature_from_sig(&impl_fn.sig)
+                    let is_pub = is_visible(&impl_fn.vis);
+
+                    // Only include public functions if this is not a trait impl
+                    if trait_.is_some() || is_pub {
+                        method_signature_from_sig(&impl_fn.sig)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 })
@@ -170,6 +166,14 @@ mod parse {
             self_ty: item.self_ty.clone(),
             methods,
         })
+    }
+
+    fn is_visible(vis: &syn::Visibility) -> bool {
+        if let syn::Visibility::Public(_) = vis {
+            true
+        } else {
+            false
+        }
     }
 
     fn method_signature_from_sig(sig: &syn::Signature) -> Option<sig::Method> {
@@ -272,7 +276,7 @@ mod gen {
                 // Wrap up the args into one value
                 let args = ( #(#arg_names),* );
 
-                ::sdk::cross_call::invoke(
+                ::sdk::invoke(
                     &self.address,
                     #method,
                     #gas_limit,
@@ -311,7 +315,9 @@ mod gen {
                 fn contract() -> #self_ty {
                     use ::sdk::types::StorageKey;
                     use ::sdk::macros::static_key;
-                    static CONTRACT_STORAGE_KEY: StorageKey = static_key!("Contract storage");
+
+                    static CONTRACT_STORAGE_KEY: StorageKey =
+                        static_key!("Contract storage");
 
                     #self_ty::new(&CONTRACT_STORAGE_KEY)
                 }

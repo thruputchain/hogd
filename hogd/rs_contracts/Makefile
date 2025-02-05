@@ -1,12 +1,10 @@
 rs_contracts : \
 	erc20.wasm \
-	caller.wasm
+	caller.wasm \
+	genesis_deployer.wasm
 
 # To be upgraded to new sdk:
-#	basic.wasm \
-#	basic_alloc.wasm \
 #	test_bytestring.wasm \
-#	genesis_deployer.wasm \
 #	simple_wallet.wasm \
 #	rcq_test.wasm
 

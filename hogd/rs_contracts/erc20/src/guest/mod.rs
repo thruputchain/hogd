@@ -5,10 +5,10 @@ use storage::CoinStorage;
 
 use storage::sender;
 use super::interface::ERC20;
-use sdk::initialization_guard;
+use sdk::initialize::initialization_guard;
 use sdk::result::{Result, assert, check_err};
 use sdk::types::{ContractAddress, StorageKey};
-use sdk::contract::ContractWithStorage;
+use sdk::contract::{Contract, ContractWithStorage};
 use sdk::macros::contract;
 
 pub struct CoinContract(ContractWithStorage<CoinStorage>);
@@ -22,12 +22,14 @@ impl Deref for CoinContract {
     }
 }
 
-impl CoinContract
-{
-    pub fn new(key: &StorageKey) -> Self {
+impl Contract for CoinContract {
+    fn new(key: &StorageKey) -> Self {
         Self(ContractWithStorage::new(key))
     }
+}
 
+impl CoinContract
+{
     // A helper function
     pub fn do_transfer(&self, from: &ContractAddress, to: &ContractAddress, amount: i64)
         -> Result<()>

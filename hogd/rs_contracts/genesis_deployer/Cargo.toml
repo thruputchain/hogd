@@ -4,8 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rs_contract_sdk = {path = "../../rs_contract_sdk/", features = ["alloc"]}
-rs_macros = {path = "../../rs_macros/"}
+sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/" }
 
 [lib]
 crate-type = ["cdylib"]
+
+[features]
+default = ["guest", "alloc"]
+client = []
+guest = []
+alloc = ["sdk/alloc"]
+std = ["sdk/std"]

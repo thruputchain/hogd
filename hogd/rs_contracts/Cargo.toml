@@ -4,14 +4,12 @@ cargo-features = ["trim-paths"]
 resolver = "2"
 
 members = [
-    "basic",
-    "basic_alloc",
-    "test_bytestring",
-    "genesis_deployer",
     "erc20",
     "caller",
-    "simple_wallet",
-    "rcq_test",
+    "genesis_deployer",
+    # "test_bytestring",
+    # "simple_wallet",
+    # "rcq_test",
 ]
 
 [profile.dev]
