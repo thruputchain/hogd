@@ -5,6 +5,7 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_item.hh"
@@ -40,7 +41,8 @@ public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy &db_proxy,
-                    std::optional<NondeterministicProposal> proposal);
+                    std::optional<NondeterministicProposal> proposal,
+                    std::shared_ptr<RuntimeContext> context = nullptr);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;
@@ -119,7 +121,7 @@ public:
   ProposalModeData const &get_proposal_data() const;
 
 private:
-  WasmiContext wasmi_context_;
+  std::shared_ptr<RuntimeContext> runtime_context_;
   const SignedTransaction signed_tx_;
   InvocationFrameStack invocation_frame_stack_;
   ExecutionModeData execution_mode_data_;
@@ -142,7 +144,7 @@ private:
   // that address in the current context (i.e. if a contract is deployed there
   // in the snapshot, or by a prior action of the current transaction that was
   // not rolled back by a revert).
-  std::optional<WasmiRuntime> resolve_runtime(ContractAddress const &addr);
+  std::unique_ptr<Runtime> resolve_runtime(ContractAddress const &addr);
   // deployed hash for first arg, true for second arg if it was deployed in the
   // current transaction
   std::pair<std::optional<SHA256Hash>, bool>
