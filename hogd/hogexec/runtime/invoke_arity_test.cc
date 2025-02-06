@@ -113,7 +113,8 @@ class InvokeArityTests : public ::testing::TestWithParam<RuntimeEngine> {
 protected:
   void SetUp() override
   {
-    auto c = test::load_wasm_from_file("test_invoke_arity.wasm");
+    auto c = Contract{.contract_data =
+                          test::load_wasm_from_file("test_invoke_arity.wasm")};
 
     auto context = make_runtime_context(GetParam());
 
@@ -126,7 +127,7 @@ protected:
     context->link_fn("test", "arg6", &arity6);
     context->link_fn("test", "arg7", &arity7);
     context->link_fn("test", "arg8", &arity8);
-    runtime_ = context->make_new_runtime(c, nullptr);
+    runtime_ = context->make_new_runtime(SHA256Hash{}, &c, nullptr);
     ASSERT_TRUE(runtime_);
   }
 

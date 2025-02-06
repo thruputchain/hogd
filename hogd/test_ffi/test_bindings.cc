@@ -1,14 +1,17 @@
 #include "hogd/test_ffi/test_bindings.h"
 
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 
-#include "coord.hh"
 #include "hogd/hogdb/hogdb_core.h"
-#include "hogd/hogexec/hogexec_core.h"
+#include "hogd/hogexec/runtime/mock_runtime.h"
+#include "hogd/hogexec/runtime/mock_runtime_ffi.h"
 #include "rpc.hh"
 #include "rpc_types.hh"
+#include "types.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/threadpool.h"
@@ -22,43 +25,45 @@ const std::string exec_to_coord_port = std::to_string(kExecToCoordPortNum);
 
 class DBContext {
 public:
-    using db_client_t = DatabaseToCoordInterfaceV1::client<
-        x23::RpcStream<x23::RpcLogger>::ClientRef>;
+  using db_client_t = DatabaseToCoordInterfaceV1::client<
+      x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-    DBContext()
-        : db_(1, db_to_exec_port, db_to_coord_port)
-        , pool_(1)
-        , cp_(pool_)
-        , db_client_([this] () -> db_client_t {
-                auto fd = cp_.tcpconnect("localhost", db_to_coord_port)();
-                if (!fd) {
-                    exit(-1);
-                }
-
-                auto client_config = x23::rpc_stream_logged(cp_, *fd);
-                return client_config.template client<DatabaseToCoordInterfaceV1>();
-    }()) {}
-
-    void advance_new_block() {
-        if (current_block_id_ != 0) {
-            if (db_client_.close_snapshot(current_block_id_)() != RPCError::kNone) {
-                exit(-1);
-            }
+  DBContext()
+    : db_(1, db_to_exec_port, db_to_coord_port), pool_(1), cp_(pool_),
+      db_client_([this]() -> db_client_t {
+        auto fd = cp_.tcpconnect("localhost", db_to_coord_port)();
+        if (!fd) {
+          exit(-1);
         }
-        if (db_client_.open_database_snapshot(current_block_id_, current_block_id_ + 1)() != RPCError::kNone) {
-            exit(-1);
-        }
-        current_block_id_ ++;
+
+        auto client_config = x23::rpc_stream_logged(cp_, *fd);
+        return client_config.template client<DatabaseToCoordInterfaceV1>();
+      }())
+  {}
+
+  void advance_new_block()
+  {
+    if (current_block_id_ != 0) {
+      if (db_client_.close_snapshot(current_block_id_)() != RPCError::kNone) {
+        exit(-1);
+      }
     }
+    if (db_client_.open_database_snapshot(current_block_id_,
+                                          current_block_id_ + 1)() !=
+        RPCError::kNone) {
+      exit(-1);
+    }
+    current_block_id_++;
+  }
 
 private:
-    HogdbCore db_;
-    x23::ThreadPool pool_;
-    x23::CoroPoll cp_;
-    // assumes genesis is 0
-    BlockID current_block_id_ = 0;
+  HogdbCore db_;
+  x23::ThreadPool pool_;
+  x23::CoroPoll cp_;
+  // assumes genesis is 0
+  BlockID current_block_id_ = 0;
 
-    db_client_t db_client_;
+  db_client_t db_client_;
 };
 
 DBContext *
@@ -71,6 +76,7 @@ free_db(DBContext *ptr)
 {
   delete ptr;
 }
+
 } // namespace
 
 } // namespace hogd
@@ -86,7 +92,35 @@ free_db(void *ptr)
   hogd::free_db(static_cast<hogd::DBContext *>(ptr));
 }
 
-void* open_syscall_handler(void *db) {
+void *
+open_runtime_context()
+{
+  return new std::shared_ptr<hogd::MockRuntimeContext>();
+}
+void
+close_runtime_context(void *context)
+{
+  delete static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
+}
+void
+add_contract_and_method(void *context, const uint8_t *contract_hash,
+                        const char *method_name, uint8_t method_name_len,
+                        void *entry_point)
+{
+  hogd::SHA256Hash hash;
+  std::memcpy(hash.data(), contract_hash, sizeof(hogd::SHA256Hash));
 
-    return nullptr;
+  std::string m{method_name, method_name_len};
+
+  auto *c = static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
+  auto entry = reinterpret_cast<hogd::detail::ForeignEntryPoint>(entry_point);
+
+  (*c)->add_mocked_method(hash, m, entry);
+}
+
+void *
+open_syscall_handler(void *db)
+{
+
+  return nullptr;
 }

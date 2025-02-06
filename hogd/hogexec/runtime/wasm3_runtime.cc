@@ -8,10 +8,12 @@
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasm3_wrapper.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -28,10 +30,14 @@ Wasm3Runtime::set_available_gas(uint64_t gas) noexcept
 }
 
 std::unique_ptr<Runtime>
-Wasm3Context::make_new_runtime(ContractBlob const &contract,
+Wasm3Context::make_new_runtime(SHA256Hash const & /*unused*/,
+                               const Contract *contract,
                                SystemCallHandler *syscall_handler)
 {
-  auto module = wasm3_env_.parse_module(contract.data(), contract.size());
+  assert(contract);
+
+  auto module = wasm3_env_.parse_module(contract->contract_data.data(),
+                                        contract->contract_data.size());
   if (!module) {
     return nullptr;
   }

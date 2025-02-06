@@ -8,8 +8,8 @@
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/status.h"

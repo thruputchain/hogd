@@ -14,9 +14,10 @@ class MemoryAccessTest : public ::testing::TestWithParam<RuntimeEngine> {
 protected:
   void SetUp() override
   {
-    auto c = test::load_wasm_from_file("test_set_memory.wasm");
+    auto c = Contract{.contract_data =
+                          test::load_wasm_from_file("test_set_memory.wasm")};
     auto context = make_runtime_context(GetParam());
-    runtime_ = context->make_new_runtime(c, nullptr);
+    runtime_ = context->make_new_runtime(SHA256Hash{}, &c, nullptr);
 
     ASSERT_TRUE(runtime_);
   }

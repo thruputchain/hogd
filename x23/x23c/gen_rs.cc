@@ -442,7 +442,7 @@ GenRs::type_name(const Declaration &d, bool generate)
     needs_alloc_ = true;
     if (tname == "string"s)
       return std::format("alloc::boxed::Box<[u8]>");// ignoring bounds, for now : map_bound(d.bound));
-    return std::format("alloc::boxed::Box<[{}]>", tname); // Ignoring bounds, for nowmap_bound(d.bound));
+    return std::format("alloc::boxed::Box<[{}]>", tname); // Ignoring bounds, for now: map_bound(d.bound));
   default:
     return {}; // suppress warnings
   }

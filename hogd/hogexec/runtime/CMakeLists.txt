@@ -13,6 +13,7 @@ add_library(
   invocation_frame.cc
   item_view.cc
   runtime.cc
+  mock_runtime.cc
   status.cc
   storage_snapshot_cache.cc
   syscall_bytestring.cc
@@ -41,6 +42,7 @@ add_executable(
   item_view_test.cc
   memory_access_test.cc
   userctx_test.cc
+  mock_contract_test.cc
 )
 
 target_link_libraries(

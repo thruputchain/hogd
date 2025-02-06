@@ -7,7 +7,6 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"

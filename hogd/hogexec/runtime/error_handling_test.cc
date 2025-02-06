@@ -89,11 +89,12 @@ class ErrorHandlingTest : public ::testing::TestWithParam<RuntimeEngine> {
 protected:
   void SetUp() override
   {
-    contract_ = test::load_wasm_from_file("test_error_handling.wasm");
+    contract_ = Contract{
+        .contract_data = test::load_wasm_from_file("test_error_handling.wasm")};
     context_ = make_runtime_context(GetParam());
     context_->link_fn("test", "good_call", &good_call);
   }
-  ContractBlob contract_;
+  Contract contract_;
   std::shared_ptr<RuntimeContext> context_;
   std::unique_ptr<Runtime> runtime_;
 };
@@ -101,7 +102,7 @@ protected:
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_P(ErrorHandlingTest, UnlinkedFn)
 {
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   EXPECT_EQ(!!runtime_, !engine_has_eager_link_guards(GetParam()));
 }
@@ -110,7 +111,7 @@ TEST_P(ErrorHandlingTest, UnlinkedFn)
 TEST_P(ErrorHandlingTest, RuntimeError)
 {
   context_->link_fn("test", "external_call", &throw_runtime_error);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -123,7 +124,7 @@ TEST_P(ErrorHandlingTest, RuntimeError)
 TEST_P(ErrorHandlingTest, ExitHandling)
 {
   context_->link_fn("test", "external_call", &exit_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -136,7 +137,7 @@ TEST_P(ErrorHandlingTest, ExitHandling)
 TEST_P(ErrorHandlingTest, ReturnHandling)
 {
   context_->link_fn("test", "external_call", &return_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -149,7 +150,7 @@ TEST_P(ErrorHandlingTest, ReturnHandling)
 TEST_P(ErrorHandlingTest, HostError)
 {
   context_->link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -161,7 +162,7 @@ TEST_P(ErrorHandlingTest, HostError)
 TEST_P(ErrorHandlingTest, ValidationError)
 {
   context_->link_fn("test", "external_call", &throw_validation_error);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(!!runtime_);
 
@@ -174,7 +175,7 @@ TEST_P(ErrorHandlingTest, ValidationError)
 TEST_P(ErrorHandlingTest, OtherWeirdError)
 {
   context_->link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -188,7 +189,7 @@ TEST_P(ErrorHandlingTest, WasmError)
 {
   // must link all the fns, required for linking
   context_->link_fn("test", "external_call", &good_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -207,7 +208,7 @@ TEST_P(ErrorHandlingTest, NonexistFn)
 {
   // must link all the fns, required for linking
   context_->link_fn("test", "external_call", &good_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -224,7 +225,7 @@ TEST_P(ErrorHandlingTest, NonexistFn)
 TEST_P(ErrorHandlingTest, FollowBadWithGood)
 {
   context_->link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -241,7 +242,7 @@ TEST_P(ErrorHandlingTest, FollowBadWithGood)
 TEST_P(ErrorHandlingTest, FollowReallyBadWithGood)
 {
   context_->link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -258,7 +259,7 @@ TEST_P(ErrorHandlingTest, FollowReallyBadWithGood)
 TEST_P(ErrorHandlingTest, Reentrance)
 {
   context_->link_fn("test", "external_call", &reentrance);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -274,8 +275,8 @@ TEST_P(ErrorHandlingTest, Reentrance)
 
 TEST_P(ErrorHandlingTest, NullHandling)
 {
-  ContractBlob null_contract;
-  runtime_ = context_->make_new_runtime(null_contract, nullptr);
+  Contract null_contract;
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &null_contract, nullptr);
 
   EXPECT_FALSE(runtime_);
 }
@@ -295,7 +296,7 @@ TEST_P(ErrorHandlingTest, NullLinkHandling)
 TEST_P(ErrorHandlingTest, OutOfGas)
 {
   context_->link_fn("test", "external_call", &consume_too_much_gas);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -313,7 +314,7 @@ TEST_P(ErrorHandlingTest, OutOfGas)
 TEST_P(ErrorHandlingTest, NoGas)
 {
   context_->link_fn("test", "external_call", &good_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 
@@ -329,7 +330,7 @@ TEST_P(ErrorHandlingTest, NoGas)
 TEST_P(ErrorHandlingTest, Spin)
 {
   context_->link_fn("test", "external_call", &good_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(SHA256Hash{}, &contract_, nullptr);
 
   ASSERT_TRUE(runtime_);
 

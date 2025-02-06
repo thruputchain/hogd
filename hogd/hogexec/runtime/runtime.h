@@ -1,12 +1,15 @@
 #pragma once
 
-#include <cstdint>
+#include <concepts>
+#include <cstddef>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
 
@@ -99,10 +102,9 @@ public:
   }
 
   virtual std::unique_ptr<Runtime>
-  make_new_runtime(ContractBlob const &contract,
+  make_new_runtime(SHA256Hash const &hash, const Contract *contract,
                    SystemCallHandler *syscall_handler) = 0;
 
-protected:
   virtual bool link_fn_nargs(std::string_view module_name,
                              std::string_view fn_name, void *fn_ptr,
                              uint8_t nargs) = 0;
@@ -133,6 +135,8 @@ public:
   // get_available_gas()))
   InvokeResult invoke(std::string const &method_name, uint64_t gas_limit);
   InvokeResult invoke(uint32_t method_name, uint64_t gas_limit);
+
+  static std::string method_name_from_int(uint32_t method_name);
 
   // Returns FALSE if gas consumption failed.
   //

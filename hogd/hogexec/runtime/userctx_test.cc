@@ -30,10 +30,11 @@ class UserContextTest : public ::testing::TestWithParam<RuntimeEngine> {
 protected:
   void SetUp() override
   {
-    auto c = test::load_wasm_from_file("test_invoke.wasm");
+    auto c = Contract{.contract_data =
+                          test::load_wasm_from_file("test_invoke.wasm")};
     auto context = make_runtime_context(GetParam());
     context->link_fn("test", "redir_call", &foo);
-    runtime_ = context->make_new_runtime(c, ctx_check);
+    runtime_ = context->make_new_runtime(SHA256Hash{}, &c, ctx_check);
 
     ASSERT_TRUE(runtime_);
   }

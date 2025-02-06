@@ -10,6 +10,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -55,7 +56,7 @@ public:
   ~WasmiContext() override;
 
   std::unique_ptr<Runtime>
-  make_new_runtime(ContractBlob const &contract,
+  make_new_runtime(SHA256Hash const & /*unused*/, const Contract *contract,
                    SystemCallHandler *syscall_handler) override;
 
 private:

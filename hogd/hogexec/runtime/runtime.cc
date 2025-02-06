@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <format>
 #include <memory>
 #include <string>
 
@@ -68,10 +69,16 @@ Runtime::invoke(std::string const &method_name, uint64_t gas_limit)
   return InvokeResult{.result_ = res, .gas_consumed_ = gas_consumed};
 }
 
+std::string
+Runtime::method_name_from_int(uint32_t method_name)
+{
+  return std::format("{:X}", method_name);
+}
+
 InvokeResult
 Runtime::invoke(uint32_t method_name, uint64_t gas_limit)
 {
-  auto method_name_str = std::format("{:X}", method_name);
+  auto method_name_str = method_name_from_int(method_name);
   return invoke(method_name_str, gas_limit);
 }
 

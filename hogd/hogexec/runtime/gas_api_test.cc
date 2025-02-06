@@ -49,7 +49,8 @@ protected:
   void SetUp() override
   {
     // this wasm just invokes an external call.  We're just reusing it here.
-    auto c = test::load_wasm_from_file("test_error_handling.wasm");
+    auto c = Contract{
+        .contract_data = test::load_wasm_from_file("test_error_handling.wasm")};
 
     auto context = make_runtime_context(GetParam());
 
@@ -58,7 +59,7 @@ protected:
     context->link_fn("test", "external_call",
                      &consume_gas_call); // called by "call1"
 
-    runtime_ = context->make_new_runtime(c, nullptr);
+    runtime_ = context->make_new_runtime(SHA256Hash{}, &c, nullptr);
 
     ASSERT_TRUE(!!runtime_);
   }

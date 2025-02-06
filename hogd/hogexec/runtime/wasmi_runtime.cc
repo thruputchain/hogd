@@ -2,9 +2,9 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
-#include <string>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
@@ -151,16 +151,20 @@ WasmiContext::~WasmiContext()
 }
 
 std::unique_ptr<Runtime>
-WasmiContext::make_new_runtime(ContractBlob const &contract,
+WasmiContext::make_new_runtime(SHA256Hash const & /*unused*/,
+                               const Contract *contract,
                                SystemCallHandler *syscall_handler)
 {
+  assert(contract);
+
   std::unique_ptr<HostCallContext> host_call_context =
       std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = syscall_handler;
 
   void *wasmi_runtime_ptr =
-      new_wasmi_runtime(contract.data(), contract.size(),
-                        host_call_context.get(), wasmi_context_ptr_);
+      new_wasmi_runtime(contract->contract_data.data(),
+                        contract->contract_data.size(), host_call_context.get(),
+                        wasmi_context_ptr_);
   if (wasmi_runtime_ptr == nullptr) {
     return {};
   }

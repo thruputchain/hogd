@@ -25,7 +25,7 @@ public:
   ~Wasm3Context() override = default;
 
   std::unique_ptr<Runtime>
-  make_new_runtime(ContractBlob const &contract,
+  make_new_runtime(SHA256Hash const & /*unused*/, const Contract *contract,
                    SystemCallHandler *syscall_handler) override;
 
 private:

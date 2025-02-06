@@ -11,9 +11,10 @@ protected:
 
 TEST_P(InstantiateTest, MissingImportFail)
 {
-  auto c = test::load_wasm_from_file("test_invoke.wasm");
+  auto c =
+      Contract{.contract_data = test::load_wasm_from_file("test_invoke.wasm")};
   auto context = make_runtime_context(GetParam());
-  auto runtime = context->make_new_runtime(c, nullptr);
+  auto runtime = context->make_new_runtime(SHA256Hash{}, &c, nullptr);
 
   if (engine_has_eager_link_guards(GetParam())) {
     EXPECT_FALSE(runtime);

@@ -40,8 +40,7 @@ SystemCallHandler::SystemCallHandler(
     PerTransactionDatabaseProxy &db_proxy,
     std::optional<NondeterministicProposal> proposal,
     std::shared_ptr<RuntimeContext> context)
-  : runtime_context_(std::move(context)),
-    signed_tx_(std::move(signed_tx)),
+  : runtime_context_(std::move(context)), signed_tx_(std::move(signed_tx)),
     invocation_frame_stack_(
         [this](InvocationFrame &last_frame) {
           commit_last_call_frame_success(last_frame);
@@ -62,12 +61,15 @@ SystemCallHandler::SystemCallHandler(
                           std::make_shared<const Contract>(contract));
       }
       return contracts;
-    }()), snapshot_cache_(snapshot_cache), db_proxy_(db_proxy)
+    }()),
+    snapshot_cache_(snapshot_cache), db_proxy_(db_proxy)
 {
   if (!runtime_context_) {
     runtime_context_ = std::make_shared<WasmiContext>();
   }
-  runtime_context_->link_fn("marmot", "syscall", &syscall_entry);
+  [[maybe_unused]]
+  auto res = runtime_context_->link_fn("marmot", "syscall", &syscall_entry);
+  assert(res);
 }
 
 InvokeResult
@@ -246,7 +248,8 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   // actually make the new runtime
   // TODO(geoff) validate that failures here are deterministic.
   // (i.e. the result of a malloc() failure).
-  return runtime_context_->make_new_runtime(contract->contract_data, this);
+  return runtime_context_->make_new_runtime(*deployed_hash, contract.get(),
+                                            this);
 }
 
 Calldata const &
