@@ -40,6 +40,8 @@ TEST_F(MockContractTest, InvokeNormal)
   auto res = runtime->invoke("good", 100);
   ASSERT_TRUE(res.result_);
   EXPECT_EQ(*res.result_, 32);
+
+  ASSERT_FALSE(runtime->invoke("bad", 10).result_);
 }
 
 } // namespace hogd

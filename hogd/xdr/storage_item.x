@@ -39,9 +39,6 @@ namespace hogd
     int128_xdr add_value;
   };
 
-  const kQueueEntryMaxLen = 256;
-  typedef opaque QueueEntry<kQueueEntryMaxLen>;
-
   struct RetrocausalQueueBlock {
     QueueEntry entries<>;
     unsigned hyper block_number;

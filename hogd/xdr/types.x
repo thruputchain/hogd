@@ -78,4 +78,7 @@ enum InvocationFlags {
 
 typedef int InvocationFlagSet;
 
+const kQueueEntryMaxLen = 256;
+typedef opaque QueueEntry<kQueueEntryMaxLen>;
+
 } // namespace hogd

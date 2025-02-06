@@ -25,8 +25,6 @@ struct GenRs {
   vector<string> namespaces_;
   vector<string> scopes_;
 
-  bool needs_alloc_ = false;
-
   constexpr static int INDENT_WIDTH = 4;
 
   void process(const vector<Definition> &defs);
@@ -97,7 +95,7 @@ struct GenRs {
   static const string &map_type(const string &);
   static const string &map_case(const string &);
   static const string &map_bound(const string &);
-  string type_name(const Declaration &d, bool generate);
+  string type_name(const Declaration &d, bool generate, bool in_colon_required_setting = false);
 
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
@@ -175,13 +173,53 @@ GenRs::show_type(const StructBody &s, string t)
     do_generations(t + "_" + d.id, d.type);
   }
 
-  prtop("#[repr(C)]\n");
-  prtop("pub struct {} ", t);
-  auto _close = open_brace();
-  scopes_.push_back(t);
-  for (const auto &d : s) {
-    show_decl(d, t);
+  {
+    prtop("#[repr(C)]\n");
+    prtop("pub struct {} ", t);
+    auto _close = open_brace();
+    scopes_.push_back(t);
+    for (const auto &d : s) {
+      show_decl(d, t);
+    }
   }
+
+  prtop(R"(
+
+#[cfg(feature="std")]
+impl ReadXdr for {0} {{
+    fn read_xdr<R: Read>(r: &mut Limited<R>) -> Result<Self, Error> {{
+        r.with_limited_depth(|r| {{
+            Ok({0} {{
+)", t);
+
+  for (const auto &d : s) {
+    prtop("                {} : {}::read_xdr(r)?,\n", d.id, type_name(d, false, true));
+  }
+
+  prtop(R"(            }})
+        }})
+    }}
+}}
+)");
+
+  prtop(R"(
+#[cfg(feature="std")]
+impl WriteXdr for {0} {{
+    fn write_xdr<W: Write>(&self, w: &mut Limited<W>) -> Result<(), Error> {{
+        w.with_limited_depth(|w| {{
+)", t);
+
+  for (const auto &d : s) {
+    prtop("                self.{}.write_xdr(w)?;\n", d.id);
+  }
+
+  prtop(R"(            Ok(())
+        }})
+    }}
+}}
+
+)");
+
 }
 
 void
@@ -410,7 +448,7 @@ GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
 }
 
 string
-GenRs::type_name(const Declaration &d, bool generate)
+GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_setting) // rust is weird
 {
   using enum Declaration::Qual;
 
@@ -434,15 +472,18 @@ GenRs::type_name(const Declaration &d, bool generate)
   case kScalar:
     return tname;
   case kPtr:
-    needs_alloc_ = true;
-    return std::format("alloc::boxed::Box<{}>", tname);
+    return std::format("Option<{}>", tname);
   case kArray:
     return std::format("[{}; {}]", tname, d.bound);
   case kVec:
-    needs_alloc_ = true;
+    if (in_colon_required_setting) {
+      if (tname == "string"s)
+        return std::format("BytesM::<{}>", map_bound(d.bound));
+      return std::format("VecM::<{}, {}>", tname, map_bound(d.bound));
+    }
     if (tname == "string"s)
-      return std::format("alloc::boxed::Box<[u8]>");// ignoring bounds, for now : map_bound(d.bound));
-    return std::format("alloc::boxed::Box<[{}]>", tname); // Ignoring bounds, for now: map_bound(d.bound));
+      return std::format("BytesM<{}>", map_bound(d.bound));
+    return std::format("VecM<{}, {}>", tname, map_bound(d.bound));
   default:
     return {}; // suppress warnings
   }
@@ -457,13 +498,20 @@ gen_rs(vector<Definition> *defs)
 
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
+#![allow(unused_imports)]
+#![allow(dead_code)]
+#![allow(unexpected_cfgs)]
+
+use core::option::Option;
+
+use crate::*;
+
+#[cfg(feature="std")]
+use std::io::{Read, Write};
+
 )";
 
   gs.process(*defs);
-
-  if (gs.needs_alloc_) {
-    preamble += "\nextern crate alloc;\n";
-  }
 
   return preamble + gs.top_ + R"(
 //

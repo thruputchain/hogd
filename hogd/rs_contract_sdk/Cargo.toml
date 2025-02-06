@@ -12,5 +12,5 @@ crate-type = ["cdylib", "rlib"]
 rs_xdr = {path = "../xdr/rs_xdr/"}
 
 [features]
-alloc = []
-std = []
+alloc = ["rs_xdr/alloc"]
+std = ["rs_xdr/std"]

@@ -17,6 +17,8 @@ add_xdr_rs(
 	protocol_rs
 	${CMAKE_CURRENT_SOURCE_DIR}/rs_xdr/src
 	types.x
+	transaction.x
+	contract.x
 	syscall.x)
 
 add_dependencies(build_protocol_rs generate_syscall_x)
