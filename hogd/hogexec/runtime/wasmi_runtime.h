@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -7,6 +8,7 @@
 #include <string_view>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
