@@ -10,7 +10,7 @@ pub fn trap() -> ! {
     unreachable!();
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(feature = "std"))]
 #[panic_handler]
 fn handle_panic(_: &core::panic::PanicInfo) -> ! {
     trap();

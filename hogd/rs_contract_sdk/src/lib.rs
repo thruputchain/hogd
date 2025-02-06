@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_array_assume_init)]
 

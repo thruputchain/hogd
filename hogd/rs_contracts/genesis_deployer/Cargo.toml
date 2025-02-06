@@ -9,3 +9,7 @@ rs_macros = {path = "../../rs_macros/"}
 
 [lib]
 crate-type = ["cdylib"]
+
+[features]
+interface = []
+std = ["rs_contract_sdk/std"]
