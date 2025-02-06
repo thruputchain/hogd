@@ -3,10 +3,8 @@ rs_contracts : \
 	caller.wasm \
 	genesis_deployer.wasm \
 	rcq_test.wasm \
-	simple_wallet.wasm
-
-# To be upgraded to new sdk:
-#	test_bytestring.wasm \
+	simple_wallet.wasm \
+	test_bytestring.wasm
 
 %.wasm : Makefile $(wildcard $</src/*.rs)
 	cargo +nightly rustc \

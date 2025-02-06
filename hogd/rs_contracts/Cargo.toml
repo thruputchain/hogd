@@ -9,8 +9,7 @@ members = [
     "genesis_deployer",
     "rcq_test",
     "simple_wallet",
-
-    # "test_bytestring",
+    "test_bytestring",
 ]
 
 [workspace.dependencies]
