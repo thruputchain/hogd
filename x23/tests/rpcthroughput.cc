@@ -61,15 +61,20 @@ static_assert(is_blank_rpc_v1<Server *, Async>);
 Detached
 Listener::accept_loop(this RefPtr<Listener> self)
 {
-  while (auto s = co_await self->cp_.accept(self->lfd_))
+  sockaddr_storage ss;
+  socklen_t socklen;
+  while (auto s = co_await self->cp_.accept(self->lfd_, &ss, &socklen)) {
+    std::println("accepted fd {} TCP port {} from {}", *s,
+		 get_port(self->addr_), HostPort(ss));
     rpc_stream_logged(self->cp_, *s).server(std::make_unique<Server>(self));
+  }
   std::println("server stopping");
 }
 
 int
 main()
 {
-  //RpcLogger::default_logfd = 1;
+  // RpcLogger::default_logfd = 1;
   Listener listener(cp);
   std::stop_source ss;
   for (int i = 0; i < 10; ++i)
@@ -79,6 +84,8 @@ main()
         std::println(stderr, "tcpconnect: {}", conn.error());
         co_return;
       }
+      std::println("connected fd {} TCP port {} to {}", *conn,
+                   get_port(local_addr(*conn)), HostPort(l->addr_));
       auto c = rpc_stream_logged(l->cp_, *conn).template client<blank_rpc_v1>();
       while (!st.stop_requested())
         co_await c.null();

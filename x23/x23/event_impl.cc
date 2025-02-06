@@ -345,7 +345,12 @@ CoroPollImpl::reset(BorrowedFd fd)
   if (auto it = ptr->find(fd.get()); it != ptr->end()) {
     auto work = report_badfd(it->second);
     ptr->erase(it);
-    //if (ptr->empty() && stop_requested())
+    // Note we must always wake, even when the events are not empty
+    // and no stop is requested.  The reason is that poll keeps a
+    // reference to sockets, which means closing a file descriptor
+    // will not close the socket (and hence not send a TCP FIN
+    // segment) while poll is still waiting for an event.  Waking the
+    // poll thread ensures closed file descriptors also close sockets.
     wake();
     ptr.reset();
     pool_.go(work);
