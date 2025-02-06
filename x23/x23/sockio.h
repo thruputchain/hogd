@@ -69,6 +69,13 @@ struct HostPort {
   std::expected<sockaddr_storage, GaiError> to_addr(bool dns = false);
 };
 
+Str show_addr(const sockaddr *);
+inline Str
+show_addr(const is_one_of<sockaddr_storage, sockaddr_in, sockaddr_in6> auto &s)
+{
+  return show_addr(reinterpret_cast<const sockaddr *>(&s));
+}
+
 } // namespace x23
 
 template<>

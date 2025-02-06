@@ -345,8 +345,8 @@ CoroPollImpl::reset(BorrowedFd fd)
   if (auto it = ptr->find(fd.get()); it != ptr->end()) {
     auto work = report_badfd(it->second);
     ptr->erase(it);
-    if (ptr->empty() && stop_requested())
-      wake();
+    //if (ptr->empty() && stop_requested())
+    wake();
     ptr.reset();
     pool_.go(work);
   }

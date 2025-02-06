@@ -1,4 +1,5 @@
 
+#include <sys/socket.h>
 #include <system_error>
 
 #include <arpa/inet.h>
@@ -135,6 +136,20 @@ show_ipaddr(const sockaddr_storage &ss)
   default:
     Errno(EINVAL).raise("Invalid address family {} does not have IP address",
                         ss.ss_family);
+  }
+}
+
+Str
+show_addr(const sockaddr *sa)
+{
+  switch(sa->sa_family) {
+  case AF_INET:
+  case AF_INET6:
+    return HostPort(*reinterpret_cast<const sockaddr_storage *>(sa)).show();
+  case AF_UNIX:
+    return "AF_UNIX";
+  default:
+    return uformat("sa_family {}", sa->sa_family);
   }
 }
 
