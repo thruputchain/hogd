@@ -234,7 +234,9 @@ mod gen {
             #[cfg(feature = "client")]
             pub mod client {
                 use ::sdk::types::ContractAddress;
-                use super::#trait_ident;
+
+                // use super::#trait_ident;
+                use super::*; // We may need various user types
 
                 pub struct #client_ident {
                     address: ContractAddress

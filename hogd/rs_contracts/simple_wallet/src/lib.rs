@@ -1,149 +1,130 @@
 #![no_std]
 #![feature(maybe_uninit_slice)]
 
-use rs_contract_sdk as sdk;
-
-use sdk::parse_trait::Serializable;
-
-use sdk::rt::trap;
-
-use rs_macros::{public_interface, public_method, static_key};
-
 extern crate alloc;
-use core::mem::MaybeUninit;
 
-public_interface!();
+use sdk::types::{
+    StorageKey, ContractAddress,
+    PublicKey, Signature,
+    Ed25519PublicKey, Ed25519SignatureA
+};
+use sdk::contract::{Contract, ContractWithStorage};
+use sdk::macros::contract;
+use serde::{Serialize, Deserialize};
+use erc20::interface::{ERC20, Amount};
+use erc20::client::ERC20Client;
 
-// Has no replay prevention in this version
-const CONFIG_KEY: sdk::StorageKey = static_key!("config key");
+// TODO: Replay prevention?
 
-const CONFIG_LEN: usize = core::mem::size_of::<sdk::ContractAddress>()
-    + core::mem::size_of::<sdk::Ed25519PublicKey>();
-
-const REPLAY_CACHE_KEY: sdk::StorageKey = static_key!("nonce replay cache");
-
-fn write_config_data(
-    erc20_addr: &sdk::ContractAddress,
-    pk: &sdk::Ed25519PublicKey,
-) {
-    // guard against double initialization
-    if sdk::BytestringGet_Sized::<CONFIG_LEN>(&CONFIG_KEY).is_ok() {
-        trap();
-    }
-
-    let mut bytes_mu = [MaybeUninit::<u8>::uninit(); CONFIG_LEN];
-    sdk::parse_trait::serialize_to_calldata(&mut bytes_mu, (erc20_addr, pk))
-        .unwrap();
-    let bytes: [u8; CONFIG_LEN] = unsafe { core::mem::transmute(bytes_mu) };
-
-    sdk::BytestringSetExclusive(&CONFIG_KEY, &bytes).unwrap();
+#[derive(Debug, Serialize, Deserialize)]
+struct WalletStorage {
+    token_addr: ContractAddress,
+    pk: Ed25519PublicKey,
 }
 
-fn load_config_data() -> (sdk::ContractAddress, sdk::Ed25519PublicKey) {
-    // TODO(geoff) see marginal impact of rewriting without allocator
-    let config = sdk::BytestringGet(&CONFIG_KEY).unwrap();
-    let (addr, pk) = sdk::parse_trait::parse_returns_from_calldata::<(
-        sdk::ContractAddress,
-        sdk::Ed25519PublicKey,
-    )>(&config)
-    .unwrap();
-    (addr, pk)
-}
+struct WalletContract(
+    ContractWithStorage<WalletStorage>
+    );
 
-#[public_method]
-pub fn get_balance() -> i128 {
-    let (erc20addr, _) = load_config_data();
-    let token = erc20::erc20::new(&erc20addr);
+impl core::ops::Deref for WalletContract {
+    type Target = ContractWithStorage<WalletStorage>;
 
-    token.get_balance().unwrap()
-}
-
-#[public_method]
-pub fn initialize(
-    pk: &sdk::Ed25519PublicKey,
-    erc20_addr: &sdk::ContractAddress,
-) -> () {
-    write_config_data(&erc20_addr, &pk);
-}
-
-#[public_method]
-pub fn test_expect_balance(expect: i128) {
-    let (erc20addr, _foo) = load_config_data();
-    let token = erc20::erc20::new(&erc20addr);
-    if expect != token.get_balance().unwrap() {
-        trap();
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-pub fn compute_auth_message(
-    to_addr: &sdk::ContractAddress,
-    amount: i128,
-) -> [u8; 80] {
-    // TODO(geoff) this will eventually need a nonce and a domain separator(?)
-    let mut bytes_mu = [MaybeUninit::<u8>::uninit(); 80];
-    let self_addr = sdk::GetCurrentAddress().unwrap();
-    (&self_addr, to_addr, amount)
-        .do_serialize(&mut bytes_mu)
-        .unwrap();
-
-    let bytes: [u8; 80] = unsafe { core::mem::transmute(bytes_mu) };
-
-    bytes
+impl Contract for WalletContract {
+    fn new(key: &StorageKey) -> Self {
+        Self(ContractWithStorage::new(key))
+    }
 }
 
-#[public_method]
-pub fn send_payment(
-    to_addr: &sdk::ContractAddress,
-    amount: i128,
-    signature: &sdk::Ed25519Signature,
-) {
-    let (erc20addr, pk) = load_config_data();
+type AuthMessage = [u8; 80];
 
-    // TODO some kind of replay mechanism
-    let auth_message = compute_auth_message(&to_addr, amount);
+#[contract(guest)]
+impl WalletContract {
 
-    sdk::VerifySignature(
-        &sdk::PublicKey::Ed25519 { ed25519: pk },
-        &sdk::Signature::Ed25519 {
-            ed25519: *signature,
-        },
-        &auth_message,
-    )
-    .unwrap();
+    fn token(&self) -> ERC20Client {
+        ERC20Client::new(
+            &self.storage().token_addr
+            )
+    }
 
-    let token = erc20::erc20::new(&erc20addr);
+    pub fn initialize(&mut self, pk: &Ed25519PublicKey, token_addr: &ContractAddress) {
+        let storage = WalletStorage {
+            pk: *pk,
+            token_addr: *token_addr
+        };
 
-    token.transfer(&to_addr, amount).unwrap();
-}
+        self.set_storage(storage);
+    }
 
-#[public_method]
-pub fn try_send_payment(
-    to_addr: &sdk::ContractAddress,
-    amount: i128,
-    signature: &sdk::Ed25519Signature,
-) {
-    let (erc20addr, pk) = load_config_data();
+    pub fn get_balance(&self) -> Amount {
+        self.token().get_balance()
+    }
 
-    let auth_message = compute_auth_message(&to_addr, amount);
+    pub fn test_expect_balance(&self, expect: Amount) {
+        let bal = self.get_balance();
 
-    sdk::VerifySignature(
-        &sdk::PublicKey::Ed25519 { ed25519: pk },
-        &sdk::Signature::Ed25519 {
-            ed25519: *signature,
-        },
-        &auth_message,
-    )
-    .unwrap();
+        assert_eq!(bal, expect);
+    }
 
-    let token = erc20::erc20::new(&erc20addr);
+    fn compute_auth_message(&self, to_addr: &ContractAddress, amount: Amount)
+        -> AuthMessage
+    {
+        // TODO(geoff) this will eventually need a nonce and a domain separator(?)
 
-    token.set_try_invoke().transfer(&to_addr, amount).unwrap();
-}
+        let self_addr = sdk::GetCurrentAddress().unwrap();
 
-#[public_method]
-pub fn mint(to_addr: &sdk::ContractAddress, amount: i128) {
-    let (erc20addr, _) = load_config_data();
+        let input = (&self_addr, to_addr, amount);
+        let buf = sdk::serialize::to_bytes(&input).unwrap();
 
-    let token = erc20::erc20::new(&erc20addr);
-    token.mint(&to_addr, amount).unwrap();
+        let bytes: [u8; 80] = buf.try_into().unwrap();
+
+        bytes
+    }
+
+    fn check_payment_authorization(&self,
+        to_addr: &ContractAddress,
+        amount: Amount,
+        signature: &Ed25519SignatureA)
+    {
+        let pk = &self.storage().pk;
+
+        // TODO some kind of replay mechanism
+        let auth_message = self.compute_auth_message(&to_addr, amount);
+
+        sdk::crypto::VerifySignature(
+            &PublicKey::Ed25519 { ed25519: *pk },
+            &Signature::Ed25519 { ed25519: signature.as_array().clone(), },
+            &auth_message,
+        ).unwrap();
+    }
+
+    pub fn send_payment(&self,
+        to_addr: &ContractAddress,
+        amount: Amount,
+        signature: &Ed25519SignatureA)
+    {
+        self.check_payment_authorization(to_addr, amount, signature);
+
+        self.token().transfer(&to_addr, amount);
+    }
+
+    /*
+    pub fn try_send_payment(&self,
+        to_addr: &ContractAddress,
+        amount: Amount,
+        signature: &Ed25519SignatureA)
+    {
+        self.check_payment_authorization(to_addr, amount, signature);
+
+        self.token().set_try_invoke().transfer(&to_addr, amount);
+    }
+    */
+
+    pub fn mint(&self, to_addr: &ContractAddress, amount: Amount) {
+        self.token().mint(&to_addr, amount);
+    }
 }

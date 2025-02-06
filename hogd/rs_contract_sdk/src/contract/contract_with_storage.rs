@@ -1,5 +1,6 @@
 //! A wrapper around a storage object that only
 //! needs to be stored once, upon contract initialization.
+//!
 //! (Objects with references, such as `Vec` and `Map`,
 //! may allow manipulating sub-objects without re-storing
 //! the root object.)

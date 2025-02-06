@@ -11,9 +11,9 @@ extern crate alloc;
 #[cfg(all(feature = "alloc", target_family = "wasm"))]
 pub mod allocator;
 
-pub use rs_xdr as types;
-
 pub extern crate macros;
+
+pub use ::bcs as serialize;
 
 mod rt;
 mod syscall;
@@ -21,6 +21,8 @@ mod syscall;
 #[rustfmt::skip]
 pub mod syscall_bindings;
 pub use syscall_bindings as sys;
+
+pub mod types;
 
 mod bytestring;
 mod delete;

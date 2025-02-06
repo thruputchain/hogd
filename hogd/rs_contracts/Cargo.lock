@@ -136,6 +136,7 @@ dependencies = [
  "macros",
  "rs_xdr",
  "serde",
+ "serde_arrays",
  "sha2",
  "thiserror",
 ]
@@ -151,6 +152,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02fc4265df13d6fa1d00ecff087228cc0a2b5f3c0e87e258d8b94a156e984c70"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde_arrays"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -173,6 +181,15 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "simple_wallet"
+version = "0.1.0"
+dependencies = [
+ "erc20",
+ "rs_contract_sdk",
+ "serde",
 ]
 
 [[package]]

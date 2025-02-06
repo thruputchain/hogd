@@ -8,10 +8,13 @@ members = [
     "caller",
     "genesis_deployer",
     "rcq_test",
+    "simple_wallet",
 
     # "test_bytestring",
-    # "simple_wallet",
 ]
+
+[workspace.dependencies]
+serde = { version = "1.0.217", default-features = false }
 
 [profile.dev]
 opt-level = "z"
