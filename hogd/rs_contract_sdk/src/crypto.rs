@@ -5,7 +5,7 @@ use crate::syscall::to_offset;
 use crate::syscall_bindings::uninit_SHA256;
 use crate::syscall_bindings::uninit_VerifySignature;
 use core::mem::MaybeUninit;
-use groundhog_xdr::{SHA256Hash, PublicKey, Signature, SyscallErrorCode};
+use groundhog_xdr::{PublicKey, SHA256Hash, Signature, SyscallErrorCode};
 
 pub fn SHA256(input: &[u8]) -> Result<SHA256Hash, i32> {
     let mut out_hash: MaybeUninit<SHA256Hash> =

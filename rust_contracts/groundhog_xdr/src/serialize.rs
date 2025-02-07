@@ -2,10 +2,7 @@
 // https://github.com/stellar/xdrgen/blob/master/lib/xdrgen/generators/rust/src/types.rs
 // A few features we didn't need were removed.
 
-use std::{
-    error, io,
-    io::{BufRead, Cursor, Read, Write},
-};
+use std::io::{BufRead, Cursor, Read, Write};
 
 use core::{
     array::TryFromSliceError, fmt, fmt::Debug, marker::Sized, ops::Deref, slice,

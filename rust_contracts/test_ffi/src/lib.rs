@@ -1,5 +1,4 @@
-
-mod types;
+pub mod types;
 
 #[cfg(test)]
 mod tests {
@@ -7,6 +6,6 @@ mod tests {
 
     #[test]
     fn test_my_function() {
-        let _ = types::DBWrapper::new();
+        let _ = types::Environment::new();
     }
 }

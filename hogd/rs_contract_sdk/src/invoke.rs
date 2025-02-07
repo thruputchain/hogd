@@ -3,7 +3,9 @@
 use crate::syscall_bindings;
 
 use core::mem::MaybeUninit;
-use groundhog_xdr::{ContractAddress, RuntimeMemoryLength, SHA256Hash, SyscallErrorCode};
+use groundhog_xdr::{
+    ContractAddress, RuntimeMemoryLength, SHA256Hash, SyscallErrorCode,
+};
 
 pub fn GetMsgSender() -> Result<ContractAddress, i32> {
     let mut out_addr: MaybeUninit<ContractAddress> =
@@ -47,9 +49,7 @@ pub fn Exit(code: i32) -> ! {
 }
 
 pub fn Revert() -> ! {
-    syscall_bindings::raw_Exit(
-        SyscallErrorCode::kDeterministicWasm as i32,
-    );
+    syscall_bindings::raw_Exit(SyscallErrorCode::kDeterministicWasm as i32);
 }
 
 pub fn GetSourceTransactionHash() -> Result<SHA256Hash, i32> {

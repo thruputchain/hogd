@@ -47,18 +47,13 @@ public:
 
         auto client_config = x23::rpc_stream_logged(cp_, *fd);
         return client_config.template client<DatabaseToCoordInterfaceV1>();
-      }())
-    , db_proxy_(cp_, DatabaseInfo{
-      .database_address = "localhost",
-      .database_to_coord_port = {
-        db_to_coord_port.c_str(),
-        db_to_coord_port.size()
-      },
-      .database_to_exec_port = {
-        db_to_exec_port.c_str(),
-        db_to_exec_port.size()
-      }
-    })
+      }()),
+      db_proxy_(
+          cp_, DatabaseInfo{.database_address = "localhost",
+                            .database_to_coord_port = {db_to_coord_port.c_str(),
+                                                       db_to_coord_port.size()},
+                            .database_to_exec_port = {db_to_exec_port.c_str(),
+                                                      db_to_exec_port.size()}})
   {}
 
   void advance_new_block()
@@ -74,29 +69,27 @@ public:
       exit(-1);
     }
     current_block_id_++;
-    snapshot_cache_ = std::make_unique<StorageSnapshotCache>(current_block_id_, db_proxy_);
+    snapshot_cache_ =
+        std::make_unique<StorageSnapshotCache>(current_block_id_, db_proxy_);
   }
 
-  bool is_block_open() const {
-    return current_block_id_ != 0;
-  }
+  bool is_block_open() const { return current_block_id_ != 0; }
 
-  BlockID current_block_id() const {
-    return current_block_id_;
-  }
+  BlockID current_block_id() const { return current_block_id_; }
 
-  TransactionID allocate_tx_id() {
-    return next_tx_id_++;
-  }
+  TransactionID allocate_tx_id() { return next_tx_id_++; }
 
-  StorageSnapshotCache& get_snapshot() {
+  StorageSnapshotCache &get_snapshot()
+  {
     assert(is_block_open());
     assert(snapshot_cache_);
     return *snapshot_cache_;
   }
 
-  PerTransactionDatabaseProxy get_per_tx_db_proxy() {
-    return PerTransactionDatabaseProxy(current_block_id_, allocate_tx_id(), db_proxy_);
+  PerTransactionDatabaseProxy get_per_tx_db_proxy()
+  {
+    return PerTransactionDatabaseProxy(current_block_id_, allocate_tx_id(),
+                                       db_proxy_);
   }
 
 private:
@@ -116,13 +109,14 @@ private:
 
 class SyscallHandlerContext {
 public:
-
-  SyscallHandlerContext(std::shared_ptr<MockRuntimeContext> context, SignedTransaction const& stx, DBContext& db)
-    : per_tx_db_proxy_(db.get_per_tx_db_proxy())
-    , handler_(stx, db.get_snapshot(), per_tx_db_proxy_, std::nullopt, std::move(context)) {}
+  SyscallHandlerContext(std::shared_ptr<MockRuntimeContext> context,
+                        SignedTransaction const &stx, DBContext &db)
+    : per_tx_db_proxy_(db.get_per_tx_db_proxy()),
+      handler_(stx, db.get_snapshot(), per_tx_db_proxy_, std::nullopt,
+               std::move(context))
+  {}
 
 private:
-
   PerTransactionDatabaseProxy per_tx_db_proxy_;
   SystemCallHandler handler_;
 };
@@ -152,13 +146,24 @@ close_runtime_context(void *context) noexcept
 }
 void
 add_contract_and_method(void *context, const unsigned char *contract_hash,
-                        const char *method_name, unsigned int method_name_len,
+                        const unsigned char *method_name,
+                        unsigned int method_name_len,
                         void *entry_point) noexcept
 {
+  if (contract_hash == nullptr)
+    return;
+
   hogd::SHA256Hash hash;
   std::memcpy(hash.data(), contract_hash, sizeof(hogd::SHA256Hash));
 
-  std::string m{method_name, method_name_len};
+  if (method_name == nullptr)
+    return;
+  std::string m{reinterpret_cast<const char *>(method_name), method_name_len};
+
+  if (context == nullptr)
+    return;
+  if (entry_point == nullptr)
+    return;
 
   auto *c = static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
   auto entry = reinterpret_cast<hogd::detail::ForeignEntryPoint>(entry_point);
@@ -167,37 +172,41 @@ add_contract_and_method(void *context, const unsigned char *contract_hash,
 }
 
 void *
-open_syscall_handler(void *db, void* rc, const unsigned char* signed_tx_, unsigned int serial_len) noexcept
+open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
+                     unsigned int serial_len) noexcept
 {
   if (!db) {
     return nullptr;
   }
-  auto* db_context = reinterpret_cast<hogd::DBContext*> (db);
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
   if (!rc) {
     return nullptr;
   }
-  if (!db_context -> is_block_open()) {
+  if (!db_context->is_block_open()) {
     return nullptr;
   }
 
-  auto* runtime_context = reinterpret_cast<std::shared_ptr<hogd::MockRuntimeContext>*>(rc);
+  auto *runtime_context =
+      reinterpret_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(rc);
 
   if (!signed_tx_) {
     return nullptr;
   }
   hogd::SignedTransaction stx;
   try {
-    x23::deserialize(&stx, std::span<const unsigned char>(signed_tx_, serial_len));
-  } catch(x23::XdrBadInput const& e) {
+    x23::deserialize(&stx,
+                     std::span<const unsigned char>(signed_tx_, serial_len));
+  } catch (x23::XdrBadInput const &e) {
     return nullptr;
   }
 
   return new hogd::SyscallHandlerContext(*runtime_context, stx, *db_context);
 }
 
-void close_syscall_handler(void *syscall_handler) noexcept
+void
+close_syscall_handler(void *syscall_handler) noexcept
 {
-  delete static_cast<hogd::SyscallHandlerContext*>(syscall_handler);
+  delete static_cast<hogd::SyscallHandlerContext *>(syscall_handler);
 }
 
 } // namespace
@@ -232,19 +241,22 @@ close_runtime_context(void *context)
 }
 void
 add_contract_and_method(void *context, const unsigned char *contract_hash,
-                        const char *method_name, unsigned int method_name_len,
-                        void *entry_point)
+                        const unsigned char *method_name,
+                        unsigned int method_name_len, void *entry_point)
 {
-  hogd::add_contract_and_method(context, contract_hash, method_name, method_name_len, entry_point);
+  hogd::add_contract_and_method(context, contract_hash, method_name,
+                                method_name_len, entry_point);
 }
 
 void *
-open_syscall_handler(void *db, void* rc, const unsigned char* signed_tx_, unsigned int serial_len)
+open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
+                     unsigned int serial_len)
 {
   return hogd::open_syscall_handler(db, rc, signed_tx_, serial_len);
 }
 
-void close_syscall_handler(void *syscall_handler)
+void
+close_syscall_handler(void *syscall_handler)
 {
   hogd::close_syscall_handler(syscall_handler);
 }

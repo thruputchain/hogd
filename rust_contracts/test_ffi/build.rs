@@ -1,5 +1,5 @@
-extern crate cmake;
 extern crate bindgen;
+extern crate cmake;
 
 use std::env;
 use std::path::PathBuf;
@@ -22,8 +22,15 @@ fn main() {
     println!("cargo:rerun-if-changed=../../x23");
 
     // Tell Rust where to find the built library
-    println!("cargo:rustc-link-search=native={}/build/hogd/test_ffi/", dst.display());
-    println!("cargo:rustc-link-lib=static=test_ffi");
+    println!(
+        "cargo:rustc-link-search=native={}/build/hogd/test_ffi/",
+        dst.display()
+    );
+    println!("cargo:rustc-link-lib=dylib=test_ffi");
+    println!(
+        "cargo:rustc-link-arg=-Wl,-rpath,{}/build/hogd/test_ffi/",
+        dst.display()
+    );
 
     // Generate Rust bindings from the C header file
     let bindings = bindgen::Builder::default()
