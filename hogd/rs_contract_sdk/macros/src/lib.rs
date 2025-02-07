@@ -334,11 +334,12 @@ mod gen {
         -> Result<TokenStream2>
     {
         let ident = &method.ident;
+        let export_name = get_method_name(&ident.to_string());
         let received_args = received_args(method);
         let provided_args = provided_args(method);
         Ok(quote_spanned! {method.span=>
 
-            #[no_mangle]
+            #[cfg_attr(target_family = "wasm", export_name = #export_name)]
             pub extern "C" fn #ident() -> i32 {
                 ::sdk::invoke::handle_call(| #received_args | {
                     contract().#ident( #provided_args )
@@ -346,6 +347,20 @@ mod gen {
             }
 
         })
+    }
+
+    fn get_method_name(arg: &str) -> String {
+        use sha2::Digest;
+
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(arg.as_bytes());
+        let result = hasher.finalize();
+
+        let prefix = &result[0..4];
+
+        let num: u32 = u32::from_be_bytes(prefix.try_into().unwrap());
+
+        format!("{:X}", num)
     }
 
     fn provided_args(method: &sig::Method) -> TokenStream2 {
