@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use crate::syscall_bindings;
-use rs_xdr::{RuntimeMemoryLength, StorageKey};
+use groundhog_xdr::{RuntimeMemoryLength, StorageKey};
 
 use core::mem::MaybeUninit;
 
@@ -23,7 +23,7 @@ pub fn BytestringSetExclusive(
     syscall_bindings::raw_BytestringSet(
         key,
         slice,
-        rs_xdr::StorageDeltaModifier::kLockExclusive as i32,
+        groundhog_xdr::StorageDeltaModifier::kLockExclusive as i32,
     )
 }
 
@@ -53,7 +53,7 @@ pub fn BytestringGet_Sized<const N: usize>(
 #[cfg(feature = "alloc")]
 mod bytestring_get_alloc {
 
-    use rs_xdr::{RuntimeMemoryLength, StorageKey};
+    use groundhog_xdr::{RuntimeMemoryLength, StorageKey};
 
     extern crate alloc;
     use alloc::boxed::Box;

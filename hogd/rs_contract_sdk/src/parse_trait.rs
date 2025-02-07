@@ -1,6 +1,6 @@
 use crate::invoke::Exit;
 use core::mem::MaybeUninit;
-use rs_xdr::*;
+use groundhog_xdr::*;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;

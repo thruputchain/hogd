@@ -15,7 +15,7 @@ add_dependencies(build_protocol generate_syscall_x)
 
 add_xdr_rs(
 	protocol_rs
-	${CMAKE_CURRENT_SOURCE_DIR}/rs_xdr/src
+	${CMAKE_SOURCE_DIR}/rust_contracts/groundhog_xdr/src
 	types.x
 	transaction.x
 	contract.x

@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use crate::syscall_bindings;
-use rs_xdr::{RuntimeMemoryLength, StorageKey};
+use groundhog_xdr::{RuntimeMemoryLength, StorageKey};
 
 use core::mem::MaybeUninit;
 

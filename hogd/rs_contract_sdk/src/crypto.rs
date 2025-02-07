@@ -5,7 +5,7 @@ use crate::syscall::to_offset;
 use crate::syscall_bindings::uninit_SHA256;
 use crate::syscall_bindings::uninit_VerifySignature;
 use core::mem::MaybeUninit;
-use rs_xdr::SHA256Hash;
+use groundhog_xdr::{SHA256Hash, PublicKey, Signature, SyscallErrorCode};
 
 pub fn SHA256(input: &[u8]) -> Result<SHA256Hash, i32> {
     let mut out_hash: MaybeUninit<SHA256Hash> =
@@ -18,14 +18,14 @@ pub fn SHA256(input: &[u8]) -> Result<SHA256Hash, i32> {
 }
 
 pub fn VerifySignature(
-    pk: &rs_xdr::PublicKey,
-    signature: &rs_xdr::Signature,
+    pk: &PublicKey,
+    signature: &Signature,
     message: &[u8],
 ) -> Result<(), i32> {
     match (pk, signature) {
         (
-            ::rs_xdr::PublicKey::Ed25519 { ed25519: pk_local },
-            ::rs_xdr::Signature::Ed25519 { ed25519: sig_local },
+            PublicKey::Ed25519 { ed25519: pk_local },
+            Signature::Ed25519 { ed25519: sig_local },
         ) => {
             return uninit_VerifySignature(
                 signature.scheme() as u64,
@@ -35,6 +35,6 @@ pub fn VerifySignature(
                 message,
             );
         }
-        _ => Err(::rs_xdr::SyscallErrorCode::kInvalidInput as i32),
+        _ => Err(SyscallErrorCode::kInvalidInput as i32),
     }
 }

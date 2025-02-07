@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/shared_util/load_contracts.h"
 #include "hogd/test/local_test_harness.h"
 #include "rpc_types.hh"

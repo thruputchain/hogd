@@ -1,4 +1,4 @@
-use rs_xdr::SyscallNo;
+use groundhog_xdr::SyscallNo;
 
 #[link(wasm_import_module = "marmot")]
 extern "C" {

@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use crate::syscall_bindings;
-use rs_xdr::StorageKey;
+use groundhog_xdr::{StorageKey, SyscallErrorCode};
 
 pub fn NonnegativeIntGet(key: &StorageKey) -> Result<(i128, i128), i32> {
     let mut set_result: i128 = 0;
@@ -26,7 +26,7 @@ pub fn NonnegativeIntAdd(key: &StorageKey, add_value: i128) -> Result<(), i32> {
     let (set, prev_add) = match NonnegativeIntGet(key) {
         Ok(x) => x,
         Err(e) => {
-            if e == rs_xdr::SyscallErrorCode::kStorageKeyNotExist as i32 {
+            if e == SyscallErrorCode::kStorageKeyNotExist as i32 {
                 (0, 0)
             } else {
                 return Err(e);

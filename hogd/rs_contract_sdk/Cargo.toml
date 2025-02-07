@@ -9,8 +9,8 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-rs_xdr = {path = "../xdr/rs_xdr/"}
+groundhog_xdr = {path = "../../rust_contracts/groundhog_xdr"}
 
 [features]
-alloc = ["rs_xdr/alloc"]
-std = ["rs_xdr/std"]
+alloc = ["groundhog_xdr/alloc"]
+std = ["groundhog_xdr/std"]

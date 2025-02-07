@@ -2,7 +2,7 @@
 
 use crate::syscall_bindings::{uninit_DeployContract, uninit_GetDeployAddress};
 use core::mem::MaybeUninit;
-use rs_xdr::{ContractAddress, SHA256Hash};
+use groundhog_xdr::{ContractAddress, SHA256Hash};
 
 pub fn GetDeployAddress(
     nonce: &SHA256Hash,

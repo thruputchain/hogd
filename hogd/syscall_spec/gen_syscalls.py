@@ -789,7 +789,7 @@ def gen_rs_syscall_bindings(spec):
 // *** Do not check in ***
 
 #![allow(non_snake_case)]
-use rs_xdr::*;
+use groundhog_xdr::*;
 use crate::syscall::{{syscall_wrapper, to_offset, to_offset_mut}};
 use core::mem::MaybeUninit;
 use core::hint::unreachable_unchecked;

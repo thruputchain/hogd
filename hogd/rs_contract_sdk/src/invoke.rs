@@ -3,7 +3,7 @@
 use crate::syscall_bindings;
 
 use core::mem::MaybeUninit;
-use rs_xdr::{ContractAddress, RuntimeMemoryLength, SHA256Hash};
+use groundhog_xdr::{ContractAddress, RuntimeMemoryLength, SHA256Hash, SyscallErrorCode};
 
 pub fn GetMsgSender() -> Result<ContractAddress, i32> {
     let mut out_addr: MaybeUninit<ContractAddress> =
@@ -48,7 +48,7 @@ pub fn Exit(code: i32) -> ! {
 
 pub fn Revert() -> ! {
     syscall_bindings::raw_Exit(
-        rs_xdr::SyscallErrorCode::kDeterministicWasm as i32,
+        SyscallErrorCode::kDeterministicWasm as i32,
     );
 }
 
@@ -62,7 +62,7 @@ pub fn GetSourceTransactionHash() -> Result<SHA256Hash, i32> {
 #[cfg(feature = "alloc")]
 mod get_calldata_alloc {
 
-    use rs_xdr::RuntimeMemoryLength;
+    use groundhog_xdr::RuntimeMemoryLength;
 
     extern crate alloc;
     use alloc::boxed::Box;
