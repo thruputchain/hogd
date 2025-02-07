@@ -28,19 +28,7 @@ pub struct InvokeResult {
     panic: i32,
 }
 
-#[derive(Debug, Clone)]
-struct InvokeError {
-    pub error: groundhog_xdr::InvokeErrorCode,
-}
-
-impl fmt::Display for InvokeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "InvokeError code {}", self.error.clone() as i32)
-    }
-}
-
-impl Error for InvokeError {}
-
+use rs_contract_sdk::InvokeError;
 
 pub fn invoke_wrapper(wrapped: fn() -> i32) -> Box<dyn Fn() -> InvokeResult> {
     Box::new(move || {
@@ -174,8 +162,21 @@ impl Drop for MockContractContext {
 mod tests {
     use super::*;
 
+    // There's a race condition on the panic handler,
+    // which changes how tests behave
     #[test]
+    fn test_panic_runner() {
+        test_error_wrap();
+        test_panic();
+        test_panic_ok();
+        test_sdk_panic();
+        test_option_panic();
+        test_pass_invoke_error_through_panic_hook();
+    }
+
+
     fn test_error_wrap() {
+        panic::take_hook();
         let f: fn() -> i32 = || {
             return 1;
         };
@@ -188,8 +189,8 @@ mod tests {
         });
     }
 
-    #[test]
     fn test_panic() {
+        panic::take_hook();
         let f: fn() -> i32 = || {
             panic!("unknown")
         };
@@ -202,12 +203,12 @@ mod tests {
         });
     }
 
-    #[test]
     fn test_panic_ok() {
+        panic::take_hook();
         let f: fn() -> i32 = || {
             panic_any(
                 InvokeError {
-                    error: InvokeErrorCode::kDeterministic
+                    error: InvokeErrorCode::kValidationFailure
                 }
             )
         };
@@ -216,7 +217,54 @@ mod tests {
 
         assert_eq!((*boxed)(), InvokeResult {
             result_code : 0,
+            panic: InvokeErrorCode::kValidationFailure as i32
+        });
+    }
+
+    fn test_sdk_panic() {
+        rs_contract_sdk::set_override_panic_hook();
+        let f: fn() -> i32 = || {
+            panic!("something");
+        };
+
+        let boxed = invoke_wrapper(f);
+
+        assert_eq!((*boxed)(), InvokeResult {
+            result_code : 0,
             panic: InvokeErrorCode::kDeterministic as i32
+        });
+    }
+
+    fn test_option_panic() {
+        rs_contract_sdk::set_override_panic_hook();
+        let f: fn() -> i32 = || {
+            let x : Option<i32> = None;
+            return x.unwrap();
+        };
+
+        let boxed = invoke_wrapper(f);
+
+        assert_eq!((*boxed)(), InvokeResult {
+            result_code : 0,
+            panic: InvokeErrorCode::kDeterministic as i32
+        });
+    }
+
+    fn test_pass_invoke_error_through_panic_hook() {
+        rs_contract_sdk::set_override_panic_hook();
+        let f: fn() -> i32 = || {
+            panic_any(
+                InvokeError {
+                    error : InvokeErrorCode::kValidationFailure
+                }
+            )
+        };
+
+        let boxed = invoke_wrapper(f);
+
+        assert_eq!((*boxed)(), InvokeResult {
+            result_code : 0,
+            panic: InvokeErrorCode::kValidationFailure as i32
         });
     }
 }
