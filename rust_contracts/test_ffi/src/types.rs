@@ -8,6 +8,7 @@ use groundhog_xdr::{Limits, WriteXdr};
 use sha2::Digest;
 use sha2::Sha256;
 
+#[cfg(test)]
 use std::panic::panic_any;
 use std::panic;
 use std::error::Error;
@@ -114,6 +115,7 @@ impl MockContract {
 pub struct MockContractContext {
     context: *mut c_void,
     mock_contract_index: u32,
+    funcs: Vec<*mut dyn Fn() -> InvokeResult>
 }
 
 impl MockContractContext {
@@ -121,6 +123,7 @@ impl MockContractContext {
         Self {
             context: unsafe { open_runtime_context() },
             mock_contract_index: 0,
+            funcs: vec![]
         }
     }
 
@@ -138,15 +141,19 @@ impl MockContractContext {
         &mut self,
         contract: &MockContract,
         name: &[u8],
-        pointer: fn() -> InvokeResult,
+        pointer: fn() -> i32,
     ) {
+        let new_func = invoke_wrapper(pointer);
+        let out = Box::<dyn Fn() -> InvokeResult>::into_raw(new_func);
+        self.funcs.push(out);
+
         unsafe {
             add_contract_and_method(
                 self.context,
                 contract.hash.as_ptr(),
                 name.as_ptr(),
                 name.len().try_into().unwrap(),
-                pointer as *mut c_void,
+                out as *mut c_void
             )
         }
     }
@@ -155,6 +162,11 @@ impl MockContractContext {
 impl Drop for MockContractContext {
     fn drop(&mut self) {
         unsafe { close_runtime_context(self.context) }
+        for func in &self.funcs {
+            unsafe {
+                let _ : Box<dyn Fn() -> InvokeResult> = Box::from_raw(*func);
+            }
+        }
     }
 }
 
