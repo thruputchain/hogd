@@ -46,8 +46,18 @@ Calldata static make_calldata(C const &data, Cs const &...additional)
     std::memcpy(out.data(), addr, sizeof(C));
   }
   else if constexpr (x23::is_bytespan<C>) {
-    out.resize_uninitialized(data.size());
-    std::memcpy(out.data(), data.data(), data.size());
+    // BCS representation for lengths < 128 is one byte, so we'll
+    // do a quick hack that works for those lengths
+    if (data.size() > 127)
+      throw std::runtime_error("span arg too big for BCS hack");
+
+    const size_t HDRLEN = 1;
+    out.resize_uninitialized(HDRLEN + data.size());
+
+    const uint8_t bcs_len = static_cast<uint8_t>(data.size());
+    std::memcpy(out.data(), &bcs_len, HDRLEN);
+
+    std::memcpy(HDRLEN + out.data(), data.data(), data.size());
   }
 
   auto rest = make_calldata(additional...);
