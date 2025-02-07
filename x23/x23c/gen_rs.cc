@@ -225,7 +225,7 @@ impl WriteXdr for {0} {{
 void
 GenRs::show_type(const EnumBody &e, string t)
 {
-  prtop("#[derive(Clone, PartialEq)]\n#[repr(i32)]\npub enum {} ", t);
+  prtop("#[derive(Clone, PartialEq, Debug)]\n#[repr(i32)]\npub enum {} ", t);
   auto _close = open_brace();
   scopes_.push_back(t);
   

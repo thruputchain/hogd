@@ -16,6 +16,7 @@ add_dependencies(build_protocol generate_syscall_x)
 add_xdr_rs(
 	protocol_rs
 	${CMAKE_SOURCE_DIR}/rust_contracts/groundhog_xdr/src
+	ffi_enums.x
 	types.x
 	transaction.x
 	contract.x

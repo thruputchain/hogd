@@ -5,7 +5,7 @@
 use std::io::{BufRead, Cursor, Read, Write};
 
 use core::{
-    array::TryFromSliceError, fmt, fmt::Debug, marker::Sized, ops::Deref, slice,
+    fmt::Debug, marker::Sized,
 };
 
 use crate::common_types::*;

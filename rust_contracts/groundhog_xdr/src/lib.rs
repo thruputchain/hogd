@@ -8,6 +8,8 @@ mod syscall;
 mod transaction;
 #[rustfmt::skip]
 mod types;
+#[rustfmt::skip]
+mod ffi_enums;
 
 mod common_types;
 pub use common_types::*;
@@ -21,3 +23,4 @@ pub use contract::*;
 pub use syscall::*;
 pub use transaction::*;
 pub use types::*;
+pub use ffi_enums::*;
