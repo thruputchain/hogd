@@ -10,7 +10,7 @@ rs_contracts : \
 	cargo +nightly rustc \
 		--features "guest,alloc" \
 		--target wasm32-unknown-unknown \
-		--target-dir "../../build/rs_contracts" \
+		--target-dir "../../build/hogd/rs_contracts/built_wasms" \
 		--release \
 		-p $(basename $@) \
 		-Zbuild-std=alloc,core \
@@ -24,7 +24,7 @@ test:
 	# Run all contract tests
 	cargo +nightly test \
 		--features "guest,std" \
-		--target-dir "../../build/rs_contracts" \
+		--target-dir "../../build/hogd/rs_contracts/built_wasms" \
 
 clean:
 	cargo clean
