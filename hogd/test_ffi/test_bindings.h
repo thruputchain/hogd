@@ -20,6 +20,11 @@ struct ForeignRootInvokeResult {
 typedef struct ForeignInvokeResult (*ForeignEntryPoint)(void *foreign_context,
                                                         uint32_t method_number);
 
+struct ForeignHostFnResult {
+  int32_t result_code;
+  int32_t panic; // HostFnErrorCode
+};
+
 void *create_db();
 void free_db(void *ptr);
 

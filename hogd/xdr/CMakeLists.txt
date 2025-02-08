@@ -8,10 +8,11 @@ add_xdr(
 	storage_item.x
 	storage_lock.x
 	syscall.x
+	syscall_args.x
 	transaction.x
 	types.x)
 
-add_dependencies(build_protocol generate_syscall_x)
+add_dependencies(build_protocol generate_syscall_x generate_syscall_args_x)
 
 add_xdr_rs(
 	protocol_rs
@@ -20,9 +21,10 @@ add_xdr_rs(
 	types.x
 	transaction.x
 	contract.x
-	syscall.x)
+	syscall.x
+	syscall_args.x)
 
-add_dependencies(build_protocol_rs generate_syscall_x)
+add_dependencies(build_protocol_rs generate_syscall_x generate_syscall_args_x)
 
 add_xdr_rs(
 	ffi_enum_rs 

@@ -97,6 +97,7 @@ syscalls:
         fixed_size: yes
         typename: "int32_t"
         rust_typename: "i32"
+        xdr_typename: "int"
         primitive_type: yes
     outputs:
     returns: no
@@ -181,9 +182,11 @@ syscalls:
       - name: "current_set"
         typename: "int128_t"
         rust_typename: "i128"
+        xdr_typename: "int128_xdr"
       - name: "current_add"
         typename: "int128_t"
         rust_typename: "i128"
+        xdr_typename: "int128_xdr"
     number: 16
   - name: "NonnegativeIntSetAdd"
     needs_context: yes
@@ -193,10 +196,12 @@ syscalls:
       - name: "set_value"
         typename: "int128_t"
         rust_typename: "i128"
+        xdr_typename: "int128_xdr"
         rust_input_requires_transmute: yes
       - name: "add_value"
         typename: "int128_t"
         rust_typename: "i128"
+        xdr_typename: "int128_xdr"
         rust_input_requires_transmute: yes
     outputs:
     number: 17

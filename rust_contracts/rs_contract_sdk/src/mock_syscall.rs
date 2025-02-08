@@ -9,6 +9,8 @@ use crate::unrecoverable_error;
 use crate::validation_error;
 use std::panic::panic_any;
 
+// https://blog.rust-lang.org/2024/03/30/i128-layout-update.html
+
 #[repr(C)]
 struct FFIHostFnResult {
     result: i32,

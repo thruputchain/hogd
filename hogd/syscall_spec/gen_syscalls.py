@@ -287,6 +287,58 @@ def gen_validate_arg(inp, *, is_input):
   {check_arg_statement}
 """, [f"user_{arg1}"],  f"*{arg1}", f"{const}{typename}& {arg1}"
 
+def gen_syscall_io_arg_decl(arg):
+  end_decorator = ""
+  argtype = ""
+  if "xdr_typename" in arg:
+    argtype = arg["xdr_typename"]
+  elif "span_argument" in arg and arg["span_argument"]:
+    argtype = "opaque"
+    end_decorator = "<>"
+  else:
+    argtype = arg["typename"]
+
+  pointerdecl = ""
+  if "optional" in arg and arg["optional"]:
+    pointerdecl = "*"
+  argname = arg["name"]
+  return f"  {argtype} {pointerdecl}{argname}{end_decorator};"
+
+def gen_syscall_input_arg_xdr(syscall):
+  name = syscall["name"]
+  decls = []
+
+  if syscall["inputs"] is not None:
+    for arg in syscall["inputs"]:
+      decl = gen_syscall_io_arg_decl(arg)
+      decls = decls + [decl]
+  if len(decls) == 0:
+    decls = ["  void;"]
+  decls_joined = "\n".join(decls)
+
+  return f"""struct {name}_input {{
+{decls_joined}
+}};
+
+"""
+
+def gen_syscall_output_arg_xdr(syscall):
+  name = syscall["name"]
+  decls = []
+
+  if syscall["outputs"] is not None:
+    for arg in syscall["outputs"]:
+      decl = gen_syscall_io_arg_decl(arg)
+      decls = decls + [decl]
+  if len(decls) == 0:
+    decls = ["  void;"]
+  decls_joined = "\n".join(decls)
+
+  return f"""struct {name}_output {{
+{decls_joined}
+}};
+
+"""
 
 def gen_inner_outer(syscall):
   name = syscall["name"]
@@ -823,9 +875,24 @@ namespace hogd {{
 
 {joined}
 }}"""
-  
 
+def gen_syscall_arg_xdr(spec):
+  structs = ""
+  for call in spec["syscalls"]:
+    structs += gen_syscall_input_arg_xdr(call)
+    structs += gen_syscall_output_arg_xdr(call)
+  print(structs)
 
+  return f"""// clang-format off
+%#include "types.hh"
+
+namespace hogd {{
+  // clang-format on
+{structs}
+
+}}
+
+"""
 
 
 parser = argparse.ArgumentParser(description="syscall generator")
@@ -834,6 +901,10 @@ parser.add_argument(
   '--syscall_x', 
   action='store_true', 
   help="gen syscall.x")
+parser.add_argument(
+  '--syscall_args_x', 
+  action='store_true', 
+  help="gen syscall_args.x")
 parser.add_argument(
   '--syscall_inner_h', 
   action='store_true', 
@@ -871,6 +942,11 @@ if (args.syscall_x):
   filename = args.output_dir + "/syscall.x"
   with open(filename, "w") as f:
     f.write(gen_syscall_x(spec_full))
+
+if (args.syscall_args_x):
+  filename = args.output_dir + "/syscall_args.x"
+  with open(filename, "w") as f:
+    f.write(gen_syscall_arg_xdr(spec_full))
 
 if (args.syscall_inner_h):
   filename = args.output_dir + "/syscall_inner.h"

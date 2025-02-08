@@ -19,6 +19,11 @@ mod serialize;
 #[cfg(feature = "std")]
 pub use serialize::*;
 
+#[cfg(feature = "std")]
+mod syscall_args;
+#[cfg(feature = "std")]
+pub use syscall_args::*;
+
 pub use contract::*;
 pub use ffi_enums::*;
 pub use syscall::*;
