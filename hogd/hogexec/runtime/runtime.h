@@ -137,6 +137,8 @@ public:
   InvokeResult invoke(uint32_t method_name, uint64_t gas_limit);
 
   static std::string method_name_from_int(uint32_t method_name);
+  // inverse of method_name_from_int
+  static MethodID method_id_from_name(std::string const &name);
 
   // Returns FALSE if gas consumption failed.
   //

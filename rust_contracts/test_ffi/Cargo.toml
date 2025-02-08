@@ -3,6 +3,9 @@ name = "test_ffi"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["rlib"]
+
 [dependencies]
 groundhog_xdr = {path = "..//groundhog_xdr", features=["std"]}
 rs_contract_sdk = {path = "../rs_contract_sdk", features=["std"]}

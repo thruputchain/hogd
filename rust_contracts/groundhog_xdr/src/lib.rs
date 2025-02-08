@@ -20,7 +20,7 @@ mod serialize;
 pub use serialize::*;
 
 pub use contract::*;
+pub use ffi_enums::*;
 pub use syscall::*;
 pub use transaction::*;
 pub use types::*;
-pub use ffi_enums::*;

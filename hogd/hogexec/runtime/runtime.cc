@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdlib>
 #include <format>
 #include <memory>
 #include <string>
@@ -11,6 +12,7 @@
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasm3_runtime.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -73,6 +75,12 @@ std::string
 Runtime::method_name_from_int(uint32_t method_name)
 {
   return std::format("{:X}", method_name);
+}
+
+MethodID
+Runtime::method_id_from_name(std::string const &name)
+{
+  return std::stoul(name, nullptr, 16);
 }
 
 InvokeResult

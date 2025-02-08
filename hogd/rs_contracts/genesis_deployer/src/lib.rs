@@ -28,5 +28,4 @@ pub fn deploy_and_invoke(
         0,
     )
     .unwrap();
-    sdk::Log(b"ABCDEFG").unwrap();
 }

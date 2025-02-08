@@ -11,9 +11,9 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/mock_contract.h"
-#include "hogd/hogexec/runtime/mock_runtime_ffi.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/test_ffi/test_bindings.h"
 #include "types.hh"
 
 namespace hogd {
@@ -33,9 +33,8 @@ public:
   make_new_runtime(SHA256Hash const &hash, const Contract *contract,
                    SystemCallHandler *syscall_handler) override;
 
-  void add_mocked_method(SHA256Hash const &contract,
-                         std::string const &method_name,
-                         detail::ForeignEntryPoint entry_point);
+  void set_trampoline(SHA256Hash const &contract, ForeignEntryPoint entry_point,
+                      void *foreign_context);
 
 private:
   std::map<SHA256Hash, MockContract> mocked_contracts_;

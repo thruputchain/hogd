@@ -4,9 +4,7 @@
 
 use std::io::{BufRead, Cursor, Read, Write};
 
-use core::{
-    fmt::Debug, marker::Sized,
-};
+use core::{fmt::Debug, marker::Sized};
 
 use crate::common_types::*;
 

@@ -1,26 +1,29 @@
 #include "hogd/test_ffi/test_bindings.h"
 
 #include <cassert>
-#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 
 #include "coord.hh"
+#include "ffi_enums.hh"
 #include "hogd/hogdb/hogdb_core.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/mock_runtime.h"
-#include "hogd/hogexec/runtime/mock_runtime_ffi.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "rpc.hh"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
+#include "x23/format.h"
 #include "x23/rpc.h"
 #include "x23/serialize.h"
 #include "x23/threadpool.h"
@@ -54,7 +57,9 @@ public:
                                                        db_to_coord_port.size()},
                             .database_to_exec_port = {db_to_exec_port.c_str(),
                                                       db_to_exec_port.size()}})
-  {}
+  {
+    db_.get_root_db().set_as_default_genesis();
+  }
 
   void advance_new_block()
   {
@@ -68,6 +73,7 @@ public:
         RPCError::kNone) {
       exit(-1);
     }
+    syscall_logfd = 1;
     current_block_id_++;
     snapshot_cache_ =
         std::make_unique<StorageSnapshotCache>(current_block_id_, db_proxy_);
@@ -116,7 +122,49 @@ public:
                std::move(context))
   {}
 
+  ForeignRootInvokeResult root_invoke()
+  {
+    assert(get_context() == this);
+
+    auto res = handler_.root_invoke();
+
+    if (res.result_) {
+      std::printf("invoke success\n");
+      return ForeignRootInvokeResult{
+          .result = ForeignInvokeResult{.result_code = *res.result_,
+                                        .panic = std::to_underlying(
+                                            InvokeErrorCode::kNone)},
+          .gas_consumed = res.gas_consumed_};
+    }
+
+    std::printf("invoke failed\n");
+    return ForeignRootInvokeResult{.result = {.result_code = 0,
+                                              .panic = std::to_underlying(
+                                                  res.result_.error().code())},
+                                   .gas_consumed = res.gas_consumed_};
+  }
+
+  static SyscallHandlerContext *get_context() { return current_context_; }
+
+  bool push_context()
+  {
+    if (get_context() != nullptr) {
+      return false;
+    }
+
+    current_context_ = this;
+    return true;
+  }
+
+  void pop_context()
+  {
+    assert(get_context() == this);
+    current_context_ = nullptr;
+  }
+
 private:
+  inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
+
   PerTransactionDatabaseProxy per_tx_db_proxy_;
   SystemCallHandler handler_;
 };
@@ -124,51 +172,61 @@ private:
 DBContext *
 make_new_db() noexcept
 {
-  std::printf("make new db\n");
   return new DBContext();
 }
 void
 free_db(DBContext *ptr) noexcept
 {
-  std::printf("free db\n");
   delete ptr;
+}
+
+void
+advance_new_block(void *db) noexcept
+{
+  auto *ptr = reinterpret_cast<DBContext *>(db);
+  if (!ptr)
+    return;
+
+  ptr->advance_new_block();
 }
 
 void *
 open_runtime_context() noexcept
 {
-  return new std::shared_ptr<hogd::MockRuntimeContext>();
+  auto *out = new std::shared_ptr<hogd::MockRuntimeContext>();
+  *out = std::make_shared<hogd::MockRuntimeContext>(
+      make_runtime_context(RuntimeEngine::kWasmi));
+  return out;
 }
 void
 close_runtime_context(void *context) noexcept
 {
   delete static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
 }
-void
+bool
 add_contract_and_method(void *context, const unsigned char *contract_hash,
-                        const unsigned char *method_name,
-                        unsigned int method_name_len,
-                        void *entry_point) noexcept
+                        ForeignEntryPoint entry_point,
+                        void *foreign_context) noexcept
 {
   if (contract_hash == nullptr)
-    return;
+    return false;
 
   hogd::SHA256Hash hash;
   std::memcpy(hash.data(), contract_hash, sizeof(hogd::SHA256Hash));
 
-  if (method_name == nullptr)
-    return;
-  std::string m{reinterpret_cast<const char *>(method_name), method_name_len};
-
   if (context == nullptr)
-    return;
+    return false;
   if (entry_point == nullptr)
-    return;
+    return false;
 
   auto *c = static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
-  auto entry = reinterpret_cast<hogd::detail::ForeignEntryPoint>(entry_point);
 
-  (*c)->add_mocked_method(hash, m, entry);
+  if (!(*c)) {
+    return false;
+  }
+
+  (*c)->set_trampoline(hash, entry_point, foreign_context);
+  return true;
 }
 
 void *
@@ -200,13 +258,40 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
     return nullptr;
   }
 
-  return new hogd::SyscallHandlerContext(*runtime_context, stx, *db_context);
+  std::printf("got tx: %s\n", x23::show(stx).c_str());
+
+  return new SyscallHandlerContext(*runtime_context, stx, *db_context);
 }
 
 void
 close_syscall_handler(void *syscall_handler) noexcept
 {
-  delete static_cast<hogd::SyscallHandlerContext *>(syscall_handler);
+  delete static_cast<SyscallHandlerContext *>(syscall_handler);
+}
+
+constexpr ForeignRootInvokeResult kUnrecoverableError = {
+    .result = {.result_code = 0,
+               .panic = std::to_underlying(InvokeErrorCode::kUnrecoverable)},
+    .gas_consumed = 0};
+
+ForeignRootInvokeResult
+root_invoke(void *syscall_handler) noexcept
+{
+  if (!syscall_handler) {
+    return kUnrecoverableError;
+  }
+
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+
+  if (!context->push_context()) {
+    return kUnrecoverableError;
+  }
+
+  auto res = context->root_invoke();
+
+  context->pop_context();
+
+  return res;
 }
 
 } // namespace
@@ -228,6 +313,12 @@ free_db(void *ptr)
   hogd::free_db(static_cast<hogd::DBContext *>(ptr));
 }
 
+void
+advance_new_block(void *db)
+{
+  hogd::advance_new_block(db);
+}
+
 void *
 open_runtime_context()
 {
@@ -239,13 +330,14 @@ close_runtime_context(void *context)
 {
   hogd::close_runtime_context(context);
 }
-void
+int
 add_contract_and_method(void *context, const unsigned char *contract_hash,
-                        const unsigned char *method_name,
-                        unsigned int method_name_len, void *entry_point)
+                        ForeignEntryPoint entry_point, void *foreign_context)
 {
-  hogd::add_contract_and_method(context, contract_hash, method_name,
-                                method_name_len, entry_point);
+  return (hogd::add_contract_and_method(context, contract_hash, entry_point,
+                                        foreign_context))
+             ? 0
+             : 1;
 }
 
 void *
@@ -259,6 +351,12 @@ void
 close_syscall_handler(void *syscall_handler)
 {
   hogd::close_syscall_handler(syscall_handler);
+}
+
+struct ForeignRootInvokeResult
+root_invoke(void *syscall_handler)
+{
+  return hogd::root_invoke(syscall_handler);
 }
 
 #ifdef __cplusplus
