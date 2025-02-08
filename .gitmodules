@@ -18,5 +18,4 @@
 	url = git@github.com:groundhogchain/bcs.git
 [submodule "hogd/rs_contract_sdk/external/serde_arrays"]
 	path = hogd/rs_contract_sdk/external/serde_arrays
-    # note lack of terminal "s":
-	url = git@github.com:groundhogchain/serde_array.git
+	url = git@github.com:groundhogchain/serde_arrays.git
