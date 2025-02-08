@@ -69,6 +69,9 @@ struct GenRs {
 
   void show_decl(const Declaration &d, std::string name_prefix)
   {
+    if (d.qual == Declaration::kVoid) {
+      return;
+    }
     show_comment(d.comment, false);
     if (holds_alternative<string>(d.type)) {
       prtop("pub {}: {},\n", d.id, type_name(d, false));
@@ -193,6 +196,9 @@ impl ReadXdr for {0} {{
 )", t);
 
   for (const auto &d : s) {
+    if (d.qual == Declaration::kVoid) {
+      continue;
+    }
     prtop("                {} : {}::read_xdr(r)?,\n", d.id, type_name(d, false, true));
   }
 
@@ -210,6 +216,9 @@ impl WriteXdr for {0} {{
 )", t);
 
   for (const auto &d : s) {
+    if (d.qual == Declaration::kVoid) {
+      continue;
+    }
     prtop("                self.{}.write_xdr(w)?;\n", d.id);
   }
 
@@ -225,6 +234,7 @@ impl WriteXdr for {0} {{
 void
 GenRs::show_type(const EnumBody &e, string t)
 {
+  {
   prtop("#[derive(Clone, PartialEq, Debug)]\n#[repr(i32)]\npub enum {} ", t);
   auto _close = open_brace();
   scopes_.push_back(t);
@@ -244,17 +254,50 @@ GenRs::show_type(const EnumBody &e, string t)
     first = false;
     prtop("{} = {},\n", cd.id, cd.val);
   }
+  }
 
-  bottom_ += std::format(R"(impl {0} {{
-    pub fn discriminant(self: {0}) -> i32 {{
-        self as i32
+  prtop(R"(
+#[cfg(feature="std")]
+impl TryFrom<i32> for {0} {{
+  type Error = Error;
+
+  fn try_from(i: i32) -> Result<Self, Error> {{
+      let e = match i {{)", t);
+  for (const auto &cd : e) {
+    prtop("{} => {}::{},\n", cd.val, t, cd.id);
+  }
+          //#{enum.members.map do |m| "#{m.value} => #{name enum}::#{name m}," end.join("\n")}
+  prtop(R"(
+          #[allow(unreachable_patterns)]
+          _ => return Err(Error::Invalid),
+      }};
+      Ok(e)
+  }}
+}}
+
+#[cfg(feature = "std")]
+impl ReadXdr for {0} {{
+    fn read_xdr<R: Read>(r: &mut Limited<R>) -> Result<Self, Error> {{
+        r.with_limited_depth(|r| {{
+            let e = i32::read_xdr(r)?;
+            let v: Self = e.try_into()?;
+            Ok(v)
+        }})
     }}
 }}
 
+#[cfg(feature = "std")]
+impl WriteXdr for {0} {{
+    fn write_xdr<W: Write>(&self, w: &mut Limited<W>) -> Result<(), Error> {{
+        w.with_limited_depth(|w| {{
+          let i: i32 = self.clone() as i32;
+          i.write_xdr(w)
+        }})
+    }}
+}}
 )", t);
 
 }
-
 
 void
 GenRs::show_type(const UnionBody &b, string t)
@@ -304,10 +347,20 @@ GenRs::show_type(const UnionBody &b, string t)
   std::string default_decl = "";
   std::string default_match = "";
   for (const auto &a : b.arms) {
+    bool double_case = false;
+    auto double_case_guard = [&double_case] {
+      if (double_case) {
+        throw std::runtime_error("Enums with multiple cases per arm not supported at the moment");
+      }
+      double_case = true;
+    };
+
     for (const auto &c : a.cases) {
+      double_case_guard();
       prtop("// case {}:\n", c);
     }
     if (a.has_default) {
+      double_case_guard();
       prtop("// default:\n");
     }
     show_comment(a.decl.comment, false, "//   ");
@@ -472,6 +525,9 @@ GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_set
   case kScalar:
     return tname;
   case kPtr:
+    if (in_colon_required_setting) {
+      return std::format("Option::<{}>", tname);
+    }
     return std::format("Option<{}>", tname);
   case kArray:
     return std::format("[{}; {}]", tname, d.bound);
@@ -501,6 +557,7 @@ gen_rs(vector<Definition> *defs)
 #![allow(unused_imports)]
 #![allow(dead_code)]
 #![allow(unexpected_cfgs)]
+#![allow(unused_variables)]
 
 use core::option::Option;
 
