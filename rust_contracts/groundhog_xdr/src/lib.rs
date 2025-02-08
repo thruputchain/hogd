@@ -29,3 +29,6 @@ pub use ffi_enums::*;
 pub use syscall::*;
 pub use transaction::*;
 pub use types::*;
+
+#[cfg(test)]
+mod test;

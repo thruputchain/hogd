@@ -11,3 +11,6 @@ crate-type = ["rlib"]
 [features]
 alloc = []
 std = ["alloc"]
+
+[dev-dependencies]
+groundhog_xdr = {path = ".", features=["std"]}

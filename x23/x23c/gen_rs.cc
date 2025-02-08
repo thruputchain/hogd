@@ -349,6 +349,7 @@ GenRs::show_type(const UnionBody &b, string t)
 
   {
     prtop("#[repr(i32)]\n");
+    prtop("#[derive(PartialEq, Debug)]\n");
     prtop("pub enum {} ", t);
     auto _close = open_brace();
     scopes_.push_back(t);
