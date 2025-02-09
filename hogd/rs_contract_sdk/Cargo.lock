@@ -613,6 +613,9 @@ dependencies = [
 [[package]]
 name = "rs_xdr"
 version = "0.0.1"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "rustix"

@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["guest", "alloc"]
+result = []
 client = []
 guest = []
 alloc = ["sdk/alloc", "serde/alloc"]

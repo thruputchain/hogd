@@ -19,8 +19,7 @@ mod rt;
 mod syscall;
 
 #[rustfmt::skip]
-pub mod syscall_bindings;
-pub use syscall_bindings as sys;
+pub use syscall::bindings as sys;
 
 pub mod types;
 
@@ -42,7 +41,6 @@ pub mod result;
 pub mod contract;
 pub mod deploy;
 pub mod storage;
-pub mod io;
 pub mod crypto;
 pub mod log;
 

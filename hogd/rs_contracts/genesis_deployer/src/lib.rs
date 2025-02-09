@@ -22,7 +22,7 @@ impl Contract for GenesisDeployer {
 impl GenesisDeployer
 {
     pub fn deploy(self, nonce: &SHA256Hash, contract_hash: &SHA256Hash) {
-        DeployContract(nonce, contract_hash).unwrap();
+        let _ = DeployContract(nonce, contract_hash).unwrap();
     }
 
     pub fn deploy_and_invoke(
@@ -30,8 +30,8 @@ impl GenesisDeployer
         nonce: &SHA256Hash,
         contract_hash: &SHA256Hash,
         method: MethodID,
-        calldata: Vec<u8>,
-    ) {
+        calldata: Vec<u8>)
+    {
         let deployed_addr = DeployContract(nonce, contract_hash).unwrap();
 
         sys::raw_Invoke(
@@ -40,8 +40,7 @@ impl GenesisDeployer
             u64::MAX,
             calldata.as_slice(),
             0,
-        )
-        .unwrap();
+        ).unwrap();
         Log(b"ABCDEFG").unwrap();
     }
 }

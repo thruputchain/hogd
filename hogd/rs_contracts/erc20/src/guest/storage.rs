@@ -1,14 +1,10 @@
 //! Storage for a coin contract
 
 use sdk::types::{ContractAddress, StorageKey};
-use sdk::result::{Result, assert};
+use sdk::result::{Result, ensure};
 use sdk::storage::{NNInt, Map, FromKey, item_key};
+use sdk::GetMsgSender;
 use serde::{Serialize, Deserialize};
-
-/// SDK item
-pub fn sender() -> Result<ContractAddress> {
-    sdk::GetMsgSender().map_err(From::from)
-}
 
 pub type Allowance = NNInt;
 pub type Balance = NNInt;
@@ -51,8 +47,8 @@ impl CoinStorage {
         self.allowances.get(&key)
     }
 
-    pub fn assert_sender_is_owner(&self) -> Result<()> {
-        let sender = sender()?;
-        assert(sender == self.owner, "sender is owner")
+    pub fn ensure_sender_is_owner(&self) -> Result<()> {
+        let sender = GetMsgSender()?;
+        ensure(sender == self.owner, "sender is owner")
     }
 }

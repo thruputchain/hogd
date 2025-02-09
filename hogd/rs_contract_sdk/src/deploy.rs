@@ -1,13 +1,15 @@
 #![allow(non_snake_case)]
 
-use crate::syscall_bindings::{uninit_DeployContract, uninit_GetDeployAddress};
+use crate::result::SysResult as Result;
+use crate::sys::{uninit_DeployContract, uninit_GetDeployAddress};
+use crate::types::{ContractAddress, SHA256Hash};
 use core::mem::MaybeUninit;
-use rs_xdr::{ContractAddress, SHA256Hash};
 
 pub fn GetDeployAddress(
     nonce: &SHA256Hash,
     contract_hash: &SHA256Hash,
-) -> Result<ContractAddress, i32> {
+    ) -> Result<ContractAddress>
+{
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
 
@@ -20,7 +22,8 @@ pub fn GetDeployAddressForOther(
     other_address: &ContractAddress,
     nonce: &SHA256Hash,
     contract_hash: &SHA256Hash,
-) -> Result<ContractAddress, i32> {
+    ) -> Result<ContractAddress>
+{
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
 
@@ -37,7 +40,8 @@ pub fn GetDeployAddressForOther(
 pub fn DeployContract(
     nonce: &SHA256Hash,
     contract_hash: &SHA256Hash,
-) -> Result<ContractAddress, i32> {
+) -> Result<ContractAddress>
+{
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
     uninit_DeployContract(nonce, contract_hash, &mut out_addr)?;

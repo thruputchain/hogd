@@ -1,58 +1,72 @@
 use crate::syscall::SysErr;
+
 use thiserror::Error;
 use bcs::Error as SerializationError;
+use serde::{Serialize, Deserialize};
+use alloc::string::{String, ToString};
 
+// For whose only error is a SysErr (syscalls or syscall-wrappers)
+pub type SysResult<T> = core::result::Result<T, SysErr>;
+
+// For other, more general SDK functions
 pub type Result<T> = core::result::Result<T, Error>;
 
-#[derive(Error, Debug)]
-pub enum Error {
-
-    #[error("{context:?}: System call error: {code}")]
+// Error type for general SDK functions
+#[derive(Error, Debug, Serialize, Deserialize)]
+pub enum Error
+{
+    #[error("{context:?}: System call error: {err}")]
     SystemErr {
-        code: SysErr,
-        context: Option<&'static str>
+        err: SysErr,
+        context: Option<String>
     },
 
     #[error("Assertion failed: {0}")]
-    AssertionFailed(&'static str),
+    AssertionFailed(String),
 
     #[error("IO error: {0}")]
-    IO(&'static str),
+    IO(String),
 
     #[error("Initialization guard failed")]
     InitGuardFailure,
 
     #[error("Serialization error: {0}")]
-    Serialization(#[from] SerializationError),
+    SerializationErr(String),
 }
 
 impl From<SysErr> for Error {
-    fn from(e: SysErr) -> Self {
+    fn from(err: SysErr) -> Self {
         Self::SystemErr {
-            code: e,
+            err,
             context: None
         }
     }
 }
 
-pub fn with_context(msg: &'static str)
+impl From<SerializationError> for Error {
+    fn from(err: SerializationError) -> Self {
+        Self::SerializationErr(err.to_string())
+    }
+}
+
+pub fn with_context<S: AsRef<str>>(msg: S)
     -> impl Fn (Error) -> Error
 {
     move |source| {
         match source {
-            Error::SystemErr { code, context: None } =>
-                Error::SystemErr { code, context: Some(msg) },
+            Error::SystemErr { err, context: None } =>
+                Error::SystemErr { err, context: Some(msg.as_ref().to_string()) },
             _ =>
                 source
         }
     }
 }
 
-pub fn assert(condition: bool, msg: &'static str) -> Result<()> {
+pub fn ensure<S: AsRef<str>>(condition: bool, msg: S) -> Result<()> {
     if condition {
         Ok(())
     } else {
-        Err(Error::AssertionFailed(msg))
+        Err(Error::AssertionFailed(msg.as_ref().to_string()))
     }
 }
 

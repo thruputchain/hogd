@@ -187,7 +187,7 @@ GenRs::show_type(const StructBody &s, string t)
 void
 GenRs::show_type(const EnumBody &e, string t)
 {
-  prtop("#[derive(Clone, PartialEq)]\n#[repr(i32)]\npub enum {} ", t);
+  prtop("#[derive(Clone, Debug, PartialEq)]\n#[repr(i32)]\npub enum {} ", t);
   auto _close = open_brace();
   scopes_.push_back(t);
   

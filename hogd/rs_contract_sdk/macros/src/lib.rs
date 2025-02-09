@@ -343,7 +343,7 @@ mod gen {
             pub extern "C" fn #ident() -> i32 {
                 ::sdk::invoke::handle_call(| #received_args | {
                     contract().#ident( #provided_args )
-                })
+                }).into()
             }
 
         })

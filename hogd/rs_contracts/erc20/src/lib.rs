@@ -1,4 +1,6 @@
 //! ERC20 contract interface and implementation
+//!
+//! This version uses Result<T> as method return values
 
 #![no_std]
 

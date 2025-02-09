@@ -1,7 +1,8 @@
-use crate::types::{StorageKey, SyscallErrorCode};
-use crate::macros::static_key;
 use crate::result::{Result, Error};
 use crate::sys;
+use crate::syscall::SyscallErrorCode;
+use crate::types::StorageKey;
+use crate::macros::static_key;
 
 const INITIALIZE_GUARD_KEY: StorageKey =
     static_key!("initialization guard key");
@@ -15,7 +16,9 @@ pub fn initialization_guard() -> Result<()> {
         &mut current_add)
     {
         Err(x) => {
-            if x != SyscallErrorCode::kStorageKeyNotExist as i32 {
+            if x.is_code(SyscallErrorCode::kStorageKeyNotExist) {
+                // Ok, expected
+            } else {
                 panic!("Unexpected initialization failure: {}", x);
             }
         }

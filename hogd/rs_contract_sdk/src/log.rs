@@ -1,7 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::syscall_bindings;
+use crate::sys;
+use crate::result::SysResult as Result;
 
-pub fn Log(buffer: &[u8]) -> Result<(), i32> {
-    syscall_bindings::raw_Log(buffer)
+pub fn Log(buffer: &[u8]) -> Result<()> {
+    sys::raw_Log(buffer)
 }

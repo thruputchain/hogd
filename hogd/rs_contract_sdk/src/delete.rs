@@ -1,8 +1,10 @@
 #![allow(non_snake_case)]
 
-use crate::syscall_bindings;
-use rs_xdr::StorageKey;
+use crate::result::SysResult as Result;
+use crate::sys;
+use crate::types::StorageKey;
 
-pub fn DeleteObject(key: &StorageKey) -> Result<(), i32> {
-    syscall_bindings::raw_DeleteObject(key)
+pub fn DeleteObject(key: &StorageKey) -> Result<()> {
+    sys::raw_DeleteObject(key)?;
+    Ok(())
 }

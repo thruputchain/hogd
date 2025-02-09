@@ -1,14 +1,14 @@
 use crate::types::StorageKey;
+use crate::crypto::{SHA256, SHA256Hash};
+use crate::result::{Result, with_context};
+use crate::serialize;
 use crate::{
     BytestringGet,
     BytestringSet,
     NonnegativeIntGet,
+    NonnegativeIntSetAdd,
 };
-use crate::crypto::{SHA256, SHA256Hash};
-use crate::result::{Error, Result, with_context};
-use crate::sys;
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use bcs;
 
 // ------------------ Hash ------------------
 
@@ -28,7 +28,7 @@ impl<T> Hash for T
     where T: Serialize
 {
     fn hash(&self) -> Result<Hash256> {
-        let buf = bcs::to_bytes(&self)?;
+        let buf = serialize::to_bytes(&self)?;
         let hash = SHA256(&buf)?;
         Ok(hash)
     }
@@ -37,14 +37,14 @@ impl<T> Hash for T
 // ------------------- Storage -----------------
 
 pub fn store<V: Serialize>(k: &StorageKey, v: &V) -> Result<()> {
-    let buf = bcs::to_bytes(v)?;
+    let buf = serialize::to_bytes(v)?;
     BytestringSet(k, buf.as_slice())?;
     Ok(())
 }
 
 pub fn load<V: DeserializeOwned>(k: &StorageKey) -> Result<V> {
     let buf = BytestringGet(k)?;
-    let v = bcs::from_bytes(&*buf)?;
+    let v = serialize::from_bytes(&*buf)?;
     Ok(v)
 }
 
@@ -68,8 +68,7 @@ pub struct NNInt {
 impl NNInt
 {
     pub fn get_both(&self) -> Result<(i128, i128)> {
-        NonnegativeIntGet(&self.key)
-            .map_err(<Error as From<i32>>::from)
+        Ok(NonnegativeIntGet(&self.key)?)
     }
 
     pub fn get(&self) -> Result<i128> {
@@ -80,13 +79,11 @@ impl NNInt
     pub fn add(&mut self, add_value: i128) -> Result<()> {
         let (set, prev_add) = self.get_both()?;
         let new = prev_add + add_value;
-        sys::raw_NonnegativeIntSetAdd(&self.key, &set, &new)
-            .map_err(From::from)
+        Ok(NonnegativeIntSetAdd(&self.key, set, new)?)
     }
 
     pub fn set_add(&mut self, set_value: i128, add_value: i128) -> Result <()> {
-        sys::raw_NonnegativeIntSetAdd(&self.key, &set_value, &add_value)
-            .map_err(From::from)
+        Ok(NonnegativeIntSetAdd(&self.key, set_value, add_value)?)
     }
 }
 

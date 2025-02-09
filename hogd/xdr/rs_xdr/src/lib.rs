@@ -1,9 +1,6 @@
 #![no_std]
 
 #[rustfmt::skip]
-mod syscall;
+pub mod syscall;
 #[rustfmt::skip]
-mod types;
-
-pub use syscall::*;
-pub use types::*;
+pub mod types;

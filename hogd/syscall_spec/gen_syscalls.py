@@ -748,10 +748,10 @@ def gen_rs_syscall_binding(syscall):
 
   uninit_args_str = ", ".join(uninit_args)
   
-  syscall_return_type = "Result<(), i32>"
+  syscall_return_type = "Result<()>"
 
-  errdecl = "let err = "
-  errhandle_str = """if err != SyscallErrorCode::kNone as i32 {
+  errdecl = "let err: SysErr = "
+  errhandle_str = """if !err.is_none() {
         return Err(err);
     }
 
@@ -789,13 +789,47 @@ def gen_rs_syscall_bindings(spec):
 // *** Do not check in ***
 
 #![allow(non_snake_case)]
-use rs_xdr::*;
-use crate::syscall::{{syscall_wrapper, to_offset, to_offset_mut}};
+use crate::types::*;
+use crate::syscall::{{SyscallNo, SysErr, syscall_wrapper, to_offset, to_offset_mut}};
 use core::mem::MaybeUninit;
 use core::hint::unreachable_unchecked;
 
+type Result<T> = core::result::Result<T, SysErr>;
+
 {syscall_str}
 
+"""
+
+def gen_rs_syscall_error_helper(error_spec):
+  errors = {}
+  for error in error_spec:
+    errors[error["number"]]=error
+
+  convert_cases = ""
+  for num in errors.keys():
+    name = errors[num]["name"]
+    convert_cases += f"""
+            e if e == SyscallErrorCode::k{name} as i32 =>
+                Ok(SyscallErrorCode::k{name}),"""
+
+  return f"""// -*-Rust-*-
+
+// *** Generated Code  ***
+// *** Do not check in ***
+
+use core::convert::TryInto;
+
+use super::{{SyscallErrorCode, SysErr}};
+
+impl TryInto<SyscallErrorCode> for SysErr {{
+    type Error = i32;
+
+    fn try_into(self) -> Result<SyscallErrorCode, Self::Error> {{
+        match self.0 {{{convert_cases}
+            e => Err(e)
+        }}
+    }}
+}}
 """
 
 def gen_syscall_frame(spec, args):
@@ -852,6 +886,10 @@ parser.add_argument(
   action='store_true', 
   help = 'gen rust syscall bindings')
 parser.add_argument(
+  '--syscall_error_helper_rs', 
+  action='store_true', 
+  help = 'gen rust syscall error helper')
+parser.add_argument(
   '--output_dir', 
   type=str, 
   default = ".", 
@@ -866,6 +904,7 @@ args = parser.parse_args()
 
 spec_full = yaml.load(open(args.syscall_yaml, 'r').read(), Loader=Loader)
 spec = spec_full["syscalls"]
+spec_errors = spec_full["errors"]
 
 if (args.syscall_x):
   filename = args.output_dir + "/syscall.x"
@@ -883,9 +922,14 @@ if (args.syscall_entry_cc):
     f.write(gen_syscall_entry_cc(spec))
 
 if (args.syscall_rs):
-  filename = args.output_dir + "/syscall_bindings.rs"
+  filename = args.output_dir + "/syscall/bindings.rs"
   with open(filename, "w") as f:
     f.write(gen_rs_syscall_bindings(spec))
+
+if (args.syscall_error_helper_rs):
+  filename = args.output_dir + "/syscall/error_helper.rs"
+  with open(filename, "w") as f:
+    f.write(gen_rs_syscall_error_helper(spec_errors))
 
 if (args.syscall_frame is not None and len(args.syscall_frame) > 0):
   print(gen_syscall_frame(spec, args.syscall_frame))

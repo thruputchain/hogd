@@ -48,7 +48,7 @@ add_custom_target(
 
 add_custom_command(
     OUTPUT
-        ${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/syscall_bindings.rs
+        ${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/syscall/bindings.rs
     DEPENDS 
         ${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml 
         ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
@@ -60,8 +60,24 @@ add_custom_command(
     "generating syscall bindings rs"
 )
 
+add_custom_command(
+    OUTPUT
+        ${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/syscall/error_helper.rs
+    DEPENDS 
+        ${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml 
+        ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py 
+    --output_dir=${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/
+    --syscall_yaml=${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml
+    --syscall_error_helper_rs
+    COMMENT
+    "generating error helper rs"
+)
+
 add_custom_target(
     generate_syscall_rs ALL
-    DEPENDS ${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/syscall_bindings.rs
+    DEPENDS
+        ${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/syscall/bindings.rs
+        ${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/syscall/error_helper.rs
 )
 

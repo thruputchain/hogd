@@ -2,29 +2,30 @@
 
 use crate::sys;
 use crate::types::{ContractAddress, RuntimeMemoryLength, SHA256Hash};
+use crate::result::SysResult as Result;
 use core::mem::MaybeUninit;
 
-pub fn GetMsgSender() -> Result<ContractAddress, i32> {
+pub fn GetMsgSender() -> Result<ContractAddress> {
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
     sys::uninit_GetMsgSender(&mut out_addr)?;
     Ok(unsafe { out_addr.assume_init() })
 }
 
-pub fn GetCurrentAddress() -> Result<ContractAddress, i32> {
+pub fn GetCurrentAddress() -> Result<ContractAddress> {
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
     sys::uninit_GetCurrentAddress(&mut out_addr)?;
     Ok(unsafe { out_addr.assume_init() })
 }
 
-pub fn GetCalldataLen() -> Result<RuntimeMemoryLength, i32> {
+pub fn GetCalldataLen() -> Result<RuntimeMemoryLength> {
     let mut out: RuntimeMemoryLength = 0;
     sys::raw_GetCalldataLen(&mut out)?;
     Ok(out)
 }
 
-pub fn GetCalldata_Sized<const N: usize>() -> Result<[u8; N], i32> {
+pub fn GetCalldata_Sized<const N: usize>() -> Result<[u8; N]> {
     let mut calldata_mu = [::core::mem::MaybeUninit::<u8>::uninit(); N];
 
     let mut calldata_len: RuntimeMemoryLength = 0;
@@ -50,11 +51,11 @@ pub fn Exit(code: i32) -> ! {
 
 pub fn Revert() -> ! {
     sys::raw_Exit(
-        rs_xdr::SyscallErrorCode::kDeterministicWasm as i32,
+        crate::syscall::SyscallErrorCode::kDeterministicWasm as i32,
     );
 }
 
-pub fn GetSourceTransactionHash() -> Result<SHA256Hash, i32> {
+pub fn GetSourceTransactionHash() -> Result<SHA256Hash> {
     let mut out_hash: MaybeUninit<SHA256Hash> =
         MaybeUninit::<SHA256Hash>::uninit();
     sys::uninit_GetSourceTransactionHash(&mut out_hash)?;
@@ -62,16 +63,14 @@ pub fn GetSourceTransactionHash() -> Result<SHA256Hash, i32> {
 }
 
 #[cfg(any(feature = "alloc", feature = "std"))]
-mod get_calldata_alloc {
-
-    use rs_xdr::RuntimeMemoryLength;
-
-    extern crate alloc;
+mod get_calldata_alloc
+{
+    use crate::result::SysResult as Result;
+    use crate::sys;
+    use crate::types::RuntimeMemoryLength;
     use alloc::boxed::Box;
 
-    use crate::sys;
-
-    pub fn GetCalldata() -> Result<Box<[u8]>, i32> {
+    pub fn GetCalldata() -> Result<Box<[u8]>> {
         let len: RuntimeMemoryLength = crate::invoke::GetCalldataLen()?;
 
         let mut vec = Box::<[u8]>::new_uninit_slice(len as usize);
@@ -87,7 +86,7 @@ mod get_calldata_alloc {
         Ok(unsafe { vec.assume_init() })
     }
 
-    pub fn GetReturnedBuffer() -> Result<Box<[u8]>, i32> {
+    pub fn GetReturnedBuffer() -> Result<Box<[u8]>> {
         let mut expected_len: RuntimeMemoryLength = 0;
         sys::raw_GetReturnedBufferLen(&mut expected_len)?;
 
@@ -109,35 +108,35 @@ mod get_calldata_alloc {
 pub use get_calldata_alloc::*;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
-mod handle {
-
+mod handle
+{
     use serde::Serialize;
     use serde::de::DeserializeOwned;
     use bcs;
 
     use super::{GetCalldata, Return};
-    use crate::types::SyscallErrorCode;
+    use crate::syscall::{SysErr, SyscallErrorCode};
 
     // Run a handler function on the invocation arguments
     // available in serialized form via `GetCalldata`,
     // and serialize the result for passing to `Return`.
-    pub fn handle_call<F, ARGS, RES>(f: F) -> i32
+    pub fn handle_call<F, ARGS, RES>(f: F) -> SysErr
         where F: FnOnce(ARGS) -> RES,
               ARGS: DeserializeOwned,
               RES: Serialize
     {
         let call_data = match GetCalldata() {
             Ok(x) => x,
-            Err(e) => return e, // SyscallErrorCode::kCalldataParseError
+            Err(e) => return e, // == SyscallErrorCode::kCalldataParseError
         };
         let args: ARGS = match bcs::from_bytes(&call_data) {
             Ok(args) => args,
-            Err(_) => return SyscallErrorCode::kCalldataParseError as i32
+            Err(_) => return SyscallErrorCode::kCalldataParseError.into()
         };
         let result: RES = f(args);
         let result_bytes = match bcs::to_bytes(&result) {
             Ok(bytes) => bytes,
-            Err(_) => return SyscallErrorCode::kCalldataParseError as i32
+            Err(_) => return SyscallErrorCode::kCalldataParseError.into()
         };
         Return(result_bytes.as_slice());
     }
