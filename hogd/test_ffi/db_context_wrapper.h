@@ -3,7 +3,6 @@
 #include "hogd/hogdb/hogdb_core.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "rpc.hh"
 #include "rpc_types.hh"
 #include "x23/event.h"
@@ -27,23 +26,7 @@ public:
 
   DBContext();
 
-  void advance_new_block()
-  {
-    if (current_block_id_ != 0) {
-      if (db_client_.close_snapshot(current_block_id_)() != RPCError::kNone) {
-        exit(-1);
-      }
-    }
-    if (db_client_.open_database_snapshot(current_block_id_,
-                                          current_block_id_ + 1)() !=
-        RPCError::kNone) {
-      exit(-1);
-    }
-    syscall_logfd = 1;
-    current_block_id_++;
-    snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(current_block_id_, db_proxy_);
-  }
+  void advance_new_block();
 
   bool is_block_open() const { return current_block_id_ != 0; }
 
