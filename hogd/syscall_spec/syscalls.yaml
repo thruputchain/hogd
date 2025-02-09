@@ -183,10 +183,12 @@ syscalls:
         typename: "int128_t"
         rust_typename: "i128"
         xdr_typename: "int128_xdr"
+        requires_to_xdr: yes
       - name: "current_add"
         typename: "int128_t"
         rust_typename: "i128"
         xdr_typename: "int128_xdr"
+        requires_to_xdr: yes
     number: 16
   - name: "NonnegativeIntSetAdd"
     needs_context: yes

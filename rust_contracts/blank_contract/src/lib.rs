@@ -1,7 +1,6 @@
 #![cfg_attr(not(test), no_std)]
-
-use groundhog_xdr;
-use rs_contract_sdk as sdk;
+#![allow(unused_imports)]
+use rs_contract_sdk;
 
 #[cfg(test)]
 use test_ffi;

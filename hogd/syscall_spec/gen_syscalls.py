@@ -281,10 +281,8 @@ def gen_validate_arg(inp, *, is_input):
   # end optional arg
 
   assign_str = f".{arg_name} = *{arg1}"
-  print(inp)
   # else fixed size
   if "requires_to_xdr" in inp and inp["requires_to_xdr"]:
-    print("whee")
     assign_str = f".{arg_name} = to_xdr(*{arg1})"
 
   return f"""
@@ -914,6 +912,7 @@ def gen_syscall_arg_xdr(spec):
 
   return f"""// clang-format off
 %#include "types.hh"
+%#include "syscall.hh"
 
 namespace hogd {{
   // clang-format on
@@ -931,6 +930,186 @@ union SyscallOutput switch(SyscallNo syscall) {{
 
 """
 
+def gen_mock_inner_decl(syscall):
+  name = syscall["name"]
+  return f"""ForeignHostFnResult
+mock_{name}_inner({name}_input const &input_arg, {name}_output &output_arg);
+
+"""
+
+def gen_mock_switch_case(syscall):
+  name = syscall["name"]
+  return f"""  case SyscallNo::k{name}:
+  return mock_syscall_parser<{name}_input, {name}_output,
+                               &mock_{name}_inner>(syscall_no, input_span, output_span);
+"""
+
+def gen_mock_inner(syscall):
+  name = syscall["name"]
+
+  call_args = []
+
+  input_arg = "input_arg"
+  output_arg = "output_arg"
+
+  if syscall["inputs"] is not None:
+    for inp in syscall["inputs"]:
+      argname = inp["name"]
+      if "optional" in inp and inp["optional"]:
+        call_args.append(f"input_arg.{argname}.get()")
+        continue
+      if "span_argument" in inp and inp["span_argument"]:
+        call_args.append(f"std::as_bytes(std::span(input_arg.{argname}))")
+        continue
+      if "requires_to_xdr" in inp and inp["requires_to_xdr"]:
+        call_args.append(f"from_xdr(input_arg.{argname})")
+        continue
+      call_args.append(f"input_arg.{argname}")
+  else:
+    input_arg="/*unused*/"
+
+  output_stack_args = ""
+  output_defer_sets = ""
+  needs_defer = False
+
+  if syscall["outputs"] is not None:
+    for outp in syscall["outputs"]:
+      argname = outp["name"]
+      if "span_argument" in outp and outp["span_argument"]:
+        call_args.append(f"std::as_writable_bytes(std::span(output_arg.{argname}))")
+        continue
+      if "requires_to_xdr" in outp and outp["requires_to_xdr"]:
+        typename = outp["typename"]
+        output_stack_args += f"  {typename} stacked_{argname};\n"
+        output_defer_sets += f"    output_arg.{argname} = to_xdr(stacked_{argname});\n";
+        needs_defer = True
+
+        call_args.append(f"stacked_{argname}")
+        continue
+      call_args.append(f"output_arg.{argname}")
+  else:
+    output_arg="/*unused*/"
+
+  defer = ""
+
+  if (needs_defer):
+    defer = f"""  x23::Defer _d([&] {{
+{output_defer_sets}
+  }});"""
+  
+  handler_decl = ""
+  total_call_args = []
+  if syscall["needs_context"]:
+    total_call_args.append("handler->to_handler()")
+    handler_decl = """  auto *handler = SyscallHandlerContext::get_context();
+  if (!handler) {
+    return unrecoverable_error();
+  }
+"""
+
+  if "needs_gas" in syscall and syscall["needs_gas"]:
+    total_call_args.append("std::numeric_limits<GasAmount>::max()")
+
+  total_call_args = total_call_args + call_args
+
+  call_args_str = ", ".join(total_call_args)
+
+  return f"""ForeignHostFnResult mock_{name}_inner({name}_input const &{input_arg},
+                                      {name}_output &{output_arg}) {{
+{handler_decl}
+
+{output_stack_args}
+{defer}
+
+  return from_status(syscall_{name}_inner({call_args_str}));
+}}
+
+"""
+
+
+def gen_mock_syscall_inner_h(spec):
+  decls = ""
+  for call in spec:
+    decls += gen_mock_inner_decl(call)
+  
+  return f"""
+#pragma once
+
+#include "hogd/test_ffi/test_bindings.h"
+#include "syscall_args.hh"
+
+namespace hogd {{
+
+// NOLINTBEGIN(readability-identifier-naming)
+{decls}
+// NOLINTEND(readability-identifier-naming)
+
+}}
+"""
+
+def gen_mock_syscall_entry_cc(spec):
+  switch_body = ""
+  for call in spec:
+    switch_body += gen_mock_switch_case(call)
+  
+  return f"""#include "hogd/test_ffi/mock_syscall_entry.h"
+
+#include <span>
+
+#include "hogd/base/types.h"
+#include "hogd/test_ffi/mock_syscall_inner.h"
+#include "syscall.hh"
+#include "syscall_args.hh"
+#include "hogd/test_ffi/syscall_handler_wrapper.h"
+
+namespace hogd {{
+
+ForeignHostFnResult
+mock_syscall_entrypoint(int32_t syscall, const unsigned char *input,
+                        uint32_t input_len, unsigned char *output,
+                        uint32_t output_len) noexcept
+{{
+  std::span<const uint8_t> input_span = std::span(input, input_len);
+  std::span<uint8_t> output_span = std::span(output, output_len);
+
+  auto syscall_no = static_cast<SyscallNo>(syscall);
+
+  switch (syscall_no) {{
+{switch_body}
+  default:
+    return recoverable_error(SyscallErrorCode::kNoSyscall);
+  }}
+}}
+
+}}
+"""
+
+def gen_mock_syscall_inner_cc(spec):
+  decls = ""
+  for call in spec:
+    decls += gen_mock_inner(call)
+  
+  return f"""
+#include "hogd/test_ffi/mock_syscall_inner.h"
+
+#include <limits>
+#include <span>
+
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
+#include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "hogd/test_ffi/test_bindings.h"
+#include "syscall_args.hh"
+#include "types.hh"
+#include "x23/cleanup.h"
+
+namespace hogd {{
+
+{decls}
+
+}}
+"""
 
 parser = argparse.ArgumentParser(description="syscall generator")
 
@@ -947,9 +1126,21 @@ parser.add_argument(
   action='store_true', 
   help="gen syscall_inner.h")
 parser.add_argument(
+  '--mock_syscall_inner_h', 
+  action='store_true', 
+  help="gen mock_syscall_inner.h")
+parser.add_argument(
+  '--mock_syscall_inner_cc', 
+  action='store_true', 
+  help="gen mock_syscall_inner.cc")
+parser.add_argument(
   '--syscall_entry_cc', 
   action='store_true', 
   help="gen syscall_entry_cc")
+parser.add_argument(
+  '--mock_syscall_entry_cc', 
+  action='store_true', 
+  help="gen mock_syscall_entry_cc")
 parser.add_argument(
   '--syscall_yaml', 
   type=str, 
@@ -990,10 +1181,25 @@ if (args.syscall_inner_h):
   with open(filename, "w") as f:
     f.write(gen_syscall_inner_h(spec))
 
+if (args.mock_syscall_inner_h):
+  filename = args.output_dir + "/mock_syscall_inner.h"
+  with open(filename, "w") as f:
+    f.write(gen_mock_syscall_inner_h(spec))
+
+if (args.mock_syscall_inner_cc):
+  filename = args.output_dir + "/mock_syscall_inner.cc"
+  with open(filename, "w") as f:
+    f.write(gen_mock_syscall_inner_cc(spec))
+
 if (args.syscall_entry_cc):
   filename = args.output_dir + "/syscall_entry.cc"
   with open(filename, "w") as f:
     f.write(gen_syscall_entry_cc(spec))
+
+if (args.mock_syscall_entry_cc):
+  filename = args.output_dir + "/mock_syscall_entry.cc"
+  with open(filename, "w") as f:
+    f.write(gen_mock_syscall_entry_cc(spec))
 
 if (args.syscall_rs):
   filename = args.output_dir + "/syscall_bindings.rs"
