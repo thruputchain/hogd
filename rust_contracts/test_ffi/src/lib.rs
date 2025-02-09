@@ -3,9 +3,16 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 
-pub mod types;
-
+#[cfg(feature = "activate")]
 pub mod deployer;
+#[cfg(feature = "activate")]
+pub mod host_fn_error;
+#[cfg(feature = "activate")]
+pub mod invoke_error;
+#[cfg(feature = "activate")]
+pub mod types;
+#[cfg(feature = "activate")]
+pub use host_fn_error::perform_mocked_syscall;
 
 #[cfg(test)]
 mod tests {

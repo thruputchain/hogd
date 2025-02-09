@@ -178,6 +178,7 @@ GenRs::show_type(const StructBody &s, string t)
 
   {
     prtop("#[repr(C)]\n");
+    prtop("#[derive(PartialEq, Debug)]\n");
     prtop("pub struct {} ", t);
     auto _close = open_brace();
     scopes_.push_back(t);

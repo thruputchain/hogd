@@ -57,8 +57,6 @@ SystemCallHandler::SystemCallHandler(
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
       for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
-        std::printf("adding contract %s %s\n", x23::show(contract).c_str(),
-                    x23::show(sha256(contract)).c_str());
         contracts.emplace(sha256(contract),
                           std::make_shared<const Contract>(contract));
       }
@@ -77,10 +75,8 @@ SystemCallHandler::SystemCallHandler(
 InvokeResult
 SystemCallHandler::root_invoke()
 {
-  std::printf("start root invoke\n");
   auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
   if (!runtime) {
-    std::printf("early shortcircuit root invoke\n");
     return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed_ = 0};
   }
@@ -90,14 +86,10 @@ SystemCallHandler::root_invoke()
                                           InvocationFlags::kNone));
   auto res = runtime->invoke(signed_tx_.tx.invocation.method,
                              signed_tx_.tx.invocation.gas_limit);
-  std::printf("done invoke: %d\n",
-              static_cast<int>(res.result_.error().code()));
 
   res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   res = finish_nondeterminism_checks(res);
 
-  std::printf("done root invoke: %d\n",
-              static_cast<int>(res.result_.error().code()));
   if (!res.is_root_success())
     return res.to_root_error();
   return res;
@@ -167,7 +159,6 @@ std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 SystemCallHandler::invoke(Invocation const &invocation, GasAmount remaining_gas,
                           InvocationFlagSet flags)
 {
-  std::printf("start invoke\n");
   auto gas_limit = std::min<GasAmount>(remaining_gas, invocation.gas_limit);
 
   if (!is_valid_invoke_flag(flags)) {
@@ -177,14 +168,12 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount remaining_gas,
   auto runtime = resolve_runtime(invocation.invoked_address);
 
   if (!runtime) {
-    std::printf("runtime resolve failed\n");
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
   invocation_frame_stack_.start_frame(invocation, flags);
   auto res = runtime->invoke(invocation.method, gas_limit);
   res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
-  std::printf("invoke done\n");
   return res.to_host_fn_result();
 }
 
@@ -247,7 +236,6 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   if (!deployed_hash) {
     // A deployment was not found in the local context
     // nor in the snapshot.
-    std::printf("no deployed hash\n");
     return nullptr;
   }
 
@@ -300,15 +288,12 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
 {
   assert(!invocation_frame_stack_.empty());
 
-  std::printf("looking up contract %s\n", x23::show(contract_hash).c_str());
-
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
   // but this is in most cases no-cost, as a deployed contract will _probably_
   // be immediately invoked with e.g. a constructor
   auto load_contract = lookup_contract_by_hash(contract_hash);
   if (!load_contract) {
-    std::printf("failed to find contract\n");
     return SyscallError{SyscallErrorCode::kContractLookupFailed};
   }
 
@@ -317,8 +302,6 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
 
   auto [deployed_hash, _] = lookup_deployed_contract_hash(deploy_addr);
   if (deployed_hash) {
-    std::printf("contract is already deployed at addr %s\n",
-                x23::show(deploy_addr).c_str());
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
 

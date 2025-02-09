@@ -25,7 +25,8 @@ impl PartialEq for ForeignInvokeResult {
     }
 }
 
-use rs_contract_sdk::InvokeError;
+use crate::invoke_error::set_override_panic_hook;
+use crate::invoke_error::InvokeError;
 
 pub struct MockContract {
     index: u32, // this is passed as the raw bytes in the contract, and thus identified as sha256(index).
@@ -87,6 +88,7 @@ pub struct Environment {
 
 impl Environment {
     pub fn new() -> Self {
+        set_override_panic_hook();
         Self {
             db: unsafe { create_db() },
         }
@@ -296,7 +298,8 @@ mod tests {
 
     fn test_panic_ok() {
         let _ = panic::take_hook();
-        let f: fn() -> i32 = || panic_any(rs_contract_sdk::validation_error());
+        let f: fn() -> i32 =
+            || panic_any(crate::invoke_error::validation_error());
 
         let boxed = invoke_wrapper(f);
 
@@ -310,7 +313,7 @@ mod tests {
     }
 
     fn test_sdk_panic() {
-        rs_contract_sdk::set_override_panic_hook();
+        set_override_panic_hook();
         let f: fn() -> i32 = || {
             panic!("something");
         };
@@ -327,7 +330,7 @@ mod tests {
     }
 
     fn test_option_panic() {
-        rs_contract_sdk::set_override_panic_hook();
+        set_override_panic_hook();
         let f: fn() -> i32 = || {
             let x: Option<i32> = None;
             return x.unwrap();
@@ -345,8 +348,9 @@ mod tests {
     }
 
     fn test_pass_invoke_error_through_panic_hook() {
-        rs_contract_sdk::set_override_panic_hook();
-        let f: fn() -> i32 = || panic_any(rs_contract_sdk::validation_error());
+        set_override_panic_hook();
+        let f: fn() -> i32 =
+            || panic_any(crate::invoke_error::validation_error());
 
         let boxed = invoke_wrapper(f);
 

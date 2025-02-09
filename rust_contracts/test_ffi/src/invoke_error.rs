@@ -1,6 +1,5 @@
 use groundhog_xdr::InvokeErrorCode;
 
-use std::any::Any;
 use std::error::Error;
 use std::fmt;
 use std::panic;

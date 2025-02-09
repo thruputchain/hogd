@@ -197,11 +197,13 @@ syscalls:
         typename: "int128_t"
         rust_typename: "i128"
         xdr_typename: "int128_xdr"
+        requires_to_xdr: yes
         rust_input_requires_transmute: yes
       - name: "add_value"
         typename: "int128_t"
         rust_typename: "i128"
         xdr_typename: "int128_xdr"
+        requires_to_xdr: yes
         rust_input_requires_transmute: yes
     outputs:
     number: 17

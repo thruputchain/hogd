@@ -210,6 +210,8 @@ def gen_validate_arg(inp, *, is_input):
   if "span_argument" in inp and inp["span_argument"]:
     arg1 = f"{in_out}_{arg_name}"
     arg2 = f"{in_out}_{arg_name}_len"
+
+    reinterpret_decl = f"x23::Vec<std::byte>{{{arg1}->begin(), {arg1}->end()}}.reinterpret<x23::Vec<uint8_t>>()"
     if optional:
       return f"""
         std::optional<std::span<{const}std::byte>> {arg1} =
@@ -217,7 +219,7 @@ def gen_validate_arg(inp, *, is_input):
                                      user_{arg2});
 
         
-      """, [f"user_{arg1}", f"user_{arg2}"], arg1, f"std::optional<std::span<{const}std::byte>> {arg1}"
+      """, [f"user_{arg1}", f"user_{arg2}"], arg1, f"std::optional<std::span<{const}std::byte>> {arg1}", f".{arg_name} = {arg1} ? {reinterpret_decl} : nullptr"
 
     else:
 
@@ -229,7 +231,7 @@ def gen_validate_arg(inp, *, is_input):
                                user_{arg2});
 
   {check_arg_statement}
-""", [f"user_{arg1}", f"user_{arg2}"], f"*{arg1}", f"std::span<{const}std::byte> {arg1}"
+""", [f"user_{arg1}", f"user_{arg2}"], f"*{arg1}", f"std::span<{const}std::byte> {arg1}", f".{arg_name} = {reinterpret_decl}"
   # endif span_argument
 
   typename = inp["typename"]
@@ -249,7 +251,7 @@ def gen_validate_arg(inp, *, is_input):
     return f"""
   {const}auto {arg1} =
       check_user_primitive_argument<{const}{typename}>(user_{arg1});
-""", [f"user_{arg1}"], arg1, f"{typename} {arg1}"
+""", [f"user_{arg1}"], arg1, f"{typename} {arg1}", f".{arg_name} = {arg1}"
 
   if "custom_parsing" in inp and inp["custom_parsing"] and is_input:
     if optional:
@@ -265,7 +267,7 @@ def gen_validate_arg(inp, *, is_input):
       check_user_custom_input_argument<{typename}>(contract_memory, {arg_str});
 
   {check_arg_statement}
-  """, custom_args, f"*{arg1}", f"{const}{typename}& {arg1}"
+  """, custom_args, f"*{arg1}", f"{const}{typename}& {arg1}", f".{arg_name} = *{arg1}"
   #endif custom_parsing
 
   if optional:
@@ -275,17 +277,23 @@ def gen_validate_arg(inp, *, is_input):
         check_user_argument<{const}{typename}>(contract_memory, user_{arg1},
                                       sizeof({typename}));
 
-""", [f"user_{arg1}"], f"{arg1}", f"{const}{typename}* {arg1}"
+""", [f"user_{arg1}"], f"{arg1}", f"{const}{typename}* {arg1}", f".{arg_name} = {arg1} ? x23::Ptr<{typename}>(new {typename}(*{arg1})) : nullptr"
   # end optional arg
 
+  assign_str = f".{arg_name} = *{arg1}"
+  print(inp)
   # else fixed size
+  if "requires_to_xdr" in inp and inp["requires_to_xdr"]:
+    print("whee")
+    assign_str = f".{arg_name} = to_xdr(*{arg1})"
+
   return f"""
   {const}auto *{arg1} =
       check_user_argument<{const}{typename}>(contract_memory, user_{arg1},
                                       sizeof({typename}));
 
   {check_arg_statement}
-""", [f"user_{arg1}"],  f"*{arg1}", f"{const}{typename}& {arg1}"
+""", [f"user_{arg1}"],  f"*{arg1}", f"{const}{typename}& {arg1}", assign_str
 
 def gen_syscall_io_arg_decl(arg):
   end_decorator = ""
@@ -320,6 +328,8 @@ def gen_syscall_input_arg_xdr(syscall):
 {decls_joined}
 }};
 
+""", f"""  case k{name}:
+    {name}_input {name};
 """
 
 def gen_syscall_output_arg_xdr(syscall):
@@ -338,6 +348,8 @@ def gen_syscall_output_arg_xdr(syscall):
 {decls_joined}
 }};
 
+""", f"""  case k{name}:
+    {name}_output {name};
 """
 
 def gen_inner_outer(syscall):
@@ -361,21 +373,24 @@ def gen_inner_outer(syscall):
   if "syscall_return_type" in syscall:
     inner_return_type = syscall["syscall_return_type"]
 
+  log_decl_strs = []
   if syscall["inputs"] is not None:
     for arg in syscall["inputs"]:
-      validate_str, local_user_args, local_call_arg, inner_arg_decl = gen_validate_arg(arg, is_input = True)
+      validate_str, local_user_args, local_call_arg, inner_arg_decl, assign_str = gen_validate_arg(arg, is_input = True)
       inner_body += validate_str
       user_args += local_user_args
       call_arg_strs.append(local_call_arg)
       inner_arg_decl_strs.append(inner_arg_decl)
+      log_decl_strs.append("      " + assign_str)
 
   # all the input argument to the syscall, except the SyscallHandler reference
   log_syscall_arg_strs = ["SyscallNo::k" + name] + call_arg_strs
   log_syscall_args = ", ".join(log_syscall_arg_strs)
+  log_decls = ", \n".join(log_decl_strs)
 
   if syscall["outputs"] is not None:
     for arg in syscall["outputs"]:
-      validate_str, local_user_args, local_call_arg, inner_arg_decl  = gen_validate_arg(arg, is_input = False)
+      validate_str, local_user_args, local_call_arg, inner_arg_decl, assign_str = gen_validate_arg(arg, is_input = False)
       inner_body += validate_str
       user_args += local_user_args
       call_arg_strs.append(local_call_arg)
@@ -418,7 +433,14 @@ syscall_{name}_outer(SystemCallHandler& {syscall_handler_ref},
                      uint64_t {user_args[4]},
                      uint64_t {user_args[5]})
 {{{inner_body}
-  log_syscall({log_syscall_args});
+  if (syscall_logfd != -1) {{
+    auto arguments = {name}_input{{
+{log_decls}
+    }};
+
+    auto msg = std::format("{{}} Input {{}}\\n", SyscallNo::k{name}, x23::show(arguments));
+    write(syscall_logfd, msg.data(), msg.size());
+  }}
   auto res = syscall_{name}_inner({inner_args});
 
   return {{convert_return_t(res.first), res.second}};
@@ -508,6 +530,7 @@ def gen_syscall_entry_cc(spec):
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -516,6 +539,7 @@ def gen_syscall_entry_cc(spec):
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
+#include "syscall_args.hh"
 #include "types.hh"
 
 namespace hogd {{
@@ -878,10 +902,15 @@ namespace hogd {{
 
 def gen_syscall_arg_xdr(spec):
   structs = ""
+  decls_in = ""
+  decls_out = ""
   for call in spec["syscalls"]:
-    structs += gen_syscall_input_arg_xdr(call)
-    structs += gen_syscall_output_arg_xdr(call)
-  print(structs)
+    struct, decl = gen_syscall_input_arg_xdr(call)
+    structs += struct
+    decls_in += decl
+    struct, decl = gen_syscall_output_arg_xdr(call)
+    structs += struct
+    decls_out += decl
 
   return f"""// clang-format off
 %#include "types.hh"
@@ -889,6 +918,14 @@ def gen_syscall_arg_xdr(spec):
 namespace hogd {{
   // clang-format on
 {structs}
+
+union SyscallInput switch(SyscallNo syscall) {{
+{decls_in}
+}};
+
+union SyscallOutput switch(SyscallNo syscall) {{
+{decls_out}
+}};
 
 }}
 

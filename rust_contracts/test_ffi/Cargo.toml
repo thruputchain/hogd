@@ -7,10 +7,15 @@ edition = "2021"
 crate-type = ["rlib"]
 
 [dependencies]
-groundhog_xdr = {path = "..//groundhog_xdr", features=["std"]}
-rs_contract_sdk = {path = "../rs_contract_sdk", features=["std"]}
+groundhog_xdr = {path = "../groundhog_xdr", features=["std"]}
 sha2 = "0.10"
+
+[features]
+activate = []
 
 [build-dependencies]
 cmake = "0.1"
 bindgen = "0.71"
+
+[dev-dependencies]
+test_ffi = {path = ".", features=["activate"]}
