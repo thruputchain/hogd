@@ -52,23 +52,23 @@ DBContext::DBContext()
   db_.get_root_db().set_as_default_genesis();
 }
 
-void 
+void
 DBContext::advance_new_block()
 {
-if (current_block_id_ != 0) {
+  if (current_block_id_ != 0) {
     if (db_client_.close_snapshot(current_block_id_)() != RPCError::kNone) {
-    exit(-1);
+      exit(-1);
     }
-}
-if (db_client_.open_database_snapshot(current_block_id_,
+  }
+  if (db_client_.open_database_snapshot(current_block_id_,
                                         current_block_id_ + 1)() !=
-    RPCError::kNone) {
+      RPCError::kNone) {
     exit(-1);
-}
-syscall_logfd = 1;
-current_block_id_++;
-snapshot_cache_ =
-    std::make_unique<StorageSnapshotCache>(current_block_id_, db_proxy_);
+  }
+  syscall_logfd = 1;
+  current_block_id_++;
+  snapshot_cache_ =
+      std::make_unique<StorageSnapshotCache>(current_block_id_, db_proxy_);
 }
 
 } // namespace hogd
