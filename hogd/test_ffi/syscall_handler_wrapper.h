@@ -167,6 +167,12 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
     return unrecoverable_error();
   }
 
+  if (syscall_logfd != -1) {
+    auto msg =
+        std::format("{} Output {}\n", syscall_no, x23::show(*output_arg));
+    write(syscall_logfd, msg.data(), msg.size());
+  }
+
   return status;
 }
 

@@ -386,6 +386,8 @@ def gen_inner_outer(syscall):
   log_syscall_args = ", ".join(log_syscall_arg_strs)
   log_decls = ", \n".join(log_decl_strs)
 
+  log_decl_strs = []
+
   if syscall["outputs"] is not None:
     for arg in syscall["outputs"]:
       validate_str, local_user_args, local_call_arg, inner_arg_decl, assign_str = gen_validate_arg(arg, is_input = False)
@@ -393,6 +395,9 @@ def gen_inner_outer(syscall):
       user_args += local_user_args
       call_arg_strs.append(local_call_arg)
       inner_arg_decl_strs.append(inner_arg_decl)
+      log_decl_strs.append("      " + assign_str)
+
+  output_log_decls = ", \n".join(log_decl_strs)
 
   if len(user_args) > syscall_argcount:
     raise ValueError("too many syscall args")
@@ -440,6 +445,15 @@ syscall_{name}_outer(SystemCallHandler& {syscall_handler_ref},
     write(syscall_logfd, msg.data(), msg.size());
   }}
   auto res = syscall_{name}_inner({inner_args});
+
+  if (syscall_logfd != -1 && has_return(SyscallNo::k{name}, res.first)) {{
+    auto arguments = {name}_output{{
+{output_log_decls}
+    }};
+
+    auto msg = std::format("{{}} Output {{}}\\n", SyscallNo::k{name}, x23::show(arguments));
+    write(syscall_logfd, msg.data(), msg.size());
+  }}
 
   return {{convert_return_t(res.first), res.second}};
 }}

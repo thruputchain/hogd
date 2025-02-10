@@ -7,8 +7,11 @@
 #include <span>
 #include <string>
 #include <unistd.h>
+#include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "syscall.hh"
 #include "x23/format.h"
@@ -98,6 +101,48 @@ log_syscall(SyscallNo syscall, T const &...args)
   auto msg = std::format("{}: {}\n", x23::show(syscall),
                          log_syscall_arguments(args...));
   write(syscall_logfd, msg.data(), msg.size());
+}
+
+template<typename T>
+bool
+has_return(SyscallNo syscall, T const &value)
+{
+
+  auto host_fn_err = [&syscall](HostFnErrorCode code) {
+    auto msg = std::format("{} Error HostFnErrorCode::{}\n", x23::show(syscall),
+                           x23::show(code));
+    write(syscall_logfd, msg.data(), msg.size());
+  };
+
+  auto syscall_err = [&syscall](SyscallErrorCode code) {
+    auto msg = std::format("{} Error SyscallErrorCode::{}\n",
+                           x23::show(syscall), x23::show(code));
+    write(syscall_logfd, msg.data(), msg.size());
+  };
+
+  if constexpr (std::is_same_v<T, HostFnStatus<SyscallErrorCode>>) {
+    if (value) {
+      if (value == SyscallErrorCode::kNone) {
+        return true;
+      }
+      syscall_err(*value);
+      return false;
+    }
+    host_fn_err(value.error().code());
+    return false;
+  }
+  else {
+    static_assert(std::is_same_v<T, std::pair<HostFnErrorCode, int32_t>>);
+    if (value.first == HostFnErrorCode::kNoneOrRecoverable) {
+      if (value.second == std::to_underlying(SyscallErrorCode::kNone)) {
+        return true;
+      }
+      syscall_err(SyscallErrorCode{value.second});
+      return false;
+    }
+    host_fn_err(value.first);
+    return false;
+  }
 }
 
 } // namespace hogd
