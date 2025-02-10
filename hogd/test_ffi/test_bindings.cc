@@ -139,15 +139,7 @@ root_invoke(void *syscall_handler) noexcept
   }
 
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-
-  if (!context->push_context()) {
-    return kUnrecoverableError;
-  }
-
   auto res = context->root_invoke();
-
-  context->pop_context();
-
   return res;
 }
 

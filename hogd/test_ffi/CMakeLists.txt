@@ -14,6 +14,7 @@ add_library(
     test_ffi
     SHARED
     test_bindings.cc
+    syscall_handler_wrapper.cc
     db_context_wrapper.cc
     mock_syscall_entry.cc
     mock_syscall_inner.cc
