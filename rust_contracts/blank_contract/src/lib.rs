@@ -12,6 +12,8 @@ mod tests {
     use sha2::Digest;
     use sha2::Sha256;
 
+    use groundhog_xdr::ffi_enums::InvokeErrorCode;
+
     static mut x: bool = false;
     #[test]
     fn invoke_err() {
@@ -39,10 +41,7 @@ mod tests {
             test_ffi::types::TransactionHandler::new(&env, &ctx, &tx);
 
         let res = tx_handler.root_invoke();
-        assert_eq!(
-            res.result.panic,
-            groundhog_xdr::InvokeErrorCode::kDeterministic as i32
-        );
+        assert_eq!(res.result.panic, InvokeErrorCode::kDeterministic as i32);
         assert!(unsafe { x });
     }
 
@@ -71,10 +70,7 @@ mod tests {
             test_ffi::types::TransactionHandler::new(&env, &ctx, &tx);
 
         let res = tx_handler.root_invoke();
-        assert_eq!(
-            res.result.panic,
-            groundhog_xdr::InvokeErrorCode::kNone as i32
-        );
+        assert_eq!(res.result.panic, InvokeErrorCode::kNone as i32);
     }
 
     static mut hash_expect: [u8; 32] = [0; 32];
@@ -109,9 +105,6 @@ mod tests {
             test_ffi::types::TransactionHandler::new(&env, &ctx, &tx);
 
         let res = tx_handler.root_invoke();
-        assert_eq!(
-            res.result.panic,
-            groundhog_xdr::InvokeErrorCode::kNone as i32
-        );
+        assert_eq!(res.result.panic, InvokeErrorCode::kNone as i32);
     }
 }

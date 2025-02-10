@@ -1,4 +1,4 @@
-use groundhog_xdr::InvokeErrorCode;
+use groundhog_xdr::ffi_enums::InvokeErrorCode;
 
 use std::error::Error;
 use std::fmt;
@@ -7,7 +7,7 @@ use std::panic::panic_any;
 
 #[derive(Debug, Clone)]
 pub struct InvokeError {
-    pub error_type: groundhog_xdr::InvokeErrorCode,
+    pub error_type: InvokeErrorCode,
     pub error_code: i32,
 }
 

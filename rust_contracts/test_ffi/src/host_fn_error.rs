@@ -1,5 +1,5 @@
 use crate::types::ForeignHostFnResult;
-use groundhog_xdr::HostFnErrorCode;
+use groundhog_xdr::ffi_enums::HostFnErrorCode;
 use std::panic::panic_any;
 
 use crate::types::mock_syscall_entrypoint;
@@ -36,7 +36,7 @@ impl ForeignHostFnResult {
 //    unsigned char* output, uint32_t output_len);
 
 pub fn perform_mocked_syscall(
-    syscall: groundhog_xdr::SyscallNo,
+    syscall: groundhog_xdr::syscall::SyscallNo,
     input: &[u8],
     output: &mut [u8],
 ) -> i32 {

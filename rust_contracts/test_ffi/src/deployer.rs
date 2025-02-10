@@ -1,5 +1,6 @@
 use crate::types::MockContract;
-use groundhog_xdr::{Invocation, SHA256Hash, SignedTransaction, Transaction};
+use groundhog_xdr::transaction::{Invocation, SignedTransaction, Transaction};
+use groundhog_xdr::types::SHA256Hash;
 
 pub fn make_deploy_transaction(
     contract: &MockContract,

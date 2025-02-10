@@ -9,10 +9,10 @@ mod wasm {
 
 #[cfg(feature = "mock")]
 mod mock {
-    use groundhog_xdr::SHA256Hash;
+    use groundhog_xdr::syscall::{SyscallErrorCode, SyscallNo};
+    use groundhog_xdr::types::SHA256Hash;
     use groundhog_xdr::{ReadXdr, WriteXdr};
     use groundhog_xdr::{SHA256_input, SHA256_output};
-    use groundhog_xdr::{SyscallErrorCode, SyscallNo};
 
     use std::panic::panic_any;
     use test_ffi::invoke_error::unrecoverable_error;

@@ -2,7 +2,10 @@ use core::ffi::c_void;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use groundhog_xdr::{InvokeErrorCode, SHA256Hash};
+use groundhog_xdr::contract::Contract;
+use groundhog_xdr::ffi_enums::InvokeErrorCode;
+use groundhog_xdr::transaction::SignedTransaction;
+use groundhog_xdr::types::SHA256Hash;
 use groundhog_xdr::{Limits, WriteXdr};
 
 use std::marker::PhantomPinned;
@@ -119,17 +122,17 @@ impl MockContract {
         }
     }
 
-    fn u32_to_contract(index: u32) -> groundhog_xdr::Contract {
+    fn u32_to_contract(index: u32) -> Contract {
         let bytes = index.to_xdr(Limits::none()).unwrap();
-        groundhog_xdr::Contract {
+        Contract {
             contract_data: bytes.try_into().unwrap(),
         }
     }
 
-    pub fn as_contract(&self) -> groundhog_xdr::Contract {
+    pub fn as_contract(&self) -> Contract {
         Self::u32_to_contract(self.index)
     }
-    pub fn as_hash(&self) -> groundhog_xdr::SHA256Hash {
+    pub fn as_hash(&self) -> SHA256Hash {
         self.hash
     }
 
@@ -214,7 +217,7 @@ impl<'a> TransactionHandler<'a> {
     pub fn new(
         env: &'a Environment,
         ctx: &'a MockContractContext,
-        stx: &groundhog_xdr::SignedTransaction,
+        stx: &SignedTransaction,
     ) -> Self {
         let tx_bytes = stx.to_xdr(Limits::none()).unwrap();
         unsafe {
