@@ -8,8 +8,7 @@ use core::mem::MaybeUninit;
 pub fn GetDeployAddress(
     nonce: &SHA256Hash,
     contract_hash: &SHA256Hash,
-    ) -> Result<ContractAddress>
-{
+) -> Result<ContractAddress> {
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
 
@@ -22,8 +21,7 @@ pub fn GetDeployAddressForOther(
     other_address: &ContractAddress,
     nonce: &SHA256Hash,
     contract_hash: &SHA256Hash,
-    ) -> Result<ContractAddress>
-{
+) -> Result<ContractAddress> {
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
 
@@ -40,8 +38,7 @@ pub fn GetDeployAddressForOther(
 pub fn DeployContract(
     nonce: &SHA256Hash,
     contract_hash: &SHA256Hash,
-) -> Result<ContractAddress>
-{
+) -> Result<ContractAddress> {
     let mut out_addr: MaybeUninit<ContractAddress> =
         MaybeUninit::<ContractAddress>::uninit();
     uninit_DeployContract(nonce, contract_hash, &mut out_addr)?;

@@ -12,6 +12,8 @@ add_library(
   execution_mode.cc
   invocation_frame.cc
   item_view.cc
+  runtime.cc
+  mock_runtime.cc
   status.cc
   storage_snapshot_cache.cc
   syscall_bytestring.cc
@@ -25,6 +27,8 @@ add_library(
   syscall_retrocausal_queue.cc
   syscall_return.cc
   wasmi_runtime.cc
+  wasm3_runtime.cc
+  wasm3_wrapper.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
 
@@ -38,14 +42,18 @@ add_executable(
   item_view_test.cc
   memory_access_test.cc
   userctx_test.cc
+  mock_contract_test.cc
 )
+
 target_link_libraries(
   runtime
   wasmi_lib
   runtime_trampoline
   protocol
-  hogd
+  m3 # wasm3
+  base
   crypto
+  ${LIBSODIUM_LIBRARIES}
 )
 
 add_dependencies(

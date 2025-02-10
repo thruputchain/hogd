@@ -13,7 +13,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 bcs = { path = "external/bcs", default-features = false }
-rs_xdr = { path = "../xdr/rs_xdr/" }
+rs_xdr = { package = "groundhog_xdr", path = "../../rust_contracts/groundhog_xdr/" }
 macros = { path = "macros" }
 thiserror = { version = "2.0.11", default-features = false }
 serde = { version = "1.0.217", default-features = false }
@@ -23,5 +23,5 @@ serde_arrays = { path = "external/serde_arrays", default-features = false }
 sha2 = { version = "0.10.8", default-features = false }
 
 [features]
-alloc = ["serde/alloc", "bcs/alloc", "serde_arrays/alloc"]
-std = ["serde/std", "bcs/std"]
+alloc = ["serde/alloc", "bcs/alloc", "serde_arrays/alloc", "rs_xdr/alloc"]
+std = ["serde/std", "bcs/std", "rs_xdr/std"]

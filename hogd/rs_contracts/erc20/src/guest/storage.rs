@@ -1,10 +1,10 @@
 //! Storage for a coin contract
 
+use sdk::result::{ensure, Result};
+use sdk::storage::{item_key, FromKey, Map, NNInt};
 use sdk::types::{ContractAddress, StorageKey};
-use sdk::result::{Result, ensure};
-use sdk::storage::{NNInt, Map, FromKey, item_key};
 use sdk::GetMsgSender;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub type Allowance = NNInt;
 pub type Balance = NNInt;
@@ -20,7 +20,10 @@ pub struct CoinStorage {
 }
 
 impl CoinStorage {
-    pub fn new(storage_key: &StorageKey, owner: &ContractAddress) -> Result<Self> {
+    pub fn new(
+        storage_key: &StorageKey,
+        owner: &ContractAddress,
+    ) -> Result<Self> {
         let key = storage_key.clone();
         let owner = owner.clone();
         let total_supply = NNInt::from_key(item_key(&key, b"1"));
@@ -40,10 +43,12 @@ impl CoinStorage {
         self.balances.get(addr)
     }
 
-    pub fn allowance_for(&self, owner: &ContractAddress, spender: &ContractAddress)
-        -> Result<Allowance>
-    {
-        let key = (*owner, *spender);   // XX: Avoid copying
+    pub fn allowance_for(
+        &self,
+        owner: &ContractAddress,
+        spender: &ContractAddress,
+    ) -> Result<Allowance> {
+        let key = (*owner, *spender); // XX: Avoid copying
         self.allowances.get(&key)
     }
 

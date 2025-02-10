@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
+use crate::result::SysResult as Result;
 use crate::sys;
 use crate::types::{RuntimeMemoryLength, StorageKey};
-use crate::result::SysResult as Result;
 
 use core::mem::MaybeUninit;
 

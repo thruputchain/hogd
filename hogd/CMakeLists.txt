@@ -27,3 +27,5 @@ add_subdirectory(hogexec)
 add_subdirectory(rs_contracts)
 add_subdirectory(test)
 add_subdirectory(loadgen)
+
+add_subdirectory(test_ffi)

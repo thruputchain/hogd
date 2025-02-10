@@ -1,4 +1,4 @@
-pub use ::rs_xdr::syscall::{SyscallNo, SyscallErrorCode};
+pub use ::rs_xdr::syscall::{SyscallErrorCode, SyscallNo};
 
 /// Rust bindings for the syscalls
 pub mod bindings;
@@ -7,12 +7,13 @@ pub mod bindings;
 mod error_helper;
 
 use thiserror::Error;
-#[derive(Error, Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Error, Copy, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize,
+)]
 #[error("SysErr({0})")]
 pub struct SysErr(i32);
 
-impl SysErr
-{
+impl SysErr {
     pub fn is_code(self, code: SyscallErrorCode) -> bool {
         if let Ok(c) = TryInto::<SyscallErrorCode>::try_into(self) {
             c == code
@@ -65,7 +66,8 @@ pub fn syscall_wrapper(
     arg6: u64,
 ) -> SysErr {
     unsafe {
-        let errno = syscall(syscall_no as u64, arg1, arg2, arg3, arg4, arg5, arg6);
+        let errno =
+            syscall(syscall_no as u64, arg1, arg2, arg3, arg4, arg5, arg6);
         SysErr(errno)
     }
 }

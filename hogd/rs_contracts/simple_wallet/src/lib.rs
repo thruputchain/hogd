@@ -3,16 +3,15 @@
 
 extern crate alloc;
 
-use sdk::types::{
-    StorageKey, ContractAddress,
-    PublicKey, Signature,
-    Ed25519PublicKey, Ed25519SignatureA
-};
+use erc20::client::ERC20Client;
+use erc20::interface::{Amount, ERC20};
 use sdk::contract::{Contract, ContractWithStorage};
 use sdk::macros::contract;
-use serde::{Serialize, Deserialize};
-use erc20::interface::{ERC20, Amount};
-use erc20::client::ERC20Client;
+use sdk::types::{
+    ContractAddress, Ed25519PublicKey, Ed25519SignatureA, PublicKey, Signature,
+    StorageKey,
+};
+use serde::{Deserialize, Serialize};
 
 // TODO: Replay prevention?
 
@@ -22,9 +21,7 @@ struct WalletStorage {
     pk: Ed25519PublicKey,
 }
 
-struct WalletContract(
-    ContractWithStorage<WalletStorage>
-    );
+struct WalletContract(ContractWithStorage<WalletStorage>);
 
 impl core::ops::Deref for WalletContract {
     type Target = ContractWithStorage<WalletStorage>;
@@ -44,17 +41,18 @@ type AuthMessage = [u8; 80];
 
 #[contract(guest)]
 impl WalletContract {
-
     fn token(&self) -> ERC20Client {
-        ERC20Client::new(
-            &self.storage().token_addr
-            )
+        ERC20Client::new(&self.storage().token_addr)
     }
 
-    pub fn initialize(&mut self, pk: &Ed25519PublicKey, token_addr: &ContractAddress) {
+    pub fn initialize(
+        &mut self,
+        pk: &Ed25519PublicKey,
+        token_addr: &ContractAddress,
+    ) {
         let storage = WalletStorage {
             pk: *pk,
-            token_addr: *token_addr
+            token_addr: *token_addr,
         };
 
         self.set_storage(storage);
@@ -70,9 +68,11 @@ impl WalletContract {
         assert_eq!(bal, expect);
     }
 
-    fn compute_auth_message(&self, to_addr: &ContractAddress, amount: Amount)
-        -> AuthMessage
-    {
+    fn compute_auth_message(
+        &self,
+        to_addr: &ContractAddress,
+        amount: Amount,
+    ) -> AuthMessage {
         // TODO(geoff) this will eventually need a nonce and a domain separator(?)
 
         let self_addr = sdk::GetCurrentAddress().unwrap();
@@ -85,11 +85,12 @@ impl WalletContract {
         bytes
     }
 
-    fn check_payment_authorization(&self,
+    fn check_payment_authorization(
+        &self,
         to_addr: &ContractAddress,
         amount: Amount,
-        signature: &Ed25519SignatureA)
-    {
+        signature: &Ed25519SignatureA,
+    ) {
         let pk = &self.storage().pk;
 
         // TODO some kind of replay mechanism
@@ -97,16 +98,20 @@ impl WalletContract {
 
         sdk::crypto::VerifySignature(
             &PublicKey::Ed25519 { ed25519: *pk },
-            &Signature::Ed25519 { ed25519: signature.as_array().clone(), },
+            &Signature::Ed25519 {
+                ed25519: signature.as_array().clone(),
+            },
             &auth_message,
-        ).unwrap();
+        )
+        .unwrap();
     }
 
-    pub fn send_payment(&self,
+    pub fn send_payment(
+        &self,
         to_addr: &ContractAddress,
         amount: Amount,
-        signature: &Ed25519SignatureA)
-    {
+        signature: &Ed25519SignatureA,
+    ) {
         self.check_payment_authorization(to_addr, amount, signature);
 
         self.token().transfer(&to_addr, amount);

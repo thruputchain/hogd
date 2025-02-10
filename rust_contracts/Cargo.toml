@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "test_ffi",
+    "groundhog_xdr",
+    "rs_contract_sdk",
+    "blank_contract"
+]
+
+[profile.dev]
+opt-level = 0
+panic = "abort"
+
+[profile.release]
+opt-level = 3
+overflow-checks = false
+debug = false
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+lto = true
+codegen-units = 1

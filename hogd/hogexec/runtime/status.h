@@ -112,6 +112,8 @@ struct InvokeResult {
   }
   bool should_frame_revert() const { return !is_frame_success(); }
 
+  // TODO(geoff): check that kReturn and kExit from a root function can return
+  // successfully
   bool is_root_success() const { return result_.has_value() && *result_ == 0; }
 
   InvokeResult to_root_error() const;

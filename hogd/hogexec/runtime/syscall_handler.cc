@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/flag_utils.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
@@ -37,8 +38,9 @@ namespace hogd {
 SystemCallHandler::SystemCallHandler(
     SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
     PerTransactionDatabaseProxy &db_proxy,
-    std::optional<NondeterministicProposal> proposal)
-  : signed_tx_(std::move(signed_tx)),
+    std::optional<NondeterministicProposal> proposal,
+    std::shared_ptr<RuntimeContext> context)
+  : runtime_context_(std::move(context)), signed_tx_(std::move(signed_tx)),
     invocation_frame_stack_(
         [this](InvocationFrame &last_frame) {
           commit_last_call_frame_success(last_frame);
@@ -62,7 +64,12 @@ SystemCallHandler::SystemCallHandler(
     }()),
     snapshot_cache_(snapshot_cache), db_proxy_(db_proxy)
 {
-  wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
+  if (!runtime_context_) {
+    runtime_context_ = std::make_shared<WasmiContext>();
+  }
+  [[maybe_unused]]
+  auto res = runtime_context_->link_fn("marmot", "syscall", &syscall_entry);
+  assert(res);
 }
 
 InvokeResult
@@ -79,6 +86,7 @@ SystemCallHandler::root_invoke()
                                           InvocationFlags::kNone));
   auto res = runtime->invoke(signed_tx_.tx.invocation.method,
                              signed_tx_.tx.invocation.gas_limit);
+
   res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   res = finish_nondeterminism_checks(res);
 
@@ -166,7 +174,6 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount remaining_gas,
   invocation_frame_stack_.start_frame(invocation, flags);
   auto res = runtime->invoke(invocation.method, gas_limit);
   res = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
-
   return res.to_host_fn_result();
 }
 
@@ -220,7 +227,7 @@ SystemCallHandler::lookup_contract_by_hash(SHA256Hash const &hash)
   return snapshot_cache_.try_get_contract_by_hash(hash);
 }
 
-std::optional<WasmiRuntime>
+std::unique_ptr<Runtime>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
 
@@ -229,7 +236,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   if (!deployed_hash) {
     // A deployment was not found in the local context
     // nor in the snapshot.
-    return std::nullopt;
+    return nullptr;
   }
 
   // At this point, we have a deployment and the hash of the contract.
@@ -241,7 +248,8 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   // actually make the new runtime
   // TODO(geoff) validate that failures here are deterministic.
   // (i.e. the result of a malloc() failure).
-  return wasmi_context_.make_new_runtime(contract->contract_data, this);
+  return runtime_context_->make_new_runtime(*deployed_hash, contract.get(),
+                                            this);
 }
 
 Calldata const &

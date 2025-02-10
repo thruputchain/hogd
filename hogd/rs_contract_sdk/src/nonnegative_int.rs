@@ -1,18 +1,14 @@
 #![allow(non_snake_case)]
 
-use crate::sys;
-use crate::types::StorageKey;
-use crate::syscall::SyscallErrorCode;
 use crate::result::SysResult as Result;
+use crate::sys;
+use crate::syscall::SyscallErrorCode;
+use crate::types::StorageKey;
 
 pub fn NonnegativeIntGet(key: &StorageKey) -> Result<(i128, i128)> {
     let mut set_result: i128 = 0;
     let mut add_result: i128 = 0;
-    sys::raw_NonnegativeIntGet(
-        key,
-        &mut set_result,
-        &mut add_result,
-    )?;
+    sys::raw_NonnegativeIntGet(key, &mut set_result, &mut add_result)?;
     Ok((set_result, add_result))
 }
 

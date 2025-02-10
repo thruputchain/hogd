@@ -88,6 +88,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "groundhog_xdr"
+version = "0.0.1"
+
+[[package]]
 name = "libc"
 version = "0.2.169"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -133,19 +137,12 @@ name = "rs_contract_sdk"
 version = "0.0.1"
 dependencies = [
  "bcs",
+ "groundhog_xdr",
  "macros",
- "rs_xdr",
  "serde",
  "serde_arrays",
  "sha2",
  "thiserror",
-]
-
-[[package]]
-name = "rs_xdr"
-version = "0.0.1"
-dependencies = [
- "serde",
 ]
 
 [[package]]

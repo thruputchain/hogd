@@ -3,10 +3,10 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
+use sdk::contract::Contract;
+use sdk::macros::contract;
 use sdk::macros::static_key;
 use sdk::types::StorageKey;
-use sdk::macros::contract;
-use sdk::contract::Contract;
 
 const KEY1: StorageKey = static_key!("queue key");
 const KEY2: StorageKey = static_key!("queue key2");
@@ -34,8 +34,7 @@ pub use client::RCQInterfaceClient;
 
 #[cfg(feature = "guest")]
 #[contract(export)]
-impl RCQInterface for RCQ
-{
+impl RCQInterface for RCQ {
     fn test_read_self_item(self) {
         sdk::RetrocausalQueueInsert(&KEY1, &[1]).unwrap();
         sdk::RetrocausalQueueInsert(&KEY1, &[2]).unwrap();

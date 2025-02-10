@@ -27,8 +27,7 @@ pub fn VerifySignature(
     pk: &PublicKey,
     signature: &Signature,
     message: &[u8],
-) -> Result<()>
-{
+) -> Result<()> {
     let PublicKey::Ed25519 { ed25519: pk_local } = pk;
     let Signature::Ed25519 { ed25519: sig_local } = signature;
     sys::uninit_VerifySignature(
@@ -36,6 +35,6 @@ pub fn VerifySignature(
         to_offset(sig_local) as u64,
         pk.scheme() as u64,
         to_offset(pk_local) as u64,
-        message
-        )
+        message,
+    )
 }

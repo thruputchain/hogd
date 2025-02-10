@@ -8,15 +8,13 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use syn::Item;
-use syn::parse::{ Result, Error };
+use syn::parse::{Error, Result};
 use syn::spanned::Spanned;
+use syn::Item;
 
 /// Generate contract-related code
 #[proc_macro_attribute]
-pub fn contract(_attr: TokenStream, item_tokens: TokenStream)
-    -> TokenStream
-{
+pub fn contract(_attr: TokenStream, item_tokens: TokenStream) -> TokenStream {
     // Parse the item tokens into syntax defined in `syn`
     let item = {
         let item_tokens = item_tokens.clone();
@@ -27,7 +25,7 @@ pub fn contract(_attr: TokenStream, item_tokens: TokenStream)
     // Generate the helper code
     let helper_tokens = match item_to_contract_helpers(&item) {
         Ok(x) => x,
-        Err(err) => return Error::into_compile_error(err).into()
+        Err(err) => return Error::into_compile_error(err).into(),
     };
 
     // Construct the output
@@ -43,9 +41,7 @@ pub fn contract(_attr: TokenStream, item_tokens: TokenStream)
     output
 }
 
-fn item_to_contract_helpers(item: &syn::Item)
-    -> Result<TokenStream2>
-{
+fn item_to_contract_helpers(item: &syn::Item) -> Result<TokenStream2> {
     match item {
         syn::Item::Trait(item) => {
             let sig = parse::contract_signature_from_trait(item)?;
@@ -57,15 +53,18 @@ fn item_to_contract_helpers(item: &syn::Item)
             let exports = gen::exports_from_contract_signature(&sig)?;
             Ok(exports)
         }
-        _ => {
-            err(item, format!("Can't generate contract helpers for item {:?}", item))
-        }
+        _ => err(
+            item,
+            format!("Can't generate contract helpers for item {:?}", item),
+        ),
     }
 }
 
 // Produce an error referencing a particular code span
 fn err<T, S, M>(spanned: &S, msg: M) -> Result<T>
-    where S: Spanned, M: AsRef<str>
+where
+    S: Spanned,
+    M: AsRef<str>,
 {
     Err(Error::new(spanned.span(), msg.as_ref()))
 }
@@ -78,7 +77,7 @@ mod sig {
         pub span: proc_macro2::Span,
         pub ident: syn::Ident,
         pub generics: syn::Generics,
-        pub methods: Vec<syn::Signature>
+        pub methods: Vec<syn::Signature>,
     }
 
     #[derive(Debug)]
@@ -100,33 +99,35 @@ mod sig {
     #[derive(Debug)]
     pub struct Arg {
         pub ident: syn::Ident,
-        pub ty: syn::Type
+        pub ty: syn::Type,
     }
 }
 
 mod parse {
     //! Parse syntax to contract signature
 
-    use syn::{ Item, ItemStruct, ItemMod, ItemConst, ItemTrait, ItemImpl,
-               Attribute, Field, Type,
-               Expr, ExprLit, ExprPath, Lit
-    };
-    use syn::parse::{ Result, Error };
-    use syn::spanned::Spanned;
-    use crate::sig;
     use crate::err;
+    use crate::sig;
+    use syn::parse::{Error, Result};
+    use syn::spanned::Spanned;
+    use syn::{
+        Attribute, Expr, ExprLit, ExprPath, Field, Item, ItemConst, ItemImpl,
+        ItemMod, ItemStruct, ItemTrait, Lit, Type,
+    };
 
-    pub fn contract_signature_from_trait(item: &ItemTrait)
-        -> Result<sig::Contract>
-    {
+    pub fn contract_signature_from_trait(
+        item: &ItemTrait,
+    ) -> Result<sig::Contract> {
         // Pull out the method signatures
-        let methods = (&item.items).iter()
-            .filter_map(|item|
+        let methods = (&item.items)
+            .iter()
+            .filter_map(|item| {
                 if let syn::TraitItem::Fn(trait_fn) = item {
                     Some(trait_fn.sig.clone())
                 } else {
                     None
-                })
+                }
+            })
             .collect();
 
         Ok(sig::Contract {
@@ -137,15 +138,16 @@ mod parse {
         })
     }
 
-    pub fn contract_signature_from_impl(item: &ItemImpl)
-        -> Result<sig::ContractImpl>
-    {
+    pub fn contract_signature_from_impl(
+        item: &ItemImpl,
+    ) -> Result<sig::ContractImpl> {
         // Get the contract trait being implemented, if any
         let trait_ = item.trait_.clone().map(|(_, path, _)| path);
 
         // Pull out the function items
-        let methods = (&item.items).into_iter()
-            .filter_map(|item|
+        let methods = (&item.items)
+            .into_iter()
+            .filter_map(|item| {
                 if let syn::ImplItem::Fn(ref impl_fn) = item {
                     let is_pub = is_visible(&impl_fn.vis);
 
@@ -157,7 +159,8 @@ mod parse {
                     }
                 } else {
                     None
-                })
+                }
+            })
             .collect();
         Ok(sig::ContractImpl {
             span: item.span(),
@@ -179,7 +182,8 @@ mod parse {
     fn method_signature_from_sig(sig: &syn::Signature) -> Option<sig::Method> {
         let span = sig.span().clone();
         let ident = sig.ident.clone();
-        let args = (&sig.inputs).iter()
+        let args = (&sig.inputs)
+            .iter()
             .filter_map(|fn_arg| {
                 // Ignore FnArg::Receiver inputs
                 if let syn::FnArg::Typed(pat_type) = fn_arg {
@@ -187,17 +191,19 @@ mod parse {
                 } else {
                     None
                 }
-            }).collect();
+            })
+            .collect();
         Some(sig::Method { span, ident, args })
     }
 
     fn arg_from_pat_type(pat_type: &syn::PatType) -> Option<sig::Arg> {
-        let ident = if let syn::Pat::Ident(ref pat_ident) = pat_type.pat.as_ref() {
-            pat_ident.ident.clone()
-        } else {
-            return None;
-            // err(&pat_type.pat, "Can't handle non-ident arg pattern");
-        };
+        let ident =
+            if let syn::Pat::Ident(ref pat_ident) = pat_type.pat.as_ref() {
+                pat_ident.ident.clone()
+            } else {
+                return None;
+                // err(&pat_type.pat, "Can't handle non-ident arg pattern");
+            };
         let ty = (*pat_type.ty).clone();
         Some(sig::Arg { ident, ty })
     }
@@ -206,27 +212,26 @@ mod parse {
 mod gen {
     //! Generate code from contract signature
 
+    use crate::sig;
     use proc_macro2::TokenStream as TokenStream2;
-    use quote::{quote, quote_spanned};
     use quote::format_ident;
     use quote::ToTokens;
-    use syn::parse::{Result, Error};
+    use quote::{quote, quote_spanned};
+    use syn::parse::{Error, Result};
     use syn::spanned::Spanned;
-    use crate::sig;
 
     // Generate a module `client` that contains the client type
     // (a wrapper around a contract address) and an implementation
     // of the contract trait that performs cross-contract calls.
-    pub fn client_from_contract_signature(contract: &sig::Contract)
-        -> Result<TokenStream2>
-    {
+    pub fn client_from_contract_signature(
+        contract: &sig::Contract,
+    ) -> Result<TokenStream2> {
         let trait_ident = &contract.ident;
         let client_ident = format_ident!("{}Client", trait_ident);
 
         let mut calls = TokenStream2::new();
         for (i, method) in contract.methods.iter().enumerate() {
-            calls.extend(
-                call_from_method_signature(i, method)?);
+            calls.extend(call_from_method_signature(i, method)?);
         }
 
         Ok(quote_spanned! {contract.span=>
@@ -259,12 +264,12 @@ mod gen {
     }
 
     // Generate a client method that makes a cross-contract invocation
-    fn call_from_method_signature(method_index: usize, method: &syn::Signature)
-        -> Result<TokenStream2>
-    {
+    fn call_from_method_signature(
+        method_index: usize,
+        method: &syn::Signature,
+    ) -> Result<TokenStream2> {
         let ident = &method.ident;
-        let formal_args: Vec<&syn::FnArg> =
-            method.inputs.iter().collect();
+        let formal_args: Vec<&syn::FnArg> = method.inputs.iter().collect();
         let arg_names: Vec<TokenStream2> =
             method.inputs.iter().filter_map(arg_pat).collect();
         let return_type = &method.output;
@@ -290,23 +295,20 @@ mod gen {
 
     fn arg_pat(fn_arg: &syn::FnArg) -> Option<TokenStream2> {
         match fn_arg {
-            syn::FnArg::Receiver(_) =>
-                None,
-            syn::FnArg::Typed(pat_type) =>
-                Some(pat_type.pat.to_token_stream())
+            syn::FnArg::Receiver(_) => None,
+            syn::FnArg::Typed(pat_type) => Some(pat_type.pat.to_token_stream()),
         }
     }
 
-    pub fn exports_from_contract_signature(contract: &sig::ContractImpl)
-        -> Result<TokenStream2>
-    {
+    pub fn exports_from_contract_signature(
+        contract: &sig::ContractImpl,
+    ) -> Result<TokenStream2> {
         let self_ty = &contract.self_ty;
         let generics = &contract.generics;
 
         let mut exports = TokenStream2::new();
         for method in &contract.methods {
-            exports.extend(
-                export_from_method_signature(method)?);
+            exports.extend(export_from_method_signature(method)?);
         }
 
         Ok(quote_spanned! {contract.span=>
@@ -330,9 +332,9 @@ mod gen {
         })
     }
 
-    fn export_from_method_signature(method: &sig::Method)
-        -> Result<TokenStream2>
-    {
+    fn export_from_method_signature(
+        method: &sig::Method,
+    ) -> Result<TokenStream2> {
         let ident = &method.ident;
         let export_name = get_method_name(&ident.to_string());
         let received_args = received_args(method);
@@ -364,8 +366,8 @@ mod gen {
     }
 
     fn provided_args(method: &sig::Method) -> TokenStream2 {
-        let provided_args: Vec<TokenStream2> = method.args
-            .iter().map(provided_arg).collect();
+        let provided_args: Vec<TokenStream2> =
+            method.args.iter().map(provided_arg).collect();
         quote! { #(#provided_args),* }
     }
 
@@ -375,21 +377,25 @@ mod gen {
         match ty {
             // If the interface expects a reference ...
             syn::Type::Reference(_) =>
-                // ... pass a reference to the deserialized calldata
-                quote! { &#ident },
+            // ... pass a reference to the deserialized calldata
+            {
+                quote! { &#ident }
+            }
             _ =>
-                // Else, pass the owned value
+            // Else, pass the owned value
+            {
                 quote! { #ident }
+            }
         }
     }
 
     fn received_args(method: &sig::Method) -> TokenStream2 {
         if method.args.is_empty() {
-            return quote! { () }
+            return quote! { () };
         }
 
-        let received_args: Vec<TokenStream2> = method.args
-            .iter().map(received_arg).collect();
+        let received_args: Vec<TokenStream2> =
+            method.args.iter().map(received_arg).collect();
         quote! { ( #(#received_args),* ) }
     }
 
@@ -400,16 +406,15 @@ mod gen {
             syn::Type::Reference(ref_ty) => {
                 // Strip the reference from the argument type
                 &*ref_ty.elem
-            },
-            _ => ty
+            }
+            _ => ty,
         };
         quote! { #ident }
     }
 }
 
 #[proc_macro]
-pub fn static_key(item: TokenStream) -> TokenStream
-{
+pub fn static_key(item: TokenStream) -> TokenStream {
     fn make_static_key(arg: &str) -> [u8; 32] {
         use sha2::Digest;
         use sha2::Sha256;

@@ -1,14 +1,11 @@
-use crate::types::StorageKey;
-use crate::crypto::{SHA256, SHA256Hash};
-use crate::result::{Result, with_context};
+use crate::crypto::{SHA256Hash, SHA256};
+use crate::result::{with_context, Result};
 use crate::serialize;
+use crate::types::StorageKey;
 use crate::{
-    BytestringGet,
-    BytestringSet,
-    NonnegativeIntGet,
-    NonnegativeIntSetAdd,
+    BytestringGet, BytestringSet, NonnegativeIntGet, NonnegativeIntSetAdd,
 };
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 // ------------------ Hash ------------------
 
@@ -25,7 +22,8 @@ impl Hash for [u8] {
 }
 
 impl<T> Hash for T
-    where T: Serialize
+where
+    T: Serialize,
 {
     fn hash(&self) -> Result<Hash256> {
         let buf = serialize::to_bytes(&self)?;
@@ -62,11 +60,10 @@ pub trait FromKey {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct NNInt {
-    key: StorageKey
+    key: StorageKey,
 }
 
-impl NNInt
-{
+impl NNInt {
     pub fn get_both(&self) -> Result<(i128, i128)> {
         Ok(NonnegativeIntGet(&self.key)?)
     }
@@ -82,7 +79,7 @@ impl NNInt
         Ok(NonnegativeIntSetAdd(&self.key, set, new)?)
     }
 
-    pub fn set_add(&mut self, set_value: i128, add_value: i128) -> Result <()> {
+    pub fn set_add(&mut self, set_value: i128, add_value: i128) -> Result<()> {
         Ok(NonnegativeIntSetAdd(&self.key, set_value, add_value)?)
     }
 }
@@ -104,7 +101,7 @@ impl FromKey for NNInt {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Map<K, V> {
     container_key: StorageKey,
-    phantom: core::marker::PhantomData<(K, V)>
+    phantom: core::marker::PhantomData<(K, V)>,
 }
 
 impl<K, V> AsKey for Map<K, V> {
@@ -117,24 +114,29 @@ impl<K, V> FromKey for Map<K, V> {
     fn from_key(key: StorageKey) -> Self {
         Self {
             container_key: key,
-            phantom: core::marker::PhantomData
+            phantom: core::marker::PhantomData,
         }
     }
 }
 
-impl<K, V> Map<K, V>
-{
+impl<K, V> Map<K, V> {
     pub fn get(&self, entry_key: &K) -> Result<V>
-        where K: Serialize, V: DeserializeOwned
+    where
+        K: Serialize,
+        V: DeserializeOwned,
     {
-        let value_key: StorageKey = try_item_key(&self.container_key, entry_key)?;
+        let value_key: StorageKey =
+            try_item_key(&self.container_key, entry_key)?;
         load(&value_key)
     }
 
     pub fn insert(&self, entry_key: &K, value: &V) -> Result<()>
-        where K: Serialize, V: Serialize
+    where
+        K: Serialize,
+        V: Serialize,
     {
-        let value_key: StorageKey = try_item_key(&self.container_key, entry_key)?;
+        let value_key: StorageKey =
+            try_item_key(&self.container_key, entry_key)?;
         store(&value_key, value)
     }
 }
@@ -142,20 +144,21 @@ impl<K, V> Map<K, V>
 // ------------------- item_key ---------------------
 
 /// Combine a key and some other data to form a subkey
-pub fn try_item_key<I: Serialize>(container_key: &StorageKey, item_info: &I)
-    -> Result<StorageKey>
-{
+pub fn try_item_key<I: Serialize>(
+    container_key: &StorageKey,
+    item_info: &I,
+) -> Result<StorageKey> {
     let item_key_info = (container_key, item_info);
-    let item_key: StorageKey = item_key_info.hash()
-        .map_err(with_context("hash failed"))?;
+    let item_key: StorageKey =
+        item_key_info.hash().map_err(with_context("hash failed"))?;
     Ok(item_key)
 }
 
 /// Combine a key and some other data to form a subkey
 /// (panics if the SHA256 syscall fails)
-pub fn item_key<I: Serialize>(container_key: &StorageKey, item_info: &I)
-    -> StorageKey
-{
-    try_item_key(container_key, item_info)
-        .expect("Couldn't create item key")
+pub fn item_key<I: Serialize>(
+    container_key: &StorageKey,
+    item_info: &I,
+) -> StorageKey {
+    try_item_key(container_key, item_info).expect("Couldn't create item key")
 }

@@ -15,7 +15,10 @@
 	url = https://github.com/google/crc32c.git
 [submodule "hogd/rs_contract_sdk/external/bcs"]
 	path = hogd/rs_contract_sdk/external/bcs
-	url = https://github.com/groundhogchain/bcs.git
+	url = git@github.com:groundhogchain/bcs.git
 [submodule "hogd/rs_contract_sdk/external/serde_arrays"]
 	path = hogd/rs_contract_sdk/external/serde_arrays
-	url = https://github.com/groundhogchain/serde_arrays.git
+	url = git@github.com:groundhogchain/serde_arrays.git
+[submodule "external/wasm3"]
+	path = external/wasm3
+	url = https://github.com/groundhogchain/wasm3.git

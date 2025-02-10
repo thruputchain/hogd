@@ -8,11 +8,11 @@ extern crate std;
 #[cfg(all(feature = "alloc", not(feature = "std")))]
 extern crate alloc;
 
-use erc20_result::interface::{ERC20, Amount};
 use erc20_result::interface::client::ERC20Client;
-use sdk::types::ContractAddress;
+use erc20_result::interface::{Amount, ERC20};
 use sdk::macros::contract;
 use sdk::result::Result;
+use sdk::types::ContractAddress;
 
 pub trait CallerInterface {
     fn check_balance(&self, account: &ContractAddress) -> Result<Amount>;

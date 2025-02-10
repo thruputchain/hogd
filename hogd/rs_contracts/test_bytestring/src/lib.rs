@@ -1,10 +1,9 @@
 #![no_std]
 
-use sdk::types::StorageKey;
 use sdk::log::Log;
+use sdk::types::StorageKey;
 
 #[cfg_attr(target_family = "wasm", export_name = "0")]
-#[no_mangle]
 pub extern "C" fn write_bytestring() -> i32 {
     let calldata = sdk::GetCalldata().unwrap();
 
@@ -18,7 +17,6 @@ pub extern "C" fn write_bytestring() -> i32 {
 }
 
 #[cfg_attr(target_family = "wasm", export_name = "1")]
-#[no_mangle]
 pub extern "C" fn log_bytestring() -> i32 {
     let calldata = sdk::GetCalldata().unwrap();
 
@@ -36,7 +34,6 @@ pub extern "C" fn log_bytestring() -> i32 {
 }
 
 #[cfg_attr(target_family = "wasm", export_name = "2")]
-#[no_mangle]
 pub extern "C" fn expect_bytestring() -> i32 {
     let calldata = sdk::GetCalldata().unwrap();
 

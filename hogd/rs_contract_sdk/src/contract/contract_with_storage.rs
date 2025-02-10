@@ -5,11 +5,11 @@
 //! may allow manipulating sub-objects without re-storing
 //! the root object.)
 
-use crate::types::StorageKey;
 use crate::storage::{load, store};
+use crate::types::StorageKey;
 use core::cell::OnceCell;
 use core::fmt::Debug;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 
 // Maybe todo: A version of this type where the storage key is referenced or boxed,
 // to save copying it onto the stack.
@@ -21,7 +21,8 @@ pub struct ContractWithStorage<S> {
 }
 
 impl<S> ContractWithStorage<S>
-    where S: Debug + Serialize + DeserializeOwned
+where
+    S: Debug + Serialize + DeserializeOwned,
 {
     pub fn new(key: &StorageKey) -> Self {
         let storage = OnceCell::new();
@@ -39,7 +40,9 @@ impl<S> ContractWithStorage<S>
     pub fn storage(&self) -> &S {
         self.storage.get().unwrap_or_else(|| {
             let s = load(&self.key).expect("Failed to load contract data");
-            self.storage.set(s).expect("Storage may only be requested after `set_storage()` is called");
+            self.storage.set(s).expect(
+                "Storage may only be requested after `set_storage()` is called",
+            );
             self.storage.get().unwrap()
         })
     }

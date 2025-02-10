@@ -2,13 +2,13 @@
 
 extern crate alloc;
 
+use alloc::vec::Vec;
 use sdk::contract::Contract;
-use sdk::types::{StorageKey, SHA256Hash, MethodID};
 use sdk::deploy::DeployContract;
 use sdk::log::Log;
-use sdk::sys;
 use sdk::macros::contract;
-use alloc::vec::Vec;
+use sdk::sys;
+use sdk::types::{MethodID, SHA256Hash, StorageKey};
 
 struct GenesisDeployer;
 
@@ -19,8 +19,7 @@ impl Contract for GenesisDeployer {
 }
 
 #[contract(export)]
-impl GenesisDeployer
-{
+impl GenesisDeployer {
     pub fn deploy(self, nonce: &SHA256Hash, contract_hash: &SHA256Hash) {
         let _ = DeployContract(nonce, contract_hash).unwrap();
     }
@@ -30,8 +29,8 @@ impl GenesisDeployer
         nonce: &SHA256Hash,
         contract_hash: &SHA256Hash,
         method: MethodID,
-        calldata: Vec<u8>)
-    {
+        calldata: Vec<u8>,
+    ) {
         let deployed_addr = DeployContract(nonce, contract_hash).unwrap();
 
         sys::raw_Invoke(
@@ -40,7 +39,8 @@ impl GenesisDeployer
             u64::MAX,
             calldata.as_slice(),
             0,
-        ).unwrap();
+        )
+        .unwrap();
         Log(b"ABCDEFG").unwrap();
     }
 }

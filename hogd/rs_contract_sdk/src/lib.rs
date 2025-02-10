@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_array_assume_init)]
 
@@ -28,25 +28,18 @@ mod delete;
 mod nonnegative_int;
 mod retrocausal_queue;
 
-pub use initialize::*;
 pub use bytestring::*;
 pub use delete::*;
+pub use initialize::*;
 pub use nonnegative_int::*;
 pub use retrocausal_queue::*;
 
 pub mod initialize;
 pub mod invoke;
 pub use invoke::*;
-pub mod result;
 pub mod contract;
-pub mod deploy;
-pub mod storage;
 pub mod crypto;
+pub mod deploy;
 pub mod log;
-
-/*
-pub use types::*;
-pub use contract::*;
-pub use crypto::*;
-pub use log::*;
-*/
+pub mod result;
+pub mod storage;

@@ -3,12 +3,12 @@
 mod storage;
 use storage::CoinStorage;
 
-use super::interface::{ERC20, Amount};
-use sdk::result::{Result, ensure};
-use sdk::initialize::initialization_guard;
-use sdk::types::{ContractAddress, StorageKey};
+use super::interface::{Amount, ERC20};
 use sdk::contract::{Contract, ContractWithStorage};
+use sdk::initialize::initialization_guard;
 use sdk::macros::contract;
+use sdk::result::{ensure, Result};
+use sdk::types::{ContractAddress, StorageKey};
 use sdk::GetMsgSender;
 
 pub struct CoinContract(ContractWithStorage<CoinStorage>);
@@ -28,18 +28,18 @@ impl Contract for CoinContract {
     }
 }
 
-impl CoinContract
-{
+impl CoinContract {
     // A helper function
-    pub fn do_transfer(&self, from: &ContractAddress, to: &ContractAddress, amount: Amount)
-        -> Result<()>
-    {
+    pub fn do_transfer(
+        &self,
+        from: &ContractAddress,
+        to: &ContractAddress,
+        amount: Amount,
+    ) -> Result<()> {
         ensure(amount >= 0, "transfer amount is non-negative")?;
 
-        self.storage().balances.get(from)?
-            .add(-amount as i128)?;
-        self.storage().balances.get(to)?
-            .add(amount as i128)
+        self.storage().balances.get(from)?.add(-amount as i128)?;
+        self.storage().balances.get(to)?.add(amount as i128)
     }
 }
 
@@ -48,8 +48,7 @@ impl CoinContract
 
 #[cfg(feature = "result")]
 #[contract(export)]
-impl ERC20 for CoinContract
-{
+impl ERC20 for CoinContract {
     fn initialize(&mut self, owner: &ContractAddress) -> Result<()> {
         initialization_guard()?;
 
@@ -63,23 +62,30 @@ impl ERC20 for CoinContract
         self.do_transfer(&sender, &to, amount)
     }
 
-    fn transfer_from(&mut self,
-                     owner: &ContractAddress,
-                     to: &ContractAddress,
-                     amount: Amount) -> Result<()>
-    {
+    fn transfer_from(
+        &mut self,
+        owner: &ContractAddress,
+        to: &ContractAddress,
+        amount: Amount,
+    ) -> Result<()> {
         let sender = GetMsgSender()?;
         let storage = self.storage();
 
         // If amount is non-negative, do_transfer() will fail
-        storage.allowance_for(owner, &sender)?
+        storage
+            .allowance_for(owner, &sender)?
             .add(-amount as i128)?;
         self.do_transfer(owner, to, amount)
     }
 
-    fn adjust_allowance(&mut self, spender: &ContractAddress, amount: Amount) -> Result<()> {
+    fn adjust_allowance(
+        &mut self,
+        spender: &ContractAddress,
+        amount: Amount,
+    ) -> Result<()> {
         let sender = GetMsgSender()?;
-        self.storage().allowance_for(&sender, spender)?
+        self.storage()
+            .allowance_for(&sender, spender)?
             .add(amount as i128)
     }
 
@@ -108,7 +114,10 @@ impl ERC20 for CoinContract
         let storage = self.storage();
         storage.ensure_sender_is_owner()?;
 
-        ensure(!(amount > 0 || amount == i64::MIN), "burn amount is negative")?;
+        ensure(
+            !(amount > 0 || amount == i64::MIN),
+            "burn amount is negative",
+        )?;
 
         storage.balance_of(to)?.add(-amount as i128)
     }
@@ -118,8 +127,7 @@ impl ERC20 for CoinContract
 
 #[cfg(not(feature = "result"))]
 #[contract(export)]
-impl ERC20 for CoinContract
-{
+impl ERC20 for CoinContract {
     fn initialize(&mut self, owner: &ContractAddress) {
         initialization_guard().unwrap();
         let storage = CoinStorage::new(self.storage_key(), owner).unwrap();
@@ -131,34 +139,40 @@ impl ERC20 for CoinContract
         self.do_transfer(&sender, &to, amount).unwrap();
     }
 
-    fn transfer_from(&mut self,
-                     owner: &ContractAddress,
-                     to: &ContractAddress,
-                     amount: Amount) {
+    fn transfer_from(
+        &mut self,
+        owner: &ContractAddress,
+        to: &ContractAddress,
+        amount: Amount,
+    ) {
         let sender = GetMsgSender().unwrap();
         let storage = self.storage();
 
         // If amount is non-negative, do_transfer() will fail
-        storage.allowance_for(owner, &sender).unwrap()
-            .add(-amount as i128).unwrap();
+        storage
+            .allowance_for(owner, &sender)
+            .unwrap()
+            .add(-amount as i128)
+            .unwrap();
         self.do_transfer(owner, to, amount).unwrap();
     }
 
     fn adjust_allowance(&mut self, spender: &ContractAddress, amount: Amount) {
         let sender = GetMsgSender().unwrap();
-        self.storage().allowance_for(&sender, spender).unwrap()
-            .add(amount as i128).unwrap();
+        self.storage()
+            .allowance_for(&sender, spender)
+            .unwrap()
+            .add(amount as i128)
+            .unwrap();
     }
 
     fn get_balance_of(&self, addr: &ContractAddress) -> Amount {
-        self.storage().balance_of(addr).unwrap()
-            .get().unwrap() as Amount
+        self.storage().balance_of(addr).unwrap().get().unwrap() as Amount
     }
 
     fn get_balance(&self) -> Amount {
         let sender = GetMsgSender().unwrap();
-        self.storage().balance_of(&sender).unwrap()
-            .get().unwrap() as Amount
+        self.storage().balance_of(&sender).unwrap().get().unwrap() as Amount
     }
 
     fn mint(&mut self, to: &ContractAddress, amount: Amount) {
@@ -175,9 +189,16 @@ impl ERC20 for CoinContract
         let storage = self.storage();
         storage.ensure_sender_is_owner().unwrap();
 
-        ensure(!(amount > 0 || amount == i64::MIN), "burn amount is negative").unwrap();
+        ensure(
+            !(amount > 0 || amount == i64::MIN),
+            "burn amount is negative",
+        )
+        .unwrap();
 
-        storage.balance_of(to).unwrap()
-            .add(-amount as i128).unwrap();
+        storage
+            .balance_of(to)
+            .unwrap()
+            .add(-amount as i128)
+            .unwrap();
     }
 }

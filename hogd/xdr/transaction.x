@@ -2,7 +2,6 @@
 // clang-format off
 %#include "types.hh"
 %#include "contract.hh"
-%#include "storage_item.hh"
 
 namespace hogd
 {
