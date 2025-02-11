@@ -3,22 +3,23 @@ build:
 
 test:
 	cargo +nightly test \
+		--no-default-features \
 		--features "guest,std" \
-		--target-dir "../../build/rs_contracts" \
 
 test-client:
 	cargo +nightly test \
+		--no-default-features \
 		--features "client,std" \
-		--target-dir "../../build/rs_contracts" \
 
 expand:
 	cargo +nightly expand \
-		--features "client,std" \
-		--target-dir "../../build/rs_contracts" \
+		--no-default-features \
+		--features "client,std,alloc" \
 
 tree:
 	# Show the dependency graph
 	cargo +nightly tree \
+		--no-default-features \
 		--features "guest,alloc" \
 		--target wasm32-unknown-unknown \
 		-Zbuild-std=alloc,core \

@@ -1,3 +1,8 @@
+# CARGO_TARGET_DIR is set in CMakeLists.txt,
+# so to build these contracts, use:
+#
+#   cmake --build ${BUILD}/hogd/rs_contracts/
+
 rs_contracts : \
 	erc20.wasm \
 	caller.wasm \

@@ -5,7 +5,7 @@ use crate::sys;
 use crate::types::{RuntimeMemoryLength, StorageKey};
 use core::mem::MaybeUninit;
 
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 pub use bytestring_get_alloc::BytestringGet;
 
 pub fn BytestringGetLen(key: &StorageKey) -> Result<RuntimeMemoryLength> {
@@ -42,7 +42,7 @@ pub fn BytestringGet_Sized<const N: usize>(
     Ok(bytes)
 }
 
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 mod bytestring_get_alloc {
 
     extern crate alloc;

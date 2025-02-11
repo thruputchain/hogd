@@ -18,7 +18,7 @@ impl Contract for GenesisDeployer {
     }
 }
 
-#[contract(export)]
+#[contract]
 impl GenesisDeployer {
     pub fn deploy(self, nonce: &SHA256Hash, contract_hash: &SHA256Hash) {
         let _ = DeployContract(nonce, contract_hash).unwrap();

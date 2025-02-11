@@ -39,7 +39,11 @@ impl Contract for WalletContract {
 
 type AuthMessage = [u8; 80];
 
-#[contract(guest)]
+#[cfg(feature = "guest")]
+// Contract methods (below) exposed with C ABI for running as guest
+pub use exports::*;
+
+#[contract]
 impl WalletContract {
     fn token(&self) -> ERC20Client {
         ERC20Client::new(&self.storage().token_addr)
