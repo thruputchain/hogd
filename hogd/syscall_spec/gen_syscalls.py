@@ -759,6 +759,8 @@ def gen_rs_syscall_binding(syscall):
         
         custom_arg_local_decl = f"""let ({", ".join(custom_arg_u64s_local)}) = {input_name}.to_u64s();""";
         custom_arg_u64s.append(custom_arg_local_decl)
+        input_mock_args.append(f"""        {input_name} : {input_name}.clone(),""")
+
 
       elif "typename" in inp:
         #Fixed size arguments
@@ -925,12 +927,16 @@ def gen_rs_syscall_binding(syscall):
     Ok(())
 """
 
+  mock_errdecl_str = "let err : SysErr = SysErr("
+  mock_errdecl_str_close = ")"
   if "returns" in syscall and not syscall["returns"]:
     syscall_return_type = "!"
     errhandle_str = "unsafe {unreachable_unchecked()}"
     errdecl = ""
     mock_output_decl = "    let mut out_buffer : [u8; 0] = [0; 0];"
-    mock_err_return_str = "unsafe {unreachable_unchecked()}"
+    mock_err_return_str = "    unsafe {unreachable_unchecked()}"
+    mock_errdecl_str = ""
+    mock_errdecl_str_close = ""
 
   return f"""#[cfg(not(feature="mock"))]
 pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
@@ -956,11 +962,11 @@ pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
         .map_err(|_| panic_any(unrecoverable_error()))
         .unwrap();
 
-    let err : SysErr = SysErr(::test_ffi::perform_mocked_syscall(
+    {mock_errdecl_str}::test_ffi::perform_mocked_syscall(
         SyscallNo::k{name},
         &input_slice,
         &mut out_buffer,
-    ));
+    ){mock_errdecl_str_close};
 {mock_err_return_str}
 }}
 

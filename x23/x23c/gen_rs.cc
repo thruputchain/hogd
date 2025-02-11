@@ -178,7 +178,7 @@ GenRs::show_type(const StructBody &s, string t)
 
   {
     prtop("#[repr(C)]\n");
-    prtop("#[derive(PartialEq, Debug, Default)]\n");
+    prtop("#[derive(PartialEq, Debug, Default, Clone)]\n");
     prtop("pub struct {} ", t);
     auto _close = open_brace();
     scopes_.push_back(t);
@@ -350,7 +350,7 @@ GenRs::show_type(const UnionBody &b, string t)
 
   {
     prtop("#[repr(i32)]\n");
-    prtop("#[derive(PartialEq, Debug)]\n");
+    prtop("#[derive(PartialEq, Debug, Clone)]\n");
     prtop("pub enum {} ", t);
     auto _close = open_brace();
     scopes_.push_back(t);
