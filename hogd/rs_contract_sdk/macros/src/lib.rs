@@ -230,8 +230,8 @@ mod gen {
         let client_ident = format_ident!("{}Client", trait_ident);
 
         let mut calls = TokenStream2::new();
-        for (i, method) in contract.methods.iter().enumerate() {
-            calls.extend(call_from_method_signature(i, method)?);
+        for method in contract.methods.iter() {
+            calls.extend(call_from_method_signature(get_method_num(&method.ident.to_string()), method)?);
         }
 
         Ok(quote_spanned! {contract.span=>
@@ -265,7 +265,7 @@ mod gen {
 
     // Generate a client method that makes a cross-contract invocation
     fn call_from_method_signature(
-        method_index: usize,
+        method_index: u32,
         method: &syn::Signature,
     ) -> Result<TokenStream2> {
         let ident = &method.ident;
@@ -351,7 +351,7 @@ mod gen {
         })
     }
 
-    fn get_method_name(arg: &str) -> String {
+    fn get_method_num(arg: &str) -> u32 {
         use sha2::Digest;
 
         let mut hasher = sha2::Sha256::new();
@@ -360,7 +360,11 @@ mod gen {
 
         let prefix = &result[0..4];
 
-        let num: u32 = u32::from_be_bytes(prefix.try_into().unwrap());
+        return u32::from_be_bytes(prefix.try_into().unwrap());
+    }
+
+    fn get_method_name(arg: &str) -> String {
+        let num = get_method_num(arg);
 
         format!("{:X}", num)
     }
