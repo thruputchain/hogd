@@ -20,12 +20,12 @@
 #include <x23/threadpool.h>
 #include <x23/vec.h>
 
-#if HAVE_EPOLL
+#if USE_EPOLL
 #include <sys/epoll.h>
-#else // !HAVE_EPOLL
+#else // !USE_EPOLL
 #include <poll.h>
 #include <unordered_map>
-#endif // !HAVE_EPOLL
+#endif // !USE_EPOLL
 
 namespace x23 {
 
@@ -131,7 +131,7 @@ private:
   void clear(BorrowedFd fd, bool write);
   void setcb(BorrowedFd fd, bool write, WorkItem h);
 
-#if HAVE_EPOLL
+#if USE_EPOLL
   static inline constexpr std::uint32_t epflags[2] = {EPOLLIN | EPOLLHUP |
                                                           EPOLLERR,
                                                       EPOLLOUT | EPOLLERR};
@@ -190,7 +190,7 @@ private:
     docb(fdp, true);
   }
 
-#else  // !HAVE_EPOLL
+#else  // !USE_EPOLL
   static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
                                                 POLLOUT | POLLERR};
   struct FdState : BufHolder {
@@ -209,7 +209,7 @@ private:
   UniqueFd selfpipe_[2];
 
   std::vector<std::coroutine_handle<>> report_badfd(FdState &fds);
-#endif // !HAVE_EPOLL
+#endif // !USE_EPOLL
 };
 
 } // namespace detail

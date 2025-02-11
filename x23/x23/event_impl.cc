@@ -4,7 +4,7 @@
 
 namespace x23::detail {
 
-#if HAVE_EPOLL
+#if USE_EPOLL
 
 CoroPollImpl::CoroPollImpl(ThreadPool &pool)
   : pool_(pool), epollfd_(epoll_create1(EPOLL_CLOEXEC))
@@ -219,7 +219,7 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
       pool_.go(h);
 }
 
-#else // !HAVE_EPOLL
+#else // !USE_EPOLL
 
 CoroPollImpl::CoroPollImpl(ThreadPool &pool_) : pool_(pool_)
 {
@@ -401,6 +401,6 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
     pool_.go(h);
 }
 
-#endif // !HAVE_EPOLL
+#endif // !USE_EPOLL
 
 } // namespace x23::detail

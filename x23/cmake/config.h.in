@@ -12,7 +12,7 @@
 #cmakedefine01 HAVE_BUILTIN_ARM_YIELD
 
 // Set to 1 if your operating system supports epoll
-#cmakedefine01 HAVE_EPOLL
+#cmakedefine01 USE_EPOLL
 
 // Set to 1 if your operating system supports the accept4 syscall
 #cmakedefine01 HAVE_ACCEPT4
