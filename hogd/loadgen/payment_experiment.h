@@ -37,7 +37,7 @@ private:
         std::shared_ptr<const Contract> const &wallet_contract,
         ContractAddress const &erc20_address) const;
 
-    ProposedTransaction make_check_balance_transaction(int128_t amount) const;
+    ProposedTransaction make_check_balance_transaction(int64_t amount) const;
   };
 
   void generate_accounts();
@@ -48,12 +48,11 @@ private:
   std::vector<ProposedTransaction> make_mint_transactions();
   std::vector<ProposedTransaction> make_check_balance_transactions();
 
-  ProposedTransaction make_mint_transaction(int128_t amount,
+  ProposedTransaction make_mint_transaction(int64_t amount,
                                             Account const &to) const;
 
-  static ProposedTransaction make_pairwise_payment(Account const &from,
-                                                   Account const &to,
-                                                   int128_t amount);
+  static ProposedTransaction
+  make_pairwise_payment(Account const &from, Account const &to, int64_t amount);
 
   std::minstd_rand gen_;
 

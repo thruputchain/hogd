@@ -146,7 +146,7 @@ PaymentExperiment::produce_initialization_transactions()
 }
 
 ProposedTransaction
-PaymentExperiment::make_mint_transaction(int128_t amount,
+PaymentExperiment::make_mint_transaction(int64_t amount,
                                          Account const &to) const
 {
   return ProposedTransaction{
@@ -161,8 +161,7 @@ PaymentExperiment::make_mint_transaction(int128_t amount,
 }
 
 ProposedTransaction
-PaymentExperiment::Account::make_check_balance_transaction(
-    int128_t amount) const
+PaymentExperiment::Account::make_check_balance_transaction(int64_t amount) const
 {
   return ProposedTransaction{
       .signed_tx = SignedTransaction{
@@ -176,7 +175,7 @@ PaymentExperiment::Account::make_check_balance_transaction(
 
 ProposedTransaction
 PaymentExperiment::make_pairwise_payment(Account const &from, Account const &to,
-                                         int128_t amount)
+                                         int64_t amount)
 {
 
   auto message =
