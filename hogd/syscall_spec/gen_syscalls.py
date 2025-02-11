@@ -724,6 +724,8 @@ def gen_rs_syscall_binding(syscall):
   inputdecls = []
   syscallargs = []
   uninit_args = []
+  input_mock_args = []
+  custom_arg_u64s = []
   if syscall["inputs"] is not None:
     for inp in syscall["inputs"]:
 
@@ -740,13 +742,24 @@ def gen_rs_syscall_binding(syscall):
         syscallargs.append(f"""{input_name} as u64""")
         inputdecls.append(f"""{input_name} : {input_type}""")
         uninit_args.append(f"""{input_name}""")
+        input_mock_args.append(f"""        {input_name} : {input_name}.try_into().map_err(|_| panic_any(unrecoverable_error())).unwrap(),""")
       elif "custom_parsing" in inp and inp["custom_parsing"]:
+        input_type = inp["typename"]
+        if "rust_typename" in inp:
+          input_type = inp["rust_typename"]
+        
+        inputdecls.append(f"""{input_name}: &{input_type}""")
+        uninit_args.append(f"{input_name}")
         # custom parsing, for now I just implement as a direct passthrough
         # and assume the sdk wrapper will handle.  Input types are just u64s
+        custom_arg_u64s_local = []
         for i in range(0, inp["custom_args_required"]):
           syscallargs.append(f"""{input_name}_{i}""")
-          inputdecls.append(f"""{input_name}_{i} : u64""")
-          uninit_args.append(f"""{input_name}_{i}""")
+          custom_arg_u64s_local.append(f"""{input_name}_{i}""")
+        
+        custom_arg_local_decl = f"""let ({", ".join(custom_arg_u64s_local)}) = {input_name}.to_u64s();""";
+        custom_arg_u64s.append(custom_arg_local_decl)
+
       elif "typename" in inp:
         #Fixed size arguments
         input_type = inp["typename"]
@@ -759,6 +772,7 @@ def gen_rs_syscall_binding(syscall):
             syscallargs.append(f"""match {input_name} {{ Some(x) => {{x.as_ptr() as u64 }}, None => u64::MAX }}""")
           inputdecls.append(f"""{input_name} : Option<&{input_type}>""")
           uninit_args.append(f"""{input_name}""")
+          input_mock_args.append(f"""        {input_name} : {input_name}.copied(),""")
         else:
           if "rust_input_requires_transmute" in inp and inp["rust_input_requires_transmute"]:
             syscallargs.append(f"""to_offset({input_name}) as u64""")
@@ -766,7 +780,11 @@ def gen_rs_syscall_binding(syscall):
             syscallargs.append(f"""{input_name}.as_ptr() as u64""")
           inputdecls.append(f"""{input_name} : &{input_type}""")
           uninit_args.append(f"""{input_name}""")
-      
+          if "requires_to_xdr" in inp and inp["requires_to_xdr"]:
+            xdr_typename = inp["xdr_typename"]
+            input_mock_args.append(f"""        {input_name} : {input_type}::to_xdr_struct({input_name}),""")
+          else:
+            input_mock_args.append(f"""        {input_name} : *{input_name},""")
       else: # span argument
         if "span_argument" not in inp or not inp["span_argument"]:
           raise Exception("unknown argument type")
@@ -781,12 +799,16 @@ def gen_rs_syscall_binding(syscall):
           syscallargs.append(f"""{input_name}.len() as u64""")
           inputdecls.append(f"""{input_name} : &{input_type}""")
           uninit_args.append(f"""{input_name}""")
+        input_mock_args.append(f"""        {input_name} : {input_name}.try_into().map_err(|_| panic_any(unrecoverable_error())).unwrap(),""")
 
   outputargs = []
   outputdecls = []
   outputinits = []
 
   uninit_inputdecls = list(inputdecls)
+
+  output_mock_init_args = []
+  output_assigns = []
 
   if syscall["outputs"] is not None:
     for outp in syscall["outputs"]:
@@ -806,14 +828,28 @@ def gen_rs_syscall_binding(syscall):
         syscallargs.append(f"""to_offset_mut({output_name}) as u64""")
         uninit_outputtype = output_type
         uninit_args.append(f"""{output_name}""")
+        output_mock_init_args.append(f"        {output_name} : 0,")
+        output_assigns.append(f"    *{output_name} = output.{output_name};")
       elif "typename" in outp:
         # Fixed-size arguments
         output_type = outp["typename"]
+        decl_type = output_type
         if "rust_typename" in outp:
           output_type = outp["rust_typename"]
+          decl_type = output_type
+          if "xdr_typename" in outp:
+            decl_type = outp["xdr_typename"]
+        if "requires_to_xdr" in outp and outp["requires_to_xdr"]:
+          output_assigns.append(f"    {output_name}.write({output_type}::from_xdr_struct(&output.{output_name}));")
+        else:
+          # output_assigns.append(f"    {output_name}.write(output.{output_name});")
+          output_assigns.append(f"""    unsafe {{
+        std::ptr::copy_nonoverlapping(output.{output_name}.as_ptr(), {output_name}.as_mut_ptr() as *mut u8, 32);
+    }}""")
         uninit_outputtype = f"""MaybeUninit<{output_type}>"""
         syscallargs.append(f"""{output_name}.as_mut_ptr() as u64""")
         uninit_args.append(f"""unsafe {{core::mem::transmute({output_name})}}""")
+        output_mock_init_args.append(f"        {output_name} : {decl_type}::default(),")
       else:
         #span argument
         if "span_argument" not in outp or not outp["span_argument"]:
@@ -821,6 +857,11 @@ def gen_rs_syscall_binding(syscall):
         syscallargs.append(f"""{output_name}.as_mut_ptr() as u64""")
         syscallargs.append(f"""{output_name}.len() as u64""")
         uninit_args.append(f"""unsafe {{core::mem::transmute({output_name})}}""")
+        output_mock_init_args.append(f"        {output_name} : ::rs_xdr::VecM::<u8>::default(),")
+        #output_assigns.append(f"    {output_name}.write(output.{output_name});")
+        output_assigns.append(f"""    unsafe {{
+        std::ptr::copy_nonoverlapping(output.{output_name}.as_ptr(), {output_name}.as_mut_ptr() as *mut u8, 32);
+    }}""")
 
       inputdecls.append(f"""{output_name} : &mut {output_type}""")
       uninit_inputdecls.append(f"""{output_name} : &mut {uninit_outputtype}""")
@@ -838,26 +879,89 @@ def gen_rs_syscall_binding(syscall):
   
   syscall_return_type = "Result<()>"
 
+  input_mock_args_str = "\n".join(input_mock_args)
+  output_mock_init_str = "\n".join(output_mock_init_args)
+
+  output_assign_str = "\n".join(output_assigns)
+
+  out_deserialize = f"""
+    output =
+        ::rs_xdr::{name}_output::from_xdr(&out_buffer, ::rs_xdr::Limits::none())
+            .map_err(|_| panic_any(unrecoverable_error()))
+            .unwrap();"""
+
+  output_mut = "mut "
+  if len(output_assigns) == 0:
+    # silence rust warnings if syscall has no outputs
+    out_deserialize = ""
+    output_mut = ""
+  
   errdecl = "let err: SysErr = "
   errhandle_str = """if !err.is_none() {
         return Err(err);
     }
 
     Ok(())"""
+  
+  mock_output_decl = f"""    // allocate space for syscall to write results
+    let {output_mut}output = ::rs_xdr::{name}_output {{ 
+{output_mock_init_str}
+    }};
+    let mut out_buffer = output
+        .to_xdr(::rs_xdr::Limits::none())
+        .map_err(|_| panic_any(unrecoverable_error()))
+        .unwrap();
+"""
+
+  mock_err_return_str =f"""
+    if !err.is_none() {{
+        return Err(err);
+    }}
+
+{out_deserialize}
+
+{output_assign_str}
+
+    Ok(())
+"""
 
   if "returns" in syscall and not syscall["returns"]:
     syscall_return_type = "!"
     errhandle_str = "unsafe {unreachable_unchecked()}"
     errdecl = ""
+    mock_output_decl = "    let mut out_buffer : [u8; 0] = [0; 0];"
+    mock_err_return_str = "unsafe {unreachable_unchecked()}"
 
-  return f"""pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
-
+  return f"""#[cfg(not(feature="mock"))]
+pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
+    {"\n    ".join(custom_arg_u64s)}
     // syscall will initialize outputs, if error is kNone
     {errdecl}
         syscall_wrapper(SyscallNo::k{name},
             {syscallargs_str});
 
     {errhandle_str}
+}}
+
+#[cfg(feature="mock")]
+pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
+    let input = ::rs_xdr::{name}_input {{
+{input_mock_args_str}
+    }};
+
+{mock_output_decl}
+
+    let input_slice = input
+        .to_xdr(::rs_xdr::Limits::none())
+        .map_err(|_| panic_any(unrecoverable_error()))
+        .unwrap();
+
+    let err : SysErr = SysErr(::test_ffi::perform_mocked_syscall(
+        SyscallNo::k{name},
+        &input_slice,
+        &mut out_buffer,
+    ));
+{mock_err_return_str}
 }}
 
 pub fn raw_{name}({inputdecl_str}) -> {syscall_return_type} {{
@@ -878,9 +982,21 @@ def gen_rs_syscall_bindings(spec):
 
 #![allow(non_snake_case)]
 use crate::types::*;
-use crate::syscall::{{SyscallNo, SysErr, syscall_wrapper, to_offset, to_offset_mut}};
+use crate::syscall::{{SyscallNo, SysErr}};
+#[cfg(not(feature="mock"))]
+use crate::syscall::{{syscall_wrapper, to_offset, to_offset_mut}};
+#[cfg(not(feature="mock"))]
+use crate::custom_arg::*;
+
 use core::mem::MaybeUninit;
 use core::hint::unreachable_unchecked;
+
+#[cfg(feature="mock")]
+use ::rs_xdr::{{ReadXdr, WriteXdr, ToXdr, FromXdr}};
+#[cfg(feature="mock")]
+use test_ffi::invoke_error::unrecoverable_error;
+#[cfg(feature="mock")]
+use std::panic::panic_any;
 
 type Result<T> = core::result::Result<T, SysErr>;
 

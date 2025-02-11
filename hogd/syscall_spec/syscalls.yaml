@@ -21,6 +21,7 @@ syscalls:
     outputs:
       - name: "len"
         typename: "RuntimeMemoryLength"
+        primitive_type: yes
     number: 2
   - name: "GetCalldata"
     needs_context: yes

@@ -40,7 +40,7 @@ pub fn perform_mocked_syscall(
     input: &[u8],
     output: &mut [u8],
 ) -> i32 {
-    let result = unsafe {
+    let result: ForeignHostFnResult = unsafe {
         mock_syscall_entrypoint(
             syscall as i32,
             input.as_ptr(),

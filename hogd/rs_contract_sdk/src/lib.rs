@@ -16,9 +16,12 @@ pub extern crate macros;
 pub use ::bcs as serialize;
 
 mod rt;
-mod syscall;
 
 #[rustfmt::skip]
+mod syscall;
+
+mod custom_arg;
+
 pub use syscall::bindings as sys;
 
 pub mod types;

@@ -2,7 +2,7 @@
 
 use crate::result::SysResult as Result;
 use crate::sys;
-use crate::types::{RuntimeMemoryLength, StorageDeltaModifier, StorageKey};
+use crate::types::{RuntimeMemoryLength, StorageKey};
 use core::mem::MaybeUninit;
 
 #[cfg(feature = "alloc")]

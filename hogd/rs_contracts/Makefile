@@ -10,21 +10,19 @@ rs_contracts : \
 	cargo +nightly rustc \
 		--features "guest,alloc" \
 		--target wasm32-unknown-unknown \
-		--target-dir "../../build/hogd/rs_contracts/built_wasms" \
+		--target-dir $(CARGO_TARGET_DIR) \
 		--release \
 		-p $(basename $@) \
 		-Zbuild-std=alloc,core \
 		-Zbuild-std-features=panic_immediate_abort \
 		-- \
-		-C target-feature=+mutable-globals \
-		-C link-args=-zstack-size=64000 \
-		-C link_args=-export=__stack_pointer
+		-C link-args=-zstack-size=64000
 
 test:
 	# Run all contract tests
 	cargo +nightly test \
 		--features "guest,std" \
-		--target-dir "../../build/hogd/rs_contracts/built_wasms" \
+		--target-dir $(CARGO_TARGET_DIR)
 
 clean:
 	cargo clean

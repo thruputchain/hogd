@@ -1,18 +1,18 @@
 use groundhog_xdr::syscall::{SyscallErrorCode, SyscallNo};
 use groundhog_xdr::types::SHA256Hash;
 
-#[cfg(feature="mock")]
+#[cfg(feature = "mock")]
 use groundhog_xdr::{ReadXdr, WriteXdr};
-#[cfg(feature="mock")]
+#[cfg(feature = "mock")]
 use groundhog_xdr::{SHA256_input, SHA256_output};
-#[cfg(feature="mock")]
-use test_ffi::invoke_error::unrecoverable_error;
-#[cfg(feature="mock")]
+#[cfg(feature = "mock")]
 use std::panic::panic_any;
+#[cfg(feature = "mock")]
+use test_ffi::invoke_error::unrecoverable_error;
 
 use core::mem::MaybeUninit;
 
-#[cfg(not(feature="mock"))]
+#[cfg(not(feature = "mock"))]
 pub fn uninit_SHA256(
     buffer: &[u8],
     hash: &mut MaybeUninit<SHA256Hash>,
@@ -29,19 +29,18 @@ pub fn uninit_SHA256(
         0,
     ); */
 
-   /*if !err.is_none() {
+    /*if !err.is_none() {
         return Err(err);
     }*/
 
     Ok(())
 }
 
-#[cfg(feature="mock")]
+#[cfg(feature = "mock")]
 pub fn uninit_SHA256(
     buffer: &[u8],
-    hash: &mut MaybeUninit<SHA256Hash>
+    hash: &mut MaybeUninit<SHA256Hash>,
 ) -> Result<(), i32> {
-
     let input = SHA256_input {
         buffer: buffer
             .try_into()

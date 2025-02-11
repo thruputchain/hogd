@@ -34,3 +34,38 @@ use types::*;
 
 #[cfg(test)]
 mod test;
+
+impl Default for Signature {
+    fn default() -> Self {
+        Self::Ed25519 { ed25519: [0; 64] }
+    }
+}
+
+impl Default for PublicKey {
+    fn default() -> Self {
+        Self::Ed25519 { ed25519: [0; 32] }
+    }
+}
+
+pub trait ToXdr<T> {
+    fn to_xdr_struct(&self) -> T;
+}
+
+pub trait FromXdr<T> {
+    fn from_xdr_struct(arg: &T) -> Self;
+}
+
+impl ToXdr<int128_xdr> for i128 {
+    fn to_xdr_struct(&self) -> int128_xdr {
+        return int128_xdr {
+            highbits: (self >> 64) as i64,
+            lowbits: (self & (u64::MAX as i128)) as u64,
+        };
+    }
+}
+
+impl FromXdr<int128_xdr> for i128 {
+    fn from_xdr_struct(arg: &int128_xdr) -> Self {
+        return ((arg.highbits as i128) << 64) + (arg.lowbits as i128);
+    }
+}
