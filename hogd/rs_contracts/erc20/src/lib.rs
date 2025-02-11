@@ -17,10 +17,10 @@ compile_error!("Cannot enable both features \"client\" and \"guest\"");
 pub mod interface;
 
 // A client stub that provides the interface via cross-contract calls
-#[cfg(all(feature = "client", feature = "result"))]
-pub use interface::client_result;
 #[cfg(all(feature = "client", not(feature = "result")))]
 pub use interface::client;
+#[cfg(all(feature = "client", feature = "result"))]
+pub use interface::client_result;
 
 #[cfg(feature = "guest")]
 // An implementation of the contract interface

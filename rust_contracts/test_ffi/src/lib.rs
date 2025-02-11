@@ -15,6 +15,6 @@ mod tests {
 
     #[test]
     fn test_my_function() {
-        let _ = types::Environment::new();
+        let _ = types::TestEnvironment::new();
     }
 }

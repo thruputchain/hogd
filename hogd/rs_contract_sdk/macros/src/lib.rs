@@ -6,31 +6,34 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
+use darling::ast::NestedMeta;
+use darling::FromMeta;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::parse::{Error, Result};
 use syn::spanned::Spanned;
 use syn::Item;
-use darling::ast::{NestedMeta};
-use darling::{FromMeta};
 
 /// Generate contract-related code
 #[proc_macro_attribute]
-pub fn contract(attr_args: TokenStream, item_tokens: TokenStream) -> TokenStream {
+pub fn contract(
+    attr_args: TokenStream,
+    item_tokens: TokenStream,
+) -> TokenStream {
     // Parse the attributes
-    let config =
-        match NestedMeta::parse_meta_list(attr_args.into()) {
-            Ok(meta_list) =>
-                match sig::Config::from_list(&meta_list) {
-                    Ok(config) => config,
-                    Err(e) => return TokenStream::from(
-                        darling::Error::from(e).write_errors())
-                },
+    let config = match NestedMeta::parse_meta_list(attr_args.into()) {
+        Ok(meta_list) => match sig::Config::from_list(&meta_list) {
+            Ok(config) => config,
             Err(e) => {
                 return TokenStream::from(
-                    darling::Error::from(e).write_errors());
+                    darling::Error::from(e).write_errors(),
+                )
             }
-        };
+        },
+        Err(e) => {
+            return TokenStream::from(darling::Error::from(e).write_errors());
+        }
+    };
 
     // Parse the item tokens into syntax defined in `syn`
     let item = {
@@ -58,7 +61,10 @@ pub fn contract(attr_args: TokenStream, item_tokens: TokenStream) -> TokenStream
     output
 }
 
-fn item_to_contract_helpers(item: &syn::Item, config: &sig::Config) -> Result<TokenStream2> {
+fn item_to_contract_helpers(
+    item: &syn::Item,
+    config: &sig::Config,
+) -> Result<TokenStream2> {
     match item {
         syn::Item::Trait(item) => {
             let sig = parse::contract_signature_from_trait(item)?;
@@ -100,10 +106,10 @@ mod sig {
         pub fn mod_ident_or(&self, default_name: &str) -> syn::Ident {
             let span = proc_macro2::Span::call_site();
             match &self.mod_name {
-                Some(name_string) =>
-                    syn::Ident::new(name_string.as_ref(), span),
-                None =>
-                    syn::Ident::new(default_name, span)
+                Some(name_string) => {
+                    syn::Ident::new(name_string.as_ref(), span)
+                }
+                None => syn::Ident::new(default_name, span),
             }
         }
     }

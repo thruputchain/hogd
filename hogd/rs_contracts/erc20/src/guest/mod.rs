@@ -3,7 +3,7 @@
 mod storage;
 use storage::CoinStorage;
 
-use super::interface::{Amount, ERC20, ERC20Result};
+use super::interface::{Amount, ERC20Result, ERC20};
 use sdk::contract::{Contract, ContractWithStorage};
 use sdk::initialize::initialization_guard;
 use sdk::macros::contract;

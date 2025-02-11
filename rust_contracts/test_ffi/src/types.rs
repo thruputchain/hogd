@@ -35,6 +35,7 @@ pub struct MockContract {
     index: u32, // this is passed as the raw bytes in the contract, and thus identified as sha256(index).
     hash: SHA256Hash,
     funcs: HashMap<u32, Box<dyn Fn() -> InvokeResult>>,
+    // TODO(geoff): It's not clear to me whether this is actually necessary
     _pin: PhantomPinned,
 }
 
@@ -85,26 +86,60 @@ pub fn invoke_wrapper(wrapped: fn() -> i32) -> Box<dyn Fn() -> InvokeResult> {
     })
 }
 
-pub struct Environment {
+pub struct TestEnvironment {
     db: *mut c_void,
+    contract_context: *mut c_void,
+    mock_contract_index: u32,
+    contracts: Vec<Pin<Box<MockContract>>>,
 }
 
-impl Environment {
+impl TestEnvironment {
     pub fn new() -> Self {
         set_override_panic_hook();
         Self {
             db: unsafe { create_db() },
+            contract_context: unsafe { open_runtime_context() },
+            mock_contract_index: 0,
+            contracts: vec![],
         }
     }
 
     pub fn advance_block(&mut self) {
         unsafe { advance_new_block(self.db) }
     }
+
+    pub fn add_contract(&mut self) -> (u32, Pin<&mut MockContract>) {
+        self.contracts
+            .push(Box::pin(MockContract::new(self.mock_contract_index)));
+        let out = self
+            .contracts
+            .get_mut(self.mock_contract_index as usize)
+            .unwrap();
+        let index_out: u32 = self.mock_contract_index;
+
+        self.mock_contract_index += 1;
+
+        let c: *mut MockContract = unsafe { core::mem::transmute(&mut *out) };
+
+        let res = unsafe {
+            add_contract_and_method(
+                self.contract_context,
+                out.as_hash().as_ptr(),
+                Some(trampoline),
+                c as *mut c_void,
+            )
+        };
+        if res != 0 {
+            panic!("failed to link fn");
+        }
+        (index_out, out.as_mut())
+    }
 }
 
-impl Drop for Environment {
+impl Drop for TestEnvironment {
     fn drop(&mut self) {
         unsafe { free_db(self.db) };
+        unsafe { close_runtime_context(self.contract_context) };
     }
 }
 
@@ -160,76 +195,30 @@ impl MockContract {
     }
 }
 
-pub struct MockContractContext {
-    context: *mut c_void,
-    mock_contract_index: u32,
-}
-
-impl MockContractContext {
-    pub fn new() -> Self {
-        Self {
-            context: unsafe { open_runtime_context() },
-            mock_contract_index: 0,
-        }
-    }
-
-    pub fn add_contract(&mut self) -> Pin<Box<MockContract>> {
-        let mut out = Box::pin(MockContract::new(self.mock_contract_index));
-        self.mock_contract_index += 1;
-
-        let c: *mut MockContract =
-            unsafe { core::mem::transmute(out.as_mut()) };
-
-        let res = unsafe {
-            add_contract_and_method(
-                self.context,
-                out.as_ref().as_hash().as_ptr(),
-                Some(trampoline),
-                c as *mut c_void,
-            )
-        };
-        if res != 0 {
-            panic!("failed to link fn");
-        }
-        out
-    }
-}
-
-impl Drop for MockContractContext {
-    fn drop(&mut self) {
-        unsafe { close_runtime_context(self.context) }
-    }
-}
-
 // Can run one, and only one, transaction,
 // and then get the results
 pub struct TransactionHandler<'a> {
     handler: *mut c_void,
-    env: &'a Environment, // cannot outlive the environment.
+    env: &'a TestEnvironment,
+    // cannot outlive the environment.
     // TODO(geoff): we could swap the backing pointer to the db
     // to be a shared ptr, and have handler hold a reference,
     // like we do with the mock contract context.
-    ctx: &'a MockContractContext,
     invoked: bool,
 }
 
 impl<'a> TransactionHandler<'a> {
-    pub fn new(
-        env: &'a Environment,
-        ctx: &'a MockContractContext,
-        stx: &SignedTransaction,
-    ) -> Self {
+    pub fn new(env: &'a TestEnvironment, stx: &SignedTransaction) -> Self {
         let tx_bytes = stx.to_xdr(Limits::none()).unwrap();
         unsafe {
             Self {
                 handler: open_syscall_handler(
                     env.db,
-                    ctx.context,
+                    env.contract_context,
                     tx_bytes.as_ptr(),
                     tx_bytes.len().try_into().unwrap(),
                 ),
                 env: env,
-                ctx: ctx,
                 invoked: false,
             }
         }
