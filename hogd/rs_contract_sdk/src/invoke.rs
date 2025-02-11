@@ -126,7 +126,7 @@ mod handle {
             Ok(x) => x,
             Err(e) => return e, // == SyscallErrorCode::kCalldataParseError
         };
-        let args: ARGS = match bcs::from_bytes::<ARGS>(&call_data) {
+        let args: ARGS = match bcs::from_bytes(&call_data) {
             Ok(args) => args,
             Err(_) => return SyscallErrorCode::kCalldataParseError.into(),
         };

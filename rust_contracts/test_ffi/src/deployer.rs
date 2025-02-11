@@ -38,6 +38,11 @@ pub fn make_deploy_and_invoke_transaction(
     c.extend(nonce);
     c.extend(contract.as_hash());
     c.extend(u32::to_le_bytes(method));
+    let calldata_len: u8 = calldata.len() as u8;
+    if calldata_len > 127 {
+        panic!("unimplemented");
+    }
+    c.push(calldata_len);
     c.extend(calldata);
 
     SignedTransaction {

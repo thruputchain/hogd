@@ -87,7 +87,7 @@ mod tests {
         env.advance_block();
 
         contract.register_method(2, || -> i32 {
-            println!("whoa");
+            println!("print from within a contract with --nocapture flag");
             let data: [u8; 4] = [0, 1, 2, 3];
             let res = ::rs_contract_sdk::SHA256(&data).unwrap();
             assert_eq!(res, unsafe { hash_expect });
