@@ -3,7 +3,7 @@
 mod storage;
 use storage::CoinStorage;
 
-use super::interface::{Amount, ERC20Result, ERC20};
+use super::interface::{Amount, ERC20};
 use sdk::contract::{Contract, ContractWithStorage};
 use sdk::initialize::initialization_guard;
 use sdk::macros::contract;
@@ -45,6 +45,9 @@ impl CoinContract {
 
 // This version of the interface (and implementation) returns
 // error values.  Below is a version that panics.
+
+#[cfg(feature = "result")]
+use super::interface::ERC20Result;
 
 #[cfg(feature = "result")]
 #[contract(mod_name = "exports")]
