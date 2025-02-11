@@ -21,6 +21,7 @@ mod serialize;
 pub use serialize::*;
 
 #[cfg(feature = "std")]
+#[rustfmt::skip]
 mod syscall_args;
 #[cfg(feature = "std")]
 pub use syscall_args::*;

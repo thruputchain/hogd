@@ -1,3 +1,4 @@
+#![cfg_attr(not(feature = "activate"), no_std)]
 // suppress spurious warnings from bindgen
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]

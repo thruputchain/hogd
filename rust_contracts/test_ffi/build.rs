@@ -1,17 +1,28 @@
 extern crate bindgen;
 extern crate cmake;
 
-use std::env;
-use std::path::PathBuf;
-
 // thank u chatgpt
+#[cfg(not(feature = "activate"))]
+fn main() {}
 
+#[cfg(feature = "activate")]
 fn main() {
+    use std::env;
+    use std::path::PathBuf;
+
+    for (key, value) in std::env::vars() {
+        println!("cargo:warning={}={}", key, value);
+    }
+
     // Run CMake and build the C++ library
     let dst = cmake::Config::new("../..") // Points to C++ source directory
         .define("CMAKE_BUILD_TYPE", "Release")
-        .define("CMAKE_CXX_COMPILER", "g++")
-        .define("CMAKE_C_COMPILER", "gcc")
+        // TODO(geoff): Using g++ here doesn't play well with cargo.
+        // There's a --target=xyz variable that gets passed to gcc,
+        // when building from a different workspace (only, which is bizarre. same workspace works fine).
+        // This is a clang flag not a gcc flag, and so gcc errors out.
+        .define("CMAKE_CXX_COMPILER", "clang++")
+        .define("CMAKE_C_COMPILER", "clang")
         .define("CMAKE_VERBOSE_MAKEFILE", "ON") // run cargo b -vv to see the full cmake output
         .define("CMAKE_OSX_SYSROOT", "")
         .build_target("test_ffi") // important: only build the test_ffi option.  If we do this wrong

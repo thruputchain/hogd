@@ -10,6 +10,7 @@ fn handle_panic(_: &core::panic::PanicInfo) -> ! {
     trap();
 }
 
+/*
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "mock")))]
 #[panic_handler]
 fn handle_panic(_: &core::panic::PanicInfo) -> ! {
@@ -18,7 +19,7 @@ fn handle_panic(_: &core::panic::PanicInfo) -> ! {
     // for testing or built targeting wasm32
 
     loop {}
-}
+} */
 
 #[cfg(feature = "mock")]
 mod test_rt {
