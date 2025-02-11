@@ -318,7 +318,6 @@ dependencies = [
  "cmake",
  "groundhog_xdr",
  "sha2",
- "test_ffi",
 ]
 
 [[package]]

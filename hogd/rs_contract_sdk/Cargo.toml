@@ -23,4 +23,4 @@ test_ffi = { path = "../../rust_contracts/test_ffi", optional = true}
 [features]
 alloc = ["serde/alloc", "bcs/alloc", "serde_arrays/alloc", "rs_xdr/alloc"]
 std = ["alloc", "serde/std", "bcs/std", "rs_xdr/std"]
-mock = ["std", "dep:test_ffi", "test_ffi/activate"]
+mock = ["std", "dep:test_ffi"]

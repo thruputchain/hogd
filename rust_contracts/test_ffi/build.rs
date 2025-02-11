@@ -2,10 +2,7 @@ extern crate bindgen;
 extern crate cmake;
 
 // thank u chatgpt
-#[cfg(not(feature = "activate"))]
-fn main() {}
 
-#[cfg(feature = "activate")]
 fn main() {
     use std::env;
     use std::path::PathBuf;

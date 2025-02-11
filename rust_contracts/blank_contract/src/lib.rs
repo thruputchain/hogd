@@ -98,7 +98,7 @@ mod tests {
             &contract,
             &[0; 32],
             2,
-            &[],
+            &[0, 1, 2, 3, 4, 5],
         );
 
         let mut tx_handler =

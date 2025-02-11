@@ -10,10 +10,10 @@ crate-type = ["rlib"]
 
 [dependencies]
 groundhog_xdr = {path = "../groundhog_xdr"}
-test_ffi = {path = "../test_ffi"}
+test_ffi = {path = "../test_ffi", optional = true}
 
 [features]
 alloc = ["groundhog_xdr/alloc"]
-mock = ["groundhog_xdr/std", "test_ffi/activate"]
+mock = ["groundhog_xdr/std", "dep:test_ffi"]
 
 

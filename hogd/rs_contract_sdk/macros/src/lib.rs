@@ -231,7 +231,10 @@ mod gen {
 
         let mut calls = TokenStream2::new();
         for method in contract.methods.iter() {
-            calls.extend(call_from_method_signature(get_method_num(&method.ident.to_string()), method)?);
+            calls.extend(call_from_method_signature(
+                get_method_num(&method.ident.to_string()),
+                method,
+            )?);
         }
 
         Ok(quote_spanned! {contract.span=>
