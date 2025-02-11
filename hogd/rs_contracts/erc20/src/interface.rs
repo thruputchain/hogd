@@ -6,9 +6,8 @@ use sdk::types::ContractAddress;
 
 pub type Amount = i64;
 
-#[cfg(feature = "result")]
-#[contract(client)]
-pub trait ERC20 {
+#[contract(mod_name = "client_result")]
+pub trait ERC20Result {
     fn initialize(&mut self, owner: &ContractAddress) -> Result<()>;
     fn transfer(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
     fn transfer_from(
@@ -28,8 +27,7 @@ pub trait ERC20 {
     fn burn(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
 }
 
-#[cfg(not(feature = "result"))]
-#[contract(client)]
+#[contract(mod_name = "client")]
 pub trait ERC20 {
     fn initialize(&mut self, owner: &ContractAddress);
     fn transfer(&mut self, to: &ContractAddress, amount: Amount);

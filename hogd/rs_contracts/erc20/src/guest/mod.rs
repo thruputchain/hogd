@@ -3,7 +3,7 @@
 mod storage;
 use storage::CoinStorage;
 
-use super::interface::{Amount, ERC20};
+use super::interface::{Amount, ERC20, ERC20Result};
 use sdk::contract::{Contract, ContractWithStorage};
 use sdk::initialize::initialization_guard;
 use sdk::macros::contract;
@@ -47,8 +47,8 @@ impl CoinContract {
 // error values.  Below is a version that panics.
 
 #[cfg(feature = "result")]
-#[contract(export)]
-impl ERC20 for CoinContract {
+#[contract(mod_name = "exports")]
+impl ERC20Result for CoinContract {
     fn initialize(&mut self, owner: &ContractAddress) -> Result<()> {
         initialization_guard()?;
 
@@ -126,7 +126,7 @@ impl ERC20 for CoinContract {
 // This version panics instead of returning error values
 
 #[cfg(not(feature = "result"))]
-#[contract(export)]
+#[contract(mod_name = "exports")]
 impl ERC20 for CoinContract {
     fn initialize(&mut self, owner: &ContractAddress) {
         initialization_guard().unwrap();

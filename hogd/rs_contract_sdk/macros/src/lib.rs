@@ -11,10 +11,27 @@ use proc_macro2::TokenStream as TokenStream2;
 use syn::parse::{Error, Result};
 use syn::spanned::Spanned;
 use syn::Item;
+use darling::ast::{NestedMeta};
+use darling::{FromMeta};
 
 /// Generate contract-related code
 #[proc_macro_attribute]
-pub fn contract(_attr: TokenStream, item_tokens: TokenStream) -> TokenStream {
+pub fn contract(attr_args: TokenStream, item_tokens: TokenStream) -> TokenStream {
+    // Parse the attributes
+    let config =
+        match NestedMeta::parse_meta_list(attr_args.into()) {
+            Ok(meta_list) =>
+                match sig::Config::from_list(&meta_list) {
+                    Ok(config) => config,
+                    Err(e) => return TokenStream::from(
+                        darling::Error::from(e).write_errors())
+                },
+            Err(e) => {
+                return TokenStream::from(
+                    darling::Error::from(e).write_errors());
+            }
+        };
+
     // Parse the item tokens into syntax defined in `syn`
     let item = {
         let item_tokens = item_tokens.clone();
@@ -23,7 +40,7 @@ pub fn contract(_attr: TokenStream, item_tokens: TokenStream) -> TokenStream {
     };
 
     // Generate the helper code
-    let helper_tokens = match item_to_contract_helpers(&item) {
+    let helper_tokens = match item_to_contract_helpers(&item, &config) {
         Ok(x) => x,
         Err(err) => return Error::into_compile_error(err).into(),
     };
@@ -41,16 +58,16 @@ pub fn contract(_attr: TokenStream, item_tokens: TokenStream) -> TokenStream {
     output
 }
 
-fn item_to_contract_helpers(item: &syn::Item) -> Result<TokenStream2> {
+fn item_to_contract_helpers(item: &syn::Item, config: &sig::Config) -> Result<TokenStream2> {
     match item {
         syn::Item::Trait(item) => {
             let sig = parse::contract_signature_from_trait(item)?;
-            let client = gen::client_from_contract_signature(&sig)?;
+            let client = gen::client_from_contract_signature(&sig, config)?;
             Ok(client)
         }
         syn::Item::Impl(item) => {
             let sig = parse::contract_signature_from_impl(item)?;
-            let exports = gen::exports_from_contract_signature(&sig)?;
+            let exports = gen::exports_from_contract_signature(&sig, config)?;
             Ok(exports)
         }
         _ => err(
@@ -71,6 +88,25 @@ where
 
 mod sig {
     //! Represent contract signatures
+
+    use darling::FromMeta;
+
+    #[derive(Debug, FromMeta)]
+    pub struct Config {
+        pub mod_name: Option<String>,
+    }
+
+    impl Config {
+        pub fn mod_ident_or(&self, default_name: &str) -> syn::Ident {
+            let span = proc_macro2::Span::call_site();
+            match &self.mod_name {
+                Some(name_string) =>
+                    syn::Ident::new(name_string.as_ref(), span),
+                None =>
+                    syn::Ident::new(default_name, span)
+            }
+        }
+    }
 
     #[derive(Debug)]
     pub struct Contract {
@@ -225,6 +261,7 @@ mod gen {
     // of the contract trait that performs cross-contract calls.
     pub fn client_from_contract_signature(
         contract: &sig::Contract,
+        config: &sig::Config,
     ) -> Result<TokenStream2> {
         let trait_ident = &contract.ident;
         let client_ident = format_ident!("{}Client", trait_ident);
@@ -237,10 +274,12 @@ mod gen {
             )?);
         }
 
+        let mod_ident = config.mod_ident_or("client");
+
         Ok(quote_spanned! {contract.span=>
 
             #[cfg(feature = "client")]
-            pub mod client {
+            pub mod #mod_ident {
                 use ::sdk::types::ContractAddress;
 
                 // use super::#trait_ident;
@@ -305,6 +344,7 @@ mod gen {
 
     pub fn exports_from_contract_signature(
         contract: &sig::ContractImpl,
+        config: &sig::Config,
     ) -> Result<TokenStream2> {
         let self_ty = &contract.self_ty;
         let generics = &contract.generics;
@@ -314,9 +354,11 @@ mod gen {
             exports.extend(export_from_method_signature(method)?);
         }
 
+        let mod_ident = config.mod_ident_or("exports");
+
         Ok(quote_spanned! {contract.span=>
 
-            pub mod exports {
+            pub mod #mod_ident {
                 use super::*;
 
                 fn contract() -> #self_ty {

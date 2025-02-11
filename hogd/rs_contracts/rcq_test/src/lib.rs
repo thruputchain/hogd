@@ -19,7 +19,7 @@ impl Contract for RCQ {
     }
 }
 
-#[contract(client)]
+#[contract]
 pub trait RCQInterface {
     fn test_read_self_item(self);
     fn make_several_inserts(self, inserts: alloc::vec::Vec<u8>);
@@ -33,7 +33,11 @@ pub trait RCQInterface {
 pub use client::RCQInterfaceClient;
 
 #[cfg(feature = "guest")]
-#[contract(export)]
+// Contract methods (below) exposed with C ABI for running as guest
+pub use exports::*;
+
+#[cfg(feature = "guest")]
+#[contract]
 impl RCQInterface for RCQ {
     fn test_read_self_item(self) {
         sdk::RetrocausalQueueInsert(&KEY1, &[1]).unwrap();
@@ -110,7 +114,3 @@ impl RCQInterface for RCQ {
         assert_eq!(item[0], 6);
     }
 }
-
-#[cfg(feature = "guest")]
-// Contract methods exposed with C ABI for running as guest
-pub use exports::*;
