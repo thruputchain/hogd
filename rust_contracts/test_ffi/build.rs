@@ -42,6 +42,8 @@ fn main() {
         dst.display()
     );
     println!("cargo:rustc-link-lib=dylib=test_ffi");
+
+    // No idea how to propagate this flag to dependent packages.
     println!(
         "cargo:rustc-link-arg=-Wl,-rpath,{}/build/hogd/test_ffi/",
         dst.display()
