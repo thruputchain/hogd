@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include "x23/utility.h"
 #include <filesystem>
 
 #include <fcntl.h>
@@ -13,6 +12,7 @@
 
 #include <x23/cleanup.h>
 #include <x23/err.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 
 namespace x23 {

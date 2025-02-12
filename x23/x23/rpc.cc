@@ -9,9 +9,7 @@ namespace x23 {
 
 RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
 {
-  auto peer = remote_addr(peerfd);
-  peername_ =
-      std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
+  peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
 }
 
 std::string
