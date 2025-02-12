@@ -7,10 +7,6 @@ fn main() {
     use std::env;
     use std::path::PathBuf;
 
-    for (key, value) in std::env::vars() {
-        println!("cargo:warning={}={}", key, value);
-    }
-
     // Run CMake and build the C++ library
     let mut cmake_config = cmake::Config::new("../.."); // Points to C++ source directory
     let binding = cmake_config
