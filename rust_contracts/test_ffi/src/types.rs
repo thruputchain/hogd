@@ -8,13 +8,11 @@ use groundhog_xdr::transaction::SignedTransaction;
 use groundhog_xdr::types::SHA256Hash;
 use groundhog_xdr::{Limits, WriteXdr};
 
-use std::marker::PhantomPinned;
-use std::pin::Pin;
-
 use sha2::Digest;
 use sha2::Sha256;
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
 use std::panic;
 #[cfg(test)]
@@ -31,21 +29,13 @@ impl PartialEq for ForeignInvokeResult {
 use crate::invoke_error::set_override_panic_hook;
 use crate::invoke_error::InvokeError;
 
-pub struct MockContract {
-    index: u32, // this is passed as the raw bytes in the contract, and thus identified as sha256(index).
-    hash: SHA256Hash,
-    funcs: HashMap<u32, Box<dyn Fn() -> InvokeResult>>,
-    // TODO(geoff): It's not clear to me whether this is actually necessary
-    _pin: PhantomPinned,
-}
-
 pub unsafe extern "C" fn trampoline(
     context: *mut c_void,
     method: u32,
 ) -> InvokeResult {
-    let c: *mut MockContract = unsafe { core::mem::transmute(context) };
+    let c: *mut MockContractInner = unsafe { core::mem::transmute(context) };
 
-    match (*c).funcs.get(&method) {
+    match unsafe { (*c).funcs.get(&method) } {
         Some(x) => {
             return x();
         }
@@ -86,14 +76,28 @@ pub fn invoke_wrapper(wrapped: fn() -> i32) -> Box<dyn Fn() -> InvokeResult> {
     })
 }
 
+struct MockContractInner {
+    index: u32, // this is passed as the raw bytes in the contract, and thus identified as sha256(index).
+    hash: SHA256Hash,
+    funcs: HashMap<u32, Box<dyn Fn() -> InvokeResult>>,
+}
+
+// TODO(geoff): I cannot figure out how to prevent rust from moving objects
+// without just converting back to raw pointers.
+// Pin<Box<T>> with PhantomPinned still wound up getting moved, somehow.
 pub struct TestEnvironment {
     db: *mut c_void,
     contract_context: *mut c_void,
     mock_contract_index: u32,
-    contracts: Vec<Pin<Box<MockContract>>>,
+    contracts: Vec<*mut MockContractInner>, // owns these contracts
 }
 
-impl TestEnvironment {
+pub struct MockContract<'a> {
+    contract: *mut MockContractInner,
+    _marker: PhantomData<&'a TestEnvironment>,
+}
+
+impl<'a> TestEnvironment {
     pub fn new() -> Self {
         set_override_panic_hook();
         Self {
@@ -108,31 +112,29 @@ impl TestEnvironment {
         unsafe { advance_new_block(self.db) }
     }
 
-    pub fn add_contract(&mut self) -> (u32, Pin<&mut MockContract>) {
-        self.contracts
-            .push(Box::pin(MockContract::new(self.mock_contract_index)));
-        let out = self
-            .contracts
-            .get_mut(self.mock_contract_index as usize)
-            .unwrap();
-        let index_out: u32 = self.mock_contract_index;
+    pub fn add_contract(&'a mut self) -> MockContract<'a> {
+        let out: *mut MockContractInner = Box::into_raw(Box::new(
+            MockContractInner::new(self.mock_contract_index),
+        ));
 
+        self.contracts.push(out);
         self.mock_contract_index += 1;
-
-        let c: *mut MockContract = unsafe { core::mem::transmute(&mut *out) };
 
         let res = unsafe {
             add_contract_and_method(
                 self.contract_context,
-                out.as_hash().as_ptr(),
+                (*out).as_hash().as_ptr(),
                 Some(trampoline),
-                c as *mut c_void,
+                out as *mut c_void,
             )
         };
         if res != 0 {
             panic!("failed to link fn");
         }
-        (index_out, out.as_mut())
+        MockContract {
+            contract: out,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -140,37 +142,20 @@ impl Drop for TestEnvironment {
     fn drop(&mut self) {
         unsafe { free_db(self.db) };
         unsafe { close_runtime_context(self.contract_context) };
+        for contract in &self.contracts {
+            let _ = unsafe { Box::from_raw(*contract) };
+        }
     }
 }
 
-impl MockContract {
-    fn new(n: u32) -> Self {
-        let mut hasher = Sha256::new();
-        let contract = Self::u32_to_contract(n);
-        hasher.update(contract.to_xdr(Limits::none()).unwrap());
-        let result = hasher.finalize();
-        Self {
-            index: n,
-            hash: result.into(),
-            funcs: HashMap::new(),
-            _pin: PhantomPinned,
-        }
+fn u32_to_contract(index: u32) -> Contract {
+    let bytes = index.to_xdr(Limits::none()).unwrap();
+    Contract {
+        contract_data: bytes.try_into().unwrap(),
     }
+}
 
-    fn u32_to_contract(index: u32) -> Contract {
-        let bytes = index.to_xdr(Limits::none()).unwrap();
-        Contract {
-            contract_data: bytes.try_into().unwrap(),
-        }
-    }
-
-    pub fn as_contract(&self) -> Contract {
-        Self::u32_to_contract(self.index)
-    }
-    pub fn as_hash(&self) -> SHA256Hash {
-        self.hash
-    }
-
+impl<'a> MockContract<'a> {
     pub fn method_name_from_int(method_id: u32) -> String {
         format!("{:X}", method_id)
     }
@@ -185,13 +170,38 @@ impl MockContract {
         num
     }
 
-    pub fn register_method(
-        self: &mut Pin<Box<Self>>,
-        id: u32,
-        func: fn() -> i32,
-    ) {
-        let unwrapped = unsafe { self.as_mut().get_unchecked_mut() }; // Safe only if the type itself upholds pin guarantees
-        unwrapped.funcs.insert(id, invoke_wrapper(func));
+    pub fn as_contract(&'a self) -> Contract {
+        u32_to_contract(unsafe { (*self.contract).index })
+    }
+
+    pub fn as_hash(&'a self) -> SHA256Hash {
+        unsafe { (*self.contract).hash }
+    }
+
+    pub fn register_method(self: &'a mut Self, id: u32, func: fn() -> i32) {
+        unsafe { (*self.contract).funcs.insert(id, invoke_wrapper(func)) };
+    }
+}
+
+impl MockContractInner {
+    fn new(n: u32) -> Self {
+        let mut hasher = Sha256::new();
+        let contract = u32_to_contract(n);
+        hasher.update(contract.to_xdr(Limits::none()).unwrap());
+        let result = hasher.finalize();
+        Self {
+            index: n,
+            hash: result.into(),
+            funcs: HashMap::new(),
+        }
+    }
+
+    pub fn as_hash(&self) -> SHA256Hash {
+        self.hash
+    }
+
+    pub fn register_method(self: &mut Self, id: u32, func: fn() -> i32) {
+        self.funcs.insert(id, invoke_wrapper(func));
     }
 }
 

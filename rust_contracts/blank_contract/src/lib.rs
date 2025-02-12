@@ -17,28 +17,34 @@ mod tests {
     static mut x: bool = false;
     #[test]
     fn invoke_err() {
-        let mut env = test_ffi::types::Environment::new();
-        let mut ctx = test_ffi::types::MockContractContext::new();
-        let mut contract = ctx.add_contract();
+        let mut env = test_ffi::types::TestEnvironment::new();
+
+        let code = {
+            let mut contract = env.add_contract();
+
+            pub fn test_basic() -> i32 {
+                unsafe { x = true };
+                return 10;
+            }
+
+            let code = contract.as_contract();
+
+            contract.register_method(0, test_basic);
+
+            code
+        };
 
         env.advance_block();
 
-        pub fn test_basic() -> i32 {
-            unsafe { x = true };
-            return 10;
-        }
-
-        contract.register_method(0, test_basic);
-
         let tx = test_ffi::deployer::make_deploy_and_invoke_transaction(
-            &contract,
+            code,
             &[0; 32],
             0,
             &[],
         );
 
         let mut tx_handler =
-            test_ffi::types::TransactionHandler::new(&env, &ctx, &tx);
+            test_ffi::types::TransactionHandler::new(&env, &tx);
 
         let res = tx_handler.root_invoke();
         assert_eq!(res.result.panic, InvokeErrorCode::kDeterministic as i32);
@@ -47,27 +53,33 @@ mod tests {
 
     #[test]
     fn invoke_ok() {
-        let mut env = test_ffi::types::Environment::new();
-        let mut ctx = test_ffi::types::MockContractContext::new();
-        let mut contract = ctx.add_contract();
+        let mut env = test_ffi::types::TestEnvironment::new();
+
+        let code = {
+            let mut contract = env.add_contract();
+
+            pub fn test_return_success() -> i32 {
+                return 0;
+            }
+
+            let code = contract.as_contract();
+
+            contract.register_method(1, test_return_success);
+
+            code
+        };
 
         env.advance_block();
 
-        pub fn test_return_success() -> i32 {
-            return 0;
-        }
-
-        contract.register_method(1, test_return_success);
-
         let tx = test_ffi::deployer::make_deploy_and_invoke_transaction(
-            &contract,
+            code,
             &[0; 32],
             1,
             &[],
         );
 
         let mut tx_handler =
-            test_ffi::types::TransactionHandler::new(&env, &ctx, &tx);
+            test_ffi::types::TransactionHandler::new(&env, &tx);
 
         let res = tx_handler.root_invoke();
         assert_eq!(res.result.panic, InvokeErrorCode::kNone as i32);
@@ -80,29 +92,34 @@ mod tests {
         hasher.update([0, 1, 2, 3]);
         unsafe { hash_expect = hasher.finalize().try_into().unwrap() };
 
-        let mut env = test_ffi::types::Environment::new();
-        let mut ctx = test_ffi::types::MockContractContext::new();
-        let mut contract = ctx.add_contract();
+        let mut env = test_ffi::types::TestEnvironment::new();
+
+        let code = {
+            let mut contract = env.add_contract();
+            let code = contract.as_contract();
+
+            contract.register_method(2, || -> i32 {
+                println!("print from within a contract with --nocapture flag");
+                let data: [u8; 4] = [0, 1, 2, 3];
+                let res = ::rs_contract_sdk::SHA256(&data).unwrap();
+                assert_eq!(res, unsafe { hash_expect });
+                0
+            });
+
+            code
+        };
 
         env.advance_block();
 
-        contract.register_method(2, || -> i32 {
-            println!("print from within a contract with --nocapture flag");
-            let data: [u8; 4] = [0, 1, 2, 3];
-            let res = ::rs_contract_sdk::SHA256(&data).unwrap();
-            assert_eq!(res, unsafe { hash_expect });
-            0
-        });
-
         let tx = test_ffi::deployer::make_deploy_and_invoke_transaction(
-            &contract,
+            code,
             &[0; 32],
             2,
             &[0, 1, 2, 3, 4, 5],
         );
 
         let mut tx_handler =
-            test_ffi::types::TransactionHandler::new(&env, &ctx, &tx);
+            test_ffi::types::TransactionHandler::new(&env, &tx);
 
         let res = tx_handler.root_invoke();
         assert_eq!(res.result.panic, InvokeErrorCode::kNone as i32);

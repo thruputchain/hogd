@@ -1,6 +1,9 @@
 use crate::types::MockContract;
+use groundhog_xdr::contract::Contract;
 use groundhog_xdr::transaction::{Invocation, SignedTransaction, Transaction};
 use groundhog_xdr::types::SHA256Hash;
+use groundhog_xdr::{Limits, WriteXdr};
+use sha2::{Digest, Sha256};
 
 pub fn make_deploy_transaction(
     contract: &MockContract,
@@ -29,14 +32,18 @@ pub fn make_deploy_transaction(
 }
 
 pub fn make_deploy_and_invoke_transaction(
-    contract: &MockContract,
+    contract_code: Contract,
     nonce: &SHA256Hash,
     method: u32,
     calldata: &[u8],
 ) -> SignedTransaction {
+    let mut hasher = Sha256::new();
+    hasher.update(contract_code.to_xdr(Limits::none()).unwrap());
+    let contract_hash = hasher.finalize();
+
     let mut c: Vec<u8> = vec![];
     c.extend(nonce);
-    c.extend(contract.as_hash());
+    c.extend(contract_hash);
     c.extend(u32::to_le_bytes(method));
     let calldata_len: u8 = calldata.len() as u8;
     if calldata_len > 127 {
@@ -55,9 +62,7 @@ pub fn make_deploy_and_invoke_transaction(
                 gas_limit: u64::MAX,
                 calldata: c.try_into().unwrap(),
             },
-            contracts_to_deploy: vec![contract.as_contract()]
-                .try_into()
-                .unwrap(),
+            contracts_to_deploy: vec![contract_code].try_into().unwrap(),
         },
     }
 }
