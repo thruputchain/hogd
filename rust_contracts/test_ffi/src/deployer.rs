@@ -6,13 +6,17 @@ use groundhog_xdr::{Limits, WriteXdr};
 use sha2::{Digest, Sha256};
 
 pub fn make_deploy_transaction(
-    contract: &MockContract,
+    contract_code: Contract,
     nonce: &SHA256Hash,
 ) -> SignedTransaction {
+    let mut hasher = Sha256::new();
+    hasher.update(contract_code.to_xdr(Limits::none()).unwrap());
+    let contract_hash = hasher.finalize();
+
     let concatenated: [u8; 64] = {
         let mut arr = [0u8; 64];
         arr[..32].copy_from_slice(nonce);
-        arr[32..].copy_from_slice(&contract.as_hash());
+        arr[32..].copy_from_slice(&contract_hash);
         arr
     };
 
@@ -24,9 +28,7 @@ pub fn make_deploy_transaction(
                 gas_limit: u64::MAX,
                 calldata: concatenated.try_into().unwrap(),
             },
-            contracts_to_deploy: vec![contract.as_contract()]
-                .try_into()
-                .unwrap(),
+            contracts_to_deploy: vec![contract_code].try_into().unwrap(),
         },
     }
 }

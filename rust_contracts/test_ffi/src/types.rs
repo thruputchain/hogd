@@ -170,15 +170,15 @@ impl<'a> MockContract<'a> {
         num
     }
 
-    pub fn as_contract(&'a self) -> Contract {
+    pub fn as_contract(&self) -> Contract {
         u32_to_contract(unsafe { (*self.contract).index })
     }
 
-    pub fn as_hash(&'a self) -> SHA256Hash {
+    pub fn as_hash(&self) -> SHA256Hash {
         unsafe { (*self.contract).hash }
     }
 
-    pub fn register_method(self: &'a mut Self, id: u32, func: fn() -> i32) {
+    pub fn register_method(self: &mut Self, id: u32, func: fn() -> i32) {
         unsafe { (*self.contract).funcs.insert(id, invoke_wrapper(func)) };
     }
 }
