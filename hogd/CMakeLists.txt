@@ -13,11 +13,12 @@ target_link_libraries(
   hogd
   base
   crypto
-  ${LIBSODIUM_LIBRARIES}
 )
-add_dependencies(hogd libsodium)
 
-# Then build the modules for the hogdb and hogexec executables
-add_subdirectory(coord)
+# Additional libraries that are not included by default (i.e., in hogd library)
+add_subdirectory(ramdb)
+
+# Finally, build the hogdb, hogexec, and coord executables
 add_subdirectory(hogdb)
 add_subdirectory(hogexec)
+add_subdirectory(coord)
