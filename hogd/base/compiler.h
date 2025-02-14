@@ -189,4 +189,8 @@ constexpr inline size_t kCacheLineSize =
 constexpr inline size_t kCacheLineSize = 64;
 #endif // __cpp_lib_hardware_interference_size
 
+// kPageSize is the size of a page in bytes.
+// TODO(amb): use getpagesize() to confirm size at runtime.
+constexpr inline size_t kPageSize = 4096;
+
 } // namespace hogd
