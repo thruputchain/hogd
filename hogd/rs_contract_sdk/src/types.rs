@@ -2,6 +2,9 @@
 
 pub use ::rs_xdr::types::*;
 
+#[cfg(feature = "mock")]
+pub use ::rs_xdr::contract::*; // export Contract for testing under name sdk::types::Contract
+
 /// A wrapper to get serialization right
 pub type Ed25519SignatureA = byte_array::ByteArray<64>;
 

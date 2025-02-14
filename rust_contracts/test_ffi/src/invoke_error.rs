@@ -71,13 +71,24 @@ pub fn set_override_panic_hook() {
             panic_info.payload().downcast_ref::<InvokeError>()
         {
             panic::resume_unwind(Box::new(payload.clone()));
+        }
+
+        if let Some(payload) = panic_info.payload().downcast_ref::<String>() {
+            eprintln!("Panic message: {}", payload);
         } else if let Some(payload) =
-            panic_info.payload().downcast_ref::<String>()
+            panic_info.payload().downcast_ref::<&str>()
         {
-            // If it's a String, you can print it
-            println!("Panic message: {}", payload);
+            eprintln!("Panic message: {}", payload);
         } else {
-            println!("Panic: {:?}", panic_info.payload());
+            eprintln!("Panic: {:?}", panic_info.payload());
+        }
+
+        if let Some(location) = panic_info.location() {
+            eprintln!(
+                "Panic occurred at file '{}' line {}",
+                location.file(),
+                location.line()
+            );
         }
 
         panic::resume_unwind(Box::new(deterministic_error()));

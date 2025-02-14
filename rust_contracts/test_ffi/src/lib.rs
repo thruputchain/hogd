@@ -6,8 +6,9 @@
 pub mod deployer;
 pub mod host_fn_error;
 pub mod invoke_error;
-pub mod types;
+mod types;
 pub use host_fn_error::perform_mocked_syscall;
+pub use types::*;
 
 #[cfg(test)]
 mod tests {

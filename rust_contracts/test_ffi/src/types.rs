@@ -5,6 +5,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 use groundhog_xdr::contract::Contract;
 use groundhog_xdr::ffi_enums::InvokeErrorCode;
 use groundhog_xdr::transaction::SignedTransaction;
+use groundhog_xdr::types::ContractAddress;
 use groundhog_xdr::types::SHA256Hash;
 use groundhog_xdr::{Limits, WriteXdr};
 
@@ -13,6 +14,7 @@ use sha2::Sha256;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::panic::UnwindSafe;
 
 use std::panic;
 #[cfg(test)]
@@ -48,10 +50,14 @@ pub unsafe extern "C" fn trampoline(
     }
 }
 
-pub fn invoke_wrapper(wrapped: fn() -> i32) -> Box<dyn Fn() -> InvokeResult> {
+pub fn invoke_wrapper<'a, F>(wrapped: F) -> Box<dyn Fn() -> InvokeResult + 'a>
+where
+    F: Fn() -> i32 + UnwindSafe + Clone + 'a,
+{
     Box::new(move || {
+        let w = wrapped.clone();
         // This wrapper never returns InvokeErrorCode::kOutOfGas.
-        let result = panic::catch_unwind(|| wrapped());
+        let result = panic::catch_unwind(move || w());
 
         match result {
             Ok(result_code) => {
@@ -85,6 +91,9 @@ struct MockContractInner {
 // TODO(geoff): I cannot figure out how to prevent rust from moving objects
 // without just converting back to raw pointers.
 // Pin<Box<T>> with PhantomPinned still wound up getting moved, somehow.
+// It would be nice to avoid this later of indirection, as that would make passing
+// (or at least seem to make) passing closures in as parameters to test functions
+// much easier.
 pub struct TestEnvironment {
     db: *mut c_void,
     contract_context: *mut c_void,
@@ -100,19 +109,59 @@ pub struct MockContract<'a> {
 impl<'a> TestEnvironment {
     pub fn new() -> Self {
         set_override_panic_hook();
-        Self {
+        let out = Self {
             db: unsafe { create_db() },
             contract_context: unsafe { open_runtime_context() },
             mock_contract_index: 0,
             contracts: vec![],
+        };
+
+        if out.db == core::ptr::null_mut() {
+            panic!("failed to initialize database!");
         }
+        if out.contract_context == core::ptr::null_mut() {
+            panic!("failed to initialize contract context!");
+        }
+
+        // prepare to accept transactions on the first block
+        unsafe { advance_new_block(out.db) };
+
+        out
+    }
+
+    pub fn setup_create_contract(&mut self, contract: &MockContract<'a>) {
+        let contract_bytes =
+            contract.as_contract().to_xdr(Limits::none()).unwrap();
+        unsafe {
+            setup_create_contract(
+                self.db,
+                contract_bytes.as_ptr(),
+                contract_bytes.len().try_into().unwrap(),
+            )
+        };
+    }
+
+    pub fn setup_create_deployment(
+        &mut self,
+        addr: &ContractAddress,
+        contract: &MockContract<'a>,
+    ) {
+        let contract_bytes =
+            contract.as_contract().to_xdr(Limits::none()).unwrap();
+        unsafe {
+            setup_create_deployment(
+                self.db,
+                addr.as_ptr(),
+                contract.as_hash().as_ptr(),
+            )
+        };
     }
 
     pub fn advance_block(&mut self) {
         unsafe { advance_new_block(self.db) }
     }
 
-    pub fn add_contract(&'a mut self) -> MockContract<'a> {
+    pub fn add_contract(&mut self) -> MockContract<'a> {
         let out: *mut MockContractInner = Box::into_raw(Box::new(
             MockContractInner::new(self.mock_contract_index),
         ));
@@ -135,6 +184,38 @@ impl<'a> TestEnvironment {
             contract: out,
             _marker: PhantomData,
         }
+    }
+
+    pub fn prepare_test<F>(
+        self: &'a mut TestEnvironment,
+        test: F,
+    ) -> TransactionHandler<'a>
+    where
+        F: Fn() -> i32 + 'a + UnwindSafe + Clone + 'static,
+    {
+        let mut test_contract = self.add_contract();
+        test_contract.register_func(0, test);
+        self.setup_create_contract(&test_contract);
+
+        use groundhog_xdr::transaction::*;
+
+        let invoke_addr: [u8; 32] = [0xFF; 32];
+
+        self.setup_create_deployment(&invoke_addr, &test_contract);
+
+        let stx = SignedTransaction {
+            tx: Transaction {
+                invocation: Invocation {
+                    invoked_address: [0xFF; 32],
+                    method: 0,
+                    gas_limit: u64::MAX,
+                    calldata: [].try_into().unwrap(),
+                },
+                contracts_to_deploy: vec![].try_into().unwrap(),
+            },
+        };
+
+        TransactionHandler::new(self, &stx)
     }
 }
 
@@ -178,8 +259,29 @@ impl<'a> MockContract<'a> {
         unsafe { (*self.contract).hash }
     }
 
+    pub fn register_extern_c_method(
+        self: &mut Self,
+        id: u32,
+        func: extern "C" fn() -> i32,
+    ) {
+        unsafe {
+            (*self.contract)
+                .funcs
+                .insert(id, invoke_wrapper(move || func()))
+        };
+    }
     pub fn register_method(self: &mut Self, id: u32, func: fn() -> i32) {
         unsafe { (*self.contract).funcs.insert(id, invoke_wrapper(func)) };
+    }
+    pub fn register_func<F>(self: &mut Self, id: u32, func: F)
+    where
+        F: Fn() -> i32 + UnwindSafe + Clone + 'static,
+    {
+        unsafe {
+            (*self.contract)
+                .funcs
+                .insert(id, invoke_wrapper(func.clone()))
+        };
     }
 }
 
@@ -200,9 +302,9 @@ impl MockContractInner {
         self.hash
     }
 
-    pub fn register_method(self: &mut Self, id: u32, func: fn() -> i32) {
-        self.funcs.insert(id, invoke_wrapper(func));
-    }
+    // pub fn register_method(self: &mut Self, id: u32, func: fn() -> i32) {
+    //    self.funcs.insert(id, invoke_wrapper(func));
+    // }
 }
 
 // Can run one, and only one, transaction,
@@ -220,7 +322,7 @@ pub struct TransactionHandler<'a> {
 impl<'a> TransactionHandler<'a> {
     pub fn new(env: &'a TestEnvironment, stx: &SignedTransaction) -> Self {
         let tx_bytes = stx.to_xdr(Limits::none()).unwrap();
-        unsafe {
+        let out = unsafe {
             Self {
                 handler: open_syscall_handler(
                     env.db,
@@ -231,7 +333,11 @@ impl<'a> TransactionHandler<'a> {
                 env: env,
                 invoked: false,
             }
+        };
+        if out.handler == core::ptr::null_mut() {
+            panic!("failed to initialize handler!");
         }
+        out
     }
 
     pub fn root_invoke(&mut self) -> ForeignRootInvokeResult {

@@ -8,10 +8,10 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 groundhog_xdr = {path = "../groundhog_xdr"}
-rs_contract_sdk = {path = "../rs_contract_sdk"}
+rs_contract_sdk = {path = "../../hogd/rs_contract_sdk"}
 
 [dev-dependencies]
 test_ffi = {path = "../test_ffi"}
 sha2 = "0.10"
-rs_contract_sdk = {path = "../rs_contract_sdk", features=["mock"]}
+rs_contract_sdk = {path = "../../hogd/rs_contract_sdk", features=["mock"]}
 

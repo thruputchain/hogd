@@ -11,8 +11,8 @@
 #include <utility>
 
 #include "coord.hh"
-#include "hogd/coord/allocate_service.h"
 #include "hogd/hogexec/interface/rpc_interface.h"
+#include "hogd/shared_util/connect_to_service.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"

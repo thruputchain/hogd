@@ -186,20 +186,4 @@ CoordinatorAllocateService::make_database_manager()
   return db_manager;
 }
 
-std::optional<hogd::CoordinatorAllocateV1::client<
-    x23::RpcStream<x23::RpcLogger>::ClientRef>>
-connect_to_coord_allocate_service(x23::CoroPoll &cp,
-                                  std::string const &coord_address,
-                                  std::string const &coord_allocate_port)
-{
-  auto fd = cp.tcpconnect(coord_address, coord_allocate_port)();
-  if (!fd) {
-    return std::nullopt;
-  }
-
-  auto client_config = x23::rpc_stream_logged(cp, *fd);
-  return std::make_optional(
-      client_config.template client<CoordinatorAllocateV1>());
-}
-
 } // namespace hogd

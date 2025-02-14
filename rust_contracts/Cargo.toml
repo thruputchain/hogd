@@ -4,7 +4,6 @@ resolver = "2"
 members = [
     "test_ffi",
     "groundhog_xdr",
-    "rs_contract_sdk",
     "blank_contract"
 ]
 

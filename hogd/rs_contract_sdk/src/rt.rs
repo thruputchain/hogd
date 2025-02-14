@@ -4,7 +4,13 @@ pub fn trap() -> ! {
     core::arch::wasm32::unreachable()
 }
 
-#[cfg(all(target_arch = "wasm32", not(feature = "mock")))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "mock")))]
+#[inline(always)]
+pub fn trap() -> ! {
+    panic!("unreachable");
+}
+
+#[cfg(not(feature = "mock"))]
 #[panic_handler]
 fn handle_panic(_: &core::panic::PanicInfo) -> ! {
     trap();

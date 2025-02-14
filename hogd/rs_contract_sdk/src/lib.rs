@@ -46,3 +46,6 @@ pub mod deploy;
 pub mod log;
 pub mod result;
 pub mod storage;
+
+#[cfg(feature = "mock")]
+pub use test_ffi::*;

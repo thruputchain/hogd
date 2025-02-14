@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "hogd/test_ffi/test_bindings.h"
+
 namespace hogd {
 
 ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,

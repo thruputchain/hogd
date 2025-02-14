@@ -47,6 +47,10 @@ public:
                                        db_proxy_);
   }
 
+  void setup_create_contract(Contract const &contract);
+  void setup_create_deployment(ContractAddress const &addr,
+                               SHA256Hash const &hash);
+
 private:
   HogdbCore db_;
   x23::ThreadPool pool_;

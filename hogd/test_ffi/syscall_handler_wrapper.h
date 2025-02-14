@@ -161,7 +161,14 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
     return unrecoverable_error();
   }
 
-  auto status = mock_func_inner(*input_arg, *output_arg);
+  ForeignHostFnResult status = mock_func_inner(*input_arg, *output_arg);
+
+  if (status.panic != std::to_underlying(HostFnErrorCode::kNoneOrRecoverable)) {
+    return status;
+  }
+  if (status.result_code != std::to_underlying(SyscallErrorCode::kNone)) {
+    return status;
+  }
 
   if (!write_output_arg(*output_arg, output)) {
     return unrecoverable_error();

@@ -36,5 +36,5 @@ target_include_directories(
 target_link_libraries(
   test_ffi
   hogdb_core
-  hogexec_core
+  runtime
 )

@@ -69,12 +69,20 @@ fn item_to_contract_helpers(
         syn::Item::Trait(item) => {
             let sig = parse::contract_signature_from_trait(item)?;
             let client = gen::client_from_contract_signature(&sig, config)?;
+
             Ok(client)
         }
         syn::Item::Impl(item) => {
             let sig = parse::contract_signature_from_impl(item)?;
+
+            let mut out = TokenStream2::new();
             let exports = gen::exports_from_contract_signature(&sig, config)?;
-            Ok(exports)
+            out.extend(exports.clone());
+            let test_registration =
+                gen::test_registration_from_method_signature(&sig)?;
+            out.extend(test_registration.clone());
+
+            Ok(out)
         }
         _ => err(
             item,
@@ -348,6 +356,31 @@ mod gen {
         }
     }
 
+    pub fn test_registration_from_method_signature(
+        contract: &sig::ContractImpl,
+    ) -> Result<TokenStream2> {
+        let mut registrations = TokenStream2::new();
+        for method in &contract.methods {
+            registrations.extend(registration_from_method_signature(method)?);
+        }
+
+        Ok(quote_spanned! {contract.span=>
+
+            #[cfg(feature="mock")]
+            pub mod test_setup {
+                use super::exports::*;
+
+                fn register(env : &mut ::sdk::TestEnvironment) -> ::sdk::types::Contract {
+                    let mut contract = env.add_contract();
+
+                    #registrations
+
+                    contract.as_contract()
+                }
+            }
+        })
+    }
+
     pub fn exports_from_contract_signature(
         contract: &sig::ContractImpl,
         config: &sig::Config,
@@ -399,6 +432,17 @@ mod gen {
                 }).into()
             }
 
+        })
+    }
+
+    fn registration_from_method_signature(
+        method: &sig::Method,
+    ) -> Result<TokenStream2> {
+        let ident = &method.ident;
+        let export_num = get_method_num(&ident.to_string());
+
+        Ok(quote! {
+            contract.register_extern_c_method(#export_num, || #ident());
         })
     }
 

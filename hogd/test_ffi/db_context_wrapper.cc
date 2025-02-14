@@ -5,8 +5,10 @@
 #include <memory>
 #include <string>
 
+#include "contract.hh"
 #include "coord.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "rpc.hh"
@@ -69,6 +71,21 @@ DBContext::advance_new_block()
   current_block_id_++;
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(current_block_id_, db_proxy_);
+}
+
+void
+DBContext::setup_create_contract(Contract const &contract)
+{
+  auto hash = sha256(contract);
+  db_.get_root_db().write_contract(hash,
+                                   std::make_shared<const Contract>(contract));
+}
+
+void
+DBContext::setup_create_deployment(ContractAddress const &addr,
+                                   SHA256Hash const &hash)
+{
+  db_.get_root_db().write_deployment(addr, hash);
 }
 
 } // namespace hogd

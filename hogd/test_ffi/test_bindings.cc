@@ -12,14 +12,11 @@
 #include <utility>
 
 #include "ffi_enums.hh"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/mock_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
-#include "hogd/test_ffi/mock_syscall_inner.h"
+#include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
-#include "syscall.hh"
-#include "syscall_args.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -88,6 +85,55 @@ add_contract_and_method(void *context, const unsigned char *contract_hash,
   return true;
 }
 
+void
+setup_create_contract(void *db, const unsigned char *contract_data,
+                      uint32_t contract_len)
+{
+  if (db == nullptr) {
+    return;
+  }
+  if (contract_data == nullptr) {
+    return;
+  }
+
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+
+  hogd::Contract contract;
+  try {
+    x23::deserialize(&contract, std::span<const unsigned char>(contract_data,
+                                                               contract_len));
+  } catch (x23::XdrBadInput const &e) {
+    return;
+  }
+
+  db_context->setup_create_contract(contract);
+}
+
+void
+setup_create_deployment(void *db, const unsigned char *deployment_addr,
+                        const unsigned char *deployed_hash)
+{
+  if (db == nullptr) {
+    return;
+  }
+  if (deployment_addr == nullptr) {
+    return;
+  }
+  if (deployed_hash == nullptr) {
+    return;
+  }
+
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+
+  ContractAddress addr;
+  std::memcpy(addr.data(), deployment_addr, addr.size());
+
+  SHA256Hash hash;
+  std::memcpy(hash.data(), deployed_hash, hash.size());
+
+  db_context->setup_create_deployment(addr, hash);
+}
+
 void *
 open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
                      unsigned int serial_len) noexcept
@@ -135,31 +181,13 @@ ForeignRootInvokeResult
 root_invoke(void *syscall_handler) noexcept
 {
   if (!syscall_handler) {
+    std::printf("no syscall handler!\n");
     return kUnrecoverableError;
   }
 
   auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
   auto res = context->root_invoke();
   return res;
-}
-
-ForeignHostFnResult
-mock_syscall_entrypoint(int32_t syscall, const unsigned char *input,
-                        uint32_t input_len, unsigned char *output,
-                        uint32_t output_len) noexcept
-{
-  std::span<const uint8_t> input_span = std::span(input, input_len);
-  std::span<uint8_t> output_span = std::span(output, output_len);
-
-  auto syscall_no = static_cast<SyscallNo>(syscall);
-
-  switch (syscall_no) {
-  case SyscallNo::kSHA256:
-    return mock_syscall_parser<SHA256_input, SHA256_output, &mock_SHA256_inner>(
-        syscall_no, input_span, output_span);
-  default:
-    return recoverable_error(SyscallErrorCode::kNoSyscall);
-  }
 }
 
 } // namespace
@@ -206,6 +234,20 @@ add_contract_and_method(void *context, const unsigned char *contract_hash,
                                         foreign_context))
              ? 0
              : 1;
+}
+
+void
+setup_create_contract(void *db, const unsigned char *contract_data,
+                      uint32_t contract_len)
+{
+  hogd::setup_create_contract(db, contract_data, contract_len);
+}
+
+void
+setup_create_deployment(void *db, const unsigned char *deployment_addr,
+                        const unsigned char *deployed_hash)
+{
+  hogd::setup_create_deployment(db, deployment_addr, deployed_hash);
 }
 
 void *

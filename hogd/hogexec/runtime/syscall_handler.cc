@@ -230,7 +230,6 @@ SystemCallHandler::lookup_contract_by_hash(SHA256Hash const &hash)
 std::unique_ptr<Runtime>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
-
   // No runtime cache entry exists; now try to create a new one.
   auto [deployed_hash, _] = lookup_deployed_contract_hash(addr);
   if (!deployed_hash) {
