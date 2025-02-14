@@ -14,7 +14,7 @@ test-client:
 expand:
 	cargo +nightly expand \
 		--no-default-features \
-		--features "client,std,alloc" \
+		--features "guest,alloc,client,mock" \
 
 tree:
 	# Show the dependency graph

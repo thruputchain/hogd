@@ -17,7 +17,9 @@ client = []
 guest = []
 alloc = ["sdk/alloc", "serde/alloc"]
 std = ["sdk/std", "serde/std"]
+mock = ["sdk/mock"]
 
 [dev-dependencies]
 sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/", features = ["mock"]}
+erc20 = {path = ".", features=["mock", "guest", "client", "std"]}
 

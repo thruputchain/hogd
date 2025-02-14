@@ -144,7 +144,7 @@ mod tests {
             contract
         };
 
-        env.setup_create_contract(&contract);
+        env.setup_create_contract(&contract.as_contract());
 
         let contract_bytes =
             contract.as_contract().to_xdr(Limits::none()).unwrap();

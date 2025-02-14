@@ -129,9 +129,8 @@ impl<'a> TestEnvironment {
         out
     }
 
-    pub fn setup_create_contract(&mut self, contract: &MockContract<'a>) {
-        let contract_bytes =
-            contract.as_contract().to_xdr(Limits::none()).unwrap();
+    pub fn setup_create_contract(&mut self, contract: &Contract) -> SHA256Hash {
+        let contract_bytes = contract.to_xdr(Limits::none()).unwrap();
         unsafe {
             setup_create_contract(
                 self.db,
@@ -139,6 +138,9 @@ impl<'a> TestEnvironment {
                 contract_bytes.len().try_into().unwrap(),
             )
         };
+        let mut hasher = Sha256::new();
+        hasher.update(&contract_bytes);
+        hasher.finalize().into()
     }
 
     pub fn setup_create_deployment(
@@ -195,7 +197,7 @@ impl<'a> TestEnvironment {
     {
         let mut test_contract = self.add_contract();
         test_contract.register_func(0, test);
-        self.setup_create_contract(&test_contract);
+        self.setup_create_contract(&test_contract.as_contract());
 
         use groundhog_xdr::transaction::*;
 
@@ -259,17 +261,6 @@ impl<'a> MockContract<'a> {
         unsafe { (*self.contract).hash }
     }
 
-    pub fn register_extern_c_method(
-        self: &mut Self,
-        id: u32,
-        func: extern "C" fn() -> i32,
-    ) {
-        unsafe {
-            (*self.contract)
-                .funcs
-                .insert(id, invoke_wrapper(move || func()))
-        };
-    }
     pub fn register_method(self: &mut Self, id: u32, func: fn() -> i32) {
         unsafe { (*self.contract).funcs.insert(id, invoke_wrapper(func)) };
     }

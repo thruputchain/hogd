@@ -859,10 +859,10 @@ def gen_rs_syscall_binding(syscall):
         syscallargs.append(f"""{output_name}.as_mut_ptr() as u64""")
         syscallargs.append(f"""{output_name}.len() as u64""")
         uninit_args.append(f"""unsafe {{core::mem::transmute({output_name})}}""")
-        output_mock_init_args.append(f"        {output_name} : ::rs_xdr::VecM::<u8>::default(),")
+        output_mock_init_args.append(f"        {output_name} :  vec![0; {output_name}.len()].try_into().unwrap(),")
         #output_assigns.append(f"    {output_name}.write(output.{output_name});")
         output_assigns.append(f"""    unsafe {{
-        std::ptr::copy_nonoverlapping(output.{output_name}.as_ptr(), {output_name}.as_mut_ptr() as *mut u8, 32);
+        std::ptr::copy_nonoverlapping(output.{output_name}.as_ptr(), {output_name}.as_mut_ptr() as *mut u8, output.{output_name}.len());
     }}""")
 
       inputdecls.append(f"""{output_name} : &mut {output_type}""")

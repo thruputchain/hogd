@@ -370,7 +370,7 @@ mod gen {
             pub mod test_setup {
                 use super::exports::*;
 
-                fn register(env : &mut ::sdk::TestEnvironment) -> ::sdk::types::Contract {
+                pub fn register(env : &mut ::sdk::TestEnvironment) -> ::sdk::types::Contract {
                     let mut contract = env.add_contract();
 
                     #registrations
@@ -423,10 +423,17 @@ mod gen {
         let export_name = get_method_name(&ident.to_string());
         let received_args = received_args(method);
         let provided_args = provided_args(method);
+
+        let internal_name = format_ident!("{}_internal", ident);
+
         Ok(quote_spanned! {method.span=>
 
             #[cfg_attr(target_family = "wasm", export_name = #export_name)]
             pub extern "C" fn #ident() -> i32 {
+                #internal_name()
+            }
+
+            pub fn #internal_name() -> i32 {
                 ::sdk::invoke::handle_call(| #received_args | {
                     contract().#ident( #provided_args )
                 }).into()
@@ -440,9 +447,10 @@ mod gen {
     ) -> Result<TokenStream2> {
         let ident = &method.ident;
         let export_num = get_method_num(&ident.to_string());
+        let internal_name = format_ident!("{}_internal", ident);
 
         Ok(quote! {
-            contract.register_extern_c_method(#export_num, || #ident());
+            contract.register_method(#export_num, #internal_name);
         })
     }
 

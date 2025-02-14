@@ -10,8 +10,8 @@ extern crate std;
 #[cfg(all(feature = "alloc", not(feature = "std")))]
 extern crate alloc;
 
-#[cfg(all(feature = "client", feature = "guest"))]
-compile_error!("Cannot enable both features \"client\" and \"guest\"");
+//#[cfg(all(feature = "client", feature = "guest"))]
+//compile_error!("Cannot enable both features \"client\" and \"guest\"");
 
 // A trait describing the contract interface
 pub mod interface;
@@ -29,3 +29,6 @@ mod guest;
 // Contract methods exposed with C ABI for running as guest
 #[cfg(feature = "guest")]
 pub use guest::exports::*;
+
+#[cfg(test)]
+mod tests;

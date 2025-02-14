@@ -131,8 +131,8 @@ ForeignHostFnResult constexpr from_status(
 
 ForeignHostFnResult constexpr from_status(HostFnResult result)
 {
-  return ForeignHostFnResult{.result_code = std::to_underlying(result.first),
-                             .panic = result.second};
+  return ForeignHostFnResult{.result_code = result.second,
+                             .panic = std::to_underlying(result.first)};
 }
 
 ForeignHostFnResult constexpr from_status(

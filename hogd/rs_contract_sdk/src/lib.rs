@@ -48,4 +48,6 @@ pub mod result;
 pub mod storage;
 
 #[cfg(feature = "mock")]
+pub use ::rs_xdr::ffi_enums::*;
+#[cfg(feature = "mock")]
 pub use test_ffi::*;
