@@ -20,6 +20,10 @@ fn check_mint() {
 
         client.initialize(&self_addr);
 
+        client.mint(&self_addr, 100);
+
+        assert_eq!(client.get_balance(), 100);
+
         return 0;
     });
 
