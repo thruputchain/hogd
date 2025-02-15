@@ -149,6 +149,7 @@ pub mod cross_call {
         RuntimeMemoryLength,
     };
     use alloc::vec::Vec;
+    use alloc::vec;
     use bcs;
     use serde::de::DeserializeOwned;
     use serde::Serialize;
@@ -198,7 +199,7 @@ pub mod cross_call {
         sys::raw_GetReturnedBufferLen(&mut return_len)
             .expect("Couldn't get returned buffer len");
 
-        let mut return_buf = Vec::with_capacity(return_len as usize);
+        let mut return_buf = vec![0; return_len as usize];
         let mut written: RuntimeMemoryLength = 0;
         sys::raw_GetReturnedBuffer(return_buf.as_mut_slice(), &mut written)
             .expect("Couldn't get returned buffer");
