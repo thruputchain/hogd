@@ -106,7 +106,7 @@ DiskWriter::sync()
 {
   std::unique_lock ul(to_disk_lock_);
 
-  // ask write_worker() to write the partial loglets in all heads and then the
+  // Ask write_worker() to write the partial loglets in all heads and then the
   // commit record. write_worker() may also still be writing full loglets
   // requested from enqueue_to_disk().
   for (WriteHead &h : heads_) {
@@ -118,7 +118,7 @@ DiskWriter::sync()
   to_disk_.emplace_back();
   worker_cv_.notify_one();
 
-  // wait for the write_worker() to finish all pending writes before the LSN.
+  // wait for the write_worker() to finish all pending writes before this LSN.
   uint64_t lsn = ++cur_lsn_;
   commit_cv_.wait(ul, [this, lsn] { return synced_lsn_ >= lsn || io_error_; });
   if (io_error_)

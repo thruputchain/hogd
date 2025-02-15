@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -213,11 +214,11 @@ run_bench(int num, int value_size, bench_fn fn)
   }
 }
 
-const std::pair<std::string, bench_fn> benchmarks[] = {
-    {"fill", do_fill},
-    {"replace", do_replacements},
-    {"read", do_reads},
-    {"delete", do_deletions},
+const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
+    {"fill", "inserts items", do_fill},
+    {"replace", "replaces existing items", do_replacements},
+    {"read", "reads items", do_reads},
+    {"delete", "deletes items", do_deletions},
 };
 
 } // namespace
@@ -235,11 +236,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   auto print_usage = [] {
     std::println("usage: [db_path] [command] [num] [value_size]");
     std::println("commands");
-    std::println("  fill: inserts items");
-    std::println("  replace: replaces existing items");
-    std::println("  read: reads items");
-    std::println("  delete: deletes items");
-    std::println("  compact: reads items while compacting");
+    for (const auto &[name, desc, ign] : hogd::benchmarks)
+      std::println("  {}: {}", name, desc);
   };
 
   if (argc < 5) {
@@ -251,7 +249,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   int num = std::stoi(argv[3], nullptr, 0);
   int value_size = std::stoi(argv[4], nullptr, 0);
 
-  for (const auto &[name, fn] : hogd::benchmarks) {
+  for (const auto &[name, ign, fn] : hogd::benchmarks) {
     if (cmd != name)
       continue;
     hogd::run_bench(num, value_size, fn);
