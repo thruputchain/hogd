@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"

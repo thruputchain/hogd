@@ -1,9 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+
 #include <algorithm>
+#include <cerrno>
 #include <cstddef>
 #include <cstdio>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -110,7 +114,7 @@ TEST(DirectoryTest, BasicUsage)
   // make sure it's empty.
   ErrnoStatus<std::vector<std::string>> list = dir->list();
   EXPECT_TRUE(list);
-  for (std::string filename : *list) {
+  for (std::string_view filename : *list) {
     EXPECT_TRUE(dir->unlink(filename));
   }
 
