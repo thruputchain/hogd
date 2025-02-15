@@ -101,6 +101,33 @@ TEST_P(IOTestP, BufferedWriteRead)
 INSTANTIATE_TEST_SUITE_P(IOTests, IOTestP,
                          ::testing::Values(3, 5, 7, 11, 4096, kDataSize));
 
+TEST(DirectoryTest, BasicUsage)
+{
+  // test opening a directory.
+  ErrnoStatus<Directory> dir = Directory::open("/tmp/hogd_io_test");
+  EXPECT_TRUE(dir);
+
+  // make sure it's empty.
+  ErrnoStatus<std::vector<std::string>> list = dir->list();
+  EXPECT_TRUE(list);
+  for (std::string filename : *list) {
+    EXPECT_TRUE(dir->unlink(filename));
+  }
+
+  // create a file.
+  ErrnoStatus<File> f = dir->openat("test", O_RDWR | O_CREAT);
+  EXPECT_TRUE(f);
+
+  // check that the file appears.
+  list = dir->list();
+  EXPECT_TRUE(list);
+  EXPECT_EQ(list->size(), 1);
+  EXPECT_EQ(list->at(0), "test");
+
+  // unlink the file.
+  EXPECT_TRUE(dir->unlink(list->at(0)));
+}
+
 } // namespace hogd
 
 int

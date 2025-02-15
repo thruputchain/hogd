@@ -203,8 +203,11 @@ Directory::list() const
 
   std::vector<std::string> filenames;
   struct dirent *entry;
-  while ((entry = readdir(dir)) != nullptr)
+  while ((entry = readdir(dir)) != nullptr) {
+    if (std::string_view n(entry->d_name); n == "." || n == "..")
+      continue;
     filenames.emplace_back(entry->d_name);
+  }
 
   return filenames;
 }
