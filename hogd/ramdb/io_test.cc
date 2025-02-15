@@ -123,9 +123,11 @@ TEST(DirectoryTest, BasicUsage)
   EXPECT_TRUE(list);
   EXPECT_EQ(list->size(), 1);
   EXPECT_EQ(list->at(0), "test");
+  EXPECT_TRUE(dir->access("test"));
 
   // unlink the file.
   EXPECT_TRUE(dir->unlink(list->at(0)));
+  EXPECT_EQ(dir->access("test").error(), ENOENT);
 }
 
 } // namespace hogd
