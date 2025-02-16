@@ -130,16 +130,20 @@ File::open_temporary()
 {
 #if defined(__linux__)
   // Linux supports a more advanced form of temporary files that are
-  // automatically cleaned up when the file descriptor is closed.
-  return sys_open("/tmp", O_TMPFILE | O_RDWR, S_IRUSR | S_IWUSR)
-      .transform([](int fd) { return File(fd); });
-#else  // defined(__linux__)
+  // automatically cleaned up when the file descriptor is closed. It may not
+  // be available on every filesystem.
+  if (auto f = sys_open("/tmp", O_TMPFILE | O_RDWR, S_IRUSR | S_IWUSR)
+                   .transform([](int fd) { return File(fd); });
+      f) {
+    return f;
+  }
+#endif // defined(__linux__)
+
   char tmp[] = "/tmp/ramdb_XXXXXX";
-  int fd = mkstemp(tmp);
+  int fd = mkstemp(tmp); // NOLINT(misc-include-cleaner)
   if (fd == -1)
     return Errno{};
   return File(fd);
-#endif // defined(__linux__)
 }
 
 File::~File()
@@ -190,6 +194,16 @@ Directory::open(const std::string &path, bool create, mode_t mode)
   }
 
   // create and return the Directory object.
+  return Directory(path);
+}
+
+ErrnoStatus<Directory>
+Directory::open_temporary()
+{
+  char tmp[] = "/tmp/ramdb_XXXXXX";
+  char *path = mkdtemp(tmp); // NOLINT(misc-include-cleaner)
+  if (path == nullptr)
+    return Errno{};
   return Directory(path);
 }
 

@@ -6,7 +6,9 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -110,7 +112,7 @@ INSTANTIATE_TEST_SUITE_P(IOTests, IOTestP,
 TEST(DirectoryTest, BasicUsage)
 {
   // test opening a directory.
-  ErrnoStatus<Directory> dir = Directory::open("/tmp/hogd_io_test");
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
   ASSERT_TRUE(dir);
 
   // make sure it's empty.

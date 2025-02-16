@@ -79,6 +79,8 @@ public:
   // open checks if the directory exists and creates it if requested.
   static ErrnoStatus<Directory> open(const std::string &path,
                                      bool create = true, mode_t mode = S_IRWXU);
+  // open_temporary creates a temporary directory. Useful for testing.
+  static ErrnoStatus<Directory> open_temporary();
 
   explicit Directory(std::string_view path) : dir_path_(path) {}
   ~Directory() = default;

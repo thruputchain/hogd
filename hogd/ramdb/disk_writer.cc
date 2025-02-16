@@ -65,12 +65,10 @@ DiskWriter::write_worker(const std::stop_token &stoken)
                           commit_hdr->get_key().begin());
         crc = 0;
 
-        // write the commit record and sync to the disk.
-        ErrnoStatus<void> ret =
-            write_full(w_, std::as_writable_bytes(std::span(commit_buf)));
-        if (!ret)
-          ret = w_.flush_and_sync();
-        if (!ret) [[unlikely]] {
+        // write the commit record and sync everything to the disk.
+        if (!write_full(w_, std::as_writable_bytes(std::span(commit_buf)))
+                 .and_then([this] { return w_.flush_and_sync(); }))
+            [[unlikely]] {
           signal_ioerror();
           return;
         }
