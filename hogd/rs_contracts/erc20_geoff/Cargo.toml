@@ -1,0 +1,24 @@
+[package]
+name = "erc20_geoff"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/" }
+serde = { version = "1.0.217", default-features = false, features = ["derive"] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["guest", "alloc"]
+client = []
+guest = []
+alloc = ["sdk/alloc", "serde/alloc"]
+std = ["sdk/std", "serde/std"]
+mock = ["sdk/mock"]
+
+[dev-dependencies]
+sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/", features = ["mock"]}
+erc20_geoff = {path = ".", features=["mock", "guest", "client", "std", "mock"]}
+

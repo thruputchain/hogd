@@ -5,6 +5,7 @@ resolver = "2"
 
 members = [
     "erc20",
+    "erc20_geoff",
     "caller",
     "genesis_deployer",
     "rcq_test",
