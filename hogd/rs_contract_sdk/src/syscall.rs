@@ -1,9 +1,13 @@
+#![allow(dead_code)]
+
 pub use ::rs_xdr::syscall::{SyscallErrorCode, SyscallNo};
 
 /// Rust bindings for the syscalls
+#[rustfmt::skip]
 pub mod bindings;
 
 // provides TryInto<SyscallErrorCode> for SysErr
+#[rustfmt::skip]
 mod error_helper;
 
 use thiserror::Error;

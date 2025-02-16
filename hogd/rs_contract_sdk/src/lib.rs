@@ -17,8 +17,7 @@ pub use ::bcs as serialize;
 
 mod rt;
 
-#[rustfmt::skip]
-mod syscall;
+pub mod syscall;
 
 mod custom_arg;
 

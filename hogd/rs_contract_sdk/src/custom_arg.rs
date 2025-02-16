@@ -1,3 +1,6 @@
+// unused under feature mock
+#![allow(dead_code)]
+
 pub trait TwoCustomArgs {
     fn to_u64s(&self) -> (u64, u64);
 }

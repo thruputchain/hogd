@@ -370,6 +370,7 @@ mod gen {
             pub mod test_setup {
                 use super::exports::*;
 
+                #[allow(dead_code)]
                 pub fn register(env : &mut ::sdk::TestEnvironment) -> ::sdk::types::Contract {
                     let mut contract = env.add_contract();
 

@@ -146,15 +146,20 @@ impl<'a> TestEnvironment {
     pub fn setup_create_deployment(
         &mut self,
         addr: &ContractAddress,
-        contract: &MockContract<'a>,
+        contract: &Contract
     ) {
         let contract_bytes =
-            contract.as_contract().to_xdr(Limits::none()).unwrap();
+            contract.to_xdr(Limits::none()).unwrap();
+        
+        let mut hasher = Sha256::new();
+        hasher.update(&contract_bytes);
+        let contract_hash : SHA256Hash = hasher.finalize().into();
+
         unsafe {
             setup_create_deployment(
                 self.db,
                 addr.as_ptr(),
-                contract.as_hash().as_ptr(),
+                contract_hash.as_ptr(),
             )
         };
     }
@@ -203,7 +208,7 @@ impl<'a> TestEnvironment {
 
         let invoke_addr: [u8; 32] = [0xFF; 32];
 
-        self.setup_create_deployment(&invoke_addr, &test_contract);
+        self.setup_create_deployment(&invoke_addr, &test_contract.as_contract());
 
         let stx = SignedTransaction {
             tx: Transaction {
@@ -302,7 +307,7 @@ impl MockContractInner {
 // and then get the results
 pub struct TransactionHandler<'a> {
     handler: *mut c_void,
-    env: &'a TestEnvironment,
+    _marker: PhantomData<&'a TestEnvironment>,
     // cannot outlive the environment.
     // TODO(geoff): we could swap the backing pointer to the db
     // to be a shared ptr, and have handler hold a reference,
@@ -321,7 +326,7 @@ impl<'a> TransactionHandler<'a> {
                     tx_bytes.as_ptr(),
                     tx_bytes.len().try_into().unwrap(),
                 ),
-                env: env,
+                _marker: PhantomData,
                 invoked: false,
             }
         };
