@@ -334,19 +334,14 @@ BufferedWriter::write_slowpath(std::span<const std::byte> src)
 ErrnoStatus<void>
 BufferedWriter::flush()
 {
-  ErrnoStatus<void> ret = write_full(out_, buf_);
-  buf_.clear();
-  if (!ret)
-    return ret.error();
-  return {};
+  Defer d([this] { buf_.clear(); });
+  return write_full(out_, buf_);
 }
 
 ErrnoStatus<void>
 BufferedWriter::flush_and_sync()
 {
-  if (ErrnoStatus<void> ret = flush(); !ret)
-    return ret.error();
-  return out_.sync();
+  return flush().and_then([this] { return out_.sync(); });
 }
 
 } // namespace hogd

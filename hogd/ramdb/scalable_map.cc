@@ -24,6 +24,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
 #include "hogd/ramdb/item_allocator.h"
@@ -58,7 +59,7 @@ counter_dec(std::atomic<uint16_t> &cnt)
 inline size_t
 calculate_hash(std::span<const std::byte> key)
 {
-  return std::hash<std::span<const std::byte>>{}(key);
+  return SipHash24::get_default()(key);
 }
 
 } // namespace
@@ -238,8 +239,7 @@ ScalableMap::do_expand()
     std::mutex &mu = mutexes_[idx & (mutexes_.size() - 1)];
     std::lock_guard guard(mu);
     for (ItemHeader **bu = &buckets_[idx]; *bu != nullptr;) {
-      size_t hash = std::hash<std::span<const std::byte>>{}((*bu)->get_key());
-      size_t new_idx = hash & (buckets_.size() - 1);
+      size_t new_idx = calculate_hash((*bu)->get_key()) & (buckets_.size() - 1);
       ItemHeader **new_bu = &buckets_[new_idx];
 
       // continue if the item's bucket didn't change.
