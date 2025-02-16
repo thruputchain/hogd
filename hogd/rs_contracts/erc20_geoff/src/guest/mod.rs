@@ -64,7 +64,7 @@ fn add_to_balance(addr: &ContractAddress, amount: Amount) -> Result<()> {
             }
         }
     };
-    Ok(sdk::NonnegativeIntSetAdd(&balance_key, s, a + amount)?)
+    Ok(sdk::NonnegativeIntSetAdd(&balance_key, s, a + (amount as i128))?)
 }
 
 fn add_to_allowance(
@@ -83,7 +83,7 @@ fn add_to_allowance(
             }
         }
     };
-    Ok(sdk::NonnegativeIntSetAdd(&key, s, a + amount)?)
+    Ok(sdk::NonnegativeIntSetAdd(&key, s, a + (amount as i128))?)
 }
 
 #[contract(mod_name = "exports")]
@@ -135,14 +135,14 @@ impl ERC20 for CoinContract {
     fn get_balance_of(&self, addr: &ContractAddress) -> Result<Amount> {
         let balance_key = get_balance_key(addr);
         match sdk::NonnegativeIntGet(&balance_key) {
-            Ok((s, a)) => return Ok((s + a).try_into().unwrap()),
+            Ok((s, a)) => Ok((s + a).try_into().unwrap()),
             Err(syserr) => {
                 if syserr.is_code(SyscallErrorCode::kStorageKeyNotExist) {
                     return Ok(0);
                 }
-                return Err(syserr.into());
+                Err(syserr.into())
             }
-        };
+        }
     }
     fn get_balance(&self) -> Result<Amount> {
         self.get_balance_of(&GetMsgSender()?)

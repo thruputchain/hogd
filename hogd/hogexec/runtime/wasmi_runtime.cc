@@ -12,6 +12,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
+#include "types.hh"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 
 namespace hogd {
@@ -151,7 +152,7 @@ WasmiContext::~WasmiContext()
 }
 
 std::unique_ptr<Runtime>
-WasmiContext::make_new_runtime(SHA256Hash const & /*unused*/,
+WasmiContext::make_new_runtime(SHA256Hash const &/*unused*/,
                                const Contract *contract,
                                SystemCallHandler *syscall_handler)
 {

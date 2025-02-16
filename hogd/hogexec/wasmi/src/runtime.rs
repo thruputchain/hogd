@@ -56,7 +56,12 @@ impl WasmiRuntime {
     ) -> Option<WasmiRuntime> {
         let module = match Module::new(&context.engine, &bytes) {
             Ok(m) => m,
-            Err(_) => {
+            Err(x) => {
+                // TODO(geoff): This should get replaced longer-term with some other
+                // kind of logging library, ideally integrated into hogd, 
+                // and need not log an error each time.
+                // Our dev tools should never give a wasm that fails to instantiate.
+                eprintln!("Wasmi module instantation error! {:?}", x);
                 return None;
             }
         };

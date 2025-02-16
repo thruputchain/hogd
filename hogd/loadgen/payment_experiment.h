@@ -16,6 +16,8 @@ class PaymentExperiment {
 public:
   PaymentExperiment(uint32_t num_accounts);
 
+  using amount_t = int128_t;
+
   // Relies on having the hardcoded deployer contract started at genesis.
 
   std::vector<std::vector<ProposedTransaction>>
@@ -37,7 +39,7 @@ private:
         std::shared_ptr<const Contract> const &wallet_contract,
         ContractAddress const &erc20_address) const;
 
-    ProposedTransaction make_check_balance_transaction(int64_t amount) const;
+    ProposedTransaction make_check_balance_transaction(amount_t amount) const;
   };
 
   void generate_accounts();
@@ -48,11 +50,11 @@ private:
   std::vector<ProposedTransaction> make_mint_transactions();
   std::vector<ProposedTransaction> make_check_balance_transactions();
 
-  ProposedTransaction make_mint_transaction(int64_t amount,
+  ProposedTransaction make_mint_transaction(amount_t amount,
                                             Account const &to) const;
 
   static ProposedTransaction
-  make_pairwise_payment(Account const &from, Account const &to, int64_t amount);
+  make_pairwise_payment(Account const &from, Account const &to, amount_t amount);
 
   std::minstd_rand gen_;
 

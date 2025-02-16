@@ -40,7 +40,7 @@ PaymentExperiment::PaymentExperiment(uint32_t num_accounts)
 {
   auto [wallet_hash, wallet_contract] =
       load_built_rs_contract("simple_wallet.wasm");
-  auto [erc20_hash, erc20_contract] = load_built_rs_contract("erc20.wasm");
+  auto [erc20_hash, erc20_contract] = load_built_rs_contract("erc20_geoff.wasm");
 
   wallet_contract_hash_ = wallet_hash;
   erc20_contract_hash_ = erc20_hash;
@@ -146,7 +146,7 @@ PaymentExperiment::produce_initialization_transactions()
 }
 
 ProposedTransaction
-PaymentExperiment::make_mint_transaction(int64_t amount,
+PaymentExperiment::make_mint_transaction(amount_t amount,
                                          Account const &to) const
 {
   return ProposedTransaction{
@@ -161,7 +161,7 @@ PaymentExperiment::make_mint_transaction(int64_t amount,
 }
 
 ProposedTransaction
-PaymentExperiment::Account::make_check_balance_transaction(int64_t amount) const
+PaymentExperiment::Account::make_check_balance_transaction(amount_t amount) const
 {
   return ProposedTransaction{
       .signed_tx = SignedTransaction{
@@ -175,7 +175,7 @@ PaymentExperiment::Account::make_check_balance_transaction(int64_t amount) const
 
 ProposedTransaction
 PaymentExperiment::make_pairwise_payment(Account const &from, Account const &to,
-                                         int64_t amount)
+                                         amount_t amount)
 {
 
   auto message =

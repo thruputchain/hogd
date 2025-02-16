@@ -12,8 +12,7 @@ pub struct ConfigStorage {
 
 impl ConfigStorage {
     pub fn new(owner: &ContractAddress) -> Result<Self> {
-        let owner = owner.clone();
-        let storage = Self { owner };
+        let storage = Self { owner: *owner };
 
         Ok(storage)
     }

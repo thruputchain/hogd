@@ -5,6 +5,7 @@
 
 rs_contracts : \
 	erc20.wasm \
+	erc20_geoff.wasm \
 	caller.wasm \
 	genesis_deployer.wasm \
 	rcq_test.wasm \

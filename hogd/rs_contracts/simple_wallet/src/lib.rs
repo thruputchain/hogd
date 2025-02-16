@@ -3,10 +3,11 @@
 
 extern crate alloc;
 
-use erc20::client::ERC20Client;
-use erc20::interface::{Amount, ERC20};
+use erc20_geoff::client::ERC20Client;
+use erc20_geoff::interface::{Amount, ERC20};
 use sdk::contract::{Contract, ContractWithStorage};
 use sdk::macros::contract;
+use sdk::result::ensure;
 use sdk::types::{
     ContractAddress, Ed25519PublicKey, Ed25519SignatureA, PublicKey, Signature,
     StorageKey,
@@ -63,13 +64,12 @@ impl WalletContract {
     }
 
     pub fn get_balance(&self) -> Amount {
-        self.token().get_balance()
+       self.token().get_balance().unwrap()
     }
 
     pub fn test_expect_balance(&self, expect: Amount) {
         let bal = self.get_balance();
-
-        assert_eq!(bal, expect);
+        ensure(bal == expect, "bad balance").unwrap();
     }
 
     fn compute_auth_message(
@@ -118,7 +118,7 @@ impl WalletContract {
     ) {
         self.check_payment_authorization(to_addr, amount, signature);
 
-        self.token().transfer(&to_addr, amount);
+        self.token().transfer(&to_addr, amount).unwrap();
     }
 
     /*
@@ -134,6 +134,6 @@ impl WalletContract {
     */
 
     pub fn mint(&self, to_addr: &ContractAddress, amount: Amount) {
-        self.token().mint(&to_addr, amount);
+        self.token().mint(&to_addr, amount).unwrap();
     }
 }

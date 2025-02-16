@@ -11,6 +11,8 @@ pub type SysResult<T> = core::result::Result<T, SysErr>;
 // For other, more general SDK functions
 pub type Result<T> = core::result::Result<T, Error>;
 
+// TODO(geoff): Do we want a configure to toggle detailed error strings?
+
 // Error type for general SDK functions
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum Error {
