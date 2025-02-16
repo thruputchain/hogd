@@ -30,10 +30,12 @@ constexpr size_t kBufferSize = 4_KiB;
 
 class IOTest : public testing::Test {
 protected:
-  IOTest() : buf_(kDataSize)
+  IOTest() : buf_(kDataSize) {}
+
+  void SetUp() override
   {
     ErrnoStatus<File> ret = File::open_temporary();
-    EXPECT_TRUE(ret);
+    ASSERT_TRUE(ret);
     f_ = std::move(*ret);
     RandomBytes rand;
     rand(std::span(buf_));
@@ -109,7 +111,7 @@ TEST(DirectoryTest, BasicUsage)
 {
   // test opening a directory.
   ErrnoStatus<Directory> dir = Directory::open("/tmp/hogd_io_test");
-  EXPECT_TRUE(dir);
+  ASSERT_TRUE(dir);
 
   // make sure it's empty.
   ErrnoStatus<std::vector<std::string>> list = dir->list();
@@ -120,7 +122,7 @@ TEST(DirectoryTest, BasicUsage)
 
   // create a file.
   ErrnoStatus<File> f = dir->openat("test", O_RDWR | O_CREAT);
-  EXPECT_TRUE(f);
+  ASSERT_TRUE(f);
 
   // check that the file appears.
   list = dir->list();

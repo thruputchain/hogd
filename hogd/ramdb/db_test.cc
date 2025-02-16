@@ -45,7 +45,7 @@ protected:
         Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
     DBStatus<std::unique_ptr<Database>> ret =
         Database::open("/tmp/ramdb_test", heap_size, kBucketOrder);
-    EXPECT_TRUE(static_cast<bool>(ret));
+    ASSERT_TRUE(static_cast<bool>(ret));
     db_ = std::move(*ret);
   }
 
