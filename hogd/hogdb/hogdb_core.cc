@@ -33,7 +33,7 @@ HogdbCore::HogdbCore(int nthreads, std::string const &exec_server_port,
   : pool_(nthreads), cp_(pool_),
     block_manager_(kGenesisBlockID, std::make_shared<BlockState>(&root_db_),
                    &root_db_),
-    db_to_exec_server_(block_manager_), db_to_coord_server_(block_manager_),
+    db_to_exec_server_(cp_, block_manager_), db_to_coord_server_(block_manager_),
     exec_server_port_(exec_server_port), coord_server_port_(coord_server_port)
 {
   auto lfd = x23::tcplisten(atoi(exec_server_port.c_str()));

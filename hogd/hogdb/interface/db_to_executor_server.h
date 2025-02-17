@@ -6,6 +6,7 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/event.h"
 
 namespace hogd {
 
@@ -13,8 +14,8 @@ class DBToExecutorServer {
 public:
   using rpc_service = DatabaseToExecutorInterfaceV1;
 
-  DBToExecutorServer(BlockManager &block_manager)
-    : block_manager_(block_manager)
+  DBToExecutorServer(x23::CoroPoll& cp, BlockManager &block_manager)
+    : cp_(cp), block_manager_(block_manager)
   {}
 
   x23::Async<RPCError> try_reserve_delta(BlockID block_id, TransactionID txid,
@@ -44,6 +45,7 @@ public:
                                                 ContractAddress const &addr);
 
 private:
+  x23::CoroPoll& cp_;
   BlockManager &block_manager_;
 };
 

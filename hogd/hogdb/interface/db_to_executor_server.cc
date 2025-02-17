@@ -16,6 +16,8 @@ DBToExecutorServer::try_reserve_delta(BlockID block_id, TransactionID txid,
                                       StorageDelta const &delta,
                                       RPCFlagSet flags)
 {
+  co_await cp_.pool_.bg();
+
   auto block_data = block_manager_.get_block_data(block_id);
 
   if (!block_data) {
@@ -33,6 +35,8 @@ DBToExecutorServer::try_reserve_delta(BlockID block_id, TransactionID txid,
 x23::Async<void>
 DBToExecutorServer::commit_transaction(BlockID block_id, TransactionID txid)
 {
+  co_await cp_.pool_.bg();
+
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
     co_return;
@@ -44,6 +48,8 @@ DBToExecutorServer::commit_transaction(BlockID block_id, TransactionID txid)
 x23::Async<void>
 DBToExecutorServer::abort_transaction(BlockID block_id, TransactionID txid)
 {
+  co_await cp_.pool_.bg();
+
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
     co_return;
@@ -56,6 +62,8 @@ DBToExecutorServer::abort_transaction(BlockID block_id, TransactionID txid)
 x23::Async<ExpectedStorageItem>
 DBToExecutorServer::get_item(BlockID block_id, AddressAndKey const &addrkey)
 {
+  co_await cp_.pool_.bg();
+
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
     co_return ExpectedStorageItem(RPCError::kBadBlockID);
@@ -77,6 +85,7 @@ x23::Async<ExpectedRetrocausalQueueBlock>
 DBToExecutorServer::get_next_retrocausal_queue_block(
     BlockID block_id, AddressAndKey const &addrkey, uint64_t block_number)
 {
+  co_await cp_.pool_.bg();
 
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
@@ -109,6 +118,8 @@ x23::Async<ExpectedQueueEntry>
 DBToExecutorServer::get_concurrent_retrocausal_queue_entry(
     BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
 {
+  co_await cp_.pool_.bg();
+
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
     co_return ExpectedQueueEntry(RPCError::kBadBlockID);
@@ -129,6 +140,8 @@ x23::Async<void>
 DBToExecutorServer::commit_contract_create(BlockID block_id,
                                            Contract const &contract)
 {
+  co_await cp_.pool_.bg();
+
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
     co_return;
@@ -143,6 +156,8 @@ DBToExecutorServer::commit_contract_deploy(BlockID block_id,
                                            ContractAddress const &addr,
                                            SHA256Hash const &contract_hash)
 {
+  co_await cp_.pool_.bg();
+
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
     co_return;
@@ -156,6 +171,8 @@ x23::Async<ExpectedContract>
 DBToExecutorServer::get_contract(BlockID block_id,
                                  SHA256Hash const &contract_hash)
 {
+  co_await cp_.pool_.bg();
+
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
     co_return ExpectedContract(RPCError::kBadBlockID);
@@ -175,6 +192,8 @@ x23::Async<ExpectedDeployment>
 DBToExecutorServer::get_deployment(BlockID block_id,
                                    ContractAddress const &addr)
 {
+  co_await cp_.pool_.bg();
+
   auto block_data = block_manager_.get_block_data(block_id);
   if (!block_data) {
     co_return ExpectedDeployment(RPCError::kBadBlockID);
