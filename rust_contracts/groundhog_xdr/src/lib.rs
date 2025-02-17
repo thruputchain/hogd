@@ -2,6 +2,9 @@
 #![allow(non_snake_case)]
 #![allow(unused_imports)]
 
+mod byte_array;
+pub use byte_array::*;
+
 #[rustfmt::skip]
 pub mod contract;
 #[rustfmt::skip]
@@ -38,13 +41,13 @@ mod test;
 
 impl Default for Signature {
     fn default() -> Self {
-        Self::Ed25519 { ed25519: [0; 64] }
+        Self::Ed25519 { ed25519: ByteArray::default() }
     }
 }
 
 impl Default for PublicKey {
     fn default() -> Self {
-        Self::Ed25519 { ed25519: [0; 32] }
+        Self::Ed25519 { ed25519: ByteArray::default() }
     }
 }
 

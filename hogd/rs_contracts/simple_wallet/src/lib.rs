@@ -9,7 +9,7 @@ use sdk::contract::{Contract, ContractWithStorage};
 use sdk::macros::contract;
 use sdk::result::ensure;
 use sdk::types::{
-    ContractAddress, Ed25519PublicKey, Ed25519SignatureA, PublicKey, Signature,
+    ContractAddress, Ed25519PublicKey, Ed25519Signature, PublicKey, Signature,
     StorageKey,
 };
 use serde::{Deserialize, Serialize};
@@ -93,7 +93,7 @@ impl WalletContract {
         &self,
         to_addr: &ContractAddress,
         amount: Amount,
-        signature: &Ed25519SignatureA,
+        signature: &Ed25519Signature,
     ) {
         let pk = &self.storage().pk;
 
@@ -103,7 +103,7 @@ impl WalletContract {
         sdk::crypto::VerifySignature(
             &PublicKey::Ed25519 { ed25519: *pk },
             &Signature::Ed25519 {
-                ed25519: signature.as_array().clone(),
+                ed25519: *signature,
             },
             &auth_message,
         )
@@ -114,7 +114,7 @@ impl WalletContract {
         &self,
         to_addr: &ContractAddress,
         amount: Amount,
-        signature: &Ed25519SignatureA,
+        signature: &Ed25519Signature,
     ) {
         self.check_payment_authorization(to_addr, amount, signature);
 
@@ -125,7 +125,7 @@ impl WalletContract {
     pub fn try_send_payment(&self,
         to_addr: &ContractAddress,
         amount: Amount,
-        signature: &Ed25519SignatureA)
+        signature: &Ed25519Signature)
     {
         self.check_payment_authorization(to_addr, amount, signature);
 

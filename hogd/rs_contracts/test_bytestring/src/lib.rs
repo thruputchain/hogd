@@ -7,7 +7,7 @@ use sdk::types::StorageKey;
 pub extern "C" fn write_bytestring() -> i32 {
     let calldata = sdk::GetCalldata().unwrap();
 
-    let key: StorageKey = calldata[0..32].try_into().unwrap();
+    let key = StorageKey::new(calldata[0..32].try_into().unwrap());
 
     let string = &calldata[32..];
 
@@ -20,7 +20,7 @@ pub extern "C" fn write_bytestring() -> i32 {
 pub extern "C" fn log_bytestring() -> i32 {
     let calldata = sdk::GetCalldata().unwrap();
 
-    let key: StorageKey = calldata[0..32].try_into().unwrap();
+    let key = StorageKey::new(calldata[0..32].try_into().unwrap());
 
     if calldata.len() != 32 {
         panic!("bad calldata len");
@@ -37,7 +37,7 @@ pub extern "C" fn log_bytestring() -> i32 {
 pub extern "C" fn expect_bytestring() -> i32 {
     let calldata = sdk::GetCalldata().unwrap();
 
-    let key: StorageKey = calldata[0..32].try_into().unwrap();
+    let key = StorageKey::new(calldata[0..32].try_into().unwrap());
 
     let bstring = sdk::BytestringGet(&key).unwrap();
     let expected_bstring = &calldata[32..];

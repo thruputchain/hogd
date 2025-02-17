@@ -1,11 +1,11 @@
-use crate::macros::static_key;
+use crate::macros::_static_key;
 use crate::result::{Error, Result};
 use crate::sys;
 use crate::syscall::SyscallErrorCode;
 use crate::types::StorageKey;
 
 const INITIALIZE_GUARD_KEY: StorageKey =
-    static_key!("initialization guard key");
+    _static_key!("initialization guard key");
 
 // a function that can only execute on one transaction, ever
 pub fn initialization_guard() -> Result<()> {

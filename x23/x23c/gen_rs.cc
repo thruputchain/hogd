@@ -608,7 +608,10 @@ GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_set
     }
     return std::format("Option<{}>", tname);
   case kArray:
-    return std::format("[{}; {}]", tname, d.bound);
+    if (tname == "u8")
+      return std::format("ByteArray<{}>", d.bound);
+    else
+      return std::format("[{}; {}]", tname, d.bound);
   case kVec:
     if (in_colon_required_setting) {
       if (tname == "string"s)

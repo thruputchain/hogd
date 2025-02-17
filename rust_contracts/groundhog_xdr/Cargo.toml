@@ -14,3 +14,7 @@ std = ["alloc"]
 
 [dev-dependencies]
 groundhog_xdr = {path = ".", features=["std"]}
+
+[dependencies]
+serde = { version = "1.0.217", default-features = false, features = ["alloc"] }
+serde_arrays = { path = "../../hogd/rs_contract_sdk/external/serde_arrays", default-features = false, features = ["alloc"] }
