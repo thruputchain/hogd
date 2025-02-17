@@ -53,8 +53,9 @@ private:
   ProposedTransaction make_mint_transaction(amount_t amount,
                                             Account const &to) const;
 
-  static ProposedTransaction
-  make_pairwise_payment(Account const &from, Account const &to, amount_t amount);
+  static ProposedTransaction make_pairwise_payment(Account const &from,
+                                                   Account const &to,
+                                                   amount_t amount);
 
   std::minstd_rand gen_;
 

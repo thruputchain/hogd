@@ -40,7 +40,7 @@ run_payments(uint32_t nacc, uint32_t nthread)
 
   const unsigned int nexec_workthreads = nthread;
   const unsigned int nexec_corothreads = 1 + (nexec_workthreads / 4);
-  const unsigned int ndb_corothreads = 1; //nexec_corothreads;
+  const unsigned int ndb_corothreads = 1; // nexec_corothreads;
 
   std::mutex mtx;
   std::condition_variable cv;

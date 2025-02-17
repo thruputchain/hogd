@@ -14,7 +14,7 @@ class DBToExecutorServer {
 public:
   using rpc_service = DatabaseToExecutorInterfaceV1;
 
-  DBToExecutorServer(x23::CoroPoll& cp, BlockManager &block_manager)
+  DBToExecutorServer(x23::CoroPoll &cp, BlockManager &block_manager)
     : cp_(cp), block_manager_(block_manager)
   {}
 
@@ -45,7 +45,7 @@ public:
                                                 ContractAddress const &addr);
 
 private:
-  x23::CoroPoll& cp_;
+  x23::CoroPoll &cp_;
   BlockManager &block_manager_;
 };
 

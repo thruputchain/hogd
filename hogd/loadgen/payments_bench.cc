@@ -42,7 +42,7 @@ bm_payments(benchmark::State &state)
 
   const unsigned int nexec_workthreads = state.range(0);
   const unsigned int nexec_corothreads = 1 + (nexec_workthreads / 4);
-  const unsigned int ndb_corothreads = 1; //nexec_corothreads;
+  const unsigned int ndb_corothreads = 1; // nexec_corothreads;
 
   std::mutex mtx;
   std::condition_variable cv;

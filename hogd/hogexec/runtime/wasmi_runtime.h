@@ -56,7 +56,7 @@ public:
   ~WasmiContext() override;
 
   std::unique_ptr<Runtime>
-  make_new_runtime(SHA256Hash const &/*unused*/, const Contract *contract,
+  make_new_runtime(SHA256Hash const & /*unused*/, const Contract *contract,
                    SystemCallHandler *syscall_handler) override;
 
 private:

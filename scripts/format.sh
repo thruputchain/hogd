@@ -34,7 +34,7 @@ xargs ${CLANG_FORMAT} -i ${FFLAGS}
 
 set -e
 # Rust fmt
-CARGO_DIRS=$(find "${CODE_DIR}" -name 'Cargo.toml')
+CARGO_DIRS=$(find "${CODE_DIR}" -name 'Cargo.toml -not -path "*external*"')
 for CARGO_DIR in $CARGO_DIRS; do
     cargo +nightly fmt ${CF_FLAGS} --manifest-path=${CARGO_DIR} --message-format human --all
 done
