@@ -42,8 +42,8 @@ impl From<SysErr> for Error {
 }
 
 impl From<SerializationError> for Error {
-    fn from(err: SerializationError) -> Self {
-        Self::SerializationErr(err.to_string())
+    fn from(_err: SerializationError) -> Self {
+        Self::SerializationErr("elided-bcs-error".to_string())
     }
 }
 
