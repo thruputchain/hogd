@@ -616,3 +616,17 @@ impl<T: WriteXdr, const MAX: u32> WriteXdr for VecM<T, MAX> {
         })
     }
 }
+
+use crate::byte_array::*;
+
+impl<const N: usize> ReadXdr for ByteArray<N> {
+    fn read_xdr<R: Read>(r: &mut Limited<R>) -> Result<Self, Error> {
+        Ok(ByteArray::new(ReadXdr::read_xdr(r)?))
+    }
+}
+
+impl<const N: usize> WriteXdr for ByteArray<N> {
+    fn write_xdr<W: Write>(&self, w: &mut Limited<W>) -> Result<(), Error> {
+        self.as_array().write_xdr(w)
+    }
+}
