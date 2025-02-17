@@ -40,3 +40,16 @@ target_link_libraries(
 )
 
 set_property(TARGET payments_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  payment_sim
+  payment_sim.cc
+)
+target_link_libraries(
+  payment_sim
+  loadgen
+  hogd
+  hogexec_core
+  hogdb_core
+  coord_core
+)

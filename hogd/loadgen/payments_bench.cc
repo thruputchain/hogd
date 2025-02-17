@@ -42,6 +42,7 @@ bm_payments(benchmark::State &state)
 
   const unsigned int nexec_workthreads = state.range(0);
   const unsigned int nexec_corothreads = 1 + (nexec_workthreads / 4);
+  const unsigned int ndb_corothreads = 1; //nexec_corothreads;
 
   std::mutex mtx;
   std::condition_variable cv;
@@ -49,7 +50,7 @@ bm_payments(benchmark::State &state)
   bool executor_connected = false;
 
   std::thread db_thread = std::thread([&] {
-    HogdbCore db_core(1, db_to_exec_port, db_to_coord_port);
+    HogdbCore db_core(ndb_corothreads, db_to_exec_port, db_to_coord_port);
     db_core.get_root_db().set_as_default_genesis();
 
     db_core.announce_to_coordinator("localhost", coord_announce_port);
