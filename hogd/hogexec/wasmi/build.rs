@@ -7,11 +7,6 @@ use std::fs::File;
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
-    for (key, value) in env::vars() {
-        println!("cargo:warning={}={}", key, value);
-    }
-
-
     let build_path = env::var("CORROSION_BUILD_DIR").unwrap_or_else(|_| ".".to_string());
     let output_path = Path::new(&build_path).join("bindings.h");
 
@@ -22,6 +17,5 @@ fn main() {
         .expect("Unable to generate bindings").write_to_file(&output_path);
     
     println!("cargo:warning=Bindings written yes/no {}", r);
-
     println!("cargo:warning=Bindings written to {}", output_path.display());
 }
