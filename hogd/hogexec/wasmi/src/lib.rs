@@ -14,14 +14,16 @@ pub struct WasmiMemorySlice {
 }
 
 #[no_mangle]
-pub extern "C" fn wasmi_get_memory(runtime_void: *mut c_void) -> WasmiMemorySlice {
+pub extern "C" fn wasmi_get_memory(
+    runtime_void: *mut c_void,
+) -> WasmiMemorySlice {
     assert!(runtime_void != core::ptr::null_mut());
 
     let runtime: *mut WasmiRuntime =
         unsafe { core::mem::transmute(runtime_void) };
 
     let r = unsafe { &mut *runtime };
- 
+
     match r.instance.get_memory(&r.store, "memory") {
         Some(mem) => {
             let mem_sz = mem.data_size(&r.store) as u32;
