@@ -39,7 +39,6 @@ pub enum TrampolineErrorEnum {
     Exit { code: i32 } = 4,
 }
 
-
 #[derive(Debug, Copy, Clone)]
 pub struct TrampolineError {
     pub error: TrampolineErrorEnum,

@@ -79,8 +79,7 @@ c_call_0args(void *function_pointer, void *host_call_context)
 }
 
 TrampolineResult
-c_call_1args(void *function_pointer, void *host_call_context,
-             uint64_t arg1)
+c_call_1args(void *function_pointer, void *host_call_context, uint64_t arg1)
 {
   return c_call_internal(function_pointer, host_call_context, arg1);
 }
@@ -109,8 +108,7 @@ c_call_4args(void *function_pointer, void *host_call_context, uint64_t arg1,
 
 TrampolineResult
 c_call_5args(void *function_pointer, void *host_call_context, uint64_t arg1,
-             uint64_t arg2, uint64_t arg3, uint64_t arg4,
-             uint64_t arg5)
+             uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5)
 {
   return c_call_internal(function_pointer, host_call_context, arg1, arg2, arg3,
                          arg4, arg5);
