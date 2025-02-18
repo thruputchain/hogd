@@ -1,6 +1,10 @@
 #![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(dead_code)]
+#![allow(non_snake_case)]
 
-use core::ffi::c_void;
+include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
 use wasmi::core::HostError;
 use wasmi::Error;
 
@@ -26,7 +30,6 @@ use core::fmt;
  *
  */
 
-#[allow(dead_code)]
 #[repr(u8)]
 #[derive(Clone, Copy, Debug)]
 pub enum TrampolineErrorEnum {
@@ -36,18 +39,6 @@ pub enum TrampolineErrorEnum {
     Exit { code: i32 } = 4,
 }
 
-const TrampolineErrorNONE: u8 = 0;
-const TrampolineErrorOUTOFGAS: u8 = 1;
-#[allow(dead_code)]
-const TrampolineErrorUNRECOVERABLE: u8 = 2;
-const TrampolineErrorRETURN: u8 = 3;
-const TrampolineErrorEXIT: u8 = 4;
-
-#[repr(C)]
-pub struct TrampolineResult {
-    result: i32,
-    panic: u8,
-}
 
 #[derive(Debug, Copy, Clone)]
 pub struct TrampolineError {
@@ -56,100 +47,25 @@ pub struct TrampolineError {
 
 impl fmt::Display for TrampolineError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "TrampolineError error printing is annoying")
+        write!(f, "TrampolineError: {:?}", self.error)
     }
 }
 
 impl HostError for TrampolineError {}
 
-extern "C" {
-    pub fn c_call_0args(
-        fn_pointer: *mut c_void,
-        userctx: *mut c_void,
-    ) -> TrampolineResult;
-    pub fn c_call_1args(
-        fn_pointer: *mut c_void,
-        userctx: *mut c_void,
-        arg1: u64,
-    ) -> TrampolineResult;
-    pub fn c_call_2args(
-        fn_pointer: *mut c_void,
-        userctx: *mut c_void,
-        arg1: u64,
-        arg2: u64,
-    ) -> TrampolineResult;
-    pub fn c_call_3args(
-        fn_pointer: *mut c_void,
-        userctx: *mut c_void,
-        arg1: u64,
-        arg2: u64,
-        arg3: u64,
-    ) -> TrampolineResult;
-    pub fn c_call_4args(
-        fn_pointer: *mut c_void,
-        userctx: *mut c_void,
-        arg1: u64,
-        arg2: u64,
-        arg3: u64,
-        arg4: u64,
-    ) -> TrampolineResult;
-    pub fn c_call_5args(
-        fn_pointer: *mut c_void,
-        userctx: *mut c_void,
-        arg1: u64,
-        arg2: u64,
-        arg3: u64,
-        arg4: u64,
-        arg5: u64,
-    ) -> TrampolineResult;
-    pub fn c_call_6args(
-        fn_pointer: *mut c_void,
-        userctx: *mut c_void,
-        arg1: u64,
-        arg2: u64,
-        arg3: u64,
-        arg4: u64,
-        arg5: u64,
-        arg6: u64,
-    ) -> TrampolineResult;
-    pub fn c_call_7args(
-        fn_pointer: *mut c_void,
-        userctx: *mut c_void,
-        arg1: u64,
-        arg2: u64,
-        arg3: u64,
-        arg4: u64,
-        arg5: u64,
-        arg6: u64,
-        arg7: u64,
-    ) -> TrampolineResult;
-    pub fn c_call_8args(
-        fn_pointer: *mut c_void,
-        userctx: *mut c_void,
-        arg1: u64,
-        arg2: u64,
-        arg3: u64,
-        arg4: u64,
-        arg5: u64,
-        arg6: u64,
-        arg7: u64,
-        arg8: u64,
-    ) -> TrampolineResult;
-}
-
 // This is annoying, but I'm not sure how better to deal with this
 pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
     match result.panic {
-        x if x == TrampolineErrorNONE => Ok(result.result),
-        x if x == TrampolineErrorOUTOFGAS => {
+        x if x == kTrampolineErrorNONE => Ok(result.result),
+        x if x == kTrampolineErrorOUTOFGAS => {
             Err(Error::host(TrampolineError {
                 error: TrampolineErrorEnum::OutOfGas,
             }))
         }
-        x if x == TrampolineErrorRETURN => Err(Error::host(TrampolineError {
+        x if x == kTrampolineErrorRETURN => Err(Error::host(TrampolineError {
             error: TrampolineErrorEnum::Return,
         })),
-        x if x == TrampolineErrorEXIT => Err(Error::host(TrampolineError {
+        x if x == kTrampolineErrorEXIT => Err(Error::host(TrampolineError {
             error: TrampolineErrorEnum::Exit {
                 code: result.result,
             },
