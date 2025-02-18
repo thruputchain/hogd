@@ -38,7 +38,7 @@ add_dependencies(
   runtime
   generate_syscall_inner_h
   generate_syscall_entry_cc
-  wasmi_lib
+  generate_wasmi_ffi_h
   protocol
 )
 
