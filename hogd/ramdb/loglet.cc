@@ -31,6 +31,7 @@ map_segment(size_t len)
   constexpr int kPermissions = PROT_READ | PROT_WRITE;
   constexpr int kFlags = MAP_PRIVATE | MAP_ANONYMOUS;
 
+#if defined(__linux__)
   // first try a huge page mapping for better performance.
   void *addr = mmap(nullptr, len, kPermissions, kFlags | MAP_HUGETLB, -1, 0);
   if (addr != MAP_FAILED)
@@ -38,6 +39,7 @@ map_segment(size_t len)
 
   warn_first_n(1, "Couldn't mmap huge pages: {}.", Errno());
   info_first_n(1, "Consider reserving huge pages to improve performance");
+#endif // defined(__linux__)
 
   // then fallback to a standard mapping.
   addr = mmap(nullptr, len, kPermissions, kFlags, -1, 0);

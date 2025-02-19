@@ -86,9 +86,9 @@ public:
   }
 
 private:
-  // the map uses this to allocate key-value pairs.
+  // used to allocate the items in the map.
   ItemAllocator &allocator_;
-  // the disk writer used to log changes to disk.
+  // used to log changes to disk.
   DiskWriter &disk_writer_;
   // the number of buckets before a resizing.
   size_t old_size_;

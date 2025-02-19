@@ -16,6 +16,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "hogd/base/cleanup.h"
@@ -128,21 +129,31 @@ File::open(const std::string &path, int flags, mode_t mode)
 ErrnoStatus<File>
 File::open_temporary()
 {
+  // use TMPDIR environment variable, of /tmp if not found.
+  std::string tmpdir("/tmp/");
+  if (char *tmp = getenv("TMPDIR"); tmp != nullptr)
+    tmpdir = tmp;
+
 #if defined(__linux__)
   // Linux supports a more advanced form of temporary files that are
   // automatically cleaned up when the file descriptor is closed. It may not
   // be available on every filesystem.
-  if (auto f = sys_open("/tmp", O_TMPFILE | O_RDWR, S_IRUSR | S_IWUSR)
+  if (auto f = sys_open(tmpdir, O_TMPFILE | O_RDWR, S_IRUSR | S_IWUSR)
                    .transform([](int fd) { return File(fd); });
       f) {
     return f;
   }
 #endif // defined(__linux__)
 
-  char tmp[] = "/tmp/ramdb_XXXXXX";
-  int fd = mkstemp(tmp); // NOLINT(misc-include-cleaner)
+  std::string tmp = tmpdir + "ramdb_XXXXXX";
+  std::vector<char> buf(tmp.begin(), tmp.end());
+  buf.push_back('\0');
+  int fd = mkstemp(buf.data()); // NOLINT(misc-include-cleaner)
   if (fd == -1)
     return Errno{};
+
+  // unlink the file so it is immediately deleted when the fd is closed.
+  std::ignore = sys_unlink(tmp);
   return File(fd);
 }
 
