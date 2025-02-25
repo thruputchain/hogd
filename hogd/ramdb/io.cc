@@ -118,6 +118,15 @@ sys_unlink(const std::string &path)
   return make_errno_status<void>(unlink(path.c_str()));
 }
 
+inline std::string
+get_tmp_dir()
+{
+  // use TMPDIR environment variable, of /tmp if not found.
+  if (char *tmp = getenv("TMPDIR"); tmp != nullptr)
+    return std::string(tmp);
+  return "/tmp/";
+}
+
 } // namespace
 
 ErrnoStatus<File>
@@ -129,10 +138,7 @@ File::open(const std::string &path, int flags, mode_t mode)
 ErrnoStatus<File>
 File::open_temporary()
 {
-  // use TMPDIR environment variable, of /tmp if not found.
-  std::string tmpdir("/tmp/");
-  if (char *tmp = getenv("TMPDIR"); tmp != nullptr)
-    tmpdir = tmp;
+  std::string tmpdir = get_tmp_dir();
 
 #if defined(__linux__)
   // Linux supports a more advanced form of temporary files that are
@@ -211,8 +217,10 @@ Directory::open(const std::string &path, bool create, mode_t mode)
 ErrnoStatus<Directory>
 Directory::open_temporary()
 {
-  char tmp[] = "/tmp/ramdb_XXXXXX";
-  char *path = mkdtemp(tmp); // NOLINT(misc-include-cleaner)
+  std::string tmp = get_tmp_dir() + "ramdb_XXXXXX";
+  std::vector<char> buf(tmp.begin(), tmp.end());
+  buf.push_back('\0');
+  char *path = mkdtemp(tmp.data()); // NOLINT(misc-include-cleaner)
   if (path == nullptr)
     return Errno{};
   return Directory(path);

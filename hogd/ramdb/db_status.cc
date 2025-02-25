@@ -27,6 +27,8 @@ DBCategory::message(int code) const
     return "Internal Error";
   case kIO:
     return "Input/Output Error";
+  case kCorruption:
+    return "Data Corruption";
   default:
     return "Unknown Code";
   }

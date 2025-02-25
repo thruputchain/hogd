@@ -137,7 +137,16 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
   CompactionStats stats{};
   size_t bytes_moved = 0;
 
-  // move live items and skip dead items to compact.
+  // alloc_loglet is a utility for allocating reserved loglets.
+  auto alloc_loglet = [this, &stats]() {
+    UniqueLoglet dst =
+        make_unique_loglet(allocator_, LogletMode::kMemoryItems, true);
+    assert(static_cast<bool>(dst));
+    stats.loglets_freed--;
+    return dst;
+  };
+
+  // compact items in this loglet: move live items and skip dead items.
   for (ItemHeader &h : *src) {
     stats.items++;
     ItemHeader *src_item = std::addressof(h);
@@ -146,16 +155,16 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
     if (src->live_bytes() == bytes_moved)
       break;
 
-    // skip dead items that can be detected without locking.
+    // optimization: skip dead items that can be detected without locking.
     auto storage = std::atomic_ref<ItemStorage>(src_item->storage);
     if (storage.load(std::memory_order_acquire) == ItemStorage::kTombstone)
       continue;
 
-    // move the item to the new loglet (if it is still live after holding lock).
+    // try to move the item to the new loglet.
     [[maybe_unused]] bool found = map_->modify_locked(
-        src_item->get_key(), [this, src_item, &bytes_moved, &stats,
-                              &storage](ItemHeader **hptr) mutable {
-          // recheck if item became dead now that the lock is held.
+        src_item->get_key(), [this, alloc_loglet, src_item, &bytes_moved,
+                              &stats, &storage](ItemHeader **hptr) mutable {
+          // recheck if the item became dead before the lock was held.
           if (storage.load(std::memory_order_relaxed) ==
               ItemStorage::kTombstone) [[unlikely]] {
             return;
@@ -163,31 +172,22 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
 
           // initialize the first use of the per-thread loglet.
           static thread_local UniqueLoglet dst;
-          if (!dst) [[unlikely]] {
-            dst =
-                make_unique_loglet(allocator_, LogletMode::kMemoryItems, true);
-            stats.loglets_freed--;
-          }
+          if (!dst) [[unlikely]]
+            dst = alloc_loglet();
 
-          // allocate the destination item.
-          ItemHeader *dst_item =
-              dst->alloc(ItemStorage::kNormal, src_item->type,
-                         src_item->key_len, src_item->value_len);
+          // allocate the destination item
+          ItemHeader *dst_item = dst->clone(src_item);
           if (!dst_item) {
             // loglet is full; get a new one.
             give_to_compactor(std::move(dst));
-            dst =
-                make_unique_loglet(allocator_, LogletMode::kMemoryItems, true);
-            stats.loglets_freed--;
-            dst_item = dst->alloc(ItemStorage::kNormal, src_item->type,
-                                  src_item->key_len, src_item->value_len);
+            dst = alloc_loglet();
+            dst_item = dst->clone(src_item);
             assert(dst_item != nullptr);
           }
 
           // copy the item's key and value to the new location.
-          std::ranges::copy(src_item->get_key(), dst_item->get_key().begin());
-          std::ranges::copy(src_item->get_value(),
-                            dst_item->get_value().begin());
+          std::ranges::copy(src_item->get_key_and_value(),
+                            dst_item->get_key_and_value().begin());
 
           // point the map to the new location (bucket lock is held).
           assert(*hptr == src_item);

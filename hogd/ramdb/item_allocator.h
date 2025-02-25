@@ -138,8 +138,6 @@ private:
   // each thread gets its own loglet head.
   PerThread<detail::ItemHead> head_;
 
-  // get_loglet_head returns the thread-local loglet used for allocation.
-  Loglet *get_loglet_head(size_t kv_len);
   // compact_one is a helper function that compacts a single loglet.
   CompactionStats compact_one(UniqueLoglet &&src);
   // give_to_compactor makes a full loglet available to the compactor.

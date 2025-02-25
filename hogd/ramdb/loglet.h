@@ -60,6 +60,7 @@ struct ItemHeader {
     uint64_t generation;
   };
 
+  ItemHeader() = default;
   ItemHeader(ItemStorage storage, uint8_t type, uint16_t key_len,
              uint32_t value_len)
     : storage(storage), type(type), key_len(key_len), value_len(value_len)

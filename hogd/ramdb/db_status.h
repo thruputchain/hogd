@@ -36,6 +36,9 @@ enum class DBCode : uint8_t {
 
   // An I/O error (e.g., disk failure) occurred.
   kIO,
+
+  // Data corruption detected.
+  kCorruption,
 };
 
 // DBCategory provides an error category for database errors.
