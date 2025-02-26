@@ -110,7 +110,7 @@ set(LIBSODIUM_INCLUDE_DIRS
     "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include/sodium"
 )
 set(LIBSODIUM_LIBRARIES
-"${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium.a")
+"${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium.so")
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
 # Enable x23
