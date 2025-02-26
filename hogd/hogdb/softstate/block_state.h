@@ -95,6 +95,8 @@ public:
   void assert_closed() { storage_view_.assert_block_closed(); }
   void assert_not_closed() { storage_view_.assert_block_not_closed(); }
 
+  bool is_closed() const { return storage_view_.is_closed(); }
+
 private:
   StorageView storage_view_;
   TransactionCache transaction_cache_;

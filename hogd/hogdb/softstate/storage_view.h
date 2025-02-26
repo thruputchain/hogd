@@ -65,6 +65,8 @@ public:
   std::shared_ptr<const Contract>
   get_post_block_contract(SHA256Hash const &hash);
 
+  bool is_closed() const { return closed_; }
+
 protected:
   ParentBlockView(InMemoryDatabase *root_db)
     : modified_items_(8), parent_view_(root_db)
@@ -161,6 +163,7 @@ public:
   using ParentBlockView::get_snapshot_contract;
   using ParentBlockView::get_snapshot_deployment;
   using ParentBlockView::get_snapshot_storage_item;
+  using ParentBlockView::is_closed;
 };
 
 } // namespace hogd

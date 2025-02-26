@@ -16,6 +16,10 @@ DBToCoordServer::open_database_snapshot(BlockID parent_id, BlockID new_id)
     co_return RPCError::kBadBlockID;
   }
 
+  if (!parent_state->is_closed()) {
+    co_return RPCError::kBadBlockID;
+  }
+
   if (block_manager_.add_child(parent_id, new_id,
                                std::make_shared<BlockState>(parent_state))) {
     co_return RPCError::kNone;

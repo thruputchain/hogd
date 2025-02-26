@@ -129,9 +129,10 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
   bool insert_res = block_cache_.emplace(std::as_bytes(std::span(&new_id, 1)),
                                          new_id, std::move(block_state));
 
-  // if insert_res is false, then the BlockID already exists in the cache (so as been used before).
-  // For now, there's no reason why we couldn't allow reusing block ids after they're committed
-  // or pruned, but it seems generally like a good idea to just always use a new block id.
+  // if insert_res is false, then the BlockID already exists in the cache (so as
+  // been used before). For now, there's no reason why we couldn't allow reusing
+  // block ids after they're committed or pruned, but it seems generally like a
+  // good idea to just always use a new block id.
   if (!insert_res) {
     return false;
   }

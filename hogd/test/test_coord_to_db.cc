@@ -96,4 +96,18 @@ TEST_F(TestCoordToDb, DelayedCommit)
   ASSERT_EQ(db_client_.open_database_snapshot(23, 321)(), RPCError::kNone);
 }
 
+TEST_F(TestCoordToDb, ErrorHandling)
+{
+  ASSERT_EQ(db_client_.open_database_snapshot(0, 1)(), RPCError::kNone);
+
+  // can't open a block on a parent that's not closed
+  ASSERT_NE(db_client_.open_database_snapshot(1, 2)(), RPCError::kNone);
+
+  // can't close a block that doesn't exist
+  ASSERT_NE(db_client_.close_snapshot(2)(), RPCError::kNone);
+
+  // block id 2 is still available
+  ASSERT_EQ(db_client_.open_database_snapshot(0, 2)(), RPCError::kNone);
+}
+
 } // namespace hogd

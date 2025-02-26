@@ -67,4 +67,24 @@ TEST(BlockManagerTest, AddSequenceOfChildren)
   m.commit_block(3);
 }
 
+TEST(BlockManagerTest, CleanupFailedInserts)
+{
+  InMemoryDatabase db;
+  BlockManager m(0, std::make_shared<BlockState>(&db), &db);
+  auto b0 = m.get_block_data(0);
+  b0->close_block();
+
+  // cannot insert block without parent
+  ASSERT_FALSE(m.add_child(1, 2, std::make_shared<BlockState>(b0)));
+
+  // but can still use block id 2
+
+  ASSERT_TRUE(m.add_child(0, 2, std::make_shared<BlockState>(b0)));
+  auto b2 = m.get_block_data(2);
+  ASSERT_TRUE(b2);
+
+  b2->close_block();
+  ASSERT_TRUE(m.add_child(2, 1, std::make_shared<BlockState>(b2)));
+}
+
 } // namespace hogd
