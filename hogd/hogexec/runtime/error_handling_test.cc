@@ -1,9 +1,11 @@
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
 
+#include "contract.hh"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -59,7 +61,7 @@ consume_too_much_gas(HostCallContext *context)
 }
 
 namespace {
-WasmiRuntime *s_runtime = nullptr;
+Runtime *s_runtime = nullptr;
 bool reentrance_hit = false;
 } // namespace
 
@@ -86,10 +88,9 @@ protected:
   }
   ContractBlob contract_;
   WasmiContext context_;
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 {
   runtime_ = context_.make_new_runtime(contract_, nullptr);
@@ -238,7 +239,7 @@ TEST_F(WasmiErrorHandlingTest, Reentrance)
 
   ASSERT_TRUE(!!runtime_);
 
-  s_runtime = &(*runtime_);
+  s_runtime = runtime_.get();
   reentrance_hit = false;
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
@@ -311,6 +312,5 @@ TEST_F(WasmiErrorHandlingTest, Spin)
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

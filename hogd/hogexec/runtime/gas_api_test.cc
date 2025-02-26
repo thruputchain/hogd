@@ -1,8 +1,9 @@
 #include <gtest/gtest.h>
 
-#include <optional>
+#include <memory>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -62,10 +63,9 @@ protected:
     ASSERT_TRUE(!!runtime_);
   }
 
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(GasApiTest, SetGasNoInvoke)
 {
   EXPECT_EQ(runtime_->get_available_gas(), 0);
@@ -99,6 +99,5 @@ TEST_F(GasApiTest, InvokeResetsGas)
   EXPECT_FALSE(!!res.result);
   EXPECT_EQ(res.gas_consumed, 80);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
