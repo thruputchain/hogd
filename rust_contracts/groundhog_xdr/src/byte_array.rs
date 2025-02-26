@@ -38,4 +38,8 @@ impl<const N: usize> ByteArray<N> {
     pub const fn as_ptr(&self) -> *const u8 {
         self.arr.as_ptr()
     }
+
+    pub const fn len(&self) -> usize {
+        N
+    }
 }

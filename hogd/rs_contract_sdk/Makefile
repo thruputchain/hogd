@@ -1,9 +1,8 @@
 check:
 	cargo +nightly check \
-		--features "std,alloc" \
-		--target-dir "../../build/rs_contracts" \
+		--features "std,alloc"
+.PHONY: check
 
 clean:
 	cargo clean
-
-.PHONY: check clean
+.PHONY: clean

@@ -1,5 +1,6 @@
 use crate::interface::ERC20;
 use crate::*;
+use sdk::types::ByteArray;
 
 #[test]
 fn check_mint() {
@@ -9,8 +10,9 @@ fn check_mint() {
     let contract_hash = env.setup_create_contract(&test_contract);
 
     let mut handler = env.prepare_test(move || -> i32 {
+        let nonce = ByteArray::new([0; 32]);
         let deployed_addr =
-            sdk::deploy::DeployContract(&[0; 32], &contract_hash).unwrap();
+            sdk::deploy::DeployContract(&nonce, &contract_hash).unwrap();
 
         let mut client = client::ERC20Client::new(&deployed_addr);
 

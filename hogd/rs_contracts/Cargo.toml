@@ -1,3 +1,4 @@
+# Strip private prefixes of filesystem paths from binaries
 cargo-features = ["trim-paths"]
 
 [workspace]
@@ -15,6 +16,7 @@ members = [
 
 [workspace.dependencies]
 serde = { version = "1.0.217", default-features = false }
+sdk = { package = "rs_contract_sdk", path = "../rs_contract_sdk/" }
 
 [profile.dev]
 opt-level = "z"

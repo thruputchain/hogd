@@ -1,7 +1,7 @@
 # CARGO_TARGET_DIR is set in CMakeLists.txt,
 # so to build these contracts, use:
 #
-#   cmake --build ${BUILD}/hogd/rs_contracts/
+#   cmake --build ${BUILD}/hogd/rs_contracts/ -j
 
 rs_contracts : \
 	erc20.wasm \
@@ -11,6 +11,7 @@ rs_contracts : \
 	rcq_test.wasm \
 	simple_wallet.wasm \
 	test_bytestring.wasm
+.PHONY: rs_contracts
 
 %.wasm : Makefile $(wildcard $</src/*.rs)
 	cargo +nightly rustc \
@@ -25,12 +26,10 @@ rs_contracts : \
 		-C link-args=-zstack-size=64000
 
 test:
-	# Run all contract tests
-	cargo +nightly test \
-		--features "guest,std" \
-		--target-dir $(CARGO_TARGET_DIR)
+	CC=gcc CXX=g++ \
+	   cargo +nightly -vv test -p erc20
+.PHONY: test
 
 clean:
 	cargo clean
-
-.PHONY: rs_contracts test clean
+.PHONY: clean

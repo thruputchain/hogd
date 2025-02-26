@@ -1,18 +1,17 @@
 [package]
 name = "erc20"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
-sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/" }
-serde = { version = "1.0.217", default-features = false, features = ["derive"] }
+sdk = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["guest", "alloc"]
-result = []
 client = []
 guest = []
 alloc = ["sdk/alloc", "serde/alloc"]
@@ -20,6 +19,4 @@ std = ["sdk/std", "serde/std"]
 mock = ["sdk/mock"]
 
 [dev-dependencies]
-sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/", features = ["mock"]}
-erc20 = {path = ".", features=["mock", "guest", "client", "std"]}
-
+erc20 = { path = ".", features = ["mock", "client", "std"] }

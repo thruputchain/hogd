@@ -1,30 +1,32 @@
 extern crate bindgen;
 extern crate cmake;
 
-// thank u chatgpt
+// Build directory should be set with `cargo --target-dir`
+// Compiler should be selected by setting CC/CXX environment vars
 
 fn main() {
     use std::env;
     use std::path::PathBuf;
 
-    // Run CMake and build the C++ library
-    let mut cmake_config = cmake::Config::new("../.."); // Points to C++ source directory
-    let binding = cmake_config
+    // Use cmake to configure and build the C++ library
+
+    let source_dir = "../..";
+    let mut cfg = cmake::Config::new(source_dir);
+    cfg
         .define("CMAKE_BUILD_TYPE", "Release")
-        // TODO(geoff): Using g++ here doesn't play well with cargo.
-        // There's a --target=xyz variable that gets passed to gcc,
-        // when building from a different workspace (only, which is bizarre. same workspace works fine).
-        // This is a clang flag not a gcc flag, and so gcc errors out.
-        .define("CMAKE_CXX_COMPILER", "clang++")
-        .define("CMAKE_C_COMPILER", "clang")
-        .define("CMAKE_VERBOSE_MAKEFILE", "ON") // run cargo b -vv to see the full cmake output
-        .define("CMAKE_OSX_SYSROOT", "");
+        // run cargo b -vv to see the full cmake output
+        .define("CMAKE_VERBOSE_MAKEFILE", "ON")
+        .define("CMAKE_OSX_SYSROOT", "")
+        ;
 
     // important: only build a limit set of targets  If we do this wrong
     // we could easily wind up with some kind of nonsense recursive build.
-    let dst = binding.build_target("test_ffi").build();
 
-    let _ = binding.build_target("rs_test_contracts").build();
+    cfg.build_target("test_ffi");
+    let dst = cfg.build();
+
+    cfg.build_target("rs_test_contracts");
+    let _ = cfg.build();
 
     println!("cargo:rerun-if-changed=../../hogd");
     println!("cargo:rerun-if-changed=../../x23");

@@ -1,6 +1,7 @@
 use crate::syscall::SysErr;
 
 use alloc::string::{String, ToString};
+use alloc::{vec, vec::Vec};
 use bcs::Error as SerializationError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,7 +20,7 @@ pub enum Error {
     #[error("{context:?}: System call error: {err}")]
     SystemErr {
         err: SysErr,
-        context: Option<String>,
+        context: Vec<String>,
     },
 
     #[error("Assertion failed: {0}")]
@@ -35,9 +36,19 @@ pub enum Error {
     SerializationErr(String),
 }
 
+impl Error {
+    pub fn get_sys_err(&self) -> Option<SysErr> {
+        if let Error::SystemErr { err, .. } = self {
+            Some(*err)
+        } else {
+            None
+        }
+    }
+}
+
 impl From<SysErr> for Error {
     fn from(err: SysErr) -> Self {
-        Self::SystemErr { err, context: None }
+        Self::SystemErr { err, context: vec![] }
     }
 }
 
@@ -49,10 +60,10 @@ impl From<SerializationError> for Error {
 
 pub fn with_context<S: AsRef<str>>(msg: S) -> impl Fn(Error) -> Error {
     move |source| match source {
-        Error::SystemErr { err, context: None } => Error::SystemErr {
-            err,
-            context: Some(msg.as_ref().to_string()),
-        },
+        Error::SystemErr { err, mut context } => {
+            context.push(msg.as_ref().to_string());
+            Error::SystemErr { err, context }
+        }
         _ => source,
     }
 }

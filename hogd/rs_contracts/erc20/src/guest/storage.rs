@@ -1,15 +1,14 @@
 //! Storage for a coin contract
 
-use sdk::result::{ensure, Result};
-use sdk::storage::{item_key, FromKey, Map, NNInt};
-use sdk::types::{ContractAddress, StorageKey};
-use sdk::GetMsgSender;
+use sdk::result::Result;
+use sdk::storage::{Keypath, FromKeypath, Map, NNInt};
+use sdk::types::ContractAddress;
 use serde::{Deserialize, Serialize};
 
 pub type Allowance = NNInt;
 pub type Balance = NNInt;
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CoinStorage {
     pub owner: ContractAddress,
     // pub name: ByteArray,
@@ -21,22 +20,27 @@ pub struct CoinStorage {
 
 impl CoinStorage {
     pub fn new(
-        storage_key: &StorageKey,
+        keypath: &Keypath,
         owner: &ContractAddress,
     ) -> Result<Self> {
-        let key = storage_key.clone();
         let owner = owner.clone();
-        let total_supply = NNInt::from_key(item_key(&key, b"1"));
-        let balances = Map::from_key(item_key(&key, b"2"));
-        let allowances = Map::from_key(item_key(&key, b"3"));
+
+        // XXX
+        let total_supply = NNInt::from_keypath(keypath.cloned_push_item(b"1"))?;
+        let balances = Map::from_keypath(keypath.cloned_push_item(b"2"))?;
+        let allowances = Map::from_keypath(keypath.cloned_push_item(b"3"))?;
+
         let storage = CoinStorage {
             owner,
             total_supply,
             balances,
             allowances,
         };
-
         Ok(storage)
+    }
+
+    pub fn contract_owner(&self) -> &ContractAddress {
+        &self.owner
     }
 
     pub fn balance_of(&self, addr: &ContractAddress) -> Result<Balance> {
@@ -48,12 +52,7 @@ impl CoinStorage {
         owner: &ContractAddress,
         spender: &ContractAddress,
     ) -> Result<Allowance> {
-        let key = (*owner, *spender); // XX: Avoid copying
+        let key = (*owner, *spender); // XX: Avoid copying?
         self.allowances.get(&key)
-    }
-
-    pub fn ensure_sender_is_owner(&self) -> Result<()> {
-        let sender = GetMsgSender()?;
-        ensure(sender == self.owner, "sender is owner")
     }
 }

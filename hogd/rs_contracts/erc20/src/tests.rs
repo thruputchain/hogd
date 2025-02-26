@@ -1,7 +1,7 @@
-use crate::interface::ERC20;
-use crate::*;
-
-use std::println;
+use sdk::types::ByteArray;
+use sdk::result::with_context;
+use crate::guest;
+use crate::interface::{client, ERC20};
 
 #[test]
 fn check_mint() {
@@ -11,18 +11,21 @@ fn check_mint() {
     let contract_hash = env.setup_create_contract(&test_contract);
 
     let mut handler = env.prepare_test(move || -> i32 {
+        let nonce = ByteArray::new([7; 32]);
         let deployed_addr =
-            sdk::deploy::DeployContract(&[0; 32], &contract_hash).unwrap();
+            sdk::deploy::DeployContract(&nonce, &contract_hash).unwrap();
 
         let mut client = client::ERC20Client::new(&deployed_addr);
 
         let self_addr = sdk::invoke::GetCurrentAddress().unwrap();
 
-        client.initialize(&self_addr);
+        client.initialize(&self_addr).unwrap();
 
-        client.mint(&self_addr, 100);
+        client.mint(&self_addr, 100)
+            .map_err(with_context("mint"))
+            .unwrap();
 
-        assert_eq!(client.get_balance(), 100);
+        assert_eq!(client.get_balance().unwrap(), 100);
 
         return 0;
     });

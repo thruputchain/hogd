@@ -9,6 +9,7 @@ serde = { version = "1.0.217", default-features = false, features = ["derive"] }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+doctest = false
 
 [features]
 default = ["guest", "alloc"]
@@ -19,6 +20,4 @@ std = ["sdk/std", "serde/std"]
 mock = ["sdk/mock"]
 
 [dev-dependencies]
-sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/", features = ["mock"]}
-erc20_geoff = {path = ".", features=["mock", "guest", "client", "std", "mock"]}
-
+erc20_geoff = {path = ".", features=["mock", "guest", "client", "std"]}

@@ -7,7 +7,7 @@ use groundhog_xdr::ffi_enums::InvokeErrorCode;
 use groundhog_xdr::transaction::SignedTransaction;
 use groundhog_xdr::types::ContractAddress;
 use groundhog_xdr::types::SHA256Hash;
-use groundhog_xdr::{Limits, WriteXdr};
+use groundhog_xdr::{Limits, WriteXdr, ByteArray};
 
 use sha2::Digest;
 use sha2::Sha256;
@@ -140,7 +140,7 @@ impl<'a> TestEnvironment {
         };
         let mut hasher = Sha256::new();
         hasher.update(&contract_bytes);
-        hasher.finalize().into()
+        ByteArray::new(hasher.finalize().into())
     }
 
     pub fn setup_create_deployment(
@@ -153,7 +153,8 @@ impl<'a> TestEnvironment {
         
         let mut hasher = Sha256::new();
         hasher.update(&contract_bytes);
-        let contract_hash : SHA256Hash = hasher.finalize().into();
+        let contract_hash : SHA256Hash =
+            ByteArray::new(hasher.finalize().into());
 
         unsafe {
             setup_create_deployment(
@@ -206,14 +207,14 @@ impl<'a> TestEnvironment {
 
         use groundhog_xdr::transaction::*;
 
-        let invoke_addr: [u8; 32] = [0xFF; 32];
+        let invoke_addr = ByteArray::new([0xFF; 32]);
 
         self.setup_create_deployment(&invoke_addr, &test_contract.as_contract());
 
         let stx = SignedTransaction {
             tx: Transaction {
                 invocation: Invocation {
-                    invoked_address: [0xFF; 32],
+                    invoked_address: ByteArray::new([0xFF; 32]),
                     method: 0,
                     gas_limit: u64::MAX,
                     calldata: [].try_into().unwrap(),
@@ -289,7 +290,7 @@ impl MockContractInner {
         let result = hasher.finalize();
         Self {
             index: n,
-            hash: result.into(),
+            hash: ByteArray::new(result.into()),
             funcs: HashMap::new(),
         }
     }

@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/" }
-erc20_result = { package = "erc20", path = "../erc20", default-features = false, features = ["client", "alloc", "result"] }
+erc20 = { path = "../erc20", default-features = false, features = ["client", "alloc"] }
 
 [lib]
 crate-type = ["cdylib"]

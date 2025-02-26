@@ -1,5 +1,5 @@
 [package]
-name = "test_ffi"
+name = "native_exec"
 version = "0.1.0"
 edition = "2021"
 
@@ -13,4 +13,3 @@ sha2 = {version = "0.10"}
 [build-dependencies]
 cmake = "0.1"
 bindgen = "0.71"
-

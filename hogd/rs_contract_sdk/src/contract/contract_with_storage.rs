@@ -11,11 +11,11 @@ use core::cell::OnceCell;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
 
-// Maybe todo: A version of this type where the storage key is referenced or boxed,
-// to save copying it onto the stack.
-
 #[derive(Debug)]
 pub struct ContractWithStorage<S> {
+    // Maybe todo: A version of this type where the storage key is referenced or boxed,
+    // to save copying it onto the stack.
+
     key: StorageKey,
     storage: OnceCell<S>,
 }
@@ -45,6 +45,15 @@ where
             );
             self.storage.get().unwrap()
         })
+    }
+
+    pub fn storage_mut(&mut self) -> &mut S {
+        // Or can use unstable `OnceCell::get_mut_or_init`
+        if self.storage.get().is_none() {
+            let s = load(&self.key).expect("Failed to load contract data");
+            self.storage.set(s).unwrap();
+        }
+        self.storage.get_mut().unwrap()
     }
 
     /// Set the storage value.

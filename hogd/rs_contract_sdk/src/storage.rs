@@ -1,11 +1,16 @@
+use alloc::{vec, vec::Vec};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use crate::crypto::{SHA256Hash, SHA256};
 use crate::result::{with_context, Result};
 use crate::serialize;
 use crate::types::StorageKey;
 use crate::{
-    BytestringGet, BytestringSet, NonnegativeIntGet, NonnegativeIntSetAdd,
+    BytestringGet,
+    BytestringSet,
+    NonnegativeIntGet,
+    NonnegativeIntAdd,
+    NonnegativeIntSetAdd,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 // ------------------ Hash ------------------
 
@@ -41,124 +46,143 @@ pub fn store<V: Serialize>(k: &StorageKey, v: &V) -> Result<()> {
 }
 
 pub fn load<V: DeserializeOwned>(k: &StorageKey) -> Result<V> {
-    let buf = BytestringGet(k)?;
+    let buf = BytestringGet(k).map_err(with_context("BytestringGet"))?;
     let v = serialize::from_bytes(&*buf)?;
     Ok(v)
 }
 
-// -------------------- AsKey / FromKey -----------------------
+// -------------------- Keypath -----------------------
 
-pub trait AsKey {
-    fn as_key(&self) -> &StorageKey;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Keypath(Vec<Vec<u8>>);
+
+impl Keypath {
+    pub fn new() -> Self {
+        Self(vec![])
+    }
+
+    pub fn from_storage_key(key: &StorageKey) -> Self {
+        let mut keypath = Self::new();
+        keypath.push_key(key);
+        keypath
+    }
+
+    pub fn push_item<I: Serialize>(&mut self, item: &I) {
+        self.0.push(serialize::to_bytes(item).unwrap());
+    }
+
+    pub fn push_key(&mut self, key: &StorageKey) {
+        let mut item = Vec::with_capacity(key.len());
+        item.extend_from_slice(key.as_slice());
+        self.0.push(item);
+    }
+
+    pub fn as_key(&self) -> StorageKey {
+        let mut info = vec![];
+        for item in self.0.iter() {
+            info.extend_from_slice(item.as_slice());
+        }
+        info.hash().unwrap()
+    }
+
+    pub fn cloned_push_item<I: Serialize>(&self, item: &I) -> Self {
+        let mut res = self.clone();
+        res.push_item(item);
+        res
+    }
 }
 
-pub trait FromKey {
-    fn from_key(_: StorageKey) -> Self;
+impl Into<StorageKey> for Keypath {
+    fn into(self) -> StorageKey {
+        // We could do less copying with an incremental hash syscall
+        let mut info = vec![];
+        for item in self.0.into_iter() {
+            info.extend_from_slice(item.as_slice());
+        }
+        info.hash().unwrap()
+    }
+}
+
+impl From<StorageKey> for Keypath {
+    fn from(key: StorageKey) -> Self {
+        let mut keypath = Keypath::new();
+        keypath.push_key(&key);
+        keypath
+    }
+}
+
+// -------------------- FromKeypath -----------------------
+
+pub trait FromKeypath {
+    fn from_keypath(keypath: Keypath) -> Result<Self>
+        where Self: Sized;
 }
 
 // ------------------------- NNInt -----------------------
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NNInt {
-    key: StorageKey,
+    keypath: Keypath,
+}
+
+impl FromKeypath for NNInt {
+    fn from_keypath(keypath: Keypath) -> Result<Self> {
+        Ok(NNInt { keypath })
+    }
 }
 
 impl NNInt {
-    pub fn get_both(&self) -> Result<(i128, i128)> {
-        Ok(NonnegativeIntGet(&self.key)?)
+    pub fn get(&self) -> Result<(i128, i128)> {
+        Ok(NonnegativeIntGet(&self.keypath.as_key())?)
     }
 
-    pub fn get(&self) -> Result<i128> {
-        let (set, add) = self.get_both()?;
-        Ok(set + add)
+    pub fn get_current(&self) -> Result<i128> {
+        let (set_value, add_value) = self.get()?;
+        Ok(set_value + add_value)
     }
 
     pub fn add(&mut self, add_value: i128) -> Result<()> {
-        let (set, prev_add) = self.get_both()?;
-        let new = prev_add + add_value;
-        Ok(NonnegativeIntSetAdd(&self.key, set, new)?)
+        Ok(NonnegativeIntAdd(&self.keypath.as_key(), add_value)?)
     }
 
     pub fn set_add(&mut self, set_value: i128, add_value: i128) -> Result<()> {
-        Ok(NonnegativeIntSetAdd(&self.key, set_value, add_value)?)
-    }
-}
-
-impl AsKey for NNInt {
-    fn as_key(&self) -> &StorageKey {
-        &self.key
-    }
-}
-
-impl FromKey for NNInt {
-    fn from_key(key: StorageKey) -> Self {
-        NNInt { key }
+        Ok(NonnegativeIntSetAdd(&self.keypath.as_key(), set_value, add_value)?)
     }
 }
 
 // ------------------- Map ---------------------
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Map<K, V> {
-    container_key: StorageKey,
+    keypath: Keypath,
     phantom: core::marker::PhantomData<(K, V)>,
 }
 
-impl<K, V> AsKey for Map<K, V> {
-    fn as_key(&self) -> &StorageKey {
-        &self.container_key
-    }
-}
-
-impl<K, V> FromKey for Map<K, V> {
-    fn from_key(key: StorageKey) -> Self {
-        Self {
-            container_key: key,
+impl<K, V> FromKeypath for Map<K, V> {
+    fn from_keypath(keypath: Keypath) -> Result<Self> {
+        Ok(Self {
+            keypath,
             phantom: core::marker::PhantomData,
-        }
+        })
     }
 }
 
 impl<K, V> Map<K, V> {
+    pub fn keypath(&self) -> &Keypath {
+        &self.keypath
+    }
+
     pub fn get(&self, entry_key: &K) -> Result<V>
     where
         K: Serialize,
-        V: DeserializeOwned,
+        V: FromKeypath,
     {
-        let value_key: StorageKey =
-            try_item_key(&self.container_key, entry_key)?;
-        load(&value_key)
+        V::from_keypath(self.entry_keypath(entry_key))
     }
 
-    pub fn insert(&self, entry_key: &K, value: &V) -> Result<()>
-    where
-        K: Serialize,
-        V: Serialize,
+    fn entry_keypath(&self, entry_key: &K) -> Keypath
+        where K: Serialize
     {
-        let value_key: StorageKey =
-            try_item_key(&self.container_key, entry_key)?;
-        store(&value_key, value)
+        self.keypath.cloned_push_item(entry_key)
     }
-}
-
-// ------------------- item_key ---------------------
-
-/// Combine a key and some other data to form a subkey
-pub fn try_item_key<I: Serialize>(
-    container_key: &StorageKey,
-    item_info: &I,
-) -> Result<StorageKey> {
-    let item_key_info = (container_key, item_info);
-    let item_key: StorageKey =
-        item_key_info.hash().map_err(with_context("hash failed"))?;
-    Ok(item_key)
-}
-
-/// Combine a key and some other data to form a subkey
-/// (panics if the SHA256 syscall fails)
-pub fn item_key<I: Serialize>(
-    container_key: &StorageKey,
-    item_info: &I,
-) -> StorageKey {
-    try_item_key(container_key, item_info).expect("Couldn't create item key")
 }

@@ -18,7 +18,7 @@ macros = { path = "macros" }
 thiserror = { version = "2.0.11", default-features = false }
 serde = { version = "1.0.217", default-features = false }
 serde_arrays = { path = "external/serde_arrays", default-features = false }
-test_ffi = { path = "../../rust_contracts/test_ffi", optional = true}
+test_ffi = { package = "native_exec", path = "../../rust_contracts/native_exec", optional = true}
 
 [features]
 alloc = ["serde/alloc", "bcs/alloc", "serde_arrays/alloc", "rs_xdr/alloc"]
