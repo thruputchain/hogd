@@ -13,7 +13,7 @@ target_link_libraries(
   hogd
   base
   crypto
-  ${LIBSODIUM_LIBRARIES}
+  libsodium_shared
 )
 add_dependencies(hogd libsodium)
 

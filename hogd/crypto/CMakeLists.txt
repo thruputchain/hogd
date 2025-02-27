@@ -7,7 +7,7 @@ add_dependencies(crypto libsodium)
 target_link_libraries(
   crypto
   protocol
-  ${LIBSODIUM_LIBRARIES}
+  libsodium_shared
   crc32c
 )
 
