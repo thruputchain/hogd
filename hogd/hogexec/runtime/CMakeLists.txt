@@ -53,7 +53,7 @@ target_link_libraries(
   m3 # wasm3
   base
   crypto
-  ${LIBSODIUM_LIBRARIES}
+  libsodium_shared
 )
 
 add_dependencies(

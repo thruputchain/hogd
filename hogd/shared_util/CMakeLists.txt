@@ -8,6 +8,6 @@ target_link_libraries(
   shared_util
   crypto
   protocol
-  ${LIBSODIUM_LIBRARIES}
+  libsodium_shared
   base
 )

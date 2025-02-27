@@ -7,7 +7,7 @@ add_dependencies(crypto libsodium)
 target_link_libraries(
   crypto
   protocol
-  ${LIBSODIUM_LIBRARIES}
+  libsodium_shared
   crc32c
 )
 
@@ -19,6 +19,7 @@ add_executable(
 target_link_libraries(
   crypto_test
   crypto
+  libsodium_shared
   GTest::gtest_main
 )
 gtest_discover_tests(crypto_test)

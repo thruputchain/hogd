@@ -14,7 +14,7 @@ target_link_libraries(
   hogd
   base
   crypto
-  ${LIBSODIUM_LIBRARIES}
+  libsodium_shared
   crc32c
   shared_util
 )

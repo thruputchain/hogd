@@ -11,7 +11,7 @@ target_link_libraries(
   base
   protocol
   crypto
-  ${LIBSODIUM_LIBRARIES}
+  libsodium_shared
   crc32c)
 
 add_dependencies(base crypto crc32c)
@@ -31,11 +31,10 @@ add_executable(
 target_link_libraries(
   base_test
   base
-  ${LIBSODIUM_LIBRARIES}
+  libsodium_shared
   GTest::gtest_main
 )
 gtest_discover_tests(base_test)
-
 
 add_executable(
   hashmap_bench
