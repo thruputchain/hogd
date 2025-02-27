@@ -105,12 +105,21 @@ set(LIBSODIUM_INCLUDE_DIRS
     "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include/sodium"
 )
 
-set(LIBSODIUM_LIBRARIES
+set(LIBSODIUM_SHARED_LIBRARIES
 "${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium${CMAKE_SHARED_LIBRARY_SUFFIX}")
+set(LIBSODIUM_STATIC_LIBRARIES
+"${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium${CMAKE_STATIC_LIBRARY_SUFFIX}")
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
-add_library(libsodium_shared SHARED IMPORTED)
-set_target_properties(libsodium_shared PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_LIBRARIES}")
+option(ENABLE_TEST_FFI "Enable test ffi bindings" OFF)
+
+if (ENABLE_TEST_FFI) 
+  add_library(libsodium_lib SHARED IMPORTED)
+  set_target_properties(libsodium_lib PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_SHARED_LIBRARIES}")
+else() 
+  add_library(libsodium_lib STATIC IMPORTED)
+  set_target_properties(libsodium_lib PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_STATIC_LIBRARIES}")
+endif()
 
 # Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
