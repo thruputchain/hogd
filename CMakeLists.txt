@@ -93,7 +93,7 @@ ExternalProject_Add(libsodium
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
       CFLAGS=${EXTERNAL_C_FLAGS} CXXFLAGS=${EXTERNAL_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
-    INSTALL_COMMAND # Skip installation step
+    INSTALL_COMMAND "" # Skip installation step
 )
 
 ExternalProject_Get_Property(libsodium binary_dir)
