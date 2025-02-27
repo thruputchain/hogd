@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/" }
-erc20_geoff = { path = "../erc20_geoff/", default-features = false, features = ["client", "alloc"] }
+sdk = { workspace = true }
 serde = { workspace = true }
+erc20_geoff = { path = "../erc20_geoff/", default-features = false, features = ["client", "alloc"] }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -18,3 +18,6 @@ guest = []
 alloc = ["sdk/alloc"]
 std = ["sdk/std"]
 mock = ["std", "alloc", "sdk/mock"]
+
+[dev-dependencies]
+simple_wallet = { path = ".", features = ["mock", "client", "std"] }

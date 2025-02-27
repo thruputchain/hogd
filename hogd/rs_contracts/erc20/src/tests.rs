@@ -1,12 +1,12 @@
 use sdk::types::ByteArray;
-use crate::guest;
+use crate::implementation;
 use crate::interface::{client, ERC20};
 
 #[test]
 fn check_mint() {
     let mut env = sdk::TestEnvironment::new();
 
-    let test_contract = guest::test_setup::register(&mut env);
+    let test_contract = implementation::test_setup::register(&mut env);
     let contract_hash = env.setup_create_contract(&test_contract);
 
     let mut handler = env.prepare_test(move || -> i32 {

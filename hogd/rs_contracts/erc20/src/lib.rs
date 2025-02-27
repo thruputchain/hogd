@@ -16,11 +16,12 @@ pub mod interface;
 pub use interface::client;
 
 // An implementation of the contract interface
-mod guest;
+#[cfg(feature = "guest")]
+mod implementation;
 
 // Contract methods exposed with C ABI for running as guest
 #[cfg(feature = "guest")]
-pub use guest::exports::*;
+pub use implementation::exports::*;
 
 #[cfg(test)]
 mod tests;

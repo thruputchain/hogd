@@ -15,3 +15,7 @@ client = []
 guest = []
 alloc = ["sdk/alloc"]
 std = ["sdk/std"]
+mock = ["sdk/mock"]
+
+[dev-dependencies]
+rcq_test = { path = ".", features = ["mock", "client", "std"] }

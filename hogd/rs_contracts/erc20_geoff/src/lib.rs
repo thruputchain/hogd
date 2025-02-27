@@ -1,6 +1,4 @@
 //! ERC20 contract interface and implementation
-//!
-//! This version uses Result<T> as method return values
 
 #![no_std]
 
@@ -19,11 +17,11 @@ pub use interface::client;
 
 // An implementation of the contract interface
 #[cfg(feature = "guest")]
-mod guest;
+mod implementation;
 
 // Contract methods exposed with C ABI for running as guest
 #[cfg(feature = "guest")]
-pub use guest::exports::*;
+pub use implementation::exports::*;
 
 #[cfg(test)]
 mod tests;

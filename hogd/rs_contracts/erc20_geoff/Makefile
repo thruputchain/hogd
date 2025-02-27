@@ -2,9 +2,7 @@ build:
 	cd ../ && make erc20_geoff.wasm
 
 test:
-	cargo +nightly test \
-		--no-default-features \
-		--features "guest,std" \
+	cd ../ && make test_erc20
 
 test-client:
 	cargo +nightly test \

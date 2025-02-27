@@ -25,10 +25,15 @@ rs_contracts : \
 		-- \
 		-C link-args=-zstack-size=64000
 
-test:
+test_erc20:
 	CC=gcc CXX=g++ \
-	   cargo +nightly -vv test -p erc20
-.PHONY: test
+	   cargo +nightly -v test -p erc20
+.PHONY: test_erc20
+
+test_erc20_geoff:
+	CC=gcc CXX=g++ \
+	   cargo +nightly -v test -p erc20_geoff
+.PHONY: test_erc20_geoff
 
 clean:
 	cargo clean

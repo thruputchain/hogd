@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sdk = { package = "rs_contract_sdk", path = "../../rs_contract_sdk/" }
+sdk = { workspace = true }
 erc20 = { path = "../erc20", default-features = false, features = ["client", "alloc"] }
 
 [lib]
@@ -16,3 +16,7 @@ client = []
 guest = []
 alloc = ["sdk/alloc"]
 std = ["sdk/std"]
+mock = ["sdk/mock"]
+
+[dev-dependencies]
+caller = { path = ".", features = ["mock", "client", "std"] }
