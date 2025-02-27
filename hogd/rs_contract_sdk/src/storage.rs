@@ -141,6 +141,20 @@ impl NNInt {
         Ok(set_value + add_value)
     }
 
+    pub fn try_get(&self) -> Result<Option<(i128, i128)>> {
+        match self.get() {
+            Err(e) if e.is_storage_key_not_exist() => Ok(None),
+            other => other.map(Some)
+        }
+    }
+
+    pub fn try_get_current(&self) -> Result<Option<i128>> {
+        match self.get_current() {
+            Err(e) if e.is_storage_key_not_exist() => Ok(None),
+            other => other.map(Some)
+        }
+    }
+
     pub fn add(&mut self, add_value: i128) -> Result<()> {
         Ok(NonnegativeIntAdd(&self.keypath.as_key(), add_value)?)
     }

@@ -39,7 +39,7 @@ impl Contract for CoinContract {
     }
 }
 
-// Internal functions that use the underlying storage to
+// These internal functions use the underlying storage to
 // create an abstraction whereby all balances and allowances
 // exist, defaulting to zero if never set.  They also, via
 // the NNInt datatype, enforce the invariant that balances
@@ -54,36 +54,37 @@ impl CoinContract {
     }
 
     pub fn _contract_owner(&self) -> &ContractAddress {
-        &self.storage().contract_owner()
+        &self.storage().owner
     }
 
-    pub fn _balance_amount_of(&self, address: &ContractAddress) -> Result<Amount> {
-        let balance = self.storage().balance_of(address)?;
-        let amount = balance.get_current()? as Amount;
+    // Balance stored at given owner address, or zero if empty
+    pub fn _balance_amount_of(&self, owner: &ContractAddress) -> Result<Amount> {
+        let balance = self.storage().balances.get(owner)?;
+        let amount = balance.try_get_current()?.unwrap_or(0) as Amount;
         Ok(amount)
     }
 
+    // Adjust balance at given owner address, from zero if empty
     pub fn _adjust_balance(&mut self, owner: &ContractAddress, amount: Amount) -> Result<()> {
-        let mut balance = self.storage().balance_of(owner)?;
+        let mut balance = self.storage().balances.get(owner)?;
 
         // The NNInt datatype ensures that `add` with a negative
         // number results in a non-negative value.
-        // For never-stored-to addresses, it acts (XXX?) as
-        // if the address contained (0, 0).
+        // For never-stored-to addresses, it acts as
+        // if the address had contained (0, 0).
         balance.add(amount as i128)?;
         Ok(())
     }
 
+    // Adjust allowance for owner and spender, from zero if empty
     pub fn _adjust_allowance(
         &mut self,
         owner: &ContractAddress,
         spender: &ContractAddress,
         amount: Amount,
     ) -> Result<()> {
-        let mut allowance = self.storage().allowance_for(owner, spender)?;
+        let mut allowance = self.storage().allowances.get(&(*owner, *spender))?;
 
-        // The NNInt datatype ensures that `add` with a negative
-        // number results in a non-negative value
         allowance.add(amount as i128)?;
         Ok(())
     }
@@ -156,7 +157,11 @@ impl ERC20 for CoinContract {
         ensure(&caller == self._contract_owner(), "Burner must be contract owner")?;
         ensure(amount >= 0, "Burn amount must be non-negative")?;
 
-        self._adjust_balance(owner, amount)?;
+        self._adjust_balance(owner, -amount)?;
         self._adjust_total_supply(-amount)
+    }
+
+    fn total_supply(&self) -> Result<Amount> {
+        Ok(self.storage().total_supply.get_current()? as Amount)
     }
 }

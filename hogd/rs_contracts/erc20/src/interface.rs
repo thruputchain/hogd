@@ -4,7 +4,7 @@ use sdk::macros::contract;
 use sdk::result::Result;
 use sdk::types::ContractAddress;
 
-pub type Amount = i64;
+pub type Amount = i128;
 
 #[contract(mod_name = "client")]
 pub trait ERC20 {
@@ -40,4 +40,7 @@ pub trait ERC20 {
 
     /// Destroy tokens from `to` address
     fn burn(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
+
+    /// Get total supply of outstanding tokens
+    fn total_supply(&self) -> Result<Amount>;
 }

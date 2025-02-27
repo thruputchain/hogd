@@ -1,6 +1,6 @@
-use crate::interface::ERC20;
-use crate::*;
 use sdk::types::ByteArray;
+use crate::guest;
+use crate::interface::{client, ERC20};
 
 #[test]
 fn check_mint() {
@@ -10,19 +10,28 @@ fn check_mint() {
     let contract_hash = env.setup_create_contract(&test_contract);
 
     let mut handler = env.prepare_test(move || -> i32 {
-        let nonce = ByteArray::new([0; 32]);
+        let nonce = ByteArray::new([7; 32]);
         let deployed_addr =
             sdk::deploy::DeployContract(&nonce, &contract_hash).unwrap();
 
         let mut client = client::ERC20Client::new(&deployed_addr);
 
-        let self_addr = sdk::invoke::GetCurrentAddress().unwrap();
+        let owner = sdk::invoke::GetCurrentAddress().unwrap();
 
-        client.initialize(&self_addr).unwrap();
+        client.initialize(&owner).unwrap();
 
-        client.mint(&self_addr, 100).unwrap();
-
+        client.mint(&owner, 100).unwrap();
         assert_eq!(client.get_balance().unwrap(), 100);
+
+        let other = ByteArray::new([0xBB; 32]);
+        client.transfer(&other, 25).unwrap();
+        assert_eq!(client.get_balance_of(&other).unwrap(), 25);
+        assert_eq!(client.get_balance_of(&owner).unwrap(), 75);
+
+        client.burn(&other, 5).unwrap();
+        assert_eq!(client.get_balance_of(&other).unwrap(), 20);
+
+        assert_eq!(client.total_supply().unwrap(), 95);
 
         return 0;
     });

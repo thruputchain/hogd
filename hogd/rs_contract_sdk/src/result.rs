@@ -44,6 +44,12 @@ impl Error {
             None
         }
     }
+
+    pub fn is_storage_key_not_exist(&self) -> bool {
+        self.get_sys_err()
+            .map(SysErr::is_storage_key_not_exist)
+            .unwrap_or(false)
+    }
 }
 
 impl From<SysErr> for Error {

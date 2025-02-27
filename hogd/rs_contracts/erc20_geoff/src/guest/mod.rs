@@ -30,6 +30,10 @@ impl Contract for CoinContract {
     }
 }
 
+fn get_total_supply_key() -> StorageKey {
+    b"total_supply".hash().unwrap()
+}
+
 fn get_balance_key(addr: &ContractAddress) -> StorageKey {
     let item_key_info = (b"balance", addr);
     let item_key: StorageKey = item_key_info
@@ -50,6 +54,21 @@ fn get_allowance_key(
         .map_err(with_context("hash failed"))
         .unwrap();
     item_key
+}
+
+fn add_to_total_supply(amount: Amount) -> Result<()> {
+    let key = get_total_supply_key();
+    let (s, a) = match sdk::NonnegativeIntGet(&key) {
+        Ok((s, a)) => (s, a),
+        Err(syserr) => {
+            if syserr.is_code(SyscallErrorCode::kStorageKeyNotExist) {
+                (0, 0)
+            } else {
+                return Err(syserr.into());
+            }
+        }
+    };
+    Ok(sdk::NonnegativeIntSetAdd(&key, s, a + (amount as i128))?)
 }
 
 fn add_to_balance(addr: &ContractAddress, amount: Amount) -> Result<()> {
@@ -137,7 +156,7 @@ impl ERC20 for CoinContract {
         match sdk::NonnegativeIntGet(&balance_key) {
             Ok((s, a)) => Ok((s + a).try_into().unwrap()),
             Err(syserr) => {
-                if syserr.is_code(SyscallErrorCode::kStorageKeyNotExist) {
+                if syserr.is_storage_key_not_exist() {
                     return Ok(0);
                 }
                 Err(syserr.into())
@@ -153,7 +172,8 @@ impl ERC20 for CoinContract {
 
         ensure(amount >= 0, "mint amount is nonnegative")?;
 
-        add_to_balance(to, amount)
+        add_to_balance(to, amount)?;
+        add_to_total_supply(amount)
     }
 
     fn burn(&mut self, to: &ContractAddress, amount: Amount) -> Result<()> {
@@ -162,6 +182,20 @@ impl ERC20 for CoinContract {
 
         ensure(amount >= 0, "burn amount is nonnegative")?;
 
-        add_to_balance(to, -amount)
+        add_to_balance(to, -amount)?;
+        add_to_total_supply(-amount)
+    }
+
+    fn total_supply(&self) -> Result<Amount> {
+        let key = get_total_supply_key();
+        match sdk::NonnegativeIntGet(&key) {
+            Ok((s, a)) => Ok((s + a).try_into().unwrap()),
+            Err(syserr) => {
+                if syserr.is_storage_key_not_exist() {
+                    return Ok(0);
+                }
+                Err(syserr.into())
+            }
+        }
     }
 }

@@ -10,7 +10,7 @@ pub type Balance = NNInt;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CoinStorage {
-    pub owner: ContractAddress,
+    pub owner: ContractAddress, // could be Option<ContractAddress>, with default None
     // pub name: ByteArray,
     // pub symbol: ByteArray,
     pub total_supply: NNInt,
@@ -18,6 +18,7 @@ pub struct CoinStorage {
     pub allowances: Map<(ContractAddress, ContractAddress), Allowance>,
 }
 
+// XX: generate new(), or derive default?
 impl CoinStorage {
     pub fn new(
         keypath: &Keypath,
@@ -37,22 +38,5 @@ impl CoinStorage {
             allowances,
         };
         Ok(storage)
-    }
-
-    pub fn contract_owner(&self) -> &ContractAddress {
-        &self.owner
-    }
-
-    pub fn balance_of(&self, addr: &ContractAddress) -> Result<Balance> {
-        self.balances.get(addr)
-    }
-
-    pub fn allowance_for(
-        &self,
-        owner: &ContractAddress,
-        spender: &ContractAddress,
-    ) -> Result<Allowance> {
-        let key = (*owner, *spender); // XX: Avoid copying?
-        self.allowances.get(&key)
     }
 }

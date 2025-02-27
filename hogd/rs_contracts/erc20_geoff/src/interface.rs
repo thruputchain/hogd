@@ -25,4 +25,5 @@ pub trait ERC20 {
     fn get_balance(&self) -> Result<Amount>;
     fn mint(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
     fn burn(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
+    fn total_supply(&self) -> Result<Amount>;
 }

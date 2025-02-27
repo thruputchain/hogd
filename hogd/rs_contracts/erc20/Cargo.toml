@@ -9,6 +9,7 @@ serde = { workspace = true, features = ["derive"] }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+doctest = false
 
 [features]
 default = ["guest", "alloc"]

@@ -1,5 +1,4 @@
 use sdk::types::ByteArray;
-use sdk::result::with_context;
 use crate::guest;
 use crate::interface::{client, ERC20};
 
@@ -17,15 +16,22 @@ fn check_mint() {
 
         let mut client = client::ERC20Client::new(&deployed_addr);
 
-        let self_addr = sdk::invoke::GetCurrentAddress().unwrap();
+        let owner = sdk::invoke::GetCurrentAddress().unwrap();
 
-        client.initialize(&self_addr).unwrap();
+        client.initialize(&owner).unwrap();
 
-        client.mint(&self_addr, 100)
-            .map_err(with_context("mint"))
-            .unwrap();
-
+        client.mint(&owner, 100).unwrap();
         assert_eq!(client.get_balance().unwrap(), 100);
+
+        let other = ByteArray::new([0xBB; 32]);
+        client.transfer(&other, 25).unwrap();
+        assert_eq!(client.get_balance_of(&other).unwrap(), 25);
+        assert_eq!(client.get_balance_of(&owner).unwrap(), 75);
+
+        client.burn(&other, 5).unwrap();
+        assert_eq!(client.get_balance_of(&other).unwrap(), 20);
+
+        assert_eq!(client.total_supply().unwrap(), 95);
 
         return 0;
     });

@@ -33,6 +33,10 @@ impl SysErr {
     pub fn is_some(self) -> bool {
         !self.is_none()
     }
+
+    pub fn is_storage_key_not_exist(self) -> bool {
+        self.is_code(SyscallErrorCode::kStorageKeyNotExist)
+    }
 }
 
 impl From<SyscallErrorCode> for SysErr {
