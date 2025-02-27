@@ -1,8 +1,13 @@
 #pragma once
 
+#include <cassert>
 #include <expected>
+#include <string>
+#include <system_error>
+#include <utility>
 
 #include "hogd/base/status.h"
+#include "hogd/base/types.h"
 #include "syscall.hh"
 
 namespace hogd {
@@ -22,7 +27,7 @@ namespace hogd {
 // WebAssembly exported function that was run, the code caused by a host
 // function returning HostFnErrorCode::kExit, or 0, if invocation ends because a
 // host function returns HostFnErrorCode::kReturn.
-enum class InvokeErrorCode : uint8_t {
+enum class InvokeErrorCode : int32_t {
   // A call frame can only succeed if this code is returned.
   // All others revert the call frame.
   kNone = 0,
@@ -48,7 +53,7 @@ enum class InvokeErrorCode : uint8_t {
 // function. The WebAssembly bytecode (the smart contract) itself never sees the
 // HostFnErrorCode. Other HostFnErrorCodes terminate the WebAssembly runtime
 // (returning to the caller), and are handled by the WebAssembly runtime.
-enum class HostFnErrorCode : uint8_t {
+enum class HostFnErrorCode : int32_t {
   kNoneOrRecoverable = 0,
   // Insufficient gas to continue WebAssembly execution.
   //
@@ -134,5 +139,26 @@ operator==(const SyscallErrorCode &lhs, const std::error_code &rhs)
 template<typename T> using SyscallStatus = std::expected<T, SyscallError>;
 
 using HostFnResult = std::pair<HostFnErrorCode, int32_t>;
+
+struct InvokeResult {
+  InvokeStatus<int32_t> result;
+  uint64_t gas_consumed;
+
+  bool is_frame_success() const { return (result.has_value() && *result >= 0); }
+
+  bool is_root_success() const { return result.has_value() && *result == 0; }
+
+  InvokeResult to_root_error()
+  {
+    assert(!is_root_success());
+
+    if (result) {
+      return InvokeResult{.result =
+                              InvokeError{InvokeErrorCode::kDeterministic},
+                          .gas_consumed = gas_consumed};
+    }
+    return *this;
+  }
+};
 
 } // namespace hogd

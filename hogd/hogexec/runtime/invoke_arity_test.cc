@@ -2,12 +2,14 @@
 // exactly maintain, and very easy to mess up with a copy-paste bug.
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -91,10 +93,9 @@ protected:
     ASSERT_TRUE(!!runtime_);
   }
 
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(InvokeArityTests, arity0)
 {
   auto res = runtime_->invoke("calltest0", UINT64_MAX);
@@ -136,6 +137,5 @@ TEST_F(InvokeArityTests, arity5)
   EXPECT_TRUE(!!res.result);
   EXPECT_EQ(*res.result, 105);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

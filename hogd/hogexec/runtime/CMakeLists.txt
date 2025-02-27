@@ -13,6 +13,7 @@ set_source_files_properties(
 add_library(
   runtime
   wasmi_runtime.cc
+  runtime.cc
   status.cc
   syscall_crypto.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
