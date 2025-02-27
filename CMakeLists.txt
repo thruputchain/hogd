@@ -111,9 +111,9 @@ set(LIBSODIUM_STATIC_LIBRARIES
 "${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium${CMAKE_STATIC_LIBRARY_SUFFIX}")
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
-option(ENABLE_TEST_FFI "Enable test ffi bindings" OFF)
+option(ENABLE_BUILD_SHARED "Enable building as shared libraruy (should only be used for testing/ffi bindings)" OFF)
 
-if (ENABLE_TEST_FFI) 
+if (ENABLE_BUILD_SHARED)
   add_library(libsodium_lib SHARED IMPORTED)
   set_target_properties(libsodium_lib PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_SHARED_LIBRARIES}")
 else() 
