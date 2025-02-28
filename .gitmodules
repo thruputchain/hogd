@@ -13,3 +13,6 @@
 [submodule "external/crc32c"]
 	path = external/crc32c
 	url = https://github.com/google/crc32c.git
+[submodule "external/lfi"]
+	path = external/lfi
+	url = git@github.com:zyedidia/lfi.git
