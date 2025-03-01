@@ -107,6 +107,37 @@ set(LIBSODIUM_LIBRARIES
 "${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium.a")
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
+ExternalProject_Add(liblfi
+    SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/lfi
+    CONFIGURE_COMMAND
+      ${CMAKE_COMMAND} -E env
+      CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
+      CFLAGS=${EXTERNAL_C_FLAGS} CXXFLAGS=${EXTERNAL_CXX_FLAGS}
+      meson setup 
+      -Dliblfi-only=true 
+      -Dliblfi-perf=false 
+      -Dliblfi-tests=false 
+      -Dliblfi-host=posix 
+      -Dliblfi-threads=false 
+      --wipe --reconfigure <BINARY_DIR> <SOURCE_DIR>
+    BUILD_COMMAND ninja -C <BINARY_DIR>
+    INSTALL_COMMAND ""  # Skip installation step
+)
+
+ExternalProject_Get_Property(liblfi binary_dir)
+set(LIBLFI_TOP_SRCDIR "${CMAKE_SOURCE_DIR}/external/lfi")
+set(LIBLFI_INCLUDE_DIRS
+    "${LIBLFI_TOP_SRCDIR}/liblfi-small"
+    "${LIBLFI_TOP_SRCDIR}/lfi-verify"
+
+)
+include_directories(${LIBLFI_INCLUDE_DIRS})
+
+add_library(liblfi_lib STATIC IMPORTED)
+set_target_properties(liblfi_lib PROPERTIES IMPORTED_LOCATION "${binary_dir}/liblfi-small/liblfi.a")
+add_library(liblfiv_lib STATIC IMPORTED)
+set_target_properties(liblfiv_lib PROPERTIES IMPORTED_LOCATION "${binary_dir}/lfi-verify/liblfiv.a")
+
 # Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
 add_subdirectory(x23)
