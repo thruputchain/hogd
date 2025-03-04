@@ -3,6 +3,7 @@
 #include <memory>
 #include <mutex>
 
+#include "contract.hh"
 #include "lfi_small.h"
 #include "hogd/base/types.h"
 
@@ -61,5 +62,7 @@ private:
     LFIGlobalEngine& main_engine_;
     LFIProc* proc_ = nullptr;
 };
+
+bool verify_contract(Contract const* contract);
 
 }
