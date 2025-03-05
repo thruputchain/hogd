@@ -90,7 +90,7 @@ ExternalProject_Add(libsodium_build
       ${CMAKE_SOURCE_DIR}/external/libsodium/configure
       --prefix=<BINARY_DIR>
       --enable-opt
-      --enable-pie=no
+      --disable-pie
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
       CFLAGS=${EXTERNAL_C_FLAGS} CXXFLAGS=${EXTERNAL_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
