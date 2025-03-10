@@ -3,11 +3,11 @@ add_library(
   crypto
   crypto.cc
 )
-add_dependencies(crypto libsodium)
+add_dependencies(crypto libsodium_build)
 target_link_libraries(
   crypto
   protocol
-  ${LIBSODIUM_LIBRARIES}
+  libsodium
   crc32c
 )
 

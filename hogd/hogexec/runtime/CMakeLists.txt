@@ -6,6 +6,10 @@ set_source_files_properties(
     ${CMAKE_CURRENT_BINARY_DIR}/syscall_inner.h
     PROPERTIES GENERATED TRUE)
 
+set_source_files_properties(
+    ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
+    PROPERTIES GENERATED TRUE)
+
 add_library(
   runtime
   wasmi_runtime.cc
@@ -27,6 +31,7 @@ add_executable(
 target_link_libraries(
   runtime
   wasmi_lib
+  runtime_trampoline
   protocol
   crypto
 )
@@ -35,6 +40,7 @@ add_dependencies(
   runtime
   generate_syscall_inner_h
   generate_syscall_entry_cc
+  generate_wasmi_ffi_h
   protocol
 )
 
