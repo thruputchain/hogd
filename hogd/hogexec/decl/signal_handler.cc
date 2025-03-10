@@ -5,7 +5,6 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
-#include <stdexcept>
 
 #include "lfi_small.h"
 
@@ -14,8 +13,6 @@ namespace hogd {
 namespace {
 
 thread_local bool decl_in_syscall = false;
-
-#if defined(__aarch64__)
 
 void signal_trap_handler(int sig, siginfo_t* /*unused*/, void* /*unused*/) {
 
@@ -74,13 +71,5 @@ void decl_signal_init() {
     signal_register(SIGBUS);
     sighandler_initialized = true;
 }
-
-#else
-
-void decl_signal_init() {
-	throw std::runtime_error("wrong architecture");
-}
-
-#endif
 
 }
