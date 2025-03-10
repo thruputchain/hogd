@@ -1,10 +1,13 @@
 #pragma once
 
-#include <cstdint>
+#include <concepts>
+#include <cstddef>
 #include <optional>
+#include <span>
 #include <type_traits>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/types.h"
 #include "types.hh"
 
 namespace hogd {
@@ -53,7 +56,7 @@ check_user_custom_input_argument(std::span<std::byte> contract_memory,
                                  Args... args);
 
 template<>
-std::optional<const Signature>
+inline std::optional<const Signature>
 check_user_custom_input_argument(std::span<std::byte> contract_memory,
                                  uint64_t user_discriminant,
                                  uint64_t user_offset)
@@ -80,7 +83,7 @@ check_user_custom_input_argument(std::span<std::byte> contract_memory,
 }
 
 template<>
-std::optional<const PublicKey>
+inline std::optional<const PublicKey>
 check_user_custom_input_argument(std::span<std::byte> contract_memory,
                                  uint64_t user_discriminant,
                                  uint64_t user_offset)
