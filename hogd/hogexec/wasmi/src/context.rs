@@ -483,7 +483,11 @@ pub extern "C" fn wasmi_verify_contract(
     contract_size: usize,
 ) -> bool {
     debug_assert!(p != core::ptr::null());
-    debug_assert!(contract_data_p != core::ptr::null());
+
+    // empty contract might trigger this case.
+    if contract_data_p == core::ptr::null() {
+        return false;
+    }
 
     let context: *const WasmiContext = unsafe { core::mem::transmute(p) };
 
