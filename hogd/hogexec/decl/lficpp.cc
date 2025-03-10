@@ -9,39 +9,70 @@
 
 namespace hogd {
 
+LFIGlobalEngine::LFIGlobalEngine(SysHandler handler)
+{
+  LFIOptions options{
+      .noverify = true,
+      .poc = true,
+      .sysexternal = true,
+      .p2size = 0,
+      .pagesize = 4 * 1024,
+      .stacksize = 65536,
+      .gas = 0,
+      .verifier = nullptr,
+      .syshandler = handler,
+  };
+
+  lfi_engine_ = lfi_new(options);
+  assert(lfi_engine_);
+}
+
+LFIGlobalEngine::~LFIGlobalEngine()
+{
+  assert(active_proc_count_ == 0);
+  if (lfi_engine_) {
+    lfi_delete(lfi_engine_);
+  }
+  lfi_engine_ = nullptr;
+}
+
 std::unique_ptr<DeclProc>
 LFIGlobalEngine::new_proc()
 {
-    std::lock_guard lock(mtx_);
-    
-    auto* decl_proc = new DeclProc(*this);
+  std::lock_guard lock(mtx_);
 
-    assert(!decl_proc->proc_);
+  auto *decl_proc = new DeclProc(*this);
 
-    auto res = lfi_adduproc(lfi_engine_, &decl_proc->proc_, static_cast<void*>(decl_proc), 0x20000, 128_KiB, 128_KiB);
+  assert(!decl_proc->proc_);
 
-    if (!res) {
-        delete decl_proc;
-        return nullptr;
-    }
+  auto res =
+      lfi_adduproc(lfi_engine_, &decl_proc->proc_,
+                   static_cast<void *>(decl_proc), 0x20000, 128_KiB, 128_KiB);
 
-    return std::unique_ptr<DeclProc>(decl_proc);
+  if (!res) {
+    delete decl_proc;
+    return nullptr;
+  }
+  active_proc_count_++;
+
+  return std::unique_ptr<DeclProc>(decl_proc);
 }
 
-void 
-LFIGlobalEngine::delete_proc(LFIProc* proc)
+void
+LFIGlobalEngine::delete_proc(LFIProc *proc)
 {
-    if (!proc) {
-        return;
-    }
+  if (!proc) {
+    return;
+  }
 
-    std::lock_guard lock(mtx_);
-    lfi_rmproc(lfi_engine_, proc);
+  std::lock_guard lock(mtx_);
+  active_proc_count_--;
+  lfi_rmproc(lfi_engine_, proc);
 }
 
-
-DeclProc::~DeclProc() {
-    main_engine_.delete_proc(proc_);
+DeclProc::~DeclProc()
+{
+  main_engine_.delete_proc(proc_);
 }
 
-}
+} // namespace hogd
