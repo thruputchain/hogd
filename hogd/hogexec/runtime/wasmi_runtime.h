@@ -60,6 +60,8 @@ public:
   make_new_runtime(ContractBlob const &contract,
                    SystemCallHandler *syscall_handler) override;
 
+  bool verify_contract(ContractBlob const &contract) const override;
+
 private:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
                      void *fn_ptr, uint8_t nargs) override;

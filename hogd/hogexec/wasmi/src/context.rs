@@ -1,4 +1,4 @@
-use wasmi::{Caller, Config, Engine, Error, Linker, StackLimits};
+use wasmi::{Caller, Config, Engine, Error, Linker, Module, StackLimits};
 
 use core::ffi::c_void;
 use core::slice;
@@ -59,6 +59,10 @@ impl WasmiContext {
             engine: engine.clone(),
             linker: Linker::new(&engine),
         }
+    }
+
+    fn verify_contract(&self, contract_data: &[u8]) -> bool {
+        return Module::validate(&self.engine, contract_data).is_ok();
     }
 
     fn link_function_0args(
@@ -429,6 +433,9 @@ pub extern "C" fn wasmi_link_nargs(
         }
     };
 
+    debug_assert!(module.len() != 0);
+    debug_assert!(method.len() != 0);
+
     let c = unsafe { &mut *context };
 
     let res = match nargs {
@@ -462,9 +469,26 @@ pub extern "C" fn new_wasmi_context() -> *mut c_void {
 
 #[no_mangle]
 pub extern "C" fn free_wasmi_context(p: *mut c_void) {
-    assert!(p != core::ptr::null_mut());
+    debug_assert!(p != core::ptr::null_mut());
 
-    let runtime: *mut WasmiContext = unsafe { core::mem::transmute(p) };
+    let context: *mut WasmiContext = unsafe { core::mem::transmute(p) };
 
-    unsafe { drop(Box::from_raw(runtime)) };
+    unsafe { drop(Box::from_raw(context)) };
+}
+
+#[no_mangle]
+pub extern "C" fn wasmi_verify_contract(
+    p: *const c_void,
+    contract_data_p: *const u8,
+    contract_size: usize,
+) -> bool {
+    debug_assert!(p != core::ptr::null());
+    debug_assert!(contract_data_p != core::ptr::null());
+
+    let context: *const WasmiContext = unsafe { core::mem::transmute(p) };
+
+    let wasm: &[u8] =
+        unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
+
+    return unsafe { (*context).verify_contract(wasm) };
 }

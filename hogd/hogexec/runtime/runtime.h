@@ -91,6 +91,10 @@ public:
                          (kArgCount<Args>() + ... + 0));
   }
 
+  // Perform any required validation checks on the contract.
+  // In the case of webassembly, this is the webassembly validator.
+  virtual bool verify_contract(ContractBlob const &contract) const = 0;
+
   virtual std::unique_ptr<Runtime>
   make_new_runtime(ContractBlob const &contract,
                    SystemCallHandler *syscall_handler) = 0;

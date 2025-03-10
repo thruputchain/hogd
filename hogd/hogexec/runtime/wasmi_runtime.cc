@@ -5,13 +5,13 @@
 #include <string_view>
 #include <utility>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/hogexec/wasmi/bindings.h"
-#include "contract.hh"
-#include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
 
 namespace hogd {
 
@@ -41,6 +41,17 @@ WasmiContext::make_new_runtime(ContractBlob const &contract,
 
   return std::make_unique<WasmiRuntime>(std::move(host_call_context),
                                         wasmi_runtime_ptr);
+}
+
+bool
+WasmiContext::verify_contract(ContractBlob const &contract) const
+{
+  assert(wasmi_context_ptr_);
+
+  return wasmi_verify_contract(wasmi_context_ptr_,
+                               reinterpret_cast<const uint8_t *>(
+                                   contract.data()),
+                               contract.size());
 }
 
 bool

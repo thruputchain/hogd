@@ -259,9 +259,11 @@ TEST_F(WasmiErrorHandlingTest, NullHandling)
 
 TEST_F(WasmiErrorHandlingTest, NullLinkHandling)
 {
-  // Apparently WASM accepts module/fn names of empty strings
-  EXPECT_TRUE(context_.link_fn("", "good_call", &good_call));
-  EXPECT_TRUE(context_.link_fn("test", "", &good_call));
+  // The WASM standard accepts empty strings, but we ban that out to keep the
+  // ffi handling simpler (meaning we never have a reason to pass a null string
+  // across FFI).
+  EXPECT_FALSE(context_.link_fn("", "good_call", &good_call));
+  EXPECT_FALSE(context_.link_fn("test", "", &good_call));
   EXPECT_TRUE(context_.link_fn("foo", "good_call", &good_call));
 
   runtime_ = context_.make_new_runtime(contract_, nullptr);
