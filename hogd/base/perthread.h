@@ -182,12 +182,14 @@ public:
 
   // for_each runs func on each thread-local copy of the variable. The lock
   // returned by lock_threads() must be passed as ul.
-  template<typename F> void for_each(std::unique_lock<std::mutex> &ul, F &&func) // NOLINT(misc-unused-parameters)
+  // NOLINTBEGIN(misc-unused-parameters)
+  template<typename F> void for_each(std::unique_lock<std::mutex> &ul, F &&func)
   {
     assert(ul.owns_lock());
     assert(ul.mutex() == &storage_.lock_);
     storage_.for_each(idx_, std::forward<F>(func));
   }
+  // NOLINTEND(misc-unused-parameters)
 
 private:
   static inline detail::TLStorage<T> storage_;
