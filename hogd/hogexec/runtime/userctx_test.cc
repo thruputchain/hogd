@@ -32,7 +32,7 @@ TEST(WasmRuntimeTest, CheckCtxCorrect)
 
   context.link_fn("test", "redir_call", &foo);
 
-  auto runtime = context.make_new_runtime(c, ctx_check);
+  auto runtime = context.make_new_runtime(c, ctx_check, true);
 
   ASSERT_TRUE(!!runtime);
 

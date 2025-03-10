@@ -97,7 +97,8 @@ public:
 
   virtual std::unique_ptr<Runtime>
   make_new_runtime(ContractBlob const &contract,
-                   SystemCallHandler *syscall_handler) = 0;
+                   SystemCallHandler *syscall_handler,
+                   bool do_contract_verify) = 0;
 
 protected:
   virtual bool link_fn_nargs(std::string_view module_name,

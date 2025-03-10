@@ -25,8 +25,13 @@ WasmiContext::~WasmiContext()
 
 std::unique_ptr<Runtime>
 WasmiContext::make_new_runtime(ContractBlob const &contract,
-                               SystemCallHandler *syscall_handler)
+                               SystemCallHandler *syscall_handler,
+                               bool do_contract_verify)
 {
+  if (do_contract_verify && !verify_contract(contract)) {
+    return {};
+  }
+
   std::unique_ptr<HostCallContext> host_call_context =
       std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = syscall_handler;
