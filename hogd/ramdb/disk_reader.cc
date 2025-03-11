@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <charconv>
@@ -158,6 +159,7 @@ get_log_files(Directory &dir)
 
     lsns.push_back(tmp);
   }
+  std::ranges::sort(lsns);
 
   return lsns;
 }
