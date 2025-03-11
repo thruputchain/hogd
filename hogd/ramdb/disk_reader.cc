@@ -136,12 +136,13 @@ static_assert(std::is_trivially_copyable_v<SafeItemHeader>);
 
 // get_log_files scans the directory and returns a vector of the starting LSN
 // for each log file that was found.
-inline std::vector<uint64_t>
+inline DBStatus<std::vector<uint64_t>>
 get_log_files(Directory &dir)
 {
-  ErrnoStatus<std::vector<std::string>> files = dir.list();
+  DBStatus<std::vector<std::string>> files =
+      dir.list().transform_error(to_db_error);
   if (!files)
-    return {};
+    return files.error();
 
   std::vector<uint64_t> lsns;
   for (std::string_view str : *files) {
@@ -278,11 +279,13 @@ DiskReader::load_database(
                                        std::vector<UniqueLoglet> &&)> &func,
     std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn)
 {
-  std::vector<uint64_t> log_lsns = get_log_files(dir);
   uint64_t cur_lsn = 0;
   DBStatus<void> ret;
+  DBStatus<std::vector<uint64_t>> log_lsns = get_log_files(dir);
+  if (!log_lsns)
+    return log_lsns.error();
 
-  for (uint64_t log_lsn : log_lsns) {
+  for (uint64_t log_lsn : *log_lsns) {
     if (target_lsn && log_lsn >= *target_lsn) {
       assert(log_lsn == *target_lsn);
       break;

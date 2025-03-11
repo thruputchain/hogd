@@ -175,9 +175,9 @@ public:
     return read_slowpath(dst);
   }
 
-  // read_string returns the string of the bytes before delim or EOF.
+  // read_string returns the string before delim or EOF.
   ErrnoStatus<std::string> read_string(char delim);
-  // readln returns the string of the bytes before a new line or EOF.
+  // readln returns the string before a new line or EOF.
   ErrnoStatus<std::string> readln() { return read_string('\n'); }
 
 private:
