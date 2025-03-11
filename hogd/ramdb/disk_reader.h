@@ -1,9 +1,4 @@
 // disk_reader.h - the read path for persistent on-disk storage.
-//
-// In order to unlock some concurrency, ramdb uses a pipelined approach with
-// two threads. The first thread reads, parses, and checksums item changes from
-// the on-disk logs. The second thread then inserts the item changes into the
-// in-memory map.
 
 #pragma once
 
