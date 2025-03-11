@@ -1,7 +1,6 @@
 #pragma once
 
-namespace hogd
-{
+namespace hogd {
 
 // This function should be called by each thread that uses DeCl
 // Second call from a thread is a no-op
@@ -14,4 +13,4 @@ void decl_signal_init();
 void decl_mark_inside_syscall();
 void decl_unmark_inside_syscall();
 
-}
+} // namespace hogd
