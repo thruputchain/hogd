@@ -1,14 +1,9 @@
 #pragma once
 
-#ifdef __cplusplus
-
-#include <cstdint>
-
-namespace hogd::detail {
-
-extern "C" {
-#else
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
 #endif
 
 struct TrampolineResult {
@@ -59,8 +54,7 @@ struct TrampolineResult
 c_call_8args(void *function_pointer, void *host_call_context, uint64_t arg1,
              uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
              uint64_t arg6, uint64_t arg7, uint64_t arg8);
+
 #ifdef __cplusplus
 } // extern C
-
-} // namespace hogd::detail
 #endif

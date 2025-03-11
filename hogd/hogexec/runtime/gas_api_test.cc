@@ -58,7 +58,7 @@ protected:
     context.link_fn("test", "external_call",
                     &consume_gas_call); // called by "call1"
 
-    runtime_ = context.make_new_runtime(c, nullptr);
+    runtime_ = context.make_new_runtime(c, nullptr, true);
 
     ASSERT_TRUE(!!runtime_);
   }

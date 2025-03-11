@@ -53,9 +53,11 @@ public:
   // wrapper around a manual drop call on the rust side
   ~WasmiContext() override;
 
-  std::unique_ptr<Runtime>
-  make_new_runtime(ContractBlob const &contract,
-                   SystemCallHandler *syscall_handler) override;
+  std::unique_ptr<Runtime> make_new_runtime(ContractBlob const &contract,
+                                            SystemCallHandler *syscall_handler,
+                                            bool do_contract_verify) override;
+
+  bool verify_contract(ContractBlob const &contract) const override;
 
 private:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,

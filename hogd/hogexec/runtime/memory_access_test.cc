@@ -18,7 +18,7 @@ protected:
     // this wasm just invokes an external call.  We're just reusing it here.
     auto c = test::load_wasm_from_file("test_set_memory.wasm");
     WasmiContext context;
-    runtime_ = context.make_new_runtime(c, nullptr);
+    runtime_ = context.make_new_runtime(c, nullptr, true);
     ASSERT_TRUE(!!runtime_);
   }
 

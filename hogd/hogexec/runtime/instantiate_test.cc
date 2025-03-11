@@ -9,7 +9,7 @@ TEST(WasmRuntimeTest, MissingImportFail)
 {
   auto c = test::load_wasm_from_file("test_invoke.wasm");
   WasmiContext context;
-  auto runtime = context.make_new_runtime(c, nullptr);
+  auto runtime = context.make_new_runtime(c, nullptr, true);
 
   EXPECT_FALSE(!!runtime);
 }

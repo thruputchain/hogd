@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -25,8 +26,13 @@ WasmiContext::~WasmiContext()
 
 std::unique_ptr<Runtime>
 WasmiContext::make_new_runtime(ContractBlob const &contract,
-                               SystemCallHandler *syscall_handler)
+                               SystemCallHandler *syscall_handler,
+                               bool do_contract_verify)
 {
+  if (do_contract_verify && !verify_contract(contract)) {
+    return {};
+  }
+
   std::unique_ptr<HostCallContext> host_call_context =
       std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = syscall_handler;
@@ -41,6 +47,17 @@ WasmiContext::make_new_runtime(ContractBlob const &contract,
 
   return std::make_unique<WasmiRuntime>(std::move(host_call_context),
                                         wasmi_runtime_ptr);
+}
+
+bool
+WasmiContext::verify_contract(ContractBlob const &contract) const
+{
+  assert(wasmi_context_ptr_);
+
+  return wasmi_verify_contract(wasmi_context_ptr_,
+                               reinterpret_cast<const uint8_t *>(
+                                   contract.data()),
+                               contract.size());
 }
 
 bool

@@ -3,7 +3,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
@@ -89,7 +88,7 @@ protected:
     context.link_fn("test", "arg3", &arity3);
     context.link_fn("test", "arg4", &arity4);
     context.link_fn("test", "arg5", &arity5);
-    runtime_ = context.make_new_runtime(c, nullptr);
+    runtime_ = context.make_new_runtime(c, nullptr, true);
     ASSERT_TRUE(!!runtime_);
   }
 
