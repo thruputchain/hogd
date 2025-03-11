@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "hogd/base/status.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/io.h"
@@ -65,6 +66,35 @@ TEST_F(IOTest, FullWriteRead)
 
   // compare the buffers
   EXPECT_EQ(buf_, read_buf);
+}
+
+TEST_F(IOTest, ReadString)
+{
+  std::string test_str("a,bb,ccc,dddd,eeeee,ffffff");
+  std::vector<std::string_view> split_str = split(test_str, ',');
+
+  // perform the write
+  ErrnoStatus<void> ret = write_full(f_, std::as_bytes(std::span(test_str)));
+  EXPECT_TRUE(ret);
+
+  // seek to beginning of file
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  ErrnoStatus<off_t> off = f_.lseek(SEEK_SET, 0);
+  EXPECT_TRUE(off);
+  EXPECT_EQ(*off, 0);
+
+  // read each string and compare to split tokens
+  BufferedReader r(f_, kBufferSize);
+  for (std::string_view str : split_str) {
+    ErrnoStatus<std::string> ret = r.read_string(',');
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(*ret, str);
+  }
+
+  // check EOF behavior
+  ErrnoStatus<std::string> eof = r.read_string(',');
+  EXPECT_TRUE(eof);
+  EXPECT_EQ(*eof, "");
 }
 
 class IOTestP : public IOTest, public ::testing::WithParamInterface<size_t> {};

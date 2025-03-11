@@ -50,8 +50,8 @@ public:
   DBStatus<void> get_if_type(std::span<const std::byte> key, uint8_t type,
                              std::span<std::byte> val_out);
 
-  // put inserts an item. If replace is false, it will return DBCode::kExists
-  // if an item already exists for the given key.
+  // put inserts an item. If the item's key already exists, the item will be
+  // replaced.
   DBStatus<void> put(std::span<const std::byte> key, uint8_t type,
                      std::span<const std::byte> val);
 
@@ -59,10 +59,14 @@ public:
   // exist.
   DBStatus<void> remove(std::span<const std::byte> key);
 
+  // apply_change applies an item change from the on-disk log. It is assumed
+  // this will be called from a single thread, so locking is not required.
+  DBStatus<void> apply_change(ItemHeader *hdr);
+
   // prepare_expand prepares to increase the size of the map. It must be called
   // without concurrent access. The expansion itself is performed by do_expand,
   // which should only be called if the return value is true.
-  bool prepare_expand(int bucket_order);
+  bool prepare_expand();
 
   // do_expand is concurrent and does not pause operations on the map. It should
   // be called after prepare_expand to finish expanding.

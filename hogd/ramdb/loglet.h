@@ -57,7 +57,7 @@ struct ItemHeader {
   uint32_t value_len;
   union {
     ItemHeader *next{nullptr};
-    uint64_t generation;
+    uint64_t lsn; // Log Sequence Number
   };
 
   ItemHeader() = default;
@@ -91,12 +91,20 @@ struct ItemHeader {
     return {buf, value_len};
   }
 
-  // get_key returns a contiguous span of the key data first and then the value
-  // data second.
+  // get_key_and_value returns a contiguous span of the key data and the value
+  // data.
   std::span<std::byte> get_key_and_value()
   {
     auto *buf = reinterpret_cast<std::byte *>(this) + sizeof(*this);
     return {buf, kv_bytes()};
+  }
+
+  // get_all returns a contiguous span of the key data, the value data, and any
+  // alignment padding.
+  std::span<std::byte> get_all()
+  {
+    auto *buf = reinterpret_cast<std::byte *>(this) + sizeof(*this);
+    return {buf, align_up(kv_bytes(), alignof(ItemHeader))};
   }
 };
 
@@ -232,13 +240,6 @@ public:
   // bytes_left returns the bytes that can still be allocated in the loglet.
   size_t bytes_left() const { return len_ - pos_ - sizeof(ItemHeader); }
 
-  // live_bytes returns the bytes that are currently allocated toward
-  // items, excluding dead items.
-  size_t live_bytes() const
-  {
-    return pos_ - free_len_.load(std::memory_order_acquire);
-  }
-
   // fully_compacted returns true if the loglet is full and all allocated bytes
   // are live.
   bool fully_compacted() const
@@ -247,18 +248,27 @@ public:
            free_len_.load(std::memory_order_acquire) == 0;
   }
 
+  // get_usage_mode returns the current usage case for the loglet.
+  LogletMode get_usage_mode() const
+  {
+    return mode_.load(std::memory_order_relaxed);
+  }
+
+  // size returns the bytes allocated in this loglet.
+  size_t size() const { return pos_; }
+
+  // live_size returns the bytes allocated in this loglet, excluding dead items.
+  size_t live_size() const
+  {
+    return pos_ - free_len_.load(std::memory_order_acquire);
+  }
+
   // utilization returns the fraction of bytes that are not being wasted due to
   // fragmentation. A higher fraction indicates that a smaller amount of memory
   // can be recovered by compacting the loglet.
   float utilization() const
   {
-    return static_cast<float>(live_bytes()) / static_cast<float>(len_);
-  }
-
-  // get_usage_mode returns the current usage case for the loglet.
-  LogletMode get_usage_mode() const
-  {
-    return mode_.load(std::memory_order_relaxed);
+    return static_cast<float>(live_size()) / static_cast<float>(len_);
   }
 
 private:

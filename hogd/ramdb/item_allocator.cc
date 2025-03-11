@@ -152,7 +152,7 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
     ItemHeader *src_item = std::addressof(h);
 
     // loglet compaction is finished if every live item has been moved.
-    if (src->live_bytes() == bytes_moved)
+    if (src->live_size() == bytes_moved)
       break;
 
     // optimization: skip dead items that can be detected without locking.

@@ -23,14 +23,14 @@ public:
   static DBStatus<std::unique_ptr<Database>>
   open(const std::string &path, size_t heap_size, int bucket_order = 0);
 
-  Database(File &&f, size_t heap_size, int lock_order, int bucket_order,
+  Database(Directory dir, size_t heap_size, int lock_order, int bucket_order,
            int write_head_order)
     : loglet_allocator_(
           LogletAllocator::create(heap_size,
                                   std::thread::hardware_concurrency(),
                                   [this] { notify_low_mem(); })),
       item_allocator_(*loglet_allocator_, pool_, &map_),
-      disk_writer_(*loglet_allocator_, std::move(f), write_head_order),
+      disk_writer_(*loglet_allocator_, std::move(dir), write_head_order),
       map_(item_allocator_, disk_writer_, lock_order, bucket_order),
       bg_th_(
           [this](const std::stop_token &stoken) { background_worker(stoken); })

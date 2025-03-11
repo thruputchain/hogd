@@ -8,11 +8,14 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/span.h"
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/ramdb/io.h"
 #include "hogd/ramdb/random_bytes.h"
 
 namespace hogd {
@@ -41,22 +44,37 @@ protected:
 
   void SetUp() override
   {
-    size_t heap_size =
-        Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
-    DBStatus<std::unique_ptr<Database>> ret =
-        Database::open("/tmp/ramdb_test", heap_size, kBucketOrder);
+    ErrnoStatus<Directory> dir = Directory::open_temporary();
+    ASSERT_TRUE(static_cast<bool>(dir));
+    dir_ = *dir;
+    info("creating database at '{}'", dir_.get_path());
+    DBStatus<void> ret = open_db();
     ASSERT_TRUE(static_cast<bool>(ret));
-    db_ = std::move(*ret);
   }
 
+  DBStatus<void> open_db();
   void insert_many(size_t count, int threads = 1);
   void remove_every_n(int n);
   void check_integrity();
 
+  Directory dir_;
   std::unique_ptr<Database> db_;
   std::unordered_map<std::string, std::string> oracle_;
   RandomBytes rand_;
 };
+
+DBStatus<void>
+DatabaseTest::open_db()
+{
+  size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<std::unique_ptr<Database>> ret =
+      Database::open(dir_.get_path(), heap_size, kBucketOrder);
+  if (!ret)
+    return ret.error();
+  db_ = std::move(*ret);
+  return {};
+}
 
 void
 DatabaseTest::insert_many(size_t count, int threads)
@@ -143,6 +161,30 @@ TEST_F(DatabaseTest, InsertionsAndRemovals)
   insert_many(kInsertions);
   check_integrity();
   remove_every_n(2);
+  check_integrity();
+}
+
+TEST_F(DatabaseTest, SyncAndLoad)
+{
+  // make changes to items.
+  insert_many(kInsertions, kThreads);
+  check_integrity();
+  remove_every_n(3);
+  check_integrity();
+
+  // sync to disk.
+  DBStatus<uint64_t> lsn = db_->sync();
+  EXPECT_TRUE(lsn);
+  if (lsn.has_value()) {
+    EXPECT_EQ(*lsn, 1);
+  }
+
+  // destroy DB.
+  db_.reset();
+
+  // restore DB from disk and check integrity.
+  DBStatus<void> ret = open_db();
+  EXPECT_TRUE(static_cast<bool>(ret));
   check_integrity();
 }
 

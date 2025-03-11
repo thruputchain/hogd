@@ -1,12 +1,16 @@
 #include "hogd/ramdb/disk_writer.h"
 
+#include <fcntl.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
+#include <format>
 #include <mutex>
 #include <span>
 #include <stop_token>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -16,11 +20,41 @@
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/io.h"
 #include "hogd/ramdb/loglet.h"
 
 namespace hogd {
+
+DBStatus<File>
+DiskWriter::create_log_file()
+{
+  std::string filename = std::format("{}.log", cur_lsn_);
+
+  // create the new log file.
+  DBStatus<File> f =
+      dir_.openat(filename, O_WRONLY | O_CREAT).transform_error(to_db_error);
+  if (!f)
+    return f.error();
+
+  // sync the directory to include the new file. This is needed or the file
+  // could disappear after a crash.
+  DBStatus<void> ret = dir_.sync().transform_error(to_db_error);
+  if (!ret)
+    return ret.error();
+
+  debug("created log file {}", filename);
+  return f;
+}
+
+void
+DiskWriter::init(uint64_t lsn)
+{
+  cur_lsn_ = synced_lsn_ = lsn;
+  writer_th_ = std::jthread(
+      [this](const std::stop_token &stoken) { write_worker(stoken); });
+}
 
 void
 DiskWriter::write_worker(const std::stop_token &stoken)
@@ -37,8 +71,16 @@ DiskWriter::write_worker(const std::stop_token &stoken)
     commit_cv_.notify_all();
   };
 
-  // used to calculate the CRC32C in the commit record.
+  // create the log file.
+  DBStatus<File> f = create_log_file();
+  if (!f) {
+    signal_ioerror();
+    return;
+  }
+
+  BufferedWriter w(*f);
   uint32_t crc = 0;
+  size_t bytes_written = 0;
 
   while (true) {
     std::vector<UniqueLoglet> q;
@@ -59,16 +101,15 @@ DiskWriter::write_worker(const std::stop_token &stoken)
       // Handle Commit Record
       if (!ll) {
         // prepare the commit record.
-        commit_hdr->generation = synced_lsn_ + 1;
+        commit_hdr->lsn = synced_lsn_;
         crc = crc32c_append(crc, writable_byte_view(*commit_hdr));
         std::ranges::copy(writable_byte_view(crc),
                           commit_hdr->get_key().begin());
         crc = 0;
 
-        // write the commit record and sync everything to the disk.
-        if (!write_full(w_, std::as_writable_bytes(std::span(commit_buf)))
-                 .and_then([this] { return w_.flush_and_sync(); }))
-            [[unlikely]] {
+        // write the commit record and sync everything to disk.
+        if (!write_full(w, std::as_writable_bytes(std::span(commit_buf)))
+                 .and_then([&w] { return w.flush_and_sync(); })) [[unlikely]] {
           signal_ioerror();
           return;
         }
@@ -82,20 +123,34 @@ DiskWriter::write_worker(const std::stop_token &stoken)
           commit_cv_.notify_all();
         }
 
+        // start a new log file if the current size exceeds the threshold.
+        if (bytes_written > kDiskLogFileThreshold) {
+          assert(w.empty());
+          bytes_written = 0;
+          f = create_log_file();
+          if (!f) {
+            signal_ioerror();
+            return;
+          }
+          w = BufferedWriter(*f);
+        }
         continue;
       }
 
       // Handle Change Records
       crc = crc32c_append(crc, ll->get_bytes());
-      ErrnoStatus<void> ret = write_full(w_, ll->get_bytes());
+      ErrnoStatus<void> ret = write_full(w, ll->get_bytes());
       if (!ret) [[unlikely]] {
         signal_ioerror();
         return;
       }
-      bytes_out_.store(bytes_out_.load(std::memory_order_relaxed) +
-                           ll->get_bytes().size(),
-                       std::memory_order_release);
+
+      // Report progress in consuming buffer.
+      size_t n = ll->get_bytes().size();
+      bytes_written += n;
       ll.reset(); // proactively free loglet
+      bytes_out_.store(bytes_out_.load(std::memory_order_relaxed) + n,
+                       std::memory_order_release);
     }
   }
 }
@@ -180,6 +235,7 @@ ScopedDiskWrite::modify(ItemHeader *src)
   // append the modification record.
   ItemHeader *dst = ll->clone(src);
   assert(dst != nullptr);
+  dst->lsn = w_.cur_lsn_;
   std::ranges::copy(src->get_key_and_value(), dst->get_key_and_value().begin());
   return {};
 }
@@ -197,6 +253,7 @@ ScopedDiskWrite::remove(std::span<const std::byte> key)
   // append the removal record.
   ItemHeader *hdr = ll->alloc(ItemStorage::kTombstone, 0, key.size(), 0);
   assert(hdr != nullptr);
+  hdr->lsn = w_.cur_lsn_;
   std::ranges::copy(key, hdr->get_key().begin());
   return {};
 }

@@ -3,6 +3,7 @@ add_library(
   ramdb
   db.cc
   db_status.cc
+  disk_reader.cc
   disk_writer.cc
   io.cc
   item_allocator.cc

@@ -136,7 +136,7 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
 
   // allocate and initialize the item.
   // WARNING: calling alloc() with the bucket lock held could deadlock since
-  // the compactor also could use this lock.
+  // the compactor may also acquire this lock.
   ItemHeader *item = allocator_.alloc(type, key.size(), val.size());
   if (!item) [[unlikely]]
     return DBError(DBCode::kNoMemory);
@@ -202,10 +202,74 @@ ScalableMap::remove(std::span<const std::byte> key)
   return {};
 }
 
-bool
-ScalableMap::prepare_expand(int bucket_order)
+DBStatus<void>
+ScalableMap::apply_change(ItemHeader *hdr)
 {
-  size_t new_size = 1UL << bucket_order;
+  size_t idx = calculate_hash(hdr->get_key()) & (buckets_.size() - 1);
+  ItemHeader **bu = &buckets_[idx];
+  std::atomic<uint16_t> &cnt = item_counts_[idx];
+
+  using enum ItemStorage;
+  assert(hdr->storage == kNormal || hdr->storage == kTombstone);
+  switch (hdr->storage) {
+
+  case kNormal: // handle put
+  {
+    // Check if the key already exists.
+    for (; *bu != nullptr; bu = &(*bu)->next) {
+      if ((*bu)->get_key() == hdr->get_key()) {
+        // Is the item size unchanged? Update in place.
+        if ((*bu)->get_value().size() == hdr->get_value().size()) {
+          (*bu)->type = hdr->type;
+          std::ranges::copy(hdr->get_value(), (*bu)->get_value().begin());
+          return {};
+        }
+
+        // Otherwise delete so it can be inserted as new.
+        unlink(bu);
+        counter_dec(cnt);
+        break;
+      }
+    }
+
+    // Insert new key-value pair.
+    ItemHeader *item = allocator_.alloc(hdr->type, hdr->get_key().size(),
+                                        hdr->get_value().size());
+    if (!item) [[unlikely]]
+      return DBError(DBCode::kNoMemory);
+    std::ranges::copy(hdr->get_key_and_value(),
+                      item->get_key_and_value().begin());
+    item->next = *bu;
+    *bu = item;
+    counter_inc(cnt);
+    break;
+  }
+
+  case kTombstone: // handle remove
+  {
+    for (; *bu != nullptr; bu = &(*bu)->next) {
+      if ((*bu)->get_key() == hdr->get_key()) {
+        unlink(bu);
+        counter_dec(cnt);
+        break;
+      }
+    }
+    break;
+  }
+
+  default:
+    std::unreachable();
+  }
+
+  return {};
+}
+
+bool
+ScalableMap::prepare_expand()
+{
+  // calculate ideal size.
+  int new_bucket_order = std::countr_zero(std::bit_floor(size()));
+  size_t new_size = 1UL << new_bucket_order;
 
   // we don't support shrinking.
   if (new_size <= buckets_.size())

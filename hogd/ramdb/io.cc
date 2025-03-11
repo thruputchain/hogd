@@ -13,10 +13,12 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iterator>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/cleanup.h"
@@ -104,6 +106,15 @@ inline ErrnoStatus<void>
 sys_access(const std::string &path, int mode)
 {
   return make_errno_status<void>(access(path.c_str(), mode));
+}
+
+inline ErrnoStatus<struct stat>
+sys_stat(const std::string &path)
+{
+  struct stat tmp;
+  if (stat(path.c_str(), &tmp) == -1)
+    return Errno{};
+  return tmp;
 }
 
 inline ErrnoStatus<void>
@@ -259,6 +270,12 @@ Directory::access(std::string_view filename, int mode) const
   return sys_access(get_file_path(filename), mode);
 }
 
+ErrnoStatus<struct stat>
+Directory::stat(std::string_view filename) const
+{
+  return sys_stat(get_file_path(filename));
+}
+
 ErrnoStatus<void>
 Directory::unlink(std::string_view filename) const
 {
@@ -266,9 +283,25 @@ Directory::unlink(std::string_view filename) const
 }
 
 ErrnoStatus<void>
+Directory::unlink_all() const
+{
+  ErrnoStatus<std::vector<std::string>> files = list();
+  if (!files)
+    return files.error();
+
+  for (std::string_view file : *files) {
+    ErrnoStatus<void> ret = unlink(file);
+    if (!ret)
+      return ret.error();
+  }
+
+  return {};
+}
+
+ErrnoStatus<void>
 Directory::sync() const
 {
-  ErrnoStatus<int> fd = sys_open(dir_path_, O_DIRECTORY | O_RDWR);
+  ErrnoStatus<int> fd = sys_open(dir_path_, O_DIRECTORY | O_RDONLY);
   if (!fd)
     return fd.error();
   Defer d([fd = *fd] {
@@ -290,7 +323,7 @@ BufferedReader::read_slowpath(std::span<std::byte> dst)
   // optimization: can read to dst directly if large enough
   dst = dst.subspan(n);
   if (dst.size() >= buf_.size()) {
-    ErrnoStatus<size_t> ret = in_.read(dst);
+    ErrnoStatus<size_t> ret = in_->read(dst);
     if (!ret)
       return ret.error();
     return n + *ret;
@@ -302,6 +335,41 @@ BufferedReader::read_slowpath(std::span<std::byte> dst)
   if (!ret)
     return ret.error();
   return n + read_from_buffer(dst);
+}
+
+ErrnoStatus<std::string>
+BufferedReader::read_string(char delim)
+{
+  std::string buf;
+  auto append = [&buf](std::span<const std::byte> str) {
+    buf.append({reinterpret_cast<const char *>(str.data()), str.size()});
+  };
+
+  while (true) {
+    // refill the buffer if it is empty
+    if (pos_.empty()) {
+      ErrnoStatus<void> ret = refill();
+      if (!ret)
+        return ret.error();
+    }
+
+    // if the buffer is still empty, we reached EOF
+    if (pos_.empty())
+      break;
+
+    // peek to see if the buffer contains the deliminator
+    std::optional<size_t> delim_pos = peek_delim(delim);
+    if (delim_pos) {
+      append(pos_.first(*delim_pos - 1));
+      pos_ = pos_.subspan(*delim_pos);
+      break;
+    }
+
+    // otherwise empty out the current buffer and continue.
+    append(std::exchange(pos_, std::span<std::byte>()));
+  }
+
+  return buf;
 }
 
 inline size_t
@@ -318,11 +386,24 @@ BufferedReader::read_from_buffer(std::span<std::byte> dst)
 inline ErrnoStatus<void>
 BufferedReader::refill()
 {
-  ErrnoStatus<size_t> ret = in_.read(buf_);
+  ErrnoStatus<size_t> ret = in_->read(buf_);
   if (!ret)
     return ret.error();
   pos_ = std::span(buf_.begin(), *ret);
   return {};
+}
+
+inline std::optional<size_t>
+BufferedReader::peek_delim(char delim) const
+{
+  assert(!pos_.empty());
+
+  for (auto it = pos_.begin(); it != pos_.end(); ++it) {
+    if (static_cast<char>(*it) == delim)
+      return std::distance(pos_.begin(), it) + 1;
+  }
+
+  return std::nullopt;
 }
 
 BufferedWriter::~BufferedWriter()
@@ -340,7 +421,7 @@ BufferedWriter::write_slowpath(std::span<const std::byte> src)
   while (!src.empty()) {
     // optimization: can write src directly if large enough and buffer is empty
     if (buf_.empty() && src.size() >= buf_.capacity()) {
-      ErrnoStatus<size_t> ret = out_.write(src);
+      ErrnoStatus<size_t> ret = out_->write(src);
       if (!ret)
         return ret.error();
       bytes_written += *ret;
@@ -368,13 +449,13 @@ ErrnoStatus<void>
 BufferedWriter::flush()
 {
   Defer d([this] { buf_.clear(); });
-  return write_full(out_, buf_);
+  return write_full(*out_, buf_);
 }
 
 ErrnoStatus<void>
 BufferedWriter::flush_and_sync()
 {
-  return flush().and_then([this] { return out_.sync(); });
+  return flush().and_then([this] { return out_->sync(); });
 }
 
 } // namespace hogd

@@ -1,7 +1,5 @@
 #include "hogd/ramdb/db.h"
 
-#include <fcntl.h>
-
 #include <algorithm>
 #include <bit>
 #include <cassert>
@@ -11,7 +9,6 @@
 #include <stop_token>
 #include <string>
 #include <thread>
-#include <utility>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/log.h"
@@ -21,6 +18,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/ramdb/disk_reader.h"
 #include "hogd/ramdb/io.h"
 #include "hogd/ramdb/loglet.h"
 
@@ -62,17 +60,23 @@ Database::open(const std::string &path, size_t heap_size, int bucket_order)
     return to_db_error(dir.error());
   }
 
-  // create the log file.
-  ErrnoStatus<File> f = dir->openat("ramdb.log", O_RDWR | O_CREAT | O_TRUNC);
-  if (!f) {
-    error("couldn't open log file: {}", f.error());
-    return to_db_error(f.error());
-  }
-
   // create the database.
-  auto db = std::make_unique<Database>(std::move(*f), heap_size, lock_order,
+  auto db = std::make_unique<Database>(*dir, heap_size, lock_order,
                                        bucket_order, write_head_order);
   db->pool_.adjust_workers(active_cores(db->pool_));
+
+  // load the existing log if it exists.
+  DiskReader r(*db->loglet_allocator_, db->map_);
+  DBStatus<uint64_t> lsn = r.load(*dir);
+  if (!lsn) {
+    error("failed to load database: {}", lsn.error());
+    return lsn.error();
+  }
+  if (*lsn == 0)
+    debug("no existing database found; creating a new database.");
+  else
+    debug("loaded up to LSN {}, {} items", *lsn, db->map_.size());
+  db->disk_writer_.init(*lsn);
 
   // print configuration for debugging.
   debug("opening DB at '{}':", path);
@@ -131,8 +135,7 @@ Database::background_worker(const std::stop_token &stoken)
       run_expand_ = false;
 
       // check if the buckets need to be expanded.
-      int bucket_order = std::countr_zero(std::bit_floor(map_.size()));
-      if (!active_ && map_.prepare_expand(bucket_order))
+      if (!active_ && map_.prepare_expand())
         expand = true;
     }
 

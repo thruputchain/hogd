@@ -80,13 +80,14 @@ Loglet::alloc(ItemStorage storage, uint8_t type, size_t key_len,
 
   // check if there is enough space.
   size_t len = sizeof(ItemHeader) + key_len + value_len;
+  len = align_up(len, alignof(ItemHeader));
   if (unlikely(pos_ + len >= len_))
     return nullptr;
 
   // initialize and return the item header.
   auto *h = new (start_ + pos_) ItemHeader(storage, type, key_len, value_len);
   assert(item_is_within(h));
-  pos_ += align_up(len, alignof(ItemHeader));
+  pos_ += len;
   return h;
 }
 
@@ -94,17 +95,17 @@ ItemHeader *
 Loglet::clone(ItemHeader *src)
 {
   assert(is_attached());
-  assert(src->storage != ItemStorage::kTombstone);
 
   // check if there is enough space.
   size_t len = sizeof(ItemHeader) + src->key_len + src->value_len;
+  len = align_up(len, alignof(ItemHeader));
   if (unlikely(pos_ + len >= len_))
     return nullptr;
 
   // copy and return the new item header.
   auto *dst = new (start_ + pos_) ItemHeader(*src);
   assert(item_is_within(dst));
-  pos_ += align_up(len, alignof(ItemHeader));
+  pos_ += len;
   return dst;
 }
 

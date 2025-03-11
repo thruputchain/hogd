@@ -7,6 +7,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -15,10 +16,12 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/ramdb/io.h"
 
 namespace hogd {
 
@@ -145,6 +148,19 @@ Benchmark::prefill()
 std::unique_ptr<Benchmark>
 make_benchmark(size_t n, int threads, size_t value_size)
 {
+  // delete the old database (if present).
+  Directory dir(db_path);
+  ErrnoStatus<std::vector<std::string>> files = dir.list();
+  if (files) {
+    for (std::string_view file : *files) {
+      if (!has_extension(file, "log"))
+        continue;
+      ErrnoStatus<void> ret = dir.unlink(file);
+      if (!ret)
+        fail(to_db_error(ret.error()));
+    }
+  }
+
   // calculate a large enough heap size (goal: target ~half full).
   size_t heap_size =
       Database::estimate_heap_size(n * 2, sizeof(uint64_t), value_size);

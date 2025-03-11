@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -68,6 +69,14 @@ private:
   int fd_{kInvalidFD};
 };
 
+// has_extension returns true if the filename has the extension ext.
+inline bool
+has_extension(std::string_view filename, std::string_view ext)
+{
+  size_t pos = filename.find_last_of('.');
+  return pos != std::string_view::npos && filename.substr(pos + 1) == ext;
+}
+
 // Directory wraps a UNIX directory.
 //
 // Linux provides a much better interface based on openat() but it's not
@@ -82,18 +91,21 @@ public:
   // open_temporary creates a temporary directory. Useful for testing.
   static ErrnoStatus<Directory> open_temporary();
 
+  Directory() = default;
   explicit Directory(std::string_view path) : dir_path_(path) {}
   ~Directory() = default;
 
-  // Enable move; disable copy.
+  // Enable move and copy.
   Directory(Directory &&dir) noexcept : dir_path_(std::move(dir.dir_path_)) {}
   Directory &operator=(Directory &&dir) noexcept
   {
     dir_path_ = std::move(dir.dir_path_);
     return *this;
   }
-  Directory(const Directory &dir) = delete;
-  Directory &operator=(const Directory &dir) = delete;
+  Directory(const Directory &dir) = default;
+  Directory &operator=(const Directory &dir) = default;
+
+  std::string get_path() const { return dir_path_; }
 
   // list returns a vector of all the filenames in the directory.
   ErrnoStatus<std::vector<std::string>> list() const;
@@ -102,8 +114,12 @@ public:
                            mode_t mode = kDefaultMode) const;
   // access checks whether a file can exist (and optionally its permissions).
   ErrnoStatus<void> access(std::string_view filename, int mode = F_OK) const;
+  // stat returns a file's stat data.
+  ErrnoStatus<struct stat> stat(std::string_view filename) const;
   // unlink deletes a filename in this directory.
   ErrnoStatus<void> unlink(std::string_view filename) const;
+  // unlink_all deletes all files in this directory.
+  ErrnoStatus<void> unlink_all() const;
   // sync flushes all modified directory data to the storage device.
   ErrnoStatus<void> sync() const;
 
@@ -121,15 +137,24 @@ private:
 // reduce kernel crossing overheads.
 class BufferedReader {
 public:
-  BufferedReader(File &in, size_t buf_len = kDefaultBufferSize) : in_(in)
+  BufferedReader(File &in, size_t buf_len = kDefaultBufferSize) : in_(&in)
   {
     buf_.resize(buf_len);
   }
   ~BufferedReader() = default;
 
-  // Disable move and copy.
-  BufferedReader(BufferedReader &&reader) = delete;
-  BufferedReader &operator=(BufferedReader &&reader) = delete;
+  // Allow move, disable copy.
+  BufferedReader(BufferedReader &&reader) noexcept
+    : in_(reader.in_), buf_(std::move(reader.buf_)),
+      pos_(std::exchange(reader.pos_, std::span<const std::byte>()))
+  {}
+  BufferedReader &operator=(BufferedReader &&reader) noexcept
+  {
+    in_ = reader.in_;
+    buf_ = std::move(reader.buf_);
+    pos_ = std::exchange(reader.pos_, std::span<const std::byte>());
+    return *this;
+  }
   BufferedReader(const BufferedReader &reader) = delete;
   BufferedReader &operator=(const BufferedReader &reader) = delete;
 
@@ -150,9 +175,14 @@ public:
     return read_slowpath(dst);
   }
 
+  // read_string returns the string of the bytes before delim or EOF.
+  ErrnoStatus<std::string> read_string(char delim);
+  // readln returns the string of the bytes before a new line or EOF.
+  ErrnoStatus<std::string> readln() { return read_string('\n'); }
+
 private:
   // the unbuffered file to read from.
-  File &in_;
+  File *in_;
   // the buffer.
   std::vector<std::byte> buf_;
   // a span within buf_; contains the bytes that have yet to be read.
@@ -164,27 +194,45 @@ private:
   size_t read_from_buffer(std::span<std::byte> dst);
   // refill performs a read on the file to refill the buffered data.
   ErrnoStatus<void> refill();
+
+  // peak_delim scans the buffer until it finds delim or reaches the end. It
+  // returns the number of bytes scanned including delim if delim was found. It
+  // does not read the buffer (only peeks at it).
+  std::optional<size_t> peek_delim(char delim) const;
 };
 
 // BufferedWriter provides buffering when writing to a File. This helps to
 // reduce kernel crossing overheads.
 class BufferedWriter {
 public:
-  BufferedWriter(File &out, size_t buf_len = kDefaultBufferSize) : out_(out)
+  BufferedWriter(File &out, size_t buf_len = kDefaultBufferSize) : out_(&out)
   {
     buf_.reserve(buf_len);
   }
   ~BufferedWriter();
 
-  // Disable move and copy.
-  BufferedWriter(BufferedWriter &&writer) = delete;
-  BufferedWriter &operator=(BufferedWriter &&writer) = delete;
+  // Allow move, disable copy.
+  BufferedWriter(BufferedWriter &&writer) noexcept
+    : out_(writer.out_), buf_(std::move(writer.buf_))
+  {
+    writer.buf_.clear();
+  }
+  BufferedWriter &operator=(BufferedWriter &&writer) noexcept
+  {
+    out_ = writer.out_;
+    buf_ = std::move(writer.buf_);
+    writer.buf_.clear();
+    return *this;
+  }
   BufferedWriter(const BufferedWriter &writer) = delete;
   BufferedWriter &operator=(const BufferedWriter &writer) = delete;
 
+  // empty returns true if no bytes are buffered.
+  bool empty() const { return buf_.empty(); }
+
   // write performs buffered writes to a file. Returns the number of bytes
   // written if successful, which could be less than the number requested
-  // because, in some cases, only one write is issued to the underlying file.
+  // because typically only one write is issued to the underlying file.
   template<size_t N = std::dynamic_extent>
   ErrnoStatus<size_t> write(std::span<const std::byte, N> src)
   {
@@ -206,7 +254,7 @@ public:
 
 private:
   // the unbuffered file to write to.
-  File &out_;
+  File *out_;
   // the buffer.
   std::vector<std::byte> buf_;
 

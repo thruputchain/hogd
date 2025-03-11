@@ -44,10 +44,9 @@ class DiskWriter {
 public:
   friend ScopedDiskWrite;
 
-  DiskWriter(LogletAllocator &allocator, File &&f, int write_head_order)
-    : allocator_(allocator), f_(std::move(f)), heads_(1UL << write_head_order),
-      writer_th_(
-          [this](const std::stop_token &stoken) { write_worker(stoken); })
+  DiskWriter(LogletAllocator &allocator, Directory dir, int write_head_order)
+    : allocator_(allocator), dir_(std::move(dir)),
+      heads_(1UL << write_head_order)
   {}
   ~DiskWriter() { writer_th_.request_stop(); }
 
@@ -56,6 +55,9 @@ public:
   DiskWriter &operator=(DiskWriter &&w) = delete;
   DiskWriter(const DiskWriter &w) = delete;
   DiskWriter &operator=(const DiskWriter &w) = delete;
+
+  // init must be called before using this class. It sets the initial LSN.
+  void init(uint64_t lsn);
 
   // write_record returns a scoped handle that allows the caller to write to
   // the appropriate log head.
@@ -92,19 +94,17 @@ private:
 
   // the allocator for loglets.
   LogletAllocator &allocator_;
-  // the file to write the log to.
-  File f_;
-  // the write buffer for f_.
-  BufferedWriter w_{f_};
+  // the directory containing the log files.
+  Directory dir_;
 
   // protects everything in this block.
   std::mutex to_disk_lock_;
   // set to true if DBCode::kIO occurs in write_worker().
   bool io_error_{false};
   // the highest LSN requested to be written to disk.
-  uint64_t cur_lsn_{0};
+  uint64_t cur_lsn_;
   // the last LSN fully written to disk.
-  uint64_t synced_lsn_{0};
+  uint64_t synced_lsn_;
   // the bytes requested to be written to disk (not including commit records).
   size_t bytes_in_{0};
   // the bytes actually written to disk (not including commit records).
@@ -112,7 +112,7 @@ private:
   // loglets waiting to be written to disk. An empty UniqueLoglet triggers a
   // commit and advances the LSN.
   std::vector<UniqueLoglet> to_disk_;
-  // used to wake writer_th_.
+  // wakes write_worker().
   std::condition_variable_any worker_cv_;
   // used to wake commit().
   std::condition_variable commit_cv_;
@@ -126,7 +126,7 @@ private:
   // Cache aligned to avoid false sharing with the disk writing state above.
   alignas(kCacheLineSize) std::vector<WriteHead> heads_;
 
-  // a worker thread that performs the writes to disk.
+  // runs write_worker().
   std::jthread writer_th_;
 
   // get_head returns the loglet head to use for this hash's shard.
@@ -136,7 +136,9 @@ private:
     return heads_[hash & (heads_.size() - 1)];
   }
 
-  // the run loop for the thread that write the on-disk log.
+  // create_log_file returns the next file to use for writing the log.
+  DBStatus<File> create_log_file();
+  // a run loop that stores items from to_disk_ to the on-disk log.
   void write_worker(const std::stop_token &stoken);
   // enqueue_to_disk enqueues a loglet to be written to disk.
   void enqueue_to_disk(UniqueLoglet &&ll);
