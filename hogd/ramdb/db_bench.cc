@@ -70,6 +70,8 @@ public:
   void sync();
   // initializes the database with items (initial state for benchmarks).
   void prefill();
+  // closes the DB and reloads all of its contents from disk.
+  void reload_db(size_t num);
 
 private:
   // the number of kv-pairs to access
@@ -145,6 +147,19 @@ Benchmark::prefill()
   sync();
 }
 
+void
+Benchmark::reload_db(size_t num)
+{
+  size_t heap_size =
+      Database::estimate_heap_size(num * 2, sizeof(uint64_t), value_size_);
+  int bucket_order = std::countr_zero(std::bit_floor(num));
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(db_path, heap_size, bucket_order);
+  if (!db)
+    fail(db.error());
+  db_ = std::move(*db);
+}
+
 std::unique_ptr<Benchmark>
 make_benchmark(size_t n, int threads, size_t value_size)
 {
@@ -218,6 +233,14 @@ do_deletions(int num, int cores, int value_size)
   });
 }
 
+double
+do_reload(int num, int cores, int value_size)
+{
+  std::unique_ptr<Benchmark> benchmark = make_benchmark(num, cores, value_size);
+  benchmark->prefill();
+  return measure([&benchmark, num] { benchmark->reload_db(num); });
+}
+
 using bench_fn = double (*)(int num, int cores, int value_size);
 
 void
@@ -235,6 +258,7 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
     {"replace", "replaces existing items", do_replacements},
     {"read", "reads items", do_reads},
     {"delete", "deletes items", do_deletions},
+    {"reload", "reloads items from disk", do_reload},
 };
 
 } // namespace
