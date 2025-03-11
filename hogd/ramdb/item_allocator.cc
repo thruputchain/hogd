@@ -196,7 +196,8 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
           stats.live_items++;
           bytes_moved += dst_item->total_bytes();
         });
-    assert(found || src_item->storage == ItemStorage::kTombstone);
+    assert(found ||
+           storage.load(std::memory_order_relaxed) == ItemStorage::kTombstone);
   }
 
   stats.loglets_freed++;
