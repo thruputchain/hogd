@@ -6,6 +6,7 @@
 #include "contract.hh"
 #include "lfi_small.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 
 namespace hogd {
 
@@ -50,6 +51,10 @@ public:
 
   ~DeclProc();
 
+  Memory get_memory();
+
+  bool load_program(Contract const* contract);
+
 private:
   friend class LFIGlobalEngine;
 
@@ -60,6 +65,8 @@ private:
 
   LFIGlobalEngine &main_engine_;
   LFIProc *proc_ = nullptr;
+  Memory active_memory_ = Runtime::kNullMemory;
+  bool actively_running_ = false;
 };
 
 bool verify_contract(Contract const* contract);

@@ -189,9 +189,11 @@ def gen_validate_arg(inp, *, is_input):
   arg_name = inp["name"]
   const = ""
   in_out = "output"
+  input_flag = "false"
   if (is_input):
     const = "const "
     in_out = "input"
+    input_flag = "true"
 
   optional = False
   if "optional" in inp and inp["optional"]:
@@ -203,7 +205,7 @@ def gen_validate_arg(inp, *, is_input):
     if optional:
       return f"""
         std::optional<std::span<{const}std::byte>> {arg1} =
-            check_user_span_argument(contract_memory, user_{arg1},
+            check_user_span_argument<{input_flag}>(contract_memory, user_{arg1},
                                      user_{arg2});
 
         
@@ -215,7 +217,7 @@ def gen_validate_arg(inp, *, is_input):
 
       return f"""
   std::optional<std::span<{const}std::byte>> {arg1} =
-      check_user_span_argument(contract_memory, user_{arg1},
+      check_user_span_argument<{input_flag}>(contract_memory, user_{arg1},
                                user_{arg2});
 
   {check_arg_statement}
@@ -339,7 +341,7 @@ def gen_inner_outer(syscall):
 
   outer= f"""std::pair<HostFnResult, GasAmount>
 syscall_{name}_outer(SystemCallHandler& {syscall_handler_ref},
-                     std::span<std::byte> {contract_mem},
+                     runtime_memory_t {contract_mem},
                      uint64_t {user_args[0]}, 
                      uint64_t {user_args[1]},
                      uint64_t {user_args[2]}, 
@@ -438,10 +440,10 @@ def gen_syscall_entry_cc(spec):
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
 #include "types.hh"
 
@@ -449,15 +451,16 @@ namespace hogd {{
 
 namespace {{
 
+using runtime_memory_t = decltype(std::declval<Runtime>().get_memory());
+
 template<typename T>
 std::pair<HostFnErrorCode, int32_t>
 convert_return_t(T const& value) {{
   if constexpr (std::is_same_v<T, HostFnStatus<SyscallErrorCode>>) {{
     if (value) {{
       return {{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(*value)}};
-    }} else {{
-      return {{value.error().code(), 0}};
     }}
+    return {{value.error().code(), 0}};
   }} else {{
     static_assert(std::is_same_v<T, std::pair<HostFnErrorCode, int32_t>>);
     return value;
@@ -467,7 +470,7 @@ convert_return_t(T const& value) {{
 {syscall_outers}
 
 using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
-    SystemCallHandler&, std::span<std::byte>, {", ".join(["uint64_t"] * (syscall_argcount))});
+    SystemCallHandler&, runtime_memory_t, {", ".join(["uint64_t"] * (syscall_argcount))});
 
 {syscall_table}
 
@@ -487,7 +490,7 @@ syscall_entry_inner(HostCallContext *call_context, {syscall_uint64_arg_decls_str
 
   assert(syscall_expect == static_cast<SyscallNo>(arg0));
 
-  std::span<std::byte> contract_memory = call_context->runtime->get_memory();
+  auto contract_memory = call_context->runtime->get_memory();
 
   assert(call_context -> syscall_handler);
 

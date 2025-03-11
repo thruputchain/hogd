@@ -1,6 +1,7 @@
 #include "hogd/hogexec/decl/lficpp.h"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdio>
 #include <memory>
 #include <mutex>
@@ -8,6 +9,7 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "lfi_small.h"
 
 namespace hogd {
@@ -81,6 +83,59 @@ DeclProc::~DeclProc()
 {
   main_engine_.delete_proc(proc_);
 }
+
+bool
+DeclProc::load_program(Contract const* contract) {
+  assert(!actively_running_);
+  assert(contract);
+
+  // TODO(geoff): For unclear reasons (I think no reason at all) loadelf takes a uint8_t* instead of const uint8_t*
+  auto* data = const_cast<uint8_t*>(contract->contract_data.data());
+  size_t data_len = contract->contract_data.size();
+
+  LFIProcInfo info;
+
+  auto res = lfi_proc_loadelf(proc_, data, data_len, NULL, 0, &info);
+
+  if (!res) {
+    active_memory_ = {{
+      Runtime::kNullMemorySpan, Runtime::kNullMemorySpan, Runtime::kNullMemorySpan}
+    };
+    return false;
+  }
+  
+  // NOLINTBEGIN(performance-no-int-to-ptr)
+  MemorySpan code_span = {
+    .bytes_ = {reinterpret_cast<std::byte*>(lfi_proc_base(proc_) + 0x20000), 128_KiB},
+    .base_offset_ = 0x20000,
+    .writable_ = false
+  };
+
+  MemorySpan data_span = {
+    .bytes_ = {reinterpret_cast<std::byte*>(lfi_proc_base(proc_) + 0x20000 + 128_KiB), 128_KiB},
+    .base_offset_ = 0x20000 + 128_KiB,
+    .writable_ = true
+  };
+
+  MemorySpan stack_span = {
+    .bytes_ = {reinterpret_cast<std::byte*>(info.stack), info.stacksize},
+    .base_offset_ = reinterpret_cast<uintptr_t>(info.stack) - lfi_proc_base(proc_),
+    .writable_ = true
+  };
+  // NOLINTEND(performance-no-int-to-ptr)
+  active_memory_ = {
+    {code_span, data_span, stack_span}
+  };
+
+  return true;
+}
+
+Memory 
+DeclProc::get_memory()
+{
+  return active_memory_;
+}
+
 
 namespace {
 

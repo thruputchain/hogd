@@ -41,17 +41,18 @@ TEST_F(MemoryAccessTest, ReadWrites)
   // but it suffices for basic tests.
 
   auto mem = runtime_->get_memory();
+  auto bytes = mem.spans_[0].bytes_;
 
-  ASSERT_FALSE(mem.empty());
+  ASSERT_FALSE(bytes.empty());
 
   // magic constants set in wat/test_set_memory.wat
-  uint32_t read_val = *reinterpret_cast<uint32_t *>((mem.data() + 12));
+  uint32_t read_val = *reinterpret_cast<uint32_t *>((bytes.data() + 12));
   EXPECT_EQ(read_val, 0xCC);
 
-  read_val = *reinterpret_cast<uint32_t *>((mem.data() + 44));
+  read_val = *reinterpret_cast<uint32_t *>((bytes.data() + 44));
   EXPECT_EQ(read_val, 0xFFAABBCC);
 
-  *reinterpret_cast<uint32_t *>((mem.data()) + 32) = 0xABCDEF01;
+  *reinterpret_cast<uint32_t *>((bytes.data()) + 32) = 0xABCDEF01;
 
   res = runtime_->invoke("load", UINT64_MAX);
 

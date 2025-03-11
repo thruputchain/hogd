@@ -1,42 +1,91 @@
 #pragma once
 
-#include <cstdint>
+#include <concepts>
+#include <cstddef>
 #include <optional>
+#include <span>
 #include <type_traits>
+#include <utility>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "types.hh"
 
 namespace hogd {
 
 inline bool
-check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
+check_memory_span(MemorySpan span, uint64_t base, uint64_t len, bool write)
 {
-  uint64_t base_end = 0;
-  if (integer_add_overflow(base, len, &base_end))
+  if (write && !span.writable_) {
     return false;
-  return (base_end <= memory_len);
+  }
+  // assert [base, base+len) \subset [span.base_offset_, span.base_offset_ + span.bytes_.size())
+  if (base < span.base_offset_) {
+    return false;
+  }
+
+  uint64_t base_end = 0;
+  if (integer_add_overflow(base - span.base_offset_, len, &base_end))
+    return false;
+  return (base_end <= span.bytes_.size());
+}
+
+/*
+inline bool check_memory(Memory& mem, uint64_t base, uint64_t len, bool write) {
+  return [&]<std::size_t... I> (std::index_sequence<I...>) -> bool {
+    return (check_memory_span(mem.spans_[I], base, len, write) || ...);
+  }(std::make_index_sequence<Memory::kMaxSpans>());
+}*/
+
+template<typename T, bool WRITE> requires std::is_trivially_copyable_v<T>
+T *
+check_user_argument(MemorySpan span, uint64_t user_offset,
+                    uint64_t user_len)
+{
+  if (!check_memory_span(span, user_offset, user_len, WRITE))
+  {
+    return nullptr;
+  }
+  return reinterpret_cast<T *>(span.bytes_.data() - span.base_offset_ + user_offset);
+}
+
+template<bool WRITE>
+std::optional<std::span<std::byte>>
+check_user_span_argument(MemorySpan span, uint64_t user_offset,
+                    uint64_t user_len)
+{
+  if (!check_memory_span(span, user_offset, user_len, WRITE))
+  {
+    return std::nullopt;
+  }
+  return span.bytes_.subspan(user_offset - span.base_offset_, user_len);
 }
 
 template<typename T> requires std::is_trivially_copyable_v<T>
 T *
-check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset,
+check_user_argument(Memory& contract_memory, uint64_t user_offset,
                     uint64_t user_len)
 {
-  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
-    return nullptr;
-  }
-  return reinterpret_cast<T *>(contract_memory.data() + user_offset);
+  constexpr static bool kWrite = std::is_const_v<T>;
+  return [&]<std::size_t...I>(std::index_sequence<I...>) {
+    T* out = nullptr;
+    ((out = check_user_argument<T, kWrite>(contract_memory.spans_[I], user_offset, user_len)) || ...);
+    return out;
+  }(std::make_index_sequence<Memory::kMaxSpans>());
 }
 
-inline std::optional<std::span<std::byte>>
-check_user_span_argument(std::span<std::byte> contract_memory,
+
+template<bool WRITE>
+std::optional<std::span<std::conditional_t<WRITE, std::byte, const std::byte>>>
+check_user_span_argument(Memory& contract_memory,
                          uint64_t user_offset, uint64_t user_len)
 {
-  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
-    return std::nullopt;
-  }
-  return contract_memory.subspan(user_offset, user_len);
+  return [&]<std::size_t...I>(std::index_sequence<I...>) {
+    std::optional<std::span<std::conditional_t<WRITE, std::byte, const std::byte>>> out;
+    ((out = check_user_span_argument<WRITE>(contract_memory.spans_[I], user_offset, user_len)) || ...);
+    return out;
+  }(std::make_index_sequence<Memory::kMaxSpans>());
 }
 
 template<typename T> requires (std::is_integral_v<T> || std::is_enum_v<T>)
@@ -45,6 +94,8 @@ check_user_primitive_argument(uint64_t user_value)
 {
   return static_cast<T>(user_value);
 }
+
+/*
 
 template<typename T, typename... Args>
 requires (std::same_as<Args, uint64_t> && ...)
@@ -104,6 +155,6 @@ check_user_custom_input_argument(std::span<std::byte> contract_memory,
   default:
     return std::nullopt;
   }
-}
+} */
 
 } // namespace hogd

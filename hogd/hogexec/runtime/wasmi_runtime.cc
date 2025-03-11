@@ -56,20 +56,17 @@ WasmiContext::link_fn_nargs(std::string_view module_name,
                           fn_name.size(), fn_ptr, nargs);
 }
 
-std::span<std::byte>
+Memory
 WasmiRuntime::get_memory() noexcept
 {
   assert(wasmi_runtime_ptr_ != nullptr);
   auto slice = wasmi_get_memory(wasmi_runtime_ptr_);
-  return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
-}
-
-std::span<const std::byte>
-WasmiRuntime::get_memory() const noexcept
-{
-  assert(wasmi_runtime_ptr_ != nullptr);
-  auto slice = wasmi_get_memory(wasmi_runtime_ptr_);
-  return std::as_bytes(std::span<const uint8_t>(slice.mem, slice.sz));
+  MemorySpan active_span = {.bytes_ = std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz)), .base_offset_ = 0, .writable_ = true};
+  return {.spans_ = {
+      active_span,
+    kNullMemorySpan,
+    kNullMemorySpan}
+  };
 }
 
 InvokeStatus<int32_t>

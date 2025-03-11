@@ -1,17 +1,14 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
-#include <optional>
-#include <span>
+#include <string>
 #include <string_view>
-#include <vector>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -86,8 +83,7 @@ public:
   //
   // Requires the module to export its memory as "memory"
   // (export "memory" (memory 0))
-  std::span<std::byte> get_memory() noexcept override;
-  std::span<const std::byte> get_memory() const noexcept override;
+  Memory get_memory() noexcept override;
 
 private:
   InvokeStatus<int32_t>

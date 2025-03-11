@@ -1,11 +1,14 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
@@ -19,6 +22,28 @@ class Runtime;
 struct HostCallContext {
   Runtime *runtime = nullptr;
   SystemCallHandler *syscall_handler = nullptr;
+};
+
+// A subset of a runtime's virtual memory space
+// This could be arbitrarily complex, but for now 
+// all we need for decl and wasm is 
+// spans of the form [base, base + size].
+//
+// All runtimes start with 0 as the logical base address,
+// but decl has the additional restriction that
+// the first base_offset_ bytes are not writable (code pages).
+// Additionally, decl procs do not have the entire address space mapped to 
+// physical memory.
+// For wasm, base_offset_ is 0.
+struct MemorySpan {
+  std::span<std::byte> bytes_;
+  uintptr_t base_offset_; 
+  bool writable_;
+};
+
+struct Memory {
+  constexpr static uint8_t kMaxSpans = 3;
+  std::array<MemorySpan, kMaxSpans> spans_;
 };
 
 enum class RuntimeEngine {
@@ -144,14 +169,24 @@ public:
   //
   // Requires the module to export its memory as "memory"
   // (export "memory" (memory 0))
-  virtual std::span<std::byte> get_memory() noexcept = 0;
-  virtual std::span<const std::byte> get_memory() const noexcept = 0;
+  virtual Memory get_memory() noexcept = 0;
 
   virtual ~Runtime() = default;
+
+  constexpr static MemorySpan kNullMemorySpan = {
+    .bytes_ = std::span<std::byte>(static_cast<std::byte*>(nullptr), 0),
+    .base_offset_ = 0,
+    .writable_ = false
+  };
+
+  constexpr static Memory kNullMemory = {
+    {kNullMemorySpan, kNullMemorySpan, kNullMemorySpan}
+  };
 
 protected:
   virtual InvokeStatus<int32_t>
   invoke_internal(std::string const &method_name) = 0;
+
 
   std::unique_ptr<HostCallContext> host_call_context_;
 };
