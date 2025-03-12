@@ -1,6 +1,7 @@
 use crate::implementation;
 use crate::interface::client::ERC20Client;
 use crate::interface::ERC20;
+use sdk::result::Result;
 
 #[test]
 fn check_mint() {
@@ -20,9 +21,7 @@ fn check_mint() {
     assert_eq!(res.result.panic, sdk::InvokeErrorCode::kNone as i32);
 }
 
-fn check_mint_inner(
-    contract_hash: &sdk::types::SHA256Hash,
-) -> sdk::result::Result<()> {
+fn check_mint_inner(contract_hash: &sdk::types::SHA256Hash) -> Result<()> {
     use sdk::prelude::*;
 
     let nonce = ByteArray::new([7; 32]);

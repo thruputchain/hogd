@@ -14,7 +14,7 @@ type Allowance = NNInt;
 pub struct CoinContract {
     contract_owner: ContractAddress,
     balances: Map<ContractAddress, Balance>,
-    allowances: Map<(ContractAddress, ContractAddress), Allowance>,
+    allowances: Map<ContractAddress, Map<ContractAddress, Allowance>>,
     total_supply: NNInt,
 }
 
@@ -65,8 +65,10 @@ impl CoinContract {
         spender: &ContractAddress,
         amount: Amount,
     ) -> Result<()> {
-        let mut allowance = self.allowances.get(&(*owner, *spender))?;
-        allowance.add(amount as i128)?;
+        #[allow(unused_mut)]
+        let mut owner_allowances = self.allowances.get(owner)?;
+        let mut spender_allowance = owner_allowances.get(spender)?;
+        spender_allowance.add(amount as i128)?;
         Ok(())
     }
 

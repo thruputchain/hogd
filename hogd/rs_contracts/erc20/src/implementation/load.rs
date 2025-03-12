@@ -52,7 +52,7 @@ impl<'de> DeserializeSeed<'de> for _KeypathSeed<CoinContract> {
 
                        self.keypath.seq_next();
                        let allowances = {
-                           let seed = KeypathSeed::<Map<(ContractAddress, ContractAddress), Allowance>>::new(self.keypath);
+                           let seed = KeypathSeed::<Map<ContractAddress, Map<ContractAddress, Allowance>>>::new(self.keypath);
                            seq.next_element_seed(seed)?.unwrap()
                        };
 
