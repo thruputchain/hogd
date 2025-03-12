@@ -1,5 +1,5 @@
-extern crate bindgen;
-extern crate cmake;
+use ::bindgen;
+use ::cmake;
 
 // Build directory should be set with `cargo --target-dir`
 // Compiler should be selected by setting CC/CXX environment vars
@@ -12,12 +12,13 @@ fn main() {
 
     let source_dir = "../..";
     let mut cfg = cmake::Config::new(source_dir);
-    cfg
-        .define("CMAKE_BUILD_TYPE", "Release")
+    cfg.define("CMAKE_BUILD_TYPE", "Release")
         // run cargo b -vv to see the full cmake output
         .define("CMAKE_VERBOSE_MAKEFILE", "ON")
-        .define("CMAKE_OSX_SYSROOT", "")
-        ;
+        .define("CMAKE_OSX_SYSROOT", "");
+
+    // Don't force re-configuration before building
+    cfg.always_configure(false);
 
     // important: only build a limit set of targets  If we do this wrong
     // we could easily wind up with some kind of nonsense recursive build.

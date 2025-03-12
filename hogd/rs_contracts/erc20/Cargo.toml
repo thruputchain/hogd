@@ -12,12 +12,12 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [features]
-default = ["guest", "alloc"]
+default = ["guest", "client", "std", "alloc"]
 client = []
 guest = []
-alloc = ["sdk/alloc", "serde/alloc"]
-std = ["sdk/std", "serde/std"]
-mock = ["sdk/mock"]
+alloc = ["sdk/alloc"]
+std = ["alloc", "sdk/std"]
+mock = ["std", "sdk/mock"]
 
 [dev-dependencies]
-erc20 = { path = ".", features = ["mock", "client", "std"] }
+erc20 = { path = ".", features = ["mock", "client"] }

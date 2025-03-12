@@ -6,9 +6,12 @@ use sdk::types::ContractAddress;
 
 pub type Amount = i128;
 
-#[contract(mod_name = "client")]
+#[contract(client = "client")]
 pub trait ERC20 {
-    fn initialize(&mut self, owner: &ContractAddress) -> Result<()>;
+    fn initialize(
+        maybe_self: Option<&mut Self>,
+        owner: &ContractAddress,
+    ) -> Result<()>;
     fn transfer(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
     fn transfer_from(
         &mut self,

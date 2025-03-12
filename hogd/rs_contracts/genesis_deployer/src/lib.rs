@@ -2,23 +2,12 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
-use sdk::contract::Contract;
-use sdk::deploy::DeployContract;
-use sdk::log::Log;
-use sdk::macros::contract;
+use sdk::prelude::*;
 use sdk::sys;
-use sdk::types::{MethodID, SHA256Hash, StorageKey};
+use sdk::types::MethodID;
 
-struct GenesisDeployer;
+pub struct GenesisDeployer;
 
-impl Contract for GenesisDeployer {
-    fn new(_: &StorageKey) -> Self {
-        Self
-    }
-}
-
-#[contract]
 impl GenesisDeployer {
     pub fn deploy(self, nonce: &SHA256Hash, contract_hash: &SHA256Hash) {
         let _ = DeployContract(nonce, contract_hash).unwrap();

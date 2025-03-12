@@ -1,7 +1,3 @@
-// WIP notes
-// - method is identified by ordered index
-// - #[no_mangle] is unsafe
-//
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 #![allow(dead_code)]
@@ -24,11 +20,7 @@ pub fn contract(
     let config = match NestedMeta::parse_meta_list(attr_args.into()) {
         Ok(meta_list) => match sig::Config::from_list(&meta_list) {
             Ok(config) => config,
-            Err(e) => {
-                return TokenStream::from(
-                    darling::Error::from(e).write_errors(),
-                )
-            }
+            Err(e) => return TokenStream::from(e.write_errors()),
         },
         Err(e) => {
             return TokenStream::from(darling::Error::from(e).write_errors());
@@ -74,13 +66,22 @@ fn item_to_contract_helpers(
         }
         syn::Item::Impl(item) => {
             let sig = parse::contract_signature_from_impl(item)?;
-
             let mut out = TokenStream2::new();
+
             let exports = gen::exports_from_contract_signature(&sig, config)?;
             out.extend(exports.clone());
+
             let test_registration =
-                gen::test_registration_from_method_signature(&sig)?;
+                gen::test_registration_from_method_signature(&sig, config)?;
             out.extend(test_registration.clone());
+
+            Ok(out)
+        }
+        syn::Item::Fn(item) => {
+            let sig = parse::method_signature_from_sig(&item.sig);
+            let mut out = TokenStream2::new();
+
+            out.extend(gen::export_from_method_signature(None, &sig)?);
 
             Ok(out)
         }
@@ -107,18 +108,27 @@ mod sig {
 
     #[derive(Debug, FromMeta)]
     pub struct Config {
-        pub mod_name: Option<String>,
+        pub exports: Option<String>,
+        pub client: Option<String>,
     }
 
     impl Config {
-        pub fn mod_ident_or(&self, default_name: &str) -> syn::Ident {
-            let span = proc_macro2::Span::call_site();
-            match &self.mod_name {
-                Some(name_string) => {
-                    syn::Ident::new(name_string.as_ref(), span)
-                }
-                None => syn::Ident::new(default_name, span),
+        pub fn exports_mod_ident(&self) -> syn::Ident {
+            ident_or(&self.exports, "exports")
+        }
+
+        pub fn client_mod_ident(&self) -> syn::Ident {
+            ident_or(&self.client, "client")
+        }
+    }
+
+    fn ident_or(maybe_name: &Option<String>, default: &str) -> syn::Ident {
+        let span = proc_macro2::Span::call_site();
+        match maybe_name {
+            Some(ref name_string) => {
+                syn::Ident::new(name_string.as_ref(), span)
             }
+            None => syn::Ident::new(default, span),
         }
     }
 
@@ -143,6 +153,7 @@ mod sig {
     pub struct Method {
         pub span: proc_macro2::Span,
         pub ident: syn::Ident,
+        pub receiver: Option<syn::Receiver>,
         pub args: Vec<Arg>,
     }
 
@@ -169,7 +180,8 @@ mod parse {
         item: &ItemTrait,
     ) -> Result<sig::Contract> {
         // Pull out the method signatures
-        let methods = (&item.items)
+        let methods = item
+            .items
             .iter()
             .filter_map(|item| {
                 if let syn::TraitItem::Fn(trait_fn) = item {
@@ -195,15 +207,16 @@ mod parse {
         let trait_ = item.trait_.clone().map(|(_, path, _)| path);
 
         // Pull out the function items
-        let methods = (&item.items)
-            .into_iter()
+        let methods = item
+            .items
+            .iter()
             .filter_map(|item| {
                 if let syn::ImplItem::Fn(ref impl_fn) = item {
                     let is_pub = is_visible(&impl_fn.vis);
 
                     // Only include public functions if this is not a trait impl
                     if trait_.is_some() || is_pub {
-                        method_signature_from_sig(&impl_fn.sig)
+                        Some(method_signature_from_sig(&impl_fn.sig))
                     } else {
                         None
                     }
@@ -222,28 +235,30 @@ mod parse {
     }
 
     fn is_visible(vis: &syn::Visibility) -> bool {
-        if let syn::Visibility::Public(_) = vis {
-            true
-        } else {
-            false
-        }
+        matches!(vis, syn::Visibility::Public(_))
     }
 
-    fn method_signature_from_sig(sig: &syn::Signature) -> Option<sig::Method> {
-        let span = sig.span().clone();
+    pub fn method_signature_from_sig(sig: &syn::Signature) -> sig::Method {
+        let span = sig.span();
         let ident = sig.ident.clone();
-        let args = (&sig.inputs)
+        let mut receiver = None;
+        let args = sig
+            .inputs
             .iter()
-            .filter_map(|fn_arg| {
-                // Ignore FnArg::Receiver inputs
-                if let syn::FnArg::Typed(pat_type) = fn_arg {
-                    arg_from_pat_type(pat_type)
-                } else {
+            .filter_map(|fn_arg| match fn_arg {
+                syn::FnArg::Typed(pat_type) => arg_from_pat_type(pat_type),
+                syn::FnArg::Receiver(rcvr) => {
+                    receiver = Some(rcvr.clone());
                     None
                 }
             })
             .collect();
-        Some(sig::Method { span, ident, args })
+        sig::Method {
+            span,
+            ident,
+            receiver,
+            args,
+        }
     }
 
     fn arg_from_pat_type(pat_type: &syn::PatType) -> Option<sig::Arg> {
@@ -251,8 +266,7 @@ mod parse {
             if let syn::Pat::Ident(ref pat_ident) = pat_type.pat.as_ref() {
                 pat_ident.ident.clone()
             } else {
-                return None;
-                // err(&pat_type.pat, "Can't handle non-ident arg pattern");
+                panic!("Can't handle non-ident arg pattern");
             };
         let ty = (*pat_type.ty).clone();
         Some(sig::Arg { ident, ty })
@@ -279,25 +293,28 @@ mod gen {
     ) -> Result<TokenStream2> {
         let trait_ident = &contract.ident;
         let client_ident = format_ident!("{}Client", trait_ident);
+        let client_mod_ident = config.client_mod_ident();
 
-        let mut calls = TokenStream2::new();
+        let mut method_stubs = TokenStream2::new();
         for method in contract.methods.iter() {
-            calls.extend(call_from_method_signature(
+            method_stubs.extend(call_from_method_signature(
                 get_method_num(&method.ident.to_string()),
                 method,
             )?);
         }
 
-        let mod_ident = config.mod_ident_or("client");
+        Ok(quote! {
 
-        Ok(quote_spanned! {contract.span=>
-
-            #[cfg(feature = "client")]
-            pub mod #mod_ident {
+            pub mod #client_mod_ident {
                 use ::sdk::types::ContractAddress;
+                use ::sdk::types::RuntimeMemoryLength;
+                use ::sdk::internal::invoke;
 
-                // use super::#trait_ident;
-                use super::*; // We may need various user types
+                use super::#trait_ident;
+
+                // The below implementation may require other public definitions
+                // that the trait definition used
+                use super::*;
 
                 pub struct #client_ident {
                     address: ContractAddress
@@ -305,70 +322,111 @@ mod gen {
 
                 impl #client_ident {
                     pub fn new(address: &ContractAddress) -> Self {
-                        let address = address.clone();
-                        Self { address }
+                        Self { address: *address }
                     }
                 }
 
-                use ::sdk::types::RuntimeMemoryLength;
                 impl #trait_ident for #client_ident {
-                    #calls
+                    #method_stubs
                 }
             }
 
         })
     }
 
-    // Generate a client method that makes a cross-contract invocation
     fn call_from_method_signature(
         method_index: u32,
         method: &syn::Signature,
     ) -> Result<TokenStream2> {
         let ident = &method.ident;
-        let formal_args: Vec<&syn::FnArg> = method.inputs.iter().collect();
-        let arg_names: Vec<TokenStream2> =
-            method.inputs.iter().filter_map(arg_pat).collect();
+        let mut params = method.inputs.iter();
+
+        // Pop the "receiver" parameter
+        let receiver_param = {
+            if let Some(p) = params.next() {
+                Ok(p)
+            } else {
+                super::err(method, "No receiver param in contract method")
+            }
+        }
+        .unwrap();
+        let receiver_arg = get_arg_name(receiver_param)?;
+        let address = if is_receiver(receiver_param) {
+            quote! { &#receiver_arg.address }
+        } else {
+            // It's an Option<&mut Self> pseudo-receiver
+            quote! { &#receiver_arg.unwrap().address }
+        };
+        let sent_params: Vec<&syn::FnArg> = params.collect();
+        let sent_args: Vec<&syn::Pat> =
+            sent_params.iter().cloned().filter_map(arg_pat).collect();
+        let args_tuple = if sent_args.len() == 1 {
+            let arg = sent_args[0];
+            quote! { #arg }
+        } else {
+            quote! { ( #(#sent_args),* ) }
+        };
         let return_type = &method.output;
-        let method = method_index as u32;
         let gas_limit = u64::MAX;
 
         Ok(quote_spanned! {method.span()=>
 
-            fn #ident( #(#formal_args),* ) #return_type
+            fn #ident(#receiver_param, #(#sent_params),* ) #return_type
             {
-                // Wrap up the args into one value
-                let args = ( #(#arg_names),* );
-
-                ::sdk::invoke(
-                    &self.address,
-                    #method,
-                    #gas_limit,
-                    &args)
+                let args = #args_tuple;
+                invoke(#address, #method_index, #gas_limit, &args)
             }
 
         })
     }
 
-    fn arg_pat(fn_arg: &syn::FnArg) -> Option<TokenStream2> {
+    fn get_arg_name(fn_arg: &syn::FnArg) -> Result<TokenStream2> {
         match fn_arg {
+            syn::FnArg::Receiver(ref r) => {
+                let token = &r.self_token;
+                Ok(quote! { #token })
+            }
+            syn::FnArg::Typed(ref pat_type) => {
+                if let syn::Pat::Ident(ref pat_ident) = pat_type.pat.as_ref() {
+                    let ident = &pat_ident.ident;
+                    Ok(quote! { #ident })
+                } else {
+                    super::err(fn_arg, "Can't handle non-ident arg pattern")
+                }
+            }
+        }
+    }
+
+    fn is_receiver(fn_arg: &syn::FnArg) -> bool {
+        matches!(fn_arg, syn::FnArg::Receiver(_))
+    }
+
+    fn has_receiver(sig: &syn::Signature) -> bool {
+        sig.inputs.iter().any(is_receiver)
+    }
+
+    fn arg_pat(fn_arg: &syn::FnArg) -> Option<&syn::Pat> {
+        match fn_arg {
+            syn::FnArg::Typed(pat_type) => Some(&pat_type.pat),
             syn::FnArg::Receiver(_) => None,
-            syn::FnArg::Typed(pat_type) => Some(pat_type.pat.to_token_stream()),
         }
     }
 
     pub fn test_registration_from_method_signature(
         contract: &sig::ContractImpl,
+        config: &sig::Config,
     ) -> Result<TokenStream2> {
+        let exports_mod_ident = config.exports_mod_ident();
         let mut registrations = TokenStream2::new();
         for method in &contract.methods {
             registrations.extend(registration_from_method_signature(method)?);
         }
 
-        Ok(quote_spanned! {contract.span=>
+        Ok(quote! {
 
             #[cfg(feature="mock")]
             pub mod test_setup {
-                use super::exports::*;
+                use super::#exports_mod_ident::*;
 
                 #[allow(dead_code)]
                 pub fn register(env : &mut ::sdk::TestEnvironment) -> ::sdk::types::Contract {
@@ -379,6 +437,7 @@ mod gen {
                     contract.as_contract()
                 }
             }
+
         })
     }
 
@@ -387,29 +446,28 @@ mod gen {
         config: &sig::Config,
     ) -> Result<TokenStream2> {
         let self_ty = &contract.self_ty;
-        let generics = &contract.generics;
+        // let generics = &contract.generics;
 
+        let exports_mod_ident = config.exports_mod_ident();
         let mut exports = TokenStream2::new();
         for method in &contract.methods {
-            exports.extend(export_from_method_signature(method)?);
+            exports
+                .extend(export_from_method_signature(Some(contract), method)?);
         }
 
-        let mod_ident = config.mod_ident_or("exports");
+        let use_trait = if let Some(trait_) = &contract.trait_ {
+            quote! { use super::#trait_; }
+        } else {
+            quote! {}
+        };
 
-        Ok(quote_spanned! {contract.span=>
+        Ok(quote! {
 
-            pub mod #mod_ident {
-                use super::*;
-
-                fn contract() -> #self_ty {
-                    use ::sdk::types::StorageKey;
-                    use ::sdk::macros::static_key;
-
-                    static CONTRACT_STORAGE_KEY: StorageKey =
-                        static_key!("Contract storage");
-
-                    #self_ty::new(&CONTRACT_STORAGE_KEY)
-                }
+            pub mod #exports_mod_ident {
+                #use_trait
+                use super::#self_ty;
+                use ::sdk::contract::{ContractStorage, try_load_state};
+                use ::sdk::serialize::Serialize;
 
                 #exports
             }
@@ -417,30 +475,82 @@ mod gen {
         })
     }
 
-    fn export_from_method_signature(
+    pub fn export_from_method_signature(
+        contract: Option<&sig::ContractImpl>,
         method: &sig::Method,
     ) -> Result<TokenStream2> {
         let ident = &method.ident;
         let export_name = get_method_name(&ident.to_string());
-        let received_args = received_args(method);
-        let provided_args = provided_args(method);
-
+        let extern_name = format_ident!("{}_extern", ident);
         let internal_name = format_ident!("{}_internal", ident);
 
-        Ok(quote_spanned! {method.span=>
+        let mut export = quote! {
 
-            #[cfg_attr(target_family = "wasm", export_name = #export_name)]
-            pub extern "C" fn #ident() -> i32 {
+            #[cfg_attr(target_family = "wasm", unsafe(export_name = #export_name))]
+            pub extern "C" fn #extern_name() -> i32 {
                 #internal_name()
             }
 
-            pub fn #internal_name() -> i32 {
-                ::sdk::invoke::handle_call(| #received_args | {
-                    contract().#ident( #provided_args )
-                }).into()
-            }
+        };
 
-        })
+        if let Some(contract) = contract {
+            let self_ty = &contract.self_ty;
+
+            if method.receiver.is_some() {
+                let provided_args = provided_args(method, false);
+                let received_args = received_args(method, false);
+
+                // Load the contract object and call the method on it
+                export.extend(quote! {
+
+                    pub fn #internal_name() -> i32 {
+                        ::sdk::internal::handle_call(| #received_args | {
+                            let mut state = try_load_state::<#self_ty>()
+                                .expect("Contract state not found");
+                            state.#ident( #provided_args )
+                        }).into()
+                    }
+
+                });
+            } else {
+                let provided_args = provided_args(method, true);
+                let received_args = received_args(method, true);
+                let self_ty_full = if let Some(trait_) = &contract.trait_ {
+                    quote! { <#self_ty as #trait_> }
+                } else {
+                    quote! { #self_ty }
+                };
+
+                // Call the associated function (without pre-loading contract state)
+                export.extend(quote! {
+
+                    pub fn #internal_name() -> i32 {
+                        ::sdk::internal::handle_call(| #received_args | {
+                            // Don't pre-load contract state
+                            let state_ref = None;
+                            #self_ty_full::#ident(state_ref, #provided_args )
+                        }).into()
+                    }
+
+                });
+            }
+        } else {
+            let provided_args = provided_args(method, false);
+            let received_args = received_args(method, false);
+
+            // Call the free function
+            export.extend(quote! {
+
+                pub fn #internal_name() -> i32 {
+                    ::sdk::internal::handle_call(| #received_args | {
+                        #ident( #provided_args )
+                    }).into()
+                }
+
+            });
+        }
+
+        Ok(export)
     }
 
     fn registration_from_method_signature(
@@ -451,7 +561,9 @@ mod gen {
         let internal_name = format_ident!("{}_internal", ident);
 
         Ok(quote! {
+
             contract.register_method(#export_num, #internal_name);
+
         })
     }
 
@@ -464,7 +576,7 @@ mod gen {
 
         let prefix = &result[0..4];
 
-        return u32::from_be_bytes(prefix.try_into().unwrap());
+        u32::from_be_bytes(prefix.try_into().unwrap())
     }
 
     fn get_method_name(arg: &str) -> String {
@@ -473,9 +585,11 @@ mod gen {
         format!("{:X}", num)
     }
 
-    fn provided_args(method: &sig::Method) -> TokenStream2 {
-        let provided_args: Vec<TokenStream2> =
-            method.args.iter().map(provided_arg).collect();
+    fn provided_args(method: &sig::Method, drop_first: bool) -> TokenStream2 {
+        let skip_n = if drop_first { 1 } else { 0 };
+        let args = method.args.iter().skip(skip_n);
+
+        let provided_args: Vec<TokenStream2> = args.map(provided_arg).collect();
         quote! { #(#provided_args),* }
     }
 
@@ -485,7 +599,7 @@ mod gen {
         match ty {
             // If the interface expects a reference ...
             syn::Type::Reference(_) =>
-            // ... pass a reference to the deserialized calldata
+            // ... pass a reference into the deserialized calldata
             {
                 quote! { &#ident }
             }
@@ -497,13 +611,11 @@ mod gen {
         }
     }
 
-    fn received_args(method: &sig::Method) -> TokenStream2 {
-        if method.args.is_empty() {
-            return quote! { () };
-        }
+    fn received_args(method: &sig::Method, drop_first: bool) -> TokenStream2 {
+        let skip_n = if drop_first { 1 } else { 0 };
+        let args = method.args.iter().skip(skip_n);
 
-        let received_args: Vec<TokenStream2> =
-            method.args.iter().map(received_arg).collect();
+        let received_args: Vec<TokenStream2> = args.map(received_arg).collect();
         quote! { ( #(#received_args),* ) }
     }
 
@@ -563,6 +675,6 @@ pub fn _static_key(item: TokenStream) -> TokenStream {
     let res = make_static_key(&string);
 
     TokenStream::from(quote::quote! {
-        ::rs_xdr::ByteArray::new([#(#res),*])
+        ::groundhog_xdr::ByteArray::new([#(#res),*])
     })
 }

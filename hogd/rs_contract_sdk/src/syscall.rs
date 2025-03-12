@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-pub use ::rs_xdr::syscall::{SyscallErrorCode, SyscallNo};
+pub use ::groundhog_xdr::syscall::{SyscallErrorCode, SyscallNo};
 
 /// Rust bindings for the syscalls
 #[rustfmt::skip]

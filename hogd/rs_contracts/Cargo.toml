@@ -15,8 +15,8 @@ members = [
 ]
 
 [workspace.dependencies]
+sdk = { package = "rs_contract_sdk", path = "../rs_contract_sdk/", default-features = false }
 serde = { version = "1.0.217", default-features = false }
-sdk = { package = "rs_contract_sdk", path = "../rs_contract_sdk/" }
 
 [profile.dev]
 opt-level = "z"

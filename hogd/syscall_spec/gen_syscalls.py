@@ -888,7 +888,7 @@ def gen_rs_syscall_binding(syscall):
 
   out_deserialize = f"""
     output =
-        ::rs_xdr::{name}_output::from_xdr(&out_buffer, ::rs_xdr::Limits::none())
+        ::groundhog_xdr::{name}_output::from_xdr(&out_buffer, ::groundhog_xdr::Limits::none())
             .map_err(|_| panic_any(unrecoverable_error()))
             .unwrap();"""
 
@@ -906,11 +906,11 @@ def gen_rs_syscall_binding(syscall):
     Ok(())"""
   
   mock_output_decl = f"""    // allocate space for syscall to write results
-    let {output_mut}output = ::rs_xdr::{name}_output {{ 
+    let {output_mut}output = ::groundhog_xdr::{name}_output {{ 
 {output_mock_init_str}
     }};
     let mut out_buffer = output
-        .to_xdr(::rs_xdr::Limits::none())
+        .to_xdr(::groundhog_xdr::Limits::none())
         .map_err(|_| panic_any(unrecoverable_error()))
         .unwrap();
 """
@@ -951,18 +951,18 @@ pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
 
 #[cfg(feature="mock")]
 pub fn uninit_{name}({uninit_inputdecl_str}) -> {syscall_return_type} {{
-    let input = ::rs_xdr::{name}_input {{
+    let input = ::groundhog_xdr::{name}_input {{
 {input_mock_args_str}
     }};
 
 {mock_output_decl}
 
     let input_slice = input
-        .to_xdr(::rs_xdr::Limits::none())
+        .to_xdr(::groundhog_xdr::Limits::none())
         .map_err(|_| panic_any(unrecoverable_error()))
         .unwrap();
 
-    {mock_errdecl_str}::test_ffi::perform_mocked_syscall(
+    {mock_errdecl_str}::native_exec::perform_mocked_syscall(
         SyscallNo::k{name},
         &input_slice,
         &mut out_buffer,
@@ -989,6 +989,7 @@ def gen_rs_syscall_bindings(spec):
 #![allow(non_snake_case)]
 use crate::types::*;
 use crate::syscall::{{SyscallNo, SysErr}};
+use alloc::vec;
 #[cfg(not(feature="mock"))]
 use crate::syscall::{{syscall_wrapper, to_offset, to_offset_mut}};
 #[cfg(not(feature="mock"))]
@@ -998,9 +999,9 @@ use core::mem::MaybeUninit;
 use core::hint::unreachable_unchecked;
 
 #[cfg(feature="mock")]
-use ::rs_xdr::{{ReadXdr, WriteXdr, ToXdr, FromXdr}};
+use ::groundhog_xdr::{{ReadXdr, WriteXdr, ToXdr, FromXdr}};
 #[cfg(feature="mock")]
-use test_ffi::invoke_error::unrecoverable_error;
+use ::native_exec::invoke_error::unrecoverable_error;
 #[cfg(feature="mock")]
 use std::panic::panic_any;
 

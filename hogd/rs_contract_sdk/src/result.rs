@@ -18,10 +18,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum Error {
     #[error("{context:?}: System call error: {err}")]
-    SystemErr {
-        err: SysErr,
-        context: Vec<String>,
-    },
+    SystemErr { err: SysErr, context: Vec<String> },
 
     #[error("Assertion failed: {0}")]
     AssertionFailed(String),
@@ -54,13 +51,16 @@ impl Error {
 
 impl From<SysErr> for Error {
     fn from(err: SysErr) -> Self {
-        Self::SystemErr { err, context: vec![] }
+        Self::SystemErr {
+            err,
+            context: vec![],
+        }
     }
 }
 
 impl From<SerializationError> for Error {
-    fn from(_err: SerializationError) -> Self {
-        Self::SerializationErr("elided-bcs-error".to_string())
+    fn from(err: SerializationError) -> Self {
+        Self::SerializationErr(err.to_string())
     }
 }
 

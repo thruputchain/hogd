@@ -1,9 +1,7 @@
-= Groundhog Contract SDK
+Infrastructure to facilitate writing Groundhog contracts.
 
-== TODO
+The most commonly useful items are available from
+the [prelude].
 
-- Docs
-- Contract storage:
-    - Separate initialize-once data from R/W data
-- Invocation
-    - Just need one entrypoint?
+# TODO
+- remove error strings for guest configuration

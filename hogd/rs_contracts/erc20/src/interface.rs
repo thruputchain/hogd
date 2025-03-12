@@ -3,22 +3,29 @@
 use sdk::macros::contract;
 use sdk::result::Result;
 use sdk::types::ContractAddress;
+use sdk::types::StorageKey;
 
 pub type Amount = i128;
 
-#[contract(mod_name = "client")]
+#[contract(client = "client")]
 pub trait ERC20 {
-    /// Must be called before any other methods, and no more than once.
-    fn initialize(&mut self, owner: &ContractAddress) -> Result<()>;
+    fn initialize(
+        maybe_self: Option<&mut Self>,
+        contract_owner: &ContractAddress,
+    ) -> Result<()>;
 
-    /// Transfer from caller to `to` address
-    fn transfer(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
+    /// Transfer from caller to `receiver` address
+    fn transfer(
+        &mut self,
+        receiver: &ContractAddress,
+        amount: Amount,
+    ) -> Result<()>;
 
-    /// Transfer from `owner` to `to` address, using allowance
+    /// Transfer from `owner` to `receiver` address, using allowance
     fn transfer_from(
         &mut self,
         owner: &ContractAddress,
-        to: &ContractAddress,
+        receiver: &ContractAddress,
         amount: Amount,
     ) -> Result<()>;
 
@@ -35,11 +42,15 @@ pub trait ERC20 {
     /// Get balance for caller
     fn get_balance(&self) -> Result<Amount>;
 
-    /// Create tokens into `to` address
-    fn mint(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
+    /// Create tokens into `receiver` address
+    fn mint(
+        &mut self,
+        receiver: &ContractAddress,
+        amount: Amount,
+    ) -> Result<()>;
 
-    /// Destroy tokens from `to` address
-    fn burn(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
+    /// Destroy tokens from `owner` address
+    fn burn(&mut self, owner: &ContractAddress, amount: Amount) -> Result<()>;
 
     /// Get total supply of outstanding tokens
     fn total_supply(&self) -> Result<Amount>;

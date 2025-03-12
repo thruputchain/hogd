@@ -5,38 +5,17 @@ extern crate alloc;
 
 use erc20_geoff::client::ERC20Client;
 use erc20_geoff::interface::{Amount, ERC20};
-use sdk::contract::{Contract, ContractWithStorage};
-use sdk::macros::contract;
-use sdk::result::ensure;
-use sdk::types::{
-    ContractAddress, Ed25519PublicKey, Ed25519Signature, PublicKey, Signature,
-    StorageKey,
-};
-use serde::{Deserialize, Serialize};
+use sdk::prelude::*;
 
 // TODO: Replay prevention?
 
 #[derive(Debug, Serialize, Deserialize)]
-struct WalletStorage {
+struct Wallet {
     token_addr: ContractAddress,
     pk: Ed25519PublicKey,
 }
 
-struct WalletContract(ContractWithStorage<WalletStorage>);
-
-impl core::ops::Deref for WalletContract {
-    type Target = ContractWithStorage<WalletStorage>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Contract for WalletContract {
-    fn new(key: &StorageKey) -> Self {
-        Self(ContractWithStorage::new(key))
-    }
-}
+impl ContractStorage for Wallet {}
 
 type AuthMessage = [u8; 80];
 
@@ -44,31 +23,39 @@ type AuthMessage = [u8; 80];
 // Contract methods (below) exposed with C ABI for running as guest
 pub use exports::*;
 
-#[contract]
-impl WalletContract {
+#[contract(exports = "exports")]
+impl Wallet {
     fn token(&self) -> ERC20Client {
-        ERC20Client::new(&self.storage().token_addr)
+        ERC20Client::new(&self.token_addr)
     }
 
     pub fn initialize(
-        &mut self,
+        _maybe_self: Option<&mut Self>,
         pk: &Ed25519PublicKey,
         token_addr: &ContractAddress,
     ) {
-        let storage = WalletStorage {
+        let key = Self::keypath().into();
+
+        // Make sure we haven't already been initialized
+        if bytestring_exists(&key).unwrap() {
+            panic!("Contract already initialized");
+        }
+
+        let value = Wallet {
             pk: *pk,
             token_addr: *token_addr,
         };
 
-        self.set_storage(storage);
+        // Store ourselves
+        store(&key, &value).unwrap();
     }
 
     pub fn get_balance(&self) -> Amount {
-       self.token().get_balance().unwrap()
+        self.token().get_balance().unwrap()
     }
 
     pub fn test_expect_balance(&self, expect: Amount) {
-        let bal = self.get_balance();
+        let bal = self.token().get_balance().unwrap();
         ensure(bal == expect, "bad balance").unwrap();
     }
 
@@ -79,7 +66,7 @@ impl WalletContract {
     ) -> AuthMessage {
         // TODO(geoff) this will eventually need a nonce and a domain separator(?)
 
-        let self_addr = sdk::GetCurrentAddress().unwrap();
+        let self_addr = GetCurrentAddress().unwrap();
 
         let input = (&self_addr, to_addr, amount);
         let buf = sdk::serialize::to_bytes(&input).unwrap();
@@ -95,13 +82,11 @@ impl WalletContract {
         amount: Amount,
         signature: &Ed25519Signature,
     ) {
-        let pk = &self.storage().pk;
-
         // TODO some kind of replay mechanism
         let auth_message = self.compute_auth_message(&to_addr, amount);
 
         sdk::crypto::VerifySignature(
-            &PublicKey::Ed25519 { ed25519: *pk },
+            &PublicKey::Ed25519 { ed25519: self.pk },
             &Signature::Ed25519 {
                 ed25519: *signature,
             },

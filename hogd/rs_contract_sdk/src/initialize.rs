@@ -1,7 +1,6 @@
 use crate::macros::_static_key;
+use crate::nonnegative_int::*;
 use crate::result::{Error, Result};
-use crate::sys;
-use crate::syscall::SyscallErrorCode;
 use crate::types::StorageKey;
 
 const INITIALIZE_GUARD_KEY: StorageKey =
@@ -9,14 +8,9 @@ const INITIALIZE_GUARD_KEY: StorageKey =
 
 // a function that can only execute on one transaction, ever
 pub fn initialization_guard() -> Result<()> {
-    let (mut current_set, mut current_add) = (0, 0);
-    match sys::raw_NonnegativeIntGet(
-        &INITIALIZE_GUARD_KEY,
-        &mut current_set,
-        &mut current_add,
-    ) {
+    match NonnegativeIntGet(&INITIALIZE_GUARD_KEY) {
         Err(x) => {
-            if x.is_code(SyscallErrorCode::kStorageKeyNotExist) {
+            if x.is_storage_key_not_exist() {
                 // Ok, expected
             } else {
                 panic!("Unexpected initialization failure: {}", x);
@@ -25,6 +19,6 @@ pub fn initialization_guard() -> Result<()> {
         _ => return Err(Error::InitGuardFailure),
     };
 
-    crate::NonnegativeIntSetAdd(&INITIALIZE_GUARD_KEY, 1, -1)?;
+    NonnegativeIntSetAdd(&INITIALIZE_GUARD_KEY, 1, -1)?;
     Ok(())
 }

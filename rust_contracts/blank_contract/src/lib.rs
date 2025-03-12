@@ -3,7 +3,7 @@
 use rs_contract_sdk;
 
 #[cfg(test)]
-use test_ffi;
+use native_exec;
 
 #[cfg(test)]
 mod tests {
@@ -19,7 +19,7 @@ mod tests {
     static mut X: bool = false;
     #[test]
     fn invoke_err() {
-        let mut env = test_ffi::TestEnvironment::new();
+        let mut env = native_exec::TestEnvironment::new();
 
         let code = {
             let mut contract = env.add_contract();
@@ -34,14 +34,14 @@ mod tests {
 
         env.advance_block();
 
-        let tx = test_ffi::deployer::make_deploy_and_invoke_transaction(
+        let tx = native_exec::deployer::make_deploy_and_invoke_transaction(
             code,
             &[0; 32],
             0,
             &[],
         );
 
-        let mut tx_handler = test_ffi::TransactionHandler::new(&env, &tx);
+        let mut tx_handler = native_exec::TransactionHandler::new(&env, &tx);
 
         let res = tx_handler.root_invoke();
         assert_eq!(res.result.panic, InvokeErrorCode::kDeterministic as i32);
@@ -50,7 +50,7 @@ mod tests {
 
     #[test]
     fn invoke_ok() {
-        let mut env = test_ffi::TestEnvironment::new();
+        let mut env = native_exec::TestEnvironment::new();
 
         let code = {
             let mut contract = env.add_contract();
@@ -64,14 +64,14 @@ mod tests {
 
         env.advance_block();
 
-        let tx = test_ffi::deployer::make_deploy_and_invoke_transaction(
+        let tx = native_exec::deployer::make_deploy_and_invoke_transaction(
             code,
             &[0; 32],
             1,
             &[],
         );
 
-        let mut tx_handler = test_ffi::TransactionHandler::new(&env, &tx);
+        let mut tx_handler = native_exec::TransactionHandler::new(&env, &tx);
 
         let res = tx_handler.root_invoke();
         assert_eq!(res.result.panic, InvokeErrorCode::kNone as i32);
@@ -84,7 +84,7 @@ mod tests {
         hasher.update([0, 1, 2, 3]);
         unsafe { HASH_EXPECT = hasher.finalize().try_into().unwrap() };
 
-        let mut env = test_ffi::TestEnvironment::new();
+        let mut env = native_exec::TestEnvironment::new();
 
         let code = {
             let mut contract = env.add_contract();
@@ -102,14 +102,14 @@ mod tests {
 
         env.advance_block();
 
-        let tx = test_ffi::deployer::make_deploy_and_invoke_transaction(
+        let tx = native_exec::deployer::make_deploy_and_invoke_transaction(
             code,
             &[0; 32],
             2,
             &[6, 0, 1, 2, 3, 4, 5],
         );
 
-        let mut tx_handler = test_ffi::TransactionHandler::new(&env, &tx);
+        let mut tx_handler = native_exec::TransactionHandler::new(&env, &tx);
 
         let res = tx_handler.root_invoke();
         assert_eq!(res.result.panic, InvokeErrorCode::kNone as i32);
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn check_prepare_test() {
-        let mut env = test_ffi::TestEnvironment::new();
+        let mut env = native_exec::TestEnvironment::new();
 
         // first write an int, then read it back
 

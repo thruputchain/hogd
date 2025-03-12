@@ -60,7 +60,10 @@ pub fn GetSourceTransactionHash() -> Result<SHA256Hash> {
     Ok(unsafe { out_hash.assume_init() })
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
+#[cfg(any(feature = "alloc"))]
+pub use get_calldata_alloc::*;
+
+#[cfg(any(feature = "alloc"))]
 mod get_calldata_alloc {
     use crate::result::SysResult as Result;
     use crate::sys;
@@ -100,116 +103,3 @@ mod get_calldata_alloc {
         Ok(unsafe { vec.assume_init() })
     }
 }
-
-#[cfg(any(feature = "alloc", feature = "std"))]
-pub use get_calldata_alloc::*;
-
-#[cfg(any(feature = "alloc", feature = "std"))]
-mod handle {
-    use bcs;
-    use serde::de::DeserializeOwned;
-    use serde::Serialize;
-
-    use super::{GetCalldata, Return};
-    use crate::syscall::{SysErr, SyscallErrorCode};
-
-    // Run a handler function on the invocation arguments
-    // available in serialized form via `GetCalldata`,
-    // and serialize the result for passing to `Return`.
-    pub fn handle_call<F, ARGS, RES>(f: F) -> SysErr
-    where
-        F: FnOnce(ARGS) -> RES,
-        ARGS: DeserializeOwned,
-        RES: Serialize,
-    {
-        let call_data = match GetCalldata() {
-            Ok(x) => x,
-            Err(e) => return e, // == SyscallErrorCode::kCalldataParseError
-        };
-        let args: ARGS = match bcs::from_bytes(&call_data) {
-            Ok(args) => args,
-            Err(_) => return SyscallErrorCode::kCalldataParseError.into(),
-        };
-        let result: RES = f(args);
-        let result_bytes = match bcs::to_bytes(&result) {
-            Ok(bytes) => bytes,
-            Err(_) => return SyscallErrorCode::kCalldataParseError.into(),
-        };
-        Return(result_bytes.as_slice());
-    }
-}
-#[cfg(any(feature = "alloc", feature = "std"))]
-pub use handle::handle_call;
-
-#[cfg(any(feature = "alloc", feature = "std"))]
-pub mod cross_call {
-    use crate::sys;
-    use crate::types::{
-        ContractAddress, InvocationFlagSet, InvocationFlags,
-        RuntimeMemoryLength,
-    };
-    use alloc::vec::Vec;
-    use alloc::vec;
-    use bcs;
-    use serde::de::DeserializeOwned;
-    use serde::Serialize;
-
-    pub fn invoke<ARGS, RET>(
-        address: &ContractAddress,
-        method: u32,
-        gas_limit: u64,
-        args: &ARGS,
-    ) -> RET
-    where
-        ARGS: Serialize,
-        RET: DeserializeOwned,
-    {
-        // Encode the args
-        let call_data =
-            bcs::to_bytes(args).expect("Couldn't serialize call data");
-
-        // Invoke the method
-        let return_buf =
-            invoke_inner(address, method, gas_limit, call_data.as_slice());
-
-        // Deserialize the buffer into a return value ...
-        let return_buf = &return_buf.as_slice();
-        let return_value = bcs::from_bytes(return_buf)
-            .expect("Couldn't deserialize return value");
-
-        return_value
-    }
-
-    fn invoke_inner(
-        address: &ContractAddress,
-        method: u32,
-        gas_limit: u64,
-        call_data: &[u8],
-    ) -> Vec<u8> {
-        // Perform the cross-contract call
-
-        let flags: InvocationFlagSet =
-            InvocationFlags::kNone as InvocationFlagSet;
-        sys::raw_Invoke(address, method, gas_limit, call_data, flags)
-            .expect("Contract invocation failed");
-
-        // Retrieve the return-value buffer
-
-        let mut return_len = 0;
-        sys::raw_GetReturnedBufferLen(&mut return_len)
-            .expect("Couldn't get returned buffer len");
-
-        let mut return_buf = vec![0; return_len as usize];
-        let mut written: RuntimeMemoryLength = 0;
-        sys::raw_GetReturnedBuffer(return_buf.as_mut_slice(), &mut written)
-            .expect("Couldn't get returned buffer");
-
-        if written != return_len {
-            panic!("Unexpected return buffer length");
-        }
-
-        return_buf
-    }
-}
-#[cfg(any(feature = "alloc", feature = "std"))]
-pub use cross_call::invoke;

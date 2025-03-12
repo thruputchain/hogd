@@ -61,6 +61,7 @@ dependencies = [
  "caller",
  "erc20",
  "rs_contract_sdk",
+ "serde",
 ]
 
 [[package]]

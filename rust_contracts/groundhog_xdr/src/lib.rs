@@ -41,13 +41,17 @@ mod test;
 
 impl Default for Signature {
     fn default() -> Self {
-        Self::Ed25519 { ed25519: ByteArray::default() }
+        Self::Ed25519 {
+            ed25519: ByteArray::default(),
+        }
     }
 }
 
 impl Default for PublicKey {
     fn default() -> Self {
-        Self::Ed25519 { ed25519: ByteArray::default() }
+        Self::Ed25519 {
+            ed25519: ByteArray::default(),
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use crate::types::MockContract;
 use groundhog_xdr::contract::Contract;
 use groundhog_xdr::transaction::{Invocation, SignedTransaction, Transaction};
 use groundhog_xdr::types::SHA256Hash;
-use groundhog_xdr::{Limits, WriteXdr, ByteArray};
+use groundhog_xdr::{ByteArray, Limits, WriteXdr};
 use sha2::{Digest, Sha256};
 
 pub fn make_deploy_transaction(

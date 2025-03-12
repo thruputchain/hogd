@@ -21,7 +21,7 @@ mod implementation;
 
 // Contract methods exposed with C ABI for running as guest
 #[cfg(feature = "guest")]
-pub use implementation::exports::*;
+pub use implementation::guest_exports::*;
 
 #[cfg(test)]
 mod tests;

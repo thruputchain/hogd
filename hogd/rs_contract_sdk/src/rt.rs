@@ -10,7 +10,7 @@ pub fn trap() -> ! {
     panic!("unreachable");
 }
 
-#[cfg(not(feature = "mock"))]
+#[cfg(all(not(feature = "mock"), not(feature = "std")))]
 #[panic_handler]
 fn handle_panic(_: &core::panic::PanicInfo) -> ! {
     trap();
@@ -18,14 +18,16 @@ fn handle_panic(_: &core::panic::PanicInfo) -> ! {
 
 #[cfg(feature = "mock")]
 mod test_rt {
+    use ::native_exec::invoke_error::deterministic_error;
     use std::boxed::Box;
     use std::panic::panic_any;
-
-    use test_ffi::invoke_error::deterministic_error;
 
     pub fn trap() -> ! {
         panic_any(Box::new(deterministic_error()))
     }
 }
+
 #[cfg(feature = "mock")]
+#[allow(dead_code)]
+#[allow(unused)]
 pub use test_rt::trap;

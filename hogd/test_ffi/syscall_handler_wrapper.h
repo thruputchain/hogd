@@ -168,7 +168,8 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
       auto panic_msg = std::format("GUEST PANIC {}", status.panic);
       if (status.panic == std::to_underlying(HostFnErrorCode::kExit)) {
         panic_msg = "GUEST EXIT";
-      } else if (status.panic == std::to_underlying(HostFnErrorCode::kReturn)) {
+      }
+      else if (status.panic == std::to_underlying(HostFnErrorCode::kReturn)) {
         panic_msg = "GUEST RETURN";
       }
       auto msg = std::format("{} {}\n", syscall_no, panic_msg);
@@ -180,7 +181,8 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
 
   if (status.result_code != std::to_underlying(SyscallErrorCode::kNone)) {
     if (syscall_logfd != -1) {
-      auto msg = std::format("{} return error {}\n", syscall_no, status.result_code);
+      auto msg =
+          std::format("{} return error {}\n", syscall_no, status.result_code);
       write(syscall_logfd, msg.data(), msg.size());
     }
 

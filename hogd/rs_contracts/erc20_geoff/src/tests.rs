@@ -1,6 +1,6 @@
-use sdk::types::ByteArray;
 use crate::implementation;
-use crate::interface::{client, ERC20};
+use crate::interface::client::ERC20Client;
+use crate::interface::ERC20;
 
 #[test]
 fn check_mint() {
@@ -10,32 +10,43 @@ fn check_mint() {
     let contract_hash = env.setup_create_contract(&test_contract);
 
     let mut handler = env.prepare_test(move || -> i32 {
-        let nonce = ByteArray::new([7; 32]);
-        let deployed_addr =
-            sdk::deploy::DeployContract(&nonce, &contract_hash).unwrap();
-
-        let mut client = client::ERC20Client::new(&deployed_addr);
-
-        let owner = sdk::invoke::GetCurrentAddress().unwrap();
-
-        client.initialize(&owner).unwrap();
-
-        client.mint(&owner, 100).unwrap();
-        assert_eq!(client.get_balance().unwrap(), 100);
-
-        let other = ByteArray::new([0xBB; 32]);
-        client.transfer(&other, 25).unwrap();
-        assert_eq!(client.get_balance_of(&other).unwrap(), 25);
-        assert_eq!(client.get_balance_of(&owner).unwrap(), 75);
-
-        client.burn(&other, 5).unwrap();
-        assert_eq!(client.get_balance_of(&other).unwrap(), 20);
-
-        assert_eq!(client.total_supply().unwrap(), 95);
-
-        return 0;
+        match check_mint_inner(&contract_hash) {
+            Ok(_) => 0,
+            Err(error) => panic!("test failed: {}", error),
+        }
     });
 
     let res = handler.root_invoke();
     assert_eq!(res.result.panic, sdk::InvokeErrorCode::kNone as i32);
+}
+
+fn check_mint_inner(
+    contract_hash: &sdk::types::SHA256Hash,
+) -> sdk::result::Result<()> {
+    use sdk::prelude::*;
+
+    let nonce = ByteArray::new([7; 32]);
+    let deployed_addr = DeployContract(&nonce, contract_hash).unwrap();
+    let owner = GetCurrentAddress().unwrap();
+
+    let mut client = ERC20Client::new(&deployed_addr);
+    ERC20Client::initialize(Some(&mut client), &owner)?;
+
+    assert_eq!(client.total_supply()?, 0);
+    assert_eq!(client.get_balance()?, 0);
+
+    client.mint(&owner, 100)?;
+    assert_eq!(client.get_balance()?, 100);
+
+    let other = ByteArray::new([0xBB; 32]);
+    client.transfer(&other, 25)?;
+    assert_eq!(client.get_balance_of(&other)?, 25);
+    assert_eq!(client.get_balance_of(&owner)?, 75);
+
+    client.burn(&other, 5)?;
+    assert_eq!(client.get_balance_of(&other)?, 20);
+
+    assert_eq!(client.total_supply()?, 95);
+
+    Ok(())
 }

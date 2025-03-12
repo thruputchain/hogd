@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 sdk = { workspace = true }
+serde = { workspace = true }
 erc20 = { path = "../erc20", default-features = false, features = ["client", "alloc"] }
 
 [lib]

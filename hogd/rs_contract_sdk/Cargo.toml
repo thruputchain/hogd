@@ -13,14 +13,15 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 bcs = { path = "external/bcs", default-features = false }
-rs_xdr = { package = "groundhog_xdr", path = "../../rust_contracts/groundhog_xdr/" }
+groundhog_xdr = { path = "../../rust_contracts/groundhog_xdr/" }
 macros = { path = "macros" }
-thiserror = { version = "2.0.11", default-features = false }
+native_exec = { path = "../../rust_contracts/native_exec", optional = true}
 serde = { version = "1.0.217", default-features = false }
 serde_arrays = { path = "external/serde_arrays", default-features = false }
-test_ffi = { package = "native_exec", path = "../../rust_contracts/native_exec", optional = true}
+thiserror = { version = "2.0.11", default-features = false }
 
 [features]
-alloc = ["serde/alloc", "bcs/alloc", "serde_arrays/alloc", "rs_xdr/alloc"]
-std = ["alloc", "serde/std", "bcs/std", "rs_xdr/std"]
-mock = ["std", "dep:test_ffi"]
+default = ["alloc"]
+alloc = ["serde/alloc", "serde_arrays/alloc", "groundhog_xdr/alloc"]
+std = ["alloc", "serde/std", "bcs/std", "groundhog_xdr/std"]
+mock = ["std", "dep:native_exec"]

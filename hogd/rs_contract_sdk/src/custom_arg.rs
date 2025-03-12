@@ -1,15 +1,14 @@
-// unused under feature mock
-#![allow(dead_code)]
+use crate::rt::trap;
+use crate::syscall::to_offset;
+use ::groundhog_xdr::types::{CryptographicScheme, PublicKey, Signature};
 
 pub trait TwoCustomArgs {
     fn to_u64s(&self) -> (u64, u64);
 }
 
 // required for custom arg handling in syscall
-impl TwoCustomArgs for ::rs_xdr::types::Signature {
+impl TwoCustomArgs for Signature {
     fn to_u64s(&self) -> (u64, u64) {
-        use crate::syscall::to_offset;
-        use ::rs_xdr::types::CryptographicScheme;
         match self {
             Self::Ed25519 { ed25519: sig } => {
                 return (
@@ -19,17 +18,14 @@ impl TwoCustomArgs for ::rs_xdr::types::Signature {
             }
             #[allow(unreachable_patterns)]
             _ => {
-                crate::rt::trap();
+                trap();
             }
         }
     }
 }
 
-impl TwoCustomArgs for ::rs_xdr::types::PublicKey {
+impl TwoCustomArgs for PublicKey {
     fn to_u64s(&self) -> (u64, u64) {
-        use crate::syscall::to_offset;
-        use ::rs_xdr::types::CryptographicScheme;
-
         match self {
             Self::Ed25519 { ed25519: pk } => {
                 return (
@@ -39,7 +35,7 @@ impl TwoCustomArgs for ::rs_xdr::types::PublicKey {
             }
             #[allow(unreachable_patterns)]
             _ => {
-                crate::rt::trap();
+                trap();
             }
         }
     }

@@ -10,7 +10,7 @@ pub struct ByteArray<const N: usize> {
 
 impl<const N: usize> Default for ByteArray<N> {
     fn default() -> Self {
-        Self{ arr: [0; N] }
+        Self { arr: [0; N] }
     }
 }
 

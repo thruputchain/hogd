@@ -7,7 +7,7 @@ use groundhog_xdr::ffi_enums::InvokeErrorCode;
 use groundhog_xdr::transaction::SignedTransaction;
 use groundhog_xdr::types::ContractAddress;
 use groundhog_xdr::types::SHA256Hash;
-use groundhog_xdr::{Limits, WriteXdr, ByteArray};
+use groundhog_xdr::{ByteArray, Limits, WriteXdr};
 
 use sha2::Digest;
 use sha2::Sha256;
@@ -146,14 +146,13 @@ impl<'a> TestEnvironment {
     pub fn setup_create_deployment(
         &mut self,
         addr: &ContractAddress,
-        contract: &Contract
+        contract: &Contract,
     ) {
-        let contract_bytes =
-            contract.to_xdr(Limits::none()).unwrap();
-        
+        let contract_bytes = contract.to_xdr(Limits::none()).unwrap();
+
         let mut hasher = Sha256::new();
         hasher.update(&contract_bytes);
-        let contract_hash : SHA256Hash =
+        let contract_hash: SHA256Hash =
             ByteArray::new(hasher.finalize().into());
 
         unsafe {
@@ -209,7 +208,10 @@ impl<'a> TestEnvironment {
 
         let invoke_addr = ByteArray::new([0xFF; 32]);
 
-        self.setup_create_deployment(&invoke_addr, &test_contract.as_contract());
+        self.setup_create_deployment(
+            &invoke_addr,
+            &test_contract.as_contract(),
+        );
 
         let stx = SignedTransaction {
             tx: Transaction {
