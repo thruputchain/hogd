@@ -998,6 +998,8 @@ use core::mem::MaybeUninit;
 use core::hint::unreachable_unchecked;
 
 #[cfg(feature="mock")]
+use alloc::vec;
+#[cfg(feature="mock")]
 use ::groundhog_xdr::{{ReadXdr, WriteXdr, ToXdr, FromXdr}};
 #[cfg(feature="mock")]
 use ::native_exec::invoke_error::unrecoverable_error;
