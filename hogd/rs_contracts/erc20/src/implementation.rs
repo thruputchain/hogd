@@ -65,7 +65,7 @@ impl CoinContract {
         spender: &ContractAddress,
         amount: Amount,
     ) -> Result<()> {
-        #[allow(unused_mut)]
+        #[allow(unused_mut)] // TODO
         let mut owner_allowances = self.allowances.get(owner)?;
         let mut spender_allowance = owner_allowances.get(spender)?;
         spender_allowance.add(amount as i128)?;

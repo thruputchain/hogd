@@ -112,7 +112,11 @@ impl ERC20 for CoinContract {
         Ok(())
     }
 
-    fn transfer(&mut self, to: &ContractAddress, amount: Amount) -> Result<()> {
+    fn transfer(
+        &mut self,
+        to: &ContractAddress,
+        amount: Amount,
+    ) -> Result<()> {
         let sender = GetMsgSender()?;
 
         ensure(amount >= 0, "no negative spends allowed")?;

@@ -12,7 +12,8 @@ pub trait ERC20 {
         maybe_self: Option<&mut Self>,
         owner: &ContractAddress,
     ) -> Result<()>;
-    fn transfer(&mut self, to: &ContractAddress, amount: Amount) -> Result<()>;
+    fn transfer(&mut self, to: &ContractAddress, amount: Amount)
+        -> Result<()>;
     fn transfer_from(
         &mut self,
         owner: &ContractAddress,

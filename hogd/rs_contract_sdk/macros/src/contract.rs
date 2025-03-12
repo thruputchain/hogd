@@ -5,7 +5,10 @@ use proc_macro2::TokenStream as TokenStream2;
 use syn::parse::{Error, Result};
 use syn::spanned::Spanned;
 
-pub fn contract_output(attr_args: TokenStream, item_tokens: TokenStream) -> TokenStream {
+pub fn contract_output(
+    attr_args: TokenStream,
+    item_tokens: TokenStream,
+) -> TokenStream {
     // Parse the attributes
     let config = match NestedMeta::parse_meta_list(attr_args.into()) {
         Ok(meta_list) => match sig::Config::from_list(&meta_list) {
@@ -266,8 +269,8 @@ mod parse {
 mod gen {
     //! Generate code from contract signature
 
-    use super::sig;
     use super::err;
+    use super::sig;
     use proc_macro2::TokenStream as TokenStream2;
     use quote::format_ident;
     use quote::{quote, quote_spanned};
@@ -575,7 +578,8 @@ mod gen {
         let skip_n = if drop_first { 1 } else { 0 };
         let args = method.args.iter().skip(skip_n);
 
-        let provided_args: Vec<TokenStream2> = args.map(provided_arg).collect();
+        let provided_args: Vec<TokenStream2> =
+            args.map(provided_arg).collect();
         quote! { #(#provided_args),* }
     }
 
@@ -601,7 +605,8 @@ mod gen {
         let skip_n = if drop_first { 1 } else { 0 };
         let args = method.args.iter().skip(skip_n);
 
-        let received_args: Vec<TokenStream2> = args.map(received_arg).collect();
+        let received_args: Vec<TokenStream2> =
+            args.map(received_arg).collect();
         quote! { ( #(#received_args),* ) }
     }
 

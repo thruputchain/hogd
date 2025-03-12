@@ -23,21 +23,21 @@ fn test_storage() {
     assert_eq!(res.result.panic, sdk::InvokeErrorCode::kNone as i32);
 }
 
-fn test_storage_inner(contract_hash: &sdk::types::SHA256Hash) -> sdk::result::Result<()> {
+fn test_storage_inner(
+    contract_hash: &sdk::types::SHA256Hash,
+) -> sdk::result::Result<()> {
     use sdk::prelude::*;
 
     let nonce = ByteArray::new([7; 32]);
     let deployed_addr = DeployContract(&nonce, contract_hash)?;
 
-    let _ = sdk::internal::invoke::<(),()>(&deployed_addr, 1, u64::MAX, &());
+    let _ = sdk::internal::invoke::<(), ()>(&deployed_addr, 1, u64::MAX, &());
 
     Ok(())
 }
 
 fn method_one_internal() -> i32 {
-    sdk::internal::handle_call(|()| {
-        method_one()
-    }).into()
+    sdk::internal::handle_call(|()| method_one()).into()
 }
 
 fn method_one() {
