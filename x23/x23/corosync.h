@@ -62,6 +62,7 @@
 #include <cassert>
 
 #include <x23/async.h>
+#include <x23/corotrace.h>
 #include <x23/mvar.h>
 #include <x23/threadpool.h>
 
@@ -96,7 +97,19 @@ public:
 
       AwaitAcquire(Self &lk, LockerState *ls) : lk_(lk), next_(ls) {}
       bool await_ready() { return !(prev_ = lk_.last_.exchange(next_)); }
-      void await_suspend(std::coroutine_handle<> h) { prev_->next = h; }
+      void await_suspend(std::coroutine_handle<> h
+#if X23_CORO_TRACE
+                         ,
+                         source_location sloc = source_location::current()
+#endif // X23_CORO_TRACE
+      )
+      {
+#if X23_CORO_TRACE
+        corotrace.set_suspend(h, sloc, "CoroLock",
+                              static_cast<const void *>(&lk_));
+#endif // X23_CORO_TRACE
+        prev_->next = h;
+      }
       void await_resume() {}
     };
 
@@ -118,8 +131,12 @@ public:
   // lock before returning.
   void unlock(LockerState *ls)
   {
-    if (std::coroutine_handle<> h = next(ls))
+    if (std::coroutine_handle<> h = next(ls)) {
+#if X23_CORO_TRACE
+      corotrace.clear_suspend(h);
+#endif // X23_CORO_TRACE
       h();
+    }
   }
 
   Async<void> await_free()

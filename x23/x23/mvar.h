@@ -25,7 +25,7 @@ public:
   // destroyed.
   class Ptr {
   public:
-    Ptr() noexcept {}
+    Ptr() noexcept = default;
     Ptr(MVar &mv)
     {
       mv.m_.lock();

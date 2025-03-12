@@ -63,7 +63,7 @@ RpcStreamImpl::fail()
 }
 
 Detached
-RpcStreamImpl::write_record(Buf b)
+RpcStreamImpl::write_record(Buf b SLOC_ARG)
 {
   if (ss_.stop_requested())
     co_return;
@@ -115,7 +115,7 @@ RpcStreamImpl::gen_call_xid(Awaitable<Buf> &a)
 }
 
 Detached
-RpcStreamImpl::reader()
+RpcStreamImpl::reader(SLOC_ARG0)
 {
   using enum msg_type;
   auto _r = shared_from_this();
@@ -151,7 +151,7 @@ RpcStreamImpl::reader()
 }
 
 Detached
-RpcStreamImpl::serve_call(const rpc_msg &call, BufView args)
+RpcStreamImpl::serve_call(const rpc_msg &call, BufView args SLOC_ARG)
 {
   using enum accept_stat;
   using enum reject_stat;

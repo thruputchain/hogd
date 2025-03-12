@@ -15,7 +15,12 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   message(STATUS "Using Clang, setting libc++")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-stdlib=libc++ -fexperimental-library)
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -stdlib=libc++ -fexperimental-library")
   set(USE_LIBCXX ON)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  message(STATUS "Using GCC, adding libstdc++exp")
+  list(APPEND CMAKE_REQUIRED_LIBRARIES stdc++exp)
+  link_libraries(stdc++exp) # needed for C++23 stacktrace library
 endif()
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -29,9 +34,22 @@ if(X23_IS_TOP_LEVEL)
   endif()
 endif()
 
-include(cmake/pause.cmake)
-include(cmake/epoll.cmake)
+set(X23_CORO_TRACE "" CACHE STRING
+  "Enable coroutine tracing (0=off, 1=on, empty=auto based on NDEBUG)")
+
+# Only pass X23_CORO_TRACE to configure_file if it's explicitly set
+if(NOT X23_CORO_TRACE STREQUAL "")
+    message(STATUS "X23_CORO_TRACE explicitly set to ${X23_CORO_TRACE}")
+else()
+    # If it's empty, unset it so it becomes undefined for #cmakedefine
+    unset(X23_CORO_TRACE)
+    message(STATUS "X23_CORO_TRACE is empty, will use !defined(NDEBUG)")
+endif()
+
 include(cmake/accept4.cmake)
+include(cmake/demangle.cmake)
+include(cmake/epoll.cmake)
+include(cmake/pause.cmake)
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in

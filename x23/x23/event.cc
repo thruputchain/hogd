@@ -72,7 +72,7 @@ CoroPoll::loop()
 }
 
 Async<std::expected<size_t, Errno>>
-CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full)
+CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full SLOC_ARG)
 {
   size_t startsize = out->size();
   while (len > 0) {
@@ -96,7 +96,7 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full)
 }
 
 Async<std::expected<size_t, Errno>>
-CoroPoll::write(BorrowedFd fd, BufView data)
+CoroPoll::write(BorrowedFd fd, BufView data SLOC_ARG)
 {
   size_t len = data.size();
   while (!data.empty()) {

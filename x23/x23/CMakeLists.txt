@@ -4,6 +4,8 @@ add_library(x23
   cleanup.h
   corosync.h
   corosync.cc
+  corotrace.h
+  corotrace.cc
   err.h
   event.cc
   event.h

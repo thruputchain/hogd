@@ -377,9 +377,9 @@ public:
     return *this;
   }
 
-  constexpr Vec &operator+=(std::ranges::range auto &rg)
+  constexpr Vec &operator+=(std::ranges::range auto &&rg)
   {
-    append_range(rg);
+    append_range(std::forward<decltype(rg)>(rg));
     return *this;
   }
 

@@ -51,13 +51,15 @@ struct BufHolder {
   TestLock buflk_;
   std::shared_ptr<BufferedReader> reader_;
 
-  std::shared_ptr<detail::BufferedReader> reader() {
+  std::shared_ptr<detail::BufferedReader> reader()
+  {
     std::lock_guard _g(buflk_);
     if (!reader_)
       reader_ = std::make_shared<detail::BufferedReader>();
     return reader_;
   }
-  void buf_clear() {
+  void buf_clear()
+  {
     std::lock_guard _g(buflk_);
     reader_.reset();
   }
@@ -224,20 +226,21 @@ public:
   // if full is false, it will return however many bytes it got from
   // the first successful call to read.
   Async<std::expected<size_t, Errno>> read(BorrowedFd fd, Buf *out, size_t len,
-                                           bool full = true);
+                                           bool full = true SLOC_PARM);
 
   // Write all of data to file descriptor fd.  The coroutine keeps
   // suspending itself until the entirety of data has been written or
   // an error occurs.  Always returns either data.size() or an Errno
   // other than EAGAIN.
-  Async<std::expected<size_t, Errno>> write(BorrowedFd fd, BufView data);
+  Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
+					    BufView data SLOC_PARM);
 
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
   template<typename Addr = sockaddr>
   Async<std::expected<int, Errno>> accept(BorrowedFd lfd, Addr *addr = nullptr,
                                           socklen_t *addrlen = nullptr,
-                                          bool close_on_exec = true)
+                                          bool close_on_exec = true SLOC_PARM)
   {
     while (!stop_requested()) {
       if constexpr (!std::same_as<decltype(addr), std::nullptr_t>)
@@ -272,7 +275,7 @@ public:
   }
 
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,
-					      socklen_t len);
+                                              socklen_t len);
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr_storage *ss)
   {
     return tcpconnect(reinterpret_cast<const sockaddr *>(ss), sizeof(*ss));

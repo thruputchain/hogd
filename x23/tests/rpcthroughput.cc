@@ -41,7 +41,7 @@ struct Listener : DestroyInhibit {
   }
 
 private:
-  Detached accept_loop(this RefPtr<Listener> self);
+  Detached accept_loop(this RefPtr<Listener> self SLOC_PARM);
 };
 
 struct Server {
@@ -59,7 +59,7 @@ struct Server {
 static_assert(is_blank_rpc_v1<Server *, Async>);
 
 Detached
-Listener::accept_loop(this RefPtr<Listener> self)
+Listener::accept_loop(this RefPtr<Listener> self SLOC_ARG)
 {
   sockaddr_storage ss;
   socklen_t socklen;
@@ -74,11 +74,13 @@ Listener::accept_loop(this RefPtr<Listener> self)
 int
 main()
 {
+  setlinebuf(stdout);
+  corotrace.enable_ = 2;
   // RpcLogger::default_logfd = 1;
   Listener listener(cp);
   std::stop_source ss;
   for (int i = 0; i < 10; ++i)
-    [](RefPtr<Listener> l, std::stop_token st) -> Detached {
+    [](RefPtr<Listener> l, std::stop_token st SLOC_PARM) -> Detached {
       auto conn = co_await l->cp_.tcpconnect(&l->addr_);
       if (!conn) {
         std::println(stderr, "tcpconnect: {}", conn.error());

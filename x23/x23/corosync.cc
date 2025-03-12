@@ -2,7 +2,9 @@
 #include "x23/corosync.h"
 #include "x23/threadpool.h"
 
-namespace x23::detail {
+namespace x23 {
+
+namespace detail {
 
 void
 resume_in_another_thread(std::coroutine_handle<> h)
@@ -13,4 +15,6 @@ resume_in_another_thread(std::coroutine_handle<> h)
     h();
 }
 
-} // namespace x23::detail
+} // namespace detail
+
+} // namespace x23

@@ -114,6 +114,7 @@
 
 #include <x23/cleanup.h>
 #include <x23/config.h>
+#include <x23/corotrace.h>
 #include <x23/utility.h>
 
 namespace x23 {
@@ -216,7 +217,7 @@ public:
   AwaitableImpl(AwaitableImpl &&) = delete;
 
   //
-  // Functions for use on the callback/callee/"promise" side
+  // Functions for use on the callee/"promise" side
   //
 
   // Call once to indicate a result is pending.  This is to catch bugs
@@ -266,8 +267,16 @@ public:
     // result_ or exception_, so use acquire semantics to access it.
     return resume_lock_.test_and_set(std::memory_order_acquire);
   }
-  void await_suspend(std::coroutine_handle<> h) noexcept
+  void await_suspend(std::coroutine_handle<> h
+#if X23_CORO_TRACE
+                     ,
+                     source_location sloc = source_location::current()
+#endif // X23_CORO_TRACE
+                         ) noexcept
   {
+#if X23_CORO_TRACE
+    corotrace.set_suspend(h, sloc, "Awaitable", type_name<R>());
+#endif // X23_CORO_TRACE
     caller_.store(h, std::memory_order_release);
     // Once we store a non-NULL coroutine_handle, the callee may
     // resume us and destroy the Awaitable at any time, so we must no
@@ -345,6 +354,9 @@ public:
       pause_instruction();
     while (!(h = caller_.load(std::memory_order_relaxed)));
     caller_.load(std::memory_order_acquire);
+#if X23_CORO_TRACE
+    corotrace.clear_suspend(h);
+#endif // X23_CORO_TRACE
     return h;
   }
 
@@ -492,6 +504,19 @@ template<typename R> struct [[nodiscard]] Async {
   struct promise_type;
   using handle_type = std::coroutine_handle<promise_type>;
   struct promise_type : Awaitable<R> {
+#if X23_CORO_TRACE
+    promise_type(const auto &...args)
+    {
+      std::coroutine_handle<> h =
+          std::coroutine_handle<promise_type>::from_promise(*this);
+      corotrace.set_alloc(h, GetLoc{}(args...), type_name<Async>());
+    }
+    ~promise_type()
+    {
+      corotrace.clear_alloc(
+          std::coroutine_handle<promise_type>::from_promise(*this));
+    }
+#endif // X23_CORO_TRACE
     Async get_return_object()
     {
       return Async{std::coroutine_handle<promise_type>::from_promise(*this)};
@@ -604,6 +629,20 @@ async_map(auto f, Async<void> a) -> Async<decltype(f())>
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
   struct promise_type {
+#if X23_CORO_TRACE
+    template<typename... Args> promise_type(const Args &...args)
+    {
+      std::coroutine_handle<> h =
+          std::coroutine_handle<promise_type>::from_promise(*this);
+      corotrace.set_alloc(h, GetLoc{}(args...), "Detached");
+    }
+    ~promise_type()
+    {
+      corotrace.clear_alloc(
+          std::coroutine_handle<promise_type>::from_promise(*this));
+    }
+#endif // X23_CORO_TRACE
+
     Detached get_return_object() const noexcept { return {}; }
     std::suspend_never initial_suspend() const noexcept { return {}; }
     void return_void() const noexcept {}

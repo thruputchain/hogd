@@ -398,8 +398,8 @@ protected:
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
-  Detached write_record(Buf b);
-  Detached reader();
+  Detached write_record(Buf b SLOC_PARM);
+  Detached reader(SLOC_PARM0);
 
 private:
   struct ClientState {
@@ -416,7 +416,7 @@ private:
   Async<std::expected<std::uint32_t, Errno>> read_uint();
   Async<std::expected<Buf, Errno>> read_record();
 
-  Detached serve_call(const rpc_msg &call, BufView args);
+  Detached serve_call(const rpc_msg &call, BufView args SLOC_PARM);
 };
 } // namespace detail
 
