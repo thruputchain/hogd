@@ -76,6 +76,6 @@ private:
   bool actively_running_ = false;
 };
 
-bool verify_contract(Contract const* contract);
+bool verify_contract_bytes(ContractBlob const& contract);
 
 }

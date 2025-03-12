@@ -192,8 +192,8 @@ verifier_errfn(char* msg, size_t /*unused*/)
 
 }
 
-bool verify_contract(Contract const* contract) {
-    if (!contract) return false;
+bool verify_contract_bytes(Contract const& contract) {
+    return false;
 
     #if defined(__aarch64__)
         

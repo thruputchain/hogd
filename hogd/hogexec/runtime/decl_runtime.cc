@@ -2,12 +2,15 @@
 
 #include <cassert>
 #include <memory>
+#include <string>
 #include <utility>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/decl/lficpp.h"
 #include "hogd/hogexec/decl/sandbox_cache.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
 
 
 namespace hogd {
@@ -47,6 +50,12 @@ DeclRuntime::invoke_internal(std::string const &method_name)
 
     return proc_->invoke(*method_num);
 }
+
+bool 
+DeclContext::verify_contract(ContractBlob const &contract) const {
+    return verify_contract_bytes(contract);
+}
+
 
 
 
