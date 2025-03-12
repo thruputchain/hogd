@@ -989,7 +989,6 @@ def gen_rs_syscall_bindings(spec):
 #![allow(non_snake_case)]
 use crate::types::*;
 use crate::syscall::{{SyscallNo, SysErr}};
-use alloc::vec;
 #[cfg(not(feature="mock"))]
 use crate::syscall::{{syscall_wrapper, to_offset, to_offset_mut}};
 #[cfg(not(feature="mock"))]
