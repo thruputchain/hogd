@@ -2,13 +2,17 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -44,6 +48,18 @@ engine_to_string(RuntimeEngine engine)
     return "UnknownEngine";
   }
 }
+
+std::optional<MethodID> 
+Runtime::method_id_from_string(std::string const& str)
+{
+  MethodID out = std::strtoul(str.data(), nullptr, 16);
+  Errno err{};
+  if (!err) {
+    return std::nullopt;
+  }
+  return out;
+}
+
 
 InvokeResult
 Runtime::invoke(std::string const &method_name, uint64_t gas_limit)

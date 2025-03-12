@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdio>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <print>
@@ -10,6 +11,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "lfi_small.h"
 
 namespace hogd {
@@ -136,6 +138,49 @@ DeclProc::get_memory()
   return active_memory_;
 }
 
+uint64_t
+DeclProc::get_available_gas() noexcept
+{
+  assert(proc_);
+  return *lfi_regs_gas(lfi_proc_regs(proc_));
+}
+
+void 
+DeclProc::set_available_gas(uint64_t gas) noexcept
+{
+  assert(proc_);
+  *lfi_regs_gas(lfi_proc_regs(proc_)) = gas;
+}
+
+InvokeStatus<int32_t>
+DeclProc::invoke(MethodID method) {
+  assert(proc_);
+  assert(!actively_running_);
+  actively_running_ = true;
+
+  // TODO(geoff) consider passing calldata here
+  lfi_proc_regs(proc_)->x0 = method;
+  uint64_t code = lfi_proc_start(proc_);
+  actively_running_ = false;
+
+  int32_t errcode_raw = code >> 32;
+  int32_t lowbits = code & 0xFFFF'FFFF;
+
+  auto errcode = HostFnErrorCode{errcode_raw};
+
+  switch (errcode) {
+    case HostFnErrorCode::kNoneOrRecoverable:
+      return {lowbits};
+    case HostFnErrorCode::kReturn:
+    case HostFnErrorCode::kExit:
+      assert(false);
+      std::terminate();
+    case HostFnErrorCode::kUnrecoverable:
+      return InvokeError{InvokeErrorCode::kUnrecoverable};
+    case HostFnErrorCode::kOutOfGas:
+      return InvokeError{InvokeErrorCode::kOutOfGas};
+  }
+}
 
 namespace {
 

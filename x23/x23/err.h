@@ -6,7 +6,7 @@
 #include <format>
 #include <system_error>
 
-#include <errno.h>
+#include <cerrno>
 
 namespace x23 {
 

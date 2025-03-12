@@ -4,9 +4,11 @@
 #include <mutex>
 
 #include "contract.hh"
+#include "hogd/hogexec/runtime/status.h"
 #include "lfi_small.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -54,6 +56,11 @@ public:
   Memory get_memory();
 
   bool load_program(Contract const* contract);
+
+  InvokeStatus<int32_t> invoke(MethodID method);
+
+  [[nodiscard]] uint64_t get_available_gas() noexcept;
+  void set_available_gas(uint64_t gas) noexcept;
 
 private:
   friend class LFIGlobalEngine;

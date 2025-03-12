@@ -189,11 +189,11 @@ def gen_validate_arg(inp, *, is_input):
   arg_name = inp["name"]
   const = ""
   in_out = "output"
-  input_flag = "false"
+  input_flag = "true"
   if (is_input):
     const = "const "
     in_out = "input"
-    input_flag = "true"
+    input_flag = "false"
 
   optional = False
   if "optional" in inp and inp["optional"]:

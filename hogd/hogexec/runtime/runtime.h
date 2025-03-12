@@ -1,15 +1,19 @@
 #pragma once
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -155,6 +159,8 @@ public:
   // (i.e. x = get_available_gas(); invoke(something); assert(x ==
   // get_available_gas()))
   InvokeResult invoke(std::string const &method_name, uint64_t gas_limit);
+
+  static std::optional<MethodID> method_id_from_string(std::string const& str);
 
   // Returns FALSE if gas consumption failed.
   //

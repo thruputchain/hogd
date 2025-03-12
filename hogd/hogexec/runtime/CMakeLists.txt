@@ -16,6 +16,8 @@ add_library(
   runtime.cc
   status.cc
   syscall_crypto.cc
+  decl_syshandler.cc
+  decl_runtime.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
 

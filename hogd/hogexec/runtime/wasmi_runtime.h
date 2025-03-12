@@ -12,8 +12,6 @@
 
 namespace hogd {
 
-// Context to be passed into a host function call
-class WasmiRuntime;
 
 // Context shared between WasmiRuntime objects.
 // Guarantee isolation between transactions

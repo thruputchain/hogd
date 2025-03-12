@@ -29,13 +29,6 @@ check_memory_span(MemorySpan span, uint64_t base, uint64_t len, bool write)
   return (base_end <= span.bytes_.size());
 }
 
-/*
-inline bool check_memory(Memory& mem, uint64_t base, uint64_t len, bool write) {
-  return [&]<std::size_t... I> (std::index_sequence<I...>) -> bool {
-    return (check_memory_span(mem.spans_[I], base, len, write) || ...);
-  }(std::make_index_sequence<Memory::kMaxSpans>());
-}*/
-
 template<typename T, bool WRITE> requires std::is_trivially_copyable_v<T>
 T *
 check_user_argument(MemorySpan span, uint64_t user_offset,
