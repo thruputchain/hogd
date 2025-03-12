@@ -11,6 +11,7 @@ add_library(
   wasmi_runtime.cc
   status.cc
   syscall_crypto.cc
+  syscall_entry_foo.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
 
