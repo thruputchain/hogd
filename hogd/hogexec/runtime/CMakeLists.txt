@@ -18,6 +18,7 @@ add_executable(
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
+  syscall_entry_outer_tests.cc
 )
 target_link_libraries(
   runtime
@@ -35,6 +36,12 @@ add_dependencies(
 
 target_include_directories(
   runtime
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+target_include_directories(
+  runtime_test
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )

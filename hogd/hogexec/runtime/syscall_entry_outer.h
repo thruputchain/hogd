@@ -10,7 +10,6 @@
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
-#include "hogd/hogexec/runtime/syscall_inner.h"
 #include "syscall.hh"
 #include "types.hh"
 
@@ -63,25 +62,19 @@ struct append_seq<Head, tuple_index_sequence<Is...>> {
 };
 */
 
-template<size_t Base, typename... Args>
+template<size_t Base, typename Arg, typename... Args>
 constexpr auto
 make_offset_seqs()
 {
   if constexpr (sizeof...(Args) == 0) {
-    return TupleIndexSequence<>{};
-  }
-  else if constexpr (sizeof...(Args) == 1) {
     return TupleIndexSequence<Base>{};
   }
   else {
-    using Arg = Args...[0];
+    //using Arg = Args...[0];
     constexpr auto kNumInputs = SyscallArgParams<Arg>::kNumInputs;
-    static_assert(sizeof...(Args) >= 2);
+    //static_assert(sizeof...(Args) >= 2);
 
-    auto [... Is] =
-        from_index_sequence(std::index_sequence<sizeof...(Args) - 1>{});
-
-    auto [... tail] = make_offset_seqs<Base + kNumInputs, Args...[Is]...>();
+    auto [... tail] = make_offset_seqs<Base + kNumInputs, Args...>();
 
     return TupleIndexSequence<Base, tail...>{};
   }

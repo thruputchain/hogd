@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
