@@ -4,7 +4,6 @@ pub use ::groundhog_xdr::syscall::{SyscallErrorCode, SyscallNo};
 
 /// Rust bindings for the syscalls
 #[rustfmt::skip]
-#[allow(clippy::missing_transmute_annotations)]
 pub mod bindings;
 
 // provides TryInto<SyscallErrorCode> for SysErr

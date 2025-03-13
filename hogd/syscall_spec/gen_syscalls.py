@@ -850,7 +850,7 @@ def gen_rs_syscall_binding(syscall):
     }}""")
         uninit_outputtype = f"""MaybeUninit<{output_type}>"""
         syscallargs.append(f"""{output_name}.as_mut_ptr() as u64""")
-        uninit_args.append(f"""unsafe {{core::mem::transmute({output_name})}}""")
+        uninit_args.append(f"""#[allow(clippy::missing_transmute_annotations)] unsafe {{core::mem::transmute({output_name})}}""")
         output_mock_init_args.append(f"        {output_name} : {decl_type}::default(),")
       else:
         #span argument
@@ -858,7 +858,7 @@ def gen_rs_syscall_binding(syscall):
           raise Exception("unknown output type")
         syscallargs.append(f"""{output_name}.as_mut_ptr() as u64""")
         syscallargs.append(f"""{output_name}.len() as u64""")
-        uninit_args.append(f"""unsafe {{core::mem::transmute({output_name})}}""")
+        uninit_args.append(f"""#[allow(clippy::missing_transmute_annotations)] unsafe {{core::mem::transmute({output_name})}}""")
         output_mock_init_args.append(f"        {output_name} :  vec![0; {output_name}.len()].try_into().unwrap(),")
         #output_assigns.append(f"    {output_name}.write(output.{output_name});")
         output_assigns.append(f"""    unsafe {{
