@@ -12,6 +12,7 @@
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "syscall.hh"
 #include "types.hh"
+#include "x23/utility.h"
 
 namespace hogd {
 
@@ -23,18 +24,45 @@ namespace hogd {
 
 template<size_t... Is> struct TupleIndexSequence {};
 
+template<size_t... Is>
+constexpr TupleIndexSequence<Is...>
+from_index_sequence(std::index_sequence<Is...> /*unused*/)
+{
+  return TupleIndexSequence<Is...>{};
+}
+
+#if __cpp_pack_indexing >= 202311L
+
 template<std::size_t I, std::size_t... Is>
-constexpr std::integral_constant<size_t, Is... [I]>
+constexpr auto
 get(TupleIndexSequence<Is...> /*unused*/) {
   return std::integral_constant<size_t, Is... [I]> {};
 }
 
-template<size_t... Is>
-constexpr TupleIndexSequence<Is...> from_index_sequence(
-    std::index_sequence<Is...>)
+#else
+
+template<size_t Idx, typename Seq> struct access_seq;
+
+template<size_t Idx, size_t I, size_t... Is> requires (Idx >= 1)
+struct access_seq<Idx, TupleIndexSequence<I, Is...>> {
+  constexpr static size_t kResult =
+      access_seq<Idx - 1, TupleIndexSequence<Is...>>::kResult;
+};
+
+template<size_t I, size_t... Is>
+struct access_seq<0, TupleIndexSequence<I, Is...>> {
+  constexpr static size_t kResult = I;
+};
+
+template<std::size_t I, std::size_t... Is>
+constexpr auto
+get(TupleIndexSequence<Is...> /*unused*/)
 {
-  return TupleIndexSequence<Is...>{};
+  return std::integral_constant<
+      size_t, access_seq<I, TupleIndexSequence<Is...>>::kResult>{};
 }
+
+#endif
 
 } // namespace hogd
 
@@ -44,9 +72,15 @@ template<size_t... Is>
 struct tuple_size<hogd::TupleIndexSequence<Is...>>
   : std::integral_constant<size_t, sizeof...(Is)> {};
 
-template<size_t I, size_t... Is>
-struct tuple_element<I, hogd::TupleIndexSequence<Is...>> {
-  using type = std::integral_constant<size_t, Is...[I]>;
+template<size_t Idx, size_t... Is>
+struct tuple_element<Idx, hogd::TupleIndexSequence<Is...>> {
+
+#if __cpp_pack_indexing >= 202311L
+  using type = std::integral_constant<size_t, Is...[Idx]>;
+#else
+  using type = std::integral_constant<
+      size_t, hogd::access_seq<Idx, hogd::TupleIndexSequence<Is...>>::kResult>;
+#endif
 };
 
 } // namespace std
@@ -62,6 +96,8 @@ struct append_seq<Head, tuple_index_sequence<Is...>> {
 };
 */
 
+#if __cpp_structured_bindings >= 202411L
+
 template<size_t Base, typename Arg, typename... Args>
 constexpr auto
 make_offset_seqs()
@@ -70,41 +106,27 @@ make_offset_seqs()
     return TupleIndexSequence<Base>{};
   }
   else {
-    auto [... tail] = make_offset_seqs<Base + SyscallArgParams<Arg>::kNumInputs, Args...>();
+    auto [... tail] =
+        make_offset_seqs<Base + SyscallArgParams<Arg>::kNumInputs, Args...>();
     return TupleIndexSequence<Base, tail...>{};
   }
 }
-
-/*
-template<size_t base, typename... Args> struct make_arg_offset_seqs;
-
-template<size_t base, typename Arg, typename... Args>
-struct make_arg_offset_seqs<base, Arg, Args...> {
-
-  using cur_arg_params = arg_params<Arg>;
-  using tail_t =
-      make_arg_offset_seqs<base + cur_arg_params::kNumInputs, Args...>;
-  using indices = append_seq<base, typename tail_t::indices>::seq;
-};
-
-template<size_t base> struct make_arg_offset_seqs<base> {
-  using indices = tuple_index_sequence<>;
-};
-*/
-
-/*
-template<size_t idx, typename seq> struct access_seq;
-
-template<size_t idx, size_t I, size_t... Is> requires (idx >= 1)
-struct access_seq<idx, std::index_sequence<I, Is...>> {
-  constexpr static size_t kResult =
-      access_seq<idx - 1, std::index_sequence<Is...>>::kResult;
-};
-
-template<size_t I, size_t... Is>
-struct access_seq<0, std::index_sequence<I, Is...>> {
-  constexpr static size_t kResult = I;
-}; */
+#else
+// sad fallback path
+template<size_t Base, typename Arg, typename... Args>
+constexpr auto
+make_offset_seqs()
+{
+  if constexpr (sizeof...(Args) == 0) {
+    return TupleIndexSequence<Base>{};
+  }
+  else {
+    return []<size_t... Tail>(TupleIndexSequence<Tail...> /*unused*/) {
+      return TupleIndexSequence<Base, Tail...>{};
+    }(make_offset_seqs<Base + SyscallArgParams<Arg>::kNumInputs, Args...>());
+  }
+}
+#endif
 
 template<typename Ret, typename... Args> struct SyscallTypeParams {
   using ret_t = Ret;
@@ -113,16 +135,25 @@ template<typename Ret, typename... Args> struct SyscallTypeParams {
   constexpr static auto kArgOffsetIndices = make_offset_seqs<0, Args...>();
   constexpr static size_t kNumArgs = std::tuple_size<args_t>();
 
+#if __cpp_pack_indexing >= 202311L
   template<size_t I> using arg_i = Args...[I];
 
   template<size_t I> constexpr static size_t offset_i()
   {
-    auto [... args] = kArgOffsetIndices;
-    return args...[I];
+    auto [... offsets] = kArgOffsetIndices;
+    return offsets...[I];
   }
+#else
+  template<size_t I> using arg_i = x23::TypeNum<I, Args...>;
+  template<size_t I> constexpr static size_t offset_i()
+  {
+    return access_seq<
+        I, std::remove_const_t<decltype(kArgOffsetIndices)>>::kResult;
+  }
+#endif
 };
 
-class SystemCallHandler {};
+class SystemCallHandler;
 
 template<typename> struct SyscallTypes;
 
@@ -144,6 +175,7 @@ struct SyscallTypes<Ret (*)(Args...)> : public SyscallTypeParams<Ret, Args...> {
   }
 };
 
+#if __cpp_structured_bindings >= 202411L
 template<size_t Offset, typename ArgToParse, typename Inputs>
 constexpr auto
 parse(std::span<std::byte> contract_memory, Inputs const &tuple_args)
@@ -152,9 +184,21 @@ parse(std::span<std::byte> contract_memory, Inputs const &tuple_args)
 
   auto [... Is] =
       from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{});
-  auto [... args] = tuple_args;
-  return arg_params::parse(contract_memory, args...[Offset + Is]...);
+  auto const& [... args] = tuple_args;
+  return arg_params::parse(contract_memory, (args...[Offset + Is])...);
 }
+#else
+template<size_t Offset, typename ArgToParse, typename Inputs>
+constexpr auto
+parse(std::span<std::byte> contract_memory, Inputs const &tuple_args)
+{
+  using arg_params = SyscallArgParams<ArgToParse>;
+  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) {
+    return arg_params::parse(contract_memory,
+                             (std::get<Offset + Is>(tuple_args))...);
+  }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
+}
+#endif
 
 constexpr static std::pair<HostFnResult, GasAmount> kFaultResult = {
     {HostFnErrorCode::kNoneOrRecoverable,
@@ -176,6 +220,7 @@ convert_return_t(std::pair<HostFnErrorCode, int32_t> const &value)
   return value;
 }
 
+#if __cpp_structured_bindings >= 202411L
 template<auto f>
 constexpr std::pair<HostFnResult, GasAmount>
 wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
@@ -206,5 +251,50 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
 
   return {convert_return_t(res.first), res.second};
 }
+#else
+
+template<auto f>
+constexpr std::pair<HostFnResult, GasAmount>
+wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
+           uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+           uint64_t arg4, uint64_t arg5)
+{
+  auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5};
+  using syscall_t = SyscallTypes<decltype(f)>;
+
+  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
+             -> std::pair<HostFnResult, GasAmount> {
+    auto parsed_args = std::tuple{
+        parse<syscall_t::template offset_i<Is>(),
+              typename syscall_t::template arg_i<Is>>(contract_memory,
+                                                      input_args)...};
+
+    if (!((SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
+               std::get<Is>(parsed_args)) &&
+           ...))) {
+      return kFaultResult;
+    }
+
+    auto handler_pack = syscall_t::handler(handler);
+
+    if constexpr (std::tuple_size_v<decltype(handler_pack)> == 1) {
+      auto res =
+          f(std::get<0>(handler_pack),
+            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                std::get<Is>(parsed_args))...);
+
+      return {convert_return_t(res.first), res.second};
+    }
+    else {
+      auto res =
+          f(SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+              std::get<Is>(parsed_args))...);
+
+      return {convert_return_t(res.first), res.second};
+    }
+  }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
+}
+
+#endif
 
 } // namespace hogd

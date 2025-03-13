@@ -9,6 +9,23 @@
 
 namespace hogd {
 
+// Templates detailing how syscall arguments are parsed from contract memory
+// into typesafe objects to pass to inner syscalls.
+//
+// Each argument type consumes some number of uint64_t inputs to the syscall.
+// These uint64_t inputs either encode the value (as in small types)
+// or act as offsets into contract memory, or some combination thereof.
+//
+// Each argument goes through three phases.
+// - parse(), which might be fallible (i.e. OOB mem access).
+// - validate(), which checks whether parse succeeded
+// - deref(), which turns the parsed value into something that's passed to the
+// syscall.
+//
+// This framework is separated into three methods for flexibility and
+// convenience. This allows definition of syscall arguments that might be
+// optionally supplied to be passed as std::optional<T> or T*, while
+// non-optional args can be passed as T or T&.
 template<typename T> struct SyscallArgParams;
 
 template<> struct SyscallArgParams<uint64_t> {
@@ -64,6 +81,8 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   }
 };
 
+// Trivially copyable output types that do not fit into a uint64_t, and
+// must therefore be passed as contract memory offsets.
 template<typename T> requires std::is_trivially_copyable_v<T> && (sizeof(T) > 8)
 struct SyscallArgParams<T &> {
   constexpr static size_t kNumInputs = 1;
