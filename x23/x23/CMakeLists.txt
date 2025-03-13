@@ -26,6 +26,7 @@ add_library(x23
   testlock.h
   threadpool.cc
   threadpool.h
+  typename.h
   utility.h
   vec.h
   x23.h

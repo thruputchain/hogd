@@ -12,47 +12,6 @@
 
 #include <cstring>
 #include <format>
-#include <string>
-#include <string_view>
-#include <typeinfo>
-
-#if HAVE_CXA_DEMANGLE
-
-#include <stdlib.h>
-#include <cxxabi.h>
-
-namespace x23 {
-template<typename T>
-const std::string_view
-type_name()
-{
-  static const std::string ret = [] -> std::string {
-    const char *mangled = typeid(T).name();
-    int status;
-    char *demangled = abi::__cxa_demangle(mangled, nullptr, nullptr, &status);
-    if (status)
-      return mangled;
-    std::string ret(demangled);
-    free(demangled);
-    return ret;
-  }();
-  return ret;
-}
-} // namespace x23
-
-#else // !HAVE_CXA_DEMANGLE
-
-namespace x23 {
-template<typename T>
-const char *
-type_name()
-{
-  return typeid(T).name();
-}
-}
-
-#endif // !HAVE_CXA_DEMANGLE
-
 #include <source_location>
 #if HAVE_STD_STACKTRACE
 #include <stacktrace>

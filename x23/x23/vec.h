@@ -53,6 +53,7 @@
 
 #include <x23/cleanup.h>
 #include <x23/config.h>
+#include <x23/typename.h>
 
 namespace x23 {
 
@@ -591,7 +592,7 @@ public:
 protected:
   template<typename, size_t, typename> friend class Vec;
 
-  static constexpr const char *tname() { return typeid(T).name(); }
+  static constexpr std::string_view tname() { return type_name<T>(); }
 
   constexpr void shrink(size_type new_size) noexcept
   {

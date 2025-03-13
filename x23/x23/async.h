@@ -115,6 +115,7 @@
 #include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/corotrace.h>
+#include <x23/typename.h>
 #include <x23/utility.h>
 
 namespace x23 {
