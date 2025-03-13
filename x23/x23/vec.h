@@ -315,7 +315,7 @@ public:
     try {
       append_range(std::forward<R>(r));
     } catch (...) {
-      resize(0);
+      realloc(0);
       throw;
     }
   }
