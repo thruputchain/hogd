@@ -78,6 +78,7 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   constexpr static std::span<const std::byte>
   deref(std::optional<std::span<const std::byte>> value)
   {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
   }
 };
