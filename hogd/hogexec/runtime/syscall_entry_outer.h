@@ -74,15 +74,14 @@ struct tuple_element<Idx, hogd::TupleIndexSequence<Is...>> {
 
 namespace hogd {
 
-
 // Creates an index sequence for a given set of args, denoting
 // at what indices (into the list of uint64_t syscall inputs)
 // does each logical syscall argument start.
 //
 // For example, a syscall that takes a span argument (2 syscall uint64_t inputs)
 // and a SHA256Hash& (1 syscall uint64_t input)
-// would produce the index sequence <0, 2>; the first argument takes indices 0 and 1,
-// and the second takes index 2.
+// would produce the index sequence <0, 2>; the first argument takes indices 0
+// and 1, and the second takes index 2.
 template<size_t Base, typename Arg, typename... Args>
 constexpr auto
 make_offset_seqs()
@@ -168,9 +167,8 @@ constexpr static std::pair<HostFnResult, GasAmount> kFaultResult = {
      static_cast<int32_t>(SyscallErrorCode::kFault)},
     kGenericBadSyscallCost};
 
-
 // Some syscalls return HostFnStatus<SyscallErrorCode>,
-// and some (e.g. Exit) need a more general form with 
+// and some (e.g. Exit) need a more general form with
 // both a HostFnErrorCode (to tell the runtime what to do)
 // and an error code (to pass to caller runtime, like a regular error code.
 // This function converts the former into the latter.
@@ -205,7 +203,6 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
   // lambda context
   return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
              -> std::pair<HostFnResult, GasAmount> {
-
     // Attempt to load syscall arguments from contract memory.
     auto parsed_args = std::tuple{
         parse<syscall_t::template offset_i<Is>(),
