@@ -228,16 +228,16 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
 
     // Invoke the inner syscall
     if constexpr (std::tuple_size_v<decltype(handler_pack)> == 1) {
-      auto res =
-          InnerSyscallFunc(std::get<0>(handler_pack),
-            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                std::get<Is>(parsed_args))...);
+      auto res = InnerSyscallFunc(
+          std::get<0>(handler_pack),
+          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+              std::get<Is>(parsed_args))...);
 
       return {convert_return_t(res.first), res.second};
     }
     else {
-      auto res =
-          InnerSyscallFunc(SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+      auto res = InnerSyscallFunc(
+          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
               std::get<Is>(parsed_args))...);
 
       return {convert_return_t(res.first), res.second};
