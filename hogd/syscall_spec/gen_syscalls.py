@@ -377,7 +377,7 @@ def gen_frame(syscall):
 
 def gen_syscall_table_entry(syscall):
   name = syscall["name"]
-  return f"""    std::pair{{SyscallNo::k{name}, &syscall_{name}_outer}},
+  return f"""    std::pair{{SyscallNo::k{name}, &wrap_outer<&syscall_{name}_inner>}},
 """
 
 def gen_syscall_table(spec):
@@ -392,7 +392,7 @@ def gen_syscall_table(spec):
 
   if max_seen != len(syscall_map):
     raise Exception("SyscallNo Gap!")
-  table = f"""const std::array<std::pair<SyscallNo, SyscallFunc>, {max_seen}> syscall_table = {{
+  table = f"""constexpr static std::array<std::pair<SyscallNo, SyscallFunc>, {max_seen}> kSyscallTable = {{
 """
   for i in range(0, max_seen):
     table += gen_syscall_table_entry(syscall_map[i])
@@ -525,6 +525,8 @@ def gen_syscall_inner_h(spec):
   for syscall in spec:
     inner_decls += gen_inner(syscall)
 
+    syscall_table = gen_syscall_table(spec)
+
   return f"""// -*-C++-*-
 
 // *** Generated Code  ***
@@ -536,6 +538,7 @@ def gen_syscall_inner_h(spec):
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "syscall.hh"
 #include "types.hh"
 
@@ -543,7 +546,14 @@ namespace hogd {{
 
 class SystemCallHandler;
 
-{inner_decls}}}// namespace hogd
+{inner_decls}
+
+using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
+    SystemCallHandler&, std::span<std::byte>, {", ".join(["uint64_t"] * (syscall_argcount))});
+
+{syscall_table}
+
+}}// namespace hogd
 """
 
 
