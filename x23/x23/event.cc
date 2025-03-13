@@ -115,7 +115,7 @@ CoroPoll::write(BorrowedFd fd, BufView data SLOC_ARG)
 }
 
 Async<std::expected<int, Errno>>
-CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len)
+CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
 {
   if (stop_requested())
     co_return Errno{EBADF};
@@ -140,7 +140,7 @@ CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len)
 }
 
 Async<std::expected<int, std::system_error>>
-CoroPoll::tcpconnect(std::string host, std::string port)
+CoroPoll::tcpconnect(std::string host, std::string port SLOC_ARG)
 {
   if (stop_requested())
     co_return std::unexpected{

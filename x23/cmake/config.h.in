@@ -27,3 +27,6 @@
 
 // Define to 1 if you have the abi::__cxa_demangle function
 #cmakedefine01 HAVE_CXA_DEMANGLE
+
+// Define to 1 if you have std::stacktrace
+#cmakedefine01 HAVE_STD_STACKTRACE

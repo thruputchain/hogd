@@ -275,15 +275,18 @@ public:
   }
 
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,
-                                              socklen_t len);
-  Async<std::expected<int, Errno>> tcpconnect(const sockaddr_storage *ss)
+                                              socklen_t len SLOC_PARM);
+  Async<std::expected<int, Errno>> tcpconnect(const sockaddr_storage *ss
+					      SLOC_PARM)
   {
-    return tcpconnect(reinterpret_cast<const sockaddr *>(ss), sizeof(*ss));
+    return tcpconnect(reinterpret_cast<const sockaddr *>(ss), sizeof(*ss)
+		      X23_IFTRACE(, sloc));
   }
 
   // Connect and return a file descriptor or a system error.
   Async<std::expected<int, std::system_error>> tcpconnect(std::string host,
-                                                          std::string port);
+                                                          std::string port
+							  SLOC_PARM);
 
 private:
   std::thread pollthread_;

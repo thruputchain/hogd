@@ -50,6 +50,7 @@ include(cmake/accept4.cmake)
 include(cmake/demangle.cmake)
 include(cmake/epoll.cmake)
 include(cmake/pause.cmake)
+include(cmake/stacktrace.cmake)
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in

@@ -179,7 +179,7 @@ struct RpcService {
   virtual ~RpcService() {}
   virtual std::uint32_t program() const = 0;
   virtual std::uint32_t version() const = 0;
-  virtual Async<Buf> serve(const rpc_msg &msg, BufView args) = 0;
+  virtual Async<Buf> serve(const rpc_msg &msg, BufView args SLOC_PARM) = 0;
   ProgVers getpv() const
   {
     return ProgVers{.prog = program(), .vers = version()};
@@ -281,9 +281,9 @@ void_to_empty(Async<void> a)
     Async<void> a_;
     Awaitable<void> &a() { return a_.operator co_await(); }
     bool await_ready() noexcept { return a().await_ready(); }
-    void await_suspend(std::coroutine_handle<> h) noexcept
+    void await_suspend(std::coroutine_handle<> h SLOC_PARM) noexcept
     {
-      a().await_suspend(h);
+      a().await_suspend(h X23_IFTRACE(, sloc));
     }
     std::array<std::uint8_t, 0> await_resume()
     {
@@ -311,7 +311,7 @@ struct RpcDispatcher : RpcService {
   std::uint32_t program() const final { return version_meta::program; }
   std::uint32_t version() const final { return version_meta::version; }
 
-  Async<Buf> serve(const rpc_msg &msg, BufView argdata) override
+  Async<Buf> serve(const rpc_msg &msg, BufView argdata SLOC_PARM) override
   {
     using enum msg_type;
     assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
@@ -328,7 +328,8 @@ private:
     const rpc_msg &callmsg_;
     const BufView argbytes_;
 
-    template<std::same_as<void>> Async<Buf> operator()(this Executor self)
+    template<std::same_as<void>> Async<Buf> operator()(this Executor self
+						       SLOC_PARM)
     {
       using enum accept_stat;
       rpc_msg err{.xid = self.callmsg_.xid};
@@ -337,7 +338,8 @@ private:
       self.d_.logger_.template log_server<VersMeta>(err);
       co_return make_record(err);
     }
-    template<typename ProcMeta> Async<Buf> operator()(this Executor self)
+    template<typename ProcMeta> Async<Buf> operator()(this Executor self
+						      SLOC_PARM)
     {
       using enum accept_stat;
       typename ProcMeta::arg_type args;
@@ -413,8 +415,8 @@ private:
     write_record(make_record(msg, x...));
   }
 
-  Async<std::expected<std::uint32_t, Errno>> read_uint();
-  Async<std::expected<Buf, Errno>> read_record();
+  Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_PARM0);
+  Async<std::expected<Buf, Errno>> read_record(SLOC_PARM0);
 
   Detached serve_call(const rpc_msg &call, BufView args SLOC_PARM);
 };

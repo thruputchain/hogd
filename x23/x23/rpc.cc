@@ -76,7 +76,7 @@ RpcStreamImpl::write_record(Buf b SLOC_ARG)
 }
 
 Async<std::expected<std::uint32_t, Errno>>
-RpcStreamImpl::read_uint()
+RpcStreamImpl::read_uint(SLOC_ARG0)
 {
   Buf b;
   if (co_await co_await cp_->read(fd_, &b, 4) != 4)
@@ -85,7 +85,7 @@ RpcStreamImpl::read_uint()
 }
 
 Async<std::expected<Buf, Errno>>
-RpcStreamImpl::read_record()
+RpcStreamImpl::read_record(SLOC_ARG0)
 {
   Buf b;
   bool done = false;

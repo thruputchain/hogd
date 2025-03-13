@@ -600,15 +600,15 @@ async_return(R &&r)
 // coroutines to co_await.
 template<typename R>
 std::pair<Async<R>, CoroCB<R>>
-make_async()
+make_async(SLOC_PARM0)
 {
   CoroCB<R> cb;
-  Async<R> async = [&cb] -> Async<R> {
+  Async<R> async = [&cb](SLOC_PARM0) -> Async<R> {
     auto h = co_await GetCoro<typename Async<R>::promise_type>{};
     cb = h.promise();
     co_await std::suspend_always{};
     std::unreachable();
-  }();
+  }(SLOC_VAR);
   return std::pair{std::move(async), cb};
 }
 
