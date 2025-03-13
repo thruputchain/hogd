@@ -70,12 +70,7 @@ make_offset_seqs()
     return TupleIndexSequence<Base>{};
   }
   else {
-    //using Arg = Args...[0];
-    constexpr auto kNumInputs = SyscallArgParams<Arg>::kNumInputs;
-    //static_assert(sizeof...(Args) >= 2);
-
-    auto [... tail] = make_offset_seqs<Base + kNumInputs, Args...>();
-
+    auto [... tail] = make_offset_seqs<Base + SyscallArgParams<Arg>::kNumInputs, Args...>();
     return TupleIndexSequence<Base, tail...>{};
   }
 }
