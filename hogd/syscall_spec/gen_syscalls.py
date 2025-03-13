@@ -122,15 +122,6 @@ custom_parsing: bool
   quite fit into one of the above options. These we support with a custom 
   parsing option.
 
-  Requires manual specialization of
-  ```
-  template<typename T, typename... Args>
-  requires (std::same_as<Args, uint64_t> && ...)
-  std::optional<const T> check_user_custom_input_argument(
-    std::span<std::byte> contract_memory,
-    Args... args);
-  ```
-
 custom_args_required: int
   required: only if custom_parsing is true
   description: The number of arguments passed to the custom parsing handler.
@@ -141,49 +132,16 @@ custom_args_required: int
 """
 
 """
-Generates a clause to check that an argument parsed correctly.
-Each non-optional argument has such a clause inserted before
-calling syscall_{name}_inner.
-
-"""
-def get_check_arg_statement(arg):
-  return f"""if (!{arg}) {{
-    return {{{{HostFnErrorCode::kNoneOrRecoverable, 
-             static_cast<int32_t>(SyscallErrorCode::kFault)}}, 
-            kGenericBadSyscallCost}};
-  }}"""
-
-
-"""
 Generate validation logic for one syscall input or output
 
 Return format:
-validate_str, local_user_args, local_call_arg, inner_arg_decl
+local_user_arg_count, inner_arg_decl
 
-validate_str is the string that takes as input a number of syscall arguments
-and produces code that validates the argument type that is supposed to be 
-supplied via those syscall arguments.
-E.g.: 
-```
-std::optional<std::span<const std::byte>> arg =
-     check_user_span_argument(contract_memory, user_arg1,
-                              user_arg2);
-if (!arg) {
-   return error
-}
-```
-
-local_user_args is a list of the uint64 argument names that this 
-syscall argument consumes.
-E.g.: for a span argument, this is user_{name}_offset and user_{name}_len
-
-local_call_arg is the expression that is passed as an argument to the 
-syscall's inner call. Usually this is `*arg`.
+local_user_args_count is the number of uint64_t syscall inputs
+consumed by this argument.  Used only in internal assertions.
 
 inner_arg_decl is the parameter of the inner syscall declaration corresponding 
 to this argument.
-
-local_call_arg is an expression of type inner_arg_decl.
 """
 def gen_validate_arg(inp, *, is_input):
   arg_name = inp["name"]
@@ -201,25 +159,9 @@ def gen_validate_arg(inp, *, is_input):
     arg1 = f"{in_out}_{arg_name}"
     arg2 = f"{in_out}_{arg_name}_len"
     if optional:
-      return f"""
-        std::optional<std::span<{const}std::byte>> {arg1} =
-            check_user_span_argument(contract_memory, user_{arg1},
-                                     user_{arg2});
-
-        
-      """, [f"user_{arg1}", f"user_{arg2}"], arg1, f"std::optional<std::span<{const}std::byte>> {arg1}"
-
+      return 2, f"std::optional<std::span<{const}std::byte>> {arg1}"
     else:
-
-      check_arg_statement = get_check_arg_statement(arg1)
-
-      return f"""
-  std::optional<std::span<{const}std::byte>> {arg1} =
-      check_user_span_argument(contract_memory, user_{arg1},
-                               user_{arg2});
-
-  {check_arg_statement}
-""", [f"user_{arg1}", f"user_{arg2}"], f"*{arg1}", f"std::span<{const}std::byte> {arg1}"
+      return 2, f"std::span<{const}std::byte> {arg1}"
   # endif span_argument
 
   typename = inp["typename"]
@@ -228,71 +170,34 @@ def gen_validate_arg(inp, *, is_input):
   # put optional_ on front of arg name, for readability
   if optional:
     arg1 = f"optional_{arg1}"
-
-  check_arg_statement = get_check_arg_statement(arg1)
   
   if "primitive_type" in inp and inp["primitive_type"] and is_input:
-    
     if optional:
       raise Exception("optional primitive_type is unimplemented");
-
-    return f"""
-  {const}auto {arg1} =
-      check_user_primitive_argument<{const}{typename}>(user_{arg1});
-""", [f"user_{arg1}"], arg1, f"{typename} {arg1}"
+    return 1, f"{typename} {arg1}"
 
   if "custom_parsing" in inp and inp["custom_parsing"] and is_input:
     if optional:
       raise Exception("optional parsing is a strict subset of custom parsing--don't use both")
     num_args = inp["custom_args_required"]
-    custom_args = []
-    for i in range(0, num_args):
-      custom_args.append(f"user_{in_out}_{arg_name}_{i}")
-    arg_str = ", ".join(custom_args)
 
-    return f"""
-  std::optional<{const}{typename}> {arg1} =
-      check_user_custom_input_argument<{typename}>(contract_memory, {arg_str});
-
-  {check_arg_statement}
-  """, custom_args, f"*{arg1}", f"{const}{typename}& {arg1}"
+    return num_args, f"{const}{typename}& {arg1}"
   #endif custom_parsing
 
   if optional:
-    opt_typename = f"{const}{typename} *"
-    return f"""
-    {const}auto* {arg1} = 
-        check_user_argument<{const}{typename}>(contract_memory, user_{arg1},
-                                      sizeof({typename}));
-
-""", [f"user_{arg1}"], f"{arg1}", f"{const}{typename}* {arg1}"
+    return 1, f"{const}{typename}* {arg1}"
   # end optional arg
 
   # else fixed size
-  return f"""
-  {const}auto *{arg1} =
-      check_user_argument<{const}{typename}>(contract_memory, user_{arg1},
-                                      sizeof({typename}));
-
-  {check_arg_statement}
-""", [f"user_{arg1}"],  f"*{arg1}", f"{const}{typename}& {arg1}"
+  return 1, f"{const}{typename}& {arg1}"
 
 
 def gen_inner_outer(syscall):
   name = syscall["name"]
-  arg1 = "/*unused*/"
-  arg2 = "/*unused*/"
-  arg3 = "/*unused*/"
-  arg4 = "/*unused*/"
-  arg5 = "/*unused*/"
-  arg6 = "/*unused*/"
-  arg7 = "/*unused*/"
 
-  inner_body = ""
-  call_arg_strs = []
-  user_args = []
+  user_arg_count = 0
   inner_arg_decl_strs = []
-  syscall_handler = ""
+
   syscall_handler_decl = ""
   inner_return_type = "HostFnStatus<SyscallErrorCode>"
 
@@ -301,57 +206,24 @@ def gen_inner_outer(syscall):
 
   if syscall["inputs"] is not None:
     for arg in syscall["inputs"]:
-      validate_str, local_user_args, local_call_arg, inner_arg_decl = gen_validate_arg(arg, is_input = True)
-      inner_body += validate_str
-      user_args += local_user_args
-      call_arg_strs.append(local_call_arg)
+      local_user_arg_count, inner_arg_decl = gen_validate_arg(arg, is_input = True)
+      user_arg_count += local_user_arg_count
       inner_arg_decl_strs.append(inner_arg_decl)
 
   if syscall["outputs"] is not None:
     for arg in syscall["outputs"]:
-      validate_str, local_user_args, local_call_arg, inner_arg_decl  = gen_validate_arg(arg, is_input = False)
-      inner_body += validate_str
-      user_args += local_user_args
-      call_arg_strs.append(local_call_arg)
+      local_user_arg_count, inner_arg_decl  = gen_validate_arg(arg, is_input = False)
+      user_arg_count += local_user_arg_count
       inner_arg_decl_strs.append(inner_arg_decl)
 
-  if len(user_args) > syscall_argcount:
+  if user_arg_count > syscall_argcount:
     raise ValueError("too many syscall args")
 
-  if len(user_args) < syscall_argcount:
-    user_args += ["/*unused*/"] * (syscall_argcount - len(user_args))
-
-  syscall_handler_ref = "/*syscall_handler*/"
   if syscall["needs_context"]:
-    call_arg_strs = ["syscall_handler"] + call_arg_strs
     inner_arg_decl_strs = ["SystemCallHandler& syscall_handler"] + inner_arg_decl_strs
-    syscall_handler_ref="syscall_handler"
 
-  inner_args = ", ".join(call_arg_strs)
   inner_arg_decls = ", ".join(inner_arg_decl_strs);
 
-  contract_mem = "contract_memory"
-  if len(user_args) == 0:
-    contract_mem = "/*contract_memory*/"
-
-
-
-
-  outer= f"""std::pair<HostFnResult, GasAmount>
-syscall_{name}_outer(SystemCallHandler& {syscall_handler_ref},
-                     std::span<std::byte> {contract_mem},
-                     uint64_t {user_args[0]}, 
-                     uint64_t {user_args[1]},
-                     uint64_t {user_args[2]}, 
-                     uint64_t {user_args[3]},
-                     uint64_t {user_args[4]},
-                     uint64_t {user_args[5]})
-{{{inner_body}
-  auto res = syscall_{name}_inner({inner_args});
-
-  return {{convert_return_t(res.first), res.second}};
-}}
-"""
   inner = f"""std::pair<{inner_return_type}, GasAmount>
 syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls});
 
@@ -363,16 +235,13 @@ syscall_{name}_inner({syscall_handler_decl}{inner_arg_decls})
 }}
 
 """
-  return outer, inner, frame
-
-def gen_outer(syscall):
-  return gen_inner_outer(syscall)[0]
+  return inner, frame
 
 def gen_inner(syscall):
-  return gen_inner_outer(syscall)[1]
+  return gen_inner_outer(syscall)[0]
 
 def gen_frame(syscall):
-  return gen_inner_outer(syscall)[2]
+  return gen_inner_outer(syscall)[1]
 
 
 def gen_syscall_table_entry(syscall):
@@ -398,126 +267,6 @@ def gen_syscall_table(spec):
     table += gen_syscall_table_entry(syscall_map[i])
   table += "};"
   return table
-
-def gen_syscall_entry_cc(spec):
-  syscall_outers = ""
-  for syscall in spec:
-    syscall_outers += gen_outer(syscall)
-
-  syscall_table = gen_syscall_table(spec)
-
-  syscall_uint64_arg_decls = []
-  syscall_uint64_args = []
-  for i in range(0, syscall_argcount + 1):
-    syscall_uint64_arg_decls.append(
-      f"uint64_t arg{i}")
-    syscall_uint64_args.append(f"arg{i}")
-
-
-  syscall_uint64_arg_decls_str = ", ".join(syscall_uint64_arg_decls)
-  syscall_uint64_args_str = ", ".join(syscall_uint64_args)
-  syscall_uint64_args_nozero_str = ", ".join(syscall_uint64_args[1:])
-
-  return f"""// -*-C++-*-
-
-// *** Generated Code  ***
-// *** Do not check in ***
-
-#include "hogd/hogexec/runtime/syscall_entry.h"
-
-#include <array>
-#include <cassert>
-#include <cstddef>
-#include <cstring>
-#include <optional>
-#include <span>
-#include <utility>
-#include <type_traits>
-
-#include "hogd/base/compiler.h"
-#include "hogd/base/types.h"
-#include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/gas_cost_table.h"
-#include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/syscall_argument_parsers.h"
-#include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "syscall.hh"
-#include "types.hh"
-
-namespace hogd {{
-
-namespace {{
-
-template<typename T>
-std::pair<HostFnErrorCode, int32_t>
-convert_return_t(T const& value) {{
-  if constexpr (std::is_same_v<T, HostFnStatus<SyscallErrorCode>>) {{
-    if (value) {{
-      return {{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(*value)}};
-    }} else {{
-      return {{value.error().code(), 0}};
-    }}
-  }} else {{
-    static_assert(std::is_same_v<T, std::pair<HostFnErrorCode, int32_t>>);
-    return value;
-  }}
-}}
-
-{syscall_outers}
-
-using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
-    SystemCallHandler&, std::span<std::byte>, {", ".join(["uint64_t"] * (syscall_argcount))});
-
-{syscall_table}
-
-// returns gas_consumed, syscall error>
-std::pair<HostFnResult, uint64_t>
-syscall_entry_inner(HostCallContext *call_context, {syscall_uint64_arg_decls_str})
-{{
-  if (arg0 >= syscall_table.size()) {{
-    // invalid syscall
-    return {{{{HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(SyscallErrorCode::kNoSyscall)}}, kNoSyscallCost}};
-  }}
-
-  static_assert(syscall_table.size() < INT32_MAX,
-                "xdr enum overflow otherwise");
-
-  auto [syscall_expect, syscall_fn_outer] = syscall_table[arg0];
-
-  assert(syscall_expect == static_cast<SyscallNo>(arg0));
-
-  std::span<std::byte> contract_memory = call_context->runtime->get_memory();
-
-  assert(call_context -> syscall_handler);
-
-  return syscall_fn_outer(
-    *call_context->syscall_handler, 
-    contract_memory, 
-    {syscall_uint64_args_nozero_str});
-}}
-
-}} // namespace
-
-HostFnResult
-syscall_entry(HostCallContext *call_context, {syscall_uint64_arg_decls_str})
-{{
-  auto [err, gas_consumed] =
-      syscall_entry_inner(call_context, {syscall_uint64_args_str});
-
-  if (!call_context->runtime->consume_gas(gas_consumed)) {{
-    return {{HostFnErrorCode::kOutOfGas, 0}};
-  }}
-
-  static_assert(
-    std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>, 
-    "type mismatch");
-
-  return err;
-}}
-
-}} // namespace hogd
-"""
 
 def gen_syscall_inner_h(spec):
   inner_decls=""
@@ -797,10 +546,6 @@ namespace hogd {{
 
 {joined}
 }}"""
-  
-
-
-
 
 parser = argparse.ArgumentParser(description="syscall generator")
 
@@ -812,10 +557,6 @@ parser.add_argument(
   '--syscall_inner_h', 
   action='store_true', 
   help="gen syscall_inner.h")
-parser.add_argument(
-  '--syscall_entry_cc', 
-  action='store_true', 
-  help="gen syscall_entry_cc")
 parser.add_argument(
   '--syscall_yaml', 
   type=str, 
@@ -850,11 +591,6 @@ if (args.syscall_inner_h):
   filename = args.output_dir + "/syscall_inner.h"
   with open(filename, "w") as f:
     f.write(gen_syscall_inner_h(spec))
-
-if (args.syscall_entry_cc):
-  filename = args.output_dir + "/syscall_entry.cc"
-  with open(filename, "w") as f:
-    f.write(gen_syscall_entry_cc(spec))
 
 if (args.syscall_rs):
   filename = args.output_dir + "/syscall_bindings.rs"
