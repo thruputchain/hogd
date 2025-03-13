@@ -60,10 +60,10 @@ pub fn GetSourceTransactionHash() -> Result<SHA256Hash> {
     Ok(unsafe { out_hash.assume_init() })
 }
 
-#[cfg(any(feature = "alloc"))]
+#[cfg(feature = "alloc")]
 pub use get_calldata_alloc::*;
 
-#[cfg(any(feature = "alloc"))]
+#[cfg(feature = "alloc")]
 mod get_calldata_alloc {
     use crate::result::SysResult as Result;
     use crate::sys;

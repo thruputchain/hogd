@@ -4,6 +4,7 @@ pub use ::groundhog_xdr::syscall::{SyscallErrorCode, SyscallNo};
 
 /// Rust bindings for the syscalls
 #[rustfmt::skip]
+#[allow(clippy::missing_transmute_annotations)]
 pub mod bindings;
 
 // provides TryInto<SyscallErrorCode> for SysErr
@@ -45,9 +46,9 @@ impl From<SyscallErrorCode> for SysErr {
     }
 }
 
-impl Into<i32> for SysErr {
-    fn into(self) -> i32 {
-        self.0
+impl From<SysErr> for i32 {
+    fn from(err: SysErr) -> Self {
+        err.0
     }
 }
 
@@ -81,9 +82,9 @@ pub fn syscall_wrapper(
 }
 
 pub(crate) fn to_offset_mut<T>(obj: &mut T) -> *mut u8 {
-    unsafe { core::mem::transmute(obj) }
+    obj as *mut T as *mut u8
 }
 
 pub(crate) fn to_offset<T>(obj: &T) -> *const u8 {
-    unsafe { core::mem::transmute(obj) }
+    obj as *const T as *const u8
 }

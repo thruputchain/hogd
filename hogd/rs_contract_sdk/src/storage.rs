@@ -48,7 +48,7 @@ mod load {
 
     pub fn load<V: DeserializeOwned>(k: &StorageKey) -> Result<V> {
         let buf = BytestringGet(k)?;
-        let v = serialize::from_bytes(&*buf)?;
+        let v = serialize::from_bytes(&buf)?;
         Ok(v)
     }
 
@@ -129,9 +129,9 @@ mod load {
         }
     }
 
-    impl Into<StorageKey> for Keypath {
-        fn into(self) -> StorageKey {
-            self.generate_key()
+    impl Default for Keypath {
+        fn default() -> Self {
+            Self::new()
         }
     }
 
@@ -298,7 +298,7 @@ mod nnint {
                     keypath: &'a mut Keypath,
                 }
 
-                impl<'de, 'a> Visitor<'de> for KeypathVisitor<'a> {
+                impl Visitor<'_> for KeypathVisitor<'_> {
                     type Value = NNInt;
 
                     fn expecting(
@@ -410,7 +410,7 @@ mod map {
                     marker: PhantomData<(K, V)>,
                 }
 
-                impl<'de, 'a, K, V> Visitor<'de> for KeypathVisitor<'a, K, V> {
+                impl<K, V> Visitor<'_> for KeypathVisitor<'_, K, V> {
                     type Value = Map<K, V>;
 
                     fn expecting(

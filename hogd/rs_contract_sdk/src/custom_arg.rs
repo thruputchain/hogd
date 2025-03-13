@@ -11,10 +11,7 @@ impl TwoCustomArgs for Signature {
     fn to_u64s(&self) -> (u64, u64) {
         match self {
             Self::Ed25519 { ed25519: sig } => {
-                return (
-                    CryptographicScheme::Ed25519 as u64,
-                    to_offset(sig) as u64,
-                );
+                (CryptographicScheme::Ed25519 as u64, to_offset(sig) as u64)
             }
             #[allow(unreachable_patterns)]
             _ => {
@@ -28,10 +25,10 @@ impl TwoCustomArgs for PublicKey {
     fn to_u64s(&self) -> (u64, u64) {
         match self {
             Self::Ed25519 { ed25519: pk } => {
-                return (
+                (
                     CryptographicScheme::Ed25519 as u64,
                     to_offset(pk) as u64,
-                );
+                )
             }
             #[allow(unreachable_patterns)]
             _ => {

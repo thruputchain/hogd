@@ -63,6 +63,7 @@ mod cross_call {
 
         // Deserialize the buffer into a return value ...
         let return_buf = &return_buf.as_slice();
+        #[allow(clippy::let_and_return)]
         let return_value = serialize::from_bytes(return_buf)
             .expect("Couldn't deserialize return value");
 

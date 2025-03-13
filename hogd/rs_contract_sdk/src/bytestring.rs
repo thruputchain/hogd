@@ -16,7 +16,7 @@ pub use bytestring_get_alloc::BytestringGet;
 /// `false` if nothing does.  If an item of another type exists there,
 /// returns an error with code [`SyscallErrorCode::kInvalidInput`].
 pub fn bytestring_exists(key: &StorageKey) -> Result<bool> {
-    match BytestringGetLen(&key) {
+    match BytestringGetLen(key) {
         Ok(_) => Ok(true),
         Err(error) => {
             if error.is_storage_key_not_exist() {
@@ -53,7 +53,7 @@ pub fn BytestringGet_Sized<const N: usize>(
 ) -> Result<[u8; N]> {
     let mut bytes_mu = [MaybeUninit::<u8>::uninit(); N];
     let mut len: RuntimeMemoryLength = 0;
-    sys::uninit_BytestringGet(&key, &mut bytes_mu, &mut len)?;
+    sys::uninit_BytestringGet(key, &mut bytes_mu, &mut len)?;
     if len != N as u32 {
         panic!("Unexpected bytestring size");
     }

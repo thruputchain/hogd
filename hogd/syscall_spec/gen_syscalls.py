@@ -987,6 +987,10 @@ def gen_rs_syscall_bindings(spec):
 // *** Do not check in ***
 
 #![allow(non_snake_case)]
+
+#![cfg_attr(not(feature="mock"), allow(clippy::unnecessary_cast))]
+#![cfg_attr(feature="mock", allow(clippy::useless_conversion))]
+
 use crate::types::*;
 use crate::syscall::{{SyscallNo, SysErr}};
 #[cfg(not(feature="mock"))]
