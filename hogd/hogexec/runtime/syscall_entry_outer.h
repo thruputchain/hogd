@@ -190,14 +190,14 @@ convert_return_t(std::pair<HostFnErrorCode, int32_t> const &value)
 // Wraps a call to an inner syscall with checks to load syscall arguments
 // from contract memory and check that all accesses into contract memory
 // are well-formed (no OOB).
-template<auto f>
+template<auto InnerSyscallFunc>
 constexpr std::pair<HostFnResult, GasAmount>
 wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
            uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
            uint64_t arg4, uint64_t arg5)
 {
   auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5};
-  using syscall_t = SyscallTypes<decltype(f)>;
+  using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
@@ -229,7 +229,7 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
     // Invoke the inner syscall
     if constexpr (std::tuple_size_v<decltype(handler_pack)> == 1) {
       auto res =
-          f(std::get<0>(handler_pack),
+          InnerSyscallFunc(std::get<0>(handler_pack),
             SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
                 std::get<Is>(parsed_args))...);
 
@@ -237,7 +237,7 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
     }
     else {
       auto res =
-          f(SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+          InnerSyscallFunc(SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
               std::get<Is>(parsed_args))...);
 
       return {convert_return_t(res.first), res.second};
