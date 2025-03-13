@@ -34,7 +34,7 @@ impl Wallet {
         pk: &Ed25519PublicKey,
         token_addr: &ContractAddress,
     ) {
-        let key = Self::keypath().into();
+        let key = Self::keypath().generate_key();
 
         // Make sure we haven't already been initialized
         if bytestring_exists(&key).unwrap() {
@@ -83,7 +83,7 @@ impl Wallet {
         signature: &Ed25519Signature,
     ) {
         // TODO some kind of replay mechanism
-        let auth_message = self.compute_auth_message(&to_addr, amount);
+        let auth_message = self.compute_auth_message(to_addr, amount);
 
         sdk::crypto::VerifySignature(
             &PublicKey::Ed25519 { ed25519: self.pk },
@@ -103,7 +103,7 @@ impl Wallet {
     ) {
         self.check_payment_authorization(to_addr, amount, signature);
 
-        self.token().transfer(&to_addr, amount).unwrap();
+        self.token().transfer(to_addr, amount).unwrap();
     }
 
     /*
@@ -119,6 +119,6 @@ impl Wallet {
     */
 
     pub fn mint(&self, to_addr: &ContractAddress, amount: Amount) {
-        self.token().mint(&to_addr, amount).unwrap();
+        self.token().mint(to_addr, amount).unwrap();
     }
 }

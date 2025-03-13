@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [features]
-default = ["guest", "client", "std", "alloc"]
+default = ["guest", "client", "std"]
 client = []
 guest = []
 alloc = ["sdk/alloc"]

@@ -23,11 +23,8 @@ fn test_read_self_item() {
     let item = RetrocausalQueueConsume_Sized::<1>(&KEY1).unwrap();
     assert_eq!(item[0], 2);
 
-    match RetrocausalQueuePeek_Sized::<1>(&KEY1) {
-        Ok(_) => {
-            panic!("!");
-        }
-        Err(_) => {}
+    if RetrocausalQueuePeek_Sized::<1>(&KEY1).is_ok() {
+        panic!("!");
     }
 }
 

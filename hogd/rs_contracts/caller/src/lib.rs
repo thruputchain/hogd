@@ -21,8 +21,7 @@ impl ContractStorage for Caller {}
 
 impl Caller {
     pub fn new(token_contract: &ContractAddress) -> Self {
-        let token_contract = token_contract.clone();
-        Self { token_contract }
+        Self { token_contract: *token_contract }
     }
 }
 

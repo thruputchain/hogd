@@ -33,7 +33,7 @@ impl<'de> DeserializeSeed<'de> for _KeypathSeed<CoinContract> {
             keypath: &'a mut Keypath,
         }
 
-        impl<'de, 'a> Visitor<'de> for KeypathVisitor<'a> {
+        impl<'de> Visitor<'de> for KeypathVisitor<'_> {
             type Value = CoinContract;
 
             fn expecting(
@@ -98,7 +98,7 @@ impl Load for CoinContract {
         let buf = BytestringGet(&key)?;
 
         let seed = _KeypathSeed::<CoinContract>::new(keypath);
-        let value = serialize::from_bytes_seed(seed, &*buf)?;
+        let value = serialize::from_bytes_seed(seed, &buf)?;
 
         Ok(value)
     }

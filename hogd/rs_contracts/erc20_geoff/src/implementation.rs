@@ -99,7 +99,7 @@ impl ERC20 for CoinContract {
     ) -> Result<()> {
         let owner = *owner;
         let value = Self { owner };
-        let key = Self::keypath().into();
+        let key = Self::keypath().generate_key();
 
         // Make sure we haven't already been initialized
         if bytestring_exists(&key)? {
