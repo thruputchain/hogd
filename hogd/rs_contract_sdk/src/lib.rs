@@ -74,7 +74,7 @@ pub mod prelude {
     pub use super::log::Log;
 
     #[doc(inline)]
-    pub use super::macros::contract;
+    pub use super::macros::{contract, Contract};
 
     #[doc(inline)]
     pub use super::nonnegative_int::*;

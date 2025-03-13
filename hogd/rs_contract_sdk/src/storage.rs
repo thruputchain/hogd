@@ -189,6 +189,29 @@ mod load {
             }
         }
     }
+
+    mod deserialize_impl {
+        use super::KeypathSeed;
+        use serde::de::DeserializeSeed;
+        use serde::{Deserialize, Deserializer};
+
+        impl<'de, T> DeserializeSeed<'de> for KeypathSeed<T>
+        where
+            T: Deserialize<'de>
+        {
+            type Value = T;
+
+            fn deserialize<D>(
+                self,
+                deserializer: D,
+            ) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                <T as Deserialize<'de>>::deserialize(deserializer)
+            }
+        }
+    }
 }
 
 pub use bytestring::*;

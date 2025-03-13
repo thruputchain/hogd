@@ -10,7 +10,7 @@ use sdk::prelude::*;
 type Balance = NNInt;
 type Allowance = NNInt;
 
-#[derive(Debug, Serialize)]
+#[derive(Contract, Debug, Serialize)]
 pub struct CoinContract {
     contract_owner: ContractAddress,
     balances: Map<ContractAddress, Balance>,
@@ -18,10 +18,8 @@ pub struct CoinContract {
     total_supply: NNInt,
 }
 
-// This paragraph to be generated (TODO):
-use sdk::contract::ContractStorage;
+// This provides a default key for this root object
 impl ContractStorage for CoinContract {}
-mod load; // Deserialization code for the datastructure
 
 impl CoinContract {
     // These internal functions use the underlying storage to
@@ -86,7 +84,7 @@ impl CoinContract {
 
 // This implements the ERC20 interface.  The `contract` macro provides
 // an exported entrypoint for each method; these will be placed in a
-// module with the specified name ("guest_exports" here).
+// module with the specified name ("guest_exports").
 #[contract(exports = "guest_exports")]
 impl ERC20 for CoinContract {
     fn initialize(
@@ -94,10 +92,10 @@ impl ERC20 for CoinContract {
         contract_owner: &ContractAddress,
     ) -> Result<()> {
         let keypath = Self::keypath();
-        let key = keypath.generate_key();
+        let storage_key = keypath.generate_key();
 
         // Make sure we haven't already been initialized
-        if bytestring_exists(&key)? {
+        if bytestring_exists(&storage_key)? {
             panic!("Contract already initialized");
         }
 
@@ -109,7 +107,7 @@ impl ERC20 for CoinContract {
         };
 
         // Store ourselves
-        store(&key, &storage)?;
+        store(&storage_key, &storage)?;
 
         Ok(())
     }
