@@ -18,6 +18,7 @@
 
 #if HAVE_CXA_DEMANGLE
 
+#include <stdlib.h>
 #include <cxxabi.h>
 
 namespace x23 {

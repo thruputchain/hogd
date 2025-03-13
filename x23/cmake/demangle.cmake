@@ -1,6 +1,7 @@
 include(CheckCXXSourceCompiles)
 
 check_cxx_source_compiles([=[
+#include <stdlib.h>
 #include <cxxabi.h>
 #include <typeinfo>
 #include <string>
