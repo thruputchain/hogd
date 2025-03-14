@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <concepts>
 #include <limits>
 #include <mutex>

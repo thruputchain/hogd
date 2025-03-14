@@ -90,19 +90,20 @@ endif()
 # --enable-opt sets -march=native and other compiler flags
 # that the libsodium authors deem important
 include(ExternalProject)
-ExternalProject_Add(libsodium
+ExternalProject_Add(libsodium_build
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
     CONFIGURE_COMMAND
       ${CMAKE_SOURCE_DIR}/external/libsodium/configure
       --prefix=<BINARY_DIR>
       --enable-opt
+      --disable-pie
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
       CFLAGS=${EXTERNAL_C_FLAGS} CXXFLAGS=${EXTERNAL_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
-    INSTALL_COMMAND # Skip installation step
+    INSTALL_COMMAND "" # Skip installation step
 )
 
-ExternalProject_Get_Property(libsodium binary_dir)
+ExternalProject_Get_Property(libsodium_build binary_dir)
 set(LIBSODIUM_PCFILEDIR "${binary_dir}")
 set(LIBSODIUM_TOP_SRCDIR "${CMAKE_SOURCE_DIR}/external/libsodium")
 set(LIBSODIUM_INCLUDE_DIRS
@@ -110,16 +111,13 @@ set(LIBSODIUM_INCLUDE_DIRS
     "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include"
     "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include/sodium"
 )
-
-set(LIBSODIUM_LIBRARIES
-"${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium${CMAKE_SHARED_LIBRARY_SUFFIX}")
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
-add_library(libsodium_shared SHARED IMPORTED)
-set_target_properties(libsodium_shared PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_LIBRARIES}")
-#set_target_properties(libsodium_shared PROPERTIES INSTALL_RPATH "@loader_path")
+set(LIBSODIUM_LIBRARY
+"${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
-
+add_library(libsodium STATIC IMPORTED)
+set_target_properties(libsodium PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_LIBRARY}")
 
 # Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)

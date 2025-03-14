@@ -82,7 +82,7 @@ private:
   SipHash24Key key_;
 };
 
-// confirm our types are the same as libsodium
+// confirm our types are the same as libsodium.
 static_assert(sizeof(SipHash24Key) == crypto_shorthash_siphash24_KEYBYTES);
 static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
 
