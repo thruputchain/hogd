@@ -294,7 +294,7 @@ DiskReader::load_database(
     }
 
     if (log_lsn != cur_lsn) {
-      warn("missing data detected");
+      warn("missing data detected: gap at LSN {}", cur_lsn);
       ret = DBError(DBCode::kNotFound);
       break;
     }
@@ -320,9 +320,10 @@ DiskReader::load_database(
       break;
   }
 
-  // check if reached the end but are still missing data.
-  if (!ret && target_lsn && cur_lsn != *target_lsn) {
-    warn("missing data detected, but able to load up to LSN {}", cur_lsn);
+  // we reached the end; are we still missing data?
+  if (ret && target_lsn && cur_lsn != *target_lsn) {
+    warn("missing data detected: loaded LSN {} < target LSN {}", cur_lsn,
+         *target_lsn);
     ret = DBError(DBCode::kNotFound);
   }
 
@@ -330,7 +331,7 @@ DiskReader::load_database(
     if (cur_lsn == 0)
       warn("unable to load any LSNs");
     else
-      warn("able to load up to LSN {} despite error", cur_lsn);
+      warn("able to load up to LSN {} despite encountering error", cur_lsn);
   }
   if (loaded_lsn)
     *loaded_lsn = cur_lsn;
