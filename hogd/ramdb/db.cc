@@ -53,6 +53,12 @@ Database::open(const std::string &path, size_t heap_size, int bucket_order)
   // calculate the number of write heads based on the available cores.
   int write_head_order = kBaseWriteHeadOrder + cores_order;
 
+  // print configuration for debugging.
+  debug("opening DB at '{}':", path);
+  debug("...heap_size {}, cores {}", print_iec_bytes(heap_size), cores);
+  debug("...locks {}, buckets {}, write_heads {}", (1UL << lock_order),
+        (1UL << bucket_order), (1ULL << write_head_order));
+
   // open the database directory.
   ErrnoStatus<Directory> dir = Directory::open(path);
   if (!dir) {
@@ -77,12 +83,6 @@ Database::open(const std::string &path, size_t heap_size, int bucket_order)
   else
     debug("loaded up to LSN {}, {} items", *lsn, db->map_.size());
   db->disk_writer_.init(*lsn);
-
-  // print configuration for debugging.
-  debug("opening DB at '{}':", path);
-  debug("...heap_size {}, cores {}", print_iec_bytes(heap_size), cores);
-  debug("...locks {}, buckets {}, write_heads {}", (1UL << lock_order),
-        (1UL << bucket_order), (1ULL << write_head_order));
 
   return db;
 }

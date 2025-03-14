@@ -282,7 +282,7 @@ DiskReader::load_database(
     std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn)
 {
   uint64_t cur_lsn = 0;
-  DBStatus<void> ret;
+  DBStatus<void> ret{};
   DBStatus<std::vector<uint64_t>> log_lsns = get_log_files(dir);
   if (!log_lsns)
     return log_lsns.error();
@@ -294,7 +294,7 @@ DiskReader::load_database(
     }
 
     if (log_lsn != cur_lsn) {
-      warn("missing data detected, but able to load up to LSN {}", cur_lsn);
+      warn("missing data detected");
       ret = DBError(DBCode::kNotFound);
       break;
     }
@@ -302,17 +302,17 @@ DiskReader::load_database(
     DBStatus<File> f = dir.openat(lsn_to_filename(log_lsn), O_RDONLY)
                            .transform_error(to_db_error);
     if (!f) {
-      warn("couldn't open logfile `{}`: {}, but able to load up to LSN {}",
-           lsn_to_filename(log_lsn), f.error(), cur_lsn);
+      warn("couldn't open logfile `{}`: {}", lsn_to_filename(log_lsn),
+           f.error());
       ret = f.error();
       break;
     }
 
     uint64_t tmp = cur_lsn;
-    DBStatus<void> ret = load_log_file(*f, cur_lsn, target_lsn, func);
+    ret = load_log_file(*f, cur_lsn, target_lsn, func);
     if (!ret) {
-      warn("corrupted data detected, but able to load up to LSN {}", cur_lsn);
-      ret = DBError(DBCode::kCorruption);
+      warn("couldn't load logfile {} : {}", lsn_to_filename(log_lsn),
+           ret.error());
       break;
     }
 
@@ -321,11 +321,17 @@ DiskReader::load_database(
   }
 
   // check if reached the end but are still missing data.
-  if (target_lsn && cur_lsn != *target_lsn) {
+  if (!ret && target_lsn && cur_lsn != *target_lsn) {
     warn("missing data detected, but able to load up to LSN {}", cur_lsn);
     ret = DBError(DBCode::kNotFound);
   }
 
+  if (!ret) {
+    if (cur_lsn == 0)
+      warn("unable to load any LSNs");
+    else
+      warn("able to load up to LSN {} despite error", cur_lsn);
+  }
   if (loaded_lsn)
     *loaded_lsn = cur_lsn;
   return ret;

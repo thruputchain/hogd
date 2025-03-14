@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+
 #include <memory>
 #include <span>
 #include <string>
@@ -186,6 +188,22 @@ TEST_F(DatabaseTest, SyncAndLoad)
   DBStatus<void> ret = open_db();
   EXPECT_TRUE(static_cast<bool>(ret));
   check_integrity();
+  db_.reset();
+
+  // corrupt the DB.
+  ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY);
+  ASSERT_TRUE(static_cast<bool>(f));
+  std::string garbage(kKeySize, '0');
+  rand_(std::span(garbage));
+  ASSERT_TRUE(
+      static_cast<bool>(write_full(*f, std::as_bytes(std::span(garbage)))));
+
+  // now the DB should fail when we restore from disk.
+  ret = open_db();
+  EXPECT_FALSE(static_cast<bool>(ret));
+  if (!ret) {
+    EXPECT_EQ(ret.error(), DBCode::kCorruption);
+  }
 }
 
 TEST_F(DatabaseTest, Compact)
