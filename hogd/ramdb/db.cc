@@ -155,6 +155,9 @@ Database::background_worker(const std::stop_token &stoken)
     if (expand)
       map_.do_expand();
 
+    // return idle memory to the OS.
+    loglet_allocator_->reclaim_idle_memory();
+
     // print statistics about memory use.
     if (!compact && !expand) {
       loglet_allocator_->print_stats();

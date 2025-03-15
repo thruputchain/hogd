@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
-#include <chrono>
 #include <exception>
 #include <functional>
 #include <future>
@@ -14,6 +13,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/loglet.h"
@@ -82,8 +82,7 @@ ItemAllocator::compact(float utilization_thresh)
   };
 
   // record start time for measuring compaction time.
-  using clock = std::chrono::high_resolution_clock;
-  clock::time_point start = clock::now();
+  ElapsedTimer timer;
 
   // take all the compactable loglets.
   std::vector<UniqueLoglet> loglets;
@@ -110,8 +109,7 @@ ItemAllocator::compact(float utilization_thresh)
     stats += f.get();
 
   // print the compaction rate.
-  clock::time_point end = clock::now();
-  auto seconds = std::chrono::duration<double>(end - start).count();
+  auto seconds = timer.elapsed();
   info("finished compaction in {:.3f} seconds", seconds);
   if (stats.items > 0) {
     info("scanned {:.0f} items/sec ({}% live)",

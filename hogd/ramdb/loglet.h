@@ -353,6 +353,9 @@ public:
   void free(Loglet *ll);
   // print_stats prints loglet memory usage statistics.
   void print_stats();
+  // reclaim_idle_memory returns idle loglets to the OS. It should be called
+  // periodically.
+  void reclaim_idle_memory();
 
   // low_mem_done() must be called by low_mem_observer_ when it is finished. If
   // success is false, out of memory errors will be returned to future and
@@ -377,7 +380,7 @@ private:
   // the length of the region where loglets can be mapped.
   const size_t len_;
   // the number of loglets that must be reserved so compaction always succeeds.
-  const int reserved_count_;
+  const size_t reserved_count_;
   // a vector of all loglets in the order they appear in the region.
   std::vector<Loglet> loglets_;
 
@@ -389,6 +392,10 @@ private:
   std::condition_variable alloc_cv_;
   // out of memory. If set, this causes alloc() to give up.
   bool oom_{false};
+  // the smallest observed number of free_loglets_
+  size_t min_free_loglets_;
+  // the number of free loglets that are not backed by the OS.
+  size_t not_needed_loglets_;
 
   // true if low_mem_observer_ is currently triggered.
   bool low_mem_in_service_{false};

@@ -4,6 +4,7 @@ extern "C" {
 #include <sys/mman.h>
 }
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
@@ -12,6 +13,7 @@ extern "C" {
 #include <memory>
 #include <mutex>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
@@ -131,6 +133,7 @@ LogletAllocator::create(size_t len, size_t reserved_count,
     pos += kLogletRegionSize;
     log->free_loglets_.push_back(&l);
   }
+  log->min_free_loglets_ = log->not_needed_loglets_ = log->free_loglets_.size();
   return log;
 }
 
@@ -193,15 +196,15 @@ LogletAllocator::alloc(LogletMode mode, bool use_reserved)
   if constexpr (is_debug_build())
     ll->poison();
   ll->mode_.store(mode, std::memory_order_relaxed);
+  min_free_loglets_ = std::min(min_free_loglets_, free_loglets_.size());
   return ll;
 }
 
 void
 LogletAllocator::free(Loglet *ll)
 {
-  // reset the loglet to empty and release its backing memory to the OS.
+  // reset the loglet to empty.
   ll->reset();
-  ll->dont_need();
 
   // add the loglet to the free list.
   {
@@ -235,6 +238,30 @@ LogletAllocator::print_stats()
   info("mem stats: {} ({}% memory items, {}% disk buffering, {}% free)",
        print_iec_bytes(len_), mem * 100 / total, disk * 100 / total,
        free * 100 / total);
+}
+
+void
+LogletAllocator::reclaim_idle_memory()
+{
+  std::vector<Loglet *> tmp;
+
+  // determine idle loglets.
+  {
+    std::lock_guard guard(lock_);
+    for (size_t i = not_needed_loglets_; i < min_free_loglets_; ++i) {
+      tmp.push_back(free_loglets_[i]);
+    }
+    assert(min_free_loglets_ <= free_loglets_.size());
+    not_needed_loglets_ = min_free_loglets_;
+    min_free_loglets_ = free_loglets_.size();
+  }
+
+  // give idle loglets back to the OS.
+  if (!tmp.empty())
+    debug("giving back {} loglets to the OS", tmp.size());
+  for (Loglet *ll : tmp) {
+    ll->dont_need();
+  }
 }
 
 } // namespace hogd

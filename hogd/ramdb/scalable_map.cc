@@ -9,7 +9,6 @@
 #include <atomic>
 #include <bit>
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <limits>
@@ -23,6 +22,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/ramdb/db_status.h"
@@ -296,8 +296,7 @@ ScalableMap::prepare_expand()
 void
 ScalableMap::do_expand()
 {
-  using clock = std::chrono::high_resolution_clock;
-  clock::time_point start = clock::now();
+  ElapsedTimer time;
 
   for (size_t idx = 0; idx < old_size_; ++idx) {
     std::mutex &mu = mutexes_[idx & (mutexes_.size() - 1)];
@@ -325,9 +324,7 @@ ScalableMap::do_expand()
     }
   }
 
-  clock::time_point end = clock::now();
-  auto seconds = std::chrono::duration<double>(end - start).count();
-  info("finished expanding in {:.3f} seconds", seconds);
+  info("finished expanding in {:.3f} seconds", time.elapsed());
 }
 
 bool
