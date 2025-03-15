@@ -1,11 +1,15 @@
 #pragma once
 
 #include <cstddef>
+#include <format>
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -38,6 +42,11 @@ template<> struct SyscallArgParams<uint64_t> {
   }
   constexpr static bool validate(uint64_t /*unused*/) { return true; }
   constexpr static uint64_t deref(uint64_t value) { return value; }
+
+  constexpr static std::string format_input(uint64_t value)
+  {
+    return x23::show(value);
+  }
 };
 
 template<> struct SyscallArgParams<std::span<std::byte>> {
@@ -58,6 +67,18 @@ template<> struct SyscallArgParams<std::span<std::byte>> {
   {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
+  }
+
+  constexpr static std::string
+  format_input(std::span<std::byte> const & /*unused*/)
+  {
+    return "";
+  }
+
+  static std::string format_output(std::span<std::byte> const &value)
+  {
+    std::string_view view(reinterpret_cast<char *>(value.data()), value.size());
+    return std::format("{}", view);
   }
 };
 
@@ -80,6 +101,19 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
+  }
+
+  static std::string format_input(std::span<const std::byte> const &value)
+  {
+    std::string_view view(reinterpret_cast<const char *>(value.data()),
+                          value.size());
+    return std::format("{}", view);
+  }
+
+  constexpr static std::string
+  format_output(std::span<const std::byte> const & /*unused*/)
+  {
+    return "";
   }
 };
 

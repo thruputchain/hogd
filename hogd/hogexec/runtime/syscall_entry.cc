@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/syscall_entry.h"
 
-#include <array>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -18,6 +17,8 @@
 #include "syscall.hh"
 
 namespace hogd {
+
+int syscall_logfd = -1;
 
 namespace {
 // returns gas_consumed, syscall error>

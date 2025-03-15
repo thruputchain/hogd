@@ -236,7 +236,7 @@ def gen_frame(syscall):
 
 def gen_syscall_table_entry(syscall):
   name = syscall["name"]
-  return f"""    std::pair{{SyscallNo::k{name}, &wrap_outer<&syscall_{name}_inner>}},
+  return f"""    std::pair{{SyscallNo::k{name}, &wrap_outer<SyscallNo::k{name}, &syscall_{name}_inner>}},
 """
 
 def gen_syscall_table(spec):
@@ -273,6 +273,7 @@ def gen_syscall_inner_h(spec):
 
 #pragma once
 
+#include <array>
 #include <utility>
 
 #include "hogd/base/types.h"
@@ -293,6 +294,95 @@ using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
 {syscall_table}
 
 }}// namespace hogd
+"""
+
+def gen_syscall_io_arg_decl(arg):
+  end_decorator = ""
+  argtype = ""
+  if "xdr_typename" in arg:
+    argtype = arg["xdr_typename"]
+  elif "span_argument" in arg and arg["span_argument"]:
+    argtype = "opaque"
+    end_decorator = "<>"
+  else:
+    argtype = arg["typename"]
+
+  pointerdecl = ""
+  if "optional" in arg and arg["optional"]:
+    pointerdecl = "*"
+  argname = arg["name"]
+  return f"  {argtype} {pointerdecl}{argname}{end_decorator};"
+
+def gen_syscall_input_arg_xdr(syscall):
+  name = syscall["name"]
+  decls = []
+
+  if syscall["inputs"] is not None:
+    for arg in syscall["inputs"]:
+      decl = gen_syscall_io_arg_decl(arg)
+      decls = decls + [decl]
+  if len(decls) == 0:
+    decls = ["  void;"]
+  decls_joined = "\n".join(decls)
+
+  return f"""struct {name}_input {{
+{decls_joined}
+}};
+
+""", f"""  case k{name}:
+    {name}_input {name};
+"""
+
+def gen_syscall_output_arg_xdr(syscall):
+  name = syscall["name"]
+  decls = []
+
+  if syscall["outputs"] is not None:
+    for arg in syscall["outputs"]:
+      decl = gen_syscall_io_arg_decl(arg)
+      decls = decls + [decl]
+  if len(decls) == 0:
+    decls = ["  void;"]
+  decls_joined = "\n".join(decls)
+
+  return f"""struct {name}_output {{
+{decls_joined}
+}};
+
+""", f"""  case k{name}:
+    {name}_output {name};
+"""
+
+def gen_syscall_arg_xdr(spec):
+  structs = ""
+  decls_in = ""
+  decls_out = ""
+  for call in spec["syscalls"]:
+    struct, decl = gen_syscall_input_arg_xdr(call)
+    structs += struct
+    decls_in += decl
+    struct, decl = gen_syscall_output_arg_xdr(call)
+    structs += struct
+    decls_out += decl
+
+  return f"""// clang-format off
+%#include "types.hh"
+%#include "syscall.hh"
+
+namespace hogd {{
+  // clang-format on
+{structs}
+
+union SyscallInput switch(SyscallNo syscall) {{
+{decls_in}
+}};
+
+union SyscallOutput switch(SyscallNo syscall) {{
+{decls_out}
+}};
+
+}}
+
 """
 
 
@@ -338,6 +428,8 @@ enum SyscallErrorCode {{{error_enumdecls}}};
 
 }} // namespace hogd
 """
+
+
 
 """
 Generate rust bindings for each syscall.
@@ -544,6 +636,10 @@ parser.add_argument(
   action='store_true', 
   help="gen syscall.x")
 parser.add_argument(
+  '--syscall_args_x', 
+  action='store_true', 
+  help="gen syscall_args.x")
+parser.add_argument(
   '--syscall_inner_h', 
   action='store_true', 
   help="gen syscall_inner.h")
@@ -576,6 +672,11 @@ if (args.syscall_x):
   filename = args.output_dir + "/syscall.x"
   with open(filename, "w") as f:
     f.write(gen_syscall_x(spec_full))
+
+if (args.syscall_args_x):
+  filename = args.output_dir + "/syscall_args.x"
+  with open(filename, "w") as f:
+    f.write(gen_syscall_arg_xdr(spec_full))
 
 if (args.syscall_inner_h):
   filename = args.output_dir + "/syscall_inner.h"

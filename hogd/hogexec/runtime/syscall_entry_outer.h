@@ -1,18 +1,26 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <span>
+#include <string>
 #include <tuple>
 #include <type_traits>
+#include <unistd.h>
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "syscall.hh"
+#include "syscall_args.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/utility.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -187,10 +195,66 @@ convert_return_t(std::pair<HostFnErrorCode, int32_t> const &value)
   return value;
 }
 
+inline static auto
+arg_to_xdr(uint64_t x)
+{
+  return x;
+}
+inline static auto
+arg_to_xdr(int128_t x)
+{
+  return to_xdr(x);
+}
+inline static auto
+arg_to_xdr(std::span<std::byte> bytes)
+{
+  return x23::Vec<std::byte>{bytes.begin(), bytes.end()}
+      .reinterpret<x23::Vec<uint8_t>>();
+}
+inline static auto
+arg_to_xdr(std::span<const std::byte> bytes)
+{
+  return x23::Vec<std::byte>{bytes.begin(), bytes.end()}
+      .reinterpret<x23::Vec<uint8_t>>();
+}
+template<size_t N>
+inline static auto
+arg_to_xdr(std::array<uint8_t, N> const &bytes)
+{
+  return bytes;
+}
+
+// Convert the dereferenced syscall arguments into SyscallInputType and
+// SyscallOutputType. This involves an extra copy and extra allocations, and is
+// not intended to be used in performance-critical settings.  Used only for
+// logging syscall IO in a convenient format.
+//
+// The first std::tuple_size_v<SyscallInputType> arguments in dereferenced_args
+// are inputs to the syscall, and the remainder are outputs.
+template<typename SyscallInputType, typename... T>
+auto
+make_syscall_input_struct(std::tuple<T...> const &deferenced_args)
+{
+  return [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
+    return SyscallInputType{arg_to_xdr(std::get<Is>(deferenced_args))...};
+  }(std::make_index_sequence<std::tuple_size_v<SyscallInputType>>{});
+}
+
+template<typename SyscallInputType, typename SyscallOutputType, typename... T>
+auto
+make_syscall_output_struct(std::tuple<T...> const &deferenced_args)
+{
+  return [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
+    return SyscallOutputType{
+        arg_to_xdr(std::get<std::tuple_size_v<SyscallInputType> + Is>(
+            deferenced_args))...};
+  }(std::make_index_sequence<std::tuple_size_v<SyscallOutputType>>{});
+}
+
 // Wraps a call to an inner syscall with checks to load syscall arguments
 // from contract memory and check that all accesses into contract memory
 // are well-formed (no OOB).
-template<auto InnerSyscallFunc>
+template<SyscallNo Syscall, auto InnerSyscallFunc>
 constexpr std::pair<HostFnResult, GasAmount>
 wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
            uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
@@ -198,6 +262,13 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
 {
   auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5};
   using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
+
+  using SyscallInputType =
+      std::remove_reference_t<decltype(get<std::to_underlying(Syscall) + 1>(
+          SyscallInput{}))>;
+  using SyscallOutputType =
+      std::remove_reference_t<decltype(get<std::to_underlying(Syscall) + 1>(
+          SyscallOutput{}))>;
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
@@ -216,6 +287,16 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
       return kFaultResult;
     }
 
+    // Once the syscall inputs are parsed, we can print them in a formatted log
+    // message.
+    if (syscall_logfd != -1) {
+      auto log_string =
+          x23::show(make_syscall_input_struct<SyscallInputType>(std::tuple{
+              SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                  std::get<Is>(parsed_args))...}));
+      write(syscall_logfd, log_string.c_str(), log_string.size());
+    }
+
     // With parameter packs as structured bindings, the annoying if constexpr
     // disappears, and the following becomes
     //   auto [...handler_pack] = syscall_t::handler(handler);
@@ -227,21 +308,44 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
     auto handler_pack = syscall_t::handler(handler);
 
     // Invoke the inner syscall
-    if constexpr (std::tuple_size_v<decltype(handler_pack)> == 1) {
-      auto res = InnerSyscallFunc(
-          std::get<0>(handler_pack),
-          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-              std::get<Is>(parsed_args))...);
+    auto res = [&] {
+      // only required because we can't do auto [...handler] = handler_pack; yet
+      if constexpr (std::tuple_size_v<decltype(handler_pack)> == 1) {
+        return InnerSyscallFunc(
+            std::get<0>(handler_pack),
+            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                std::get<Is>(parsed_args))...);
+      }
+      else {
+        return InnerSyscallFunc(
+            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                std::get<Is>(parsed_args))...);
+      }
+    }();
 
-      return {convert_return_t(res.first), res.second};
+    // Print the output of the syscall.  The outputs in parsed_args should only
+    // be written to if the syscall succeeds.
+    if (syscall_logfd != -1) {
+      auto [host_fn_code, syscall_code] = convert_return_t(res.first);
+      std::string log_string;
+      if (host_fn_code != HostFnErrorCode::kNoneOrRecoverable ||
+          syscall_code != 0) {
+        log_string = std::format("Syscall Error: {} {}",
+                                 HostFnErrorCategory{}.message(
+                                     std::to_underlying(host_fn_code)),
+                                 x23::show(SyscallErrorCode(syscall_code)));
+      }
+      else {
+        log_string =
+            x23::show(make_syscall_output_struct<SyscallInputType,
+                                                 SyscallOutputType>(std::tuple{
+                SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                    std::get<Is>(parsed_args))...}));
+      }
+      write(syscall_logfd, log_string.c_str(), log_string.size());
     }
-    else {
-      auto res = InnerSyscallFunc(
-          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-              std::get<Is>(parsed_args))...);
 
-      return {convert_return_t(res.first), res.second};
-    }
+    return {convert_return_t(res.first), res.second};
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
 }
 
