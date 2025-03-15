@@ -1,15 +1,11 @@
 #pragma once
 
 #include <cstddef>
-#include <format>
 #include <optional>
 #include <span>
-#include <string>
-#include <string_view>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
-#include "x23/format.h"
 
 namespace hogd {
 
