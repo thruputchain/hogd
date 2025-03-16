@@ -64,4 +64,13 @@ TEST_F(MockContractTest, MethodInversion)
   check_roundtrip(0xABCDEF01);
 }
 
+TEST(Foo, Bar) {
+  bool first = false, second = false;
+  [&] (int x) {
+    first = true;
+    ASSERT_FALSE(second);
+  }((x23::Defer([&] { ASSERT_TRUE(first);; second = true; }), 0));
+  ASSERT_TRUE(second);
+}
+
 } // namespace hogd

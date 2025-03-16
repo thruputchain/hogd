@@ -914,7 +914,7 @@ def gen_mock_switch_case(syscall):
   name = syscall["name"]
   return f"""  case SyscallNo::k{name}:
   return mock_syscall_parser<{name}_input, {name}_output,
-                               &mock_{name}_inner>(syscall_no, input_span, output_span);
+                               &syscall_{name}_inner>(syscall_no, input_span, output_span);
 """
 
 def gen_mock_inner(syscall):
@@ -1034,6 +1034,7 @@ def gen_mock_syscall_entry_cc(spec):
 #include "syscall.hh"
 #include "syscall_args.hh"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
 
 namespace hogd {{
 
