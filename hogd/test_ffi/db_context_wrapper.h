@@ -1,10 +1,12 @@
 #pragma once
 
+#include "contract.hh"
 #include "hogd/hogdb/hogdb_core.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc.hh"
 #include "rpc_types.hh"
+#include "types.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/threadpool.h"
