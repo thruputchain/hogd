@@ -1,3 +1,4 @@
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <algorithm>
@@ -69,7 +70,7 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
 
 std::pair<HostFnResult, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
-                     GasAmount remaining_gas,
+                     WrappedGasAmount remaining_gas,
                      const ContractAddress &input_address,
                      const MethodID input_method,
                      const GasAmount input_gas_limit,
@@ -85,7 +86,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(Invocation(input_address, input_method,
                                         input_gas_limit, calldata),
-                             remaining_gas, input_flags);
+                             remaining_gas.gas_amount_, input_flags);
 
   if (invoke_res) {
     return {{HostFnErrorCode::kNoneOrRecoverable,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -68,6 +69,7 @@ check_user_primitive_argument(uint64_t user_value)
   return static_cast<T>(user_value);
 }
 
+// NOLINTBEGIN(readability-inconsistent-declaration-parameter-name)
 template<typename T, typename... Args>
 requires (std::same_as<Args, uint64_t> && ...)
 std::optional<const T>
@@ -81,7 +83,6 @@ check_user_custom_input_argument(std::span<std::byte> contract_memory,
 {
   auto disc =
       check_user_primitive_argument<CryptographicScheme>(user_discriminant);
-
   Signature out;
   out.scheme(disc);
   switch (disc) {
@@ -126,5 +127,6 @@ check_user_custom_input_argument(std::span<std::byte> contract_memory,
     return std::nullopt;
   }
 }
+// NOLINTEND(readability-inconsistent-declaration-parameter-name)
 
 } // namespace hogd

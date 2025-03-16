@@ -1,8 +1,4 @@
 set_source_files_properties(
-    ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
-    PROPERTIES GENERATED TRUE)
-
-set_source_files_properties(
     ${CMAKE_CURRENT_BINARY_DIR}/syscall_inner.h
     PROPERTIES GENERATED TRUE)
 
@@ -29,7 +25,7 @@ add_library(
   wasmi_runtime.cc
   wasm3_runtime.cc
   wasm3_wrapper.cc
-  ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
+  syscall_entry.cc
 )
 
 add_executable(
@@ -43,6 +39,7 @@ add_executable(
   memory_access_test.cc
   userctx_test.cc
   mock_contract_test.cc
+  syscall_entry_outer_tests.cc
 )
 
 target_link_libraries(
@@ -58,12 +55,17 @@ target_link_libraries(
 add_dependencies(
   runtime
   generate_syscall_inner_h
-  generate_syscall_entry_cc
   protocol
 )
 
 target_include_directories(
   runtime
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+target_include_directories(
+  runtime_test
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
