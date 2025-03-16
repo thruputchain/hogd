@@ -67,6 +67,10 @@ public:
 
   SystemCallHandler &to_handler() { return handler_; }
 
+  ~SyscallHandlerContext() {
+    per_tx_db_proxy_.do_explicit_cleanup();
+  }
+
 private:
   inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
 

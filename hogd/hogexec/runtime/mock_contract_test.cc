@@ -1,15 +1,24 @@
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <span>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/mock_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/test_bindings.h"
+#include "syscall.hh"
 #include "types.hh"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -62,15 +71,6 @@ TEST_F(MockContractTest, MethodInversion)
   check_roundtrip(0);
   check_roundtrip(UINT32_MAX);
   check_roundtrip(0xABCDEF01);
-}
-
-TEST(Foo, Bar) {
-  bool first = false, second = false;
-  [&] (int x) {
-    first = true;
-    ASSERT_FALSE(second);
-  }((x23::Defer([&] { ASSERT_TRUE(first);; second = true; }), 0));
-  ASSERT_TRUE(second);
 }
 
 } // namespace hogd

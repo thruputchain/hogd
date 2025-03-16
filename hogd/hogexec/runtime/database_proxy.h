@@ -126,6 +126,15 @@ public:
     co_await db_proxy_.abort_transaction(block_id_, tx_id_);
     co_return;
   }
+  
+  void do_explicit_cleanup() {
+    if (committed_) {
+      return;
+    }
+    if (!aborted_) {
+      abort_transaction()();
+    }
+  }
 
   ~PerTransactionDatabaseProxy() { assert(aborted_ || committed_); }
 

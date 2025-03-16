@@ -38,3 +38,18 @@ target_link_libraries(
   hogdb_core
   runtime
 )
+
+add_executable(
+  test_ffi_test
+  mock_syscall_test.cc
+)
+
+target_link_libraries(
+  test_ffi_test
+  test_ffi
+  GTest::gtest_main
+)
+gtest_discover_tests(test_ffi_test)
+
+
+

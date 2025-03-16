@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -11,7 +10,9 @@
 #include <unistd.h>
 #include <utility>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/mock_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
@@ -169,6 +170,7 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
 void
 close_syscall_handler(void *syscall_handler) noexcept
 {
+  std::println("closing syscall handler{}", syscall_handler);
   delete static_cast<SyscallHandlerContext *>(syscall_handler);
 }
 
@@ -181,7 +183,7 @@ ForeignRootInvokeResult
 root_invoke(void *syscall_handler) noexcept
 {
   if (!syscall_handler) {
-    std::printf("no syscall handler!\n");
+    std::println("no syscall handler!");
     return kUnrecoverableError;
   }
 
@@ -254,6 +256,7 @@ void *
 open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
                      unsigned int serial_len)
 {
+  std::println("opening syscall handler");
   return hogd::open_syscall_handler(db, rc, signed_tx_, serial_len);
 }
 
