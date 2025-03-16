@@ -72,7 +72,6 @@ mock_test_inner(uint32_t inp_1, int128_t const &inp_128,
 
 TEST(MockSyscallTest, SyscallPassArgs)
 {
-
   DBContext db_context;
   db_context.advance_new_block();
 
