@@ -304,20 +304,13 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
     auto handler_pack = syscall_t::handler(handler);
 
     // Invoke the inner syscall
-    auto res = [&] {
-      // only required because we can't do auto [...handler] = handler_pack; yet
-      if constexpr (std::tuple_size_v<decltype(handler_pack)> == 1) {
-        return InnerSyscallFunc(
-            std::get<0>(handler_pack),
-            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                std::get<Is>(parsed_args))...);
-      }
-      else {
-        return InnerSyscallFunc(
-            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                std::get<Is>(parsed_args))...);
-      }
-    }();
+    // template only required because we can't do auto [...handler] = handler_pack; yet
+    auto res = [&]<size_t... ExtraArgs>(std::index_sequence<ExtraArgs...> /*unused*/) {
+      return InnerSyscallFunc(
+          std::get<ExtraArgs>(handler_pack)...,
+          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+              std::get<Is>(parsed_args))...);
+    }(std::make_index_sequence<std::tuple_size_v<decltype(handler_pack)>>{});
 
     // Print the output of the syscall.  The outputs in parsed_args should only
     // be written to if the syscall succeeds.
