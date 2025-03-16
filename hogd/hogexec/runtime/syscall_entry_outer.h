@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <span>
 #include <string>
@@ -21,6 +22,7 @@
 #include "x23/format.h"
 #include "x23/utility.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -195,33 +197,27 @@ convert_return_t(std::pair<HostFnErrorCode, int32_t> const &value)
   return value;
 }
 
-inline static auto
-arg_to_xdr(uint64_t x)
-{
-  return x;
-}
-inline static auto
-arg_to_xdr(int128_t x)
-{
-  return to_xdr(x);
-}
-inline static auto
-arg_to_xdr(std::span<std::byte> bytes)
-{
-  return x23::Vec<std::byte>{bytes.begin(), bytes.end()}
+auto arg_to_xdr(auto arg) {
+  using T = std::remove_cvref_t<decltype(arg)>;
+
+  if constexpr (std::same_as<T, int128_t>) {
+    return to_xdr(arg);
+  }
+  else if constexpr(std::same_as<T, std::span<std::byte>> || std::same_as<T, std::span<const std::byte>>)
+  {
+    return x23::Vec<std::byte>{arg.begin(), arg.end()}
       .reinterpret<x23::Vec<uint8_t>>();
-}
-inline static auto
-arg_to_xdr(std::span<const std::byte> bytes)
-{
-  return x23::Vec<std::byte>{bytes.begin(), bytes.end()}
-      .reinterpret<x23::Vec<uint8_t>>();
-}
-template<size_t N>
-inline static auto
-arg_to_xdr(std::array<uint8_t, N> const &bytes)
-{
-  return bytes;
+  } else if constexpr(std::is_pointer_v<T>) {
+    using base_t = std::remove_const_t<std::remove_pointer_t<T>>;
+    static_assert(std::same_as<base_t, ContractAddress>);
+    if (arg) {
+      return x23::Ptr<base_t>(new base_t(*arg));
+    }
+    return x23::Ptr<base_t>(nullptr);
+  }
+  else {
+    return arg;
+  }
 }
 
 // Convert the dereferenced syscall arguments into SyscallInputType and
