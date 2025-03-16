@@ -35,8 +35,7 @@ template<std::integral T> requires (sizeof(T) <= 8)
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static T parse(std::span<std::byte> /*unused*/,
-                                  uint64_t input)
+  constexpr static T parse(std::span<std::byte> /*unused*/, uint64_t input)
   {
     return input;
   }
@@ -105,7 +104,7 @@ struct SyscallArgParams<T &> {
 
 // Optional trivially copyable input types.
 template<typename T> requires std::is_trivially_copyable_v<T>
-struct SyscallArgParams<const T*> {
+struct SyscallArgParams<const T *> {
   constexpr static size_t kNumInputs = 1;
   constexpr static T *parse(std::span<std::byte> contract_memory,
                             uint64_t offset)
@@ -115,39 +114,49 @@ struct SyscallArgParams<const T*> {
 
   constexpr static bool validate(T * /*unused*/) { return true; }
 
-  constexpr static const T* deref(const T *value) { return value; }
+  constexpr static const T *deref(const T *value) { return value; }
 };
 
 // custom parse types
-template<>
-struct SyscallArgParams<const Signature&> {
+template<> struct SyscallArgParams<const Signature &> {
   constexpr static size_t kNumInputs = 2;
-  constexpr static std::optional<const Signature> parse(std::span<std::byte> contract_memory,
-                            uint64_t arg1, uint64_t arg2)
+  constexpr static std::optional<const Signature>
+  parse(std::span<std::byte> contract_memory, uint64_t arg1, uint64_t arg2)
   {
-    return check_user_custom_input_argument<Signature>(contract_memory, arg1, arg2);
+    return check_user_custom_input_argument<Signature>(contract_memory, arg1,
+                                                       arg2);
   }
 
-  constexpr static bool validate(std::optional<const Signature> const& arg) { return arg.has_value(); }
+  constexpr static bool validate(std::optional<const Signature> const &arg)
+  {
+    return arg.has_value();
+  }
 
-  constexpr static const Signature& deref(std::optional<const Signature> const& value) {
+  constexpr static const Signature &
+  deref(std::optional<const Signature> const &value)
+  {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
   }
 };
 
-template<>
-struct SyscallArgParams<const PublicKey&> {
+template<> struct SyscallArgParams<const PublicKey &> {
   constexpr static size_t kNumInputs = 2;
-  constexpr static std::optional<const PublicKey> parse(std::span<std::byte> contract_memory,
-                            uint64_t arg1, uint64_t arg2)
+  constexpr static std::optional<const PublicKey>
+  parse(std::span<std::byte> contract_memory, uint64_t arg1, uint64_t arg2)
   {
-    return check_user_custom_input_argument<PublicKey>(contract_memory, arg1, arg2);
+    return check_user_custom_input_argument<PublicKey>(contract_memory, arg1,
+                                                       arg2);
   }
 
-  constexpr static bool validate(std::optional<const PublicKey> const& arg) { return arg.has_value(); }
+  constexpr static bool validate(std::optional<const PublicKey> const &arg)
+  {
+    return arg.has_value();
+  }
 
-  constexpr static const PublicKey& deref(std::optional<const PublicKey> const& value) {
+  constexpr static const PublicKey &
+  deref(std::optional<const PublicKey> const &value)
+  {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
   }

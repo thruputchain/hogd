@@ -147,7 +147,7 @@ struct SyscallTypes<Ret (*)(SystemCallHandler &, WrappedGasAmount, Args...)>
   : public SyscallTypeParams<Ret, Args...> {
 
   constexpr static std::tuple<SystemCallHandler &, WrappedGasAmount>
-  extras(SystemCallHandler &handler, Runtime& runtime)
+  extras(SystemCallHandler &handler, Runtime &runtime)
   {
     return {handler, {runtime.get_available_gas()}};
   }
@@ -158,7 +158,7 @@ struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...)>
   : public SyscallTypeParams<Ret, Args...> {
 
   constexpr static std::tuple<SystemCallHandler &>
-  extras(SystemCallHandler &handler, Runtime& /*unused*/)
+  extras(SystemCallHandler &handler, Runtime & /*unused*/)
   {
     return {handler};
   }
@@ -166,7 +166,8 @@ struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...)>
 
 template<typename Ret, typename... Args>
 struct SyscallTypes<Ret (*)(Args...)> : public SyscallTypeParams<Ret, Args...> {
-  constexpr static std::tuple<> extras(SystemCallHandler & /*unused*/, Runtime& /*unused*/)
+  constexpr static std::tuple<> extras(SystemCallHandler & /*unused*/,
+                                       Runtime & /*unused*/)
   {
     return {};
   }
@@ -216,17 +217,20 @@ convert_return_t(std::pair<HostFnErrorCode, int32_t> const &value)
   return value;
 }
 
-auto arg_to_xdr(auto arg) {
+auto
+arg_to_xdr(auto arg)
+{
   using T = std::remove_cvref_t<decltype(arg)>;
 
   if constexpr (std::same_as<T, int128_t>) {
     return to_xdr(arg);
   }
-  else if constexpr(std::same_as<T, std::span<std::byte>> || std::same_as<T, std::span<const std::byte>>)
-  {
+  else if constexpr (std::same_as<T, std::span<std::byte>> ||
+                     std::same_as<T, std::span<const std::byte>>) {
     return x23::Vec<std::byte>{arg.begin(), arg.end()}
-      .reinterpret<x23::Vec<uint8_t>>();
-  } else if constexpr(std::is_pointer_v<T>) {
+        .reinterpret<x23::Vec<uint8_t>>();
+  }
+  else if constexpr (std::is_pointer_v<T>) {
     using base_t = std::remove_const_t<std::remove_pointer_t<T>>;
     static_assert(std::same_as<base_t, ContractAddress>);
     if (arg) {
@@ -271,9 +275,9 @@ make_syscall_output_struct(std::tuple<T...> const &dereferenced_args)
 // are well-formed (no OOB).
 template<SyscallNo Syscall, auto InnerSyscallFunc>
 constexpr std::pair<HostFnResult, GasAmount>
-wrap_outer(SystemCallHandler &handler, Runtime& runtime,
-           uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-           uint64_t arg4, uint64_t arg5)
+wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
+           uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
+           uint64_t arg5)
 {
   auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5};
   using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
@@ -325,13 +329,12 @@ wrap_outer(SystemCallHandler &handler, Runtime& runtime,
 
     // Invoke the inner syscall
     // only required because we can't do auto [...handler] = handler_pack; yet
-    auto res = 
-      [&]<size_t... Extras>(std::index_sequence<Extras...> /*unusd*/) {
-        return InnerSyscallFunc(
-            std::get<Extras>(extras_pack)...,
-            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                std::get<Is>(parsed_args))...);
-      }(std::make_index_sequence<std::tuple_size_v<decltype(extras_pack)>>{});
+    auto res = [&]<size_t... Extras>(std::index_sequence<Extras...> /*unusd*/) {
+      return InnerSyscallFunc(
+          std::get<Extras>(extras_pack)...,
+          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+              std::get<Is>(parsed_args))...);
+    }(std::make_index_sequence<std::tuple_size_v<decltype(extras_pack)>>{});
 
     // Print the output of the syscall.  The outputs in parsed_args should only
     // be written to if the syscall succeeds.

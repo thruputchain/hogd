@@ -67,9 +67,7 @@ public:
 
   SystemCallHandler &to_handler() { return handler_; }
 
-  ~SyscallHandlerContext() {
-    per_tx_db_proxy_.do_explicit_cleanup();
-  }
+  ~SyscallHandlerContext() { per_tx_db_proxy_.do_explicit_cleanup(); }
 
 private:
   inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
@@ -154,57 +152,72 @@ ForeignHostFnResult constexpr from_status(
   return from_status(status.first);
 }
 
-auto input_xdr_to_input(auto arg) {
+auto
+input_xdr_to_input(auto arg)
+{
   using T = std::remove_cvref_t<decltype(arg)>;
 
-  if constexpr(x23::is_bytevec<T>) {
+  if constexpr (x23::is_bytevec<T>) {
     return std::as_bytes(std::span(arg));
-  } else if constexpr (requires  { arg.get(); }) {
+  }
+  else if constexpr (requires { arg.get(); }) {
     return arg.get();
-  } else if constexpr(std::same_as<int128_xdr, T>) {
+  }
+  else if constexpr (std::same_as<int128_xdr, T>) {
     return from_xdr(arg);
-  } else {
+  }
+  else {
     return arg;
   }
 }
 
-struct NoCleanupRequired{};
+struct NoCleanupRequired {};
 
-constexpr static auto cleanup_type(auto arg) {
+constexpr static auto
+cleanup_type(auto arg)
+{
   using T = std::remove_cvref_t<decltype(arg)>;
 
   if constexpr (std::same_as<T, int128_xdr>) {
     return int128_t{};
-  } else {
+  }
+  else {
     return NoCleanupRequired{};
   }
 }
 
 template<typename T, typename U>
-decltype(auto) output_xdr_to_output(T& arg, U& local_arg_alloc) {
+decltype(auto)
+output_xdr_to_output(T &arg, U &local_arg_alloc)
+{
   static_assert(std::same_as<U, decltype(cleanup_type(std::declval<T>()))>);
 
-  if constexpr(std::same_as<T, int128_xdr>) {
+  if constexpr (std::same_as<T, int128_xdr>) {
     return local_arg_alloc;
   }
-  else if constexpr(x23::is_bytevec<T>) {
+  else if constexpr (x23::is_bytevec<T>) {
     return std::as_writable_bytes(std::span(arg));
-  } else {
+  }
+  else {
     return (arg);
   }
 }
 
-void cleanup_local_output(auto& arg, auto const& local_arg_alloc) {
+void
+cleanup_local_output(auto &arg, auto const &local_arg_alloc)
+{
   using T = std::remove_cvref_t<decltype(arg)>;
   using T_local = std::remove_cvref_t<decltype(local_arg_alloc)>;
-  if constexpr(std::same_as<T, int128_xdr>) {
+  if constexpr (std::same_as<T, int128_xdr>) {
     static_assert(std::same_as<T_local, int128_t>);
     arg = to_xdr(local_arg_alloc);
   }
 }
 
 template<typename T>
-constexpr static auto cleanup_tuple(T const& arg) {
+constexpr static auto
+cleanup_tuple(T const &arg)
+{
   return [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
     return std::tuple{cleanup_type(get<Is>(arg))...};
   }(std::make_index_sequence<std::tuple_size_v<T>>{});
@@ -212,7 +225,7 @@ constexpr static auto cleanup_tuple(T const& arg) {
 
 template<typename InputArg, typename OutputArg, auto mock_func_inner>
 ForeignHostFnResult
-run_mock_func_inner(InputArg const& input, OutputArg& output)
+run_mock_func_inner(InputArg const &input, OutputArg &output)
 {
   auto *handler = SyscallHandlerContext::get_context();
   if (!handler) {
@@ -222,30 +235,32 @@ run_mock_func_inner(InputArg const& input, OutputArg& output)
   using syscall_t = SyscallTypes<decltype(mock_func_inner)>;
   using cleanup_args_t = decltype(cleanup_tuple(output));
 
-  // One type (int128_xdr) needs to get converted before being put back into the xdr.
-  // This is annoying.
+  // One type (int128_xdr) needs to get converted before being put back into the
+  // xdr. This is annoying.
   cleanup_args_t local_args_alloc{};
 
   struct NullRuntime : public Runtime {
     NullRuntime() : Runtime(std::make_unique<HostCallContext>()) {}
-    uint64_t get_available_gas() const noexcept override {
+    uint64_t get_available_gas() const noexcept override
+    {
       return std::numeric_limits<GasAmount>::max();
     }
-    void set_available_gas(uint64_t /*unused*/) noexcept override {
+    void set_available_gas(uint64_t /*unused*/) noexcept override
+    {
       std::terminate();
     }
 
-    std::span<std::byte> get_memory() noexcept override {
-      std::terminate();
-    }
-    std::span<const std::byte> get_memory() const noexcept override {
+    std::span<std::byte> get_memory() noexcept override { std::terminate(); }
+    std::span<const std::byte> get_memory() const noexcept override
+    {
       std::terminate();
     }
 
     ~NullRuntime() = default;
 
     InvokeStatus<int32_t>
-    invoke_internal(std::string const &/*unused*/) override {
+    invoke_internal(std::string const & /*unused*/) override
+    {
       std::terminate();
     }
   };
@@ -254,13 +269,15 @@ run_mock_func_inner(InputArg const& input, OutputArg& output)
 
   auto extras_pack = syscall_t::extras(handler->to_handler(), null_runtime);
 
-  return [&] <size_t... Extras>(std::index_sequence<Extras...>/*unused*/) {
+  return [&]<size_t... Extras>(std::index_sequence<Extras...> /*unused*/) {
     return [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
       return [&]<size_t... Os>(std::index_sequence<Os...> /*unused*/) {
-        auto res = from_status(mock_func_inner(get<Extras>(extras_pack)...,
-          input_xdr_to_input(get<Is>(input))..., output_xdr_to_output(get<Os>(output), get<Os>(local_args_alloc))...));
+        auto res = from_status(mock_func_inner(
+            get<Extras>(extras_pack)..., input_xdr_to_input(get<Is>(input))...,
+            output_xdr_to_output(get<Os>(output),
+                                 get<Os>(local_args_alloc))...));
 
-        (cleanup_local_output(get<Os>(output), get<Os>(local_args_alloc)),...);
+        (cleanup_local_output(get<Os>(output), get<Os>(local_args_alloc)), ...);
         return res;
       }(std::make_index_sequence<std::tuple_size_v<OutputArg>>());
     }(std::make_index_sequence<std::tuple_size_v<InputArg>>());
@@ -287,7 +304,9 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
     return unrecoverable_error();
   }
 
-  ForeignHostFnResult status = run_mock_func_inner<InputArg, OutputArg, mock_func_inner>(*input_arg, *output_arg);//mock_func_inner(*input_arg, *output_arg);
+  ForeignHostFnResult status =
+      run_mock_func_inner<InputArg, OutputArg, mock_func_inner>(
+          *input_arg, *output_arg); // mock_func_inner(*input_arg, *output_arg);
 
   if (status.panic != std::to_underlying(HostFnErrorCode::kNoneOrRecoverable)) {
     if (syscall_logfd != -1) {

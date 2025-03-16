@@ -42,8 +42,9 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   assert(call_context->syscall_handler);
   assert(call_context->runtime);
 
-  return syscall_fn_outer(*call_context->syscall_handler, *call_context->runtime, arg1,
-                          arg2, arg3, arg4, arg5, arg6);
+  return syscall_fn_outer(*call_context->syscall_handler,
+                          *call_context->runtime, arg1, arg2, arg3, arg4, arg5,
+                          arg6);
 }
 
 } // namespace
