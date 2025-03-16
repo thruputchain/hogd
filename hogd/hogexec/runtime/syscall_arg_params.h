@@ -1,11 +1,13 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <optional>
 #include <span>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -28,16 +30,17 @@ namespace hogd {
 // non-optional args can be passed as T or T&.
 template<typename T> struct SyscallArgParams;
 
-template<> struct SyscallArgParams<uint64_t> {
+// Primitive type syscall input
+template<std::integral T> requires (sizeof(T) <= 8)
+struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static uint64_t parse(std::span<std::byte> /*unused*/,
-                                  uint64_t input)
+  constexpr static T parse(std::span<std::byte> /*unused*/, uint64_t input)
   {
     return input;
   }
   constexpr static bool validate(uint64_t /*unused*/) { return true; }
-  constexpr static uint64_t deref(uint64_t value) { return value; }
+  constexpr static T deref(T value) { return value; }
 };
 
 template<> struct SyscallArgParams<std::span<std::byte>> {
@@ -83,9 +86,9 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   }
 };
 
-// Trivially copyable output types that do not fit into a uint64_t, and
-// must therefore be passed as contract memory offsets.
-template<typename T> requires std::is_trivially_copyable_v<T> && (sizeof(T) > 8)
+// Trivially copyable input and output types.
+// Must be passed as contract memory offsets.
+template<typename T> requires std::is_trivially_copyable_v<T>
 struct SyscallArgParams<T &> {
   constexpr static size_t kNumInputs = 1;
   constexpr static T *parse(std::span<std::byte> contract_memory,
@@ -97,6 +100,66 @@ struct SyscallArgParams<T &> {
   constexpr static bool validate(T *arg) { return (arg != nullptr); }
 
   constexpr static T &deref(T *value) { return *value; }
+};
+
+// Optional trivially copyable input types.
+template<typename T> requires std::is_trivially_copyable_v<T>
+struct SyscallArgParams<const T *> {
+  constexpr static size_t kNumInputs = 1;
+  constexpr static T *parse(std::span<std::byte> contract_memory,
+                            uint64_t offset)
+  {
+    return check_user_argument<T>(contract_memory, offset, sizeof(T));
+  }
+
+  constexpr static bool validate(T * /*unused*/) { return true; }
+
+  constexpr static const T *deref(const T *value) { return value; }
+};
+
+// custom parse types
+template<> struct SyscallArgParams<const Signature &> {
+  constexpr static size_t kNumInputs = 2;
+  constexpr static std::optional<const Signature>
+  parse(std::span<std::byte> contract_memory, uint64_t arg1, uint64_t arg2)
+  {
+    return check_user_custom_input_argument<Signature>(contract_memory, arg1,
+                                                       arg2);
+  }
+
+  constexpr static bool validate(std::optional<const Signature> const &arg)
+  {
+    return arg.has_value();
+  }
+
+  constexpr static const Signature &
+  deref(std::optional<const Signature> const &value)
+  {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *value;
+  }
+};
+
+template<> struct SyscallArgParams<const PublicKey &> {
+  constexpr static size_t kNumInputs = 2;
+  constexpr static std::optional<const PublicKey>
+  parse(std::span<std::byte> contract_memory, uint64_t arg1, uint64_t arg2)
+  {
+    return check_user_custom_input_argument<PublicKey>(contract_memory, arg1,
+                                                       arg2);
+  }
+
+  constexpr static bool validate(std::optional<const PublicKey> const &arg)
+  {
+    return arg.has_value();
+  }
+
+  constexpr static const PublicKey &
+  deref(std::optional<const PublicKey> const &value)
+  {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *value;
+  }
 };
 
 } // namespace hogd
