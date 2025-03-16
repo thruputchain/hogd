@@ -222,14 +222,7 @@ run_mock_func_inner(InputArg const& input, OutputArg& output)
   // This is annoying.
   cleanup_args_t local_args_alloc{};
 
-  if constexpr (std::same_as<NonnegativeIntGet_input, InputArg>) {
-    static_assert(std::same_as<cleanup_args_t, std::tuple<int128_t, int128_t>>);
-  }
-    static_assert(std::same_as<decltype(cleanup_type(std::declval<int128_xdr&>())), int128_t>);
-
-
   struct NullRuntime : public Runtime {
-
     NullRuntime() : Runtime(std::make_unique<HostCallContext>()) {}
     uint64_t get_available_gas() const noexcept override {
       return std::numeric_limits<GasAmount>::max();
@@ -252,7 +245,6 @@ run_mock_func_inner(InputArg const& input, OutputArg& output)
       std::terminate();
     }
   };
-  
 
   NullRuntime null_runtime;
 
