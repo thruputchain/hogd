@@ -1,12 +1,5 @@
 #pragma once
 
-// Uint256 reservation implementation.
-// The NNInt primitive allows overflows in the positive direction,
-// and caps the value at INT128_MAX in the next snapshot.
-//
-// Implementation requires tracking the total amount added to an nnint
-// in a block, which requires an int larger than 128 bits.
-
 #include <concepts>
 #include <limits>
 
@@ -15,6 +8,15 @@
 
 namespace hogd {
 
+// Uint256 reservation implementation.
+// The NNInt primitive allows overflows in the positive direction,
+// and caps the value at INT128_MAX in the next snapshot.
+//
+// Implementation requires tracking the total amount added to an nnint
+// in a block, which requires an int larger than 128 bits.
+//
+// Templated impl because that makes the logic slightly clearer,
+// although the only instantiation right now is T=uint128_t.
 template<std::unsigned_integral T> class CappedOverflowReservation {
 public:
   CappedOverflowReservation &operator+=(T v)

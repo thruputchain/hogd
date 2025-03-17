@@ -1,9 +1,10 @@
 #pragma once
 
-#include <cstdint>
+#include <cassert>
 #include <optional>
-#include <set>
+#include <variant>
 
+#include "hogd/base/types.h"
 #include "hogd/hogdb/softstate/uint256_reservation.h"
 #include "storage_item.hh"
 #include "x23/mvar.h"
@@ -12,10 +13,10 @@ namespace hogd {
 
 // Manage concurrent accesses to a StorageItem in the database.
 //
-// Some data types will require internal data structures more complex than a
-// StorageItem,(which is really a serialization format more than an efficient
-// data structure). The internals may need reimplementation when we have a
-// database to interact with. However, the external interface should look
+// TODO(geoff): Some data types will require internal data structures more
+// complex than a StorageItem,(which is really a serialization format more than
+// an efficient data structure). The internals may need reimplementation when we
+// have a database to interact with. However, the external interface should look
 // approximately like this.
 class StorageItemFrame {
 public:
@@ -31,14 +32,11 @@ public:
   // and then either calls commit or revert on the delta
   //
   // Each transaction should call try_reserve_delta() at most ONCE per object.
-  // This means I need to condense things into one StorageDelta object
-  // (or I could swap for a list, but that's annoying).
+  // The executor should therefore condense all modifications into one
+  // StorageDelta per each modified item.
   //
-  // Returns true if reservation is successful.
-  //
-  // TODO(geoff): We can probably just remove the commit_delta() method
-  // entirely.  Will wait to remove until we
-  // have all the other StorageDelta types worked out.
+  // Returns true iff reservation is successful.
+  // No-op if the operation fails.
   [[nodiscard]] bool try_reserve_delta(StorageDelta const &delta);
 
   void revert_delta(StorageDelta const &delta);
