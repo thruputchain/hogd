@@ -201,7 +201,7 @@ concept is_{0} =)",
       comma.reset();
       string argtypes = "std::tuple<";
       for (const string &t : proc.arg_types)
-        argtypes += std::format("{}{}", comma.get(), t);
+        argtypes += std::format("{}{}", comma.get(), map_type(t));
       argtypes += ">";
       string dispatch = std::format(
           R"(return std::forward<Server>(server).{}(

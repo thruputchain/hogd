@@ -389,7 +389,7 @@ client_example(int fd)
   auto cstream = rpc_stream_logged(cp, fd);
   // Now X23 owns the file descriptor
 
-  myvers::client = cstream.client(myvers{});
+  myvers::client client = cstream.client(myvers{});
   return client.add(5, 5)(); // second set of parens to wait synchronously
   // file descriptor will be closed on destruction of client
 }
