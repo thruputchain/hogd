@@ -22,6 +22,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_link_options(-stdlib=libc++ -fexperimental-library)
 endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-interference-size")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
 endif()
 set(CMAKE_C_FLAGS_DEBUG "-DDEBUG -O0")
@@ -43,7 +44,7 @@ check_ipo_supported()
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/built_headers)
 
-# Enable GoogleTest (google's unit testing library)
+# Enable GoogleTest (Google's unit testing library)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 option(INSTALL_GTEST "" OFF)
 add_subdirectory(external/googletest)
@@ -52,7 +53,7 @@ set(GOOGLETEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/googletest"
 enable_testing()
 include(GoogleTest)
 
-# Enable performance (google's benchmarking library)
+# Enable performance (Google's benchmarking library)
 option(BENCHMARK_ENABLE_TESTING "" OFF)
 add_subdirectory(external/benchmark)
 if(BENCHMARK_ENABLE_TESTING)
@@ -65,6 +66,13 @@ set(BUILD_WASI none)
 add_subdirectory(external/wasm3)
 set(WASM3_INCLUDE_DIRS "external/wasm3/source")
 include_directories(${WASM3_INCLUDE_DIRS})
+
+# Enable crc32c (Google's CRC library)
+option(CRC32C_BUILD_TESTS "" OFF)
+option(CRC32C_BUILD_BENCHMARKS "" OFF)
+option(CRC32C_USE_GLOG "" OFF)
+option(CRC32C_INSTALL "" OFF)
+add_subdirectory(external/crc32c)
 
 # Detect number of cores - only needed for make-based ExternalProject
 include(ProcessorCount)
@@ -82,18 +90,20 @@ endif()
 # --enable-opt sets -march=native and other compiler flags
 # that the libsodium authors deem important
 include(ExternalProject)
-ExternalProject_Add(libsodium
+ExternalProject_Add(libsodium_build
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
     CONFIGURE_COMMAND
       ${CMAKE_SOURCE_DIR}/external/libsodium/configure
-      --prefix=${CMAKE_INSTALL_PREFIX}
+      --prefix=<BINARY_DIR>
       --enable-opt
+      --disable-pie
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
       CFLAGS=${EXTERNAL_C_FLAGS} CXXFLAGS=${EXTERNAL_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
-    INSTALL_COMMAND ""  # Skip installation step
+    INSTALL_COMMAND "" # Skip installation step
 )
-ExternalProject_Get_Property(libsodium binary_dir)
+
+ExternalProject_Get_Property(libsodium_build binary_dir)
 set(LIBSODIUM_PCFILEDIR "${binary_dir}")
 set(LIBSODIUM_TOP_SRCDIR "${CMAKE_SOURCE_DIR}/external/libsodium")
 set(LIBSODIUM_INCLUDE_DIRS
@@ -101,9 +111,13 @@ set(LIBSODIUM_INCLUDE_DIRS
     "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include"
     "${LIBSODIUM_TOP_SRCDIR}/src/libsodium/include/sodium"
 )
-set(LIBSODIUM_LIBRARIES
-"${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium.a")
 include_directories(${LIBSODIUM_INCLUDE_DIRS})
+
+set(LIBSODIUM_LIBRARY
+"${LIBSODIUM_PCFILEDIR}/src/libsodium/.libs/libsodium${CMAKE_STATIC_LIBRARY_SUFFIX}")
+
+add_library(libsodium STATIC IMPORTED)
+set_target_properties(libsodium PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_LIBRARY}")
 
 # Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)

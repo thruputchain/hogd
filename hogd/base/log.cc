@@ -7,6 +7,7 @@
 #include <source_location>
 #include <string>
 #include <string_view>
+#include <syncstream>
 #include <vector>
 
 #include "hogd/config.h"
@@ -104,7 +105,7 @@ ConsoleLogger::vlog(LogLevel level, std::string_view fmt,
 
   // write to stderr
   // todo(amb): maybe write to the fd directly.
-  std::cerr << buf;
+  std::osyncstream(std::cerr) << buf;
 }
 
 void

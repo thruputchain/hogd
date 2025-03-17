@@ -13,3 +13,6 @@
 [submodule "external/wasm3"]
 	path = external/wasm3
 	url = https://github.com/groundhogchain/wasm3.git
+[submodule "external/crc32c"]
+	path = external/crc32c
+	url = https://github.com/google/crc32c.git

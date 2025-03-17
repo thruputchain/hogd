@@ -30,11 +30,11 @@ add_executable(
 target_link_libraries(
   runtime
   wasmi_lib
+  runtime_trampoline
   protocol
   m3 # wasm3
   base
   crypto
-  ${LIBSODIUM_LIBRARIES}
 )
 
 add_dependencies(
