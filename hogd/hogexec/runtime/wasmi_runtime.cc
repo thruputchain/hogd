@@ -2,9 +2,9 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
-#include <string>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
