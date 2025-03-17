@@ -2,59 +2,58 @@
 
 #include <cstddef>
 #include <cstdlib>
-#include <span>
 #include <vector>
 
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
-#include "types.hh"
 
 namespace hogd {
 
-TEST(SHA256, NullInput)
+TEST(SHA256, BasicUsage)
 {
-  std::span<std::byte> null_input{};
-  SHA256Hash hash = sha256(null_input);
-  EXPECT_NE(hash, SHA256Hash{});
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> a_same = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
+
+  EXPECT_EQ(sha256(a), sha256(a_same));
+  EXPECT_NE(sha256(a), sha256(b));
 }
 
-TEST(SHA256, SomeInput)
+TEST(CRC32C, BasicUsage)
 {
-  std::vector<uint8_t> bytes = {0, 1, 2, 3};
-  std::vector<uint8_t> bytes2 = {3, 2, 1, 0};
-  EXPECT_NE(sha256(std::as_bytes(std::span(bytes))),
-            sha256(std::as_bytes(std::span(bytes2))));
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> a_same = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
+
+  // direct calcuation
+  EXPECT_EQ(crc32c(a), crc32c(a_same));
+  EXPECT_NE(crc32c(a), crc32c(b));
+
+  // appended calculation
+  uint32_t crc = crc32c(a);
+  crc = crc32c_append(crc, b);
+  a.insert(a.end(), b.begin(), b.end());
+  EXPECT_EQ(crc, crc32c(a));
 }
 
-TEST(Siphash24, NullInput)
+TEST(Siphash24, BasicUsage)
 {
-  std::span<std::byte> null_input{};
-  Siphash24Key key = siphash24_keygen();
-  uint64_t mac = siphash24(null_input, key);
-  EXPECT_EQ(mac, siphash24(null_input, key));
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> a_same = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
 
-  auto key2 = siphash24_keygen();
-  EXPECT_NE(mac, siphash24(null_input, key2));
-}
+  // the same key should produce different outputs for different inputs.
+  SipHash24 hasher;
+  EXPECT_EQ(hasher(a), hasher(a_same));
+  EXPECT_NE(hasher(a), hasher(b));
 
-TEST(Siphash24, SomeInput)
-{
-  std::vector<uint8_t> bytes = {0, 1, 2, 3};
-  std::vector<uint8_t> bytes2 = {3, 2, 1, 0};
-
-  auto input = std::as_bytes(std::span(bytes));
-  auto input2 = std::as_bytes(std::span(bytes2));
-
-  // the same key should produce the same output for the same input value.
-  Siphash24Key key = siphash24_keygen();
-  EXPECT_EQ(siphash24(input, key), siphash24(input, key));
-  EXPECT_NE(siphash24(input, key), siphash24(input2, key));
-
-  // a different key should produce a different output.
-  Siphash24Key key2 = siphash24_keygen();
-  EXPECT_NE(siphash24(input, key), siphash24(input, key2));
+  // different keys should produce different outputs for the same input.
+  SipHash24 hasher2;
+  EXPECT_NE(hasher.get_key(), hasher2.get_key());
+  EXPECT_NE(hasher(a), hasher2(a));
+  EXPECT_NE(hasher(b), hasher2(b));
 }
 
 } // namespace hogd

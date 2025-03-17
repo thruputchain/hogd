@@ -566,6 +566,14 @@ public:
   {}
 };
 
+// The return type of RpcStream<Logger>::client<VersMeta>, for
+// situations where you cannot use auto.
+template<typename VersMeta, typename Logger = RpcNoLogger,
+         typename... ExtraArgs>
+using RpcClient =
+    VersMeta::template client<typename RpcStream<Logger>::ClientRef,
+                              ExtraArgs...>;
+
 // Create an RPC Stream attached to a file descriptor.  Returns a
 // Configurator object with which you can add servers and create
 // clients, e.g.,
@@ -588,9 +596,10 @@ rpc_stream(CoroPoll &cp, int fd, Logger logger = {})
 // pass logfd = -1 to suppress logging and most of the logging
 // overhead.
 inline RpcStream<RpcLogger>::Configurator
-rpc_stream_logged(CoroPoll &cp, int fd)
+rpc_stream_logged(CoroPoll &cp, int fd,
+                  int logfd = RpcLogger::default_logfd)
 {
-  return RpcStream<RpcLogger>::make(cp, UniqueFd{fd}, RpcLogger(fd));
+  return RpcStream<RpcLogger>::make(cp, UniqueFd{fd}, RpcLogger(logfd));
 }
 
 } // namespace x23

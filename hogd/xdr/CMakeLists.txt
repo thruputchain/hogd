@@ -1,16 +1,18 @@
 add_xdr(
-	protocol 
-	types.x 
-	syscall.x 
+	protocol
 	contract.x
-	storage_object.x)
+	coord.x
+	types.x 
+	storage_object.x
+	syscall.x 
+)
 
 add_dependencies(protocol generate_syscall_x)
 
 add_xdr_rs(
-	protocol_rs 
-	${CMAKE_CURRENT_SOURCE_DIR}/rs_xdr/src 
-	types.x 
+	protocol_rs
+	${CMAKE_CURRENT_SOURCE_DIR}/rs_xdr/src
+	types.x
 	syscall.x)
 
 add_dependencies(protocol_rs generate_syscall_x)

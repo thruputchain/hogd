@@ -3,6 +3,7 @@
 #pragma once
 
 #include <concepts>
+#include <new>
 
 #include "hogd/base/types.h"
 
@@ -178,5 +179,18 @@ integer_add_overflow(T a, U b)
   return integer_add_overflow(a, b, &r);
 #endif
 }
+
+// kCacheLineSize is the minimum offset between two objects needed to prevent
+// false sharing.
+#ifdef __cpp_lib_hardware_interference_size
+constexpr inline size_t kCacheLineSize =
+    std::hardware_destructive_interference_size;
+#else  // __cpp_lib_hardware_interference_size
+constexpr inline size_t kCacheLineSize = 64;
+#endif // __cpp_lib_hardware_interference_size
+
+// kPageSize is the size of a page in bytes.
+// TODO(amb): use getpagesize() to confirm size at runtime.
+constexpr inline size_t kPageSize = 4096;
 
 } // namespace hogd

@@ -12,5 +12,4 @@ target_link_libraries(
   hogexec
   hogd
   runtime
-  runtime_trampoline
 )

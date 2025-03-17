@@ -2,86 +2,127 @@
 
 #pragma once
 
-#include <array>
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <span>
-
 #include <sodium.h>
 
+#include <array>
+#include <cassert>
+#include <span>
+
+#include "x23/serialize.h"
+#include "x23/x23.h"
+#include <crc32c/crc32c.h>
+
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "types.hh"
 
 namespace hogd {
 
-using Siphash24Key = std::array<uint8_t, 16>;
+// read_random fills buf with high-quality random bytes (e.g., /dev/urandom)
+// suitable for creating secret keys.
+inline void
+read_random(x23::is_bytespan auto buf)
+{
+  randombytes_buf(reinterpret_cast<uint8_t *>(buf.data()), buf.size());
+}
 
-// sha256 returns a SHA256 hash of the input.
+// sha256 returns the SHA256 hash of buf.
 inline SHA256Hash
-sha256(std::span<const std::byte> input)
+sha256(x23::is_bytespan auto buf)
 {
   SHA256Hash out;
-
   [[maybe_unused]]
-  int res = crypto_hash_sha256(out.data(),
-                               reinterpret_cast<const uint8_t *>(input.data()),
-                               input.size());
-
-  // libsodium's version of sha256 (on release 1.20) never returns errors.
-  assert(res == 0);
+  int ret = crypto_hash_sha256(out.data(),
+                               reinterpret_cast<const uint8_t *>(buf.data()),
+                               buf.size());
+  // this libsodium call cannot fail (V1.20).
+  assert(ret == 0);
   return out;
 }
 
-// siphash24 returns a 64-bit message authentication code from a
-// variable-length message and 128-bit secret key. This function implements the
-// version with parameters 2-4.
-inline uint64_t
-siphash24(std::span<const std::byte> input, const Siphash24Key &key)
+template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
+inline SHA256Hash
+sha256(const T &value)
 {
-  static_assert(sizeof(Siphash24Key) == crypto_shorthash_siphash24_KEYBYTES);
-  static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
+  auto buf = x23::serialize(value);
+  return sha256(buf);
+}
 
+// SipHash24Key is the secret key used by SipHash24.
+using SipHash24Key = std::array<uint8_t, 16>;
+
+// SipHash24 is a non-cryptographic hash function that is designed to prevent
+// denial of service attacks by making it more difficult for an adversary to
+// find collisions that cause load imbalances. SipHash24 requires a secret key,
+// which will be randomly generated if not specified.
+class alignas(kCacheLineSize) SipHash24 {
+public:
+  // get_default returns a default, process-wide SipHash24 that was initialized
+  // with a random key. In most cases, you should use this unless you need a
+  // specific key.
+  static SipHash24 &get_default()
+  {
+    static SipHash24 hasher;
+    return hasher;
+  }
+
+  SipHash24() { read_random(std::as_writable_bytes(std::span(key_))); }
+  SipHash24(SipHash24Key key) : key_(key) {}
+  ~SipHash24() = default;
+
+  // Returns the hash of the input bytes.
+  uint64_t operator()(x23::is_bytespan auto buf);
+
+  SipHash24Key get_key() const { return key_; }
+
+private:
+  // the secret key.
+  SipHash24Key key_;
+};
+
+// confirm our types are the same as libsodium.
+static_assert(sizeof(SipHash24Key) == crypto_shorthash_siphash24_KEYBYTES);
+static_assert(sizeof(uint64_t) == crypto_shorthash_siphash24_BYTES);
+
+uint64_t
+SipHash24::operator()(x23::is_bytespan auto buf)
+{
   uint64_t out;
-
-  // This is safe on nullptr (0-length) inputs:
-  // Verifiable by reading the implementation at
-  // https://github.com/jedisct1/libsodium/blob/master/src/libsodium/crypto_shorthash/siphash24/ref/shorthash_siphash24_ref.c#L6
-  // This function also never returns anything other than 0, so the error check
-  // is redundant.
-
   [[maybe_unused]]
-  int res = crypto_shorthash_siphash24(reinterpret_cast<uint8_t *>(&out),
-                                       reinterpret_cast<const uint8_t *>(
-                                           input.data()),
-                                       input.size(), key.data());
-  // libsodium's version of siphash24 (on release 1.20) never returns errors.
-  assert(res == 0);
+  int ret =
+      crypto_shorthash_siphash24(reinterpret_cast<uint8_t *>(&out),
+                                 reinterpret_cast<const uint8_t *>(buf.data()),
+                                 buf.size(), key_.data());
+  // this libsodium call cannot fail (V1.20).
+  assert(ret == 0);
   return out;
 }
 
-// siphash24_keygen generates a key for use with siphash24.
-inline Siphash24Key
-siphash24_keygen()
-{
-  Siphash24Key out;
-  // Both siphash24 and siphash24x in libsodium use a 16-byte key,
-  // and use the same keygen method.
-  // https://libsodium.gitbook.io/doc/hashing/short-input_hashing
-  crypto_shorthash_keygen(out.data());
-  return out;
-}
-
+// ed25519_verify verifies sig for a msg and publickey.
 inline bool
-ed25519_verify(Ed25519PublicKey const &publickey,
-               Ed25519Signature const &signature,
-               std::span<const std::byte> message)
+ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
+               x23::is_bytespan auto msg)
 {
-  return crypto_sign_ed25519_verify_detached(signature.data(),
+  return crypto_sign_ed25519_verify_detached(sig.data(),
                                              reinterpret_cast<const uint8_t *>(
-                                                 message.data()),
-                                             message.size(),
-                                             publickey.data()) == 0;
+                                                 msg.data()),
+                                             msg.size(), publickey.data()) == 0;
+}
+
+// crc32c calculates the CRC32C of buf.
+inline uint32_t
+crc32c(x23::is_bytespan auto buf)
+{
+  return crc32c::Crc32c(reinterpret_cast<const uint8_t *>(buf.data()),
+                        buf.size());
+}
+
+// crc32c_append extends a previous CRC32C to include buf.
+inline uint32_t
+crc32c_append(uint32_t crc, x23::is_bytespan auto buf)
+{
+  return crc32c::Extend(crc, reinterpret_cast<const uint8_t *>(buf.data()),
+                        buf.size());
 }
 
 } // namespace hogd
