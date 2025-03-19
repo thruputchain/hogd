@@ -266,9 +266,10 @@ CoroPollImpl::check(int timeout)
     pollfds.push_back({selfpipe_[0].get(), pollflags[0], 0});
     for (const auto &kv : *ptr) {
       const FdState &f = kv.second;
-      if (f.poisoned)
+      short events;
+      if (f.poisoned || !(events = f.events()))
         continue;
-      pollfds.push_back({kv.first, f.events(), 0});
+      pollfds.push_back({kv.first, events, 0});
     }
   }
 
@@ -300,8 +301,6 @@ CoroPollImpl::check(int timeout)
         if (auto h = std::exchange(f.callbacks[write], nullptr)
                          .set_result_without_resuming(0))
           cbs.push_back(h);
-    if (f.empty())
-      ptr->erase(it);
   }
   ptr.reset();
   pool_.go(cbs);

@@ -82,10 +82,6 @@ struct BufHolder {
     std::lock_guard _g(buflk_);
     reader_.reset();
   }
-  bool empty() noexcept {
-    std::lock_guard _g(buflk_);
-    return !reader_ || reader_->start_ == reader_->stop_;
-  }
 };
 
 class CoroPollImpl : public DestroyInhibit {
@@ -235,9 +231,6 @@ private:
         if (callbacks[write])
           ret |= pollflags[write];
       return ret;
-    }
-    bool empty() noexcept {
-      return !callbacks[0] && !callbacks[1] && BufHolder::empty();
     }
   };
   MVar<std::unordered_map<int, FdState>> state_;
