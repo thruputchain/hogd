@@ -5,7 +5,6 @@ add_library(x23
   corosync.h
   corosync.cc
   corotrace.h
-  corotrace.cc
   err.h
   event.cc
   event.h

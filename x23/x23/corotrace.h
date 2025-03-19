@@ -192,7 +192,7 @@ struct CoroTrace {
   }
 };
 
-extern CoroTrace corotrace;
+inline CoroTrace corotrace;
 
 #else // !X23_CORO_TRACE
 

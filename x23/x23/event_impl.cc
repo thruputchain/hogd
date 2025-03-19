@@ -74,7 +74,8 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode)
   }
   else {
     if (old_mode == kActive &&
-        epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1)
+        epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1 &&
+	errno != EBADF)
       Errno{}.raise("EPOLL_CTL_DEL failed");
     docbs(fdp);
   }
@@ -299,7 +300,7 @@ CoroPollImpl::check(int timeout)
         if (auto h = std::exchange(f.callbacks[write], nullptr)
                          .set_result_without_resuming(0))
           cbs.push_back(h);
-    if (!f.callbacks[0] && !f.callbacks[1])
+    if (f.empty())
       ptr->erase(it);
   }
   ptr.reset();

@@ -39,6 +39,9 @@ struct BufferedReader : std::enable_shared_from_this<BufferedReader> {
   std::uint16_t stop_{};
   Mem m_;
 
+  BufferedReader() noexcept = default;
+  BufferedReader(BufferedReader &&) noexcept = delete;
+
   ssize_t operator()(int fd, void *buf, size_t len);
   std::expected<size_t, Errno> read(BorrowedFd fd, is_bytevec auto *buf,
                                     size_t len)
@@ -78,6 +81,10 @@ struct BufHolder {
   {
     std::lock_guard _g(buflk_);
     reader_.reset();
+  }
+  bool empty() noexcept {
+    std::lock_guard _g(buflk_);
+    return !reader_ || reader_->start_ == reader_->stop_;
   }
 };
 
@@ -228,6 +235,9 @@ private:
         if (callbacks[write])
           ret |= pollflags[write];
       return ret;
+    }
+    bool empty() noexcept {
+      return !callbacks[0] && !callbacks[1] && BufHolder::empty();
     }
   };
   MVar<std::unordered_map<int, FdState>> state_;
