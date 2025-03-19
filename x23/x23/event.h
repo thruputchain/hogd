@@ -51,6 +51,22 @@ struct BufHolder {
   TestLock buflk_;
   std::shared_ptr<BufferedReader> reader_;
 
+  BufHolder() noexcept = default;
+  BufHolder(BufHolder &&other) noexcept {
+    std::lock_guard _g(other.buflk_);
+    reader_ = std::move(other.reader_);
+  }
+  BufHolder &operator=(BufHolder &&other) noexcept {
+    // We're going to assume that *this is only accessible in one
+    // thread, since this assignment operator should only be used to
+    // grow the FdState array.
+    if (this != &other) {
+      std::lock_guard _g(other.buflk_);
+      reader_ = std::move(other.reader_);
+    }
+    return *this;
+  }
+
   std::shared_ptr<detail::BufferedReader> reader()
   {
     std::lock_guard _g(buflk_);
@@ -146,14 +162,21 @@ private:
     std::array<std::atomic<WorkItem>, 2> callbacks{};
 
     FdState() noexcept = default;
-    FdState(const FdState &other) { *this = other; }
-    FdState &operator=(const FdState &other)
-    {
+    FdState(FdState &&other) noexcept : BufHolder(std::move(other)) {
+      copy_fields(other);
+    }
+    FdState &operator=(FdState &&other) noexcept {
+      BufHolder::operator=(std::move(other));
+      copy_fields(other);
+      return *this;
+    }
+
+  private:
+    void copy_fields(const FdState &other) {
       mode = other.mode.load();
       ready = other.ready.load();
       for (size_t i = 0; i < callbacks.size(); ++i)
         callbacks[i] = other.callbacks[i].load();
-      return *this;
     }
   };
 

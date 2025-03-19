@@ -45,10 +45,10 @@ public:
   {
     if (p_ != other.p_) {
       if (p_)
-	ops::decref(p_);
+        ops::decref(p_);
       p_ = other.p_;
       if (p_)
-	ops::incref(p_);
+        ops::incref(p_);
     }
     return *this;
   }
