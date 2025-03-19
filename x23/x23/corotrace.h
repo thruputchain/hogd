@@ -194,6 +194,8 @@ struct CoroTrace {
 
 inline CoroTrace corotrace;
 
+} // namespace x23
+
 #else // !X23_CORO_TRACE
 
 #define X23_IFTRACE(...)
@@ -205,5 +207,3 @@ inline CoroTrace corotrace;
 #define SLOC_VAR
 
 #endif // !X23_CORO_TRACE
-
-} // namespace x23

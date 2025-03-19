@@ -75,7 +75,9 @@ int
 main()
 {
   setlinebuf(stdout);
+#ifndef NDEBUG
   corotrace.enable_ = 2;
+#endif // !NDEBUG
   // RpcLogger::default_logfd = 1;
   Listener listener(cp);
   std::stop_source ss;
