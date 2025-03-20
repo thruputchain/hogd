@@ -30,3 +30,6 @@
 
 // Define to 1 if you have std::stacktrace
 #cmakedefine01 HAVE_STD_STACKTRACE
+
+// Define to 1 if you have a working std::atomic<std::shared_ptr<T>>
+#cmakedefine01 HAVE_ATOMIC_SHARED_PTR

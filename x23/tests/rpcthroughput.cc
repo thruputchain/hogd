@@ -75,7 +75,7 @@ int
 main()
 {
   setlinebuf(stdout);
-#ifdef X23_CORO_TRACE
+#if X23_CORO_TRACE
   corotrace.enable_ = 2;
 #endif // !X23_CORO_TRACE
   // RpcLogger::default_logfd = 1;

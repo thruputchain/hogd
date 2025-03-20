@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 
 #include <x23/async.h>
+#include <x23/atomicsharedptr.h>
 #include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/corosync.h>
@@ -30,7 +31,7 @@ namespace x23 {
 
 namespace detail {
 
-struct BufferedReader : std::enable_shared_from_this<BufferedReader> {
+struct BufferedReader {
   using Super = std::enable_shared_from_this<BufferedReader>;
   using Mem = std::array<char, 4092 - sizeof(Super)>;
 
@@ -50,37 +51,31 @@ struct BufferedReader : std::enable_shared_from_this<BufferedReader> {
 };
 
 struct BufHolder {
-  TestLock buflk_;
-  std::shared_ptr<BufferedReader> reader_;
+  atomic_shared_ptr<BufferedReader> reader_;
 
   BufHolder() noexcept = default;
   BufHolder(BufHolder &&other) noexcept
   {
-    std::lock_guard _g(other.buflk_);
-    reader_ = std::move(other.reader_);
+    reader_.store(other.reader_.exchange(nullptr));
   }
   BufHolder &operator=(BufHolder &&other) noexcept
   {
-    // We're going to assume that *this and other are only accessible
-    // in one thread, since this assignment operator should only be
-    // used to grow the FdState array.
     if (this != &other)
-      reader_ = std::move(other.reader_);
+      reader_.store(other.reader_.exchange(nullptr));
     return *this;
   }
 
-  std::shared_ptr<detail::BufferedReader> reader()
+  std::shared_ptr<BufferedReader> reader()
   {
-    std::lock_guard _g(buflk_);
-    if (!reader_)
-      reader_ = std::make_shared<detail::BufferedReader>();
-    return reader_;
+    auto ret = reader_.load();
+    if (!ret) {
+      auto buf = std::make_shared<BufferedReader>();
+      if (reader_.compare_exchange_strong(ret, buf))
+        return buf;
+    }
+    return ret;
   }
-  void buf_clear()
-  {
-    std::lock_guard _g(buflk_);
-    reader_.reset();
-  }
+  void buf_clear() { reader_.store(nullptr); }
 };
 
 class CoroPollImpl : public DestroyInhibit {

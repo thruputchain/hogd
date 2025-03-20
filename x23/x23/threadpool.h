@@ -208,7 +208,9 @@ public:
     }
 
 #else  // NDEBUG
-    CrashIfSuspended() noexcept = default;
+    constexpr CrashIfSuspended() noexcept = default;
+    // Explicit destructor to avoid unused variable warnings
+    constexpr ~CrashIfSuspended() {}
     explicit CrashIfSuspended(std::nullptr_t) noexcept {}
     void reset() noexcept {}
     void check() const noexcept {}

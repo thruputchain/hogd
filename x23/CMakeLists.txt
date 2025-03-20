@@ -47,6 +47,7 @@ else()
 endif()
 
 include(cmake/accept4.cmake)
+include(cmake/atomicsharedptr.cmake)
 include(cmake/demangle.cmake)
 include(cmake/epoll.cmake)
 include(cmake/pause.cmake)
