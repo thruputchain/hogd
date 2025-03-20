@@ -33,8 +33,10 @@ template<typename T> struct atomic_shared_ptr : std::shared_ptr<T> {
   {
     return std::atomic_exchange(this, std::move(desired));
   }
-  bool compare_exchange_strong(super &expected, super desired) {
-    std::atomic_compare_exchange_strong(this, &expected, std::move(desired));
+  bool compare_exchange_strong(super &expected, super desired)
+  {
+    return std::atomic_compare_exchange_strong(this, &expected,
+                                               std::move(desired));
   }
 };
 
