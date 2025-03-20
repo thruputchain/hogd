@@ -12,9 +12,9 @@
 #include <x23/config.h>
 #include <x23/corosync.h>
 #include <x23/err.h>
-#include <x23/fileio.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
+#include <x23/sockio.h>
 #include <x23/testlock.h>
 #include <x23/threadpool.h>
 #include <x23/vec.h>
@@ -54,11 +54,13 @@ struct BufHolder {
   std::shared_ptr<BufferedReader> reader_;
 
   BufHolder() noexcept = default;
-  BufHolder(BufHolder &&other) noexcept {
+  BufHolder(BufHolder &&other) noexcept
+  {
     std::lock_guard _g(other.buflk_);
     reader_ = std::move(other.reader_);
   }
-  BufHolder &operator=(BufHolder &&other) noexcept {
+  BufHolder &operator=(BufHolder &&other) noexcept
+  {
     // We're going to assume that *this and other are only accessible
     // in one thread, since this assignment operator should only be
     // used to grow the FdState array.
@@ -162,17 +164,20 @@ private:
     std::array<std::atomic<WorkItem>, 2> callbacks{};
 
     FdState() noexcept = default;
-    FdState(FdState &&other) noexcept : BufHolder(std::move(other)) {
+    FdState(FdState &&other) noexcept : BufHolder(std::move(other))
+    {
       copy_fields(other);
     }
-    FdState &operator=(FdState &&other) noexcept {
+    FdState &operator=(FdState &&other) noexcept
+    {
       BufHolder::operator=(std::move(other));
       copy_fields(other);
       return *this;
     }
 
   private:
-    void copy_fields(const FdState &other) {
+    void copy_fields(const FdState &other)
+    {
       mode = other.mode.load();
       ready = other.ready.load();
       for (size_t i = 0; i < callbacks.size(); ++i)
@@ -182,7 +187,7 @@ private:
 
   UniqueFd epollfd_;
 
-  //SharedLock resize_lock_{std::thread::hardware_concurrency()};
+  // SharedLock resize_lock_{std::thread::hardware_concurrency()};
   SharedLock resize_lock_{unsigned(pool_.nthreads_)};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
@@ -255,7 +260,7 @@ public:
   // an error occurs.  Always returns either data.size() or an Errno
   // other than EAGAIN.
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
-					    BufView data SLOC_PARM);
+                                            BufView data SLOC_PARM);
 
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
@@ -298,17 +303,16 @@ public:
 
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,
                                               socklen_t len SLOC_PARM);
-  Async<std::expected<int, Errno>> tcpconnect(const sockaddr_storage *ss
-					      SLOC_PARM)
+  Async<std::expected<int, Errno>>
+  tcpconnect(const sockaddr_storage *ss SLOC_PARM)
   {
-    return tcpconnect(reinterpret_cast<const sockaddr *>(ss), sizeof(*ss)
-		      X23_IFTRACE(, sloc));
+    return tcpconnect(reinterpret_cast<const sockaddr *>(ss),
+                      sizeof(*ss) X23_IFTRACE(, sloc));
   }
 
   // Connect and return a file descriptor or a system error.
-  Async<std::expected<int, std::system_error>> tcpconnect(std::string host,
-                                                          std::string port
-							  SLOC_PARM);
+  Async<std::expected<int, std::system_error>>
+  tcpconnect(std::string host, std::string port SLOC_PARM);
 
 private:
   std::thread pollthread_;
