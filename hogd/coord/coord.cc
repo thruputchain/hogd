@@ -7,8 +7,8 @@
 #include <utility>
 
 #include <x23/event.h>
-#include <x23/sockio.h>
 #include <x23/rpc.h>
+#include <x23/sockio.h>
 #include <x23/threadpool.h>
 
 #include "coord.hh"
