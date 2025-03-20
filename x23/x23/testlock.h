@@ -162,7 +162,6 @@ public:
       if (&other != this) {
 	reset();
 	inh_ = std::exchange(other.inh_, nullptr);
-	return *this;
       }
       return *this;
     }

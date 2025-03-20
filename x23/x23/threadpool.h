@@ -77,8 +77,8 @@ public:
       go(h);
   }
 
-  // co_await pool.bg() suspends the current coroutine and
-  // resumes it as soon as possible in a different thread.
+  // co_await pool.bg() suspends the current coroutine and resumes it
+  // as soon as possible in a different thread.
   [[nodiscard]] auto bg()
   {
     struct AwaitBackground {
@@ -133,11 +133,11 @@ public:
   // Drain pauses the current thread and doesn't return untill all
   // coroutine handles that were either in the queue or executing at
   // the time drain was invoked have completed.  Do not call this from
-  // within a coroutine (which could lead to deadlock if two threads
-  // drain simultaneously).  Within a coroutine, use async to invoke
-  // drain in another thread (or just spawn a detached thread if you
-  // don't need to wait for the action to finish, for instance if you
-  // just need to free something after drain completes).
+  // within the ThreadPool (which could lead to deadlock if two
+  // threads drain simultaneously).  Within a coroutine, use async to
+  // invoke drain in another thread (or just spawn a detached thread
+  // if you don't need to wait for the action to finish, for instance
+  // if you just need to free something after drain completes).
   void drain() noexcept;
 
   // If you are executing in a thread pool, return the pool.
@@ -202,7 +202,8 @@ public:
     ~CrashIfSuspended() { check(); }
 
     void reset() noexcept { start_ = SuspendCount{}; }
-    void check() const {
+    void check() const
+    {
       assert(start_ == get_suspend_count() || !start_.valid());
     }
 

@@ -72,10 +72,10 @@ public:
     : t_(std::forward<Args>(args)...)
   {}
 
-  // take() acquries the lock and returns a smart pointer to the
+  // take() acquries the lock and returns a smart pointer Ptr to the
   // object that will release the lock when the pointer is destroyed
-  // or you call reset() on it.  The Ptr returned by take() will
-  // always be non-null, so you can old the lock for a block with:
+  // or when you call reset() on it.  The Ptr returned by take() will
+  // always be non-null, so you can hold the lock for a block with:
   //
   //     if (auto ptr = mvar.take()) {
   //       // access object as *ptr or ptr->fields
@@ -84,7 +84,7 @@ public:
 
   // Like take(), but returns a NULL smart pointer if the lock is
   // unavailable.
-  Ptr try_take() { return {*this, std::try_lock}; }
+  Ptr try_take() { return {*this, std::try_to_lock}; }
 
   // Given an MVar<T> mvar, you can directly access fields of the
   // underlying T as in mvar->field.  The lock will be held by a
@@ -171,7 +171,7 @@ public:
   MVar() noexcept = default;
 
   Ptr take() { return *this; }
-  Ptr try_take() { return {*this, std::try_lock}; }
+  Ptr try_take() { return {*this, std::try_to_lock}; }
 
   template<typename F> decltype(auto) with(F &&f)
     requires std::invocable<F>

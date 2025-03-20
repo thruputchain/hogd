@@ -24,8 +24,6 @@ BufferedReader::operator()(int fd, void *buf, size_t len)
     return 0;
   assert(len <= PTRDIFF_MAX);
 
-  auto _hold = shared_from_this();
-
   if (size_t buflen = stop_ - start_) {
     size_t n = std::min(len, buflen);
     memcpy(buf, m_.data() + start_, n);

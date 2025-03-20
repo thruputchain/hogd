@@ -13,6 +13,8 @@
 #include <cxxabi.h>
 #include <stdlib.h>
 
+// Return a human-readable name for a type.  Attempts to demangle the
+// C++ type name if the the abi library is available.
 namespace x23 {
 template<typename T>
 std::string_view

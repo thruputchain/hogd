@@ -13,7 +13,6 @@
 #include <x23/corosync.h>
 #include <x23/err.h>
 #include <x23/fileio.h>
-#include <x23/growvec.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
 #include <x23/testlock.h>
@@ -60,13 +59,11 @@ struct BufHolder {
     reader_ = std::move(other.reader_);
   }
   BufHolder &operator=(BufHolder &&other) noexcept {
-    // We're going to assume that *this is only accessible in one
-    // thread, since this assignment operator should only be used to
-    // grow the FdState array.
-    if (this != &other) {
-      std::lock_guard _g(other.buflk_);
+    // We're going to assume that *this and other are only accessible
+    // in one thread, since this assignment operator should only be
+    // used to grow the FdState array.
+    if (this != &other)
       reader_ = std::move(other.reader_);
-    }
     return *this;
   }
 
@@ -185,12 +182,11 @@ private:
 
   UniqueFd epollfd_;
 
-  SharedLock resize_lock_{std::thread::hardware_concurrency()};
+  //SharedLock resize_lock_{std::thread::hardware_concurrency()};
+  SharedLock resize_lock_{unsigned(pool_.nthreads_)};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
   std::atomic_uint numcoro_{0};
-
-  std::stop_token st_;
 
   struct FdPtr {
     FdState *p_;

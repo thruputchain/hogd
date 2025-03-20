@@ -137,10 +137,7 @@ struct CoroTrace {
                        const auto &...extra)
   {
     Str ret = uformat("{}: [{}]", to_string(sloc), h.address());
-    if constexpr (sizeof...(extra)) {
-      auto append = [&ret](const auto &a) { ret += uformat(" {}", a); };
-      (append(extra), ...);
-    }
+    ((ret += uformat(" {}", extra)), ...);
     return ret;
   }
 

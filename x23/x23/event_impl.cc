@@ -382,7 +382,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem cb)
 void
 CoroPollImpl::wake()
 {
-  char z = '\0';
+  static const char z = '\0';
   write(selfpipe_[1].get(), &z, 1);
 }
 

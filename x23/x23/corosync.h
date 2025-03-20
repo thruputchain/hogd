@@ -31,10 +31,10 @@
 // LockerState for last coroutine in line to acquire the lock, or NULL
 // if the lock is free.  LockerState contains the coroutine_handle of
 // the next coroutine to wake up.  When acquiring the lock, a
-// coroutine swaps itself into the last position pointer, then sets
-// the coroutine_handle in the previous last coroutine's LockerState
-// to point to itself.  On release, a coroutine resumes the next
-// coroutine.
+// coroutine C swaps itself into the last position pointer, then sets
+// the coroutine_handle in LockerState of the coroutine that was
+// previously last to point to C.  On release, a coroutine resumes the
+// next coroutine.
 //
 // The structure is reminiscent of MCS spinlocks, though CoroLock
 // suspends the coroutine, making it more comparable to a sleeping
@@ -97,13 +97,7 @@ public:
 
       AwaitAcquire(Self &lk, LockerState *ls) : lk_(lk), next_(ls) {}
       bool await_ready() { return !(prev_ = lk_.last_.exchange(next_)); }
-      void await_suspend(std::coroutine_handle<> h
-#if X23_CORO_TRACE
-                         ,
-                         source_location sloc = source_location::current()
-#endif // X23_CORO_TRACE
-      )
-      {
+      void await_suspend(std::coroutine_handle<> h SLOC_PARM) {
 #if X23_CORO_TRACE
         corotrace.set_suspend(h, sloc, "CoroLock",
                               static_cast<const void *>(&lk_));
@@ -147,7 +141,7 @@ public:
     // Note: it's important that unlock resumes the next coroutine
     // before returning.  Hence, if there's a big chain of threads
     // each calling await_free() in a loop, then they will all return
-    // after from await_free after the last unlock has completed.
+    // from await_free after the last unlock has completed.
   }
 
 private:
@@ -157,7 +151,10 @@ public:
   // Release the lock and immediately destroy the invoking coroutine,
   // resuming the next coroutine in line for the lock.  If present,
   // the second argument is passed to return_value in coroutines
-  // returning a value.
+  // returning a value.  The result of these functions must be
+  // co_awaited, as in:
+  //
+  //     co_await lk.unlock_and_return(ls);
   [[nodiscard]] AwaitReleaseAndReturn<void> unlock_and_return(LockerState *ls);
   template<typename T>
   [[nodiscard]] AwaitReleaseAndReturn<T> unlock_and_return(LockerState *ls,
@@ -198,12 +195,18 @@ void resume_in_another_thread(std::coroutine_handle<>);
 } // namespace detail
 
 template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
-  CoroLock &lk_;
-  LockerState *ls_;
-
   AwaitReleaseAndReturn(CoroLock &lk, LockerState *ls) : lk_(lk), ls_(ls) {}
   bool await_ready() noexcept { return false; }
+  template<typename Promise>
+  auto await_suspend(std::coroutine_handle<Promise> moriturus) noexcept
+  {
+    Promise &p = moriturus.promise();
+    p.return_void(); // Coroutine must return void
+    return finish_suspend(moriturus);
+  }
+  void await_resume() noexcept { std::unreachable(); }
 
+protected:
   // Returns NULL if there is no other coroutine to resume, otherwise
   // returns the coroutine.
   template<typename Promise>
@@ -237,14 +240,9 @@ template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
     return next_locker;
   }
 
-  template<typename Promise>
-  auto await_suspend(std::coroutine_handle<Promise> moriturus) noexcept
-  {
-    Promise &p = moriturus.promise();
-    p.return_void(); // Coroutine must return void
-    return finish_suspend(moriturus);
-  }
-  void await_resume() noexcept { std::terminate(); }
+private:
+  CoroLock &lk_;
+  LockerState *ls_;
 };
 template<typename T>
 struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn
@@ -278,9 +276,9 @@ CoroLock::unlock_and_return(LockerState *ls, T t)
 
 // A CoroGuard is similar to a lock_guard for a CoroLock.  However,
 // the syntax is different because a CoroLock requires LockerState to
-// persist for the duration of the lock, so the CoroGuard holds that
-// state.  To ensure the state lives until the lock is released, the
-// CoroGuard must be declared before the lock is acquired, as in:
+// persist for the duration of the lock, so the CoroGuard holds the
+// LockerState.  To ensure the state lives until the lock is released,
+// the CoroGuard must be declared before the lock is acquired, as in:
 //
 //   CoroLock lk;
 //   ...
@@ -309,11 +307,13 @@ struct CoroGuard : CoroLock::LockerState {
 
   // reset_and_return can only be called when the CoroGuard contains a
   // valid lock.  The return value must be co_awaited and immediately
-  // destroys the invoking coroutine.  Otherwise, if you are at the
-  // end of a coroutine and release the lock normally before a
-  // co_return statement, the invoking coroutine will not be destroyed
-  // until the next locker suspends itself.  The version with an
-  // argument returns the return value of the unlocking coroutine.
+  // destroys the invoking coroutine by simulating a co_return
+  // statement.  Otherwise, if you are at the end of a coroutine and
+  // release the lock normally before a co_return statement, the
+  // invoking coroutine will not be destroyed until the next locker
+  // suspends itself.  The version with an argument allows you to
+  // specify a non-void return value for the unlocking coroutine, as
+  // if the reset_and_return were followed by a "co_return t;".
   [[nodiscard]] auto reset_and_return()
   {
     assert(lkp_);
