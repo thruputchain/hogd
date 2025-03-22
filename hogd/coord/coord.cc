@@ -26,7 +26,8 @@ x23::CoroPoll cp(pool);
 
 struct Coord {
   using rpc_service = CoordV1;
-  static Async<void> null() { co_return; }
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  Async<void> null() { co_return; }
 };
 static_assert(is_CoordV1<Coord *, Async>);
 
