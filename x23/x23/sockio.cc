@@ -3,9 +3,9 @@
 #include <system_error>
 
 #include <arpa/inet.h>
-#include <asm-generic/socket.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
 
 #include "x23/sockio.h"
 
@@ -122,17 +122,17 @@ show_ipaddr(const sockaddr_storage &ss)
   Str ret;
   switch (ss.ss_family) {
   case AF_INET6:
-    {
-      const auto *sin6 = reinterpret_cast<const sockaddr_in6 *>(&ss);
-      if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr))
-	return ntop.operator()<AF_INET>(&sin6->sin6_addr.s6_addr[12]);
-      return ntop.operator()<AF_INET6>(&sin6->sin6_addr);
-    }
+  {
+    const auto *sin6 = reinterpret_cast<const sockaddr_in6 *>(&ss);
+    if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr))
+      return ntop.operator()<AF_INET>(&sin6->sin6_addr.s6_addr[12]);
+    return ntop.operator()<AF_INET6>(&sin6->sin6_addr);
+  }
   case AF_INET:
-    {
-      const auto *sin = reinterpret_cast<const sockaddr_in *>(&ss);
-      return ntop.operator()<AF_INET>(&sin->sin_addr);
-    }
+  {
+    const auto *sin = reinterpret_cast<const sockaddr_in *>(&ss);
+    return ntop.operator()<AF_INET>(&sin->sin_addr);
+  }
   default:
     Errno(EINVAL).raise("Invalid address family {} does not have IP address",
                         ss.ss_family);
@@ -142,7 +142,7 @@ show_ipaddr(const sockaddr_storage &ss)
 Str
 show_addr(const sockaddr *sa)
 {
-  switch(sa->sa_family) {
+  switch (sa->sa_family) {
   case AF_INET:
   case AF_INET6:
     return HostPort(*reinterpret_cast<const sockaddr_storage *>(sa)).show();
