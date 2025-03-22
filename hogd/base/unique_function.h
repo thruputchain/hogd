@@ -17,7 +17,6 @@ namespace detail {
 template<typename Ret, typename... Args> class InvokerBase {
 public:
   virtual ~InvokerBase() = default;
-  // NOLINTNEXTLINE(portability-template-virtual-member-function)
   virtual Ret operator()(Args &&...args) = 0;
 };
 
