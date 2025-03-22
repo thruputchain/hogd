@@ -23,7 +23,6 @@ using std::uintptr_t;
 // 128-bit integers (this is a GNU C++ extension supported by Clang and GCC)
 using int128_t = __int128;
 using uint128_t = unsigned __int128;
-// NOLINTNEXTLINE(misc-redundant-expression)
 static_assert(__SIZEOF_INT128__ == 16); // check for support
 
 // Kibibytes (power of 2)

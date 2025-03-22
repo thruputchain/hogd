@@ -6,7 +6,6 @@
 #include <string>
 #include <utility>
 
-#include <x23/async.h>
 #include <x23/event.h>
 #include <x23/fileio.h>
 #include <x23/rpc.h>
@@ -27,8 +26,7 @@ x23::CoroPoll cp(pool);
 
 struct Coord {
   using rpc_service = CoordV1;
-  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-  Async<void> null() { co_return; }
+  static Async<void> null() { co_return; }
 };
 static_assert(is_CoordV1<Coord *, Async>);
 
