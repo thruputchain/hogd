@@ -19,18 +19,18 @@ jobs:
       with:
         submodules: "recursive"
     - name: install llvm
-      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 19 all && sudo apt-get remove clang-18
+      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 20 all && sudo apt-get remove clang-18
     - name: set gcc-14 default
-       # default is 13.2, unfortunately. This makes 14.0 work
+       # default is 13.2, unfortunately. This makes 14.x work
       run: sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 14 && sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 14
-    - name: set clang-19 default
-      run: sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-19 19 && sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 19
+    - name: set clang-20 default
+      run: sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 20 && sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 20
     - name: gcc version check
       run: gcc --version
     - name: clang version check
       run: clang --version
     - name: set clang-tidy
-      run: echo "CLANG_TIDY=run-clang-tidy-19" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+      run: echo "CLANG_TIDY=run-clang-tidy-20" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: install packages
       run: sudo apt-get install -y git cmake pkg-config wabt
     - name: install rust nightly
@@ -41,7 +41,9 @@ jobs:
       with:
         path: ${{ env.CACHED_PATHS }}
         # Cmake should handle rebuilding any changed files across commits
-        key: ${{ runner.os }}-${{ github.ref_name }}
+        # The last number is a version number.  Bump the version number whenever the compiler changes,
+        # to invalidate the cache (or any other time you need to manually clear the cache)
+        key: ${{ runner.os }}-${{ github.ref_name }}-1
     - name: check
       run: ./scripts/check.sh
     - uses: actions/cache/save@v4
