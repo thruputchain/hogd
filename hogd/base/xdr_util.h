@@ -26,13 +26,13 @@ to_xdr(uint128_t value)
 constexpr int128_t
 from_xdr(int128_xdr value)
 {
-  return (static_cast<int128_t>(value.highbits) << 64) + value.lowbits;
+  return (int128_t{value.highbits} << 64) + value.lowbits;
 }
 
 constexpr uint128_t
 from_xdr(uint128_xdr value)
 {
-  return (static_cast<uint128_t>(value.highbits) << 64) + value.lowbits;
+  return (uint128_t{value.highbits} << 64) + value.lowbits;
 }
 
 } // namespace hogd
