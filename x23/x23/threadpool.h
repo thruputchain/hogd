@@ -31,11 +31,17 @@ constexpr size_t hardware_destructive_interference_size =
     std::hardware_destructive_interference_size;
 #pragma GCC diagnostic pop
 
+// Return the number of available hardware threads.  Tries to figure
+// it out from Cpus_allowed in /proc/self/status, which works on
+// modern linux distributions, but then falls back to
+// std::thread::hardware_concurrency().
+unsigned nproc();
+
 class ThreadPool {
 public:
   const size_t nthreads_;
 
-  ThreadPool(size_t nthreads = std::thread::hardware_concurrency());
+  ThreadPool(size_t nthreads = nproc());
   ~ThreadPool();
 
   void go(const is_range_of<std::coroutine_handle<>> auto &rg)

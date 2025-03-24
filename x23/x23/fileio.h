@@ -42,7 +42,7 @@ read(BorrowedFd fd, BufT *buf, size_t len, Read readfn = &::read)
 // Keep reading until you have read len bytes.  Returns ECONNRESET on
 // a premature EOF.
 template<is_bytevec BufT>
-std::expected<void, Errno>
+std::expected<size_t, Errno>
 fullread(BorrowedFd fd, BufT *buf, size_t len)
 {
   size_t nread = 0;
@@ -55,7 +55,7 @@ fullread(BorrowedFd fd, BufT *buf, size_t len)
     nread += *r;
     len -= *r;
   }
-  return {};
+  return nread;
 }
 
 struct SeekBounds {
@@ -84,7 +84,7 @@ readall(BorrowedFd fd, BufT *buf)
 }
 
 template<is_bytevec BufT = Str>
-std::expected<Buf, Errno>
+std::expected<BufT, Errno>
 readfile(std::filesystem::path p)
 {
   UniqueFd fd(open(p.c_str(), O_RDONLY));

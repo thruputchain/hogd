@@ -182,7 +182,6 @@ private:
 
   UniqueFd epollfd_;
 
-  // SharedLock resize_lock_{std::thread::hardware_concurrency()};
   SharedLock resize_lock_{unsigned(pool_.nthreads_)};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
