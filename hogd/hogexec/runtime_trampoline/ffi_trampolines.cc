@@ -2,7 +2,9 @@
 
 #include <concepts>
 #include <cstdint>
+#include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 
@@ -12,22 +14,31 @@ class HostCallContext;
 
 namespace {
 
-TrampolineResult
+constexpr TrampolineResult
 success(int32_t res)
 {
-  return TrampolineResult{.result = res, .panic = kTrampolineErrorNONE};
+  return TrampolineResult{.result = res,
+                          .panic = std::to_underlying(
+                              HostFnErrorCode::kNoneOrRecoverable)};
 }
 
-TrampolineResult
+constexpr TrampolineResult
 host_exit(int32_t res)
 {
-  return TrampolineResult{.result = res, .panic = kTrampolineErrorEXIT};
+  return TrampolineResult{.result = res,
+                          .panic = std::to_underlying(HostFnErrorCode::kExit)};
 }
 
-TrampolineResult
-error(uint8_t error)
+constexpr TrampolineResult
+error(HostFnErrorCode error_code)
 {
-  return TrampolineResult{.result = 0, .panic = error};
+  return TrampolineResult{.result = 0, .panic = std::to_underlying(error_code)};
+}
+
+constexpr TrampolineResult
+unrecoverable()
+{
+  return error(HostFnErrorCode::kUnrecoverable);
 }
 
 TrampolineResult
@@ -37,13 +48,13 @@ handle_result(HostFnResult const &res)
   case HostFnErrorCode::kNoneOrRecoverable:
     return success(res.second);
   case HostFnErrorCode::kOutOfGas:
-    return error(kTrampolineErrorOUTOFGAS);
   case HostFnErrorCode::kReturn:
-    return error(kTrampolineErrorRETURN);
+  case HostFnErrorCode::kValidationFailure:
+    return error(res.first);
   case HostFnErrorCode::kExit:
     return host_exit(res.second);
   default:
-    return error(kTrampolineErrorUNRECOVERABLE);
+    return unrecoverable();
   }
 }
 
@@ -60,7 +71,7 @@ c_call_internal(void *function_pointer, void *host_call_context,
     return handle_result((*ptr)(user_ctx, args...));
 
   } catch (...) { // NOLINT(bugprone-empty-catch)
-    return error(kTrampolineErrorUNRECOVERABLE);
+    return unrecoverable();
   }
 }
 
