@@ -1,8 +1,8 @@
 #include "hogd/hogexec/runtime_trampoline/ffi_trampolines.h"
 
 #include <concepts>
-#include <utility>
 #include <cstdint>
+#include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
