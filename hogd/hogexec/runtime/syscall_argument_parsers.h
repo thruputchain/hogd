@@ -80,7 +80,7 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
   switch (disc) {
   case CryptographicScheme::Ed25519:
   {
-    if (auto *ed25519 =
+    if (const auto *ed25519 =
             check_user_argument<Ed25519Signature>(contract_memory, user_offset,
                                                   sizeof(Ed25519Signature))) {
       out.ed25519() = *ed25519;
