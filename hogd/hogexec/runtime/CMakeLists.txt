@@ -1,31 +1,35 @@
 set_source_files_properties(
-    ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
+    ${CMAKE_CURRENT_BINARY_DIR}/syscall_inner.h
     PROPERTIES GENERATED TRUE)
 
 set_source_files_properties(
-    ${CMAKE_CURRENT_BINARY_DIR}/syscall_inner.h
+    ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
     PROPERTIES GENERATED TRUE)
 
 add_library(
   runtime
   wasmi_runtime.cc
   status.cc
+  item_view.cc
   syscall_crypto.cc
-  ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
+  syscall_entry.cc
 )
 
 add_executable(
   runtime_test
-  userctx_test.cc
-  instantiate_test.cc
   error_handling_test.cc
+  instantiate_test.cc
+  item_view_test.cc
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
+  syscall_entry_outer_tests.cc
+  userctx_test.cc
 )
 target_link_libraries(
   runtime
   wasmi_lib
+  runtime_trampoline
   protocol
   crypto
 )
@@ -33,12 +37,18 @@ target_link_libraries(
 add_dependencies(
   runtime
   generate_syscall_inner_h
-  generate_syscall_entry_cc
+  generate_wasmi_ffi_h
   protocol
 )
 
 target_include_directories(
   runtime
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+target_include_directories(
+  runtime_test
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )

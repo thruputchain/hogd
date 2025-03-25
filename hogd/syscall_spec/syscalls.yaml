@@ -37,7 +37,7 @@ errors:
     doc: "System call for supplied number is not supported"
   - name: "InvalidInput"
     number: 3
-    doc: "Invalid input for syscall"
+    doc: "Invalid input to a syscall (e.g. bytestring too long)"
 
     # those that cause call frames to revert
   - name: "DeterministicWasm"

@@ -1,8 +1,42 @@
+set_source_files_properties(
+    ${CMAKE_SOURCE_DIR}/hogd/hogexec/wasmi/src/ffi_enums.rs
+    PROPERTIES GENERATED TRUE)
+
 # Import targets defined in a package or workspace manifest `Cargo.toml` file
 corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATE_TYPES staticlib)
+
+add_dependencies(
+  cargo-build_wasmi_lib
+  ffi_enum_rs)
+
+target_sources(
+  wasmi_lib
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/ffi_enums.rs)
 
 target_link_libraries(
   wasmi_lib
   INTERFACE
   runtime_trampoline
 )
+
+add_custom_command(
+    OUTPUT
+        ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+    DEPENDS 
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/context.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/external_call.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/invoke_result.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime.rs
+    COMMAND 
+      cbindgen --config cbindgen.toml --crate wasmi_lib --output ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+    WORKING_DIRECTORY
+      ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_custom_target(
+	generate_wasmi_ffi_h ALL
+	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+)
+
