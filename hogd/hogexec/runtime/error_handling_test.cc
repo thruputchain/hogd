@@ -1,9 +1,11 @@
+#include <gtest/gtest.h>
+
 #include <cstdint>
+#include <new>
 #include <optional>
 #include <stdexcept>
 
-#include <gtest/gtest.h>
-
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"

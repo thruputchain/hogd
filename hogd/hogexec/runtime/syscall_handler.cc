@@ -1,9 +1,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -12,6 +10,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
@@ -48,14 +47,14 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
 InvokeResult
 SystemCallHandler::root_invoke()
 {
-  auto *runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
+  auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
   if (!runtime) {
     return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
                         .gas_consumed_ = 0};
   }
 
-  invocation_frame_stack_.start_frame(signed_tx_.tx.invocation, runtime);
-  auto res = runtime->runtime_.invoke(signed_tx_.tx.invocation.method,
+  invocation_frame_stack_.start_frame(signed_tx_.tx.invocation);
+  auto res = runtime->invoke(signed_tx_.tx.invocation.method,
                                       signed_tx_.tx.invocation.gas_limit);
   invocation_frame_stack_.finish_frame(res);
 
@@ -88,56 +87,20 @@ SystemCallHandler::get_msg_sender() const
                          : SyscallError{SyscallErrorCode::kIsRootTransaction};
 }
 
-SyscallStatus<GasAmount>
-SystemCallHandler::get_invoke_gas_limit(GasAmount call_specified_gas_limit)
-{
-  // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left
-
-  GasAmount initial_gas_limit =
-      invocation_frame_stack_.empty()
-          ? UINT64_MAX
-          : runtimes_
-                .at(invocation_frame_stack_.get_active_frame()
-                        .active_invocation_.invoked_address)
-                ->runtime_.get_available_gas();
-
-  if (call_specified_gas_limit != UINT64_MAX &&
-      call_specified_gas_limit > initial_gas_limit) {
-    return SyscallError{SyscallErrorCode::kInsufficientGasForInvocation};
-  }
-
-  return std::min<GasAmount>(initial_gas_limit, call_specified_gas_limit);
-}
-
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke(Invocation const &invocation)
+SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit)
 {
-  auto gas_limit = get_invoke_gas_limit(invocation.gas_limit);
-
-  if (!gas_limit) {
-    return std::pair{gas_limit.error().code(), 0};
-  }
-
-  auto *runtime = resolve_runtime(invocation.invoked_address);
+  auto runtime = resolve_runtime(invocation.invoked_address);
 
   if (!runtime) {
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  invocation_frame_stack_.start_frame(invocation, runtime);
-  auto res = runtime->runtime_.invoke(invocation.method, *gas_limit);
+  invocation_frame_stack_.start_frame(invocation);
+  auto res = runtime->invoke(invocation.method, gas_limit);
   invocation_frame_stack_.finish_frame(res);
 
   return res.to_host_fn_result();
-}
-
-bool
-SystemCallHandler::current_runtime_is_revert_poisoned() const
-{
-  return runtimes_
-      .at(invocation_frame_stack_.get_active_frame()
-              .active_invocation_.invoked_address)
-      ->revert_poisoned_;
 }
 
 void
@@ -166,34 +129,15 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
       std::move(returned_buffer));
 }
 
-RuntimeCacheEntry *
+std::optional<WasmiRuntime>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
-  auto it = runtimes_.find(addr);
-  if (it != runtimes_.end()) {
-    auto *out = it->second.get();
-
-    // The entry was created by the current transaction.
-    // Must check whether that action was rolled back.
-    if (out->local_deployment_ &&
-        !invocation_frame_stack_.lookup_locally_deployed_contract(addr)) {
-      // Runtime exists in the cache, but it was deployed in an earlier
-      // call frame that has since been reverted.
-      return nullptr;
-    }
-
-    return out->revert_poisoned_ ? nullptr : out;
-  }
-
-  // No runtime cache entry exists; now try to create a new one.
-
+  // check if the address has a deployed contract hash
   auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
 
-  bool local_deployment = false;
   if (!deployed_hash) {
     // There was no deployment in the previous snapshot.
     // Now check for the transaction's local context.
-    local_deployment = true;
     deployed_hash =
         invocation_frame_stack_.lookup_locally_deployed_contract(addr);
   }
@@ -201,7 +145,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   if (!deployed_hash) {
     // A deployment was not found in the local context
     // nor in the snapshot.
-    return nullptr;
+    return std::nullopt;
   }
 
   // At this point, we have a deployment and the hash of the contract.
@@ -221,22 +165,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   }
 
   // actually make the new runtime
-  auto new_runtime =
-      wasmi_context_.make_new_runtime(load_contract->contract_data, this);
-
-  // Some error instantiating the runtime.
-  // TODO(geoff) validate that failures here are deterministic.
-  // (i.e. the result of a malloc() failure).
-  if (!new_runtime) {
-    return nullptr;
-  }
-
-  // successfully resolved runtime
-  runtimes_.emplace(addr,
-                    std::make_unique<RuntimeCacheEntry>(std::move(*new_runtime),
-                                                        local_deployment));
-
-  return runtimes_.at(addr).get();
+  return wasmi_context_.make_new_runtime(load_contract->contract_data, this);
 }
 
 Calldata const &

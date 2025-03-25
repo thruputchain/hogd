@@ -1,10 +1,16 @@
 #pragma once
 
-#include <cstdint>
-#include <map>
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <span>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
+#include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
-#include "hogd/hogexec/runtime/runtime_cache.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
@@ -23,9 +29,6 @@ class StorageSnapshotCache;
 //   invocation on a contract. A contract might be invoked multiple times and
 //   might be reentrant. Each frame either commits or reverts atomically, and
 //   pushes its state changes into its parent frame.
-//   - Runtime Cache: The set of instantiated WASM runtimes.  One runtime per
-//   ContractAddress. This is maintained separately from the frame stack
-//   because there is not a 1-1 map between runtimes and call frames.
 class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
@@ -44,7 +47,7 @@ public:
   // Create and run a child call frame.
   // Should be called from within a syscall.
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-  invoke(Invocation const &invocation);
+  invoke(Invocation const &invocation, GasAmount gas_limit);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -83,7 +86,6 @@ public:
 private:
   WasmiContext wasmi_context_;
   const SignedTransaction signed_tx_;
-  RuntimeCache runtimes_;
   InvocationFrameStack invocation_frame_stack_;
 
   // Searchable map of contracts that are implicitly created by the current
@@ -96,20 +98,12 @@ private:
 
   StorageSnapshotCache &snapshot_cache_;
 
-  // Resolve the RuntimeCacheEntry associated with the queried address.
-  // Creates a new entry if no entry exists, AND a contract is deployed at
+  // Resolve the WasmiRuntime associated with the queried address.
+  // Creates a new runtime if contract is deployed at
   // that address in the current context (i.e. if a contract is deployed there
   // in the snapshot, or by a prior action of the current transaction that was
   // not rolled back by a revert).
-  RuntimeCacheEntry *resolve_runtime(ContractAddress const &addr);
-
-  // Get the amount of gas available to a child invoke call.
-  // UINT64_MAX as gas_limit implies gas_limit is whatever gas is left.
-  // Otherwise, checks the current runtime's available gas,
-  // and returns an error if it has insufficient gas to supply
-  // the requested amount.
-  SyscallStatus<GasAmount>
-  get_invoke_gas_limit(GasAmount call_specified_gas_limit);
+  std::optional<WasmiRuntime> resolve_runtime(ContractAddress const &addr);
 
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the

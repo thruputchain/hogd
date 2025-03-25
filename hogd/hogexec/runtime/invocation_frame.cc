@@ -8,25 +8,20 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/runtime_cache.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
 
-InvocationFrame::InvocationFrame(Invocation invocation,
-                                 RuntimeCacheEntry *visited_entry)
+InvocationFrame::InvocationFrame(Invocation invocation)
   : active_invocation_(std::move(invocation))
 {
-  visited_runtimes_.insert(visited_entry);
 }
 
 void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &frame)
 {
-  visited_runtimes_.insert(frame.visited_runtimes_.begin(),
-                           frame.visited_runtimes_.end());
 
   child_return_buffer_ = frame.to_return_;
   logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
@@ -62,19 +57,9 @@ InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
 }
 
 void
-InvocationFrame::poison_visited_runtimes()
+InvocationFrameStack::start_frame(Invocation const &invocation)
 {
-  for (auto *runtime : visited_runtimes_) {
-    // TODO(geoff) metadata allowing revert_safe declarations
-    runtime->revert_poisoned_ = true;
-  }
-}
-
-void
-InvocationFrameStack::start_frame(Invocation const &invocation,
-                                  RuntimeCacheEntry *visited_entry)
-{
-  frame_stack_.emplace_back(invocation, visited_entry);
+  frame_stack_.emplace_back(invocation);
 }
 
 void
@@ -91,7 +76,6 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
   if (result.should_frame_revert()) {
     assert(!frame_stack_.empty());
 
-    frame_stack_.back().poison_visited_runtimes();
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {

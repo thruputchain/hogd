@@ -1,19 +1,19 @@
 #pragma once
 
-#include <cstdint>
+#include <cassert>
+#include <cstddef>
 #include <functional>
 #include <map>
-#include <memory>
-#include <set>
+#include <optional>
 #include <span>
-#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
-struct RuntimeCacheEntry;
 struct InvokeResult;
 
 // Stores all relevant data structures for one Invocation in a transaction.
@@ -29,7 +29,7 @@ public:
   // Set to nullopt on failed calls, or before any child call happens.
   std::optional<ReturnBuffer> child_return_buffer_ = std::nullopt;
 
-  InvocationFrame(Invocation invocation, RuntimeCacheEntry *visited_entry);
+  InvocationFrame(Invocation invocation);
 
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &frame);
@@ -42,22 +42,13 @@ public:
   // add a log message to the output of the transaction, associated with the
   // current call frame.
   void log(std::span<const std::byte> message);
-
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
-
-  void poison_visited_runtimes();
 
 private:
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
 
   std::vector<LogEntry> logs_;
-
-  // The set of all runtimes visited by the current call frame
-  // and _successful_ children. Failed calls poison the set of visited
-  // runtimes, unless the runtime is marked UNWIND_SAFE (not this PR) Failed
-  // call frames immediately poison their set of visited runtimes.
-  std::unordered_set<RuntimeCacheEntry *> visited_runtimes_;
 };
 
 // Stack of invocation frames.
@@ -74,8 +65,7 @@ public:
   }
   bool empty() const { return frame_stack_.empty(); }
 
-  void start_frame(Invocation const &invocation,
-                   RuntimeCacheEntry *visited_entry);
+  void start_frame(Invocation const &invocation);
   void finish_frame(InvokeResult const &result);
 
   std::optional<ContractAddress> get_msg_sender() const;
