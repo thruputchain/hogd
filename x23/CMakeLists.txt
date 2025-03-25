@@ -105,10 +105,7 @@ function(add_xdr_rs target_name output_folder)
   endforeach()
 
   add_library(${target_name} INTERFACE)
-  target_include_directories(${target_name}
-    INTERFACE "${CMAKE_CURRENT_BINARY_DIR}")
-  target_link_libraries(${target_name} INTERFACE x23)
-
+  
   add_custom_target(build_${target_name} ALL DEPENDS ${xdr_headers})
   add_dependencies(${target_name} build_${target_name})
 endfunction()
