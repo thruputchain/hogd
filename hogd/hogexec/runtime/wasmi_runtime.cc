@@ -7,12 +7,12 @@
 #include <string_view>
 #include <utility>
 
+#include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/hogexec/wasmi/bindings.h"
-
-#include "contract.hh"
 
 namespace hogd {
 
@@ -115,7 +115,15 @@ bool
 WasmiRuntime::consume_gas(uint64_t gas) noexcept
 {
   assert(wasmi_runtime_ptr_ != nullptr);
-  return wasmi_consume_gas(wasmi_runtime_ptr_, gas);
+  auto current_gas = get_available_gas();
+
+  if (current_gas >= gas) {
+    set_available_gas(current_gas - gas);
+    return true;
+  }
+
+  set_available_gas(0);
+  return false;
 }
 
 uint64_t

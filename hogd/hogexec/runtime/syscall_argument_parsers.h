@@ -32,6 +32,17 @@ check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset,
   return reinterpret_cast<T *>(contract_memory.data() + user_offset);
 }
 
+template<typename T> requires std::is_trivially_copyable_v<T>
+const T *
+check_user_argument(std::span<const std::byte> contract_memory,
+                    uint64_t user_offset, uint64_t user_len)
+{
+  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
+    return nullptr;
+  }
+  return reinterpret_cast<const T *>(contract_memory.data() + user_offset);
+}
+
 inline std::optional<std::span<std::byte>>
 check_user_span_argument(std::span<std::byte> contract_memory,
                          uint64_t user_offset, uint64_t user_len)
@@ -53,12 +64,12 @@ check_user_primitive_argument(uint64_t user_value)
 template<typename T, typename... Args>
 requires (std::same_as<Args, uint64_t> && ...)
 std::optional<const T>
-check_user_custom_input_argument(std::span<std::byte> contract_memory,
+check_user_custom_input_argument(std::span<const std::byte> contract_memory,
                                  Args... args);
 
 template<>
 inline std::optional<const Signature>
-check_user_custom_input_argument(std::span<std::byte> contract_memory,
+check_user_custom_input_argument(std::span<const std::byte> contract_memory,
                                  uint64_t user_discriminant,
                                  uint64_t user_offset)
 {
@@ -84,7 +95,7 @@ check_user_custom_input_argument(std::span<std::byte> contract_memory,
 
 template<>
 inline std::optional<const PublicKey>
-check_user_custom_input_argument(std::span<std::byte> contract_memory,
+check_user_custom_input_argument(std::span<const std::byte> contract_memory,
                                  uint64_t user_discriminant,
                                  uint64_t user_offset)
 {
@@ -96,7 +107,7 @@ check_user_custom_input_argument(std::span<std::byte> contract_memory,
   switch (disc) {
   case CryptographicScheme::Ed25519:
   {
-    if (auto *ed25519 =
+    if (const auto *ed25519 =
             check_user_argument<Ed25519PublicKey>(contract_memory, user_offset,
                                                   sizeof(Ed25519Signature))) {
       out.ed25519() = *ed25519;
