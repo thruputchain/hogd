@@ -37,4 +37,3 @@ from_xdr(uint128_xdr value)
 }
 
 } // namespace hogd
-
