@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <optional>
@@ -59,6 +60,7 @@ template<> struct SyscallArgParams<std::span<std::byte>> {
   constexpr static std::span<std::byte>
   deref(std::optional<std::span<std::byte>> value)
   {
+    assert(value.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
   }
@@ -81,6 +83,7 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   constexpr static std::span<const std::byte>
   deref(std::optional<std::span<const std::byte>> value)
   {
+    assert(value.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
   }
@@ -135,6 +138,7 @@ template<> struct SyscallArgParams<const Signature &> {
   constexpr static const Signature &
   deref(std::optional<const Signature> const &value)
   {
+    assert(value.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
   }
@@ -157,6 +161,7 @@ template<> struct SyscallArgParams<const PublicKey &> {
   constexpr static const PublicKey &
   deref(std::optional<const PublicKey> const &value)
   {
+    assert(value.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;
   }
