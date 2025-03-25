@@ -10,19 +10,21 @@ add_library(
   runtime
   wasmi_runtime.cc
   status.cc
+  item_view.cc
   syscall_crypto.cc
   syscall_entry.cc
 )
 
 add_executable(
   runtime_test
-  userctx_test.cc
-  instantiate_test.cc
   error_handling_test.cc
+  instantiate_test.cc
+  item_view_test.cc
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
   syscall_entry_outer_tests.cc
+  userctx_test.cc
 )
 target_link_libraries(
   runtime
