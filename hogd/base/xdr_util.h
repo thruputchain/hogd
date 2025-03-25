@@ -4,7 +4,6 @@
 
 #include <cstdint>
 
-#include "hogd/base/span.h"
 #include "hogd/base/types.h"
 
 #include "types.hh"
@@ -39,12 +38,3 @@ from_xdr(uint128_xdr value)
 
 } // namespace hogd
 
-// enable hashing of important XDR types
-template<> struct std::hash<hogd::AddressAndKey> {
-  std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept
-  {
-    return std::hash<std::string_view>{}(
-        {reinterpret_cast<const char *>(&addrkey),
-         sizeof(hogd::AddressAndKey)});
-  }
-};
