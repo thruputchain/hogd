@@ -7,7 +7,7 @@ add_xdr(
 	syscall.x 
 )
 
-add_dependencies(protocol generate_syscall_x)
+add_dependencies(build_protocol generate_syscall_x)
 
 add_xdr_rs(
 	protocol_rs
@@ -15,5 +15,5 @@ add_xdr_rs(
 	types.x
 	syscall.x)
 
-add_dependencies(protocol_rs generate_syscall_x)
+add_dependencies(build_protocol_rs generate_syscall_x)
 
