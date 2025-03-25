@@ -2,6 +2,7 @@ add_xdr(
 	protocol
 	contract.x
 	coord.x
+	ffi_enums.x
 	types.x 
 	storage_object.x
 	syscall.x 
