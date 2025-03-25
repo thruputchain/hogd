@@ -1,9 +1,12 @@
 #pragma once
 
 #include <expected>
+#include <string>
+#include <system_error>
 
 #include "ffi_enums.hh"
 #include "hogd/base/status.h"
+#include "hogd/base/types.h"
 #include "syscall.hh"
 
 namespace hogd {

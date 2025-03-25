@@ -1,10 +1,13 @@
 #pragma once
 
-#include <cstdint>
+#include <concepts>
+#include <cstddef>
 #include <optional>
+#include <span>
 #include <type_traits>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/types.h"
 #include "types.hh"
 
 namespace hogd {
@@ -57,6 +60,7 @@ check_user_primitive_argument(uint64_t user_value)
   return static_cast<T>(user_value);
 }
 
+// NOLINTBEGIN(readability-inconsistent-declaration-parameter-name)
 template<typename T, typename... Args>
 requires (std::same_as<Args, uint64_t> && ...)
 std::optional<const T>
@@ -64,20 +68,19 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
                                  Args... args);
 
 template<>
-std::optional<const Signature>
+inline std::optional<const Signature>
 check_user_custom_input_argument(std::span<const std::byte> contract_memory,
                                  uint64_t user_discriminant,
                                  uint64_t user_offset)
 {
   auto disc =
       check_user_primitive_argument<CryptographicScheme>(user_discriminant);
-
   Signature out;
   out.scheme(disc);
   switch (disc) {
   case CryptographicScheme::Ed25519:
   {
-    if (auto *ed25519 =
+    if (const auto *ed25519 =
             check_user_argument<Ed25519Signature>(contract_memory, user_offset,
                                                   sizeof(Ed25519Signature))) {
       out.ed25519() = *ed25519;
@@ -91,7 +94,7 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
 }
 
 template<>
-std::optional<const PublicKey>
+inline std::optional<const PublicKey>
 check_user_custom_input_argument(std::span<const std::byte> contract_memory,
                                  uint64_t user_discriminant,
                                  uint64_t user_offset)
@@ -116,5 +119,6 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
     return std::nullopt;
   }
 }
+// NOLINTEND(readability-inconsistent-declaration-parameter-name)
 
 } // namespace hogd

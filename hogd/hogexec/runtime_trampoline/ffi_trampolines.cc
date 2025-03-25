@@ -84,6 +84,8 @@ extern "C" {
 // These functions catch all errors, just in case our code throws an exception.
 // It is UB to pass errors across FFI boundaries, so they're all declared
 // noexcept.
+// These do not have the noexcept qualifier (for C compatibility)
+// so c_call_internal does instead.
 TrampolineResult
 c_call_0args(void *function_pointer, void *host_call_context)
 {
