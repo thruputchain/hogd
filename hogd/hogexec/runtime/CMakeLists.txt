@@ -6,17 +6,22 @@ set_source_files_properties(
     ${CMAKE_CURRENT_BINARY_DIR}/syscall_inner.h
     PROPERTIES GENERATED TRUE)
 
+set_source_files_properties(
+    ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
+    PROPERTIES GENERATED TRUE)
+
 add_library(
   runtime
   invocation_frame.cc
+  item_view.cc
   wasmi_runtime.cc
-  syscall_handler.cc
   status.cc
   storage_snapshot_cache.cc
   syscall_invoke.cc
   syscall_log.cc
   syscall_contract.cc
   syscall_crypto.cc
+  syscall_handler.cc
   ${CMAKE_CURRENT_BINARY_DIR}/syscall_entry.cc
 )
 
@@ -28,6 +33,7 @@ add_executable(
   invoke_arity_test.cc
   gas_api_test.cc
   memory_access_test.cc
+  item_view_test.cc
 )
 target_link_libraries(
   runtime
@@ -41,6 +47,7 @@ add_dependencies(
   runtime
   generate_syscall_inner_h
   generate_syscall_entry_cc
+  generate_wasmi_ffi_h
   protocol
 )
 
