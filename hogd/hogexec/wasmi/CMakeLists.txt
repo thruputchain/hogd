@@ -20,3 +20,23 @@ target_link_libraries(
   runtime_trampoline
 )
 
+add_custom_command(
+    OUTPUT
+        ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+    DEPENDS 
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/context.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/external_call.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/invoke_result.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime.rs
+    COMMAND 
+      cbindgen --config cbindgen.toml --crate wasmi_lib --output ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+    WORKING_DIRECTORY
+      ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_custom_target(
+	generate_wasmi_ffi_h ALL
+	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+)
+

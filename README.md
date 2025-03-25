@@ -31,6 +31,12 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
     ~~~~
 
+1. Install cbindgen
+
+    ~~~~ .sh
+    cargo install --force cbindgen
+    ~~~~
+
 1. Configure the build system using "`cmake -B `_builddir_", setting
    the `CXX` and `CXXFLAGS` environment variables if you don't want to
    use the default.  For instance, any of the following might be what

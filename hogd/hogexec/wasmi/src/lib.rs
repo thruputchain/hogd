@@ -1,7 +1,7 @@
 use core::ffi::c_void;
 
 pub mod context;
-pub mod external_call;
+mod external_call;
 #[rustfmt::skip]
 pub mod ffi_enums;
 pub mod invoke_result;
@@ -10,13 +10,15 @@ pub mod runtime;
 use crate::runtime::WasmiRuntime;
 
 #[repr(C)]
-pub struct MemorySlice {
+pub struct WasmiMemorySlice {
     mem: *mut u8,
     sz: u32,
 }
 
 #[no_mangle]
-pub extern "C" fn wasmi_get_memory(runtime_void: *mut c_void) -> MemorySlice {
+pub extern "C" fn wasmi_get_memory(
+    runtime_void: *mut c_void,
+) -> WasmiMemorySlice {
     assert!(runtime_void != core::ptr::null_mut());
 
     let runtime: *mut WasmiRuntime =
@@ -29,12 +31,12 @@ pub extern "C" fn wasmi_get_memory(runtime_void: *mut c_void) -> MemorySlice {
             let mem_sz = mem.data_size(&r.store) as u32;
             // wasmi docs say that _any_ call to data_ptr or use of store
             // can invalidate returned pointers
-            MemorySlice {
+            WasmiMemorySlice {
                 mem: mem.data_ptr(&r.store),
                 sz: mem_sz,
             }
         }
-        _ => MemorySlice {
+        _ => WasmiMemorySlice {
             mem: std::ptr::null_mut(),
             sz: 0,
         },

@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <utility>
+#include <cstdint>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -11,11 +12,9 @@ namespace hogd {
 
 class HostCallContext;
 
-namespace detail {
-
 namespace {
 
-TrampolineResult
+constexpr TrampolineResult
 success(int32_t res)
 {
   return TrampolineResult{.result = res,
@@ -23,14 +22,14 @@ success(int32_t res)
                               HostFnErrorCode::kNoneOrRecoverable)};
 }
 
-TrampolineResult
+constexpr TrampolineResult
 host_exit(int32_t res)
 {
   return TrampolineResult{.result = res,
                           .panic = std::to_underlying(HostFnErrorCode::kExit)};
 }
 
-TrampolineResult
+constexpr TrampolineResult
 error(HostFnErrorCode error_code)
 {
   return TrampolineResult{.result = 0, .panic = std::to_underlying(error_code)};
@@ -39,9 +38,7 @@ error(HostFnErrorCode error_code)
 constexpr TrampolineResult
 unrecoverable()
 {
-  return TrampolineResult{.result = 0,
-                          .panic = std::to_underlying(
-                              HostFnErrorCode::kUnrecoverable)};
+  return error(HostFnErrorCode::kUnrecoverable);
 }
 
 TrampolineResult
@@ -57,7 +54,7 @@ handle_result(HostFnResult const &res)
   case HostFnErrorCode::kExit:
     return host_exit(res.second);
   default:
-    return error(HostFnErrorCode::kUnrecoverable);
+    return unrecoverable();
   }
 }
 
@@ -80,84 +77,81 @@ c_call_internal(void *function_pointer, void *host_call_context,
 
 } // namespace
 
+} // namespace hogd
+
 extern "C" {
 
 // These functions catch all errors, just in case our code throws an exception.
 // It is UB to pass errors across FFI boundaries, so they're all declared
 // noexcept.
 TrampolineResult
-c_call_0args(void *function_pointer, void *host_call_context) noexcept
+c_call_0args(void *function_pointer, void *host_call_context)
 {
-  return c_call_internal(function_pointer, host_call_context);
+  return hogd::c_call_internal(function_pointer, host_call_context);
 }
 
 TrampolineResult
-c_call_1args(void *function_pointer, void *host_call_context,
-             uint64_t arg1) noexcept
+c_call_1args(void *function_pointer, void *host_call_context, uint64_t arg1)
 {
-  return c_call_internal(function_pointer, host_call_context, arg1);
+  return hogd::c_call_internal(function_pointer, host_call_context, arg1);
 }
 
 TrampolineResult
 c_call_2args(void *function_pointer, void *host_call_context, uint64_t arg1,
-             uint64_t arg2) noexcept
+             uint64_t arg2)
 {
-  return c_call_internal(function_pointer, host_call_context, arg1, arg2);
+  return hogd::c_call_internal(function_pointer, host_call_context, arg1, arg2);
 }
 
 TrampolineResult
 c_call_3args(void *function_pointer, void *host_call_context, uint64_t arg1,
-             uint64_t arg2, uint64_t arg3) noexcept
+             uint64_t arg2, uint64_t arg3)
 {
-  return c_call_internal(function_pointer, host_call_context, arg1, arg2, arg3);
+  return hogd::c_call_internal(function_pointer, host_call_context, arg1, arg2,
+                               arg3);
 }
 
 TrampolineResult
 c_call_4args(void *function_pointer, void *host_call_context, uint64_t arg1,
-             uint64_t arg2, uint64_t arg3, uint64_t arg4) noexcept
+             uint64_t arg2, uint64_t arg3, uint64_t arg4)
 {
-  return c_call_internal(function_pointer, host_call_context, arg1, arg2, arg3,
-                         arg4);
+  return hogd::c_call_internal(function_pointer, host_call_context, arg1, arg2,
+                               arg3, arg4);
 }
 
 TrampolineResult
 c_call_5args(void *function_pointer, void *host_call_context, uint64_t arg1,
-             uint64_t arg2, uint64_t arg3, uint64_t arg4,
-             uint64_t arg5) noexcept
+             uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5)
 {
-  return c_call_internal(function_pointer, host_call_context, arg1, arg2, arg3,
-                         arg4, arg5);
+  return hogd::c_call_internal(function_pointer, host_call_context, arg1, arg2,
+                               arg3, arg4, arg5);
 }
 
 TrampolineResult
 c_call_6args(void *function_pointer, void *host_call_context, uint64_t arg1,
              uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-             uint64_t arg6) noexcept
+             uint64_t arg6)
 {
-  return c_call_internal(function_pointer, host_call_context, arg1, arg2, arg3,
-                         arg4, arg5, arg6);
+  return hogd::c_call_internal(function_pointer, host_call_context, arg1, arg2,
+                               arg3, arg4, arg5, arg6);
 }
 
 TrampolineResult
 c_call_7args(void *function_pointer, void *host_call_context, uint64_t arg1,
              uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-             uint64_t arg6, uint64_t arg7) noexcept
+             uint64_t arg6, uint64_t arg7)
 {
-  return c_call_internal(function_pointer, host_call_context, arg1, arg2, arg3,
-                         arg4, arg5, arg6, arg7);
+  return hogd::c_call_internal(function_pointer, host_call_context, arg1, arg2,
+                               arg3, arg4, arg5, arg6, arg7);
 }
 
 TrampolineResult
 c_call_8args(void *function_pointer, void *host_call_context, uint64_t arg1,
              uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-             uint64_t arg6, uint64_t arg7, uint64_t arg8) noexcept
+             uint64_t arg6, uint64_t arg7, uint64_t arg8)
 {
-  return c_call_internal(function_pointer, host_call_context, arg1, arg2, arg3,
-                         arg4, arg5, arg6, arg7, arg8);
+  return hogd::c_call_internal(function_pointer, host_call_context, arg1, arg2,
+                               arg3, arg4, arg5, arg6, arg7, arg8);
 }
 
 } // extern C
-
-} // namespace detail
-
-} // namespace hogd
