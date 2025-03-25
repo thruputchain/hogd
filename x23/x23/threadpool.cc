@@ -99,7 +99,8 @@ nproc()
     unsigned sum = 0;
     for (char c : matches.str(1))
       sum += hex_nibble_popcount[c];
-    return sum;
+    if (sum > 0)
+      return sum;
   }
 
   return std::thread::hardware_concurrency();

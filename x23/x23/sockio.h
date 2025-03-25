@@ -28,7 +28,7 @@ private:
 void set_nonblock(BorrowedFd fd, bool on = true);
 
 // Listen on a TCP port on any IP address (allowing IPv4 and IPv6)
-UniqueFd tcplisten(std::uint16_t port);
+UniqueFd tcplisten(std::uint16_t port, int backlog = 5);
 
 sockaddr_storage local_addr(BorrowedFd s);
 sockaddr_storage remote_addr(BorrowedFd s);
@@ -49,6 +49,7 @@ struct HostPort {
   Str port;
 
   constexpr HostPort() noexcept = default;
+  HostPort(Str h, Str p) : host(std::move(h)), port(std::move(p)) {}
   HostPort(const sockaddr_storage &ss)
     : host(show_ipaddr(ss)), port(uformat("{}", get_port(ss)))
   {}

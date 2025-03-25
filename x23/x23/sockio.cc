@@ -39,7 +39,7 @@ set_nonblock(BorrowedFd fd, bool on)
 }
 
 UniqueFd
-tcplisten(std::uint16_t port)
+tcplisten(std::uint16_t port, int backlog)
 {
   UniqueFd lfd(socket(AF_INET6, SOCK_STREAM, 0));
   if (!lfd)
@@ -66,7 +66,7 @@ tcplisten(std::uint16_t port)
            sizeof(addr)) < 0)
     Errno{}.raise("bind in6addr_any");
 
-  if (listen(lfd.get(), 5) < 0)
+  if (listen(lfd.get(), backlog) < 0)
     Errno{}.raise("listen");
   set_nonblock(lfd.get());
   return lfd;

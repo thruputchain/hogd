@@ -239,6 +239,8 @@ private:
 
 class CoroPoll : public detail::CoroPollImpl {
 public:
+  static inline bool ignore_sigpipe = true;
+
   CoroPoll(ThreadPool &pool);
   ~CoroPoll();
 

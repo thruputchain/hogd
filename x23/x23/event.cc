@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 
@@ -50,6 +51,10 @@ BufferedReader::operator()(int fd, void *buf, size_t len)
 CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
 {
   pollthread_ = std::thread(&CoroPoll::loop, this);
+  if (ignore_sigpipe) {
+    ignore_sigpipe = false;
+    signal(SIGPIPE, SIG_IGN);
+  }
 }
 
 CoroPoll::~CoroPoll()
