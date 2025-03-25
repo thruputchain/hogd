@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "hogd/base/types.h"
+
 #include "types.hh"
 
 namespace hogd {
