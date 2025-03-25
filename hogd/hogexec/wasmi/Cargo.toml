@@ -16,5 +16,4 @@ lto = "fat"
 codegen-units = 1
 
 [build-dependencies]
-cbindgen = "0.28.0"
 bindgen = "0.71"

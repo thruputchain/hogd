@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -22,6 +23,12 @@ HostFnResult
 throw_unrecoverable_host_error(HostCallContext * /*unused*/)
 {
   return {HostFnErrorCode::kUnrecoverable, 0};
+}
+
+HostFnResult
+throw_validation_error(HostCallContext * /*unused*/)
+{
+  return {HostFnErrorCode::kValidationFailure, 0};
 }
 
 HostFnResult
@@ -133,6 +140,19 @@ TEST_F(WasmiErrorHandlingTest, HostError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+}
+
+TEST_F(WasmiErrorHandlingTest, ValidationError)
+{
+  context_.link_fn("test", "external_call", &throw_validation_error);
+  runtime_ = context_.make_new_runtime(contract_, nullptr);
+
+  ASSERT_TRUE(!!runtime_);
+
+  auto res = runtime_->invoke("call1", UINT64_MAX);
+
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kValidationFailure});
 }
 
 TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
