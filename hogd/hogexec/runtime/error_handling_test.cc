@@ -2,12 +2,12 @@
 
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <new>
+#include <stdexcept>
 
 #include "contract.hh"
-#include "hogd/hogexec/runtime/runtime.h"
 #include "ffi_enums.hh"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"

@@ -89,8 +89,7 @@ public:
   std::span<std::byte> get_memory() noexcept override;
 
 private:
-  InvokeStatus<int32_t>
-  invoke_internal(std::string_view method_name) override;
+  InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
 
   // manipulated in rust
   void *wasmi_runtime_ptr_;

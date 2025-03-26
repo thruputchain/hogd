@@ -42,8 +42,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       return contracts;
     }()),
     snapshot_cache_(snapshot_cache)
-{
-}
+{}
 
 InvokeResult
 SystemCallHandler::root_invoke()
@@ -167,7 +166,8 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
-  return runtime_context_->make_new_runtime(load_contract->contract_data, this, true);
+  return runtime_context_->make_new_runtime(load_contract->contract_data, this,
+                                            true);
 }
 
 Calldata const &

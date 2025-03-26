@@ -132,7 +132,8 @@ public:
   Runtime(Runtime &&other) = delete;
   Runtime &operator=(Runtime &&other) = delete;
 
-  constexpr static std::string invoke_name(MethodID method) {
+  constexpr static std::string invoke_name(MethodID method)
+  {
     return std::format("{:X}", method);
   }
 
@@ -140,11 +141,10 @@ public:
   // (i.e. x = get_available_gas(); invoke(something); assert(x ==
   // get_available_gas()))
   InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
-  InvokeResult invoke(MethodID method_id, uint64_t gas_limit) {
+  InvokeResult invoke(MethodID method_id, uint64_t gas_limit)
+  {
     return invoke(invoke_name(method_id), gas_limit);
   }
-
-
 
   // Returns FALSE if gas consumption failed.
   //
