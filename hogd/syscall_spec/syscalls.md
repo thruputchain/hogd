@@ -43,12 +43,13 @@ message, associated with the address of the currently running contract.
 Returns kInvalidSyscallInput if the supplied message is too long.
 
 # Invoke Signature: (call_address: ContractAddress, method: MethodID,
-  gas_limit: GasAmount, calldata: [u8]) -> ()
+  gas_limit: GasAmount, calldata: [u8]) -> i32
 
 Invokes the specified method of the contract at the specified address, with
 the supplied parameters. Creates a new callframe, which terminates upon
 conclusion of the Invoke() syscall.
 
+Returns the length of the buffer returned by the called contract (0 if error).
 
 # Return Signature: (output : [u8]) -> !
 
@@ -65,14 +66,6 @@ Loads the bytestring returned by the most recent child callframe.
 
 Returns error kNoReturnBufferAvailable if the most recent child callframe does
 not exist or exited in an error state.
-
-# GetReturnedBufferLen Signature: () -> u32
-
-Gets the size of the bytestring returned by the most recent child callframe.
-
-Returns error kNoReturnBufferAvailable if the most recent child callframe does
-not exist or exited in an error state.
-
 
 # Exit
 
@@ -126,4 +119,10 @@ Signature: GetSourceTransactionHash() -> SHA256Hash
 Returns the sha256 hash of the originating transaction.
 
 No other errors.
+
+# VerifySignature
+
+Signature: VerifySignature(signature: Signature, publickey: Publickey, message : [u8]) -> ()
+
+Check the error code to determine verification status.
 

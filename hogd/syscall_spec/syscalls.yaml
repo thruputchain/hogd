@@ -54,9 +54,9 @@ syscalls:
       - name: "calldata"
         span_argument: yes
     outputs:
-      # cannot return ReturnLen here:
-      # invoke(), if reentrant, could cause the contract memory ptr
-      # to become invalidated
+      - name: return_buffer_len
+        typename: "RuntimeMemoryLength"
+        primitive_type: yes
     syscall_return_type: "HostFnResult"
     number: 5
   - name: "Return"
@@ -77,14 +77,6 @@ syscalls:
         typename: "RuntimeMemoryLength"
         primitive_type: yes
     number: 7
-  - name: "GetReturnedBufferLen"
-    needs_context: yes
-    inputs:
-    outputs:
-      - name: "buffer_len"
-        typename: "RuntimeMemoryLength"
-        primitive_type: yes
-    number: 8
   - name: "Exit"
     needs_context: no
     syscall_return_type: "HostFnResult"
@@ -96,7 +88,7 @@ syscalls:
         primitive_type: yes
     outputs:
     returns: no
-    number: 9
+    number: 8
   - name: "GetDeployAddress"
     needs_context : yes
     inputs:
@@ -113,7 +105,7 @@ syscalls:
     outputs:
       - name: "to_be_deployed"
         typename: "ContractAddress"
-    number: 10
+    number: 9
   - name: "DeployContract"
     needs_context : yes
     inputs:
@@ -126,14 +118,14 @@ syscalls:
     outputs:
       - name: "deployed_address"
         typename: "ContractAddress"
-    number: 11
+    number: 10
   - name: "GetSourceTransactionHash"
     needs_context : yes
     inputs:
     outputs:
       - name: "source_tx_hash"
         typename: "SHA256Hash"
-    number: 12
+    number: 11
   - name: "VerifySignature"
     needs_context: no
     inputs:
@@ -149,7 +141,7 @@ syscalls:
         span_argument: yes
     outputs:
         # No outputs: check the error code returned
-    number: 13
+    number: 12
 
 errors:
   - name: "None"

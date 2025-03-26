@@ -65,7 +65,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      WrappedGasAmount remaining_gas,
                      const ContractAddress &input_address,
                      MethodID input_method, GasAmount input_gas_limit,
-                     std::span<const std::byte> input_calldata)
+                     std::span<const std::byte> input_calldata,
+                     RuntimeMemoryLength& output_return_buffer_len)
 {
   Calldata calldata;
   calldata.resize_uninitialized(input_calldata.size());
@@ -78,16 +79,22 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                                         input_gas_limit, calldata),
                              remaining_gas.gas_amount_);
 
-  if (syscall_handler.current_runtime_is_revert_poisoned()) {
-    return {{HostFnErrorCode::kExit,
-             static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)},
-            0};
-  }
+  // invocation returned successfully
   if (invoke_res) {
+
+    auto return_buffer = syscall_handler.get_return_buffer();
+    if (return_buffer.has_value()) {
+      output_return_buffer_len = (*return_buffer)->size();
+    } else {
+      output_return_buffer_len = 0;
+    }
+
     return {{HostFnErrorCode::kNoneOrRecoverable,
              static_cast<int32_t>(*invoke_res)},
             gas_amount};
   }
+  // Invocation encountered some error
+  output_return_buffer_len = 0;
   return {{invoke_res.error().code(), 0}, gas_amount};
 }
 
