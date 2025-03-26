@@ -330,18 +330,15 @@ using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
 def gen_syscall_io_arg_decl(arg):
   end_decorator = ""
   argtype = ""
-  print(cpp_to_xdr_typenames.keys())
   if "xdr_typename" in arg:
     argtype = arg["xdr_typename"]
   elif "typename" in arg and arg["typename"] in cpp_to_xdr_typenames.keys():
     argtype = cpp_to_xdr_typenames[arg["typename"]]
-    print(argtype)
   elif "span_argument" in arg and arg["span_argument"]:
     argtype = "opaque"
     end_decorator = "<>"
   else:
     argtype = arg["typename"]
-
 
   pointerdecl = ""
   if "optional" in arg and arg["optional"]:

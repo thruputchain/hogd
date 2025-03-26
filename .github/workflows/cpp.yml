@@ -45,7 +45,7 @@ jobs:
         # Cmake should handle rebuilding any changed files across commits
         # The last number is a version number.  Bump the version number whenever the compiler changes,
         # to invalidate the cache (or any other time you need to manually clear the cache)
-        key: ${{ runner.os }}-${{ github.ref_name }}-1
+        key: ${{ runner.os }}-${{ github.ref_name }}-2
     - name: check
       run: ./scripts/check.sh
     - uses: actions/cache/save@v4
