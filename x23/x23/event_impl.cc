@@ -75,7 +75,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode)
   else {
     if (old_mode == kActive &&
         epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1 &&
-	errno != EBADF)
+	errno != EBADF && errno != ENOENT)
       Errno{}.raise("EPOLL_CTL_DEL failed");
     docbs(fdp);
   }

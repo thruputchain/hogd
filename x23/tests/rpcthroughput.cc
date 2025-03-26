@@ -12,7 +12,17 @@
 
 using namespace x23;
 
-std::filesystem::path progname;
+std::string progname;
+unsigned opt_threads = (nproc() + 1) / 2;
+unsigned opt_connections;
+unsigned opt_async_rpcs_per_thread = 10;
+unsigned opt_seconds = 1;
+
+#if NDEBUG
+#define make_rpc_stream rpc_stream
+#else // !NDEBUG
+#define make_rpc_stream rpc_stream_logged
+#endif // !NDEBUG
 
 struct Listener : DestroyInhibit {
   CoroPoll &cp_;
@@ -68,7 +78,7 @@ Listener::accept_loop(this RefPtr<Listener> self SLOC_ARG)
   while (auto s = co_await self->cp_.accept(self->lfd_, &ss, &socklen)) {
     std::println("accepted fd {} TCP port {} from {}", *s,
                  get_port(self->addr_), HostPort(ss));
-    rpc_stream_logged(self->cp_, *s).server(std::make_unique<Server>(self));
+    make_rpc_stream(self->cp_, *s).server(std::make_unique<Server>(self));
   }
   std::println("server stopping");
 }
@@ -78,7 +88,7 @@ std::atomic<std::uint16_t> server_port{0};
 void
 do_server(int port)
 {
-  ThreadPool pool((nproc() + 1) / 2);
+  ThreadPool pool(opt_threads);
   CoroPoll cp(pool);
   Listener listener(cp, port);
   server_port = get_port(listener.addr_);
@@ -95,7 +105,7 @@ do_client(int port)
 {
   std::atomic_int count{0};
 
-  ThreadPool pool((nproc() + 1) / 2);
+  ThreadPool pool(opt_threads);
   CoroPoll cp(pool);
   auto server_addr = *HostPort{"localhost", uformat("{}", port)}.to_addr(true);
 
@@ -107,24 +117,24 @@ do_client(int port)
     }
     std::println("connected fd {} TCP port {} to {}", *conn,
                  get_port(local_addr(*conn)), HostPort(server_addr));
-    auto c = rpc_stream_logged(cp, *conn).template client<blank_rpc_v1>();
+    auto c = make_rpc_stream(cp, *conn).template client<blank_rpc_v1>();
     for (unsigned i = 0; i < ncoros; ++i)
       [](auto c, std::atomic_int &count) -> Detached {
-	try {
-	  for (;;) {
-	    co_await c.null();
-	    ++count;
-	  }
-	} catch (const XdrException &e) {
-	}
-	co_return;
+        try {
+          for (;;) {
+            co_await c.null();
+            ++count;
+          }
+        } catch (const XdrException &e) {
+        }
+        co_return;
       }(c, count);
   };
 
-  for(int i = pool.nthreads_; i > 0; --i)
-    make_client(10);
+  for (int i = opt_connections; i > 0; --i)
+    make_client(opt_async_rpcs_per_thread);
 
-  sleep(1);
+  sleep(opt_seconds);
 
   std::println("{} RPCs", count.load());
 }
@@ -133,31 +143,67 @@ do_client(int port)
 void
 usage(int err)
 {
-  std::println(err ? stderr : stdout, R"(usage: {0}
-       {0} -c PORT
-       {0} -s [PORT])",
-               progname.string());
+  std::println(err ? stderr : stdout,
+               "usage: {} [-C|-S] [-a #coros/thread] [-t #threads]\n"
+               "       {:{}} [-c #connections] [-s seconds] [port]",
+               progname, "", progname.size());
   exit(err);
+}
+
+static void
+parse_int_opt(std::integral auto &value, const char *s = optarg) noexcept
+{
+  auto [ptr, ec] = std::from_chars(s, s + strlen(s), value);
+  if (ec != std::errc()) {
+    std::println(stderr, "{}: cannot parse integer {}", progname, s);
+    exit(2);
+  }
 }
 
 int
 main(int argc, char **argv)
 {
-  using namespace std::string_literals;
-  progname = std::filesystem::path(argc > 0 ? argv[0] : __FILE__).filename();
+  progname =
+      std::filesystem::path(argc > 0 ? argv[0] : __FILE__).filename().string();
 
-  std::string mode;
-  if (argc >= 2)
-    mode = argv[1];
-  int port{};
-  if (argc >= 3) {
-    try {
-      port = std::stoi(argv[2]);
-    } catch (std::logic_error &e) {
-      std::println(stderr, "bad port {}: {}", argv[2], e.what());
+  char mode{};
+  std::uint16_t port = 0;
+
+  int opt;
+  while ((opt = getopt(argc, argv, "CSt:c:a:s:")) != -1)
+    switch (opt) {
+    case 'C':
+    case 'S':
+      mode = opt;
+      break;
+    case 'h':
+      usage(0);
+      break;
+    case 't':
+      parse_int_opt(opt_threads);
+      break;
+    case 'c':
+      parse_int_opt(opt_connections);
+      break;
+    case 'a':
+      parse_int_opt(opt_async_rpcs_per_thread);
+      break;
+    case 's':
+      parse_int_opt(opt_seconds);
+      break;
+    default:
       usage(2);
     }
+
+  if (optind < argc)
+    parse_int_opt(port, argv[optind++]);
+  if (optind != argc) {
+    std::println(stderr, "{}: too many arguments", progname);
+    usage(2);
   }
+
+  if (!opt_connections)
+    opt_connections = opt_threads;
 
   setlinebuf(stdout);
 #if X23_CORO_TRACE
@@ -167,17 +213,11 @@ main(int argc, char **argv)
   if (getenv("RPCTRACE"))
     RpcLogger::default_logfd = 1;
 
-  if (mode == "-c"s) {
-    if (port <= 0 || port > 0xffff) {
-      std::println(stderr, "bad or missing port number");
-      usage(2);
-    }
+  if (mode == 'C')
     do_client(port);
-  }
-  else if (mode == "-s"s) {
+  else if (mode == 'S')
     do_server(port);
-  }
-  else if (argc <= 1) {
+  else if (!mode) {
     std::thread{do_server, 0}.detach();
     while (!server_port.load())
       server_port.wait(0);
