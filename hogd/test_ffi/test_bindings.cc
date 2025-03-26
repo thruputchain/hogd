@@ -1,0 +1,286 @@
+#include "hogd/test_ffi/test_bindings.h"
+
+#include <cassert>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <print>
+#include <span>
+#include <unistd.h>
+#include <utility>
+
+#include "contract.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/mock_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/mock_syscall_entry.h"
+#include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/serialize.h"
+
+namespace hogd {
+
+namespace {
+
+DBContext *
+make_new_db() noexcept
+{
+  return new DBContext();
+}
+void
+free_db(DBContext *ptr) noexcept
+{
+  delete ptr;
+}
+
+void
+advance_new_block(void *db) noexcept
+{
+  auto *ptr = reinterpret_cast<DBContext *>(db);
+  if (!ptr)
+    return;
+
+  ptr->advance_new_block();
+}
+
+void *
+open_runtime_context() noexcept
+{
+  auto *out = new std::shared_ptr<hogd::MockRuntimeContext>();
+  *out = std::make_shared<hogd::MockRuntimeContext>(
+      make_runtime_context(RuntimeEngine::kWasmi));
+  return out;
+}
+void
+close_runtime_context(void *context) noexcept
+{
+  delete static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
+}
+bool
+add_contract_and_method(void *context, const unsigned char *contract_hash,
+                        ForeignEntryPoint entry_point,
+                        void *foreign_context) noexcept
+{
+  if (contract_hash == nullptr)
+    return false;
+
+  hogd::SHA256Hash hash;
+  std::memcpy(hash.data(), contract_hash, sizeof(hogd::SHA256Hash));
+
+  if (context == nullptr)
+    return false;
+  if (entry_point == nullptr)
+    return false;
+
+  auto *c = static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
+
+  if (!(*c)) {
+    return false;
+  }
+
+  (*c)->set_trampoline(hash, entry_point, foreign_context);
+  return true;
+}
+
+void
+setup_create_contract(void *db, const unsigned char *contract_data,
+                      uint32_t contract_len)
+{
+  if (db == nullptr) {
+    return;
+  }
+  if (contract_data == nullptr) {
+    return;
+  }
+
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+
+  hogd::Contract contract;
+  try {
+    x23::deserialize(&contract, std::span<const unsigned char>(contract_data,
+                                                               contract_len));
+  } catch (x23::XdrBadInput const &e) {
+    return;
+  }
+
+  db_context->setup_create_contract(contract);
+}
+
+void
+setup_create_deployment(void *db, const unsigned char *deployment_addr,
+                        const unsigned char *deployed_hash)
+{
+  if (db == nullptr) {
+    return;
+  }
+  if (deployment_addr == nullptr) {
+    return;
+  }
+  if (deployed_hash == nullptr) {
+    return;
+  }
+
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+
+  ContractAddress addr;
+  std::memcpy(addr.data(), deployment_addr, addr.size());
+
+  SHA256Hash hash;
+  std::memcpy(hash.data(), deployed_hash, hash.size());
+
+  db_context->setup_create_deployment(addr, hash);
+}
+
+void *
+open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
+                     unsigned int serial_len) noexcept
+{
+  if (!db) {
+    return nullptr;
+  }
+  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
+  if (!rc) {
+    return nullptr;
+  }
+  if (!db_context->is_block_open()) {
+    return nullptr;
+  }
+
+  auto *runtime_context =
+      reinterpret_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(rc);
+
+  if (!signed_tx_) {
+    return nullptr;
+  }
+  hogd::SignedTransaction stx;
+  try {
+    x23::deserialize(&stx,
+                     std::span<const unsigned char>(signed_tx_, serial_len));
+  } catch (x23::XdrBadInput const &e) {
+    return nullptr;
+  }
+
+  return new SyscallHandlerContext(*runtime_context, stx, *db_context);
+}
+
+void
+close_syscall_handler(void *syscall_handler) noexcept
+{
+  std::println("closing syscall handler{}", syscall_handler);
+  delete static_cast<SyscallHandlerContext *>(syscall_handler);
+}
+
+constexpr ForeignRootInvokeResult kUnrecoverableError = {
+    .result = {.result_code = 0,
+               .panic = std::to_underlying(InvokeErrorCode::kUnrecoverable)},
+    .gas_consumed = 0};
+
+ForeignRootInvokeResult
+root_invoke(void *syscall_handler) noexcept
+{
+  if (!syscall_handler) {
+    std::println("no syscall handler!");
+    return kUnrecoverableError;
+  }
+
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  auto res = context->root_invoke();
+  return res;
+}
+
+} // namespace
+
+} // namespace hogd
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void *
+create_db()
+{
+  return hogd::make_new_db();
+}
+void
+free_db(void *ptr)
+{
+  hogd::free_db(static_cast<hogd::DBContext *>(ptr));
+}
+
+void
+advance_new_block(void *db)
+{
+  hogd::advance_new_block(db);
+}
+
+void *
+open_runtime_context()
+{
+  return hogd::open_runtime_context();
+}
+
+void
+close_runtime_context(void *context)
+{
+  hogd::close_runtime_context(context);
+}
+int
+add_contract_and_method(void *context, const unsigned char *contract_hash,
+                        ForeignEntryPoint entry_point, void *foreign_context)
+{
+  return (hogd::add_contract_and_method(context, contract_hash, entry_point,
+                                        foreign_context))
+             ? 0
+             : 1;
+}
+
+void
+setup_create_contract(void *db, const unsigned char *contract_data,
+                      uint32_t contract_len)
+{
+  hogd::setup_create_contract(db, contract_data, contract_len);
+}
+
+void
+setup_create_deployment(void *db, const unsigned char *deployment_addr,
+                        const unsigned char *deployed_hash)
+{
+  hogd::setup_create_deployment(db, deployment_addr, deployed_hash);
+}
+
+void *
+open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
+                     unsigned int serial_len)
+{
+  std::println("opening syscall handler");
+  return hogd::open_syscall_handler(db, rc, signed_tx_, serial_len);
+}
+
+void
+close_syscall_handler(void *syscall_handler)
+{
+  hogd::close_syscall_handler(syscall_handler);
+}
+
+struct ForeignRootInvokeResult
+root_invoke(void *syscall_handler)
+{
+  return hogd::root_invoke(syscall_handler);
+}
+
+struct ForeignHostFnResult
+mock_syscall_entrypoint(int32_t syscall, const unsigned char *input,
+                        uint32_t input_len, unsigned char *output,
+                        uint32_t output_len)
+{
+  return hogd::mock_syscall_entrypoint(syscall, input, input_len, output,
+                                       output_len);
+}
+
+#ifdef __cplusplus
+}
+#endif
