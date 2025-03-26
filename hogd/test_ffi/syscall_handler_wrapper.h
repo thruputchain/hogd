@@ -9,8 +9,9 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <print>
 #include <span>
+#include <string>
+#include <tuple>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -76,6 +77,10 @@ private:
   SystemCallHandler handler_;
 };
 
+// Arguments to the mock syscall are first
+// deserialized from raw XDR.
+// The structs are those generated in syscall_args.x
+// ({Syscall}_input and {Syscall}_output).
 template<typename Arg>
 std::optional<Arg>
 read_arg(std::span<const uint8_t> input)
@@ -85,11 +90,17 @@ read_arg(std::span<const uint8_t> input)
     x23::deserialize(&out, input);
     return out;
   } catch (x23::XdrBadInput &e) {
-    std::println("xdr deserialize error! %s", e.what());
+    if (syscall_logfd != -1) {
+      std::string message =
+          std::string("Syscall input xdr deserialize error") + e.what();
+      write(syscall_logfd, message.c_str(), message.size());
+    }
     return std::nullopt;
   }
 }
 
+// Serializes the output of a syscall to a memory span
+// provided by the caller.
 template<typename Arg>
 bool
 write_output_arg(Arg const &arg, std::span<uint8_t> output)
@@ -97,13 +108,20 @@ write_output_arg(Arg const &arg, std::span<uint8_t> output)
   try {
     auto res = x23::serialize(arg);
     if (res.size() != output.size()) {
-      std::println("Output serialize len mismatch!");
+      if (syscall_logfd != -1) {
+        std::string message = "Syscall output serialize len mismatch";
+        write(syscall_logfd, message.c_str(), message.size());
+      }
       return false;
     }
     std::memcpy(output.data(), res.data(), res.size());
     return true;
   } catch (std::exception &e) {
-    std::println("xdr serialize error! %s", e.what());
+    if (syscall_logfd != -1) {
+      std::string message =
+          std::string("Syscall output xdr serialize error!") + e.what();
+      write(syscall_logfd, message.c_str(), message.size());
+    }
     return false;
   }
 }
@@ -124,6 +142,7 @@ unrecoverable_error()
                                  HostFnErrorCode::kUnrecoverable)};
 }
 
+// Translate various types of syscall return types into FFI-safe return type
 ForeignHostFnResult constexpr from_status(HostFnStatus<SyscallErrorCode> status)
 {
   if (status) {
@@ -152,18 +171,23 @@ ForeignHostFnResult constexpr from_status(
   return from_status(status.first);
 }
 
+// Turn the input type (the xdr type) into the corresponding
+// type accepted by the syscall.
 auto
 input_xdr_to_input(auto arg)
 {
   using T = std::remove_cvref_t<decltype(arg)>;
 
   if constexpr (x23::is_bytevec<T>) {
+    // span types
     return std::as_bytes(std::span(arg));
   }
   else if constexpr (requires { arg.get(); }) {
+    // pointer types
     return arg.get();
   }
   else if constexpr (std::same_as<int128_xdr, T>) {
+    // int128 requires special handling
     return from_xdr(arg);
   }
   else {
@@ -186,6 +210,15 @@ cleanup_type(auto arg)
   }
 }
 
+// Turn the output type (the xdr type, as a reference) into the corresponding
+// type accepted by the syscall.
+// Note that not all types can be converted in this way;
+// the main exception is int128.
+// Those types require a special cleanup phase
+// after the syscall.
+// For those types, we allocate an instance of the non-xdr type first,
+// pass a reference to that into the syscall, and then later copy that object
+// into the output xdr.
 template<typename T, typename U>
 decltype(auto)
 output_xdr_to_output(T &arg, U &local_arg_alloc)
@@ -196,13 +229,16 @@ output_xdr_to_output(T &arg, U &local_arg_alloc)
     return local_arg_alloc;
   }
   else if constexpr (x23::is_bytevec<T>) {
+    // bytevector -> span
     return std::as_writable_bytes(std::span(arg));
   }
   else {
+    // references -> references
     return (arg);
   }
 }
 
+// Types that require post-syscall cleanup to add to the output xdr
 void
 cleanup_local_output(auto &arg, auto const &local_arg_alloc)
 {
@@ -214,6 +250,8 @@ cleanup_local_output(auto &arg, auto const &local_arg_alloc)
   }
 }
 
+// Create a tuple of objects that need special handling.
+// At the moment, that only type is int128.
 template<typename T>
 constexpr static auto
 cleanup_tuple(T const &arg)
@@ -223,6 +261,8 @@ cleanup_tuple(T const &arg)
   }(std::make_index_sequence<std::tuple_size_v<T>>{});
 }
 
+// Wrapper around the actual inner syscall, after transforming the xdr arguments
+// into actual arguments and adding any relevant context.
 template<typename InputArg, typename OutputArg, auto mock_func_inner>
 ForeignHostFnResult
 run_mock_func_inner(InputArg const &input, OutputArg &output)
@@ -236,7 +276,7 @@ run_mock_func_inner(InputArg const &input, OutputArg &output)
   using cleanup_args_t = decltype(cleanup_tuple(output));
 
   // One type (int128_xdr) needs to get converted before being put back into the
-  // xdr. This is annoying.
+  // xdr.
   cleanup_args_t local_args_alloc{};
 
   auto extras_pack =
@@ -259,6 +299,7 @@ run_mock_func_inner(InputArg const &input, OutputArg &output)
   }(std::make_index_sequence<std::tuple_size_v<decltype(extras_pack)>>());
 }
 
+// Parse the arguments of a syscall and forward them to run_mock_func_inner
 template<typename InputArg, typename OutputArg, auto mock_func_inner>
 ForeignHostFnResult
 mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
