@@ -1,23 +1,21 @@
 #pragma once
 
-#include <stdint.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <stdint.h>
+
+// Translation of HostFnResult/HostFnStatus<SyscallErrorCode> into an FFI-safe
+// type.
 struct TrampolineResult {
+  // if HostFnErrorCode is kNoneOrRecoverable, this is the SyscallErrorCode.
+  // If HostFnErrorCode is kExit, this is the exit code.
+  // Otherwise, this will be 0.
   int32_t result;
+  // Corresponds to HostFnErrorCode.
   int32_t panic;
 };
-
-// NOLINTBEGIN(readability-identifier-naming)
-const static uint8_t kTrampolineErrorNONE = 0;
-const static uint8_t kTrampolineErrorOUTOFGAS = 1;
-const static uint8_t kTrampolineErrorUNRECOVERABLE = 2;
-const static uint8_t kTrampolineErrorRETURN = 3;
-const static uint8_t kTrampolineErrorEXIT = 4;
-// NOLINTEND(readability-identifier-naming)
 
 // These functions get called (from within Wasmi)
 // as wrappers around
