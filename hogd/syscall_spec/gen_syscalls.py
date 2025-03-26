@@ -9,6 +9,22 @@ import os
 
 syscall_argcount = 6
 
+# Map from c++ to xdr typenames
+cpp_to_xdr_typenames = {
+  "int32_t" : "int",
+  "uint32_t" : "unsigned int",
+  "int64_t" : "hyper",
+  "uint64_t" : "unsigned hyper"
+}
+
+# map from c++ to rust typenames
+cpp_to_rust_typenames = {
+  "int32_t" : "i32",
+  "uint32_t" : "u32",
+  "int64_t" : "i64",
+  "uint64_t" : "u64"
+}
+
 """
 Each syscall generates a
 syscall_{callname}_inner(...); declaration.
@@ -314,13 +330,18 @@ using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
 def gen_syscall_io_arg_decl(arg):
   end_decorator = ""
   argtype = ""
+  print(cpp_to_xdr_typenames.keys())
   if "xdr_typename" in arg:
     argtype = arg["xdr_typename"]
+  elif "typename" in arg and arg["typename"] in cpp_to_xdr_typenames.keys():
+    argtype = cpp_to_xdr_typenames[arg["typename"]]
+    print(argtype)
   elif "span_argument" in arg and arg["span_argument"]:
     argtype = "opaque"
     end_decorator = "<>"
   else:
     argtype = arg["typename"]
+
 
   pointerdecl = ""
   if "optional" in arg and arg["optional"]:
