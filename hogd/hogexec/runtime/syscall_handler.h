@@ -32,9 +32,9 @@ class StorageSnapshotCache;
 //   pushes its state changes into its parent frame.
 //   - Storage Snapshot Cache reference: Object in which lookups to the database
 //   are cached (reads).
-//   - Wasmi Context: Stores any relevant state internal to Wasmi.  Can be shared
-//   across runtime instances (and across transactions, if made threadsafe by 
-//   appropriate guards).
+//   - Wasmi Context: Stores any relevant state internal to Wasmi.  Can be
+//   shared across runtime instances (and across transactions, if made
+//   threadsafe by appropriate guards).
 class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
