@@ -14,19 +14,21 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
+// TODO(geoff): Setup configuration parameters for alternative wasm engines
+// and/or shared contexts.
 SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
                                      StorageSnapshotCache &snapshot_cache)
-  : signed_tx_(std::move(signed_tx)),
+  : runtime_context_(make_hogexec_context(RuntimeEngine::kWasmi)),
+    signed_tx_(std::move(signed_tx)),
     invocation_frame_stack_([this](InvocationFrame &last_frame) {
       commit_last_call_frame_success(last_frame);
     }),
@@ -40,9 +42,7 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       return contracts;
     }()),
     snapshot_cache_(snapshot_cache)
-{
-  wasmi_context_.link_fn("marmot", "syscall", &syscall_entry);
-}
+{}
 
 InvokeResult
 SystemCallHandler::root_invoke()
@@ -129,7 +129,7 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
       std::move(returned_buffer));
 }
 
-std::optional<WasmiRuntime>
+std::unique_ptr<Runtime>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
   // check if the address has a deployed contract hash
@@ -145,7 +145,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   if (!deployed_hash) {
     // A deployment was not found in the local context
     // nor in the snapshot.
-    return std::nullopt;
+    return nullptr;
   }
 
   // At this point, we have a deployment and the hash of the contract.
@@ -165,7 +165,9 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   }
 
   // actually make the new runtime
-  return wasmi_context_.make_new_runtime(load_contract->contract_data, this);
+  // TODO(geoff): do verification when contracts are created, not each time.
+  return runtime_context_->make_new_runtime(load_contract->contract_data, this,
+                                            true);
 }
 
 Calldata const &

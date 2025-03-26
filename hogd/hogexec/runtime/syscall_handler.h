@@ -12,6 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
@@ -90,7 +91,7 @@ public:
   bool current_runtime_is_revert_poisoned() const;
 
 private:
-  WasmiContext wasmi_context_;
+  std::shared_ptr<RuntimeContext> runtime_context_;
   const SignedTransaction signed_tx_;
   InvocationFrameStack invocation_frame_stack_;
 
@@ -109,7 +110,7 @@ private:
   // that address in the current context (i.e. if a contract is deployed there
   // in the snapshot, or by a prior action of the current transaction that was
   // not rolled back by a revert).
-  std::optional<WasmiRuntime> resolve_runtime(ContractAddress const &addr);
+  std::unique_ptr<Runtime> resolve_runtime(ContractAddress const &addr);
 
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the

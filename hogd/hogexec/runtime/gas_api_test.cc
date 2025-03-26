@@ -1,9 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <optional>
+#include <memory>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -58,15 +59,14 @@ protected:
     context.link_fn("test", "external_call",
                     &consume_gas_call); // called by "call1"
 
-    runtime_ = context.make_new_runtime(c, nullptr);
+    runtime_ = context.make_new_runtime(c, nullptr, true);
 
     ASSERT_TRUE(!!runtime_);
   }
 
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(GasApiTest, SetGasNoInvoke)
 {
   EXPECT_EQ(runtime_->get_available_gas(), 0);
@@ -100,6 +100,5 @@ TEST_F(GasApiTest, InvokeResetsGas)
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.gas_consumed_, 80);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

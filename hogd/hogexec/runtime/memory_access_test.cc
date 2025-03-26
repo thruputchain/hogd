@@ -1,9 +1,10 @@
 #include <cstdint>
-#include <optional>
+#include <memory>
 
 #include <gtest/gtest.h>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -17,13 +18,13 @@ protected:
     // this wasm just invokes an external call.  We're just reusing it here.
     auto c = test::load_wasm_from_file("test_set_memory.wasm");
     WasmiContext context;
-    runtime_ = context.make_new_runtime(c, nullptr);
+    runtime_ = context.make_new_runtime(c, nullptr, true);
     ASSERT_TRUE(!!runtime_);
   }
 
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 TEST_F(MemoryAccessTest, ReadWrites)
 {
   // assert memory exists
@@ -57,6 +58,5 @@ TEST_F(MemoryAccessTest, ReadWrites)
   ASSERT_TRUE(res.result_);
   EXPECT_EQ(*res.result_, 0xABCDEF01);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

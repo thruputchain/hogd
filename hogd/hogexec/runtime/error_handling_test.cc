@@ -1,12 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <memory>
 #include <new>
-#include <optional>
 #include <stdexcept>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -68,7 +69,7 @@ consume_too_much_gas(HostCallContext *context)
 }
 
 namespace {
-WasmiRuntime *s_runtime = nullptr;
+Runtime *s_runtime = nullptr;
 bool reentrance_hit = false;
 } // namespace
 
@@ -95,13 +96,12 @@ protected:
   }
   ContractBlob contract_;
   WasmiContext context_;
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 {
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
   EXPECT_FALSE(runtime_);
 }
 
@@ -109,7 +109,7 @@ TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 TEST_F(WasmiErrorHandlingTest, RuntimeError)
 {
   context_.link_fn("test", "external_call", &throw_runtime_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -122,7 +122,7 @@ TEST_F(WasmiErrorHandlingTest, RuntimeError)
 TEST_F(WasmiErrorHandlingTest, ExitHandling)
 {
   context_.link_fn("test", "external_call", &exit_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -135,7 +135,7 @@ TEST_F(WasmiErrorHandlingTest, ExitHandling)
 TEST_F(WasmiErrorHandlingTest, HostError)
 {
   context_.link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -147,7 +147,7 @@ TEST_F(WasmiErrorHandlingTest, HostError)
 TEST_F(WasmiErrorHandlingTest, ValidationError)
 {
   context_.link_fn("test", "external_call", &throw_validation_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(!!runtime_);
 
@@ -160,7 +160,7 @@ TEST_F(WasmiErrorHandlingTest, ValidationError)
 TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
 {
   context_.link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -174,7 +174,7 @@ TEST_F(WasmiErrorHandlingTest, WasmError)
 {
   // must link all the fns, required for linking
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -193,7 +193,7 @@ TEST_F(WasmiErrorHandlingTest, NonexistFn)
 {
   // must link all the fns, required for linking
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -210,7 +210,7 @@ TEST_F(WasmiErrorHandlingTest, NonexistFn)
 TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
 {
   context_.link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -227,7 +227,7 @@ TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
 TEST_F(WasmiErrorHandlingTest, CheckReturn)
 {
   context_.link_fn("test", "external_call", &return_syscall);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -239,7 +239,7 @@ TEST_F(WasmiErrorHandlingTest, CheckReturn)
 TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 {
   context_.link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -256,11 +256,11 @@ TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 TEST_F(WasmiErrorHandlingTest, Reentrance)
 {
   context_.link_fn("test", "external_call", &reentrance);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
-  s_runtime = &(*runtime_);
+  s_runtime = runtime_.get();
   reentrance_hit = false;
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
@@ -273,19 +273,21 @@ TEST_F(WasmiErrorHandlingTest, Reentrance)
 TEST_F(WasmiErrorHandlingTest, NullHandling)
 {
   ContractBlob null_contract;
-  runtime_ = context_.make_new_runtime(null_contract, nullptr);
+  runtime_ = context_.make_new_runtime(null_contract, nullptr, true);
 
   EXPECT_FALSE(runtime_);
 }
 
 TEST_F(WasmiErrorHandlingTest, NullLinkHandling)
 {
-  // Apparently WASM accepts module/fn names of empty strings
-  EXPECT_TRUE(context_.link_fn("", "good_call", &good_call));
-  EXPECT_TRUE(context_.link_fn("test", "", &good_call));
+  // The WASM standard accepts empty strings, but we ban that out to keep the
+  // ffi handling simpler (meaning we never have a reason to pass a null string
+  // across FFI).
+  EXPECT_FALSE(context_.link_fn("", "good_call", &good_call));
+  EXPECT_FALSE(context_.link_fn("test", "", &good_call));
   EXPECT_TRUE(context_.link_fn("foo", "good_call", &good_call));
 
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   EXPECT_FALSE(runtime_);
 }
@@ -293,7 +295,7 @@ TEST_F(WasmiErrorHandlingTest, NullLinkHandling)
 TEST_F(WasmiErrorHandlingTest, OutOfGas)
 {
   context_.link_fn("test", "external_call", &consume_too_much_gas);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -311,7 +313,7 @@ TEST_F(WasmiErrorHandlingTest, OutOfGas)
 TEST_F(WasmiErrorHandlingTest, NoGas)
 {
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -324,7 +326,7 @@ TEST_F(WasmiErrorHandlingTest, NoGas)
 TEST_F(WasmiErrorHandlingTest, Spin)
 {
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -333,6 +335,5 @@ TEST_F(WasmiErrorHandlingTest, Spin)
   EXPECT_FALSE(res.result_);
   EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
