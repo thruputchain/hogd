@@ -11,6 +11,14 @@ struct TrampolineResult {
   int32_t panic;
 };
 
+// NOLINTBEGIN(readability-identifier-naming)
+const static uint8_t kTrampolineErrorNONE = 0;
+const static uint8_t kTrampolineErrorOUTOFGAS = 1;
+const static uint8_t kTrampolineErrorUNRECOVERABLE = 2;
+const static uint8_t kTrampolineErrorRETURN = 3;
+const static uint8_t kTrampolineErrorEXIT = 4;
+// NOLINTEND(readability-identifier-naming)
+
 // These functions get called (from within Wasmi)
 // as wrappers around
 // the functions given as arguments to WasmiContext::link_fn.

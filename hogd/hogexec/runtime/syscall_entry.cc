@@ -11,9 +11,9 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
 
 namespace hogd {

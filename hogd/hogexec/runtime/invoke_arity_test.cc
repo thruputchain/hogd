@@ -2,13 +2,14 @@
 // exactly maintain, and very easy to mess up with a copy-paste bug.
 
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -88,14 +89,13 @@ protected:
     context.link_fn("test", "arg3", &arity3);
     context.link_fn("test", "arg4", &arity4);
     context.link_fn("test", "arg5", &arity5);
-    runtime_ = context.make_new_runtime(c, nullptr);
+    runtime_ = context.make_new_runtime(c, nullptr, true);
     ASSERT_TRUE(runtime_);
   }
 
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(InvokeArityTests, arity0)
 {
   auto res = runtime_->invoke("calltest0", UINT64_MAX);
@@ -137,6 +137,5 @@ TEST_F(InvokeArityTests, arity5)
   EXPECT_TRUE(res.result_);
   EXPECT_EQ(*res.result_, 105);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

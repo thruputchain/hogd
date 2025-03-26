@@ -48,17 +48,19 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
 }
 
 impl WasmiRuntime {
+    // Invariant required: the input wasm module must have passed validation.
     fn new(
         bytes: &[u8],
         context: &WasmiContext,
         userctx: *mut c_void,
     ) -> Option<WasmiRuntime> {
-        let module = match Module::new(&context.engine, &bytes) {
-            Ok(m) => m,
-            Err(_) => {
-                return None;
-            }
-        };
+        let module =
+            match unsafe { Module::new_unchecked(&context.engine, &bytes) } {
+                Ok(m) => m,
+                Err(_) => {
+                    return None;
+                }
+            };
 
         let mut store = Store::new(&context.engine, userctx);
 

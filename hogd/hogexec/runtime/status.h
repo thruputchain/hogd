@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cassert>
 #include <expected>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/status.h"

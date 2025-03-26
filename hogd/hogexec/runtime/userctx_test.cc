@@ -4,6 +4,7 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -33,7 +34,7 @@ TEST(WasmRuntimeTest, CheckCtxCorrect)
 
   context.link_fn("test", "redir_call", &foo);
 
-  auto runtime = context.make_new_runtime(c, ctx_check);
+  auto runtime = context.make_new_runtime(c, ctx_check, true);
 
   ASSERT_TRUE(runtime);
 

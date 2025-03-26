@@ -295,11 +295,12 @@ def gen_syscall_inner_h(spec):
 namespace hogd {{
 
 class SystemCallHandler;
+class Runtime;
 
 {inner_decls}
 
 using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
-    SystemCallHandler&, WasmiRuntime&, {", ".join(["uint64_t"] * (syscall_argcount))});
+    SystemCallHandler&, Runtime&, {", ".join(["uint64_t"] * (syscall_argcount))});
 
 {syscall_table}
 

@@ -11,6 +11,7 @@ add_library(
   invocation_frame.cc
   item_view.cc
   wasmi_runtime.cc
+  runtime.cc
   status.cc
   storage_snapshot_cache.cc
   syscall_invoke.cc
