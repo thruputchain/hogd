@@ -19,10 +19,10 @@ namespace hogd {
 
 class MockRuntime;
 
-
 // Context for a runtime that has been mocked out to some function pointer.
-// Returns a MockRuntime when the input to make_new_runtime is an appropriate mock contract.
-// Otherwise, defaults to the kind of runtime returned by base_context.
+// Returns a MockRuntime when the input to make_new_runtime is an appropriate
+// mock contract. Otherwise, defaults to the kind of runtime returned by
+// base_context.
 class MockRuntimeContext : public RuntimeContext {
 public:
   MockRuntimeContext(std::shared_ptr<RuntimeContext> base_context)

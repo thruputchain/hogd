@@ -28,9 +28,7 @@ SyscallHandlerContext::root_invoke()
                                           InvokeErrorCode::kUnrecoverable)},
         .gas_consumed = 0};
   }
-  x23::Defer _([this] () {
-    pop_context();
-  });
+  x23::Defer _([this]() { pop_context(); });
 
   auto res = handler_.root_invoke();
 
