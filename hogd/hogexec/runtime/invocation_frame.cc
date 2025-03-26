@@ -11,6 +11,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
 

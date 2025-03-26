@@ -9,6 +9,7 @@
 #include <span>
 
 #include "x23/serialize.h"
+#include "x23/vec.h"
 #include "x23/x23.h"
 #include <crc32c/crc32c.h>
 

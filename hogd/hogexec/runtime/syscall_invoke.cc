@@ -1,3 +1,4 @@
+#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <algorithm>
@@ -60,6 +61,7 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
 
 std::pair<HostFnResult, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
+                     WrappedGasAmount current_available_gas,
                      const ContractAddress &input_address,
                      const MethodID input_method,
                      const GasAmount input_gas_limit,
@@ -72,7 +74,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
               input_calldata.size());
 
   auto [invoke_res, gas_amount] = syscall_handler.invoke(
-      Invocation(input_address, input_method, input_gas_limit, calldata));
+      Invocation(input_address, input_method, input_gas_limit, calldata), current_available_gas.gas_amount_);
 
   if (syscall_handler.current_runtime_is_revert_poisoned()) {
     return {{HostFnErrorCode::kExit,

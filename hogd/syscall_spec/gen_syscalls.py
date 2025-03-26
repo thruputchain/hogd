@@ -40,6 +40,13 @@ needs_context:
   to the syscall.  Most syscalls will have this as a yes; there are
   a few (i.e. SHA256) where this is not required.
 
+needs_gas:
+  type: boolean
+  required: no
+  description: Whether or not the amount of currently available gas
+  should be passed as input to the syscall.
+  default: no
+  
 returns:
   type: boolean
   required: no
@@ -208,6 +215,9 @@ def gen_inner_outer(syscall):
 
   if user_arg_count > syscall_argcount:
     raise ValueError("too many syscall args")
+  
+  if "needs_gas" in syscall and syscall["needs_gas"]:
+    inner_arg_decl_strs = ["WrappedGasAmount remaining_gas"] + inner_arg_decl_strs
 
   if syscall["needs_context"]:
     inner_arg_decl_strs = ["SystemCallHandler& syscall_handler"] + inner_arg_decl_strs
@@ -289,7 +299,7 @@ class SystemCallHandler;
 {inner_decls}
 
 using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
-    SystemCallHandler&, std::span<std::byte>, {", ".join(["uint64_t"] * (syscall_argcount))});
+    SystemCallHandler&, WasmiRuntime&, {", ".join(["uint64_t"] * (syscall_argcount))});
 
 {syscall_table}
 

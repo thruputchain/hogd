@@ -16,6 +16,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "hogd/base/xdr_util.h"
 
 namespace hogd {
 
