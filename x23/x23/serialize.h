@@ -387,15 +387,19 @@ struct Deserializer {
     if constexpr (rem == 0) {
       if constexpr (Safe)
         need(x.size());
-      memcpy(x.data(), p, size);
-      p += size;
+      if constexpr (size > 0) {
+        memcpy(x.data(), p, size);
+        p += size;
+      }
     }
     else {
-      size_t binlen = (x.size() + 3UZ) & ~3UZ;
+      constexpr size_t binlen = (x.size() + 3UZ) & ~3UZ;
       if constexpr (Safe)
         need(binlen);
-      memcpy(x.data(), p, size);
-      p += binlen;
+      if constexpr (binlen > 0) {
+        memcpy(x.data(), p, size);
+        p += binlen;
+      }
       check_trailing_zeros(rem);
     }
   }

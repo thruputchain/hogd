@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -35,11 +36,11 @@ TEST(WasmRuntimeTest, CheckCtxCorrect)
 
   auto runtime = context.make_new_runtime(c, ctx_check, true);
 
-  ASSERT_TRUE(!!runtime);
+  ASSERT_TRUE(runtime);
 
   auto res = runtime->invoke("calltest", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 15U);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 15U);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 

@@ -8,7 +8,7 @@ extern "C" {
 
 struct TrampolineResult {
   int32_t result;
-  uint8_t panic;
+  int32_t panic;
 };
 
 // NOLINTBEGIN(readability-identifier-naming)

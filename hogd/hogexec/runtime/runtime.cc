@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -46,7 +47,7 @@ engine_to_string(RuntimeEngine engine)
 }
 
 InvokeResult
-Runtime::invoke(std::string const &method_name, uint64_t gas_limit)
+Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
   uint64_t prev_gas_limit = get_available_gas();
   set_available_gas(gas_limit);
@@ -60,7 +61,7 @@ Runtime::invoke(std::string const &method_name, uint64_t gas_limit)
 
   set_available_gas(prev_gas_limit);
 
-  return InvokeResult{.result = res, .gas_consumed = gas_consumed};
+  return InvokeResult{.result_ = res, .gas_consumed_ = gas_consumed};
 }
 
 bool

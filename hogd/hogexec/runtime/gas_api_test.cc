@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -87,17 +88,17 @@ TEST_F(GasApiTest, InvokeResetsGas)
 
   auto res = runtime_->invoke("call1", 300);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 
-  EXPECT_GE(res.gas_consumed, 100);
+  EXPECT_GE(res.gas_consumed_, 100);
 
   EXPECT_EQ(runtime_->get_available_gas(), 5000);
 
-  EXPECT_TRUE(runtime_->consume_gas(res.gas_consumed));
+  EXPECT_TRUE(runtime_->consume_gas(res.gas_consumed_));
 
   res = runtime_->invoke("call1", 80);
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.gas_consumed, 80);
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.gas_consumed_, 80);
 }
 
 } // namespace hogd

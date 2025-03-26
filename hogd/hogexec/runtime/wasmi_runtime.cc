@@ -2,11 +2,11 @@
 #include <cstddef>
 #include <memory>
 #include <span>
-#include <string>
 #include <string_view>
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -40,7 +40,6 @@ WasmiContext::make_new_runtime(ContractBlob const &contract,
   void *wasmi_runtime_ptr =
       new_wasmi_runtime(contract.data(), contract.size(),
                         host_call_context.get(), wasmi_context_ptr_);
-
   if (wasmi_runtime_ptr == nullptr) {
     return {};
   }
@@ -81,16 +80,8 @@ WasmiRuntime::get_memory() noexcept
   return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
 }
 
-std::span<const std::byte>
-WasmiRuntime::get_memory() const noexcept
-{
-  assert(wasmi_runtime_ptr_ != nullptr);
-  auto slice = wasmi_get_memory(wasmi_runtime_ptr_);
-  return std::as_bytes(std::span<const uint8_t>(slice.mem, slice.sz));
-}
-
 InvokeStatus<int32_t>
-WasmiRuntime::invoke_internal(std::string const &method_name)
+WasmiRuntime::invoke_internal(std::string_view method_name)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
 
@@ -100,7 +91,6 @@ WasmiRuntime::invoke_internal(std::string const &method_name)
                    method_name.size());
 
   InvokeErrorCode wasmi_error{res.error};
-
   if (wasmi_error != InvokeErrorCode::kNone) {
     return InvokeError{wasmi_error};
   }
