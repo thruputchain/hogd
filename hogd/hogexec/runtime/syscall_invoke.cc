@@ -66,7 +66,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const ContractAddress &input_address,
                      MethodID input_method, GasAmount input_gas_limit,
                      std::span<const std::byte> input_calldata,
-                     RuntimeMemoryLength& output_return_buffer_len)
+                     RuntimeMemoryLength &output_return_buffer_len)
 {
   Calldata calldata;
   calldata.resize_uninitialized(input_calldata.size());
@@ -85,7 +85,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
     auto return_buffer = syscall_handler.get_return_buffer();
     if (return_buffer.has_value()) {
       output_return_buffer_len = (*return_buffer)->size();
-    } else {
+    }
+    else {
       output_return_buffer_len = 0;
     }
 
