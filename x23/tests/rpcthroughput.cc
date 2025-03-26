@@ -1,11 +1,12 @@
 
 #include <atomic>
 #include <chrono>
-#include <netinet/in.h>
 #include <poll.h>
+#include <utility>
+
+#include <netinet/in.h>
 #include <unistd.h>
 
-#include <utility>
 #include <x23/refcnt.h>
 #include <x23/rpc.h>
 #include <x23/sockio.h>
@@ -20,6 +21,7 @@ bool opt_csv;
 unsigned opt_connections;
 unsigned opt_async_rpcs_per_thread = 10;
 unsigned opt_seconds = 1;
+std::optional<std::uint32_t> opt_data;
 
 #if NDEBUG
 #define make_rpc_stream rpc_stream
@@ -71,6 +73,8 @@ struct Server {
     l_->count_++;
     co_return;
   }
+
+  Async<Data> echo(Data arg) { co_return arg; }
 };
 static_assert(is_blank_rpc_v1<Server *, Async>);
 
@@ -123,17 +127,33 @@ do_client(int port, const char *server)
     //    std::println("connected fd {} TCP port {} to {}", *conn,
     //                 get_port(local_addr(*conn)), HostPort(server_addr));
     auto c = make_rpc_stream(cp, *conn).template client<blank_rpc_v1>();
-    for (unsigned i = 0; i < ncoros; ++i)
-      [](auto c, std::atomic_int &count) -> Detached {
-        try {
-          for (;;) {
-            co_await c.null();
-            ++count;
+
+    if (opt_data) {
+      for (unsigned i = 0; i < ncoros; ++i)
+        [](auto c, std::atomic_int &count) -> Detached {
+          Data bytes(size_t(*opt_data), std::uint8_t(0xc5));
+          try {
+            for (;;) {
+              co_await c.echo(bytes);
+              ++count;
+            }
+          } catch (const XdrException &e) {
           }
-        } catch (const XdrException &e) {
-        }
-        co_return;
-      }(c, count);
+          co_return;
+        }(c, count);
+    }
+    else
+      for (unsigned i = 0; i < ncoros; ++i)
+        [](auto c, std::atomic_int &count) -> Detached {
+          try {
+            for (;;) {
+              co_await c.null();
+              ++count;
+            }
+          } catch (const XdrException &e) {
+          }
+          co_return;
+        }(c, count);
   };
 
   for (int i = opt_connections; i > 0; --i)
@@ -152,14 +172,18 @@ do_client(int port, const char *server)
   double rate = double(final_count) / duration<double>(elapsed).count();
 
   if (opt_csv)
-    std::println("{},{},{},{},{:.0f}", server ? server : "INTERNAL",
+    std::println("{},{},{},{},{},{:.0f}", server ? server : "INTERNAL",
+                 opt_data ? std::string{} : std::to_string(*opt_data),
                  pool->nthreads_, opt_connections, opt_async_rpcs_per_thread,
                  rate);
   else
-    std::println("{}: {} threads, {} connections, {} coros/connection\n"
+    std::println("{}: {}, {} threads, {} connections, {} coros/connection\n"
                  "    {} RPCs / {} = {:.0f} RPCs/sec",
-                 server ? server : "INTERNAL", pool->nthreads_, opt_connections,
-                 opt_async_rpcs_per_thread, final_count, elapsed, rate);
+                 server ? server : "INTERNAL",
+                 opt_data ? std::format("{} bytes", *opt_data)
+                          : std::string("no data"),
+                 pool->nthreads_, opt_connections, opt_async_rpcs_per_thread,
+                 final_count, elapsed, rate);
 }
 
 [[noreturn]]
@@ -168,7 +192,7 @@ usage(int err)
 {
   std::println(err ? stderr : stdout,
                "usage: {} [-C|-S] [-q] [-a #coros/thread] [-t #threads]\n"
-               "       {:{}} [-c #connections] [-s seconds] [port]",
+               "       {:{}} [-c #connections] [-s seconds] [-d bytes] [port]",
                progname, "", progname.size());
   exit(err);
 }
@@ -195,7 +219,7 @@ main(int argc, char **argv)
   const char *server{};
 
   int opt;
-  while ((opt = getopt(argc, argv, "CSqt:c:a:s:")) != -1)
+  while ((opt = getopt(argc, argv, "CSqt:c:a:s:d:")) != -1)
     switch (opt) {
     case 'C':
     case 'S':
@@ -215,6 +239,9 @@ main(int argc, char **argv)
       break;
     case 'a':
       parse_int_opt(opt_async_rpcs_per_thread);
+      break;
+    case 'd':
+      parse_int_opt(opt_data.emplace());
       break;
     case 's':
       parse_int_opt(opt_seconds);
