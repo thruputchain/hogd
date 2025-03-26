@@ -21,4 +21,6 @@ add_subdirectory(hogdb)
 add_subdirectory(hogexec)
 
 # Build module for mock contract tests
-add_subdirectory(test_ffi)
+if (ENABLE_TEST_FFI)
+  add_subdirectory(test_ffi)
+endif()
