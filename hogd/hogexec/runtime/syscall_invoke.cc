@@ -134,19 +134,6 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_GetReturnedBufferLen_inner(SystemCallHandler &syscall_handler,
-                                   RuntimeMemoryLength &output_buffer_len)
-{
-  auto status = syscall_handler.get_return_buffer();
-  if (!status) {
-    return {status.error().code(), 0};
-  }
-
-  output_buffer_len = (*status)->size();
-  return {SyscallErrorCode::kNone, 0};
-}
-
 std::pair<HostFnResult, GasAmount>
 syscall_Exit_inner(const int32_t input_code)
 {
