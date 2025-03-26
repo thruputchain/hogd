@@ -80,8 +80,8 @@ add_contract_and_method(void *context, uint32_t mock_contract_id,
 }
 
 void *
-open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
-                     unsigned int serial_len) noexcept
+open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
+                     unsigned int signed_tx_len) noexcept
 {
   if (!db) {
     return nullptr;
@@ -94,13 +94,13 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
   auto *runtime_context =
       reinterpret_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(rc);
 
-  if (!signed_tx_) {
+  if (!signed_tx) {
     return nullptr;
   }
   hogd::SignedTransaction stx;
   try {
     x23::deserialize(&stx,
-                     std::span<const unsigned char>(signed_tx_, serial_len));
+                     std::span<const unsigned char>(signed_tx, signed_tx_len));
   } catch (x23::XdrBadInput const &e) {
     return nullptr;
   }
@@ -180,11 +180,11 @@ add_contract_and_method(void *context, uint32_t mock_contract_id,
 }
 
 void *
-open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
-                     unsigned int serial_len)
+open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
+                     unsigned int signed_tx_len)
 {
   std::println("opening syscall handler");
-  return hogd::open_syscall_handler(db, rc, signed_tx_, serial_len);
+  return hogd::open_syscall_handler(db, rc, signed_tx, signed_tx_len);
 }
 
 void

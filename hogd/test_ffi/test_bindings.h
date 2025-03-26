@@ -43,13 +43,12 @@ void *open_runtime_context();
 void close_runtime_context(void *context);
 
 // Returns 0 for success, nonzero for some error code
-// entrypoint should be of type detail::ForeignEntryPoint
 int add_contract_and_method(void *context, uint32_t mock_contract_id,
                             ForeignEntryPoint entry_point,
                             void *foreign_context);
 
-void *open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
-                           unsigned int serial_len);
+void *open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
+                           unsigned int signed_tx_len);
 void close_syscall_handler(void *syscall_handler);
 
 struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
