@@ -3,6 +3,9 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/status.h"
+#include <string>
+#include <string_view>
 
 namespace hogd {
 

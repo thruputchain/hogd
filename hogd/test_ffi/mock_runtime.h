@@ -5,7 +5,6 @@
 #include <map>
 #include <memory>
 #include <span>
-#include <string>
 #include <string_view>
 #include <utility>
 
@@ -15,12 +14,15 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/mock_contract.h"
 #include "hogd/test_ffi/test_bindings.h"
-#include "types.hh"
 
 namespace hogd {
 
 class MockRuntime;
 
+
+// Context for a runtime that has been mocked out to some function pointer.
+// Returns a MockRuntime when the input to make_new_runtime is an appropriate mock contract.
+// Otherwise, defaults to the kind of runtime returned by base_context.
 class MockRuntimeContext : public RuntimeContext {
 public:
   MockRuntimeContext(std::shared_ptr<RuntimeContext> base_context)
@@ -39,6 +41,7 @@ public:
     return true;
   };
 
+  // Sets the function pointer and context that a mocked contract calls into.
   void set_trampoline(uint32_t contract, ForeignEntryPoint entry_point,
                       void *foreign_context);
 
@@ -47,6 +50,11 @@ private:
   std::shared_ptr<RuntimeContext> base_context_;
 };
 
+// One instance of a mock contract.
+// All invocations are forwarded to the MockContract instance,
+// which is essentially a wrapper around a function pointer.
+// Note that mocked contracts do not on their own track gas usage,
+// aside from that explicitly consumed by syscalls.
 class MockRuntime : public Runtime {
 public:
   MockRuntime(MockContract contract)

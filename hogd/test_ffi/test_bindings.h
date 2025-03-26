@@ -6,20 +6,29 @@ extern "C" {
 
 #include <stdint.h>
 
+// Translation of InvokeStatus<int32_t> into an FFI-safe type.
+// This is the type returned by an invocation to a mocked contract.
 struct ForeignInvokeResult {
   int32_t result_code;
   int32_t panic;
 };
 
+// FFI-safe type corresponding to the result of a root invocation.
+// I.e. InvokeStatus<int32_t> plus the gas consumed.
 struct ForeignRootInvokeResult {
   struct ForeignInvokeResult result;
   uint64_t gas_consumed;
 };
 
+// Type of the function pointer used within a mock contract.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct ForeignInvokeResult (*ForeignEntryPoint)(void *foreign_context,
                                                         uint32_t method_number);
 
+// Translation of HostFnStatus<SyscallErrorCode> into an FFI-safe type.
+// TODO(geoff): This is identical to TrampolineResult in runtime_trampoline.
+// This could be replaced by the same type as there, although that could
+// somewhat complicate the build system/bindgen usage.
 struct ForeignHostFnResult {
   int32_t result_code;
   int32_t panic; // HostFnErrorCode
@@ -49,7 +58,6 @@ struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    unsigned char *output,
                                                    uint32_t output_len);
 
-// returns an FFIRootInvokeResult
 struct ForeignRootInvokeResult root_invoke(void *syscall_handler);
 
 #ifdef __cplusplus

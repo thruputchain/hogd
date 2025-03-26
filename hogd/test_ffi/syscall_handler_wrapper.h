@@ -11,7 +11,6 @@
 #include <optional>
 #include <print>
 #include <span>
-#include <string_view>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -35,6 +34,9 @@
 
 namespace hogd {
 
+// Wrapper around the SyscallHandler.
+// Stores the SyscallHandler in a threadlocal variable (which means
+// that the test harness does not need to maintain that context externally).
 class SyscallHandlerContext {
 public:
   SyscallHandlerContext(std::shared_ptr<MockRuntimeContext> context,

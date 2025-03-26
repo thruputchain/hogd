@@ -8,6 +8,8 @@
 
 namespace hogd {
 
+// Wrapper around a function pointer, implementing a contract mocked out via
+// the test harness (or some other mechanism).
 class MockContract {
 public:
   InvokeStatus<int32_t> invoke(std::string_view method);

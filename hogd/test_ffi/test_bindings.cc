@@ -11,7 +11,6 @@
 #include <unistd.h>
 #include <utility>
 
-#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -20,7 +19,6 @@
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "transaction.hh"
-#include "types.hh"
 #include "x23/serialize.h"
 
 namespace hogd {
@@ -53,7 +51,7 @@ open_runtime_context() noexcept
 {
   auto *out = new std::shared_ptr<hogd::MockRuntimeContext>();
   *out = std::make_shared<hogd::MockRuntimeContext>(
-      make_runtime_context(RuntimeEngine::kWasmi));
+      make_hogexec_context(RuntimeEngine::kWasmi));
   return out;
 }
 void

@@ -7,6 +7,9 @@
 
 namespace hogd {
 
+// Database-related context for the test environment.
+// Provides appropriate methods for manipulating the evolution
+// of the database during a test.
 class DBContext {
 public:
   DBContext();

@@ -8,6 +8,7 @@
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "transaction.hh"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
@@ -27,6 +28,9 @@ SyscallHandlerContext::root_invoke()
                                           InvokeErrorCode::kUnrecoverable)},
         .gas_consumed = 0};
   }
+  x23::Defer _([this] () {
+    pop_context();
+  });
 
   auto res = handler_.root_invoke();
 
@@ -37,8 +41,6 @@ SyscallHandlerContext::root_invoke()
                                           InvokeErrorCode::kNone)},
         .gas_consumed = res.gas_consumed_};
   }
-
-  pop_context();
 
   return ForeignRootInvokeResult{.result = {.result_code = 0,
                                             .panic = std::to_underlying(
