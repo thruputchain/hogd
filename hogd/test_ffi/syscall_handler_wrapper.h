@@ -28,6 +28,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -305,7 +306,7 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
 
   ForeignHostFnResult status =
       run_mock_func_inner<InputArg, OutputArg, mock_func_inner>(
-          *input_arg, *output_arg); // mock_func_inner(*input_arg, *output_arg);
+          *input_arg, *output_arg);
 
   if (status.panic != std::to_underlying(HostFnErrorCode::kNoneOrRecoverable)) {
     if (syscall_logfd != -1) {
@@ -316,7 +317,7 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
       else if (status.panic == std::to_underlying(HostFnErrorCode::kReturn)) {
         panic_msg = "GUEST RETURN";
       }
-      auto msg = std::format("{} {}\n", syscall_no, panic_msg);
+      auto msg = std::format("{} {}\n", x23::show(syscall_no), panic_msg);
       write(syscall_logfd, msg.data(), msg.size());
     }
 
@@ -326,7 +327,7 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
   if (status.result_code != std::to_underlying(SyscallErrorCode::kNone)) {
     if (syscall_logfd != -1) {
       auto msg =
-          std::format("{} return error {}\n", syscall_no, status.result_code);
+          std::format("{} return error {}\n", x23::show(syscall_no), status.result_code);
       write(syscall_logfd, msg.data(), msg.size());
     }
 
