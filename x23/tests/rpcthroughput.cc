@@ -1,6 +1,8 @@
 
 #include <atomic>
+#include <chrono>
 #include <netinet/in.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include <utility>
@@ -13,7 +15,8 @@
 using namespace x23;
 
 std::string progname;
-unsigned opt_threads = (nproc() + 1) / 2;
+std::shared_ptr<ThreadPool> pool;
+bool opt_csv;
 unsigned opt_connections;
 unsigned opt_async_rpcs_per_thread = 10;
 unsigned opt_seconds = 1;
@@ -30,7 +33,8 @@ struct Listener : DestroyInhibit {
   sockaddr_storage addr_{};
   std::atomic_int count_{};
 
-  Listener(CoroPoll &cp, int port = 0) : cp_(cp), lfd_(tcplisten(port))
+  Listener(CoroPoll &cp, int port = 0)
+    : cp_(cp), lfd_(tcplisten(port, opt_connections > 5 ? opt_connections : 5))
   {
     if (!lfd_)
       throw Errno{};
@@ -76,8 +80,8 @@ Listener::accept_loop(this RefPtr<Listener> self SLOC_ARG)
   sockaddr_storage ss;
   socklen_t socklen;
   while (auto s = co_await self->cp_.accept(self->lfd_, &ss, &socklen)) {
-    std::println("accepted fd {} TCP port {} from {}", *s,
-                 get_port(self->addr_), HostPort(ss));
+    //    std::println("accepted fd {} TCP port {} from {}", *s,
+    //                 get_port(self->addr_), HostPort(ss));
     make_rpc_stream(self->cp_, *s).server(std::make_unique<Server>(self));
   }
   std::println("server stopping");
@@ -86,13 +90,13 @@ Listener::accept_loop(this RefPtr<Listener> self SLOC_ARG)
 std::atomic<std::uint16_t> server_port{0};
 
 void
-do_server(int port)
+do_server(int port, bool quiet)
 {
-  ThreadPool pool(opt_threads);
-  CoroPoll cp(pool);
+  auto retain_pool(pool);
+  CoroPoll cp(*retain_pool);
   Listener listener(cp, port);
   server_port = get_port(listener.addr_);
-  if (port == 0)
+  if (port == 0 && !quiet)
     std::println("port {}", server_port.load());
   server_port.notify_all();
 
@@ -101,13 +105,14 @@ do_server(int port)
 }
 
 void
-do_client(int port)
+do_client(int port, const char *server)
 {
   std::atomic_int count{0};
 
-  ThreadPool pool(opt_threads);
-  CoroPoll cp(pool);
-  auto server_addr = *HostPort{"localhost", uformat("{}", port)}.to_addr(true);
+  CoroPoll cp(*pool);
+  auto server_addr =
+      *HostPort{server ? server : "localhost", uformat("{}", port)}.to_addr(
+          true);
 
   auto make_client = [&](unsigned ncoros) -> Detached {
     auto conn = co_await cp.tcpconnect(&server_addr);
@@ -115,8 +120,8 @@ do_client(int port)
       std::println(stderr, "tcpconnect: {}", conn.error());
       co_return;
     }
-    std::println("connected fd {} TCP port {} to {}", *conn,
-                 get_port(local_addr(*conn)), HostPort(server_addr));
+    //    std::println("connected fd {} TCP port {} to {}", *conn,
+    //                 get_port(local_addr(*conn)), HostPort(server_addr));
     auto c = make_rpc_stream(cp, *conn).template client<blank_rpc_v1>();
     for (unsigned i = 0; i < ncoros; ++i)
       [](auto c, std::atomic_int &count) -> Detached {
@@ -134,9 +139,27 @@ do_client(int port)
   for (int i = opt_connections; i > 0; --i)
     make_client(opt_async_rpcs_per_thread);
 
-  sleep(opt_seconds);
+  // Warm up for 100 msec
+  poll(nullptr, 0, 100);
 
-  std::println("{} RPCs", count.load());
+  using namespace std::chrono;
+  auto start = high_resolution_clock::now();
+  count = 0;
+  sleep(opt_seconds);
+  auto final_count = count.load();
+  auto elapsed = high_resolution_clock::now() - start;
+
+  double rate = double(final_count) / duration<double>(elapsed).count();
+
+  if (opt_csv)
+    std::println("{},{},{},{},{:.0f}", server ? server : "INTERNAL",
+                 pool->nthreads_, opt_connections, opt_async_rpcs_per_thread,
+                 rate);
+  else
+    std::println("{}: {} threads, {} connections, {} coros/connection\n"
+                 "    {} RPCs / {} = {:.0f} RPCs/sec",
+                 server ? server : "INTERNAL", pool->nthreads_, opt_connections,
+                 opt_async_rpcs_per_thread, final_count, elapsed, rate);
 }
 
 [[noreturn]]
@@ -144,7 +167,7 @@ void
 usage(int err)
 {
   std::println(err ? stderr : stdout,
-               "usage: {} [-C|-S] [-a #coros/thread] [-t #threads]\n"
+               "usage: {} [-C|-S] [-q] [-a #coros/thread] [-t #threads]\n"
                "       {:{}} [-c #connections] [-s seconds] [port]",
                progname, "", progname.size());
   exit(err);
@@ -166,18 +189,23 @@ main(int argc, char **argv)
   progname =
       std::filesystem::path(argc > 0 ? argv[0] : __FILE__).filename().string();
 
-  char mode{};
-  std::uint16_t port = 0;
+  char opt_mode{};
+  std::uint16_t port{};
+  unsigned opt_threads{};
+  const char *server{};
 
   int opt;
-  while ((opt = getopt(argc, argv, "CSt:c:a:s:")) != -1)
+  while ((opt = getopt(argc, argv, "CSqt:c:a:s:")) != -1)
     switch (opt) {
     case 'C':
     case 'S':
-      mode = opt;
+      opt_mode = opt;
       break;
     case 'h':
       usage(0);
+      break;
+    case 'q':
+      opt_csv = true;
       break;
     case 't':
       parse_int_opt(opt_threads);
@@ -197,11 +225,16 @@ main(int argc, char **argv)
 
   if (optind < argc)
     parse_int_opt(port, argv[optind++]);
+  if (optind < argc && opt_mode == 'C')
+    server = argv[optind++];
   if (optind != argc) {
     std::println(stderr, "{}: too many arguments", progname);
     usage(2);
   }
 
+  if (!opt_threads)
+    opt_threads = opt_mode ? nproc() : (nproc() + 1) / 2;
+  pool = std::make_shared<ThreadPool>(opt_threads);
   if (!opt_connections)
     opt_connections = opt_threads;
 
@@ -213,15 +246,20 @@ main(int argc, char **argv)
   if (getenv("RPCTRACE"))
     RpcLogger::default_logfd = 1;
 
-  if (mode == 'C')
-    do_client(port);
-  else if (mode == 'S')
-    do_server(port);
-  else if (!mode) {
-    std::thread{do_server, 0}.detach();
+  if (opt_mode == 'C') {
+    if (!port) {
+      std::println(stderr, "Must specify port number with -C");
+      exit(2);
+    }
+    do_client(port, server ? server : "localhost");
+  }
+  else if (opt_mode == 'S')
+    do_server(port, false);
+  else if (!opt_mode) {
+    std::thread{do_server, 0, true}.detach();
     while (!server_port.load())
       server_port.wait(0);
-    do_client(server_port.load());
+    do_client(server_port.load(), nullptr);
   }
   else
     usage(2);
