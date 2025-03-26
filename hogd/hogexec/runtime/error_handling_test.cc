@@ -100,7 +100,6 @@ protected:
   std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_P(ErrorHandlingTest, UnlinkedFn)
 {
   runtime_ = context_->make_new_runtime(contract_, nullptr, true);

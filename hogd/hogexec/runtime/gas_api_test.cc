@@ -66,7 +66,6 @@ protected:
   std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_P(GasApiTest, SetGasNoInvoke)
 {
   EXPECT_EQ(runtime_->get_available_gas(), 0);
