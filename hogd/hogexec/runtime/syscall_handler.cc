@@ -55,7 +55,7 @@ SystemCallHandler::root_invoke()
 
   invocation_frame_stack_.start_frame(signed_tx_.tx.invocation);
   auto res = runtime->invoke(signed_tx_.tx.invocation.method,
-                                      signed_tx_.tx.invocation.gas_limit);
+                             signed_tx_.tx.invocation.gas_limit);
   invocation_frame_stack_.finish_frame(res);
 
   if (!res.is_root_success())

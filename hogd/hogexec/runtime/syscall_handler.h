@@ -10,13 +10,13 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "hogd/base/xdr_util.h"
 
 namespace hogd {
 

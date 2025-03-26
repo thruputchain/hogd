@@ -8,17 +8,16 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
-#include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
 
 InvocationFrame::InvocationFrame(Invocation invocation)
   : active_invocation_(std::move(invocation))
-{
-}
+{}
 
 void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &frame)
