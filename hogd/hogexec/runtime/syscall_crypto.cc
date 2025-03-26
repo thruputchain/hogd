@@ -31,16 +31,16 @@ syscall_VerifySignature_inner(Signature const &signature,
                               std::span<const std::byte> message)
 {
   if (public_key.scheme() != signature.scheme()) {
-    return {SyscallErrorCode::kInvalidInput, 0};
+    return {SyscallErrorCode::kInvalidSyscallInput, 0};
   }
   switch (public_key.scheme()) {
   case CryptographicScheme::Ed25519:
     if (!ed25519_verify(public_key.ed25519(), signature.ed25519(), message)) {
-      return {SyscallErrorCode::kInvalidInput, 0};
+      return {SyscallErrorCode::kInvalidSyscallInput, 0};
     }
     return {SyscallErrorCode::kNone, 0};
   default:
-    return {SyscallErrorCode::kInvalidInput, 0};
+    return {SyscallErrorCode::kInvalidSyscallInput, 0};
   }
 }
 

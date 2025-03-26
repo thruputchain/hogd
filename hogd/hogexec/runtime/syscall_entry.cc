@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <span>
 #include <type_traits>
 #include <utility>
 
@@ -43,9 +42,9 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   assert(syscall_expect == static_cast<SyscallNo>(arg0));
   assert(call_context->syscall_handler);
 
-  std::span<std::byte> contract_memory = call_context->runtime->get_memory();
-  return syscall_fn_outer(*call_context->syscall_handler, contract_memory, arg1,
-                          arg2, arg3, arg4, arg5, arg6);
+  return syscall_fn_outer(*call_context->syscall_handler,
+                          *call_context->runtime, arg1, arg2, arg3, arg4, arg5,
+                          arg6);
 }
 
 } // namespace

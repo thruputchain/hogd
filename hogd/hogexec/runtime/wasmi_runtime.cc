@@ -13,6 +13,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/hogexec/wasmi/bindings.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -35,11 +36,9 @@ WasmiContext::make_new_runtime(ContractBlob const &contract,
   void *wasmi_runtime_ptr =
       new_wasmi_runtime(contract.data(), contract.size(),
                         host_call_context.get(), wasmi_context_ptr_);
-
   if (wasmi_runtime_ptr == nullptr) {
     return {};
   }
-
   return std::make_optional<WasmiRuntime>(std::move(host_call_context),
                                           wasmi_runtime_ptr);
 }
@@ -77,7 +76,6 @@ InvokeResult
 WasmiRuntime::invoke(uint32_t method_name, uint64_t gas_limit)
 {
   auto method_name_str = std::format("{:X}", method_name);
-
   return invoke(method_name_str, gas_limit);
 }
 
@@ -86,6 +84,9 @@ WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
 
+  // invoke does not commit changes to available gas amounts.  We assume
+  // that accounting is performed elsewhere.
+  // We therefore push the previous available gas amount onto the stack.
   uint64_t prev_gas_limit = wasmi_get_available_gas(wasmi_runtime_ptr_);
   wasmi_set_available_gas(wasmi_runtime_ptr_, gas_limit);
 
@@ -97,22 +98,21 @@ WasmiRuntime::invoke(std::string_view method_name, uint64_t gas_limit)
   uint64_t gas_remaining = wasmi_get_available_gas(wasmi_runtime_ptr_);
 
   assert(gas_remaining <= gas_limit);
-
   uint64_t gas_consumed = gas_limit - gas_remaining;
 
+  // restore previous gas amount
   wasmi_set_available_gas(wasmi_runtime_ptr_, prev_gas_limit);
 
   InvokeErrorCode wasmi_error{res.error};
-
   if (wasmi_error != InvokeErrorCode::kNone) {
-    return InvokeResult{.result = {InvokeError{wasmi_error}},
-                        .gas_consumed = gas_consumed};
+    return InvokeResult{.result_ = {InvokeError{wasmi_error}},
+                        .gas_consumed_ = gas_consumed};
   }
-  return InvokeResult{.result = res.result, .gas_consumed = gas_consumed};
+  return InvokeResult{.result_ = res.result, .gas_consumed_ = gas_consumed};
 }
 
 bool
-WasmiRuntime::consume_gas(uint64_t gas) noexcept
+WasmiRuntime::consume_gas(GasAmount gas) noexcept
 {
   assert(wasmi_runtime_ptr_ != nullptr);
   auto current_gas = get_available_gas();
@@ -126,7 +126,7 @@ WasmiRuntime::consume_gas(uint64_t gas) noexcept
   return false;
 }
 
-uint64_t
+GasAmount
 WasmiRuntime::get_available_gas() const
 {
   assert(wasmi_runtime_ptr_ != nullptr);

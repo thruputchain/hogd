@@ -8,10 +8,16 @@ set_source_files_properties(
 
 add_library(
   runtime
+  invocation_frame.cc
+  item_view.cc
   wasmi_runtime.cc
   status.cc
-  item_view.cc
+  storage_snapshot_cache.cc
+  syscall_invoke.cc
+  syscall_log.cc
+  syscall_contract.cc
   syscall_crypto.cc
+  syscall_handler.cc
   syscall_entry.cc
 )
 

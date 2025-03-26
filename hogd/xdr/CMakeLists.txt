@@ -1,8 +1,9 @@
 add_xdr(
-	protocol
+	protocol 
 	contract.x
 	coord.x
 	ffi_enums.x
+	transaction.x
 	types.x 
 	storage_object.x
 	syscall.x 
@@ -24,5 +25,4 @@ add_xdr_rs(
 	ffi_enum_rs 
 	${CMAKE_SOURCE_DIR}/hogd/hogexec/wasmi/src
 	ffi_enums.x)
-
 

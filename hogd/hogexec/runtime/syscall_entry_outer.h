@@ -10,12 +10,14 @@
 #include <unistd.h>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
 #include "syscall_args.hh"
 #include "types.hh"
@@ -131,15 +133,30 @@ template<typename Ret, typename... Args> struct SyscallTypeParams {
   }
 };
 
+// Arguments that might be passed in as extra components to a syscall,
+// that are NOT derived from the runtime memory.
 class SystemCallHandler;
+struct WrappedGasAmount {
+  [[no_unique_address]] GasAmount gas_amount_;
+};
 
 template<typename> struct SyscallTypes;
+
+template<typename Ret, typename... Args>
+struct SyscallTypes<Ret (*)(SystemCallHandler &, WrappedGasAmount, Args...)>
+  : public SyscallTypeParams<Ret, Args...> {
+  constexpr static std::tuple<SystemCallHandler &, WrappedGasAmount>
+  extra_args(SystemCallHandler &handler, WrappedGasAmount total_available_gas)
+  {
+    return {handler, total_available_gas};
+  }
+};
 
 template<typename Ret, typename... Args>
 struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...)>
   : public SyscallTypeParams<Ret, Args...> {
   constexpr static std::tuple<SystemCallHandler &>
-  handler(SystemCallHandler &handler)
+  extra_args(SystemCallHandler &handler, WrappedGasAmount /*unused*/)
   {
     return {handler};
   }
@@ -147,7 +164,8 @@ struct SyscallTypes<Ret (*)(SystemCallHandler &, Args...)>
 
 template<typename Ret, typename... Args>
 struct SyscallTypes<Ret (*)(Args...)> : public SyscallTypeParams<Ret, Args...> {
-  constexpr static std::tuple<> handler(SystemCallHandler & /*unused*/)
+  constexpr static std::tuple<> extra_args(SystemCallHandler & /*unused*/,
+                                           WrappedGasAmount /*unused*/)
   {
     return {};
   }
@@ -212,7 +230,6 @@ arg_to_xdr(auto arg)
   }
   else if constexpr (std::is_pointer_v<T>) {
     using base_t = std::remove_const_t<std::remove_pointer_t<T>>;
-    static_assert(std::same_as<base_t, ContractAddress>);
     if (arg) {
       return x23::Ptr<base_t>(new base_t(*arg));
     }
@@ -255,10 +272,12 @@ make_syscall_output_struct(std::tuple<T...> const &deferenced_args)
 // are well-formed (no OOB).
 template<SyscallNo Syscall, auto InnerSyscallFunc>
 constexpr std::pair<HostFnResult, GasAmount>
-wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
-           uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
-           uint64_t arg4, uint64_t arg5)
+wrap_outer(SystemCallHandler &handler, WasmiRuntime &runtime, uint64_t arg0,
+           uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
+           uint64_t arg5)
 {
+  auto contract_memory = runtime.get_memory();
+
   auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5};
   using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
 
@@ -298,24 +317,26 @@ wrap_outer(SystemCallHandler &handler, std::span<std::byte> contract_memory,
 
     // With parameter packs as structured bindings, the annoying if constexpr
     // disappears, and the following becomes
-    //   auto [...handler_pack] = syscall_t::handler(handler);
-    //   auto res = f(handler_pack...,
+    //   auto [...extra_args] = syscall_t::extra_args(handler, etc);
+    //   auto res = f(extra_args...,
     //           SyscallArgParams<typename syscall_t::template
     //           arg_i<Is>>::deref(
     //               parsed_args...[Is])...);
 
-    auto handler_pack = syscall_t::handler(handler);
+    auto extra_args =
+        syscall_t::extra_args(handler,
+                              WrappedGasAmount{runtime.get_available_gas()});
 
     // Invoke the inner syscall
     // template only required because we can't do auto [...handler] =
     // handler_pack; yet
-    auto res = [&]<size_t... ExtraArgs>(
-                   std::index_sequence<ExtraArgs...> /*unused*/) {
-      return InnerSyscallFunc(
-          std::get<ExtraArgs>(handler_pack)...,
-          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-              std::get<Is>(parsed_args))...);
-    }(std::make_index_sequence<std::tuple_size_v<decltype(handler_pack)>>{});
+    auto res =
+        [&]<size_t... ExtraArgs>(std::index_sequence<ExtraArgs...> /*unused*/) {
+          return InnerSyscallFunc(
+              std::get<ExtraArgs>(extra_args)...,
+              SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                  std::get<Is>(parsed_args))...);
+        }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
 
     // Print the output of the syscall.  The outputs in parsed_args should only
     // be written to if the syscall succeeds.

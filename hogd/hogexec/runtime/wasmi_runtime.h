@@ -1,14 +1,14 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
-#include <vector>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
 
@@ -23,11 +23,6 @@ class WasmiRuntime;
 struct HostCallContext {
   WasmiRuntime *runtime = nullptr;
   SystemCallHandler *syscall_handler = nullptr;
-};
-
-struct InvokeResult {
-  InvokeStatus<int32_t> result;
-  uint64_t gas_consumed;
 };
 
 // Context shared between WasmiRuntime objects.
@@ -149,8 +144,8 @@ public:
   [[nodiscard]]
   bool consume_gas(uint64_t gas) noexcept;
 
-  [[nodiscard]] uint64_t get_available_gas() const;
-  void set_available_gas(uint64_t gas);
+  [[nodiscard]] GasAmount get_available_gas() const;
+  void set_available_gas(GasAmount gas);
 
   // Complex data types pass in/out of wasm via read/writes to wasm linear
   // memory.
