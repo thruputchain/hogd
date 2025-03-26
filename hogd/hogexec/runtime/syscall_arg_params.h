@@ -44,6 +44,8 @@ struct SyscallArgParams<T> {
   constexpr static T deref(T value) { return value; }
 };
 
+// [u8] span contract output.
+// The two input arguments are (offset, length) in contract memory.
 template<> struct SyscallArgParams<std::span<std::byte>> {
   constexpr static size_t kNumInputs = 2;
   constexpr static std::optional<std::span<std::byte>>
@@ -66,6 +68,8 @@ template<> struct SyscallArgParams<std::span<std::byte>> {
   }
 };
 
+// [u8] span contract input.
+// The two input arguments are (offset, length) in contract memory.
 template<> struct SyscallArgParams<std::span<const std::byte>> {
   constexpr static size_t kNumInputs = 2;
 
@@ -90,7 +94,7 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
 };
 
 // Trivially copyable input and output types.
-// Must be passed as contract memory offsets.
+// Passed as contract memory offsets (i.e. the single input argument).
 template<typename T> requires std::is_trivially_copyable_v<T>
 struct SyscallArgParams<T &> {
   constexpr static size_t kNumInputs = 1;
@@ -106,6 +110,11 @@ struct SyscallArgParams<T &> {
 };
 
 // Optional trivially copyable input types.
+// The difference between this and the non-optional case
+// is that validation always succeeds, but the syscall itself
+// might be passed a nullptr (and must check against that).
+// Some syscalls use that optional check to provide default
+// parameters if a parameter is not supplied by a contract.
 template<typename T> requires std::is_trivially_copyable_v<T>
 struct SyscallArgParams<const T *> {
   constexpr static size_t kNumInputs = 1;
@@ -120,7 +129,15 @@ struct SyscallArgParams<const T *> {
   constexpr static const T *deref(const T *value) { return value; }
 };
 
-// custom parse types
+// custom parse types.
+// For those types that don't quite fit into any of the above categories.
+// At this point, these include PublicKeys and Signatures,
+// which are both unions over different cryptographic schemes.
+// The first argument is an enum of the cryptographic scheme,
+// and the second can be scheme-dependent, but refers to whatever
+// data is required for the scheme.
+// (Future schemes might require variable numbers of arguments; that is not
+// implemented here).)
 template<> struct SyscallArgParams<const Signature &> {
   constexpr static size_t kNumInputs = 2;
   constexpr static std::optional<const Signature>
