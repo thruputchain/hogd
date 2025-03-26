@@ -30,17 +30,19 @@ SOFTWARE.
 
 */
 
-#include <algorithm>
 #include <cassert>
-#include <iterator>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <memory>
+#include <new>
+#include <optional>
 #include <span>
-#include <stdexcept>
-#include <string>
 #include <tuple>
-#include <type_traits>
 #include <vector>
 
+#include "ffi_enums.hh"
 #include "wasm3.h"
 
 #include "hogd/hogexec/runtime/status.h"
@@ -88,54 +90,50 @@ wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
 
   void *fn_pointer = _ctx->userdata;
   constexpr size_t kNumArgs = std::tuple_size_v<args_tuple_t>;
-  hogd::detail::TrampolineResult result;
+  TrampolineResult result;
 
   if constexpr (kNumArgs == 0) {
-    result = hogd::detail::c_call_0args(fn_pointer, m3_GetUserData(rt));
+    result = c_call_0args(fn_pointer, m3_GetUserData(rt));
   }
   else if constexpr (kNumArgs == 1) {
-    result = hogd::detail::c_call_1args(fn_pointer, m3_GetUserData(rt),
-                                        std::get<0>(args));
+    result = c_call_1args(fn_pointer, m3_GetUserData(rt), std::get<0>(args));
   }
   else if constexpr (kNumArgs == 2) {
-    result = hogd::detail::c_call_2args(fn_pointer, m3_GetUserData(rt),
-                                        std::get<0>(args), std::get<1>(args));
+    result = c_call_2args(fn_pointer, m3_GetUserData(rt), std::get<0>(args),
+                          std::get<1>(args));
   }
   else if constexpr (kNumArgs == 3) {
-    result = hogd::detail::c_call_3args(fn_pointer, m3_GetUserData(rt),
-                                        std::get<0>(args), std::get<1>(args),
-                                        std::get<2>(args));
+    result = c_call_3args(fn_pointer, m3_GetUserData(rt), std::get<0>(args),
+                          std::get<1>(args), std::get<2>(args));
   }
   else if constexpr (kNumArgs == 4) {
-    result = hogd::detail::c_call_4args(fn_pointer, m3_GetUserData(rt),
-                                        std::get<0>(args), std::get<1>(args),
-                                        std::get<2>(args), std::get<3>(args));
+    result =
+        c_call_4args(fn_pointer, m3_GetUserData(rt), std::get<0>(args),
+                     std::get<1>(args), std::get<2>(args), std::get<3>(args));
   }
   else if constexpr (kNumArgs == 5) {
-    result = hogd::detail::c_call_5args(fn_pointer, m3_GetUserData(rt),
-                                        std::get<0>(args), std::get<1>(args),
-                                        std::get<2>(args), std::get<3>(args),
-                                        std::get<4>(args));
+    result = c_call_5args(fn_pointer, m3_GetUserData(rt), std::get<0>(args),
+                          std::get<1>(args), std::get<2>(args),
+                          std::get<3>(args), std::get<4>(args));
   }
   else if constexpr (kNumArgs == 6) {
-    result = hogd::detail::c_call_6args(fn_pointer, m3_GetUserData(rt),
-                                        std::get<0>(args), std::get<1>(args),
-                                        std::get<2>(args), std::get<3>(args),
-                                        std::get<4>(args), std::get<5>(args));
+    result =
+        c_call_6args(fn_pointer, m3_GetUserData(rt), std::get<0>(args),
+                     std::get<1>(args), std::get<2>(args), std::get<3>(args),
+                     std::get<4>(args), std::get<5>(args));
   }
   else if constexpr (kNumArgs == 7) {
-    result = hogd::detail::c_call_7args(fn_pointer, m3_GetUserData(rt),
-                                        std::get<0>(args), std::get<1>(args),
-                                        std::get<2>(args), std::get<3>(args),
-                                        std::get<4>(args), std::get<5>(args),
-                                        std::get<6>(args));
+    result =
+        c_call_7args(fn_pointer, m3_GetUserData(rt), std::get<0>(args),
+                     std::get<1>(args), std::get<2>(args), std::get<3>(args),
+                     std::get<4>(args), std::get<5>(args), std::get<6>(args));
   }
   else if constexpr (kNumArgs == 8) {
-    result = hogd::detail::c_call_8args(fn_pointer, m3_GetUserData(rt),
-                                        std::get<0>(args), std::get<1>(args),
-                                        std::get<2>(args), std::get<3>(args),
-                                        std::get<4>(args), std::get<5>(args),
-                                        std::get<6>(args), std::get<7>(args));
+    result =
+        c_call_8args(fn_pointer, m3_GetUserData(rt), std::get<0>(args),
+                     std::get<1>(args), std::get<2>(args), std::get<3>(args),
+                     std::get<4>(args), std::get<5>(args), std::get<6>(args),
+                     std::get<7>(args));
   }
   else {
     std::terminate();
@@ -160,6 +158,8 @@ wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
   case kReturn:
     wasm3_err_code = 0;
     m3ApiTrap(m3Err_hogdExit);
+  case kValidationFailure:
+    m3ApiTrap(m3Err_validationFailure);
   default:
     m3ApiTrap(m3Err_unrecoverableSystemError);
   }

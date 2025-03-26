@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -87,7 +88,7 @@ protected:
     context->link_fn("test", "arg3", &arity3);
     context->link_fn("test", "arg4", &arity4);
     context->link_fn("test", "arg5", &arity5);
-    runtime_ = context->make_new_runtime(c, nullptr);
+    runtime_ = context->make_new_runtime(c, nullptr, true);
     ASSERT_TRUE(!!runtime_);
   }
 
@@ -97,43 +98,43 @@ protected:
 TEST_P(InvokeArityTests, arity0)
 {
   auto res = runtime_->invoke("calltest0", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 100);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 100);
 }
 
 TEST_P(InvokeArityTests, arity1)
 {
   auto res = runtime_->invoke("calltest1", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 101);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 101);
 }
 
 TEST_P(InvokeArityTests, arity2)
 {
   auto res = runtime_->invoke("calltest2", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 102);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 102);
 }
 
 TEST_P(InvokeArityTests, arity3)
 {
   auto res = runtime_->invoke("calltest3", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 103);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 103);
 }
 
 TEST_P(InvokeArityTests, arity4)
 {
   auto res = runtime_->invoke("calltest4", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 104);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 104);
 }
 
 TEST_P(InvokeArityTests, arity5)
 {
   auto res = runtime_->invoke("calltest5", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 105);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 105);
 }
 
 INSTANTIATE_TEST_SUITE_P(AllEngines, InvokeArityTests,

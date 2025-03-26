@@ -1,14 +1,15 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
-#include <optional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/wasm3_wrapper.h"
@@ -24,9 +25,14 @@ public:
   Wasm3Context() = default;
   ~Wasm3Context() override = default;
 
-  std::unique_ptr<Runtime>
-  make_new_runtime(ContractBlob const &contract,
-                   SystemCallHandler *syscall_handler) override;
+  std::unique_ptr<Runtime> make_new_runtime(ContractBlob const &contract,
+                                            SystemCallHandler *syscall_handler,
+                                            bool do_verify) override;
+
+  bool verify_contract(ContractBlob const & /*unused*/) const override
+  {
+    return true;
+  }
 
 private:
   struct LinkedFunction {
@@ -62,8 +68,8 @@ public:
 
   ~Wasm3Runtime() override = default;
 
-  [[nodiscard]] uint64_t get_available_gas() const noexcept override;
-  void set_available_gas(uint64_t gas) noexcept override;
+  [[nodiscard]] GasAmount get_available_gas() const noexcept override;
+  void set_available_gas(GasAmount gas) noexcept override;
 
   // Complex data types pass in/out of wasm via read/writes to wasm linear
   // memory.
@@ -71,11 +77,9 @@ public:
   // Requires the module to export its memory as "memory"
   // (export "memory" (memory 0))
   std::span<std::byte> get_memory() noexcept override;
-  std::span<const std::byte> get_memory() const noexcept override;
 
 private:
-  InvokeStatus<int32_t>
-  invoke_internal(std::string const &method_name) override;
+  InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
 
   std::unique_ptr<wasm3::Runtime> wasm3_runtime_;
   uint64_t available_gas_ = 0;

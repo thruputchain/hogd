@@ -1,9 +1,12 @@
-#include <cstdint>
-#include <memory>
-#include <stdexcept>
-
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <memory>
+#include <new>
+#include <stdexcept>
+
+#include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -23,6 +26,12 @@ HostFnResult
 throw_unrecoverable_host_error(HostCallContext * /*unused*/)
 {
   return {HostFnErrorCode::kUnrecoverable, 0};
+}
+
+HostFnResult
+throw_validation_error(HostCallContext * /*unused*/)
+{
+  return {HostFnErrorCode::kValidationFailure, 0};
 }
 
 HostFnResult
@@ -70,7 +79,7 @@ reentrance(HostCallContext * /*unused*/)
   reentrance_hit = true;
 
   auto res = s_runtime->invoke("unreachable", UINT64_MAX);
-  if (!res.result.has_value()) {
+  if (!res.result_.has_value()) {
     return {HostFnErrorCode::kUnrecoverable, 0};
   }
   return {HostFnErrorCode::kNoneOrRecoverable, 0};
@@ -94,7 +103,7 @@ protected:
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_P(ErrorHandlingTest, UnlinkedFn)
 {
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
   EXPECT_EQ(!!runtime_, !engine_has_eager_link_guards(GetParam()));
 }
@@ -103,150 +112,163 @@ TEST_P(ErrorHandlingTest, UnlinkedFn)
 TEST_P(ErrorHandlingTest, RuntimeError)
 {
   context_->link_fn("test", "external_call", &throw_runtime_error);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 }
 
 TEST_P(ErrorHandlingTest, ExitHandling)
 {
   context_->link_fn("test", "external_call", &exit_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 10);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 10);
 }
 
 TEST_P(ErrorHandlingTest, HostError)
 {
   context_->link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(!!runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+}
+
+TEST_P(ErrorHandlingTest, ValidationError)
+{
+  context_->link_fn("test", "external_call", &throw_validation_error);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
+
+  ASSERT_TRUE(!!runtime_);
+
+  auto res = runtime_->invoke("call1", UINT64_MAX);
+
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kValidationFailure});
 }
 
 TEST_P(ErrorHandlingTest, OtherWeirdError)
 {
   context_->link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 }
 
 TEST_P(ErrorHandlingTest, WasmError)
 {
   // must link all the fns, required for linking
   context_->link_fn("test", "external_call", &good_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 0);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 0);
 
   res = runtime_->invoke("unreachable", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kDeterministic});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kDeterministic});
 }
 
 TEST_P(ErrorHandlingTest, NonexistFn)
 {
   // must link all the fns, required for linking
   context_->link_fn("test", "external_call", &good_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 
   res = runtime_->invoke("blah", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kDeterministic});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kDeterministic});
 }
 
 TEST_P(ErrorHandlingTest, FollowBadWithGood)
 {
   context_->link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 }
 
 TEST_P(ErrorHandlingTest, CheckReturn)
 {
   context_->link_fn("test", "external_call", &return_syscall);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call_then_unreachable", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 }
 
 TEST_P(ErrorHandlingTest, FollowReallyBadWithGood)
 {
   context_->link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 }
 
 TEST_P(ErrorHandlingTest, Reentrance)
 {
   context_->link_fn("test", "external_call", &reentrance);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
-  s_runtime = &(*runtime_);
+  s_runtime = runtime_.get();
   reentrance_hit = false;
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
+  EXPECT_FALSE(res.result_);
 
   EXPECT_TRUE(reentrance_hit);
 }
@@ -254,9 +276,9 @@ TEST_P(ErrorHandlingTest, Reentrance)
 TEST_P(ErrorHandlingTest, NullHandling)
 {
   ContractBlob null_contract;
-  runtime_ = context_->make_new_runtime(null_contract, nullptr);
+  runtime_ = context_->make_new_runtime(null_contract, nullptr, true);
 
-  EXPECT_FALSE(!!runtime_);
+  EXPECT_FALSE(runtime_);
 }
 
 TEST_P(ErrorHandlingTest, NullLinkHandling)
@@ -274,53 +296,52 @@ TEST_P(ErrorHandlingTest, NullLinkHandling)
 TEST_P(ErrorHandlingTest, OutOfGas)
 {
   context_->link_fn("test", "external_call", &consume_too_much_gas);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 
   res = runtime_->invoke("call1", 1);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
 
 TEST_P(ErrorHandlingTest, NoGas)
 {
   context_->link_fn("test", "external_call", &good_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", 1);
 
   if (!engine_has_native_metering(GetParam()))
     return;
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
 
 TEST_P(ErrorHandlingTest, Spin)
 {
   context_->link_fn("test", "external_call", &good_call);
-  runtime_ = context_->make_new_runtime(contract_, nullptr);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   if (!engine_has_native_metering(GetParam()))
     return;
 
   auto res = runtime_->invoke("spin", 10000);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(AllEngines, ErrorHandlingTest,
                          ::testing::Values(RuntimeEngine::kWasmi,

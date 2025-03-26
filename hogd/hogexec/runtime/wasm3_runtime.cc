@@ -5,9 +5,11 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -29,7 +31,8 @@ Wasm3Runtime::set_available_gas(uint64_t gas) noexcept
 
 std::unique_ptr<Runtime>
 Wasm3Context::make_new_runtime(ContractBlob const &contract,
-                               SystemCallHandler *syscall_handler)
+                               SystemCallHandler *syscall_handler,
+                               bool /*unused*/)
 {
   auto module = wasm3_env_.parse_module(contract.data(), contract.size());
   if (!module) {
@@ -69,17 +72,12 @@ Wasm3Runtime::get_memory() noexcept
   return wasm3_runtime_->get_memory();
 }
 
-std::span<const std::byte>
-Wasm3Runtime::get_memory() const noexcept
-{
-  assert(wasm3_runtime_);
-  return wasm3_runtime_->get_memory();
-}
-
 InvokeStatus<int32_t>
-Wasm3Runtime::invoke_internal(std::string const &method_name)
+Wasm3Runtime::invoke_internal(std::string_view method_name)
 {
-  auto fn = wasm3_runtime_->find_function(method_name.data());
+  // input to find_function has to be null-terminated c-string
+  std::string method_name_string(method_name);
+  auto fn = wasm3_runtime_->find_function(method_name_string.c_str());
   if (!fn) {
     return InvokeError{InvokeErrorCode::kDeterministic};
   }

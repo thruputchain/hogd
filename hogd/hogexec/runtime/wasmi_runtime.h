@@ -1,17 +1,15 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
-#include <optional>
 #include <span>
+#include <string>
 #include <string_view>
-#include <vector>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -56,9 +54,11 @@ public:
   // wrapper around a manual drop call on the rust side
   ~WasmiContext() override;
 
-  std::unique_ptr<Runtime>
-  make_new_runtime(ContractBlob const &contract,
-                   SystemCallHandler *syscall_handler) override;
+  std::unique_ptr<Runtime> make_new_runtime(ContractBlob const &contract,
+                                            SystemCallHandler *syscall_handler,
+                                            bool do_contract_verify) override;
+
+  bool verify_contract(ContractBlob const &contract) const override;
 
 private:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
@@ -87,11 +87,9 @@ public:
   // Requires the module to export its memory as "memory"
   // (export "memory" (memory 0))
   std::span<std::byte> get_memory() noexcept override;
-  std::span<const std::byte> get_memory() const noexcept override;
 
 private:
-  InvokeStatus<int32_t>
-  invoke_internal(std::string const &method_name) override;
+  InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
 
   // manipulated in rust
   void *wasmi_runtime_ptr_;

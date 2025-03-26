@@ -440,6 +440,7 @@ gen_rs(vector<Definition> *defs)
 {
   GenRs gs;
   gs.prtop(R"(// -*-Rust-*-
+// Generated Code: DO NOT CHECK IN
 
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]

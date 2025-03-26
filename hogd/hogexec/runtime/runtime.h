@@ -1,12 +1,16 @@
 #pragma once
 
-#include <cstdint>
+#include <concepts>
+#include <cstddef>
+#include <format>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
 
@@ -98,9 +102,14 @@ public:
                          (kArgCount<Args>() + ... + 0));
   }
 
+  // Perform any required validation checks on the contract.
+  // In the case of webassembly, this is the webassembly validator.
+  virtual bool verify_contract(ContractBlob const &contract) const = 0;
+
   virtual std::unique_ptr<Runtime>
   make_new_runtime(ContractBlob const &contract,
-                   SystemCallHandler *syscall_handler) = 0;
+                   SystemCallHandler *syscall_handler,
+                   bool do_contract_verify) = 0;
 
 protected:
   virtual bool link_fn_nargs(std::string_view module_name,
@@ -128,10 +137,19 @@ public:
   Runtime(Runtime &&other) = delete;
   Runtime &operator=(Runtime &&other) = delete;
 
+  constexpr static std::string invoke_name(MethodID method)
+  {
+    return std::format("{:X}", method);
+  }
+
   // The gas counter is saved before calling this method
   // (i.e. x = get_available_gas(); invoke(something); assert(x ==
   // get_available_gas()))
-  InvokeResult invoke(std::string const &method_name, uint64_t gas_limit);
+  InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
+  InvokeResult invoke(MethodID method_id, uint64_t gas_limit)
+  {
+    return invoke(invoke_name(method_id), gas_limit);
+  }
 
   // Returns FALSE if gas consumption failed.
   //
@@ -152,13 +170,12 @@ public:
   // Requires the module to export its memory as "memory"
   // (export "memory" (memory 0))
   virtual std::span<std::byte> get_memory() noexcept = 0;
-  virtual std::span<const std::byte> get_memory() const noexcept = 0;
 
   virtual ~Runtime() = default;
 
 protected:
   virtual InvokeStatus<int32_t>
-  invoke_internal(std::string const &method_name) = 0;
+  invoke_internal(std::string_view method_name) = 0;
 
   std::unique_ptr<HostCallContext> host_call_context_;
 };

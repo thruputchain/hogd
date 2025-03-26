@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -32,7 +33,7 @@ protected:
     auto c = test::load_wasm_from_file("test_invoke.wasm");
     auto context = make_runtime_context(GetParam());
     context->link_fn("test", "redir_call", &foo);
-    runtime_ = context->make_new_runtime(c, ctx_check);
+    runtime_ = context->make_new_runtime(c, ctx_check, true);
 
     ASSERT_TRUE(runtime_);
   }
@@ -43,8 +44,8 @@ protected:
 TEST_P(UserContextTest, CheckCtxCorrect)
 {
   auto res = runtime_->invoke("calltest", UINT64_MAX);
-  EXPECT_TRUE(res.result);
-  EXPECT_EQ(*res.result, 15U);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 15U);
 }
 
 INSTANTIATE_TEST_SUITE_P(AllEngines, UserContextTest,

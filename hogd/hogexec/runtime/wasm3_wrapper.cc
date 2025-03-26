@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/status.h"
 #include "wasm3.h"
 
@@ -156,6 +157,9 @@ Function::m3_err_to_invoke_status(M3Result res)
   }
   if (res == m3Err_hogdExit) {
     return hogd::InvokeStatus<int32_t>{detail::wasm3_err_code};
+  }
+  if (res == m3Err_validationFailure) {
+    return hogd::InvokeError{hogd::InvokeErrorCode::kValidationFailure};
   }
 
   // all other errors
