@@ -99,13 +99,16 @@ struct InvokeResult {
   InvokeStatus<int32_t> result_;
   uint64_t gas_consumed_;
 
-  bool is_frame_success() const
+  constexpr bool is_frame_success() const
   {
     return (result_.has_value() && *result_ >= 0);
   }
-  bool should_frame_revert() const { return !is_frame_success(); }
+  constexpr bool should_frame_revert() const { return !is_frame_success(); }
 
-  bool is_root_success() const { return result_.has_value() && *result_ == 0; }
+  constexpr bool is_root_success() const
+  {
+    return result_.has_value() && *result_ == 0;
+  }
 
   InvokeResult to_root_error() const;
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> to_host_fn_result() const;

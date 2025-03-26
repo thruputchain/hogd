@@ -5,8 +5,25 @@ import yaml
 from yaml import CLoader as Loader, CDumper as Dumper
 
 import argparse
+import os
 
 syscall_argcount = 6
+
+# Map from c++ to xdr typenames
+cpp_to_xdr_typenames = {
+  "int32_t" : "int",
+  "uint32_t" : "unsigned int",
+  "int64_t" : "hyper",
+  "uint64_t" : "unsigned hyper"
+}
+
+# map from c++ to rust typenames
+cpp_to_rust_typenames = {
+  "int32_t" : "i32",
+  "uint32_t" : "u32",
+  "int64_t" : "i64",
+  "uint64_t" : "u64"
+}
 
 """
 Each syscall generates a
@@ -307,11 +324,16 @@ using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
 }}// namespace hogd
 """
 
+# ===== generate syscall-related x files =====
+
+# One argument within a SyscallArgs structure.
 def gen_syscall_io_arg_decl(arg):
   end_decorator = ""
   argtype = ""
   if "xdr_typename" in arg:
     argtype = arg["xdr_typename"]
+  elif "typename" in arg and arg["typename"] in cpp_to_xdr_typenames.keys():
+    argtype = cpp_to_xdr_typenames[arg["typename"]]
   elif "span_argument" in arg and arg["span_argument"]:
     argtype = "opaque"
     end_decorator = "<>"
@@ -397,6 +419,7 @@ union SyscallOutput switch(SyscallNo syscall) {{
 """
 
 
+
 def gen_syscall_x(spec_full):
   spec = spec_full["syscalls"]
   syscalls = {}
@@ -440,7 +463,9 @@ enum SyscallErrorCode {{{error_enumdecls}}};
 }} // namespace hogd
 """
 
+# ===== end generate syscall-related x files =====
 
+# ===== generate rs syscall bindings =====
 
 """
 Generate rust bindings for each syscall.
@@ -640,6 +665,8 @@ namespace hogd {{
 {joined}
 }}"""
 
+# ===== end generate rs syscall bindings =====
+
 parser = argparse.ArgumentParser(description="syscall generator")
 
 parser.add_argument(
@@ -678,6 +705,8 @@ args = parser.parse_args()
 
 spec_full = yaml.load(open(args.syscall_yaml, 'r').read(), Loader=Loader)
 spec = spec_full["syscalls"]
+
+os.makedirs(args.output_dir, exist_ok=True)
 
 if (args.syscall_x):
   filename = args.output_dir + "/syscall.x"
