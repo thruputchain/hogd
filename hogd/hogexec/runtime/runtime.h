@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <format>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -111,7 +112,6 @@ public:
                    SystemCallHandler *syscall_handler,
                    bool do_contract_verify) = 0;
 
-protected:
   virtual bool link_fn_nargs(std::string_view module_name,
                              std::string_view fn_name, void *fn_ptr,
                              uint8_t nargs) = 0;
@@ -142,6 +142,16 @@ public:
   constexpr static std::string invoke_name(MethodID method)
   {
     return std::format("{:X}", method);
+  }
+  // WASM name -> Method ID (inverse of invoke_name)
+  constexpr static std::optional<MethodID>
+  method_id_from_name(std::string const &name)
+  {
+    try {
+      return std::stoul(name, nullptr, 16);
+    } catch (std::invalid_argument &e) {
+      return std::nullopt;
+    }
   }
 
   // The gas counter is saved before calling this method

@@ -19,3 +19,8 @@ target_link_libraries(
 add_subdirectory(coord)
 add_subdirectory(hogdb)
 add_subdirectory(hogexec)
+
+# Build module for mock contract tests
+if (ENABLE_TEST_FFI)
+  add_subdirectory(test_ffi)
+endif()

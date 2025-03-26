@@ -664,8 +664,53 @@ namespace hogd {{
 
 {joined}
 }}"""
-
 # ===== end generate rs syscall bindings =====
+
+# ===== Mock syscall entry =====
+def gen_mock_switch_case(syscall):
+  name = syscall["name"]
+  return f"""  case SyscallNo::k{name}:
+  return mock_syscall_parser<{name}_input, {name}_output,
+                               &syscall_{name}_inner>(syscall_no, input_span, output_span);
+"""
+
+def gen_mock_syscall_entry_cc(spec):
+  switch_body = ""
+  for call in spec:
+    switch_body += gen_mock_switch_case(call)
+  
+  return f"""#include "hogd/test_ffi/mock_syscall_entry.h"
+
+#include <span>
+
+#include "hogd/base/types.h"
+#include "syscall.hh"
+#include "syscall_args.hh"
+#include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
+
+namespace hogd {{
+
+ForeignHostFnResult
+mock_syscall_entrypoint(int32_t syscall, const unsigned char *input,
+                        uint32_t input_len, unsigned char *output,
+                        uint32_t output_len) noexcept
+{{
+  std::span<const uint8_t> input_span = std::span(input, input_len);
+  std::span<uint8_t> output_span = std::span(output, output_len);
+
+  auto syscall_no = static_cast<SyscallNo>(syscall);
+
+  switch (syscall_no) {{
+{switch_body}
+  default:
+    return recoverable_error(SyscallErrorCode::kNoSyscall);
+  }}
+}}
+
+}}
+"""
+# ===== end mock syscall entry =====
 
 parser = argparse.ArgumentParser(description="syscall generator")
 
@@ -700,6 +745,10 @@ parser.add_argument(
   nargs='+', 
   type=int, 
   help = "syscall nos")
+parser.add_argument(
+  '--mock_syscall_entry_cc', 
+  action='store_true', 
+  help="gen mock_syscall_entry_cc")
 
 args = parser.parse_args()
 
@@ -730,4 +779,9 @@ if (args.syscall_rs):
 
 if (args.syscall_frame is not None and len(args.syscall_frame) > 0):
   print(gen_syscall_frame(spec, args.syscall_frame))
+
+if (args.mock_syscall_entry_cc):
+  filename = args.output_dir + "/mock_syscall_entry.cc"
+  with open(filename, "w") as f:
+    f.write(gen_mock_syscall_entry_cc(spec))
 
