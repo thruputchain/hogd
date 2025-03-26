@@ -1,12 +1,11 @@
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 
 #include <memory>
-#include <optional>
 #include <utility>
 
 #include "ffi_enums.hh"
-#include "hogd/hogexec/runtime/mock_runtime.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "transaction.hh"
 
@@ -15,9 +14,7 @@ namespace hogd {
 SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
     DBContext &db)
-  : per_tx_db_proxy_(db.get_per_tx_db_proxy()),
-    handler_(stx, db.get_snapshot(), per_tx_db_proxy_, std::nullopt,
-             std::move(context))
+  : handler_(stx, db.get_snapshot(), std::move(context))
 {}
 
 ForeignRootInvokeResult

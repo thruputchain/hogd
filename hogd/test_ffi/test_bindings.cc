@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -13,9 +14,9 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/mock_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "transaction.hh"
@@ -61,16 +62,10 @@ close_runtime_context(void *context) noexcept
   delete static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
 }
 bool
-add_contract_and_method(void *context, const unsigned char *contract_hash,
+add_contract_and_method(void *context, uint32_t mock_contract_id,
                         ForeignEntryPoint entry_point,
                         void *foreign_context) noexcept
 {
-  if (contract_hash == nullptr)
-    return false;
-
-  hogd::SHA256Hash hash;
-  std::memcpy(hash.data(), contract_hash, sizeof(hogd::SHA256Hash));
-
   if (context == nullptr)
     return false;
   if (entry_point == nullptr)
@@ -82,57 +77,8 @@ add_contract_and_method(void *context, const unsigned char *contract_hash,
     return false;
   }
 
-  (*c)->set_trampoline(hash, entry_point, foreign_context);
+  (*c)->set_trampoline(mock_contract_id, entry_point, foreign_context);
   return true;
-}
-
-void
-setup_create_contract(void *db, const unsigned char *contract_data,
-                      uint32_t contract_len)
-{
-  if (db == nullptr) {
-    return;
-  }
-  if (contract_data == nullptr) {
-    return;
-  }
-
-  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
-
-  hogd::Contract contract;
-  try {
-    x23::deserialize(&contract, std::span<const unsigned char>(contract_data,
-                                                               contract_len));
-  } catch (x23::XdrBadInput const &e) {
-    return;
-  }
-
-  db_context->setup_create_contract(contract);
-}
-
-void
-setup_create_deployment(void *db, const unsigned char *deployment_addr,
-                        const unsigned char *deployed_hash)
-{
-  if (db == nullptr) {
-    return;
-  }
-  if (deployment_addr == nullptr) {
-    return;
-  }
-  if (deployed_hash == nullptr) {
-    return;
-  }
-
-  auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
-
-  ContractAddress addr;
-  std::memcpy(addr.data(), deployment_addr, addr.size());
-
-  SHA256Hash hash;
-  std::memcpy(hash.data(), deployed_hash, hash.size());
-
-  db_context->setup_create_deployment(addr, hash);
 }
 
 void *
@@ -144,9 +90,6 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
   }
   auto *db_context = reinterpret_cast<hogd::DBContext *>(db);
   if (!rc) {
-    return nullptr;
-  }
-  if (!db_context->is_block_open()) {
     return nullptr;
   }
 
@@ -229,27 +172,13 @@ close_runtime_context(void *context)
   hogd::close_runtime_context(context);
 }
 int
-add_contract_and_method(void *context, const unsigned char *contract_hash,
+add_contract_and_method(void *context, uint32_t mock_contract_id,
                         ForeignEntryPoint entry_point, void *foreign_context)
 {
-  return (hogd::add_contract_and_method(context, contract_hash, entry_point,
+  return (hogd::add_contract_and_method(context, mock_contract_id, entry_point,
                                         foreign_context))
              ? 0
              : 1;
-}
-
-void
-setup_create_contract(void *db, const unsigned char *contract_data,
-                      uint32_t contract_len)
-{
-  hogd::setup_create_contract(db, contract_data, contract_len);
-}
-
-void
-setup_create_deployment(void *db, const unsigned char *deployment_addr,
-                        const unsigned char *deployed_hash)
-{
-  hogd::setup_create_deployment(db, deployment_addr, deployed_hash);
 }
 
 void *

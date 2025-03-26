@@ -5,10 +5,12 @@ set_source_files_properties(
 add_library(
     test_ffi
     SHARED
-    test_bindings.cc
-    syscall_handler_wrapper.cc
     db_context_wrapper.cc
     mock_syscall_entry.cc
+    mock_contract.cc
+    mock_runtime.cc
+    syscall_handler_wrapper.cc
+    test_bindings.cc
 )
 
 add_dependencies(
@@ -24,7 +26,6 @@ target_include_directories(
 
 target_link_libraries(
   test_ffi
-  hogdb_core
   runtime
 )
 

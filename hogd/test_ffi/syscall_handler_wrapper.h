@@ -11,19 +11,20 @@
 #include <optional>
 #include <print>
 #include <span>
+#include <string_view>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/mock_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -67,12 +68,9 @@ public:
 
   SystemCallHandler &to_handler() { return handler_; }
 
-  ~SyscallHandlerContext() { per_tx_db_proxy_.do_explicit_cleanup(); }
-
 private:
   inline static thread_local SyscallHandlerContext *current_context_ = nullptr;
 
-  PerTransactionDatabaseProxy per_tx_db_proxy_;
   SystemCallHandler handler_;
 };
 
@@ -239,35 +237,10 @@ run_mock_func_inner(InputArg const &input, OutputArg &output)
   // xdr. This is annoying.
   cleanup_args_t local_args_alloc{};
 
-  struct NullRuntime : public Runtime {
-    NullRuntime() : Runtime(std::make_unique<HostCallContext>()) {}
-    uint64_t get_available_gas() const noexcept override
-    {
-      return std::numeric_limits<GasAmount>::max();
-    }
-    void set_available_gas(uint64_t /*unused*/) noexcept override
-    {
-      std::terminate();
-    }
-
-    std::span<std::byte> get_memory() noexcept override { std::terminate(); }
-    std::span<const std::byte> get_memory() const noexcept override
-    {
-      std::terminate();
-    }
-
-    ~NullRuntime() = default;
-
-    InvokeStatus<int32_t>
-    invoke_internal(std::string const & /*unused*/) override
-    {
-      std::terminate();
-    }
-  };
-
-  NullRuntime null_runtime;
-
-  auto extras_pack = syscall_t::extras(handler->to_handler(), null_runtime);
+  auto extras_pack =
+      syscall_t::extra_args(handler->to_handler(),
+                            WrappedGasAmount{
+                                std::numeric_limits<uint64_t>::max()});
 
   return [&]<size_t... Extras>(std::index_sequence<Extras...> /*unused*/) {
     return [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
@@ -305,8 +278,8 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
   }
 
   ForeignHostFnResult status =
-      run_mock_func_inner<InputArg, OutputArg, mock_func_inner>(
-          *input_arg, *output_arg);
+      run_mock_func_inner<InputArg, OutputArg, mock_func_inner>(*input_arg,
+                                                                *output_arg);
 
   if (status.panic != std::to_underlying(HostFnErrorCode::kNoneOrRecoverable)) {
     if (syscall_logfd != -1) {
@@ -326,8 +299,8 @@ mock_syscall_parser(SyscallNo syscall_no, std::span<const uint8_t> input,
 
   if (status.result_code != std::to_underlying(SyscallErrorCode::kNone)) {
     if (syscall_logfd != -1) {
-      auto msg =
-          std::format("{} return error {}\n", x23::show(syscall_no), status.result_code);
+      auto msg = std::format("{} return error {}\n", x23::show(syscall_no),
+                             status.result_code);
       write(syscall_logfd, msg.data(), msg.size());
     }
 

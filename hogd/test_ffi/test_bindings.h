@@ -35,17 +35,9 @@ void close_runtime_context(void *context);
 
 // Returns 0 for success, nonzero for some error code
 // entrypoint should be of type detail::ForeignEntryPoint
-int add_contract_and_method(void *context, const unsigned char *contract_hash,
+int add_contract_and_method(void *context, uint32_t mock_contract_id,
                             ForeignEntryPoint entry_point,
                             void *foreign_context);
-
-// registers a test contract as created within the root database
-void setup_create_contract(void *db, const unsigned char *contract_data,
-                           uint32_t contract_len);
-
-// registers a deployment within the root database
-void setup_create_deployment(void *db, const unsigned char *deployment_addr,
-                             const unsigned char *deployed_hash);
 
 void *open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx_,
                            unsigned int serial_len);

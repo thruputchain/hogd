@@ -14,7 +14,6 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -39,7 +38,8 @@ class StorageSnapshotCache;
 class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
-                    StorageSnapshotCache &snapshot_cache);
+                    StorageSnapshotCache &snapshot_cache,
+                    std::shared_ptr<RuntimeContext> runtime_context = nullptr);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;

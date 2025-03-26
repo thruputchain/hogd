@@ -25,9 +25,10 @@ namespace hogd {
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
-SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
-                                     StorageSnapshotCache &snapshot_cache)
-  : runtime_context_(make_hogexec_context(RuntimeEngine::kWasmi)),
+SystemCallHandler::SystemCallHandler(
+    SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
+    std::shared_ptr<RuntimeContext> runtime_context)
+  : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)),
     invocation_frame_stack_([this](InvocationFrame &last_frame) {
       commit_last_call_frame_success(last_frame);
@@ -42,7 +43,11 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       return contracts;
     }()),
     snapshot_cache_(snapshot_cache)
-{}
+{
+  if (!runtime_context_) {
+    runtime_context_ = make_hogexec_context(RuntimeEngine::kWasmi);
+  }
+}
 
 InvokeResult
 SystemCallHandler::root_invoke()
