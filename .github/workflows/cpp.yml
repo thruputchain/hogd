@@ -16,7 +16,7 @@ jobs:
     
     steps:
     - name: set ssh
-      run: eval `ssh-agent -s` && ssh-add - <<< '${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}'
+      run: eval `ssh-agent -s` && ssh-add - <<< '${{ secrets.HOGD_PROTOCOL_ACCESS_KEY_2 }}'
     - uses: actions/checkout@v4
       with:
         submodules: "recursive"
