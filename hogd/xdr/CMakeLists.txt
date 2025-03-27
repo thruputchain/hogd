@@ -1,10 +1,11 @@
 add_xdr(
-	protocol 
+	protocol
+	${CMAKE_CURRENT_BINARY_DIR} 
 	contract.x
 	coord.x
 	ffi_enums.x
 	transaction.x
-	types.x 
+	phild/types.x 
 	storage_object.x
 	syscall.x 
 	syscall_args.x
