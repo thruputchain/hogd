@@ -1,15 +1,14 @@
 add_xdr(
-	protocol 
+	protocol
 	contract.x
 	coord.x
 	ffi_enums.x
 	transaction.x
-	types.x 
+	../../protocol/types.x 
 	storage_object.x
 	syscall.x 
 	syscall_args.x
 )
-
 add_dependencies(build_protocol generate_syscall_x generate_syscall_args_x)
 
 add_xdr_rs(
@@ -18,7 +17,6 @@ add_xdr_rs(
 	types.x
 	syscall.x
 	syscall_args.x)
-
 add_dependencies(build_protocol_rs generate_syscall_x generate_syscall_args_x)
 
 add_xdr_rs(
