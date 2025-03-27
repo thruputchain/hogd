@@ -15,10 +15,14 @@ jobs:
         bcheck
     
     steps:
+    - uses: webfactory/ssh-agent@v0.9.1
+      with:
+        ssh-private-key: |
+          ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
+          ${{ secrets.HOGD_GH_ACTIONS_HOGD_ACCESS_KEY }}
     - uses: actions/checkout@v4
       with:
-        ssh-key: ${{ secrets.HOGD_PROTOCOL_ACCESS_KEY_2 }}
-        submodules: "recursive"
+        submodules: recursive
     - name: install llvm
       run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 20 all && sudo apt-get remove clang-18
     - name: set gcc-14 default
