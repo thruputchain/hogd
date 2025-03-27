@@ -13,6 +13,6 @@
 [submodule "external/crc32c"]
 	path = external/crc32c
 	url = https://github.com/google/crc32c.git
-[submodule "hogd/xdr/phild"]
-	path = hogd/xdr/phild
-	url = https://github.com/groundhogchain/phild.git
+[submodule "protocol"]
+	path = protocol
+	url = https://github.com/groundhogchain/protocol.git
