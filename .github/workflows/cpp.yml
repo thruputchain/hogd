@@ -19,7 +19,6 @@ jobs:
       with:
         ssh-private-key: |
           ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-          ${{ secrets.HOGD_GH_ACTIONS_HOGD_ACCESS_KEY }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
