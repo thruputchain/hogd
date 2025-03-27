@@ -57,7 +57,7 @@ if(NOT X23_IS_TOP_LEVEL)
   set(X23C_EXECUTABLE ${X23C_EXECUTABLE} PARENT_SCOPE)
 endif()
 
-function(add_xdr target_name output_folder)
+function(add_xdr target_name)
   set(xdr_headers)
   foreach(xdr_file IN LISTS ARGN)
     set(xdr_file_ "${CMAKE_CURRENT_SOURCE_DIR}/${xdr_file}")
@@ -66,7 +66,7 @@ function(add_xdr target_name output_folder)
       set(xdr_file_ "${CMAKE_CURRENT_BINARY_DIR}/${xdr_file}")
     endif()
     get_filename_component(base_name ${xdr_file_} NAME_WLE)
-    set(output_file "${output_folder}/${base_name}.hh")
+    set(output_file "${CMAKE_CURRENT_BINARY_DIR}/${base_name}.hh")
     add_custom_command(
       OUTPUT ${output_file}
       COMMAND ${X23C_EXECUTABLE} -o ${output_file} ${xdr_file_}

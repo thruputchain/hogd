@@ -1,6 +1,5 @@
 add_xdr(
 	protocol
-	${CMAKE_CURRENT_BINARY_DIR} 
 	contract.x
 	coord.x
 	ffi_enums.x
