@@ -15,4 +15,4 @@
 	url = https://github.com/google/crc32c.git
 [submodule "protocol"]
 	path = protocol
-	url = ssh:git@github.com:groundhogchain/protocol.git
+	url = git@github.com:groundhogchain/protocol.git
