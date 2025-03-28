@@ -1,16 +1,23 @@
 
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <new>
 #include <print>
 
 #include <fcntl.h>
 #include <getopt.h>
-#include <stdio.h>
+#include <cstdio>
+#include <string>
+#include <sys/fcntl.h>
+#include <unistd.h>
+#include <utility>
 
 #include "x23/cleanup.h"
+#include "x23/config.h"
 #include "x23/err.h"
 #include "x23c/defs.h"
+#include "x23c/lex.hh"
 #include "x23c/parse.hh"
 
 using namespace x23;

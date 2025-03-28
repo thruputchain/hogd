@@ -1,7 +1,14 @@
+#include <cstddef>
+#include <format>
 #include <map>
-#include <print>
 #include <ranges>
 #include <set>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <variant>
 
 #include "x23/cleanup.h"
 #include "x23c/defs.h"
@@ -16,30 +23,43 @@ struct Gen {
   std::size_t indent_{};
   vector<string> namespaces_;
   vector<string> scopes_;
+  std::set<string> declnames_;
+
+  void double_declaration_guard(std::string const& declname) {
+    auto [_, new_decl] = declnames_.insert(declname);
+    if (!new_decl) {
+      throw std::runtime_error("Error: double declaration of typename " + declname);
+    }
+  }
 
   void process(const vector<Definition> &defs);
 
   void show_def(const ConstDef &c)
   {
+    double_declaration_guard(c.id);
     show_comment(c.comment, true);
     prtop("constexpr auto {} = {};\n", c.id, c.val);
   }
   void show_def(const Typedef &d)
   {
+    double_declaration_guard(d.id);
     prtop("using {} = {};\n", d.id, type_name(d, true));
   }
   void show_def(const EnumDecl &t)
   {
+    double_declaration_guard(t.id);
     show_typespec(t.body, t.id);
     prtop(";\n");
   }
   void show_def(const StructDecl &t)
   {
+    double_declaration_guard(t.id);
     show_typespec(t.body, t.id);
     prtop(";\n");
   }
   void show_def(const UnionDecl &t)
   {
+    double_declaration_guard(t.id);
     show_typespec(t.body, t.id);
     prtop(";\n");
   }
