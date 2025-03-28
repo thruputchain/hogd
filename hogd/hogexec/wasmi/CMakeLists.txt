@@ -6,7 +6,7 @@ set_source_files_properties(
 corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATE_TYPES staticlib)
 
 add_dependencies(
-  cargo-build_wasmi_lib
+  cargo-prebuild_wasmi_lib
   ffi_enum_rs)
 
 target_sources(
