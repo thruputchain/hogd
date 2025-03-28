@@ -40,3 +40,8 @@ add_custom_target(
 	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
 )
 
+add_dependencies(
+  generate_wasmi_ffi_h
+  ffi_enum_rs
+)
+
