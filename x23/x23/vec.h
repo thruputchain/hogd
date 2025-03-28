@@ -443,6 +443,16 @@ public:
   constexpr void shrink_to_fit() { realloc(size()); }
 
   constexpr void clear() noexcept { shrink(0); }
+  void erase(iterator first, iterator last)
+  {
+    std::move(last, end(), first);
+    shrink(size() - (last - first));
+  }
+  void erase(iterator pos)
+  {
+    std::move(pos + 1, end(), pos);
+    shrink(size() - 1);
+  }
   template<typename... Args> reference emplace_back(Args &&...args)
   {
     ensure();

@@ -38,6 +38,7 @@ struct Connection {
 
   using rpc_service = blank_rpc_v1;
   x23::Async<void> null() { co_return; }
+  x23::Async<Data> echo(Data arg) { co_return arg; }
 };
 static_assert(is_blank_rpc_v1<Connection *, x23::Async>);
 
