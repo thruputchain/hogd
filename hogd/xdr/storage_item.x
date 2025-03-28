@@ -5,7 +5,7 @@ namespace hogd
 {
   // clang-format on
 
-  enum StorageObjectType {
+  enum StorageItemType {
     kBytestring = 0,
     kNonnegativeInt = 1,
   };
@@ -14,7 +14,7 @@ namespace hogd
 
   typedef opaque Bytestring<>;
 
-  union StorageObject switch (StorageObjectType type)
+  union StorageItem switch (StorageItemType type)
   {
   case kBytestring:
     Bytestring bytestring;

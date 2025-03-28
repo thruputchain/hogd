@@ -6,7 +6,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "storage_object.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 
 namespace hogd {
@@ -33,12 +33,12 @@ make_nnint128_set_add(int128_t set, int128_t add)
 
 } // namespace
 
-std::optional<StorageObjectType>
-ItemView::get_object_type() const
+std::optional<StorageItemType>
+ItemView::get_item_type() const
 {
   return std::visit(
-      [](auto const &v) -> std::optional<StorageObjectType> {
-        return v.get_object_type();
+      [](auto const &v) -> std::optional<StorageItemType> {
+        return v.get_item_type();
       },
       delta_args_);
 }
@@ -102,15 +102,15 @@ NNIntItem::validate() const
   return {};
 }
 
-std::optional<StorageObjectType>
-UnmodifiedItem::get_object_type() const
+std::optional<StorageItemType>
+UnmodifiedItem::get_item_type() const
 {
-  if (!base_object_) {
+  if (!base_item_) {
     // no base object exists in the snapshot,
     // so object has no type
     return std::nullopt;
   }
-  return base_object_->type();
+  return base_item_->type();
 }
 
 } // namespace hogd

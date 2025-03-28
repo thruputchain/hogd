@@ -6,9 +6,12 @@
 #include <map>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "hogd/hogexec/runtime/item_view.h"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -44,18 +47,29 @@ public:
   void log(std::span<const std::byte> message);
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
 
+  // returned pointer is invalidated by any call to add_item_view
+  ItemView *get_item_view(AddressAndKey const &addrkey);
+  // returns pointer to the newly created view
+  ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
+
 private:
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
 
+  // Accumulates log entries created in the current call frame (and child
+  // frames)
   std::vector<LogEntry> logs_;
+
+  std::unordered_map<AddressAndKey, ItemView> modified_items_;
 };
 
 // Stack of invocation frames.
 class InvocationFrameStack {
 public:
-  InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action)
-    : last_frame_action_(std::move(last_frame_action))
+  InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action,
+                       StorageSnapshotCache &snapshot_cache)
+    : last_frame_action_(std::move(last_frame_action)),
+      snapshot_cache_(snapshot_cache)
   {}
 
   auto &get_active_frame(this auto &self)
@@ -80,9 +94,13 @@ public:
   std::optional<SHA256Hash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
+  // Reference invalidated by any other call to get_item_view
+  ItemView &get_item_view(StorageKey const &key);
+
 private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &)> last_frame_action_;
+  StorageSnapshotCache &snapshot_cache_;
 };
 
 } // namespace hogd

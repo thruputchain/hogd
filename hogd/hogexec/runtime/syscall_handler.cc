@@ -14,9 +14,11 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
+#include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -30,9 +32,11 @@ SystemCallHandler::SystemCallHandler(
     std::shared_ptr<RuntimeContext> runtime_context)
   : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)),
-    invocation_frame_stack_([this](InvocationFrame &last_frame) {
-      commit_last_call_frame_success(last_frame);
-    }),
+    invocation_frame_stack_(
+        [this](InvocationFrame &last_frame) {
+          commit_last_call_frame_success(last_frame);
+        },
+        snapshot_cache),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
@@ -247,6 +251,43 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   frame.new_contract_deployments_.emplace(deploy_addr, contract_hash);
 
   return deploy_addr;
+}
+
+SyscallStatus<std::span<const std::byte>>
+SystemCallHandler::get_bytestring(StorageKey const &storage_key)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+
+  if (auto const *bytestring_item = item_view.template get<BytestringItem>()) {
+    return std::as_bytes(std::span(bytestring_item->bytestring_));
+  }
+
+  if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
+    if (!unmodified_item->base_item_) {
+      return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
+    }
+    if (unmodified_item->base_item_->type() != StorageItemType::kBytestring) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    }
+    return std::as_bytes(std::span(unmodified_item->base_item_->bytestring()));
+  }
+
+  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+}
+
+SyscallStatus<void>
+SystemCallHandler::set_bytestring(StorageKey const &storage_key,
+                                  std::span<const std::byte> input_bytestring)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+
+  Bytestring new_string;
+  new_string.resize_uninitialized(input_bytestring.size());
+  std::memcpy(new_string.data(),
+              reinterpret_cast<const uint8_t *>(input_bytestring.data()),
+              input_bytestring.size());
+
+  return item_view.set(BytestringItem(std::move(new_string)));
 }
 
 } // namespace hogd
