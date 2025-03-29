@@ -170,20 +170,11 @@ struct BucketEntry<UnorderedSetMarker<T>>
 #endif
   }
 
-  const T *find_element(std::span<const std::byte> key) const
+  auto *find_element(this auto &self, std::span<const std::byte> key)
   {
-    auto it = this->find(key);
-    if (it == this->end()) {
-      return static_cast<const T *>(nullptr);
-    }
-    return &(it->base_);
-  }
-
-  T *find_element(std::span<const std::byte> key)
-  {
-    auto it = this->find(key);
-    if (it == this->end()) {
-      return static_cast<T *>(nullptr);
+    auto it = self.find(key);
+    if (it == self.end()) {
+      return static_cast<decltype(&(it->base_))>(nullptr);
     }
     return &(it->base_);
   }
