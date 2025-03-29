@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -127,6 +128,59 @@ InvocationFrameStack::lookup_locally_deployed_contract(
     }
   }
   return std::nullopt;
+}
+
+ItemView *
+InvocationFrame::get_item_view(AddressAndKey const &addrkey)
+{
+  auto it = modified_items_.find(addrkey);
+  if (it != modified_items_.end()) {
+    return &(it->second);
+  }
+  return nullptr;
+}
+
+ItemView *
+InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
+{
+  assert(modified_items_.contains(addrkey));
+  auto [iter, _] = modified_items_.emplace(addrkey, std::move(new_view));
+  return &iter->second;
+}
+
+ItemView &
+InvocationFrameStack::get_item_view(StorageKey const &key)
+{
+  const int32_t stack_depth = frame_stack_.size();
+  assert(stack_depth > 0);
+
+  auto &active_frame = get_active_frame();
+  AddressAndKey addrkey{.address =
+                            active_frame.active_invocation_.invoked_address,
+                        .key = key};
+
+  // do we already have a frame in the top active frame
+  if (auto *active_frame_view = active_frame.get_item_view(addrkey)) {
+    return *active_frame_view;
+  }
+
+  // otherwise create view in active frame, by either copying from
+  // a parent call frame or from storage
+  for (int32_t i = stack_depth - 2; i >= 0; --i) {
+    auto &frame = frame_stack_[i];
+
+    if (auto const *local_view = frame.get_item_view(addrkey)) {
+      // refresh the parent frame view in the top frame
+      return *active_frame.add_item_view(addrkey, *local_view);
+    }
+  }
+
+  // item view not yet accessed in current transaction; looking up in snapshot
+  // TODO(geoff): perform the lookup in snapshot_cache_
+  // auto const* snapshot_item = ...
+
+  // snapshot_item might be nullptr; this is handled in ItemView
+  return *frame_stack_.back().add_item_view(addrkey, ItemView(nullptr));
 }
 
 } // namespace hogd

@@ -90,8 +90,8 @@ public:
 // it.
 class ItemView {
 public:
-  ItemView(const StorageItem *base_object)
-    : delta_args_(UnmodifiedItem{.base_item_ = base_object})
+  ItemView(const StorageItem *base_item)
+    : delta_args_(UnmodifiedItem{.base_item_ = base_item})
   {}
 
   std::optional<StorageItemType> get_item_type() const;

@@ -14,12 +14,13 @@ add_library(
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
-  syscall_invoke.cc
-  syscall_log.cc
+  syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
-  syscall_handler.cc
   syscall_entry.cc
+  syscall_handler.cc
+  syscall_invoke.cc
+  syscall_log.cc
 )
 
 add_executable(

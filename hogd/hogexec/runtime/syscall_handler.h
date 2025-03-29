@@ -14,6 +14,7 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -89,6 +90,14 @@ public:
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
   bool current_runtime_is_revert_poisoned() const;
+
+  // === Bytestring syscalls ===
+  // The returned span is only valid until another storage item is accessed.
+  SyscallStatus<std::span<const std::byte>>
+  get_bytestring(StorageKey const &storage_key);
+  SyscallStatus<void>
+  set_bytestring(StorageKey const &storage_key,
+                 std::span<const std::byte> input_bytestring);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;

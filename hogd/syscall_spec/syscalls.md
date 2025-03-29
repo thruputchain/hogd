@@ -142,3 +142,23 @@ Signature: VerifySignature(signature: Signature, publickey: Publickey, message :
 
 Check the error code to determine verification status.
 
+# BytestringGetLen
+
+Signature: BytestringGetLen(key : StorageKey) -> RuntimeMemoryLength
+
+Gets the length of the bytestring at key if it exists.
+Returns an error otherwise.
+
+# BytestringGet
+
+Signature: BytestringGet(key: StorageKey) -> [u8], RuntimeMemoryLength
+
+Returns the bytestring at the input key, if it exists.
+
+# BytestringSet
+
+Signature: BytestringSet(key: StorageKey, string : [u8]) -> ()
+
+Creates a bytestring at the specified key.
+
+
