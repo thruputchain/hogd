@@ -118,15 +118,33 @@ template<hash_map_object T> struct CustomEqual {
   }
 };
 
+// Wrapper around object inside unordered set.
+// It's required that the object cannot be modified in a way
+// that changes the object's key.  This object ensures
+// that we can still modify the object, without having to
+// use a (potentially error-prone) const_cast.
+template<hash_map_object T> struct MutableWrapper {
+  template<typename... Args>
+  MutableWrapper(Args &&...args) : base_(std::forward<Args>(args)...)
+  {}
+  mutable T base_;
+
+  std::span<const std::byte> get_key() const { return base_.get_key(); }
+};
+
+template<hash_map_object T> struct UnorderedSetMarker {};
+
 // Unordered set implementation, using cpp20 transparent comparators.
 template<hash_map_object T>
-struct BucketEntry<std::unordered_set<T, CustomHash<T>, CustomEqual<T>>>
-  : private std::unordered_set<T, CustomHash<T>, CustomEqual<T>> {
+struct BucketEntry<UnorderedSetMarker<T>>
+  : private std::unordered_set<MutableWrapper<T>, CustomHash<MutableWrapper<T>>,
+                               CustomEqual<MutableWrapper<T>>> {
 
-  using self_type =
-      BucketEntry<std::unordered_set<T, CustomHash<T>, CustomEqual<T>>>;
+  using self_type = BucketEntry<UnorderedSetMarker<T>>;
 
-  using base_type = std::unordered_set<T, CustomHash<T>, CustomEqual<T>>;
+  using base_type =
+      std::unordered_set<MutableWrapper<T>, CustomHash<MutableWrapper<T>>,
+                         CustomEqual<MutableWrapper<T>>>;
   template<typename... Args> decltype(auto) emplace(Args &&...args)
   {
     auto [it, _] = base_type::emplace(std::forward<Args>(args)...);
@@ -157,13 +175,16 @@ struct BucketEntry<std::unordered_set<T, CustomHash<T>, CustomEqual<T>>>
     if (it == this->end()) {
       return static_cast<const T *>(nullptr);
     }
-    return &(*it);
+    return &(it->base_);
   }
 
   T *find_element(std::span<const std::byte> key)
   {
-    return const_cast<T *>(
-        static_cast<const self_type *>(this)->find_element(key));
+    auto it = this->find(key);
+    if (it == this->end()) {
+      return static_cast<T *>(nullptr);
+    }
+    return &(it->base_);
   }
 };
 
@@ -172,8 +193,7 @@ struct BucketEntry<std::unordered_set<T, CustomHash<T>, CustomEqual<T>>>
 template<hash_map_object T>
 using vector_bucket_t = detail::BucketEntry<std::vector<T>>;
 template<hash_map_object T>
-using set_bucket_t = detail::BucketEntry<
-    std::unordered_set<T, detail::CustomHash<T>, detail::CustomEqual<T>>>;
+using set_bucket_t = detail::BucketEntry<detail::UnorderedSetMarker<T>>;
 
 template<hash_map_object T, typename BucketEntryT = vector_bucket_t<T>>
 class HashMap {
