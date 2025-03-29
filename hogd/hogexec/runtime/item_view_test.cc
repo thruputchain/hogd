@@ -4,14 +4,14 @@
 #include <gtest/gtest.h>
 
 #include "hogd/hogexec/runtime/item_view.h"
-#include "storage_object.hh"
+#include "storage_item.hh"
 
 namespace hogd {
 
 TEST(ItemView, Exists)
 {
   ItemView proxy(nullptr);
-  EXPECT_FALSE(proxy.get_object_type());
+  EXPECT_FALSE(proxy.get_item_type());
 
   Bytestring bytes{0, 1, 2, 3};
   const auto *get_res = proxy.template get<BytestringItem>();
@@ -21,9 +21,9 @@ TEST(ItemView, Exists)
   write1.bytestring_ = bytes;
 
   EXPECT_TRUE(proxy.set(write1));
-  ASSERT_TRUE(proxy.get_object_type());
+  ASSERT_TRUE(proxy.get_item_type());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  EXPECT_EQ(*proxy.get_object_type(), StorageObjectType::kBytestring);
+  EXPECT_EQ(*proxy.get_item_type(), StorageItemType::kBytestring);
 }
 
 TEST(ItemView, SetBytestring)
