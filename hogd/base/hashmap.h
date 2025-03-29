@@ -33,7 +33,11 @@ namespace hogd {
 // Types contained must be movable (in order to implement vector resizing)
 // but a lock will be held while movement is occuring.
 //
-// TODO(geoff): investigate whether this should also use a custom allocator
+// KEY REQUIREMENT:
+// Modifying an element CANNOT change its key.  
+//
+// TODO(geoff): investigate whether this should also use a custom allocator,
+// and investigate performance of different bucket implementations on various workloads.
 template<typename T>
 concept hash_map_object = std::movable<T> && requires(T object) {
   { object.get_key() } -> std::same_as<std::span<const std::byte>>;
@@ -177,7 +181,14 @@ public:
     assert(lg_bucket_count <= 64);
   }
 
-  // Technically allowed but bad practice to block within the invoked call.
+  // Performs the supplied lambda on the object at the supplied key,
+  // if the object exists.  Lambda is not invoked if the object does not exist.
+  // 
+  // The lambda can modify the object.  HOWEVER,
+  // the object's key, which can be computed from the object during lookups,
+  // must NEVER be modified by one of these lambdas.
+  //
+  // Allowed but bad practice to block within the invoked call.
   // Returns nullopt if the object is not found.
   template<typename Func,
            typename Ret = std::invoke_result_t<std::decay_t<Func>, T &>>
@@ -189,10 +200,13 @@ public:
     if (auto *ptr = bucket->find_element(key)) {
       if constexpr (std::is_void_v<Ret>) {
         lambda(*ptr);
+        assert(std::ranges::equal(ptr->get_key(), key));
         return true;
       }
       else {
-        return std::make_optional<Ret>(lambda(*ptr));
+        auto out = std::make_optional<Ret>(lambda(*ptr));
+        assert(std::ranges::equal(ptr->get_key(), key));
+        return out;
       }
     }
     if constexpr (std::is_void_v<Ret>) {
@@ -206,6 +220,7 @@ public:
 
   // Creates an object if does not already exist.
   // Then applies the supplied lambda to the (new or preexisting) object.
+  // The supplied lambda MUST NOT modify the object's key.
   template<typename Func,
            typename Ret = std::invoke_result_t<std::decay_t<Func>, T &>,
            typename... Args>
