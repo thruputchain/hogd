@@ -9,9 +9,9 @@
 #include <optional>
 #include <span>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <vector>
-#include <unordered_set>
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
