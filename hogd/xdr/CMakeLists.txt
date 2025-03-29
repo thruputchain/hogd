@@ -5,7 +5,7 @@ add_xdr(
 	ffi_enums.x
 	transaction.x
 	../../protocol/types.x 
-	storage_object.x
+	../../protocol/storage_item.x
 	syscall.x 
 	syscall_args.x
 )
