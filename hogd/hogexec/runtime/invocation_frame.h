@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "hogd/hogexec/runtime/item_view.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -66,10 +65,8 @@ private:
 // Stack of invocation frames.
 class InvocationFrameStack {
 public:
-  InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action,
-                       StorageSnapshotCache &snapshot_cache)
-    : last_frame_action_(std::move(last_frame_action)),
-      snapshot_cache_(snapshot_cache)
+  InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action)
+    : last_frame_action_(std::move(last_frame_action))
   {}
 
   auto &get_active_frame(this auto &self)
@@ -100,7 +97,6 @@ public:
 private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &)> last_frame_action_;
-  StorageSnapshotCache &snapshot_cache_;
 };
 
 } // namespace hogd
