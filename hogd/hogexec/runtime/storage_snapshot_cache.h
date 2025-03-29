@@ -7,6 +7,8 @@
 
 #include "contract.hh"
 #include "hogd/base/hashmap.h"
+#include "hogd/base/types.h"
+#include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -17,9 +19,10 @@ struct CachedContract {
   SHA256Hash contract_hash_;
   std::shared_ptr<const Contract> contract_;
 
-  std::span<const std::byte> get_key() const
+  std::span<const std::byte> get_key() const { return get_key(contract_hash_); }
+  static std::span<const std::byte> get_key(SHA256Hash const &hash)
   {
-    return std::as_bytes(std::span(contract_hash_));
+    return std::as_bytes(std::span(hash));
   }
 };
 
@@ -27,9 +30,24 @@ struct CachedDeployment {
   ContractAddress address_;
   SHA256Hash deployed_hash_;
 
-  std::span<const std::byte> get_key() const
+  std::span<const std::byte> get_key() const { return get_key(address_); }
+  static std::span<const std::byte> get_key(ContractAddress const &address)
   {
-    return std::as_bytes(std::span(address_));
+    return std::as_bytes(std::span(address));
+  }
+};
+
+struct CachedStorageItem {
+  AddressAndKey addrkey_;
+  std::optional<StorageItem> item_;
+
+  std::span<const std::byte> get_key() const { return get_key(addrkey_); }
+
+  static std::span<const std::byte> get_key(AddressAndKey addrkey)
+  {
+    // AddressAndKey is a struct with two bytespans, laid out consecutively.
+    const auto *addrkey_ptr = reinterpret_cast<const uint8_t *>(&addrkey);
+    return std::as_bytes(std::span(addrkey_ptr, sizeof(AddressAndKey)));
   }
 };
 
@@ -55,10 +73,13 @@ public:
   try_get_contract_by_hash(SHA256Hash const &hash);
   std::optional<SHA256Hash>
   try_get_deployed_contract_hash(ContractAddress const &addr);
+  std::optional<StorageItem>
+  try_get_snapshot_item(AddressAndKey const &addrkey);
 
 private:
   HashMap<detail::CachedContract> contract_cache_;
   HashMap<detail::CachedDeployment> deployment_cache_;
+  HashMap<detail::CachedStorageItem> item_cache_;
 };
 
 } // namespace hogd
