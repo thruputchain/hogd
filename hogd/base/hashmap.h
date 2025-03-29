@@ -34,10 +34,11 @@ namespace hogd {
 // but a lock will be held while movement is occuring.
 //
 // KEY REQUIREMENT:
-// Modifying an element CANNOT change its key.  
+// Modifying an element CANNOT change its key.
 //
 // TODO(geoff): investigate whether this should also use a custom allocator,
-// and investigate performance of different bucket implementations on various workloads.
+// and investigate performance of different bucket implementations on various
+// workloads.
 template<typename T>
 concept hash_map_object = std::movable<T> && requires(T object) {
   { object.get_key() } -> std::same_as<std::span<const std::byte>>;
@@ -52,8 +53,12 @@ struct Hasher {
   }
 };
 
+// BucketEntry type abstracts the required operations on a bucket,
+// to allow alternative implementations of each bucket.
+// Required methods are emplace(), erase(), and find_element().
 template<typename BackingType> struct BucketEntry;
 
+// Vector implementation
 template<hash_map_object T>
 struct BucketEntry<std::vector<T>> : private std::vector<T> {
 
@@ -119,6 +124,7 @@ template<hash_map_object T> struct CustomEqual {
   }
 };
 
+// Unordered set implementation, using cpp20 transparent comparators.
 template<hash_map_object T>
 struct BucketEntry<std::unordered_set<T, CustomHash<T>, CustomEqual<T>>>
   : private std::unordered_set<T, CustomHash<T>, CustomEqual<T>> {
@@ -135,14 +141,20 @@ struct BucketEntry<std::unordered_set<T, CustomHash<T>, CustomEqual<T>>>
 
   bool erase(std::span<const std::byte> key)
   {
+    // cpp23 feature: p2077r3
+#if __cpp_lib_associative_heterogeneous_erasure >= 202110L
+    auto res = bucket->erase(key);
+    assert(res == 0 || res == 1);
+    return res == 1;
+#else
     // transparent erase not yet supported
-    // auto res = bucket->erase(key);
     auto it = base_type::find(key);
     if (it != base_type::end()) {
       base_type::erase(it);
       return true;
     }
     return false;
+#endif
   }
 
   const T *find_element(std::span<const std::byte> key) const
@@ -183,7 +195,7 @@ public:
 
   // Performs the supplied lambda on the object at the supplied key,
   // if the object exists.  Lambda is not invoked if the object does not exist.
-  // 
+  //
   // The lambda can modify the object.  HOWEVER,
   // the object's key, which can be computed from the object during lookups,
   // must NEVER be modified by one of these lambdas.
