@@ -15,6 +15,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
@@ -256,6 +257,10 @@ public:
     auto [lk, bucket] = acquire_bucket(key);
 
     if (T *ptr = find_element(key, *bucket)) {
+#if DEBUG
+      x23::Defer d(
+          [ptr, key]() { assert(std::ranges::equal(ptr->get_key(), key)); });
+#endif
       return lambda(*ptr);
     }
     return lambda(bucket->emplace(std::forward<Args>(args)...));
@@ -272,7 +277,9 @@ public:
       return false;
     }
 
-    bucket->emplace(std::forward<Args>(args)...);
+    [[maybe_unused]] auto &new_element =
+        bucket->emplace(std::forward<Args>(args)...);
+    assert(std::ranges::equal(new_element.get_key(), key));
     return true;
   }
 
