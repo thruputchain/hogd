@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <atomic>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -12,12 +11,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-#define VECTOR 1
-
-#if VECTOR
 #include <unordered_set>
-#endif
 
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
