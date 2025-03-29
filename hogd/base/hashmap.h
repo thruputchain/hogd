@@ -214,17 +214,17 @@ public:
   auto modify_element(key_t key, Func &&lambda)
   {
     auto [lk, bucket] = acquire_bucket(key);
-
     if (auto *ptr = bucket->find_element(key)) {
+#if DEBUG
+      x23::Defer d(
+          [ptr, key]() { assert(std::ranges::equal(ptr->get_key(), key)); });
+#endif
       if constexpr (std::is_void_v<Ret>) {
         lambda(*ptr);
-        assert(std::ranges::equal(ptr->get_key(), key));
         return true;
       }
       else {
-        auto out = std::make_optional<Ret>(lambda(*ptr));
-        assert(std::ranges::equal(ptr->get_key(), key));
-        return out;
+        return std::make_optional<Ret>(lambda(*ptr));
       }
     }
     if constexpr (std::is_void_v<Ret>) {
