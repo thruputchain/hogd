@@ -67,6 +67,10 @@ struct CachedStorageItem {
 // This is possible with some e.g. higher level mechanism (if we can, for
 // example, ensure that all ContractAddresses are different from deployed
 // contract hashes), but that seems bugprone and difficult to maintain.
+// Alternatively, we could construct a separate key type,
+// although doing so without introducing excessive copies
+// would require making HashMap have some internal knowledge of a notion of type
+// (and still probably involves extra copies).
 class StorageSnapshotCache {
 public:
   std::shared_ptr<const Contract>
