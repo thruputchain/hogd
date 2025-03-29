@@ -7,13 +7,14 @@ add_library(
   string.cc
 )
 
-target_link_libraries(base protocol)
+target_link_libraries(base crypto protocol)
 
 # create base module test binary
 add_executable(
   base_test
   bits_test.cc
   cpputil_test.cc
+  hashmap_test.cc
   perthread_test.cc
   status_test.cc
   string_test.cc
