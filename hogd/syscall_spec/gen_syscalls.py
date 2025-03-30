@@ -111,6 +111,12 @@ primitive_type: bool
 
   Only available for input arguments.
 
+syscall_pass_by_value: bool
+  required: no
+    default: no
+  description: Pass the input argument to the syscall by value, instead of by
+  constant reference (input arguments only).
+
 rust_typename: string
   required: no
     default: the value set in typename
@@ -203,8 +209,11 @@ def gen_validate_arg(inp, *, is_input):
   # end optional arg
 
   # else fixed size
+  if "syscall_pass_by_value" in inp and inp["syscall_pass_by_value"]:
+    if not is_input:
+      raise Exception("Pass by value only valid for inputs")
+    return 1, f"{typename} {arg_name}"
   return 1, f"{const}{typename}& {arg_name}"
-
 
 def gen_inner_outer(syscall):
   name = syscall["name"]

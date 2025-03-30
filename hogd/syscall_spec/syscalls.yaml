@@ -192,9 +192,11 @@ syscalls:
       - name: "set_value"
         typename: "int128_t"
         xdr_typename: "int128_xdr"
+        syscall_pass_by_value: yes
       - name: "add_value"
         typename: "int128_t"
         xdr_typename: "int128_xdr"
+        syscall_pass_by_value: yes
     outputs:
     number: 17
 

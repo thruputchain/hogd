@@ -44,6 +44,19 @@ struct SyscallArgParams<T> {
   constexpr static T deref(T value) { return value; }
 };
 
+// Input types that can be passed by value but not within a uint64
+template<typename T> requires (sizeof(T) > 8) && std::is_trivially_copyable_v<T>
+struct SyscallArgParams<T> {
+  constexpr static size_t kNumInputs = 1;
+
+  constexpr static T parse(std::span<std::byte> /*unused*/, uint64_t input)
+  {
+    return input;
+  }
+  constexpr static bool validate(uint64_t /*unused*/) { return true; }
+  constexpr static T deref(T value) { return value; }
+};
+
 // [u8] span contract output.
 // The two input arguments are (offset, length) in contract memory.
 template<> struct SyscallArgParams<std::span<std::byte>> {

@@ -32,8 +32,8 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKey &input_key,
-                                   int128_t const &input_set_value,
-                                   int128_t const &input_add_value)
+                                   int128_t input_set_value,
+                                   int128_t input_add_value)
 {
   auto status =
       syscall_handler.set_nnint(input_key, input_set_value, input_add_value);
