@@ -73,6 +73,18 @@ struct CachedStorageItem {
 // (and still probably involves extra copies).
 class StorageSnapshotCache {
 public:
+
+  StorageSnapshotCache(int lg_bucket_count)
+    : contract_cache_(lg_bucket_count)
+    , deployment_cache_(lg_bucket_count)
+    , item_cache_(lg_bucket_count) {}
+
+  // delete move and copy
+  StorageSnapshotCache(StorageSnapshotCache const&) = delete;
+  StorageSnapshotCache(StorageSnapshotCache&&) = delete;
+  StorageSnapshotCache& operator=(StorageSnapshotCache const&) = delete;
+  StorageSnapshotCache& operator=(StorageSnapshotCache&&) = delete;
+
   std::shared_ptr<const Contract>
   try_get_contract_by_hash(SHA256Hash const &hash);
   std::optional<SHA256Hash>
