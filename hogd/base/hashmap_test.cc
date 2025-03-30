@@ -48,6 +48,16 @@ insert_and_get_test(Map &map)
   ASSERT_TRUE(val);
   EXPECT_EQ(*val, 10);
   // NOLINTEND(bugprone-unchecked-optional-access)
+
+  // asserting that emplace and modify
+  val = map.emplace_and_modify(
+      std::as_bytes(std::span(a)), [](ValueT const &v) { return v.value_; }, a,
+      5);
+
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_TRUE(val);
+  EXPECT_EQ(*val, 10);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 } // namespace
 
