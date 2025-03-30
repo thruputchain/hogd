@@ -36,7 +36,7 @@ template<typename Map>
 void
 insert_and_get_test(Map &map)
 {
-  std::string a = "aaa", b = "bbb";
+  std::string a = "aaa", b = "bbb", c = "ccc";
 
   EXPECT_TRUE(map.emplace(std::as_bytes(std::span(a)), a, 10));
   EXPECT_TRUE(map.emplace(std::as_bytes(std::span(b)), b, 12));
@@ -47,6 +47,32 @@ insert_and_get_test(Map &map)
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(val);
   EXPECT_EQ(*val, 10);
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
+  // asserting that emplace and modify compiles and doesn't emplace
+  // when an element already exists
+  val = map.emplace_and_modify(
+      std::as_bytes(std::span(a)), [](ValueT const &v) { return v.value_; }, a,
+      5);
+
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_TRUE(val);
+  EXPECT_EQ(*val, 10);
+  // NOLINTEND(bugprone-unchecked-optional-access)
+
+  // asserting that emplace and modify compiles and does emplace
+  // when an element does not already exist
+  val = map.emplace_and_modify(
+      std::as_bytes(std::span(c)),
+      [](ValueT &v) {
+        v.value_++;
+        return v.value_;
+      },
+      c, 5);
+
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  ASSERT_TRUE(val);
+  EXPECT_EQ(*val, 6);
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 } // namespace

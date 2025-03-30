@@ -57,7 +57,7 @@ template<typename BackingType> struct BucketEntry;
 template<hash_map_object T>
 struct BucketEntry<std::vector<T>> : private std::vector<T> {
 
-  template<typename... Args> decltype(auto) emplace(Args &&...args)
+  template<typename... Args> auto &emplace(Args &&...args)
   {
     return std::vector<T>::emplace_back(std::forward<Args>(args)...);
   }
@@ -146,10 +146,10 @@ struct BucketEntry<UnorderedSetMarker<T>>
   using base_type =
       std::unordered_set<MutableWrapper<T>, CustomHash<MutableWrapper<T>>,
                          CustomEqual<MutableWrapper<T>>>;
-  template<typename... Args> decltype(auto) emplace(Args &&...args)
+  template<typename... Args> auto &emplace(Args &&...args)
   {
     auto [it, _] = base_type::emplace(std::forward<Args>(args)...);
-    return *it;
+    return it->base_;
   }
 
   bool erase(std::span<const std::byte> key)
@@ -214,17 +214,17 @@ public:
   auto modify_element(key_t key, Func &&lambda)
   {
     auto [lk, bucket] = acquire_bucket(key);
-
     if (auto *ptr = bucket->find_element(key)) {
+#if DEBUG
+      x23::Defer d(
+          [ptr, key]() { assert(std::ranges::equal(ptr->get_key(), key)); });
+#endif
       if constexpr (std::is_void_v<Ret>) {
         lambda(*ptr);
-        assert(std::ranges::equal(ptr->get_key(), key));
         return true;
       }
       else {
-        auto out = std::make_optional<Ret>(lambda(*ptr));
-        assert(std::ranges::equal(ptr->get_key(), key));
-        return out;
+        return std::make_optional<Ret>(lambda(*ptr));
       }
     }
     if constexpr (std::is_void_v<Ret>) {
@@ -247,7 +247,7 @@ public:
   {
     auto [lk, bucket] = acquire_bucket(key);
 
-    if (T *ptr = find_element(key, *bucket)) {
+    if (auto *ptr = bucket->find_element(key)) {
 #if DEBUG
       x23::Defer d(
           [ptr, key]() { assert(std::ranges::equal(ptr->get_key(), key)); });
