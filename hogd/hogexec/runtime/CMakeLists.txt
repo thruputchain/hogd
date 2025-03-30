@@ -21,6 +21,7 @@ add_library(
   syscall_handler.cc
   syscall_invoke.cc
   syscall_log.cc
+  syscall_nnint.cc
 )
 
 add_executable(

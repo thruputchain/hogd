@@ -9,7 +9,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "types.hh"
 
@@ -55,8 +54,7 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             const StorageKey &input_key,
                             std::span<const std::byte> input_bytestring)
 {
-  SyscallStatus<void> status =
-      syscall_handler.set_bytestring(input_key, input_bytestring);
+  auto status = syscall_handler.set_bytestring(input_key, input_bytestring);
   if (!status) {
     return {status.error().code(), 0};
   }
