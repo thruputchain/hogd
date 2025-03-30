@@ -32,6 +32,8 @@ namespace hogd {
 template<typename T> struct SyscallArgParams;
 
 // Primitive type syscall input
+// For items that can be passed directly within one of the uint64 syscall
+// arguments, and not as a memory offset.
 template<std::integral T> requires (sizeof(T) <= 8)
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
