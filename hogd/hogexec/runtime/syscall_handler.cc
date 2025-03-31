@@ -12,6 +12,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
@@ -286,6 +287,45 @@ SystemCallHandler::set_bytestring(StorageKey const &storage_key,
               input_bytestring.size());
 
   return item_view.set(BytestringItem(std::move(new_string)));
+}
+
+SyscallStatus<std::pair<int128_t, int128_t>>
+SystemCallHandler::get_nnint(StorageKey const &storage_key)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+
+  if (auto const *nnint_item = item_view.template get<NNIntItem>()) {
+    return {{nnint_item->base_value_, nnint_item->add_value_}};
+  }
+
+  if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
+    if (!unmodified_item->base_item_) {
+      return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
+    }
+    if (unmodified_item->base_item_->type() !=
+        StorageItemType::kNonnegativeInt) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    }
+    return {{from_xdr(unmodified_item->base_item_->nnint()), 0}};
+  }
+
+  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+}
+
+SyscallStatus<void>
+SystemCallHandler::set_nnint(StorageKey const &storage_key, int128_t set_value,
+                             int128_t add_value)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+  return item_view.set(
+      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
+}
+
+SyscallStatus<void>
+SystemCallHandler::delete_object(StorageKey const &storage_key)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+  return item_view.set(DeletedItem{});
 }
 
 } // namespace hogd

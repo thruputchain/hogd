@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <memory>
-#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -14,7 +13,6 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -98,6 +96,15 @@ public:
   SyscallStatus<void>
   set_bytestring(StorageKey const &storage_key,
                  std::span<const std::byte> input_bytestring);
+
+  // === Nonnegative Integer syscalls ===
+  SyscallStatus<std::pair<int128_t, int128_t>>
+  get_nnint(StorageKey const &storage_key);
+  SyscallStatus<void> set_nnint(StorageKey const &storage_key,
+                                int128_t set_value, int128_t add_value);
+
+  // === Delete syscall ===
+  SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
