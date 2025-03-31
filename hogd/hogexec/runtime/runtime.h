@@ -105,10 +105,10 @@ public:
 
   // Perform any required validation checks on the contract.
   // In the case of webassembly, this is the webassembly validator.
-  virtual bool verify_contract(ContractBlob const &contract) const = 0;
+  virtual bool verify_contract(Contract const &contract) const = 0;
 
   virtual std::unique_ptr<Runtime>
-  make_new_runtime(ContractBlob const &contract,
+  make_new_runtime(Contract const &contract,
                    SystemCallHandler *syscall_handler,
                    bool do_contract_verify) = 0;
 

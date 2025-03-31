@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -49,8 +50,9 @@ class GasApiTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
+    Contract contract(ContractType::kWasmi);
     // this wasm just invokes an external call.  We're just reusing it here.
-    auto c = test::load_wasm_from_file("test_error_handling.wasm");
+    contract.wasmi_contract() = test::load_wasm_from_file("test_error_handling.wasm");
 
     WasmiContext context;
 
@@ -59,7 +61,7 @@ protected:
     context.link_fn("test", "external_call",
                     &consume_gas_call); // called by "call1"
 
-    runtime_ = context.make_new_runtime(c, nullptr, true);
+    runtime_ = context.make_new_runtime(contract, nullptr, true);
 
     ASSERT_TRUE(!!runtime_);
   }

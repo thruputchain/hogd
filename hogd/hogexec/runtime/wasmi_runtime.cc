@@ -25,7 +25,7 @@ WasmiContext::~WasmiContext()
 }
 
 std::unique_ptr<Runtime>
-WasmiContext::make_new_runtime(ContractBlob const &contract,
+WasmiContext::make_new_runtime(Contract const &contract,
                                SystemCallHandler *syscall_handler,
                                bool do_contract_verify)
 {
@@ -37,8 +37,12 @@ WasmiContext::make_new_runtime(ContractBlob const &contract,
       std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = syscall_handler;
 
+  if (contract.contract_type() != ContractType::kWasmi) {
+    return nullptr;
+  }
+
   void *wasmi_runtime_ptr =
-      new_wasmi_runtime(contract.data(), contract.size(),
+      new_wasmi_runtime(contract.wasmi_contract().data(), contract.wasmi_contract().size(),
                         host_call_context.get(), wasmi_context_ptr_);
   if (wasmi_runtime_ptr == nullptr) {
     return {};
@@ -49,14 +53,18 @@ WasmiContext::make_new_runtime(ContractBlob const &contract,
 }
 
 bool
-WasmiContext::verify_contract(ContractBlob const &contract) const
+WasmiContext::verify_contract(Contract const &contract) const
 {
   assert(wasmi_context_ptr_);
 
+  if (contract.contract_type() != ContractType::kWasmi) {
+    return false;
+  }
+
   return wasmi_verify_contract(wasmi_context_ptr_,
                                reinterpret_cast<const uint8_t *>(
-                                   contract.data()),
-                               contract.size());
+                                   contract.wasmi_contract().data()),
+                               contract.wasmi_contract().size());
 }
 
 bool
