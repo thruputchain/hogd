@@ -32,7 +32,7 @@ TEST(ExecutionModeTest, ProposalBitStoredCorrectly)
   auto check = [&](bool bit) {
     auto res = validation.consume_nondeterministic_bit();
     ASSERT_TRUE(res);
-    EXPECT_EQ(*res, bit);
+    EXPECT_EQ(res->get(), bit);
   };
 
   check(false);

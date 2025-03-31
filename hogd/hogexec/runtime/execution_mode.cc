@@ -2,9 +2,9 @@
 
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 #include <optional>
 
+#include "hogd/base/types.h"
 #include "transaction.hh"
 
 namespace hogd {
@@ -18,7 +18,7 @@ offset_bit(uint32_t idx)
 } // namespace
 
 void
-ProposalModeData::log_nondeterministic_bit(bool bit)
+ProposalModeData::log_nondeterministic_bit(Nondeterministic<bool> bit)
 {
   uint8_t byte_count = (proposal_data_.nondeterministic_bit_count / 8) + 1;
   if (byte_count != proposal_data_.nondeterministic_bits.size()) {
@@ -28,7 +28,7 @@ ProposalModeData::log_nondeterministic_bit(bool bit)
 
   assert(!proposal_data_.nondeterministic_bits.empty());
 
-  if (bit) {
+  if (bit.get()) {
     uint8_t &last_byte = proposal_data_.nondeterministic_bits.back();
     last_byte |= offset_bit(proposal_data_.nondeterministic_bit_count);
   }
@@ -36,7 +36,7 @@ ProposalModeData::log_nondeterministic_bit(bool bit)
   proposal_data_.nondeterministic_bit_count++;
 }
 
-std::optional<bool>
+std::optional<Nondeterministic<bool>>
 ValidationModeData::consume_nondeterministic_bit()
 {
   if (next_nondeterministic_bit_index_ >=

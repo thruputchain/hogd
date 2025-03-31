@@ -1,10 +1,10 @@
 #pragma once
 
-#include <cstdint>
 #include <optional>
 #include <utility>
 #include <variant>
 
+#include "hogd/base/types.h"
 #include "transaction.hh"
 
 namespace hogd {
@@ -25,7 +25,7 @@ public:
 
   // Records a nondeterministic boolean choice (e.g., does a try_invoke frame
   // succeed?) made during try_invoke
-  void log_nondeterministic_bit(bool bit);
+  void log_nondeterministic_bit(Nondeterministic<bool> bit);
 
   NondeterministicProposalData proposal_data() const { return proposal_data_; }
 
@@ -56,7 +56,7 @@ public:
 
   // Consumes and returns the next nondeterministic bit from the proposal
   // Returns nullopt if no more bits are available
-  std::optional<bool> consume_nondeterministic_bit();
+  std::optional<Nondeterministic<bool>> consume_nondeterministic_bit();
 
   // Returns true if all proposal bits have been consumed
   bool check_all_consumed() const;
