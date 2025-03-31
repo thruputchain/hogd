@@ -104,8 +104,7 @@ public:
                                 int128_t set_value, int128_t add_value);
 
   // === Delete syscall ===
-  SyscallStatus<void>
-  delete_object(StorageKey const& storage_key);
+  SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
