@@ -199,6 +199,13 @@ syscalls:
         syscall_pass_by_value: yes
     outputs:
     number: 17
+  - name: "DeleteObject"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+    number: 18
 
 errors:
   - name: "None"
