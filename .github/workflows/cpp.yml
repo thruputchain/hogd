@@ -15,9 +15,13 @@ jobs:
         bcheck
     
     steps:
+    - uses: webfactory/ssh-agent@v0.9.1
+      with:
+        ssh-private-key: |
+          ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
     - uses: actions/checkout@v4
       with:
-        submodules: "recursive"
+        submodules: recursive
     - name: install llvm
       run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 20 all && sudo apt-get remove clang-18
     - name: set gcc-14 default
@@ -45,7 +49,7 @@ jobs:
         # Cmake should handle rebuilding any changed files across commits
         # The last number is a version number.  Bump the version number whenever the compiler changes,
         # to invalidate the cache (or any other time you need to manually clear the cache)
-        key: ${{ runner.os }}-${{ github.ref_name }}-1
+        key: ${{ runner.os }}-${{ github.ref_name }}-3
     - name: check
       run: ./scripts/check.sh
     - uses: actions/cache/save@v4

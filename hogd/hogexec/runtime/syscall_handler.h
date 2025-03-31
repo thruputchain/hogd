@@ -37,7 +37,8 @@ class StorageSnapshotCache;
 class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
-                    StorageSnapshotCache &snapshot_cache);
+                    StorageSnapshotCache &snapshot_cache,
+                    std::shared_ptr<RuntimeContext> runtime_context = nullptr);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;
@@ -87,6 +88,23 @@ public:
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
   bool current_runtime_is_revert_poisoned() const;
+
+  // === Bytestring syscalls ===
+  // The returned span is only valid until another storage item is accessed.
+  SyscallStatus<std::span<const std::byte>>
+  get_bytestring(StorageKey const &storage_key);
+  SyscallStatus<void>
+  set_bytestring(StorageKey const &storage_key,
+                 std::span<const std::byte> input_bytestring);
+
+  // === Nonnegative Integer syscalls ===
+  SyscallStatus<std::pair<int128_t, int128_t>>
+  get_nnint(StorageKey const &storage_key);
+  SyscallStatus<void> set_nnint(StorageKey const &storage_key,
+                                int128_t set_value, int128_t add_value);
+
+  // === Delete syscall ===
+  SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;

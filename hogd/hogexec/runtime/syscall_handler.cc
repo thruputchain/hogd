@@ -12,11 +12,14 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
+#include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -25,9 +28,10 @@ namespace hogd {
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
-SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
-                                     StorageSnapshotCache &snapshot_cache)
-  : runtime_context_(make_hogexec_context(RuntimeEngine::kWasmi)),
+SystemCallHandler::SystemCallHandler(
+    SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
+    std::shared_ptr<RuntimeContext> runtime_context)
+  : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)),
     invocation_frame_stack_([this](InvocationFrame &last_frame) {
       commit_last_call_frame_success(last_frame);
@@ -42,7 +46,11 @@ SystemCallHandler::SystemCallHandler(SignedTransaction signed_tx,
       return contracts;
     }()),
     snapshot_cache_(snapshot_cache)
-{}
+{
+  if (!runtime_context_) {
+    runtime_context_ = make_hogexec_context(RuntimeEngine::kWasmi);
+  }
+}
 
 InvokeResult
 SystemCallHandler::root_invoke()
@@ -242,6 +250,82 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   frame.new_contract_deployments_.emplace(deploy_addr, contract_hash);
 
   return deploy_addr;
+}
+
+SyscallStatus<std::span<const std::byte>>
+SystemCallHandler::get_bytestring(StorageKey const &storage_key)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+
+  if (auto const *bytestring_item = item_view.template get<BytestringItem>()) {
+    return std::as_bytes(std::span(bytestring_item->bytestring_));
+  }
+
+  if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
+    if (!unmodified_item->base_item_) {
+      return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
+    }
+    if (unmodified_item->base_item_->type() != StorageItemType::kBytestring) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    }
+    return std::as_bytes(std::span(unmodified_item->base_item_->bytestring()));
+  }
+
+  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+}
+
+SyscallStatus<void>
+SystemCallHandler::set_bytestring(StorageKey const &storage_key,
+                                  std::span<const std::byte> input_bytestring)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+
+  Bytestring new_string;
+  new_string.resize_uninitialized(input_bytestring.size());
+  std::memcpy(new_string.data(),
+              reinterpret_cast<const uint8_t *>(input_bytestring.data()),
+              input_bytestring.size());
+
+  return item_view.set(BytestringItem(std::move(new_string)));
+}
+
+SyscallStatus<std::pair<int128_t, int128_t>>
+SystemCallHandler::get_nnint(StorageKey const &storage_key)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+
+  if (auto const *nnint_item = item_view.template get<NNIntItem>()) {
+    return {{nnint_item->base_value_, nnint_item->add_value_}};
+  }
+
+  if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
+    if (!unmodified_item->base_item_) {
+      return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
+    }
+    if (unmodified_item->base_item_->type() !=
+        StorageItemType::kNonnegativeInt) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    }
+    return {{from_xdr(unmodified_item->base_item_->nnint()), 0}};
+  }
+
+  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+}
+
+SyscallStatus<void>
+SystemCallHandler::set_nnint(StorageKey const &storage_key, int128_t set_value,
+                             int128_t add_value)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+  return item_view.set(
+      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
+}
+
+SyscallStatus<void>
+SystemCallHandler::delete_object(StorageKey const &storage_key)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+  return item_view.set(DeletedItem{});
 }
 
 } // namespace hogd

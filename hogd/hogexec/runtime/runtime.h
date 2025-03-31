@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <format>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -20,8 +21,8 @@ namespace hogd {
 class SystemCallHandler;
 class Runtime;
 
-// Passed in as the argument to functions invoked from Wasmi.
-// The WasmiRuntime argument allows a syscall to consume gas.
+// Passed in as the argument to functions invoked from a sandbox.
+// The Runtime* argument allows a syscall to consume gas.
 struct HostCallContext {
   Runtime *runtime = nullptr;
   SystemCallHandler *syscall_handler = nullptr;
@@ -34,7 +35,11 @@ enum class RuntimeEngine {
 
 std::string engine_to_string(RuntimeEngine engine);
 
-inline static bool
+// Whether or not the engine has native gas metering.
+// Use case is when testing behavior across multiple engines,
+// some tests will succeed/fail based on whether gas metering
+// is implemented in the engine.
+constexpr static bool
 engine_has_native_metering(RuntimeEngine engine)
 {
   switch (engine) {
@@ -48,7 +53,8 @@ engine_has_native_metering(RuntimeEngine engine)
 
 // does a missing linked function cause errors at instantiation time (true)
 // or are those checks deferred to runtime (false)
-inline static bool
+// Usage is again for tests across multiple wasm engines.
+constexpr static bool
 engine_has_eager_link_guards(RuntimeEngine engine)
 {
   switch (engine) {
@@ -60,7 +66,7 @@ engine_has_eager_link_guards(RuntimeEngine engine)
   throw std::runtime_error("unknown engine");
 }
 
-// Abstract class that abstracts the context associated with a sandbox runtime.
+// Abstract class that wraps the context associated with a sandbox runtime.
 // Most sandbox implementations have some amount of shared state (i.e., a list
 // of function pointers to link, or an environment allocator).
 //
@@ -111,7 +117,6 @@ public:
                    SystemCallHandler *syscall_handler,
                    bool do_contract_verify) = 0;
 
-protected:
   virtual bool link_fn_nargs(std::string_view module_name,
                              std::string_view fn_name, void *fn_ptr,
                              uint8_t nargs) = 0;
@@ -137,9 +142,21 @@ public:
   Runtime(Runtime &&other) = delete;
   Runtime &operator=(Runtime &&other) = delete;
 
+  // Turns a method ID (uint32) into a method name string that
+  // can be invoked within wasm.
   constexpr static std::string invoke_name(MethodID method)
   {
     return std::format("{:X}", method);
+  }
+  // WASM name -> Method ID (inverse of invoke_name)
+  constexpr static std::optional<MethodID>
+  method_id_from_name(std::string const &name)
+  {
+    try {
+      return std::stoul(name, nullptr, 16);
+    } catch (std::invalid_argument &e) {
+      return std::nullopt;
+    }
   }
 
   // The gas counter is saved before calling this method

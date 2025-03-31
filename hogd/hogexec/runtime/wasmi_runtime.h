@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <memory>
 #include <span>
-#include <string>
 #include <string_view>
 
 #include "contract.hh"

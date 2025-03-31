@@ -5,8 +5,25 @@ import yaml
 from yaml import CLoader as Loader, CDumper as Dumper
 
 import argparse
+import os
 
 syscall_argcount = 6
+
+# Map from c++ to xdr typenames
+cpp_to_xdr_typenames = {
+  "int32_t" : "int",
+  "uint32_t" : "unsigned int",
+  "int64_t" : "hyper",
+  "uint64_t" : "unsigned hyper"
+}
+
+# map from c++ to rust typenames
+cpp_to_rust_typenames = {
+  "int32_t" : "i32",
+  "uint32_t" : "u32",
+  "int64_t" : "i64",
+  "uint64_t" : "u64"
+}
 
 """
 Each syscall generates a
@@ -93,6 +110,12 @@ primitive_type: bool
   memory.
 
   Only available for input arguments.
+
+syscall_pass_by_value: bool
+  required: no
+    default: no
+  description: Pass the input argument to the syscall by value, instead of by
+  constant reference (input arguments only).
 
 rust_typename: string
   required: no
@@ -186,8 +209,11 @@ def gen_validate_arg(inp, *, is_input):
   # end optional arg
 
   # else fixed size
+  if "syscall_pass_by_value" in inp and inp["syscall_pass_by_value"]:
+    if not is_input:
+      raise Exception("Pass by value only valid for inputs")
+    return 1, f"{typename} {arg_name}"
   return 1, f"{const}{typename}& {arg_name}"
-
 
 def gen_inner_outer(syscall):
   name = syscall["name"]
@@ -307,11 +333,16 @@ using SyscallFunc = std::pair<HostFnResult, uint64_t> (*)(
 }}// namespace hogd
 """
 
+# ===== generate syscall-related x files =====
+
+# One argument within a SyscallArgs structure.
 def gen_syscall_io_arg_decl(arg):
   end_decorator = ""
   argtype = ""
   if "xdr_typename" in arg:
     argtype = arg["xdr_typename"]
+  elif "typename" in arg and arg["typename"] in cpp_to_xdr_typenames.keys():
+    argtype = cpp_to_xdr_typenames[arg["typename"]]
   elif "span_argument" in arg and arg["span_argument"]:
     argtype = "opaque"
     end_decorator = "<>"
@@ -397,6 +428,7 @@ union SyscallOutput switch(SyscallNo syscall) {{
 """
 
 
+
 def gen_syscall_x(spec_full):
   spec = spec_full["syscalls"]
   syscalls = {}
@@ -440,7 +472,9 @@ enum SyscallErrorCode {{{error_enumdecls}}};
 }} // namespace hogd
 """
 
+# ===== end generate syscall-related x files =====
 
+# ===== generate rs syscall bindings =====
 
 """
 Generate rust bindings for each syscall.
@@ -639,6 +673,53 @@ namespace hogd {{
 
 {joined}
 }}"""
+# ===== end generate rs syscall bindings =====
+
+# ===== Mock syscall entry =====
+def gen_mock_switch_case(syscall):
+  name = syscall["name"]
+  return f"""  case SyscallNo::k{name}:
+  return mock_syscall_parser<{name}_input, {name}_output,
+                               &syscall_{name}_inner>(syscall_no, input_span, output_span);
+"""
+
+def gen_mock_syscall_entry_cc(spec):
+  switch_body = ""
+  for call in spec:
+    switch_body += gen_mock_switch_case(call)
+  
+  return f"""#include "hogd/test_ffi/mock_syscall_entry.h"
+
+#include <span>
+
+#include "hogd/base/types.h"
+#include "syscall.hh"
+#include "syscall_args.hh"
+#include "hogd/test_ffi/syscall_handler_wrapper.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
+
+namespace hogd {{
+
+ForeignHostFnResult
+mock_syscall_entrypoint(int32_t syscall, const unsigned char *input,
+                        uint32_t input_len, unsigned char *output,
+                        uint32_t output_len) noexcept
+{{
+  std::span<const uint8_t> input_span = std::span(input, input_len);
+  std::span<uint8_t> output_span = std::span(output, output_len);
+
+  auto syscall_no = static_cast<SyscallNo>(syscall);
+
+  switch (syscall_no) {{
+{switch_body}
+  default:
+    return recoverable_error(SyscallErrorCode::kNoSyscall);
+  }}
+}}
+
+}}
+"""
+# ===== end mock syscall entry =====
 
 parser = argparse.ArgumentParser(description="syscall generator")
 
@@ -673,11 +754,17 @@ parser.add_argument(
   nargs='+', 
   type=int, 
   help = "syscall nos")
+parser.add_argument(
+  '--mock_syscall_entry_cc', 
+  action='store_true', 
+  help="gen mock_syscall_entry_cc")
 
 args = parser.parse_args()
 
 spec_full = yaml.load(open(args.syscall_yaml, 'r').read(), Loader=Loader)
 spec = spec_full["syscalls"]
+
+os.makedirs(args.output_dir, exist_ok=True)
 
 if (args.syscall_x):
   filename = args.output_dir + "/syscall.x"
@@ -701,4 +788,9 @@ if (args.syscall_rs):
 
 if (args.syscall_frame is not None and len(args.syscall_frame) > 0):
   print(gen_syscall_frame(spec, args.syscall_frame))
+
+if (args.mock_syscall_entry_cc):
+  filename = args.output_dir + "/mock_syscall_entry.cc"
+  with open(filename, "w") as f:
+    f.write(gen_mock_syscall_entry_cc(spec))
 

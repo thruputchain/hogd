@@ -7,27 +7,35 @@ the output argument should be written, AND return a RuntimeMemoryLength
 variable, which describes how much of the contract-supplied bytespan was
 overwritten. We do not change any of the remaining elements of the bytespan.
 
-# SHA256 Signature: SHA256(input_buffer : [u8]) -> SHA256Hash
+# SHA256 
+
+ Signature: SHA256(input_buffer : [u8]) -> SHA256Hash
 
 Returns SHA256 of the input.
 
 Does not return additional errors.
 
-# GetMsgSender Signature: GetMsgSender() -> ContractAddress
+# GetMsgSender 
+
+Signature: GetMsgSender() -> ContractAddress
 
 Returns the contract address of the contract that invoked the current call
 frame.
 
 Can return the error kIsRootTransaction if called from a root call frame.
 
-# GetCalldataLen Signature: GetCalldataLen() -> RuntimeMemoryLength
+# GetCalldataLen 
+
+Signature: GetCalldataLen() -> RuntimeMemoryLength
 
 Returns the length of the calldata supplied to the invocation associated with
 the current call frame.
 
 Does not return additional errors.
 
-# GetCalldata Signature: () -> [u8]
+# GetCalldata 
+
+Signature: () -> [u8]
 
 Returns the calldata supplied to the invocation associated with the current
 call frame. Truncates the calldata to the size of the bytestring allocated by
@@ -35,23 +43,29 @@ the contract to accept the calldata.
 
 Does not return additional errors.
 
-# Log Signature: (message : [u8]) -> ()
+# Log 
+
+Signature: (message : [u8]) -> ()
 
 Creates a log entry associated with the current transaction using the supplied
 message, associated with the address of the currently running contract.
 
 Returns kInvalidSyscallInput if the supplied message is too long.
 
-# Invoke Signature: (call_address: ContractAddress, method: MethodID,
-  gas_limit: GasAmount, calldata: [u8]) -> i32
+# Invoke 
+
+Signature: (call_address: ContractAddress, method: MethodID,
+  gas_limit: GasAmount, calldata: [u8]) -> RuntimeMemoryLength
 
 Invokes the specified method of the contract at the specified address, with
 the supplied parameters. Creates a new callframe, which terminates upon
 conclusion of the Invoke() syscall.
 
-Returns the length of the buffer returned by the called contract (0 if error).
+Returns the length of the buffer returned by the called contract (which is not accessible, if the frame has an error).
 
-# Return Signature: (output : [u8]) -> !
+# Return 
+
+Signature: (output : [u8]) -> !
 
 Immediately terminates the currently running contract, and sets the parent
 callframe's return buffer to be the supplied `output` value.  Sets the exit
@@ -60,7 +74,9 @@ code for the current call frame to 0.
 If the supplied bytestring is too long, the currently running contract
 terminates with a negative exit code (to revert the call frame).
 
-# GetReturnedBuffer Signature: () -> [u8]
+# GetReturnedBuffer
+
+ Signature: () -> [u8]
 
 Loads the bytestring returned by the most recent child callframe.
 
@@ -76,9 +92,9 @@ set the parent call frame's  return buffer. Reverts the contract if the exit
 codes is negative.
 
 
-# GetDeployAddress Signature: 
+# GetDeployAddress 
 
-GetDeployAddress(
+Signature: (
   source_address: Option<ContractAddress>, 
   nonce: SHA256Hash, 
   contract_hash: SHA256Hash) -> ContractAddress
@@ -125,4 +141,24 @@ No other errors.
 Signature: VerifySignature(signature: Signature, publickey: Publickey, message : [u8]) -> ()
 
 Check the error code to determine verification status.
+
+# BytestringGetLen
+
+Signature: BytestringGetLen(key : StorageKey) -> RuntimeMemoryLength
+
+Gets the length of the bytestring at key if it exists.
+Returns an error otherwise.
+
+# BytestringGet
+
+Signature: BytestringGet(key: StorageKey) -> [u8], RuntimeMemoryLength
+
+Returns the bytestring at the input key, if it exists.
+
+# BytestringSet
+
+Signature: BytestringSet(key: StorageKey, string : [u8]) -> ()
+
+Creates a bytestring at the specified key.
+
 

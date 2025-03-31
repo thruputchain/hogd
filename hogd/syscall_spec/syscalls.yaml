@@ -142,6 +142,70 @@ syscalls:
     outputs:
         # No outputs: check the error code returned
     number: 12
+  - name: "BytestringGetLen"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+      - name: "length"
+        typename: "RuntimeMemoryLength"
+    number: 13
+  - name: "BytestringGet"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+      - name: "bytestring"
+        span_argument: yes
+      - name: "written_len"
+        typename: "RuntimeMemoryLength"
+    number: 14
+  - name: "BytestringSet"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+      - name: "bytestring"
+        span_argument: yes
+    outputs:
+    number: 15
+  - name: "NonnegativeIntGet"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+      - name: "current_set"
+        typename: "int128_t"
+        xdr_typename: "int128_xdr"
+      - name: "current_add"
+        typename: "int128_t"
+        xdr_typename: "int128_xdr"
+    number: 16
+  - name: "NonnegativeIntSetAdd"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+      - name: "set_value"
+        typename: "int128_t"
+        xdr_typename: "int128_xdr"
+        syscall_pass_by_value: yes
+      - name: "add_value"
+        typename: "int128_t"
+        xdr_typename: "int128_xdr"
+        syscall_pass_by_value: yes
+    outputs:
+    number: 17
+  - name: "DeleteObject"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+    number: 18
 
 errors:
   - name: "None"
@@ -171,6 +235,9 @@ errors:
   - name: "InvalidSyscallInput"
     number: 8
     doc: "Invalid input to a syscall, such as subtracting below 0 on an nnint64"
+  - name: "StorageKeyNotExist"
+    number: 9
+    doc: "Accessing a storage key that does not exist in the current view"
 
     # those that cause call frames to revert
   - name: "DeterministicWasm"

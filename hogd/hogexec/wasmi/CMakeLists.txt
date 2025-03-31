@@ -6,7 +6,7 @@ set_source_files_properties(
 corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATE_TYPES staticlib)
 
 add_dependencies(
-  cargo-build_wasmi_lib
+  cargo-prebuild_wasmi_lib
   ffi_enum_rs)
 
 target_sources(
@@ -38,5 +38,10 @@ add_custom_command(
 add_custom_target(
 	generate_wasmi_ffi_h ALL
 	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+)
+
+add_dependencies(
+  generate_wasmi_ffi_h
+  ffi_enum_rs
 )
 

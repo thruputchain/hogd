@@ -13,15 +13,18 @@ add_library(
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
-  syscall_invoke.cc
-  syscall_log.cc
+  syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
-  syscall_handler.cc
+  syscall_delete.cc
   syscall_entry.cc
-  wasmi_runtime.cc
+  syscall_handler.cc
+  syscall_invoke.cc
+  syscall_log.cc
+  syscall_nnint.cc
   wasm3_runtime.cc
   wasm3_wrapper.cc
+  wasmi_runtime.cc
 )
 
 add_executable(
