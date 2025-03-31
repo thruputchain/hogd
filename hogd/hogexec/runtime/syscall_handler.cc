@@ -321,4 +321,11 @@ SystemCallHandler::set_nnint(StorageKey const &storage_key, int128_t set_value,
       NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
 }
 
+SyscallStatus<void>
+SystemCallHandler::delete_object(StorageKey const &storage_key)
+{
+  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+  return item_view.set(DeletedItem{});
+}
+
 } // namespace hogd

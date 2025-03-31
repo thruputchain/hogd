@@ -17,6 +17,7 @@ add_library(
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
+  syscall_delete.cc
   syscall_entry.cc
   syscall_handler.cc
   syscall_invoke.cc

@@ -13,7 +13,6 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -103,6 +102,9 @@ public:
   get_nnint(StorageKey const &storage_key);
   SyscallStatus<void> set_nnint(StorageKey const &storage_key,
                                 int128_t set_value, int128_t add_value);
+
+  // === Delete syscall ===
+  SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
