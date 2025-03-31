@@ -13,7 +13,7 @@ DBContext::DBContext() : snapshot_cache_(nullptr)
 void
 DBContext::advance_new_block()
 {
-  snapshot_cache_ = std::make_unique<StorageSnapshotCache>(5);
+  snapshot_cache_ = std::make_unique<StorageSnapshotCache>();
 }
 
 } // namespace hogd
