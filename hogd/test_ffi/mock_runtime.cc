@@ -28,20 +28,20 @@ MockRuntime::invoke_internal(std::string_view method_name)
 }
 
 std::unique_ptr<Runtime>
-MockRuntimeContext::make_new_runtime(const ContractBlob &contract,
+MockRuntimeContext::make_new_runtime(Contract const &contract,
                                      SystemCallHandler *syscall_handler,
                                      bool do_contract_verify)
 {
-  // If ContractBlob is a mock contract, it must be a serialization in
-  // little-endian of a uint32.
-  if (contract.size() == 4) {
-    uint32_t mock_contract =
-        *reinterpret_cast<const uint32_t *>(contract.data());
+  if (contract.contract_type() == ContractType::kMockTest) {
+    uint32_t mock_contract = contract.mock_contract_id();
     auto it = mocked_contracts_.find(mock_contract);
     if (it != mocked_contracts_.end()) {
       return std::make_unique<MockRuntime>(it->second);
     }
+    return nullptr;
   }
+  // otherwise some other contract type; returns whatever the base context
+  // wants to do with the contract.
   return base_context_->make_new_runtime(contract, syscall_handler,
                                          do_contract_verify);
 }
