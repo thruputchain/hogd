@@ -35,7 +35,7 @@ SystemCallHandler::SystemCallHandler(
     signed_tx_(std::move(signed_tx)),
     invocation_frame_stack_([this](InvocationFrame &last_frame) {
       commit_last_call_frame_success(last_frame);
-    }),
+    }, snapshot_cache),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
