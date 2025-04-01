@@ -5,13 +5,13 @@
 #include <ostream>
 #include <random>
 
+#include <x23/async.h>
 #include <x23/format.h>
 #include <x23/serialize.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
 
 #include "tests/xdrtest.hh"
-#include "x23/async.h"
 
 
 std::default_random_engine rnd;
