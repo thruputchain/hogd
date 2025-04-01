@@ -18,7 +18,8 @@ protected:
   {
     Contract contract(ContractType::kWasmi);
     // this wasm just invokes an external call.  We're just reusing it here.
-    contract.wasmi_contract() = test::load_wasm_from_file("test_set_memory.wasm");
+    contract.wasmi_contract() =
+        test::load_wasm_from_file("test_set_memory.wasm");
     WasmiContext context;
     runtime_ = context.make_new_runtime(contract, nullptr, true);
     ASSERT_TRUE(!!runtime_);

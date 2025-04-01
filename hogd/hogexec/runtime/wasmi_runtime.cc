@@ -42,7 +42,8 @@ WasmiContext::make_new_runtime(Contract const &contract,
   }
 
   void *wasmi_runtime_ptr =
-      new_wasmi_runtime(contract.wasmi_contract().data(), contract.wasmi_contract().size(),
+      new_wasmi_runtime(contract.wasmi_contract().data(),
+                        contract.wasmi_contract().size(),
                         host_call_context.get(), wasmi_context_ptr_);
   if (wasmi_runtime_ptr == nullptr) {
     return {};

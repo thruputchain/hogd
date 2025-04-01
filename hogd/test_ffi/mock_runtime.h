@@ -36,7 +36,7 @@ public:
                                             SystemCallHandler *syscall_handler,
                                             bool do_contract_verify) override;
 
-  bool verify_contract(Contract const& /*unused*/) const override
+  bool verify_contract(Contract const & /*unused*/) const override
   {
     return true;
   };

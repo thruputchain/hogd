@@ -43,8 +43,8 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   return nullptr;
 }
 
-const StorageItem*
-StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const& addrkey)
+const StorageItem *
+StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
   {
     auto cache = snapshot_item_cache_.take();

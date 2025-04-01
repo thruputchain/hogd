@@ -92,7 +92,8 @@ protected:
   void SetUp() override
   {
     contract_.contract_type(ContractType::kWasmi);
-    contract_.wasmi_contract() = test::load_wasm_from_file("test_error_handling.wasm");
+    contract_.wasmi_contract() =
+        test::load_wasm_from_file("test_error_handling.wasm");
     context_.link_fn("test", "good_call", &good_call);
   }
   Contract contract_;

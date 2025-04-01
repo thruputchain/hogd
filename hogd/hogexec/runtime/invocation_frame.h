@@ -66,9 +66,11 @@ private:
 // Stack of invocation frames.
 class InvocationFrameStack {
 public:
-  InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action, StorageSnapshotCache& snapshot_cache)
+  InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action,
+                       StorageSnapshotCache &snapshot_cache)
     : last_frame_action_(std::move(last_frame_action)),
-    snapshot_cache_(snapshot_cache) {}
+      snapshot_cache_(snapshot_cache)
+  {}
 
   auto &get_active_frame(this auto &self)
   {
@@ -98,7 +100,7 @@ public:
 private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &)> last_frame_action_;
-  StorageSnapshotCache& snapshot_cache_;
+  StorageSnapshotCache &snapshot_cache_;
 };
 
 } // namespace hogd

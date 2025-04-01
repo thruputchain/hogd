@@ -108,8 +108,7 @@ public:
   virtual bool verify_contract(Contract const &contract) const = 0;
 
   virtual std::unique_ptr<Runtime>
-  make_new_runtime(Contract const &contract,
-                   SystemCallHandler *syscall_handler,
+  make_new_runtime(Contract const &contract, SystemCallHandler *syscall_handler,
                    bool do_contract_verify) = 0;
 
   virtual bool link_fn_nargs(std::string_view module_name,

@@ -81,7 +81,8 @@ protected:
   void SetUp() override
   {
     Contract contract(ContractType::kWasmi);
-    contract.wasmi_contract() = test::load_wasm_from_file("test_invoke_arity.wasm");
+    contract.wasmi_contract() =
+        test::load_wasm_from_file("test_invoke_arity.wasm");
 
     WasmiContext context;
 

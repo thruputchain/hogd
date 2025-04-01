@@ -52,7 +52,8 @@ protected:
   {
     Contract contract(ContractType::kWasmi);
     // this wasm just invokes an external call.  We're just reusing it here.
-    contract.wasmi_contract() = test::load_wasm_from_file("test_error_handling.wasm");
+    contract.wasmi_contract() =
+        test::load_wasm_from_file("test_error_handling.wasm");
 
     WasmiContext context;
 
