@@ -1,5 +1,6 @@
 #include "hogd/test_ffi/test_bindings.h"
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
+#include "hogd/test_ffi/port_allocator.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "transaction.hh"
@@ -28,7 +30,7 @@ namespace {
 DBContext *
 make_new_db() noexcept
 {
-  return new DBContext();
+  return new DBContext(PortAllocator::get());
 }
 void
 free_db(DBContext *ptr) noexcept

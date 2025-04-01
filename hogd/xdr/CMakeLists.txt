@@ -2,7 +2,9 @@ add_xdr(
 	protocol
 	../../protocol/contract.x
 	coord.x
+	../../protocol/db_read_interface.x
 	ffi_enums.x
+	../../protocol/rpc_types.x
 	../../protocol/transaction.x
 	../../protocol/types.x 
 	../../protocol/storage_item.x

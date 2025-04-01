@@ -8,6 +8,7 @@ set_source_files_properties(
 
 add_library(
   runtime
+  database_proxy.cc
   execution_mode.cc
   invocation_frame.cc
   item_view.cc
