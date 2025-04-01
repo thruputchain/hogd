@@ -32,11 +32,11 @@ public:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
                      void *fn_ptr, uint8_t nargs) override;
 
-  std::unique_ptr<Runtime> make_new_runtime(const ContractBlob &contract,
+  std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
                                             SystemCallHandler *syscall_handler,
                                             bool do_contract_verify) override;
 
-  bool verify_contract(const ContractBlob & /*unused*/) const override
+  bool verify_contract(Contract const & /*unused*/) const override
   {
     return true;
   };

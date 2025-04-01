@@ -47,16 +47,15 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   return nullptr;
 }
 
-std::optional<StorageItem>
+const StorageItem *
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
   auto key = detail::CachedStorageItem::get_key(addrkey);
 
-  auto cached_obj = item_cache_.modify_element(
-      key, [&](auto const &v) -> std::optional<StorageItem> {
-        assert(v.addrkey_ == addrkey);
-        return v.item_;
-      });
+  auto cached_obj = item_cache_.modify_element(key, [&](auto const &v) {
+    assert(v.addrkey_ == addrkey);
+    return v.item_.get();
+  });
 
   if (cached_obj.has_value()) {
     // The item cache caches positive and negative lookups;
@@ -69,7 +68,7 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 
   // TODO(geoff): query from storage (unimplemented here)
 
-  return std::nullopt;
+  return nullptr;
 }
 
 } // namespace hogd

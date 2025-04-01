@@ -1,9 +1,9 @@
 add_xdr(
 	protocol
-	contract.x
+	../../protocol/contract.x
 	coord.x
 	ffi_enums.x
-	transaction.x
+	../../protocol/transaction.x
 	../../protocol/types.x 
 	../../protocol/storage_item.x
 	syscall.x 

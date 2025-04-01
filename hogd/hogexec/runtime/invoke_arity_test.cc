@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -79,7 +80,9 @@ class InvokeArityTests : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    auto c = test::load_wasm_from_file("test_invoke_arity.wasm");
+    Contract contract(ContractType::kWasmi);
+    contract.wasmi_contract() =
+        test::load_wasm_from_file("test_invoke_arity.wasm");
 
     WasmiContext context;
 
@@ -89,7 +92,7 @@ protected:
     context.link_fn("test", "arg3", &arity3);
     context.link_fn("test", "arg4", &arity4);
     context.link_fn("test", "arg5", &arity5);
-    runtime_ = context.make_new_runtime(c, nullptr, true);
+    runtime_ = context.make_new_runtime(contract, nullptr, true);
     ASSERT_TRUE(runtime_);
   }
 

@@ -8,28 +8,32 @@ set_source_files_properties(
 
 add_library(
   runtime
+  execution_mode.cc
   invocation_frame.cc
   item_view.cc
-  wasmi_runtime.cc
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
+  syscall_delete.cc
   syscall_entry.cc
   syscall_handler.cc
   syscall_invoke.cc
   syscall_log.cc
+  syscall_nnint.cc
+  wasmi_runtime.cc
 )
 
 add_executable(
   runtime_test
   error_handling_test.cc
-  instantiate_test.cc
-  item_view_test.cc
-  invoke_arity_test.cc
+  execution_mode_test.cc
   gas_api_test.cc
+  instantiate_test.cc
+  invoke_arity_test.cc
+  item_view_test.cc
   memory_access_test.cc
   syscall_entry_outer_tests.cc
   userctx_test.cc

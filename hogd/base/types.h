@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 namespace hogd {
 
@@ -46,5 +47,20 @@ operator""_GiB(unsigned long long int gib)
 {
   return gib * (1UL << 30);
 }
+
+// Wrap locations that work with nondeterministic values in this type;
+// This should make auditing for nondeterminism easier.
+template<typename T> class Nondeterministic {
+public:
+  template<typename... Args>
+  Nondeterministic(Args &&...args)
+    : nondeterministic_value_(std::forward<Args>(args)...)
+  {}
+
+  T const &get() { return nondeterministic_value_; }
+
+private:
+  T nondeterministic_value_;
+};
 
 } // namespace hogd
