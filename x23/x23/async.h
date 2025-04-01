@@ -103,6 +103,8 @@
 #include <cassert>
 #include <concepts>
 #include <coroutine>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <expected>
 #include <functional>
@@ -110,6 +112,7 @@
 #include <optional>
 #include <semaphore>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #if HAVE_BUILTIN_ARM_YIELD
