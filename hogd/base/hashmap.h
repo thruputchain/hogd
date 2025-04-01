@@ -19,7 +19,8 @@
 
 namespace hogd {
 
-// Types in the hashmap must be movable and must be able to reconstruct their own key.
+// Types in the hashmap must be movable and must be able to reconstruct their
+// own key.
 template<typename T>
 concept hash_map_object = std::movable<T> && requires(T object) {
   { object.get_key() } -> std::same_as<std::span<const std::byte>>;
@@ -174,7 +175,6 @@ template<hash_map_object T>
 using vector_bucket_t = detail::BucketEntry<std::vector<T>>;
 template<hash_map_object T>
 using set_bucket_t = detail::BucketEntry<detail::UnorderedSetMarker<T>>;
-
 
 // Hashmap designed for concurrent accesses.  Elements are stored
 // in separate buckets, guarded by bucket locks.
