@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
 project(hogd CXX)
 
+set(CMAKE_POLICY_VERSION_MINIMUM 3.18)
+
 # Configuration parameters
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
