@@ -13,5 +13,4 @@ private:
   inline static std::atomic<uint32_t> port_ = 10000;
 };
 
-
-}
+} // namespace hogd
