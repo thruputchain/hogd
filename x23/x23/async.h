@@ -101,11 +101,13 @@
 
 #include <atomic>
 #include <cassert>
+#include <concepts>
 #include <coroutine>
 #include <exception>
 #include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <semaphore>
 #include <tuple>
 #include <utility>
@@ -541,7 +543,7 @@ template<typename R> struct [[nodiscard]] Async {
         wait.release();
       });
       wait.acquire();
-      return *res;
+      return std::move(*res);
     }
   }
 

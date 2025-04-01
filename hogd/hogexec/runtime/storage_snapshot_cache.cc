@@ -3,6 +3,7 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "contract.hh"
 #include "storage_item.hh"
@@ -22,9 +23,11 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
     }
   }
 
-  // TODO(geoff): query from storage (unimplemented here)
+  auto db_res = db_proxy_.get_deployment(block_id_, addr)();
 
-  return std::nullopt;
+  // caches both positive and negative lookups
+  deployment_cache_->emplace(addr, db_res);
+  return db_res;
 }
 
 std::shared_ptr<const Contract>
@@ -37,10 +40,12 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
       return it->second;
     }
   }
+  auto db_res = db_proxy_.get_contract(block_id_, hash)();
 
-  // TODO(geoff): query from storage (unimplemented here)
-
-  return nullptr;
+  // TODO(geoff): If we decide to NOT reset the cache after every block,
+  // then the contract cache needs to only cache positive lookups
+  contract_cache_->emplace(hash, db_res);
+  return db_res;
 }
 
 const StorageItem *
@@ -54,9 +59,10 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
     }
   }
 
-  // TODO(geoff): query from storage (unimplemented here)
-
-  return nullptr;
+  auto db_res = db_proxy_.get_snapshot_item(block_id_, addrkey)();
+  auto const *out = db_res.get();
+  snapshot_item_cache_->emplace(addrkey, std::move(db_res));
+  return out;
 }
 
 } // namespace hogd
