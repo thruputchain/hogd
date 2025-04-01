@@ -12,9 +12,6 @@
 
 namespace hogd {
 
-// Context to be passed into a host function call
-class WasmiRuntime;
-
 // Context shared between WasmiRuntime objects.
 // Guarantee isolation between transactions
 // by starting each transaction with a separate
@@ -53,11 +50,11 @@ public:
   // wrapper around a manual drop call on the rust side
   ~WasmiContext() override;
 
-  std::unique_ptr<Runtime> make_new_runtime(ContractBlob const &contract,
+  std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
                                             SystemCallHandler *syscall_handler,
                                             bool do_contract_verify) override;
 
-  bool verify_contract(ContractBlob const &contract) const override;
+  bool verify_contract(Contract const &contract) const override;
 
 private:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,

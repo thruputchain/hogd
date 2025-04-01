@@ -24,8 +24,7 @@ public:
   try_get_contract_by_hash(SHA256Hash const &hash);
   std::optional<SHA256Hash>
   try_get_deployed_contract_hash(ContractAddress const &addr);
-  const StorageItem*
-  try_get_snapshot_item(AddressAndKey const& addrkey);
+  const StorageItem *try_get_snapshot_item(AddressAndKey const &addrkey);
 
 private:
   // Note: the contract_cache_ does not need to be reset (although it is not
@@ -36,7 +35,7 @@ private:
   // Neither does the deployment cache
   x23::MVar<std::map<ContractAddress, std::optional<SHA256Hash>>>
       deployment_cache_;
-    
+
   x23::MVar<std::map<AddressAndKey, std::unique_ptr<StorageItem>>>
       snapshot_item_cache_;
 };

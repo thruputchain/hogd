@@ -33,9 +33,11 @@ SystemCallHandler::SystemCallHandler(
     std::shared_ptr<RuntimeContext> runtime_context)
   : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)),
-    invocation_frame_stack_([this](InvocationFrame &last_frame) {
-      commit_last_call_frame_success(last_frame);
-    }, snapshot_cache),
+    invocation_frame_stack_(
+        [this](InvocationFrame &last_frame) {
+          commit_last_call_frame_success(last_frame);
+        },
+        snapshot_cache),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
@@ -174,8 +176,8 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
-  return runtime_context_->make_new_runtime(load_contract->contract_data, this,
-                                            true);
+  assert(load_contract);
+  return runtime_context_->make_new_runtime(*load_contract, this, true);
 }
 
 Calldata const &
