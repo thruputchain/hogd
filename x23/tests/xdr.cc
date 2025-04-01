@@ -1,11 +1,18 @@
+#include <gtest/gtest.h>
 
+#include <cstdint>
+#include <memory>
+#include <ostream>
 #include <random>
 
-#include <gtest/gtest.h>
 #include <x23/format.h>
+#include <x23/serialize.h>
+#include <x23/vec.h>
+#include <x23/x23.h>
 
 #include "tests/xdrtest.hh"
-#include "x23/serialize.h"
+#include "x23/async.h"
+
 
 std::default_random_engine rnd;
 
@@ -90,13 +97,17 @@ TEST(RoundTrip, BasicAssertions)
   EXPECT_EQ(ua, ub);
 }
 
+namespace {
+
 StorageDelta
 make_nnint64_set_add(int64_t set, int64_t add)
 {
   StorageDelta out;
   out.type(StorageDeltaType::kNonnegativeInt64SetAdd);
-  out.nnint64() = NonnegativeInt64SetAddArgs{set, add};
+  out.nnint64() = NonnegativeInt64SetAddArgs{.set_value=set, .add_value=add};
   return out;
+}
+
 }
 
 TEST(UnionAssign, BasicAssertion)
@@ -110,4 +121,15 @@ TEST(UnionAssign, BasicAssertion)
   dv.back() = d;
 
   EXPECT_EQ(d.type(), dv.back().type());
+}
+
+TEST(CoReturnCompile, UniquePtr)
+{
+  auto x = [] (int x) -> x23::Async<std::unique_ptr<int>> {
+    auto out = std::make_unique<int>(x);
+    co_return out;
+  };
+
+  auto res = x(10) ();
+  ASSERT_EQ(*res, 10);
 }
