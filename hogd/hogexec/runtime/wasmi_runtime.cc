@@ -33,9 +33,7 @@ WasmiContext::make_new_runtime(Contract const &contract,
     return {};
   }
 
-  std::unique_ptr<HostCallContext> host_call_context =
-      std::make_unique<HostCallContext>();
-  host_call_context->syscall_handler = syscall_handler;
+  auto host_call_context = make_new_host_call_context(syscall_handler);
 
   if (contract.contract_type() != ContractType::kWasmi) {
     return nullptr;

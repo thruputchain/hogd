@@ -11,6 +11,7 @@ add_library(
   execution_mode.cc
   invocation_frame.cc
   item_view.cc
+  native_runtime.cc
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
