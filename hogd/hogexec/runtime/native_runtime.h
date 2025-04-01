@@ -13,7 +13,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
