@@ -36,6 +36,7 @@ add_executable(
   invoke_arity_test.cc
   item_view_test.cc
   memory_access_test.cc
+  native_contract_test.cc
   syscall_entry_outer_tests.cc
   userctx_test.cc
 )

@@ -58,7 +58,8 @@ private:
 //
 // Also note that the host_call_context_ in a mock contract
 // does NOT keept track of a SystemCallHandler* pointer.
-// The mock testing system uses a separate method for tracking SystemCallHandler* context.
+// The mock testing system uses a separate method for tracking
+// SystemCallHandler* context.
 class MockRuntime : public Runtime {
 public:
   MockRuntime(MockContract contract)

@@ -42,9 +42,9 @@ public:
   {}
 
   NativeContract(NativeContract &&) = delete;
-  NativeContract& operator=(NativeContract&&) = delete;
+  NativeContract &operator=(NativeContract &&) = delete;
   NativeContract(NativeContract const &) = delete;
-  NativeContract& operator=(NativeContract const&) = delete;
+  NativeContract &operator=(NativeContract const &) = delete;
 
   InvokeStatus<int32_t> invoke(MethodID method,
                                SystemCallHandler &syscall_handler);
@@ -62,8 +62,7 @@ public:
     : contracts_(std::move(native_contracts))
   {}
 
-  // wrapper around a manual drop call on the rust side
-  ~NativeContext() override;
+  ~NativeContext() override {}
 
   std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
                                             SystemCallHandler *syscall_handler,
