@@ -7,7 +7,11 @@ add_library(
   string.cc
 )
 
-target_link_libraries(base crypto protocol)
+target_link_libraries(
+  base
+  crypto
+  protocol
+)
 
 # create base module test binary
 add_executable(

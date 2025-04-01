@@ -171,6 +171,41 @@ syscalls:
         span_argument: yes
     outputs:
     number: 15
+  - name: "NonnegativeIntGet"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+      - name: "current_set"
+        typename: "int128_t"
+        xdr_typename: "int128_xdr"
+      - name: "current_add"
+        typename: "int128_t"
+        xdr_typename: "int128_xdr"
+    number: 16
+  - name: "NonnegativeIntSetAdd"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+      - name: "set_value"
+        typename: "int128_t"
+        xdr_typename: "int128_xdr"
+        syscall_pass_by_value: yes
+      - name: "add_value"
+        typename: "int128_t"
+        xdr_typename: "int128_xdr"
+        syscall_pass_by_value: yes
+    outputs:
+    number: 17
+  - name: "DeleteObject"
+    needs_context: yes
+    inputs:
+      - name: "key"
+        typename: "StorageKey"
+    outputs:
+    number: 18
 
 errors:
   - name: "None"

@@ -23,22 +23,25 @@
 namespace hogd {
 
 namespace {
-// primitive type, int128, opaque<>, optional
-using input_types = std::tuple<uint32_t, int128_xdr, x23::Vec<uint8_t, 100>,
-                               x23::Ptr<uint64_t>, x23::Ptr<uint32_t>>;
+// primitive type, int128, int128, opaque<>, optional
+using input_types =
+    std::tuple<uint32_t, int128_xdr, int128_xdr, x23::Vec<uint8_t, 100>,
+               x23::Ptr<uint64_t>, x23::Ptr<uint32_t>>;
 // primitive types, int128, opaque<>
 using output_types =
     std::tuple<uint32_t, uint64_t, int128_xdr, x23::Vec<uint8_t, 50>>;
 
 HostFnStatus<SyscallErrorCode>
 mock_test_inner(uint32_t inp_1, int128_t const &inp_128,
-                std::span<const std::byte> inp_span, const uint64_t *inp_opt,
-                const uint32_t *inp_opt_null, uint32_t &out_1, uint64_t &out_2,
-                int128_t &out_128, std::span<std::byte> out_span)
+                int128_t inp_128_by_value, std::span<const std::byte> inp_span,
+                const uint64_t *inp_opt, const uint32_t *inp_opt_null,
+                uint32_t &out_1, uint64_t &out_2, int128_t &out_128,
+                std::span<std::byte> out_span)
 {
 
   EXPECT_EQ(inp_1, 100);
   EXPECT_EQ(inp_128, int128_t{1} << 70);
+  EXPECT_EQ(inp_128_by_value, int128_t{1} << 80);
   EXPECT_EQ(inp_span.size(), 6);
   if (inp_span.size() != 6) {
     return HostFnError{HostFnErrorCode::kUnrecoverable};
@@ -77,9 +80,12 @@ TEST(MockSyscallTest, SyscallPassArgs)
   SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());
 
-  input_types input = {100, to_xdr(int128_t{1} << 70),
+  input_types input = {100,
+                       to_xdr(int128_t{1} << 70),
+                       to_xdr(int128_t{1} << 80),
                        x23::Vec<uint8_t>{0, 1, 2, 3, 4, 5},
-                       x23::Ptr<uint64_t>(new uint64_t{100}), nullptr};
+                       x23::Ptr<uint64_t>(new uint64_t{100}),
+                       nullptr};
   output_types output = {0, 0, to_xdr(int128_t{0}), x23::Vec<uint8_t>(10, 0)};
 
   auto res =

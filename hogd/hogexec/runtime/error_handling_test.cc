@@ -91,10 +91,12 @@ class WasmiErrorHandlingTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    contract_ = test::load_wasm_from_file("test_error_handling.wasm");
+    contract_.contract_type(ContractType::kWasmi);
+    contract_.wasmi_contract() =
+        test::load_wasm_from_file("test_error_handling.wasm");
     context_.link_fn("test", "good_call", &good_call);
   }
-  ContractBlob contract_;
+  Contract contract_;
   WasmiContext context_;
   std::unique_ptr<Runtime> runtime_;
 };
@@ -272,7 +274,7 @@ TEST_F(WasmiErrorHandlingTest, Reentrance)
 
 TEST_F(WasmiErrorHandlingTest, NullHandling)
 {
-  ContractBlob null_contract;
+  Contract null_contract(ContractType::kWasmi);
   runtime_ = context_.make_new_runtime(null_contract, nullptr, true);
 
   EXPECT_FALSE(runtime_);
