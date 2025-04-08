@@ -37,10 +37,13 @@ public:
   x23::Async<ExpectedDeployment>
   get_deployment(BlockID block, ContractAddress const &contract_address);
 
-  void start_server(x23::CoroPoll& cp, uint32_t port_number);
+  void start_server(uint32_t port_number);
 
 private:
   BlockID block_id_;
+
+  x23::ThreadPool pool_ = x23::ThreadPool(1);
+  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
   x23::MVar<std::unordered_map<AddressAndKey, StorageItem>> items_;
   x23::MVar<std::unordered_map<SHA256Hash, Contract>> contracts_;

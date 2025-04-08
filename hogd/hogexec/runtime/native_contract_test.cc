@@ -75,11 +75,11 @@ protected:
     contract_map.emplace(1, std::move(contract_1));
 
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
-    snapshot_server_.start_server(cp_, 10000);
+    snapshot_server_.start_server(10000);
     db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ = 10000});
   }
 
-  x23::ThreadPool pool_ = x23::ThreadPool(4);
+  x23::ThreadPool pool_ = x23::ThreadPool(1);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(0);

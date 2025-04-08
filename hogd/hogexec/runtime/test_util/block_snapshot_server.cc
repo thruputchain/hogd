@@ -76,7 +76,7 @@ BlockSnapshotServer::get_deployment(BlockID block,
 }
 
 void 
-BlockSnapshotServer::start_server(x23::CoroPoll& cp, uint32_t port_number)
+BlockSnapshotServer::start_server(uint32_t port_number)
 {
   auto lfd = x23::tcplisten(port_number);
   if (!lfd) {
@@ -94,7 +94,7 @@ BlockSnapshotServer::start_server(x23::CoroPoll& cp, uint32_t port_number)
       x23::rpc_stream_logged(cp, *c).server(server);
       std::printf("D\n");
     }
-  }(cp, this, std::move(lfd));
+  }(cp_, this, std::move(lfd));
 }
 
 
