@@ -1,3 +1,4 @@
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
@@ -7,6 +8,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "types.hh"
 
@@ -21,6 +23,18 @@ syscall_SHA256_inner(std::span<const std::byte> input_buffer,
   output_hash = sha256(input_buffer);
   return {SyscallErrorCode::kNone, SHA256HashCost(input_buffer.size())};
 };
+
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_BufferSHA256_inner(SystemCallHandler &syscall_handler,
+                           const uint32_t &input_handle,
+                           SHA256Hash &output_hash)
+{
+  auto status = syscall_handler.get_buffer(input_handle);
+  if (!status) {
+    return {status.error().code(), 0};
+  }
+  return syscall_SHA256_inner(*status, output_hash);
+}
 
 // Verifies a cryptographic signature against a message using the provided
 // public key Returns: Status code indicating if verification succeeded and gas

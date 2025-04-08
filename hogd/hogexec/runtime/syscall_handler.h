@@ -106,6 +106,12 @@ public:
   // === Delete syscall ===
   SyscallStatus<void> delete_object(StorageKey const &storage_key);
 
+  // === Buffer Syscalls ===
+  SyscallStatus<uint32_t>
+  append_to_buffer(std::span<const std::byte> input_data,
+                   const uint32_t *optional_input_handle);
+  SyscallStatus<std::span<const std::byte>> get_buffer(uint32_t buffer_handle);
+
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
   const SignedTransaction signed_tx_;

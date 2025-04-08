@@ -82,7 +82,6 @@ syscalls:
     syscall_return_type: "HostFnResult"
     inputs:
       - name: "code"
-        fixed_size: yes
         typename: "int32_t"
         rust_typename: "i32"
         primitive_type: yes
@@ -93,14 +92,11 @@ syscalls:
     needs_context : yes
     inputs:
       - name: "caller_address"
-        fixed_size: yes
         typename: "ContractAddress"
         optional: yes
       - name: "nonce"
-        fixed_size: yes
         typename: "SHA256Hash"
       - name: "contract_hash"
-        fixed_size: yes
         typename: "SHA256Hash"
     outputs:
       - name: "to_be_deployed"
@@ -206,6 +202,27 @@ syscalls:
         typename: "StorageKey"
     outputs:
     number: 18
+  - name: BufferAccumulate
+    needs_context: yes
+    inputs:
+      - name: "data"
+        span_argument: yes
+      - name: "handle"
+        typename: "uint32_t"
+        optional: yes
+    outputs:
+      - name: "handle"
+        typename: "uint32_t"
+    number: 19
+  - name: BufferSHA256
+    needs_context: yes
+    inputs:
+      - name: "handle"
+        typename: "uint32_t"
+    outputs:
+      - name: "hash"
+        typename: "SHA256Hash"
+    number: 20
 
 errors:
   - name: "None"

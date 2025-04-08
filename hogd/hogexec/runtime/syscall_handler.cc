@@ -330,4 +330,36 @@ SystemCallHandler::delete_object(StorageKey const &storage_key)
   return item_view.set(DeletedItem{});
 }
 
+SyscallStatus<uint32_t>
+SystemCallHandler::append_to_buffer(std::span<const std::byte> input_data,
+                                    const uint32_t *optional_input_handle)
+{
+  auto &manager = invocation_frame_stack_.get_buffer_manager();
+  if (optional_input_handle) {
+    auto *buffer = manager.get_buffer(*optional_input_handle);
+    if (!buffer) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    }
+
+    buffer->append_range(input_data);
+    return *optional_input_handle;
+  }
+
+  // create a new buffer if no handle is supplied
+  auto [handle, buffer] = manager.allocate_buffer();
+  buffer.append_range(input_data);
+  return handle;
+}
+
+SyscallStatus<std::span<const std::byte>>
+SystemCallHandler::get_buffer(uint32_t buffer_handle)
+{
+  auto &manager = invocation_frame_stack_.get_buffer_manager();
+  auto *buffer = manager.get_buffer(buffer_handle);
+  if (!buffer) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+  return std::span(*buffer);
+}
+
 } // namespace hogd

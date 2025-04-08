@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/hogexec/runtime/buffer_manager.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -52,7 +53,11 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
+  BufferManager &get_buffer_manager() { return framelocal_buffers_; }
+
 private:
+  BufferManager framelocal_buffers_;
+
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
 
@@ -96,6 +101,13 @@ public:
 
   // Reference invalidated by any other call to get_item_view
   ItemView &get_item_view(StorageKey const &key);
+
+  // Reference invalidated when frames created or destroyed
+  auto &get_buffer_manager()
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().get_buffer_manager();
+  }
 
 private:
   std::vector<InvocationFrame> frame_stack_;

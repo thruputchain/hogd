@@ -8,6 +8,7 @@ set_source_files_properties(
 
 add_library(
   runtime
+  buffer_manager.cc
   database_proxy.cc
   execution_mode.cc
   invocation_frame.cc
@@ -15,6 +16,7 @@ add_library(
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
+  syscall_buffer.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
