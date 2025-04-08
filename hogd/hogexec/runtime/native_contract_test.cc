@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -17,6 +18,8 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/event.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -73,12 +76,18 @@ protected:
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
   }
 
+  x23::ThreadPool pool_ = x23::ThreadPool(4);
+  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
+
+  
+
+  DatabaseProxy db_proxy_ = DatabaseProxy(cp_, LocalMockDB{.read_port_number_ = 10000});
   std::shared_ptr<RuntimeContext> runtime_context_;
 };
 
 TEST_F(NativeContractTest, BasicInstantiate)
 {
-  StorageSnapshotCache snapshot;
+  StorageSnapshotCache snapshot(0, db_proxy_);
   SystemCallHandler handler(SignedTransaction{}, snapshot, runtime_context_);
 
   Contract contract(ContractType::kNative);

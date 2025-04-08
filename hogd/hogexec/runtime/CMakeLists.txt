@@ -6,6 +6,8 @@ set_source_files_properties(
     ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
     PROPERTIES GENERATED TRUE)
 
+add_subdirectory(test_util)
+
 add_library(
   runtime
   database_proxy.cc
@@ -46,7 +48,7 @@ target_link_libraries(
   wasmi_lib
   runtime_trampoline
   protocol
-  crypto
+  hogd
 )
 
 add_dependencies(
@@ -71,6 +73,7 @@ target_include_directories(
 target_link_libraries(
   runtime_test
   runtime
+  runtime_test_util
   GTest::gtest_main
 )
 gtest_discover_tests(runtime_test)
