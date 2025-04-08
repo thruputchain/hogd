@@ -79,9 +79,8 @@ protected:
   x23::ThreadPool pool_ = x23::ThreadPool(4);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
-  
-
-  DatabaseProxy db_proxy_ = DatabaseProxy(cp_, LocalMockDB{.read_port_number_ = 10000});
+  DatabaseProxy db_proxy_ =
+      DatabaseProxy(cp_, LocalMockDB{.read_port_number_ = 10000});
   std::shared_ptr<RuntimeContext> runtime_context_;
 };
 
