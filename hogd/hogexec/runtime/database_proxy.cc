@@ -28,11 +28,14 @@ std::optional<DatabaseSnapshotReadInterfaceV1::client<
     x23::RpcStream<x23::RpcLogger>::ClientRef>>
 connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
 {
+  std::printf("connect attempt\n");
   auto fd =
       cp.tcpconnect("localhost", std::to_string(local_db.read_port_number_))();
   if (!fd) {
+    std::printf("failed\n");
     return std::nullopt;
   }
+  std::printf("success\n");
   auto client_config = x23::rpc_stream_logged(cp, *fd);
   return client_config.template client<DatabaseSnapshotReadInterfaceV1>();
 }

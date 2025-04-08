@@ -1,9 +1,18 @@
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <utility>
+
+#include "hogd/base/xdr_util.h"
 #include "db_read_interface.hh"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
+#include "x23/event.h"
+#include "x23/fileio.h"
+#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -65,5 +74,28 @@ BlockSnapshotServer::get_deployment(BlockID block,
   out.deployed_hash() = it->second;
   co_return out;
 }
+
+void 
+BlockSnapshotServer::start_server(x23::CoroPoll& cp, uint32_t port_number)
+{
+  auto lfd = x23::tcplisten(port_number);
+  if (!lfd) {
+    perror("listen");
+    exit(EXIT_FAILURE);
+  }
+
+  [](x23::CoroPoll &cp, BlockSnapshotServer *server,
+     x23::UniqueFd lfd) -> x23::Detached {
+        std::printf("A\n");
+    co_await cp.pool_.bg();
+    std::printf("B\n");
+    while (auto c = co_await cp.accept(lfd)) {
+        std::printf("C\n");
+      x23::rpc_stream_logged(cp, *c).server(server);
+      std::printf("D\n");
+    }
+  }(cp, this, std::move(lfd));
+}
+
 
 } // namespace hogd

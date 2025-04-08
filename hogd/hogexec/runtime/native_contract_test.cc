@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
@@ -74,19 +75,22 @@ protected:
     contract_map.emplace(1, std::move(contract_1));
 
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
+    snapshot_server_.start_server(cp_, 10000);
+    db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ = 10000});
   }
 
   x23::ThreadPool pool_ = x23::ThreadPool(4);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
-  DatabaseProxy db_proxy_ =
-      DatabaseProxy(cp_, LocalMockDB{.read_port_number_ = 10000});
+  BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(0);
+
+  std::unique_ptr<DatabaseProxy> db_proxy_;
   std::shared_ptr<RuntimeContext> runtime_context_;
 };
 
 TEST_F(NativeContractTest, BasicInstantiate)
 {
-  StorageSnapshotCache snapshot(0, db_proxy_);
+  StorageSnapshotCache snapshot(0, *db_proxy_);
   SystemCallHandler handler(SignedTransaction{}, snapshot, runtime_context_);
 
   Contract contract(ContractType::kNative);
@@ -102,6 +106,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
 
   ASSERT_FALSE(res.result_);
   ASSERT_EQ(res.result_.error(), InvokeErrorCode::kDeterministic);
+  std::printf("end test\n");
 }
 
 } // namespace hogd

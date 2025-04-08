@@ -2,11 +2,15 @@
 
 #include <unordered_map>
 
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "contract.hh"
 #include "db_read_interface.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/event.h"
 #include "x23/mvar.h"
 
 namespace hogd {
@@ -20,6 +24,10 @@ namespace hogd {
 // things.
 class BlockSnapshotServer {
 public:
+  using rpc_service = DatabaseSnapshotReadInterfaceV1;
+
+  BlockSnapshotServer(BlockID block_id) : block_id_(block_id) {}
+
   static x23::Async<void> db_snapshot_read_null();
 
   x23::Async<ExpectedStorageItem>
@@ -28,6 +36,8 @@ public:
                                             SHA256Hash const &contract_hash);
   x23::Async<ExpectedDeployment>
   get_deployment(BlockID block, ContractAddress const &contract_address);
+
+  void start_server(x23::CoroPoll& cp, uint32_t port_number);
 
 private:
   BlockID block_id_;
