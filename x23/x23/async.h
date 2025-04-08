@@ -101,13 +101,18 @@
 
 #include <atomic>
 #include <cassert>
+#include <concepts>
 #include <coroutine>
+#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <semaphore>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #if HAVE_BUILTIN_ARM_YIELD
@@ -541,7 +546,7 @@ template<typename R> struct [[nodiscard]] Async {
         wait.release();
       });
       wait.acquire();
-      return *res;
+      return std::move(*res);
     }
   }
 

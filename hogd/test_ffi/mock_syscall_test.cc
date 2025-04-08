@@ -13,6 +13,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/port_allocator.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -74,7 +75,7 @@ mock_test_inner(uint32_t inp_1, int128_t const &inp_128,
 
 TEST(MockSyscallTest, SyscallPassArgs)
 {
-  DBContext db_context;
+  DBContext db_context(PortAllocator::get());
   db_context.advance_new_block();
 
   SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);
