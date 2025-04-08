@@ -27,6 +27,7 @@ constexpr size_t hardware_destructive_interference_size = 64;
 // [[no_unique_address]]:
 // https://github.com/llvm/llvm-project/issues/50766
 #pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Winterference-size"
 constexpr size_t hardware_destructive_interference_size =
     std::hardware_destructive_interference_size;
