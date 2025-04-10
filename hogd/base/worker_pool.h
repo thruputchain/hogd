@@ -14,6 +14,7 @@
 #include <type_traits>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/os.h"
 #include "hogd/base/unique_function.h"
 
 namespace hogd {
@@ -30,7 +31,7 @@ public:
     return pool;
   }
 
-  WorkerPool(int n = std::jthread::hardware_concurrency())
+  WorkerPool(int n = available_parallelism())
     : target_workers_(n), active_workers_(n)
   {
     workers_.reserve(n);
