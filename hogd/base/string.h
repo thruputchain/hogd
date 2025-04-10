@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <charconv>
+#include <concepts>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -31,7 +33,22 @@ split(std::string_view text, char sep = ' ',
   return tokens;
 }
 
+// print_iec_bytes converts an integer into IEC units.
 std::string print_iec_bytes(size_t val, bool add_space = false);
+// print_si_bytes converts an integer into SI units.
 std::string print_si_bytes(size_t val, bool add_space = false);
+
+// parse_integer transforms a string into an integer type. It returns
+// std::nullopt if parsing failed.
+template<std::integral T>
+constexpr std::optional<T>
+parse_integer(std::string_view str)
+{
+  T ret;
+  auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), ret);
+  if (ec != std::errc())
+    return std::nullopt;
+  return ret;
+}
 
 } // namespace hogd
