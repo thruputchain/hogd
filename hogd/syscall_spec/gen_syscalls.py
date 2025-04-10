@@ -52,7 +52,8 @@ name:
 
 needs_context:
   type: boolean (yes/no)
-  required: yes
+  required: no
+    default: true
   description: Defines whether or not a SyscallHandler& reference is passed
   to the syscall.  Most syscalls will have this as a yes; there are
   a few (i.e. SHA256) where this is not required.
@@ -244,8 +245,12 @@ def gen_inner_outer(syscall):
   
   if "needs_gas" in syscall and syscall["needs_gas"]:
     inner_arg_decl_strs = ["WrappedGasAmount remaining_gas"] + inner_arg_decl_strs
-
-  if syscall["needs_context"]:
+  
+  #needs context defaults to True
+  needs_context = True
+  if "needs_context" in syscall and not syscall["needs_context"]:
+    needs_context = False
+  if needs_context:
     inner_arg_decl_strs = ["SystemCallHandler& syscall_handler"] + inner_arg_decl_strs
 
   inner_arg_decls = ", ".join(inner_arg_decl_strs);
