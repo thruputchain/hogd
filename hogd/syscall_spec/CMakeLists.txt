@@ -2,7 +2,7 @@
 add_custom_command(
     OUTPUT
         ${CMAKE_BINARY_DIR}/hogd/xdr/syscall.x
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py 
     --output_dir=${CMAKE_BINARY_DIR}/hogd/xdr/ 
     --syscall_yaml=${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml
@@ -17,7 +17,7 @@ add_custom_target(
 add_custom_command(
     OUTPUT
         ${CMAKE_BINARY_DIR}/hogd/xdr/syscall_args.x
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py
     --output_dir=${CMAKE_BINARY_DIR}/hogd/xdr/
     --syscall_yaml=${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml
@@ -31,7 +31,7 @@ add_custom_target(
 add_custom_command(
     OUTPUT
         ${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/syscall_inner.h
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py 
     --output_dir=${CMAKE_BINARY_DIR}/hogd/hogexec/runtime/
     --syscall_yaml=${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml
@@ -47,7 +47,7 @@ add_custom_command(
     OUTPUT
         ${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/syscall_bindings.rs
     DEPENDS 
-        ${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml 
+        ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml
         ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py 
     --output_dir=${CMAKE_SOURCE_DIR}/hogd/rs_contract_sdk/src/
@@ -65,7 +65,7 @@ add_custom_target(
 add_custom_command(
     OUTPUT
         ${CMAKE_BINARY_DIR}/hogd/test_ffi/mock_syscall_entry.cc
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml ${CMAKE_CURRENT_SOURCE_DIR}/gen_syscalls.py
     COMMAND python3 ${CMAKE_SOURCE_DIR}/hogd/syscall_spec/gen_syscalls.py 
     --output_dir=${CMAKE_BINARY_DIR}/hogd/test_ffi/
     --syscall_yaml=${CMAKE_SOURCE_DIR}/protocol/syscalls.yaml
