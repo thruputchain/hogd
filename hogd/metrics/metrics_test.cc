@@ -19,10 +19,9 @@ TEST(Metrics, BasicUsage)
   size_t cntc{0};
 
   // register the counters
-  MetricRegistry registry;
-  registry.register_metrics({make_counter_metric("a", "", cnta),
-                             make_counter_metric("b", "", cntb),
-                             make_raw_metric("c", "", true, cntc)});
+  MetricRegistry registry({make_counter_metric("a", "", cnta),
+                           make_counter_metric("b", "", cntb),
+                           make_raw_metric("c", "", true, cntc)});
 
   // increment the counters
   cnta.inc(1);

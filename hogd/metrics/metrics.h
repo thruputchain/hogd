@@ -1,12 +1,16 @@
 // metrics.h - metric gathering framework
+//
+// TODO(abelay): Add histogram metric type.
 
 #pragma once
 
 #include <concepts>
 #include <functional>
 #include <initializer_list>
-#include <mutex>
+#include <ranges>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "hogd/base/types.h"
@@ -22,49 +26,42 @@ struct Metric {
 
 // Sample provides a recorded sample of a metric.
 struct Sample {
-  std::string key;
+  std::string_view key;
   size_t val;
 };
+
+// MetricSource is used to register a metric.
+using MetricSource = std::pair<Metric, std::function<size_t()>>;
 
 // MetricRegistry maintains a collection of metrics.
 class MetricRegistry {
 public:
   MetricRegistry() = default;
-  MetricRegistry(std::vector<Metric> &&metrics) : metrics_(std::move(metrics))
+  MetricRegistry(std::span<MetricSource> sources,
+                 std::span<std::function<void()>> read_fns = {})
+    : sources_(sources.begin(), sources.end()),
+      read_fns_(read_fns.begin(), read_fns.end())
+  {}
+  MetricRegistry(std::initializer_list<MetricSource> sources,
+                 std::initializer_list<std::function<void()>> read_fns = {})
+    : sources_(sources.begin(), sources.end()),
+      read_fns_(read_fns.begin(), read_fns.end())
   {}
 
-  // register_read_observer adds a callback that runs before read(). This is
-  // sometimes useful for refreshing metrics with the latest values.
-  void register_read_observer(std::function<void()> &&fn);
-
-  // register_metric registers a metric. Synchronization is provided.
-  void register_metric(std::pair<Metric, std::function<size_t()>> m);
-
-  // register_metrics registers a batch of metrics. Synchronization is provided.
-  void register_metrics(
-      std::initializer_list<std::pair<Metric, std::function<size_t()>>> l);
-
-  // all returns a description vector of registered metrics.
-  const std::vector<Metric> &all();
+  // get_metrics returns a description vector of supported metrics.
+  std::vector<Metric> get_metrics() const;
 
   // read provides samples for all metric values.
-  std::vector<Sample> read();
+  std::vector<Sample> read() const;
 
 private:
-  struct Sampler {
-    std::string key;
-    std::function<size_t()> get_fn;
-  };
-
-  std::mutex lock_;
+  std::vector<MetricSource> sources_;
   std::vector<std::function<void()>> read_fns_;
-  std::vector<Metric> metrics_;
-  std::vector<Sampler> samplers_;
 };
 
 // works with any class that has size_t get() and increments cumulatively.
 template<std::unsigned_integral T, template<typename> typename Counter>
-std::pair<Metric, std::function<size_t()>>
+MetricSource
 make_counter_metric(std::string key, std::string description, Counter<T> &cnt)
 {
   return std::make_pair(Metric{.key = std::move(key),
@@ -75,7 +72,7 @@ make_counter_metric(std::string key, std::string description, Counter<T> &cnt)
 
 // works with any integer reference.
 template<std::unsigned_integral T>
-std::pair<Metric, std::function<size_t()>>
+MetricSource
 make_raw_metric(std::string key, std::string description, bool cumulative,
                 T &val)
 {
