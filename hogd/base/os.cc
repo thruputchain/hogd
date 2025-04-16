@@ -19,6 +19,7 @@ extern "C" {
 
 namespace hogd {
 
+namespace os_detail {
 size_t
 available_parallelism()
 {
@@ -33,6 +34,8 @@ available_parallelism()
   // Not as accurate; only reports the number of cores in the machine.
   return std::thread::hardware_concurrency();
 }
+
+} // namespace os_detail
 
 ErrnoStatus<ProcessStats>
 read_process_stats()
