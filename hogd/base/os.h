@@ -4,14 +4,27 @@
 
 #include <bit>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
 
+namespace os_detail {
+
+size_t available_parallelism();
+
+} // namespace os_detail
+
 // available_parallelism returns the maximum number of cores that this process
 // is permitted to run on.
-size_t available_parallelism();
+inline size_t
+available_parallelism()
+{
+  alignas(kCacheLineSize) static size_t cores =
+      os_detail::available_parallelism();
+  return cores;
+}
 
 inline constexpr int kDefaultShardBaseOrder = 9;
 

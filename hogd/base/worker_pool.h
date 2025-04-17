@@ -1,18 +1,24 @@
 // worker_pool.h - a thread pool abstraction
 //
-// Not optimized/intended for very short jobs.
+// submit() is not optimized/intended for very short jobs, but you can use
+// for_each_parallel() with a large enough width instead.
 
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <condition_variable>
 #include <functional>
 #include <future>
 #include <mutex>
 #include <queue>
+#include <ranges>
 #include <thread>
+#include <tuple>
 #include <type_traits>
+#include <vector>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/os.h"
 #include "hogd/base/unique_function.h"
@@ -40,14 +46,7 @@ public:
           [this](const std::stop_token &stoken) { worker_loop(stoken); });
     }
   }
-  ~WorkerPool()
-  {
-    assert(jobs_.empty());
-    for (std::jthread &worker : workers_)
-      worker.request_stop();
-    for (std::jthread &worker : workers_)
-      worker.join();
-  }
+  ~WorkerPool() { assert(jobs_.empty()); }
 
   // disable move and copy.
   WorkerPool(WorkerPool &&p) = delete;
@@ -100,6 +99,41 @@ public:
     return future;
   }
 
+  // for_each_parallel divides a range into jobs and runs f on its elements in
+  // parallel. The width defines the number of elements per job (i.e.,
+  // the batching factor). This function blocks until all jobs finish.
+  template<std::ranges::input_range R, class Proj = std::identity,
+           std::indirectly_unary_invocable<
+               std::projected<std::ranges::iterator_t<R>, Proj>>
+               Func>
+  void for_each_parallel(R &&r, Func f, size_t width = 1, Proj proj = {})
+  {
+    std::vector<std::future<void>> completions;
+#if defined(__cpp_lib_ranges_chunk)
+    completions.reserve(divide_up(r.size(), width));
+    std::ranges::for_each(r | std::views::chunk(width),
+                          [this, &f, proj,
+                           &completions](std::ranges::viewable_range auto &&r) {
+                            completions.emplace_back(
+                                submit([proj, &f, r = std::move(r)] {
+                                  for (auto v : r) {
+                                    f(std::invoke(proj, v));
+                                  }
+                                }));
+                          });
+#else  // defined(__cpp_lib_ranges_chunk)
+    // LLVM doesn't support std::views::chunk yet.
+    std::ignore = width;
+    completions.reserve(r.size());
+    for (auto v : r) {
+      completions.emplace_back(
+          submit([&f, proj, v] { f(std::invoke(proj, v)); }));
+    }
+#endif // defined(__cpp_lib_ranges_chunk)
+    for (const std::future<void> &f : completions)
+      f.wait();
+  }
+
   // adjust_workers changes the number of active worker threads. By setting it
   // low or to zero, one can reduce background activity during periods of
   // high-priority work. Setting n to INT_MAX will re-enable all available
@@ -143,6 +177,6 @@ private:
       fn();
     }
   }
-};
+}; // namespace hogd
 
 } // namespace hogd
