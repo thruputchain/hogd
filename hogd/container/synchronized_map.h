@@ -52,9 +52,10 @@ public:
   // support copy and move.
   SynchronizedMap(const SynchronizedMap &map) : locks_(map.locks_.size())
   {
-    for (auto &[lock, map] : std::views::zip(map.locks_, map.buckets_)) {
+    buckets_.clear();
+    for (auto &[lock, v] : std::views::zip(map.locks_, map.buckets_)) {
       std::scoped_lock guard(lock);
-      buckets_.emplace_back(map);
+      buckets_.emplace_back(v);
     }
   }
   SynchronizedMap &operator=(const SynchronizedMap &map)
@@ -63,27 +64,21 @@ public:
       return *this;
 
     locks_ = std::vector<std::mutex>(locks_.size());
-    for (auto &[lock, map] : std::views::zip(map.locks_, map.buckets_)) {
+    buckets_.clear();
+    for (auto &[lock, v] : std::views::zip(map.locks_, map.buckets_)) {
       std::scoped_lock guard(lock);
-      buckets_.emplace_back(map);
+      buckets_.emplace_back(v);
     }
     return *this;
   }
 
-  SynchronizedMap(SynchronizedMap &&map) : locks_(map.locks_.size())
+  SynchronizedMap(SynchronizedMap &&map) noexcept
+    : locks_(std::move(map.locks_)), buckets_(std::move(map.buckets_))
+  {}
+  SynchronizedMap &operator=(SynchronizedMap &&map) noexcept
   {
-    for (auto &[lock, map] : std::views::zip(map.locks_, map.buckets_)) {
-      std::scoped_lock guard(lock);
-      buckets_.emplace_back(std::move(map));
-    }
-  }
-  SynchronizedMap &operator=(SynchronizedMap &&map)
-  {
-    locks_ = std::vector<std::mutex>(locks_.size());
-    for (auto &[lock, map] : std::views::zip(map.locks_, map.buckets_)) {
-      std::scoped_lock guard(lock);
-      buckets_.emplace_back(std::move(map));
-    }
+    locks_ = std::move(map.locks_);
+    buckets_ = std::move(map.buckets_);
     return *this;
   }
 
