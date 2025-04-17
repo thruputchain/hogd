@@ -1,6 +1,7 @@
 # Build each shared module
 add_subdirectory(crypto)
 add_subdirectory(base)
+add_subdirectory(container)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
 
