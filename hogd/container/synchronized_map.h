@@ -6,9 +6,8 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <print>
-#include <tuple>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/compiler.h"
@@ -52,7 +51,6 @@ public:
   // support copy and move.
   SynchronizedMap(const SynchronizedMap &map) : locks_(map.locks_.size())
   {
-    buckets_.clear();
     for (auto &[lock, v] : std::views::zip(map.locks_, map.buckets_)) {
       std::scoped_lock guard(lock);
       buckets_.emplace_back(v);
@@ -72,15 +70,8 @@ public:
     return *this;
   }
 
-  SynchronizedMap(SynchronizedMap &&map) noexcept
-    : locks_(std::move(map.locks_)), buckets_(std::move(map.buckets_))
-  {}
-  SynchronizedMap &operator=(SynchronizedMap &&map) noexcept
-  {
-    locks_ = std::move(map.locks_);
-    buckets_ = std::move(map.buckets_);
-    return *this;
-  }
+  SynchronizedMap(SynchronizedMap &&map) noexcept = default;
+  SynchronizedMap &operator=(SynchronizedMap &&map) noexcept = default;
 
   std::pair<T &, std::unique_lock<std::mutex>> operator[](const Key &key)
   {
