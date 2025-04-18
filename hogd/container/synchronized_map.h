@@ -16,9 +16,9 @@
 
 namespace hogd {
 
-// SynchronizedMap is similar to a std::unordered_map, but provides
-// synchronized access to its elements by sharding them into buckets that are
-// each protected by a separate lock.
+// SynchronizedMap is similar to a std::unordered_map, but provides multicore
+// scalability with synchronized access to its elements by sharding them into
+// buckets that are each protected by a separate lock.
 //
 // SynchronizedMap exposes these locks through a std::unique_lock in many of
 // its operations, which allows the caller to control when the lock is released
