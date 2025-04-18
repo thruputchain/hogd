@@ -12,10 +12,7 @@ namespace hogd {
 
 TEST(SynchronizedMap, BasicUsage)
 {
-  SynchronizedMap<int, std::string> map;
-
-  map.insert(10, "foo");
-  map.insert(20, "bar");
+  SynchronizedMap<int, std::string> map({{10, "foo"}, {20, "bar"}});
 
   // check 10
   {
