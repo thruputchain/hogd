@@ -95,9 +95,9 @@ struct GenRs {
 
   void show_comment(std::string_view comment, bool chomp, string prefix = {});
 
-  static const string &map_type(const string &);
-  static const string &map_case(const string &);
-  static const string &map_bound(const string &);
+  static string map_type(const string &);
+  static string map_case(const string &);
+  static string map_bound(const string &);
   string type_name(const Declaration &d, bool generate, bool in_colon_required_setting = false);
 
   template<typename... Args>
@@ -186,50 +186,6 @@ GenRs::show_type(const StructBody &s, string t)
       show_decl(d, t);
     }
   }
-
-  prtop(R"(
-
-#[cfg(feature="std")]
-impl ReadXdr for {0} {{
-    fn read_xdr<R: Read>(r: &mut Limited<R>) -> Result<Self, Error> {{
-        r.with_limited_depth(|r| {{
-            Ok({0} {{
-)", t);
-
-  for (const auto &d : s) {
-    if (d.qual == Declaration::kVoid) {
-      continue;
-    }
-    prtop("                {} : {}::read_xdr(r)?,\n", d.id, type_name(d, false, true));
-  }
-
-  prtop(R"(            }})
-        }})
-    }}
-}}
-)");
-
-  prtop(R"(
-#[cfg(feature="std")]
-impl WriteXdr for {0} {{
-    fn write_xdr<W: Write>(&self, w: &mut Limited<W>) -> Result<(), Error> {{
-        w.with_limited_depth(|w| {{
-)", t);
-
-  for (const auto &d : s) {
-    if (d.qual == Declaration::kVoid) {
-      continue;
-    }
-    prtop("                self.{}.write_xdr(w)?;\n", d.id);
-  }
-
-  prtop(R"(            Ok(())
-        }})
-    }}
-}}
-
-)");
-
 }
 
 void
@@ -275,29 +231,7 @@ impl TryFrom<i32> for {0} {{
       }};
       Ok(e)
   }}
-}}
-
-#[cfg(feature = "std")]
-impl ReadXdr for {0} {{
-    fn read_xdr<R: Read>(r: &mut Limited<R>) -> Result<Self, Error> {{
-        r.with_limited_depth(|r| {{
-            let e = i32::read_xdr(r)?;
-            let v: Self = e.try_into()?;
-            Ok(v)
-        }})
-    }}
-}}
-
-#[cfg(feature = "std")]
-impl WriteXdr for {0} {{
-    fn write_xdr<W: Write>(&self, w: &mut Limited<W>) -> Result<(), Error> {{
-        w.with_limited_depth(|w| {{
-            let i: i32 = self.clone() as i32;
-            i.write_xdr(w)
-        }})
-    }}
-}}
-)", t);
+}})");
 
 }
 
@@ -344,10 +278,6 @@ GenRs::show_type(const UnionBody &b, string t)
       }
       return c;
     };
-
-
-  std::string read_match_cases, write_match_cases;
-
   {
     prtop("#[repr(i32)]\n");
     prtop("#[derive(PartialEq, Debug, Clone)]\n");
@@ -378,18 +308,10 @@ GenRs::show_type(const UnionBody &b, string t)
         prtop("//   void;\n");
         for (const auto& c : a.cases) {
           prtop("{} = {} as i32,\n", int_qualified_declname(c), qualified_typename(c));
-          read_match_cases += std::format(
-            "                x if x == Self::{0} as i32 => {{ Self::{0} }},\n",  int_qualified_declname(c));
-          write_match_cases += std::format(
-            "                Self::{0} => {{}},\n", int_qualified_declname(c));
         }
         if (a.has_default) {
           default_decl = std::format("default {{ {}: i32 }},", b.switch_id);
           default_match = std::format("{0}::default{{ {1} }} => *{1} ,\n", t, b.switch_id);
-          read_match_cases += std::format(
-            "                _ => {{ Self::default {{ {0} : e }} }},\n", b.switch_id);
-          write_match_cases += std::format(
-            "                Self::default {{ {0} }} => {{}},\n", b.switch_id);
         }
       }
       else
@@ -412,28 +334,12 @@ GenRs::show_type(const UnionBody &b, string t)
           if (b.switch_type == "unsigned int") {
             throw std::runtime_error("unsupported enum discriminant type");
           }
-
-          read_match_cases += std::format(
-            "                x if x == {3} as i32 => {{ Self::{0} {{ {1} : {2}::read_xdr(r)? }} }}\n",
-            int_qualified_declname(c),
-            a.decl.id, type_name(a.decl, false, true),
-            match_name);
-          write_match_cases += std::format(
-            "                Self::{0} {{ {1} }} => {{ {1}.write_xdr(w)?; }},\n",
-            int_qualified_declname(c),
-            a.decl.id);
         }
         if (a.has_default) {
           std::format_to(
             std::back_inserter(default_decl),
             "default {{ {}: i32, {}: {} }},", b.switch_id, a.decl.id, type_name(a.decl, false));
           default_match = std::format("{0}::default{{ {1},..}} => *{1},\n", t, b.switch_id);
-          read_match_cases += std::format(
-            "                _ => {{ Self::default {{ {0} : e, {1} : {2}::read_xdr(r)? }} }}\n",
-            b.switch_id, a.decl.id, type_name(a.decl, false, true));
-          write_match_cases += std::format(
-            "                Self::default {{ {0} , {1} }} =>{{ {1}.write_xdr(w)?; }},\n",
-            b.switch_id, a.decl.id);
         }
       }
     }
@@ -441,41 +347,7 @@ GenRs::show_type(const UnionBody &b, string t)
     top_ += default_decl;
     top_ += "\n";
   }
-
-  prtop(R"(
-
-#[cfg(feature="std")]
-impl ReadXdr for {0} {{
-    fn read_xdr<R: Read>(r: &mut Limited<R>) -> Result<Self, Error> {{
-        r.with_limited_depth(|r| {{
-            let e = i32::read_xdr(r)?;
-            Ok(match e {{
-{1}
-                #[allow(unreachable_patterns)]
-                _ => {{ return Err(Error::Invalid) }},
-            }})
-        }})
-    }}
-}}
-)", t, read_match_cases);
-
-  prtop(R"(
-
-#[cfg(feature="std")]
-impl WriteXdr for {0} {{
-    fn write_xdr<W: Write>(&self, w: &mut Limited<W>) -> Result<(), Error> {{
-        w.with_limited_depth(|w| {{
-            self.{1}().write_xdr(w)?;
-            match self {{
-{2}
-            }};
-            Ok(())
-        }})
-    }}
-}}
-)", t, b.switch_id, write_match_cases);
-
-
+  
   bottom_ += std::format(R"(impl {0} {{
     pub fn {2}(&self) -> i32 {{
         match self {{
@@ -532,7 +404,7 @@ GenRs::show_comment(std::string_view comment, bool chomp, string prefix)
   }
 }
 
-const string &
+string
 GenRs::map_type(const string &t)
 {
   static const std::map<string, string> type_map{
@@ -542,11 +414,10 @@ GenRs::map_type(const string &t)
   };
   if (auto it = type_map.find(t); it != type_map.end())
     return it->second;
-  else
-    return t;
+  return t;
 }
 
-const string &
+string
 GenRs::map_case(const string &c)
 {
   static const std::map<string, string> case_map{
@@ -555,11 +426,10 @@ GenRs::map_case(const string &c)
   };
   if (auto it = case_map.find(c); it != case_map.end())
     return it->second;
-  else
-    return c;
+  return c;
 }
 
-const string &
+string
 GenRs::map_bound(const string &b)
 {
   static const string defbound = "0xffffffff";
