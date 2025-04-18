@@ -48,28 +48,9 @@ public:
   {}
   ~SynchronizedMap() = default;
 
-  // support copy and move.
-  SynchronizedMap(const SynchronizedMap &map) : locks_(map.locks_.size())
-  {
-    for (auto &[lock, v] : std::views::zip(map.locks_, map.buckets_)) {
-      std::scoped_lock guard(lock);
-      buckets_.emplace_back(v);
-    }
-  }
-  SynchronizedMap &operator=(const SynchronizedMap &map)
-  {
-    if (this == &map)
-      return *this;
-
-    locks_ = std::vector<std::mutex>(locks_.size());
-    buckets_.clear();
-    for (auto &[lock, v] : std::views::zip(map.locks_, map.buckets_)) {
-      std::scoped_lock guard(lock);
-      buckets_.emplace_back(v);
-    }
-    return *this;
-  }
-
+  // disable copy and support move.
+  SynchronizedMap(const SynchronizedMap &map) = delete;
+  SynchronizedMap &operator=(const SynchronizedMap &map) = delete;
   SynchronizedMap(SynchronizedMap &&map) noexcept = default;
   SynchronizedMap &operator=(SynchronizedMap &&map) noexcept = default;
 
