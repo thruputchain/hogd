@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
@@ -22,7 +23,6 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
-#include "hogd/ramdb/io.h"
 #include "hogd/ramdb/loglet.h"
 
 namespace hogd {

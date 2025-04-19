@@ -5,7 +5,6 @@ add_library(
   db_status.cc
   disk_reader.cc
   disk_writer.cc
-  io.cc
   item_allocator.cc
   loglet.cc
   scalable_map.cc
@@ -26,7 +25,7 @@ target_link_libraries(
   ramdb
 )
 
-# create test binaries
+# create test binary
 add_executable(
   db_test
   db_test.cc
@@ -37,14 +36,3 @@ target_link_libraries(
   GTest::gtest_main
 )
 gtest_discover_tests(db_test)
-# create test binaries
-add_executable(
-  io_test
-  io_test.cc
-)
-target_link_libraries(
-  io_test
-  ramdb
-  GTest::gtest_main
-)
-gtest_discover_tests(io_test)

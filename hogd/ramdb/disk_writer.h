@@ -16,8 +16,8 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/io.h"
 #include "hogd/ramdb/db_status.h"
-#include "hogd/ramdb/io.h"
 #include "hogd/ramdb/loglet.h"
 
 namespace hogd {

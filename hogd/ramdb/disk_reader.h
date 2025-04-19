@@ -5,8 +5,8 @@
 #include <optional>
 #include <vector>
 
+#include "hogd/base/io.h"
 #include "hogd/base/types.h"
-#include "hogd/ramdb/io.h"
 #include "hogd/ramdb/loglet.h"
 #include "hogd/ramdb/scalable_map.h"
 
