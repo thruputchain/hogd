@@ -224,7 +224,6 @@ impl TryFrom<i32> for {0} {{
   for (const auto &cd : e) {
     prtop("            {} => {}::{},\n", cd.val, t, cd.id);
   }
-          //#{enum.members.map do |m| "#{m.value} => #{name enum}::#{name m}," end.join("\n")}
   prtop(R"(
             #[allow(unreachable_patterns)]
             _ => return Err(Error::Invalid),
