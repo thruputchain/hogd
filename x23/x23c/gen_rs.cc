@@ -179,6 +179,7 @@ GenRs::show_type(const StructBody &s, string t)
   {
     prtop("#[repr(C)]\n");
     prtop("#[derive(PartialEq, Debug, Default, Clone)]\n");
+    prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
     prtop("pub struct {} ", t);
     auto _close = open_brace();
     scopes_.push_back(t);
@@ -191,8 +192,11 @@ GenRs::show_type(const StructBody &s, string t)
 void
 GenRs::show_type(const EnumBody &e, string t)
 {
-  {
-  prtop("#[derive(Clone, PartialEq, Debug)]\n#[repr(i32)]\npub enum {} ", t);
+  prtop(R"(
+#[derive(Clone, PartialEq, Debug)]
+#[cfg_attr(feature="std", derive(ReadXdrEnum,WriteXdrEnum))]
+#[repr(i32)]
+pub enum {} )", t);
   auto _close = open_brace();
   scopes_.push_back(t);
   
@@ -211,27 +215,6 @@ GenRs::show_type(const EnumBody &e, string t)
     first = false;
     prtop("{} = {},\n", cd.id, cd.val);
   }
-  }
-
-  prtop(R"(
-#[cfg(feature="std")]
-impl TryFrom<i32> for {0} {{
-    type Error = Error;
-
-    fn try_from(i: i32) -> Result<Self, Error> {{
-        let e = match i {{
-)", t);
-  for (const auto &cd : e) {
-    prtop("            {} => {}::{},\n", cd.val, t, cd.id);
-  }
-  prtop(R"(
-            #[allow(unreachable_patterns)]
-            _ => return Err(Error::Invalid),
-      }};
-      Ok(e)
-  }}
-}})");
-
 }
 
 void
@@ -280,6 +263,7 @@ GenRs::show_type(const UnionBody &b, string t)
   {
     prtop("#[repr(i32)]\n");
     prtop("#[derive(PartialEq, Debug, Clone)]\n");
+    prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
     prtop("pub enum {} ", t);
     auto _close = open_brace();
     scopes_.push_back(t);
