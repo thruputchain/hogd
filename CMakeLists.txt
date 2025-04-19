@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
 project(hogd CXX)
 
+set(CMAKE_POLICY_VERSION_MINIMUM 3.18)
+
 # Configuration parameters
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,13 +10,26 @@ set(CMAKE_COLOR_MAKEFILE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 
-# Set up compiler flags for release and debug build types
+# Configuration options
+# Enable building test ffi (default: OFF)
+# Turning test ffi on requires building with fPIC
+option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
+
+# Print configuration options
+message(STATUS "ENABLE_TEST_FFI: ${ENABLE_TEST_FFI}")
+
+# Handle configuration options
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
+if(ENABLE_TEST_FFI)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
+# Set up compiler flags for release and debug build types
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -g -march=native")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -march=native")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

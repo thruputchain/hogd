@@ -1,9 +1,13 @@
-#include <cstdint>
-#include <optional>
-#include <stdexcept>
-
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <memory>
+#include <new>
+#include <stdexcept>
+
+#include "contract.hh"
+#include "ffi_enums.hh"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -22,6 +26,12 @@ HostFnResult
 throw_unrecoverable_host_error(HostCallContext * /*unused*/)
 {
   return {HostFnErrorCode::kUnrecoverable, 0};
+}
+
+HostFnResult
+throw_validation_error(HostCallContext * /*unused*/)
+{
+  return {HostFnErrorCode::kValidationFailure, 0};
 }
 
 HostFnResult
@@ -59,7 +69,7 @@ consume_too_much_gas(HostCallContext *context)
 }
 
 namespace {
-WasmiRuntime *s_runtime = nullptr;
+Runtime *s_runtime = nullptr;
 bool reentrance_hit = false;
 } // namespace
 
@@ -69,7 +79,7 @@ reentrance(HostCallContext * /*unused*/)
   reentrance_hit = true;
 
   auto res = s_runtime->invoke("unreachable", UINT64_MAX);
-  if (!res.result.has_value()) {
+  if (!res.result_.has_value()) {
     return {HostFnErrorCode::kUnrecoverable, 0};
   }
   return {HostFnErrorCode::kNoneOrRecoverable, 0};
@@ -81,236 +91,251 @@ class WasmiErrorHandlingTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    contract_ = test::load_wasm_from_file("test_error_handling.wasm");
+    contract_.contract_type(ContractType::kWasmi);
+    contract_.wasmi_contract() =
+        test::load_wasm_from_file("test_error_handling.wasm");
     context_.link_fn("test", "good_call", &good_call);
   }
-  ContractBlob contract_;
+  Contract contract_;
   WasmiContext context_;
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 {
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
-  EXPECT_FALSE(!!runtime_);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  EXPECT_FALSE(runtime_);
 }
 
 // make sure we don't break if errors do get thrown
 TEST_F(WasmiErrorHandlingTest, RuntimeError)
 {
   context_.link_fn("test", "external_call", &throw_runtime_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 }
 
 TEST_F(WasmiErrorHandlingTest, ExitHandling)
 {
   context_.link_fn("test", "external_call", &exit_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 10);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 10);
 }
 
 TEST_F(WasmiErrorHandlingTest, HostError)
 {
   context_.link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+
+  ASSERT_TRUE(runtime_);
+
+  auto res = runtime_->invoke("call1", UINT64_MAX);
+
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+}
+
+TEST_F(WasmiErrorHandlingTest, ValidationError)
+{
+  context_.link_fn("test", "external_call", &throw_validation_error);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(!!runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kValidationFailure});
 }
 
 TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
 {
   context_.link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 }
 
 TEST_F(WasmiErrorHandlingTest, WasmError)
 {
   // must link all the fns, required for linking
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 0);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 0);
 
   res = runtime_->invoke("unreachable", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kDeterministic});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kDeterministic});
 }
 
 TEST_F(WasmiErrorHandlingTest, NonexistFn)
 {
   // must link all the fns, required for linking
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 
   res = runtime_->invoke("blah", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kDeterministic});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kDeterministic});
 }
 
 TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
 {
   context_.link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 }
 
 TEST_F(WasmiErrorHandlingTest, CheckReturn)
 {
   context_.link_fn("test", "external_call", &return_syscall);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call_then_unreachable", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 }
 
 TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 {
   context_.link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 }
 
 TEST_F(WasmiErrorHandlingTest, Reentrance)
 {
   context_.link_fn("test", "external_call", &reentrance);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
-  s_runtime = &(*runtime_);
+  s_runtime = runtime_.get();
   reentrance_hit = false;
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
+  EXPECT_FALSE(res.result_);
 
   EXPECT_TRUE(reentrance_hit);
 }
 
 TEST_F(WasmiErrorHandlingTest, NullHandling)
 {
-  ContractBlob null_contract;
-  runtime_ = context_.make_new_runtime(null_contract, nullptr);
+  Contract null_contract(ContractType::kWasmi);
+  runtime_ = context_.make_new_runtime(null_contract, nullptr, true);
 
-  EXPECT_FALSE(!!runtime_);
+  EXPECT_FALSE(runtime_);
 }
 
 TEST_F(WasmiErrorHandlingTest, NullLinkHandling)
 {
-  // Apparently WASM accepts module/fn names of empty strings
-  EXPECT_TRUE(context_.link_fn("", "good_call", &good_call));
-  EXPECT_TRUE(context_.link_fn("test", "", &good_call));
+  // The WASM standard accepts empty strings, but we ban that out to keep the
+  // ffi handling simpler (meaning we never have a reason to pass a null string
+  // across FFI).
+  EXPECT_FALSE(context_.link_fn("", "good_call", &good_call));
+  EXPECT_FALSE(context_.link_fn("test", "", &good_call));
   EXPECT_TRUE(context_.link_fn("foo", "good_call", &good_call));
 
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  EXPECT_FALSE(!!runtime_);
+  EXPECT_FALSE(runtime_);
 }
 
 TEST_F(WasmiErrorHandlingTest, OutOfGas)
 {
   context_.link_fn("test", "external_call", &consume_too_much_gas);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 
   res = runtime_->invoke("call1", 1);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
 
 TEST_F(WasmiErrorHandlingTest, NoGas)
 {
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("call1", 1);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
 
 TEST_F(WasmiErrorHandlingTest, Spin)
 {
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
+  ASSERT_TRUE(runtime_);
 
   auto res = runtime_->invoke("spin", 10000);
 
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.result.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

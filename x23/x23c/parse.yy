@@ -8,12 +8,22 @@
 #endif
 
 #include <print>
+#include <unordered_set>
+#include <string>
 
 #include "x23c/defs.h"
 
 YY_DECL;
 
 using enum Declaration::Qual;
+
+static std::unordered_set<std::string> declnames;
+
+inline bool decl_guard(std::string const& declname) {
+  auto [_, new_decl] = declnames.insert(declname);
+  return !new_decl;
+}
+
 }
 
 %define parse.trace
@@ -98,20 +108,37 @@ definition:
 type_def:
   T_TYPEDEF declaration ';'[semicolon] {
     checkliterals(xc);
-    $$ = Typedef($declaration.get());
+    auto t = Typedef($declaration.get());
+    if (decl_guard(t.id)) {
+      yyerror(&@1, xc,
+	     "Duplicate declaration of typedef " + t.id, false);
+    }
+    $$ = t;
     $$->comment = combine($1->block_comment, $semicolon->eol_comment);
   }
 | T_ENUM T_ID[id] enum_body[type] ';'[semicolon] {
+    if (decl_guard($id->text)) {
+      yyerror(&@1, xc,
+	     "Duplicate declaration of enum " + $id->text, false);
+    }
     checkliterals(xc);
     $$ = EnumDecl{ .id = $id->text, .body = $type};
     $$->comment = $1->block_comment;
   }
 | T_STRUCT T_ID[id] struct_body[type] ';'[semicolon] {
+    if (decl_guard($id->text)) {
+      yyerror(&@1, xc,
+	     "Duplicate declaration of struct " + $id->text, false);
+    }
     checkliterals(xc);
     $$ = StructDecl{ .id = $id->text, .body = $type};
     $$->comment = $1->block_comment;
   }
 | T_UNION T_ID[id] union_body[type] ';'[semicolon] {
+    if (decl_guard($id->text)) {
+      yyerror(&@1, xc,
+	     "Duplicate declaration of union " + $id->text, false);
+    }
     checkliterals(xc);
     $$ = UnionDecl{ .id = $id->text, .body = $type};
     $$->comment = $1->block_comment;
