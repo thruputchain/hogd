@@ -5,13 +5,16 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <concepts>
 #include <functional>
 #include <mutex>
+#include <ranges>
 #include <tuple>
 #include <vector>
 
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
 #include "hogd/ramdb/item_allocator.h"
@@ -89,6 +92,36 @@ public:
         });
   }
 
+  // for_each executes func on each element.
+  void for_each(std::invocable<ItemHeader *> auto func)
+  {
+    size_t lock_shift = std::countr_zero(buckets_.size() / mutexes_.size());
+    for (size_t i = 0; i < buckets_.size(); ++i) {
+      std::scoped_lock guard(mutexes_[i >> lock_shift]);
+      for (ItemHeader *hdr = buckets_[i]; hdr != nullptr; hdr = hdr->next) {
+        func(hdr);
+      }
+    }
+  }
+
+  // for_each_parallel executes func in parallel on each element using a
+  // WorkerPool.
+  void for_each_parallel(std::invocable<ItemHeader *> auto func,
+                         WorkerPool &pool)
+  {
+    constexpr size_t kBucketsPerJob = 32;
+    size_t lock_shift = std::countr_zero(buckets_.size() / mutexes_.size());
+    pool.for_each_parallel(
+        std::ranges::iota_view{0UL, buckets_.size()},
+        [this, func, lock_shift](size_t i) {
+          std::scoped_lock guard(mutexes_[i >> lock_shift]);
+          for (ItemHeader *hdr = buckets_[i]; hdr != nullptr; hdr = hdr->next) {
+            func(hdr);
+          }
+        },
+        kBucketsPerJob);
+  }
+
 private:
   // used to allocate the items in the map.
   ItemAllocator &allocator_;
@@ -98,7 +131,7 @@ private:
   size_t old_size_;
   // the buckets expanded so far during resizing.
   std::atomic<size_t> expanded_idx_;
-  // locks to protect the buckets (not 1:1 with the buckets).
+  // locks to protect the buckets (not 1:1 with buckets_).
   std::vector<std::mutex> mutexes_;
   // the number of items per lock. used to calculate the load factor.
   std::vector<std::atomic<uint16_t>> item_counts_;

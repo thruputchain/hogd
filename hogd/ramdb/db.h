@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <thread>
 
@@ -14,6 +15,10 @@
 #include "hogd/ramdb/scalable_map.h"
 
 namespace hogd {
+
+// GetEachCallback is used by get_each(). Arguments are key, type, and value.
+using GetEachCallback = std::function<void(std::span<const std::byte>, uint8_t,
+                                           std::span<std::byte>)>;
 
 // Database provides the interface for using ramdb. Normally, you should only
 // interact with this class.
@@ -35,7 +40,7 @@ public:
       bg_th_(
           [this](const std::stop_token &stoken) { background_worker(stoken); })
   {}
-  ~Database() { bg_th_.request_stop(); }
+  ~Database() = default;
 
   // Disable move and copy.
   Database(Database &&db) = delete;
@@ -59,6 +64,15 @@ public:
   // remove deletes an item. It is not considered an error if the item does not
   // exist.
   DBStatus<void> remove(std::span<const std::byte> key);
+
+  // get_each reads every item and provides its key, type, and value to a
+  // callback.
+  void get_each(GetEachCallback fn);
+
+  // get_each_parallel reads every item and provides its key, type, and value to
+  // a callback that runs in parallel on a worker pool.
+  void get_each_parallel(GetEachCallback fn,
+                         WorkerPool &pool = WorkerPool::get_default_pool());
 
   // sync writes pending items to disk. Any calls to put() or remove() performed
   // before this call are guaranteed to be recoverable after a failure.
@@ -129,6 +143,24 @@ Database::remove(std::span<const std::byte> key)
 {
   assert(active_);
   return map_.remove(key);
+}
+
+inline void
+Database::get_each(GetEachCallback fn)
+{
+  map_.for_each([&fn](ItemHeader *hdr) {
+    fn(hdr->get_key(), hdr->type, hdr->get_value());
+  });
+}
+
+inline void
+Database::get_each_parallel(GetEachCallback fn, WorkerPool &pool)
+{
+  map_.for_each_parallel(
+      [&fn](ItemHeader *hdr) {
+        fn(hdr->get_key(), hdr->type, hdr->get_value());
+      },
+      pool);
 }
 
 inline DBStatus<uint64_t>
