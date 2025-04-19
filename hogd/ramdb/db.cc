@@ -13,6 +13,7 @@
 #include "hogd/base/bits.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -43,19 +44,18 @@ Database::open(const std::string &path, size_t heap_size, int bucket_order)
   heap_size = align_up(heap_size, kLogletRegionSize);
 
   // calculate the number of locks based on the available cores.
-  size_t cores = std::thread::hardware_concurrency();
-  int cores_order = std::countr_zero(std::bit_ceil(cores));
-  int lock_order = kBaseLockOrder + cores_order;
+  int lock_order = scalable_shard_order(kBaseLockOrder);
 
   // the starting bucket order must be at least as large as the lock order.
   bucket_order = std::max(lock_order, bucket_order);
 
   // calculate the number of write heads based on the available cores.
-  int write_head_order = kBaseWriteHeadOrder + cores_order;
+  int write_head_order = scalable_shard_order(kBaseWriteHeadOrder);
 
   // print configuration for debugging.
   debug("opening DB at '{}':", path);
-  debug("...heap_size {}, cores {}", print_iec_bytes(heap_size), cores);
+  debug("...heap_size {}, cores {}", print_iec_bytes(heap_size),
+        available_parallelism());
   debug("...locks {}, buckets {}, write_heads {}", (1UL << lock_order),
         (1UL << bucket_order), (1ULL << write_head_order));
 
