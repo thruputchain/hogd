@@ -12,6 +12,7 @@
 #include <tuple>
 #include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -95,12 +96,19 @@ public:
   // for_each executes func on each element.
   void for_each(std::invocable<ItemHeader *> auto func)
   {
-    size_t lock_shift = std::countr_zero(buckets_.size() / mutexes_.size());
-    for (size_t i = 0; i < buckets_.size(); ++i) {
-      std::scoped_lock guard(mutexes_[i >> lock_shift]);
+    for (size_t i = 0; i < buckets_.size();) {
+      // retry if this bucket still needs to be expanded.
+      if (i < old_size_ && i >= expanded_idx_.load(std::memory_order_acquire)) {
+        cpu_relax();
+        continue;
+      }
+
+      // otherwise, it's safe to loop through its items.
+      std::scoped_lock guard(mutexes_[i & (mutexes_.size() - 1)]);
       for (ItemHeader *hdr = buckets_[i]; hdr != nullptr; hdr = hdr->next) {
         func(hdr);
       }
+      ++i;
     }
   }
 
@@ -110,11 +118,18 @@ public:
                          WorkerPool &pool)
   {
     constexpr size_t kBucketsPerJob = 32;
-    size_t lock_shift = std::countr_zero(buckets_.size() / mutexes_.size());
     pool.for_each_parallel(
-        std::ranges::iota_view{0UL, buckets_.size()},
-        [this, func, lock_shift](size_t i) {
-          std::scoped_lock guard(mutexes_[i >> lock_shift]);
+        std::ranges::iota_view{0UL, buckets_.size()} |
+            std::views::transform([this](size_t i) {
+              // wait for expansion of this bucket to finish.
+              while (i < old_size_ &&
+                     i >= expanded_idx_.load(std::memory_order_acquire)) {
+                cpu_relax();
+              }
+              return i;
+            }),
+        [this, func](size_t i) {
+          std::scoped_lock guard(mutexes_[i & (mutexes_.size() - 1)]);
           for (ItemHeader *hdr = buckets_[i]; hdr != nullptr; hdr = hdr->next) {
             func(hdr);
           }

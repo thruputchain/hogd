@@ -318,12 +318,13 @@ ScalableMap::do_expand()
       *new_bu = item;
       counter_dec(item_counts_[idx]);
       counter_inc(item_counts_[new_idx]);
-
-      // increment index of expanded buckets.
-      expanded_idx_.store(idx + 1, std::memory_order_relaxed);
     }
+
+    // increment expanded_idx_ to mark this bucket as fully expanded.
+    expanded_idx_.store(idx + 1, std::memory_order_relaxed);
   }
 
+  assert(expanded_idx_.load() == old_size_);
   info("finished expanding in {:.3f} seconds", time.elapsed());
 }
 
