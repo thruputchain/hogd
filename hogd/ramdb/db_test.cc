@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 
+#include <cstddef>
 #include <memory>
 #include <span>
 #include <string>
@@ -13,7 +14,6 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/random_bytes.h"
-#include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
@@ -36,6 +36,13 @@ constexpr size_t kInsertions = 32'768;
 constexpr int kThreads = 4;
 // the number of times to force a compaction
 constexpr int kCompactionIterations = 8;
+
+constexpr std::string
+to_string(std::span<const std::byte> bytes)
+{
+  return std::string(reinterpret_cast<const char *>(bytes.data()),
+                     bytes.size());
+}
 
 } // namespace
 
@@ -136,14 +143,16 @@ DatabaseTest::remove_every_n(int n)
 void
 DatabaseTest::check_integrity()
 {
-  for (const auto &[key, value] : oracle_) {
-    DBStatus<DBItem> item = db_->get(std::as_bytes(std::span(key)));
-    EXPECT_TRUE(item);
-    if (item) {
-      EXPECT_EQ(item->type, 0);
-      EXPECT_TRUE(item->value == std::as_bytes(std::span(value)));
-    }
-  }
+  std::unordered_map<std::string, std::string> tmp;
+  db_->get_each([&tmp](std::span<const std::byte> key, int type,
+                       std::span<const std::byte> val) {
+    auto [it, inserted] = tmp.insert({to_string(key), to_string(val)});
+    EXPECT_TRUE(inserted); // checks for duplicates
+    EXPECT_EQ(type, 0);    // type should always be 0
+  });
+
+  // both maps should be identical.
+  EXPECT_EQ(tmp, oracle_);
 }
 
 TEST_F(DatabaseTest, SimpleInsertions)
