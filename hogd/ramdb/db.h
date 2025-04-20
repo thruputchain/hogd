@@ -18,7 +18,7 @@ namespace hogd {
 
 // GetEachCallback is used by get_each(). Arguments are key, type, and value.
 using GetEachCallback = std::function<void(std::span<const std::byte>, uint8_t,
-                                           std::span<std::byte>)>;
+                                           std::span<const std::byte>)>;
 
 // Database provides the interface for using ramdb. Normally, you should only
 // interact with this class.
