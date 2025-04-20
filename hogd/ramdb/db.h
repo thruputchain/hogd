@@ -148,6 +148,7 @@ Database::remove(std::span<const std::byte> key)
 inline void
 Database::get_each(GetEachCallback fn)
 {
+  assert(active_);
   map_.for_each([&fn](ItemHeader *hdr) {
     fn(hdr->get_key(), hdr->type, hdr->get_value());
   });
@@ -156,6 +157,7 @@ Database::get_each(GetEachCallback fn)
 inline void
 Database::get_each_parallel(GetEachCallback fn, WorkerPool &pool)
 {
+  assert(active_);
   map_.for_each_parallel(
       [&fn](ItemHeader *hdr) {
         fn(hdr->get_key(), hdr->type, hdr->get_value());
