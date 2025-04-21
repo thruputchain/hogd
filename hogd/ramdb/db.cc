@@ -9,6 +9,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/io.h"
@@ -33,10 +34,8 @@ active_cores(const WorkerPool &pool)
   return std::max(pool.worker_count() / kActiveBGCoreFraction, 1);
 }
 
-} // namespace
-
 DBStatus<std::unique_ptr<Database>>
-Database::open(const std::string &path, size_t heap_size, int bucket_order)
+create_db(const std::string &path, size_t heap_size, int bucket_order)
 {
   // NOTE: all variables with the _order suffix means they are log2(n).
 
@@ -67,13 +66,25 @@ Database::open(const std::string &path, size_t heap_size, int bucket_order)
   }
 
   // create the database.
-  auto db = std::make_unique<Database>(*dir, heap_size, lock_order,
-                                       bucket_order, write_head_order);
+  return std::make_unique<Database>(*dir, heap_size, lock_order, bucket_order,
+                                    write_head_order);
+}
+
+} // namespace
+
+DBStatus<std::unique_ptr<Database>>
+Database::open(const std::string &path, size_t heap_size, int bucket_order)
+{
+  DBStatus<std::unique_ptr<Database>> ret =
+      create_db(path, heap_size, bucket_order);
+  if (!ret)
+    return ret.error();
+  std::unique_ptr<Database> db = std::move(ret.value());
   db->pool_.adjust_workers(active_cores(db->pool_));
 
-  // load the existing log if it exists.
+  // load all the LSNs that are available and valid.
   DiskReader r(*db->loglet_allocator_, db->map_);
-  DBStatus<uint64_t> lsn = r.load(*dir);
+  DBStatus<uint64_t> lsn = r.load(db->dir_);
   if (!lsn) {
     error("failed to load database: {}", lsn.error());
     return lsn.error();
@@ -83,8 +94,48 @@ Database::open(const std::string &path, size_t heap_size, int bucket_order)
   else
     debug("loaded up to LSN {}, {} items", *lsn, db->map_.size());
   db->disk_writer_.init(*lsn);
-
   return db;
+}
+
+DBStatus<std::unique_ptr<Database>>
+Database::open_lsn(const std::string &path, uint64_t lsn, size_t heap_size,
+                   int bucket_order)
+{
+  DBStatus<std::unique_ptr<Database>> ret =
+      create_db(path, heap_size, bucket_order);
+  if (!ret)
+    return ret.error();
+  std::unique_ptr<Database> db = std::move(ret.value());
+  db->pool_.adjust_workers(active_cores(db->pool_));
+
+  // load up to a specific LSN.
+  DiskReader r(*db->loglet_allocator_, db->map_);
+  DBStatus<uint64_t> load_ret = r.load(db->dir_, lsn);
+  if (!load_ret) {
+    error("failed to load database: {}", load_ret.error());
+    return load_ret.error();
+  }
+  assert(*load_ret == lsn);
+  db->disk_writer_.init(lsn);
+  return db;
+}
+
+DBStatus<uint64_t>
+Database::check(const std::string &path, size_t heap_size)
+{
+  DBStatus<std::unique_ptr<Database>> ret = create_db(path, heap_size, 0);
+  if (!ret)
+    return ret.error();
+  std::unique_ptr<Database> db = std::move(ret.value());
+
+  // Check the integrity of the database.
+  DiskReader r(*db->loglet_allocator_, db->map_);
+  DBStatus<uint64_t> valid_lsn = r.verify(db->dir_);
+  if (!valid_lsn) {
+    error("failed to check database: {}", valid_lsn.error());
+    return valid_lsn.error();
+  }
+  return *valid_lsn;
 }
 
 void

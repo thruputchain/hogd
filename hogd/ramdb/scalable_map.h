@@ -96,19 +96,18 @@ public:
   // for_each executes func on each element.
   void for_each(std::invocable<ItemHeader *> auto func)
   {
-    for (size_t i = 0; i < buckets_.size();) {
-      // retry if this bucket still needs to be expanded.
-      if (i < old_size_ && i >= expanded_idx_.load(std::memory_order_acquire)) {
+    for (size_t i = 0; i < buckets_.size(); ++i) {
+      // wait for expansion of this bucket to finish.
+      while (i < old_size_ &&
+             i >= expanded_idx_.load(std::memory_order_acquire)) {
         cpu_relax();
-        continue;
       }
 
-      // otherwise, it's safe to loop through its items.
+      // now it's safe to loop through the bucket's items.
       std::scoped_lock guard(mutexes_[i & (mutexes_.size() - 1)]);
       for (ItemHeader *hdr = buckets_[i]; hdr != nullptr; hdr = hdr->next) {
         func(hdr);
       }
-      ++i;
     }
   }
 

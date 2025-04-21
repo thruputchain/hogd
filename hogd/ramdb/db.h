@@ -6,6 +6,7 @@
 #include <memory>
 #include <thread>
 
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/ramdb/db_status.h"
@@ -24,18 +25,32 @@ using GetEachCallback = std::function<void(std::span<const std::byte>, uint8_t,
 // interact with this class.
 class Database {
 public:
-  // open is a factory method to create a database.
+  //
+  // Factory methods: Use these to initialize a database.
+  //
+
+  // open opens a database at path.
   static DBStatus<std::unique_ptr<Database>>
   open(const std::string &path, size_t heap_size, int bucket_order = 0);
 
+  // open_lsn opens a database at path and loads only up to a specific LSN.
+  static DBStatus<std::unique_ptr<Database>> open_lsn(const std::string &path,
+                                                      uint64_t lsn,
+                                                      size_t heap_size,
+                                                      int bucket_order = 0);
+
+  // check check the integrity of a database. It returns the highest valid LSN.
+  static DBStatus<uint64_t> check(const std::string &path, size_t heap_size);
+
   Database(Directory dir, size_t heap_size, int lock_order, int bucket_order,
            int write_head_order)
-    : loglet_allocator_(
-          LogletAllocator::create(heap_size,
-                                  std::thread::hardware_concurrency(),
-                                  [this] { notify_low_mem(); })),
+    : dir_(std::move(dir)),
+      loglet_allocator_(LogletAllocator::create(heap_size,
+                                                available_parallelism(),
+                                                [this] { notify_low_mem(); })),
+      pool_(available_parallelism()),
       item_allocator_(*loglet_allocator_, pool_, &map_),
-      disk_writer_(*loglet_allocator_, std::move(dir), write_head_order),
+      disk_writer_(*loglet_allocator_, dir_, write_head_order),
       map_(item_allocator_, disk_writer_, lock_order, bucket_order),
       bg_th_(
           [this](const std::stop_token &stoken) { background_worker(stoken); })
@@ -94,6 +109,10 @@ public:
                                    size_t value_size);
 
 private:
+  // the directory that stores this database.
+  Directory dir_;
+
+  // the modules of the database. Each has a shared lifetime with this object.
   std::unique_ptr<LogletAllocator> loglet_allocator_;
   WorkerPool pool_;
   ItemAllocator item_allocator_;

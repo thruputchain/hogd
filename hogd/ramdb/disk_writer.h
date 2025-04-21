@@ -44,9 +44,8 @@ class DiskWriter {
 public:
   friend ScopedDiskWrite;
 
-  DiskWriter(LogletAllocator &allocator, Directory dir, int write_head_order)
-    : allocator_(allocator), dir_(std::move(dir)),
-      heads_(1UL << write_head_order)
+  DiskWriter(LogletAllocator &allocator, Directory &dir, int write_head_order)
+    : allocator_(allocator), dir_(dir), heads_(1UL << write_head_order)
   {}
   ~DiskWriter() { writer_th_.request_stop(); }
 
@@ -95,7 +94,7 @@ private:
   // the allocator for loglets.
   LogletAllocator &allocator_;
   // the directory containing the log files.
-  Directory dir_;
+  Directory &dir_;
 
   // protects everything in this block.
   std::mutex to_disk_lock_;
