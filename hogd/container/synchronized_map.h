@@ -143,6 +143,7 @@ public:
   {
     assert(std::has_single_bit(locks_.size()));
     assert(locks_.size() == buckets_.size());
+    assert(ul.owns_lock());
 
     size_t idx = hash_fn_(key) & (buckets_.size() - 1);
     if (ul.mutex() != std::addressof(locks_[idx]))

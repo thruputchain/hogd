@@ -48,6 +48,11 @@ public:
   // get finds an item for a given key.
   DBStatus<DBItem> get(std::span<const std::byte> key);
 
+  // get_if_type finds an item of a specific type for a given key. If the type
+  // does not match, it will return DBCode::kTypeMismatch.
+  DBStatus<OwningSpan<const std::byte>>
+  get_if_type(std::span<const std::byte> key, uint8_t type);
+
   // get_if_type finds an item of a specific type for a given key. If the
   // type or the size of val_out do not match exactly, it will return
   // DBCode::kTypeMismatch.

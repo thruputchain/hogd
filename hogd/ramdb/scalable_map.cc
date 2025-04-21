@@ -107,6 +107,20 @@ ScalableMap::get(std::span<const std::byte> key)
   return DBError(DBCode::kNotFound);
 }
 
+DBStatus<OwningSpan<const std::byte>>
+ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type)
+{
+  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  for (; *bu != nullptr; bu = &(*bu)->next) {
+    if ((*bu)->get_key() == key) {
+      if ((*bu)->type != type)
+        return DBError(DBCode::kTypeMismatch);
+      return make_byte_buffer((*bu)->get_value());
+    }
+  }
+  return DBError(DBCode::kNotFound);
+}
+
 DBStatus<void>
 ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type,
                          std::span<std::byte> val_out)
