@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -16,6 +17,38 @@
 
 namespace hogd {
 
+template<typename T> class WritableOutput {
+public:
+  WritableOutput(std::optional<T> value, void *ptr)
+    : value_(std::move(value)), original_pointer_(ptr)
+  {}
+
+  T &get()
+  {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return value_.value();
+  }
+
+  bool has_value() const { return value_.has_value(); }
+
+  ~WritableOutput()
+  {
+    if (!value_)
+      return;
+
+    if constexpr (requires { value_->data(); }) {
+      std::memcpy(original_pointer_, value_->data(), sizeof(T));
+    }
+    else {
+      std::memcpy(original_pointer_, &(value_.value()), sizeof(T));
+    }
+  }
+
+private:
+  std::optional<T> value_;
+  void *original_pointer_;
+};
+
 // check [base, base + len) \subseteq [0, memory_len)
 inline bool
 check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
@@ -26,26 +59,44 @@ check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
   return (base_end <= memory_len);
 }
 
-template<typename T> requires std::is_trivially_copyable_v<T>
-T *
+template<typename T>
+T
+read_unaligned(const void *ptr)
+{
+  T value{};
+  if constexpr (requires { value.data(); }) {
+    std::memcpy(value.data(), ptr, sizeof(T));
+  }
+  else {
+    std::memcpy(&value, ptr, sizeof(T));
+  }
+  return value;
+}
+
+template<typename T>
+requires (std::is_trivially_copyable_v<T> && !std::is_const_v<T>)
+WritableOutput<T>
 check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset,
                     uint64_t user_len)
 {
   if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
-    return nullptr;
+    return WritableOutput<T>(std::nullopt, nullptr);
   }
-  return reinterpret_cast<T *>(contract_memory.data() + user_offset);
+  return WritableOutput<T>(read_unaligned<T>(contract_memory.data() +
+                                             user_offset),
+                           contract_memory.data() + user_offset);
 }
 
 template<typename T> requires std::is_trivially_copyable_v<T>
-const T *
+std::optional<const T>
 check_user_argument(std::span<const std::byte> contract_memory,
                     uint64_t user_offset, uint64_t user_len)
 {
   if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
-    return nullptr;
+    return std::nullopt;
   }
-  return reinterpret_cast<const T *>(contract_memory.data() + user_offset);
+  return read_unaligned<std::remove_cvref_t<T>>(contract_memory.data() +
+                                                user_offset);
 }
 
 inline std::optional<std::span<std::byte>>
@@ -89,7 +140,7 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
   switch (disc) {
   case CryptographicScheme::Ed25519:
   {
-    if (const auto *ed25519 =
+    if (auto ed25519 =
             check_user_argument<Ed25519Signature>(contract_memory, user_offset,
                                                   sizeof(Ed25519Signature))) {
       out.ed25519() = *ed25519;
@@ -116,7 +167,7 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
   switch (disc) {
   case CryptographicScheme::Ed25519:
   {
-    if (const auto *ed25519 =
+    if (auto ed25519 =
             check_user_argument<Ed25519PublicKey>(contract_memory, user_offset,
                                                   sizeof(Ed25519Signature))) {
       out.ed25519() = *ed25519;

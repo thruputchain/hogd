@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <cstring>
 #include <optional>
 #include <span>
 
@@ -42,7 +43,8 @@ struct SyscallArgParams<T> {
   {
     return input;
   }
-  constexpr static bool validate(uint64_t /*unused*/) { return true; }
+
+  constexpr static bool validate(T /*unused*/) { return true; }
   constexpr static T deref(T value) { return value; }
 };
 
@@ -51,12 +53,20 @@ template<typename T> requires (sizeof(T) > 8) && std::is_trivially_copyable_v<T>
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static T parse(std::span<std::byte> /*unused*/, uint64_t input)
+  constexpr static std::optional<const T>
+  parse(std::span<std::byte> contract_memory, uint64_t offset)
   {
-    return input;
+    return check_user_argument<const T>(contract_memory, offset, sizeof(T));
   }
-  constexpr static bool validate(uint64_t /*unused*/) { return true; }
-  constexpr static T deref(T value) { return value; }
+  constexpr static bool validate(std::optional<const T> argument)
+  {
+    return argument.has_value();
+  }
+  constexpr static T deref(std::optional<const T> &value)
+  {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *value;
+  }
 };
 
 // [u8] span contract output.
@@ -108,20 +118,47 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   }
 };
 
-// Trivially copyable input and output types.
+// Trivially copyable input types.
 // Passed as contract memory offsets (i.e. the single input argument).
 template<typename T> requires std::is_trivially_copyable_v<T>
+struct SyscallArgParams<const T &> {
+  constexpr static size_t kNumInputs = 1;
+  constexpr static std::optional<T> parse(std::span<std::byte> contract_memory,
+                                          uint64_t offset)
+  {
+    return check_user_argument<const T>(contract_memory, offset, sizeof(T));
+  }
+
+  constexpr static bool validate(std::optional<T> arg)
+  {
+    return arg.has_value();
+  }
+
+  constexpr static T &deref(std::optional<T> &value)
+  {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *value;
+  }
+};
+
+// Trivially copyable output types..
+// Passed as contract memory offsets (i.e. the single input argument).
+template<typename T>
+requires (std::is_trivially_copyable_v<T> && !std::is_const_v<T>)
 struct SyscallArgParams<T &> {
   constexpr static size_t kNumInputs = 1;
-  constexpr static T *parse(std::span<std::byte> contract_memory,
-                            uint64_t offset)
+  constexpr static WritableOutput<T> parse(std::span<std::byte> contract_memory,
+                                           uint64_t offset)
   {
     return check_user_argument<T>(contract_memory, offset, sizeof(T));
   }
 
-  constexpr static bool validate(T *arg) { return (arg != nullptr); }
+  constexpr static bool validate(WritableOutput<T> const &arg)
+  {
+    return arg.has_value();
+  }
 
-  constexpr static T &deref(T *value) { return *value; }
+  constexpr static T &deref(WritableOutput<T> &value) { return value.get(); }
 };
 
 // Optional trivially copyable input types.
@@ -133,18 +170,21 @@ struct SyscallArgParams<T &> {
 template<typename T> requires std::is_trivially_copyable_v<T>
 struct SyscallArgParams<const T *> {
   constexpr static size_t kNumInputs = 1;
-  constexpr static T *parse(std::span<std::byte> contract_memory,
-                            uint64_t offset)
+  constexpr static std::optional<T> parse(std::span<std::byte> contract_memory,
+                                          uint64_t offset)
   {
-    return check_user_argument<T>(contract_memory, offset, sizeof(T));
+    return check_user_argument<const T>(contract_memory, offset, sizeof(T));
   }
 
-  constexpr static bool validate(T * /*unused*/) { return true; }
+  constexpr static bool validate(std::optional<T> /*unused*/) { return true; }
 
-  constexpr static const T *deref(const T *value) { return value; }
+  constexpr static const T *deref(std::optional<T> &value)
+  {
+    return value.has_value() ? &(*value) : nullptr;
+  }
 };
 
-// custom parse types.
+// custom parse input types.
 // For those types that don't quite fit into any of the above categories.
 // At this point, these include PublicKeys and Signatures,
 // which are both unions over different cryptographic schemes.
