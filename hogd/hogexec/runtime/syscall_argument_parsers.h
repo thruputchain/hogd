@@ -76,6 +76,13 @@ std::optional<const T>
 check_user_custom_input_argument(std::span<const std::byte> contract_memory,
                                  Args... args);
 
+// custom parsing in mock syscall inputs
+template<typename T, typename... Args>
+requires (std::same_as<Args, uint64_t> && ...)
+std::optional<const T>
+check_user_custom_input_argument_mock(
+                                 Args... args);
+
 template<>
 inline std::optional<const Signature>
 check_user_custom_input_argument(std::span<const std::byte> contract_memory,
@@ -103,6 +110,29 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
 }
 
 template<>
+inline std::optional<const Signature>
+check_user_custom_input_argument_mock(
+                                 uint64_t user_discriminant,
+                                 uint64_t user_offset)
+{
+  auto disc =
+      check_user_primitive_argument<CryptographicScheme>(user_discriminant);
+
+  Signature out;
+  out.scheme(disc);
+  switch (disc) {
+  case CryptographicScheme::Ed25519:
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    out.ed25519() = *reinterpret_cast<const Ed25519Signature*>(user_offset);
+    return out;
+  }
+  default:
+    return std::nullopt;
+  }
+}
+
+template<>
 inline std::optional<const PublicKey>
 check_user_custom_input_argument(std::span<const std::byte> contract_memory,
                                  uint64_t user_discriminant,
@@ -123,6 +153,29 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
       return out;
     }
     return std::nullopt;
+  }
+  default:
+    return std::nullopt;
+  }
+}
+
+template<>
+inline std::optional<const PublicKey>
+check_user_custom_input_argument_mock(
+                                 uint64_t user_discriminant,
+                                 uint64_t user_offset)
+{
+  auto disc =
+      check_user_primitive_argument<CryptographicScheme>(user_discriminant);
+
+  PublicKey out;
+  out.scheme(disc);
+  switch (disc) {
+  case CryptographicScheme::Ed25519:
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    out.ed25519() = *reinterpret_cast<const Ed25519PublicKey*>(user_offset);
+    return out;
   }
   default:
     return std::nullopt;

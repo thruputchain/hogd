@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <span>
 
@@ -62,6 +63,10 @@ struct SyscallArgParams<T> {
                             uint64_t offset)
   {
     return check_user_argument<T>(contract_memory, offset, sizeof(T));
+  }
+  constexpr static const T *parse_mock(uint64_t offset)
+  {
+    return reinterpret_cast<const T*>(offset);
   }
   constexpr static bool validate(const T *argument) { return argument != nullptr; }
   constexpr static T deref(const T *value) { return *value; }
@@ -143,6 +148,11 @@ struct SyscallArgParams<T &> {
     return check_user_argument<T>(contract_memory, offset, sizeof(T));
   }
 
+  constexpr static T *parse_mock(uint64_t offset)
+  {
+    return reinterpret_cast<T*>(offset);
+  }
+
   constexpr static bool validate(T *arg) { return (arg != nullptr); }
 
   constexpr static T &deref(T *value) { return *value; }
@@ -161,6 +171,16 @@ struct SyscallArgParams<const T *> {
                             uint64_t offset)
   {
     return check_user_argument<T>(contract_memory, offset, sizeof(T));
+  }
+
+  constexpr static T *parse_mock(uint64_t offset)
+  {
+    // 0 can be a valid pointer in wasm.  As such, the optional input types in the sdk
+    // use UINT64_MAX as the nullptr (in the case of a None input), instead of 0.
+    if (offset == std::numeric_limits<uint64_t>::max()) {
+      return nullptr;
+    }
+    return reinterpret_cast<T*>(offset);
   }
 
   constexpr static bool validate(T * /*unused*/) { return true; }
@@ -186,6 +206,13 @@ template<> struct SyscallArgParams<const Signature &> {
                                                        arg2);
   }
 
+  constexpr static std::optional<const Signature>
+  parse_mock(uint64_t arg1, uint64_t arg2)
+  {
+    return check_user_custom_input_argument_mock<Signature>(arg1,
+                                                       arg2);
+  }
+
   constexpr static bool validate(std::optional<const Signature> const &arg)
   {
     return arg.has_value();
@@ -207,6 +234,12 @@ template<> struct SyscallArgParams<const PublicKey &> {
   {
     return check_user_custom_input_argument<PublicKey>(contract_memory, arg1,
                                                        arg2);
+  }
+  
+  constexpr static std::optional<const PublicKey>
+  parse_mock(uint64_t arg1, uint64_t arg2)
+  {
+    return check_user_custom_input_argument_mock<PublicKey>(arg1, arg2);
   }
 
   constexpr static bool validate(std::optional<const PublicKey> const &arg)
