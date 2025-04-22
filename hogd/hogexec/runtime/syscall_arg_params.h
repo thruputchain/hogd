@@ -62,7 +62,11 @@ struct SyscallArgParams<T> {
   {
     return argument.has_value();
   }
-  constexpr static T deref(std::optional<const T> &value) { return *value; }
+  constexpr static T deref(std::optional<const T> &value)
+  {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *value;
+  }
 };
 
 // [u8] span contract output.
@@ -130,7 +134,11 @@ struct SyscallArgParams<const T &> {
     return arg.has_value();
   }
 
-  constexpr static T &deref(std::optional<T> &value) { return *value; }
+  constexpr static T &deref(std::optional<T> &value)
+  {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return *value;
+  }
 };
 
 // Trivially copyable output types..
@@ -145,7 +153,7 @@ struct SyscallArgParams<T &> {
     return check_user_argument<T>(contract_memory, offset, sizeof(T));
   }
 
-  constexpr static bool validate(WritableOutput<T> arg)
+  constexpr static bool validate(WritableOutput<T> const &arg)
   {
     return arg.has_value();
   }
