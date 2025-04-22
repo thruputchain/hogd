@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <span>
 #include <vector>
 
 #include "hogd/base/types.h"
