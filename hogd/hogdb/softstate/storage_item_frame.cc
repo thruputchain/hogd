@@ -149,16 +149,15 @@ StorageItemFrame::RefcountedVariant::revert_nnint_set_add(int128_t add_value)
 bool
 StorageItemFrame::try_reserve_delta(StorageDelta const &delta)
 {
-  auto v = variant_.take();
-
   switch (delta.type()) {
   case StorageDeltaType::kBytestringSet:
-    return v->try_reserve_bytestring_set(delta.bytestring());
+    return variant_.try_reserve_bytestring_set(delta.bytestring());
   case StorageDeltaType::kNonnegativeIntSetAdd:
-    return v->try_reserve_nnint_set_add(from_xdr(delta.nnint().set_value),
-                                        from_xdr(delta.nnint().add_value));
+    return variant_.try_reserve_nnint_set_add(from_xdr(delta.nnint().set_value),
+                                              from_xdr(
+                                                  delta.nnint().add_value));
   case StorageDeltaType::kDelete:
-    return v->try_reserve_delete();
+    return variant_.try_reserve_delete();
   default:
     throw std::runtime_error("unknown delta type");
   }
@@ -173,21 +172,19 @@ StorageItemFrame::commit_delta(StorageDelta const &delta)
 void
 StorageItemFrame::revert_delta(StorageDelta const &delta)
 {
-  auto v = variant_.take();
-
   switch (delta.type()) {
   case StorageDeltaType::kDelete:
   case StorageDeltaType::kBytestringSet:
     // nothing to do in these cases, beyond releasing the typeclass reference
     break;
   case StorageDeltaType::kNonnegativeIntSetAdd:
-    v->revert_nnint_set_add(from_xdr(delta.nnint().add_value));
+    variant_.revert_nnint_set_add(from_xdr(delta.nnint().add_value));
     break;
   default:
     throw std::runtime_error("unimplemented");
   }
 
-  v->release_reference();
+  variant_.release_reference();
 }
 
 std::optional<StorageItem> const &
@@ -199,7 +196,7 @@ StorageItemFrame::get_snapshot_item() const
 void
 StorageItemFrame::clear_modifications()
 {
-  variant_->refcount_ = 0;
+  variant_.clear();
 }
 
 void
@@ -207,16 +204,15 @@ StorageItemFrame::commit_round()
 {
   x23::Defer cleanup([&] { clear_modifications(); });
 
-  auto v = variant_.take();
-
-  if (v->refcount_ == 0) {
+  if (variant_.refcount_ == 0) {
     // no committed modifications.
     return;
   }
 
-  assert(!std::holds_alternative<UnsetState>(v->variant_));
+  assert(!std::holds_alternative<UnsetState>(variant_.variant_));
   committed_base_item_ =
-      std::visit([&](auto const &arm) { return arm.to_item(); }, v->variant_);
+      std::visit([&](auto const &arm) { return arm.to_item(); },
+                 variant_.variant_);
 }
 
 void

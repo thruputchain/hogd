@@ -8,11 +8,13 @@
 #include "hogd/base/types.h"
 #include "hogd/hogdb/softstate/uint256_reservation.h"
 #include "storage_item.hh"
-#include "x23/mvar.h"
 
 namespace hogd {
 
 // Manage concurrent accesses to a StorageItem in the database.
+//
+// This object is not threadsafe.  It should only be accessed while
+// some external lock on it is held.
 //
 // TODO(geoff): Some data types will require internal data structures more
 // complex than a StorageItem,(which is really a serialization format more than
@@ -122,6 +124,12 @@ private:
         variant_ = UnsetState{};
     }
 
+    void clear()
+    {
+      refcount_ = 0;
+      variant_ = UnsetState{};
+    }
+
     // If these methods return true, a reference has been acquired
     bool try_reserve_delete();
     bool try_reserve_bytestring_set(Bytestring const &bytestring);
@@ -144,7 +152,7 @@ private:
   void clear_modifications();
 
   std::optional<StorageItem> committed_base_item_;
-  x23::MVar<RefcountedVariant> variant_;
+  RefcountedVariant variant_;
 };
 
 } // namespace hogd
