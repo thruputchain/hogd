@@ -190,6 +190,18 @@ parse(std::span<std::byte> contract_memory, Inputs const &tuple_args)
   }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
 }
 
+// Parse inputs to mock syscall, within native_exec.
+template<size_t Offset, typename ArgToParse, typename Inputs>
+constexpr auto
+parse_mock(Inputs const &tuple_args)
+{
+  using arg_params = SyscallArgParams<ArgToParse>;
+
+  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) {
+    return arg_params::parse_mock((std::get<Offset + Is>(tuple_args))...);
+  }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
+}
+
 constexpr static std::pair<HostFnResult, GasAmount> kFaultResult = {
     {HostFnErrorCode::kNoneOrRecoverable,
      static_cast<int32_t>(SyscallErrorCode::kFault)},
