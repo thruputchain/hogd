@@ -74,8 +74,8 @@ mock_test_inner(uint32_t inp_1, int128_t const &inp_128,
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 int_type_tests(uint32_t inp_1, int128_t const &inp_128,
-                int128_t inp_128_by_value,
-                uint32_t &out_1, uint64_t &out_2, int128_t &out_128)
+               int128_t inp_128_by_value, uint32_t &out_1, uint64_t &out_2,
+               int128_t &out_128)
 {
   EXPECT_EQ(inp_1, 100);
   EXPECT_EQ(inp_128, int128_t{1} << 70);
@@ -88,7 +88,6 @@ int_type_tests(uint32_t inp_1, int128_t const &inp_128,
 }
 
 } // namespace
-
 
 TEST(MockSyscallTest, IntTypeTests)
 {
@@ -106,12 +105,12 @@ TEST(MockSyscallTest, IntTypeTests)
   uint64_t out_2;
   int128_t out_128;
 
-  auto res =
-      mock_syscall_parser<SyscallNo::kExit, std::tuple<uint32_t, int128_xdr, int128_xdr>, 
-      std::tuple<uint32_t, uint64_t, int128_xdr>, &int_type_tests>(inp_1, reinterpret_cast<uint64_t>(&inp_128), 
-      reinterpret_cast<uint64_t>(&inp_128_by_value), 
-      reinterpret_cast<uint64_t>(&out_1), 
-      reinterpret_cast<uint64_t>(&out_2),
+  auto res = mock_syscall_parser<
+      SyscallNo::kExit, std::tuple<uint32_t, int128_xdr, int128_xdr>,
+      std::tuple<uint32_t, uint64_t, int128_xdr>, &int_type_tests>(
+      inp_1, reinterpret_cast<uint64_t>(&inp_128),
+      reinterpret_cast<uint64_t>(&inp_128_by_value),
+      reinterpret_cast<uint64_t>(&out_1), reinterpret_cast<uint64_t>(&out_2),
       reinterpret_cast<uint64_t>(&out_128));
   context.pop_context();
 
