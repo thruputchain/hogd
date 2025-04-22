@@ -37,6 +37,7 @@ add_executable(
   item_view_test.cc
   memory_access_test.cc
   syscall_entry_outer_tests.cc
+  syscall_parse_tests.cc
   userctx_test.cc
 )
 target_link_libraries(

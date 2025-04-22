@@ -25,6 +25,11 @@ namespace hogd {
 // - deref(), which turns the parsed value into something that's passed to the
 // syscall.
 //
+// There also is the following method, used during native_exec.
+// - parse_mock(), which is an analogue of parse().  Does not rely on an
+// explicit contract_memory argument, but rather treats the inputs as regular
+// pointers.
+//
 // This framework is separated into three methods for flexibility and
 // convenience. This allows definition of syscall arguments that might be
 // optionally supplied to be passed as std::optional<T> or T*, while
@@ -42,7 +47,9 @@ struct SyscallArgParams<T> {
   {
     return input;
   }
-  constexpr static bool validate(uint64_t /*unused*/) { return true; }
+
+  constexpr static T parse_mock(uint64_t input) { return input; }
+  constexpr static bool validate(T /*unused*/) { return true; }
   constexpr static T deref(T value) { return value; }
 };
 
@@ -51,12 +58,13 @@ template<typename T> requires (sizeof(T) > 8) && std::is_trivially_copyable_v<T>
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static T parse(std::span<std::byte> /*unused*/, uint64_t input)
+  constexpr static T *parse(std::span<std::byte> contract_memory,
+                            uint64_t offset)
   {
-    return input;
+    return check_user_argument<T>(contract_memory, offset, sizeof(T));
   }
-  constexpr static bool validate(uint64_t /*unused*/) { return true; }
-  constexpr static T deref(T value) { return value; }
+  constexpr static bool validate(T *argument) { return argument != nullptr; }
+  constexpr static T deref(T *value) { return *value; }
 };
 
 // [u8] span contract output.
@@ -67,6 +75,14 @@ template<> struct SyscallArgParams<std::span<std::byte>> {
   parse(std::span<std::byte> contract_memory, uint64_t offset, uint64_t len)
   {
     return check_user_span_argument(contract_memory, offset, len);
+  }
+
+  constexpr static std::optional<std::span<std::byte>>
+  parse_mock(uint64_t offset, uint64_t len)
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    auto *output_pointer = reinterpret_cast<std::byte *>(offset);
+    return std::span<std::byte>{output_pointer, len};
   }
 
   constexpr static bool validate(std::optional<std::span<std::byte>> arg)
@@ -92,6 +108,14 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   parse(std::span<std::byte> contract_memory, uint64_t offset, uint64_t len)
   {
     return check_user_span_argument(contract_memory, offset, len);
+  }
+
+  constexpr static std::optional<std::span<const std::byte>>
+  parse_mock(uint64_t offset, uint64_t len)
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    const auto *output_pointer = reinterpret_cast<const std::byte *>(offset);
+    return std::span<const std::byte>{output_pointer, len};
   }
 
   constexpr static bool validate(std::optional<std::span<const std::byte>> arg)
