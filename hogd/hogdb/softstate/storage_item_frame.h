@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <exception>
 #include <optional>
 #include <variant>
 
@@ -92,13 +93,23 @@ private:
     static std::optional<StorageItem> to_item() { return std::nullopt; }
   };
 
-  using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs, DeleteArgs>;
+  // No deltas have been applied or reserved.
+  // If variant.refcount is 0, then the variant is in this state.
+  struct UnsetState {
+    static bool typeclass_match() { return true; };
+
+    // to_item should never be called if refcount is 0.
+    static std::optional<StorageItem> to_item() { std::terminate(); }
+  };
+
+  using variant_t =
+      std::variant<BytestringArgs, NNIntSetAddArgs, DeleteArgs, UnsetState>;
 
   // Contents of the variant are ignored if refcount_ is 0.
   // Every successful try_reserve increases the refcount, and revert reduces it.
   class RefcountedVariant {
   public:
-    variant_t variant_;
+    variant_t variant_ = UnsetState{};
     uint32_t refcount_ = 0;
 
     void acquire_reference() { ++refcount_; }
@@ -107,6 +118,8 @@ private:
     {
       assert(refcount_ > 0);
       --refcount_;
+      if (refcount_ == 0)
+        variant_ = UnsetState{};
     }
 
     // If these methods return true, a reference has been acquired

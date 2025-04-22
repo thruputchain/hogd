@@ -174,20 +174,21 @@ void
 StorageItemFrame::revert_delta(StorageDelta const &delta)
 {
   auto v = variant_.take();
-  v->release_reference();
 
   switch (delta.type()) {
   case StorageDeltaType::kDelete:
   case StorageDeltaType::kBytestringSet:
     // nothing to do in these cases, beyond releasing the typeclass reference
     // above
-    return;
+    break;
   case StorageDeltaType::kNonnegativeIntSetAdd:
     v->revert_nnint_set_add(from_xdr(delta.nnint().add_value));
-    return;
+    break;
   default:
     throw std::runtime_error("unimplemented");
   }
+
+  v->release_reference();
 }
 
 std::optional<StorageItem> const &
@@ -214,6 +215,7 @@ StorageItemFrame::commit_round()
     return;
   }
 
+  assert(!std::holds_alternative<UnsetState>(v->variant_));
   committed_base_item_ =
       std::visit([&](auto const &arm) { return arm.to_item(); }, v->variant_);
 }
