@@ -4,7 +4,7 @@
 // thread_local, it supports per-thread variables that are local rather than
 // global in scope.  For example, if a class uses PerThread to define a member
 // variable, every instance will have its own per-thread copies of the
-// variable.
+// variable. It also supports iterating through each per-thread copy.
 //
 // The implementation strategy is to maintain a thread_local std::vector<T> for
 // each T. Then, each PerThread instance refers to an index in the
@@ -14,13 +14,14 @@
 // first access) to avoid wasting memory if the thread never touches the
 // PerThread variable.
 //
-// See also alloc_percpu() in the Linux Kernel, which works in a similar way
-// but uses a per-core heap that stores a mix of types in one mapping. We don't
-// do this here in order to avoid the implementation complexity of a full heap
-// allocator, and the added difficulty of constructing and destructing types
-// each time a new thread spawns and exits. Instead we went with a per-thread
-// std::vector<T> for each T, so that each type is grouped together, making
-// it easy to know how to construct and destruct items.
+// See also alloc_percpu() in the Linux Kernel, which provides similar
+// functionality but uses a per-core heap that stores a mix of types in one
+// mapping. We don't do this here in order to avoid the implementation
+// complexity of a full heap allocator, and the added difficulty of
+// constructing and destructing variables each time a new thread spawns and
+// exits.  Instead we went with a per-thread std::vector<T> for each T, so that
+// each type is grouped together, making it easier to construct and destruct
+// items.
 
 #pragma once
 
@@ -182,12 +183,14 @@ public:
 
   // for_each runs func on each thread-local copy of the variable. The lock
   // returned by lock_threads() must be passed as ul.
+  // NOLINTBEGIN(misc-unused-parameters)
   template<typename F> void for_each(std::unique_lock<std::mutex> &ul, F &&func)
   {
     assert(ul.owns_lock());
     assert(ul.mutex() == &storage_.lock_);
     storage_.for_each(idx_, std::forward<F>(func));
   }
+  // NOLINTEND(misc-unused-parameters)
 
 private:
   static inline detail::TLStorage<T> storage_;
@@ -220,6 +223,14 @@ public:
     if (!tl_count.global_count) [[unlikely]]
       tl_count.global_count = &global_counter_;
   }
+
+  PerThreadCounter &operator+=(const T &rhs)
+  {
+    inc(rhs);
+    return *this;
+  }
+  bool operator==(const T &rhs) const { return get() == rhs; }
+  auto operator<=>(const T &rhs) const { return get() <=> rhs; }
 
 private:
   struct TLCounter {

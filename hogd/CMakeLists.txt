@@ -1,6 +1,8 @@
 # Build each shared module
 add_subdirectory(base)
+add_subdirectory(container)
 add_subdirectory(crypto)
+add_subdirectory(metrics)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
 
@@ -19,3 +21,8 @@ target_link_libraries(
 add_subdirectory(coord)
 add_subdirectory(hogdb)
 add_subdirectory(hogexec)
+
+# Build module for mock contract tests
+if (ENABLE_TEST_FFI)
+  add_subdirectory(test_ffi)
+endif()

@@ -2,7 +2,11 @@
 
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <string_view>
 
 #include "hogd/base/types.h"
 #include "types.hh"
@@ -26,13 +30,31 @@ to_xdr(uint128_t value)
 constexpr int128_t
 from_xdr(int128_xdr value)
 {
-  return (static_cast<int128_t>(value.highbits) << 64) + value.lowbits;
+  return (int128_t{value.highbits} << 64) + value.lowbits;
 }
 
 constexpr uint128_t
 from_xdr(uint128_xdr value)
 {
-  return (static_cast<uint128_t>(value.highbits) << 64) + value.lowbits;
+  return (uint128_t{value.highbits} << 64) + value.lowbits;
 }
 
 } // namespace hogd
+
+// enable hashing of important XDR types
+template<std::size_t N> struct std::hash<std::array<uint8_t, N>> {
+  std::size_t operator()(const std::array<uint8_t, N> &array) const noexcept
+  {
+    return std::hash<std::string_view>{}(
+        std::string_view(reinterpret_cast<const char *>(array.data()), N));
+  }
+};
+
+template<> struct std::hash<hogd::AddressAndKey> {
+  std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept
+  {
+    return std::hash<std::string_view>{}(
+        {reinterpret_cast<const char *>(&addrkey),
+         sizeof(hogd::AddressAndKey)});
+  }
+};

@@ -1,12 +1,12 @@
 #pragma once
 
-#include <cstdint>
 #include <cstdio>
+#include <span>
+#include <stdexcept>
 #include <string>
-#include <vector>
+#include <string_view>
 
 #include "contract.hh"
-#include "types.hh"
 
 namespace hogd ::test {
 

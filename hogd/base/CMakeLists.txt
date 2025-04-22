@@ -2,18 +2,24 @@
 add_library(
   base
   init.cc
+  io.cc
   log.cc
+  os.cc
   status.cc
   string.cc
 )
 
-target_link_libraries(base protocol)
+target_link_libraries(
+  base 
+  protocol
+)
 
 # create base module test binary
 add_executable(
   base_test
   bits_test.cc
   cpputil_test.cc
+  io_test.cc
   perthread_test.cc
   status_test.cc
   string_test.cc

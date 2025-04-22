@@ -9,14 +9,26 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
+#include <version>
+
+#if defined(__cpp_lib_move_only)
+#include <functional>
+#endif // defined(__cpp_lib_move_only)
 
 namespace hogd {
+
+#if defined(__cpp_lib_move_only)
+
+using UniqueFunction = std::move_only_function;
+
+#else // defined(__cpp_lib_move_only)
 
 namespace detail {
 
 template<typename Ret, typename... Args> class InvokerBase {
 public:
   virtual ~InvokerBase() = default;
+  // NOLINTNEXTLINE(portability-template-virtual-member-function)
   virtual Ret operator()(Args &&...args) = 0;
 };
 
@@ -101,5 +113,7 @@ operator==(const UniqueFunction<Ret, Args...> &f, std::nullptr_t)
 {
   return !!f;
 }
+
+#endif // defined(__cpp_lib_move_only)
 
 } // namespace hogd
