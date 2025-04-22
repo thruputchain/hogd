@@ -9,8 +9,19 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
+#include <version>
+
+#if defined(__cpp_lib_move_only)
+#include <functional>
+#endif // defined(__cpp_lib_move_only)
 
 namespace hogd {
+
+#if defined(__cpp_lib_move_only)
+
+using UniqueFunction = std::move_only_function;
+
+#else // defined(__cpp_lib_move_only)
 
 namespace detail {
 
@@ -102,5 +113,7 @@ operator==(const UniqueFunction<Ret, Args...> &f, std::nullptr_t)
 {
   return !!f;
 }
+
+#endif // defined(__cpp_lib_move_only)
 
 } // namespace hogd

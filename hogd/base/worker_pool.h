@@ -17,6 +17,7 @@
 #include <tuple>
 #include <type_traits>
 #include <vector>
+#include <version>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
