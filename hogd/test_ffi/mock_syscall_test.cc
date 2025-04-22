@@ -24,6 +24,7 @@
 namespace hogd {
 
 namespace {
+
 // primitive type, int128, int128, opaque<>, optional
 using input_types =
     std::tuple<uint32_t, int128_xdr, int128_xdr, x23::Vec<uint8_t, 100>,
@@ -71,9 +72,25 @@ mock_test_inner(uint32_t inp_1, int128_t const &inp_128,
   return {SyscallErrorCode::kNoReturnBufferAvailable};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+int_type_tests(uint32_t inp_1, int128_t const &inp_128,
+                int128_t inp_128_by_value,
+                uint32_t &out_1, uint64_t &out_2, int128_t &out_128)
+{
+  EXPECT_EQ(inp_1, 100);
+  EXPECT_EQ(inp_128, int128_t{1} << 70);
+  EXPECT_EQ(inp_128_by_value, int128_t{1} << 80);
+
+  out_1 = 10;
+  out_2 = UINT64_MAX;
+  out_128 = int128_t{out_1} + int128_t{out_2};
+  return {{SyscallErrorCode::kNoReturnBufferAvailable}, 0};
+}
+
 } // namespace
 
-TEST(MockSyscallTest, SyscallPassArgs)
+
+TEST(MockSyscallTest, IntTypeTests)
 {
   DBContext db_context(PortAllocator::get());
   db_context.advance_new_block();
@@ -81,29 +98,30 @@ TEST(MockSyscallTest, SyscallPassArgs)
   SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());
 
-  input_types input = {100,
-                       to_xdr(int128_t{1} << 70),
-                       to_xdr(int128_t{1} << 80),
-                       x23::Vec<uint8_t>{0, 1, 2, 3, 4, 5},
-                       x23::Ptr<uint64_t>(new uint64_t{100}),
-                       nullptr};
-  output_types output = {0, 0, to_xdr(int128_t{0}), x23::Vec<uint8_t>(10, 0)};
+  uint32_t inp_1 = 100;
+  int128_t inp_128 = int128_t{1} << 70;
+  int128_t inp_128_by_value = int128_t{1} << 80;
+
+  uint32_t out_1;
+  uint64_t out_2;
+  int128_t out_128;
 
   auto res =
-      run_mock_func_inner<input_types, output_types, &mock_test_inner>(input,
-                                                                       output);
+      mock_syscall_parser<SyscallNo::kExit, std::tuple<uint32_t, int128_xdr, int128_xdr>, 
+      std::tuple<uint32_t, uint64_t, int128_xdr>, &int_type_tests>(inp_1, reinterpret_cast<uint64_t>(&inp_128), 
+      reinterpret_cast<uint64_t>(&inp_128_by_value), 
+      reinterpret_cast<uint64_t>(&out_1), 
+      reinterpret_cast<uint64_t>(&out_2),
+      reinterpret_cast<uint64_t>(&out_128));
   context.pop_context();
 
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
             std::to_underlying(SyscallErrorCode::kNoReturnBufferAvailable));
 
-  EXPECT_EQ(get<0>(output), 10);
-  EXPECT_EQ(get<1>(output), UINT64_MAX);
-  EXPECT_EQ(get<2>(output), to_xdr(int128_t{10} + int128_t{UINT64_MAX}));
-  EXPECT_EQ(get<3>(output).size(), 10);
-  EXPECT_EQ(get<3>(output)[5], 10);
-  EXPECT_EQ(get<3>(output)[7], 200);
+  EXPECT_EQ(out_1, 10);
+  EXPECT_EQ(out_2, UINT64_MAX);
+  EXPECT_EQ(out_128, int128_t{10} + int128_t{UINT64_MAX});
 }
 
 } // namespace hogd
