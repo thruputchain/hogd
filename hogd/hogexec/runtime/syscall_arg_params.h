@@ -52,13 +52,13 @@ template<typename T> requires (sizeof(T) > 8) && std::is_trivially_copyable_v<T>
 struct SyscallArgParams<T> {
   constexpr static size_t kNumInputs = 1;
 
-  constexpr static T *parse(std::span<std::byte> contract_memory,
+  constexpr static const T *parse(std::span<std::byte> contract_memory,
                             uint64_t offset)
   {
     return check_user_argument<T>(contract_memory, offset, sizeof(T));
   }
-  constexpr static bool validate(T *argument) { return argument != nullptr; }
-  constexpr static T deref(T *value) { return *value; }
+  constexpr static bool validate(const T *argument) { return argument != nullptr; }
+  constexpr static T deref(const T *value) { return *value; }
 };
 
 // [u8] span contract output.
