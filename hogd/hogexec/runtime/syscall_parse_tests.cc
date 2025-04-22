@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <span>
 #include <vector>
 
 #include "hogd/base/types.h"
@@ -35,7 +36,7 @@ TEST(SyscallParseTests, ParsePrimitiveTypes)
   EXPECT_EQ(memory[5], 0);
 
   // larger input types work as regular pointers
-  auto *int128_inp = SyscallArgParams<int128_t>::parse(contract_memory, 8);
+  const auto *int128_inp = SyscallArgParams<int128_t>::parse(contract_memory, 8);
   ASSERT_TRUE(int128_inp);
   EXPECT_TRUE(SyscallArgParams<int128_t>::validate(int128_inp));
   EXPECT_EQ(big_num, *int128_inp);
