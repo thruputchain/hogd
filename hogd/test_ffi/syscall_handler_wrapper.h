@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <format>
@@ -314,7 +315,8 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
   // lambda context
   return [&]<size_t... Is>(
              TupleIndexSequence<Is...> /*unused*/) -> ForeignHostFnResult {
-    // Attempt to load syscall arguments from regular machine, not contract) memory.
+    // Attempt to load syscall arguments from regular machine, not contract)
+    // memory.
     auto parsed_args = std::tuple{
         parse_mock<syscall_t::template offset_i<Is>(),
                    typename syscall_t::template arg_i<Is>>(input_args)...};
@@ -350,9 +352,9 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     }
 
     auto extra_args =
-      syscall_t::extra_args(handler->to_handler(),
-                            WrappedGasAmount{
-                                std::numeric_limits<uint64_t>::max()});
+        syscall_t::extra_args(handler->to_handler(),
+                              WrappedGasAmount{
+                                  std::numeric_limits<uint64_t>::max()});
 
     // Invoke the inner syscall
     auto res =
@@ -376,9 +378,8 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
                                  x23::show(SyscallErrorCode(syscall_code)));
       }
       else {
-        log_string =
-            x23::show(make_syscall_output_struct<InputArg,
-                                                 OutputArg>(std::tuple{
+        log_string = x23::show(
+            make_syscall_output_struct<InputArg, OutputArg>(std::tuple{
                 SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
                     std::get<Is>(parsed_args))...}));
       }
