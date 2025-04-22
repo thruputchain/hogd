@@ -179,7 +179,6 @@ StorageItemFrame::revert_delta(StorageDelta const &delta)
   case StorageDeltaType::kDelete:
   case StorageDeltaType::kBytestringSet:
     // nothing to do in these cases, beyond releasing the typeclass reference
-    // above
     break;
   case StorageDeltaType::kNonnegativeIntSetAdd:
     v->revert_nnint_set_add(from_xdr(delta.nnint().add_value));
