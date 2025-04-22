@@ -40,6 +40,7 @@ TEST(SyscallParseTests, ParsePrimitiveTypes)
   auto int128_inp = SyscallArgParams<int128_t>::parse(contract_memory, 8);
   ASSERT_TRUE(int128_inp);
   EXPECT_TRUE(SyscallArgParams<int128_t>::validate(int128_inp));
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(big_num, *int128_inp);
 }
 

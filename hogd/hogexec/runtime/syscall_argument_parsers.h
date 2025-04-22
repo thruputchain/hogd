@@ -23,7 +23,11 @@ public:
     : value_(std::move(value)), original_pointer_(ptr)
   {}
 
-  T &get() { return value_.value(); }
+  T &get()
+  {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return value_.value();
+  }
 
   bool has_value() const { return value_.has_value(); }
 
