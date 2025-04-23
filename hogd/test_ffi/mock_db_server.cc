@@ -23,8 +23,7 @@ MockDBServer::db_snapshot_read_null()
 }
 
 x23::Async<ExpectedStorageItem>
-MockDBServer::get_snapshot_item(BlockID block,
-                                       AddressAndKey const &addrkey)
+MockDBServer::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 {
   if (block != block_id_) {
     co_return ExpectedStorageItem(RPCError::kBadBlockID);
@@ -40,8 +39,7 @@ MockDBServer::get_snapshot_item(BlockID block,
   co_return out;
 }
 x23::Async<ExpectedContract>
-MockDBServer::get_contract(BlockID block,
-                                  SHA256Hash const &contract_hash)
+MockDBServer::get_contract(BlockID block, SHA256Hash const &contract_hash)
 {
   if (block != block_id_) {
     co_return ExpectedContract(RPCError::kBadBlockID);
@@ -59,7 +57,7 @@ MockDBServer::get_contract(BlockID block,
 
 x23::Async<ExpectedDeployment>
 MockDBServer::get_deployment(BlockID block,
-                                    ContractAddress const &contract_address)
+                             ContractAddress const &contract_address)
 {
   if (block != block_id_) {
     co_return ExpectedDeployment(RPCError::kBadBlockID);

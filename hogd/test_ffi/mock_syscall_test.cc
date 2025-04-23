@@ -25,8 +25,8 @@ namespace {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 int_type_test(uint32_t inp_1, int128_t const &inp_128,
-               int128_t inp_128_by_value, uint32_t &out_1, uint64_t &out_2,
-               int128_t &out_128)
+              int128_t inp_128_by_value, uint32_t &out_1, uint64_t &out_2,
+              int128_t &out_128)
 {
   EXPECT_EQ(inp_1, 100);
   EXPECT_EQ(inp_128, int128_t{1} << 70);
@@ -39,7 +39,8 @@ int_type_test(uint32_t inp_1, int128_t const &inp_128,
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-span_type_test(std::span<const std::byte> span_in, std::span<std::byte> span_out)
+span_type_test(std::span<const std::byte> span_in,
+               std::span<std::byte> span_out)
 {
   EXPECT_EQ(span_in.size(), 8);
   EXPECT_EQ(span_out.size(), 4);
@@ -55,7 +56,6 @@ span_type_test(std::span<const std::byte> span_in, std::span<std::byte> span_out
   return {{SyscallErrorCode::kStorageKeyNotExist}, 0};
 }
 
-
 } // namespace
 
 TEST(MockSyscallTest, IntTypeTest)
@@ -63,7 +63,7 @@ TEST(MockSyscallTest, IntTypeTest)
   uint32_t port = PortAllocator::get();
   MockDBServer server(0);
   server.start_server(port);
-  
+
   DBContext db_context(port);
   db_context.advance_new_block();
 
@@ -101,7 +101,7 @@ TEST(MockSyscallTest, SpanTest)
   uint32_t port = PortAllocator::get();
   MockDBServer server(0);
   server.start_server(port);
-  
+
   DBContext db_context(port);
   db_context.advance_new_block();
 
@@ -114,15 +114,11 @@ TEST(MockSyscallTest, SpanTest)
   std::span<const std::byte> inp_span = std::as_bytes(std::span(&inp, 1));
   std::span<std::byte> out_span = std::as_writable_bytes(std::span(&out, 1));
 
-  auto res = mock_syscall_parser<
-      SyscallNo::kExit, std::tuple<x23::Vec<uint8_t>>,
-      std::tuple<x23::Vec<uint8_t>>, &span_type_test>(
-      reinterpret_cast<uint64_t>(inp_span.data()),
-      inp_span.size(),
-      reinterpret_cast<uint64_t>(out_span.data()),
-      out_span.size(),
-      0,
-      0);
+  auto res =
+      mock_syscall_parser<SyscallNo::kExit, std::tuple<x23::Vec<uint8_t>>,
+                          std::tuple<x23::Vec<uint8_t>>, &span_type_test>(
+          reinterpret_cast<uint64_t>(inp_span.data()), inp_span.size(),
+          reinterpret_cast<uint64_t>(out_span.data()), out_span.size(), 0, 0);
   context.pop_context();
 
   ASSERT_EQ(res.panic, 0);

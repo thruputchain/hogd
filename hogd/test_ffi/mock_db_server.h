@@ -52,7 +52,6 @@ private:
   x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>> deployments_;
 };
 
-static_assert(
-    is_DatabaseSnapshotReadInterfaceV1<MockDBServer *, x23::Async>);
+static_assert(is_DatabaseSnapshotReadInterfaceV1<MockDBServer *, x23::Async>);
 
 } // namespace hogd
