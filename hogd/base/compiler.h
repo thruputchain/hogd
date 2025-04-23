@@ -4,6 +4,7 @@
 
 #include <concepts>
 #include <new>
+#include <utility>
 
 #include "hogd/base/types.h"
 
@@ -154,8 +155,21 @@ cpu_relax()
   // are cases where we want UMWAIT/TPAUSE on x86.
 }
 
+// overflowing_add returns a pair of the sum and a boolean indicating if an
+// overflow would occur. If it would, the sum is returned as a wrapped value.
+template<std::integral T>
+std::pair<T, bool>
+overflowing_add(T a, T b)
+{
+  T ret;
+  bool overflow = __builtin_add_overflow(a, b, &ret);
+  return {ret, overflow};
+}
+
 // integer_add_overflow adds b to a and stores the result in out. Returns
 // true if there was an overflow while performing the addition.
+//
+// DEPRECATED: use overflowing_add().
 template<std::integral T, std::integral U, std::integral Result>
 inline bool
 integer_add_overflow(T a, U b, Result *out)
@@ -166,6 +180,8 @@ integer_add_overflow(T a, U b, Result *out)
 // integer_add_overflow adds b to a without storing the result.  Returns true if
 // there would be an overflow while performing the addition and storing in the
 // type Result.  Result defaults to decltype(a+b).
+//
+// DEPRECATED: use overflowing_add().
 template<typename R = void, std::integral T, std::integral U>
 inline bool
 integer_add_overflow(T a, U b)
