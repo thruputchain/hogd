@@ -76,10 +76,9 @@ read_unaligned(const void *ptr)
 template<typename T>
 requires (std::is_trivially_copyable_v<T> && !std::is_const_v<T>)
 WritableOutput<T>
-check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset,
-                    uint64_t user_len)
+check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset)
 {
-  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
+  if (!check_memory_range(contract_memory.size(), user_offset, sizeof(T))) {
     return WritableOutput<T>(std::nullopt, nullptr);
   }
   return WritableOutput<T>(read_unaligned<T>(contract_memory.data() +
@@ -87,16 +86,38 @@ check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset,
                            contract_memory.data() + user_offset);
 }
 
-template<typename T> requires std::is_trivially_copyable_v<T>
-std::optional<const T>
-check_user_argument(std::span<const std::byte> contract_memory,
-                    uint64_t user_offset, uint64_t user_len)
+template<typename T>
+requires (std::is_trivially_copyable_v<T> && !std::is_const_v<T>)
+WritableOutput<T>
+check_user_argument_mock(uint64_t user_offset)
 {
-  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  auto *ptr = reinterpret_cast<void *>(user_offset);
+  return WritableOutput<T>(read_unaligned<T>(ptr), ptr);
+}
+
+template<typename T>
+requires (std::is_trivially_copyable_v<T> && std::is_const_v<T>)
+std::optional<T>
+check_user_argument(std::span<const std::byte> contract_memory,
+                    uint64_t user_offset)
+{
+  if (!check_memory_range(contract_memory.size(), user_offset, sizeof(T))) {
     return std::nullopt;
   }
   return read_unaligned<std::remove_cvref_t<T>>(contract_memory.data() +
                                                 user_offset);
+}
+
+template<typename T>
+requires (std::is_trivially_copyable_v<T> && std::is_const_v<T>)
+std::optional<T>
+check_user_argument_mock(uint64_t user_offset)
+{
+  // NOLINTBEGIN(performance-no-int-to-ptr)
+  return read_unaligned<std::remove_cvref_t<T>>(
+      reinterpret_cast<void *>(user_offset));
+  // NOLINTEND(performance-no-int-to-ptr)
 }
 
 inline std::optional<std::span<std::byte>>
@@ -127,6 +148,11 @@ std::optional<const T>
 check_user_custom_input_argument(std::span<const std::byte> contract_memory,
                                  Args... args);
 
+// custom parsing in mock syscall inputs
+template<typename T, typename... Args>
+requires (std::same_as<Args, uint64_t> && ...)
+std::optional<const T> check_user_custom_input_argument_mock(Args... args);
+
 template<>
 inline std::optional<const Signature>
 check_user_custom_input_argument(std::span<const std::byte> contract_memory,
@@ -141,12 +167,34 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
   case CryptographicScheme::Ed25519:
   {
     if (auto ed25519 =
-            check_user_argument<Ed25519Signature>(contract_memory, user_offset,
-                                                  sizeof(Ed25519Signature))) {
+            check_user_argument<const Ed25519Signature>(contract_memory,
+                                                        user_offset)) {
       out.ed25519() = *ed25519;
       return out;
     }
     return std::nullopt;
+  }
+  default:
+    return std::nullopt;
+  }
+}
+
+template<>
+inline std::optional<const Signature>
+check_user_custom_input_argument_mock(uint64_t user_discriminant,
+                                      uint64_t user_offset)
+{
+  auto disc =
+      check_user_primitive_argument<CryptographicScheme>(user_discriminant);
+
+  Signature out;
+  out.scheme(disc);
+  switch (disc) {
+  case CryptographicScheme::Ed25519:
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    out.ed25519() = *reinterpret_cast<const Ed25519Signature *>(user_offset);
+    return out;
   }
   default:
     return std::nullopt;
@@ -168,12 +216,34 @@ check_user_custom_input_argument(std::span<const std::byte> contract_memory,
   case CryptographicScheme::Ed25519:
   {
     if (auto ed25519 =
-            check_user_argument<Ed25519PublicKey>(contract_memory, user_offset,
-                                                  sizeof(Ed25519Signature))) {
+            check_user_argument<const Ed25519PublicKey>(contract_memory,
+                                                        user_offset)) {
       out.ed25519() = *ed25519;
       return out;
     }
     return std::nullopt;
+  }
+  default:
+    return std::nullopt;
+  }
+}
+
+template<>
+inline std::optional<const PublicKey>
+check_user_custom_input_argument_mock(uint64_t user_discriminant,
+                                      uint64_t user_offset)
+{
+  auto disc =
+      check_user_primitive_argument<CryptographicScheme>(user_discriminant);
+
+  PublicKey out;
+  out.scheme(disc);
+  switch (disc) {
+  case CryptographicScheme::Ed25519:
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    out.ed25519() = *reinterpret_cast<const Ed25519PublicKey *>(user_offset);
+    return out;
   }
   default:
     return std::nullopt;

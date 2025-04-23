@@ -4,6 +4,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <span>
 
@@ -26,6 +27,11 @@ namespace hogd {
 // - deref(), which turns the parsed value into something that's passed to the
 // syscall.
 //
+// There also is the following method, used during native_exec.
+// - parse_mock(), which is an analogue of parse().  Does not rely on an
+// explicit contract_memory argument, but rather treats the inputs as regular
+// pointers.
+//
 // This framework is separated into three methods for flexibility and
 // convenience. This allows definition of syscall arguments that might be
 // optionally supplied to be passed as std::optional<T> or T*, while
@@ -44,6 +50,7 @@ struct SyscallArgParams<T> {
     return input;
   }
 
+  constexpr static T parse_mock(uint64_t input) { return input; }
   constexpr static bool validate(T /*unused*/) { return true; }
   constexpr static T deref(T value) { return value; }
 };
@@ -56,8 +63,14 @@ struct SyscallArgParams<T> {
   constexpr static std::optional<const T>
   parse(std::span<std::byte> contract_memory, uint64_t offset)
   {
-    return check_user_argument<const T>(contract_memory, offset, sizeof(T));
+    return check_user_argument<const T>(contract_memory, offset);
   }
+
+  constexpr static std::optional<const T> parse_mock(uint64_t offset)
+  {
+    return check_user_argument_mock<const T>(offset);
+  }
+
   constexpr static bool validate(std::optional<const T> argument)
   {
     return argument.has_value();
@@ -77,6 +90,14 @@ template<> struct SyscallArgParams<std::span<std::byte>> {
   parse(std::span<std::byte> contract_memory, uint64_t offset, uint64_t len)
   {
     return check_user_span_argument(contract_memory, offset, len);
+  }
+
+  constexpr static std::optional<std::span<std::byte>>
+  parse_mock(uint64_t offset, uint64_t len)
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    auto *output_pointer = reinterpret_cast<std::byte *>(offset);
+    return std::span<std::byte>{output_pointer, len};
   }
 
   constexpr static bool validate(std::optional<std::span<std::byte>> arg)
@@ -104,6 +125,14 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
     return check_user_span_argument(contract_memory, offset, len);
   }
 
+  constexpr static std::optional<std::span<const std::byte>>
+  parse_mock(uint64_t offset, uint64_t len)
+  {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    const auto *output_pointer = reinterpret_cast<const std::byte *>(offset);
+    return std::span<const std::byte>{output_pointer, len};
+  }
+
   constexpr static bool validate(std::optional<std::span<const std::byte>> arg)
   {
     return arg.has_value();
@@ -126,7 +155,12 @@ struct SyscallArgParams<const T &> {
   constexpr static std::optional<T> parse(std::span<std::byte> contract_memory,
                                           uint64_t offset)
   {
-    return check_user_argument<const T>(contract_memory, offset, sizeof(T));
+    return check_user_argument<const T>(contract_memory, offset);
+  }
+
+  constexpr static std::optional<T> parse_mock(uint64_t offset)
+  {
+    return check_user_argument_mock<const T>(offset);
   }
 
   constexpr static bool validate(std::optional<T> arg)
@@ -150,7 +184,12 @@ struct SyscallArgParams<T &> {
   constexpr static WritableOutput<T> parse(std::span<std::byte> contract_memory,
                                            uint64_t offset)
   {
-    return check_user_argument<T>(contract_memory, offset, sizeof(T));
+    return check_user_argument<T>(contract_memory, offset);
+  }
+
+  constexpr static WritableOutput<T> parse_mock(uint64_t offset)
+  {
+    return check_user_argument_mock<T>(offset);
   }
 
   constexpr static bool validate(WritableOutput<T> const &arg)
@@ -173,7 +212,18 @@ struct SyscallArgParams<const T *> {
   constexpr static std::optional<T> parse(std::span<std::byte> contract_memory,
                                           uint64_t offset)
   {
-    return check_user_argument<const T>(contract_memory, offset, sizeof(T));
+    return check_user_argument<const T>(contract_memory, offset);
+  }
+
+  constexpr static std::optional<T> parse_mock(uint64_t offset)
+  {
+    // 0 can be a valid pointer in wasm.  As such, the optional input types in
+    // the sdk use UINT64_MAX as the nullptr (in the case of a None input),
+    // instead of 0.
+    if (offset == std::numeric_limits<uint64_t>::max()) {
+      return std::nullopt;
+    }
+    return check_user_argument_mock<const T>(offset);
   }
 
   constexpr static bool validate(std::optional<T> /*unused*/) { return true; }
@@ -202,6 +252,12 @@ template<> struct SyscallArgParams<const Signature &> {
                                                        arg2);
   }
 
+  constexpr static std::optional<const Signature> parse_mock(uint64_t arg1,
+                                                             uint64_t arg2)
+  {
+    return check_user_custom_input_argument_mock<Signature>(arg1, arg2);
+  }
+
   constexpr static bool validate(std::optional<const Signature> const &arg)
   {
     return arg.has_value();
@@ -223,6 +279,12 @@ template<> struct SyscallArgParams<const PublicKey &> {
   {
     return check_user_custom_input_argument<PublicKey>(contract_memory, arg1,
                                                        arg2);
+  }
+
+  constexpr static std::optional<const PublicKey> parse_mock(uint64_t arg1,
+                                                             uint64_t arg2)
+  {
+    return check_user_custom_input_argument_mock<PublicKey>(arg1, arg2);
   }
 
   constexpr static bool validate(std::optional<const PublicKey> const &arg)

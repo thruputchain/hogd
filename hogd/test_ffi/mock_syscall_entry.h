@@ -6,10 +6,9 @@
 
 namespace hogd {
 
-ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
-                                            const unsigned char *input,
-                                            uint32_t input_len,
-                                            unsigned char *output,
-                                            uint32_t output_len) noexcept;
+ForeignHostFnResult mock_syscall_entrypoint(uint64_t syscall, uint64_t arg1,
+                                            uint64_t arg2, uint64_t arg3,
+                                            uint64_t arg4, uint64_t arg5,
+                                            uint64_t arg6) noexcept;
 
 } // namespace hogd
