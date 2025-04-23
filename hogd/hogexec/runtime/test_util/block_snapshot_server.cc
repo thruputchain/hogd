@@ -4,8 +4,8 @@
 #include <cstdlib>
 #include <utility>
 
-#include "hogd/base/xdr_util.h"
 #include "db_read_interface.hh"
+#include "hogd/base/xdr_util.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -75,7 +75,7 @@ BlockSnapshotServer::get_deployment(BlockID block,
   co_return out;
 }
 
-void 
+void
 BlockSnapshotServer::start_server(uint32_t port_number)
 {
   auto lfd = x23::tcplisten(port_number);
@@ -86,16 +86,11 @@ BlockSnapshotServer::start_server(uint32_t port_number)
 
   [](x23::CoroPoll &cp, BlockSnapshotServer *server,
      x23::UniqueFd lfd) -> x23::Detached {
-        std::printf("A\n");
     co_await cp.pool_.bg();
-    std::printf("B\n");
     while (auto c = co_await cp.accept(lfd)) {
-        std::printf("C\n");
       x23::rpc_stream_logged(cp, *c).server(server);
-      std::printf("D\n");
     }
   }(cp_, this, std::move(lfd));
 }
-
 
 } // namespace hogd

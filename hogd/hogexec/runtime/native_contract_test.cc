@@ -76,7 +76,9 @@ protected:
 
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
     snapshot_server_.start_server(10000);
-    db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ = 10000});
+    db_proxy_ =
+        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
+                                                             10000});
   }
 
   x23::ThreadPool pool_ = x23::ThreadPool(1);
@@ -106,7 +108,6 @@ TEST_F(NativeContractTest, BasicInstantiate)
 
   ASSERT_FALSE(res.result_);
   ASSERT_EQ(res.result_.error(), InvokeErrorCode::kDeterministic);
-  std::printf("end test\n");
 }
 
 } // namespace hogd

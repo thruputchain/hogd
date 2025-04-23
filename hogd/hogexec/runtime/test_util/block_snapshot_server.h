@@ -2,16 +2,17 @@
 
 #include <unordered_map>
 
-#include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "contract.hh"
 #include "db_read_interface.hh"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/event.h"
 #include "x23/mvar.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -42,7 +43,7 @@ public:
 private:
   BlockID block_id_;
 
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
+  x23::ThreadPool pool_ = x23::ThreadPool(2);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
   x23::MVar<std::unordered_map<AddressAndKey, StorageItem>> items_;
