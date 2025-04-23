@@ -114,9 +114,10 @@ requires (std::is_trivially_copyable_v<T> && std::is_const_v<T>)
 std::optional<T>
 check_user_argument_mock(uint64_t user_offset)
 {
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  // NOLINTBEGIN(performance-no-int-to-ptr)
   return read_unaligned<std::remove_cvref_t<T>>(
       reinterpret_cast<void *>(user_offset));
+  // NOLINTEND(performance-no-int-to-ptr)
 }
 
 inline std::optional<std::span<std::byte>>
