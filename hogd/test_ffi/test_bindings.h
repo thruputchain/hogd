@@ -51,7 +51,7 @@ void *open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
                            unsigned int signed_tx_len);
 void close_syscall_handler(void *syscall_handler);
 
-struct ForeignHostFnResult mock_syscall_entrypoint(uint64_t syscall,
+struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg1, uint64_t arg2,
                                                    uint64_t arg3, uint64_t arg4,
                                                    uint64_t arg5,
