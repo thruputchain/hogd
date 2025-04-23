@@ -164,6 +164,7 @@ BlockTX::replace(ItemKey key, const ItemChange &old_change,
                  const ItemChange &new_change)
 {
   auto [val, ul] = locks_[key];
+  assert(val.ref > 0);
   if (val.ref == 1) {
     val.change = new_change;
     return {};
@@ -183,6 +184,7 @@ inline void
 BlockTX::unlock(ItemKey key, const ItemChange &change)
 {
   auto [val, ul] = locks_[key];
+  assert(val.ref > 0);
   if (--val.ref == 0) {
     val.change = ItemChange();
     return;

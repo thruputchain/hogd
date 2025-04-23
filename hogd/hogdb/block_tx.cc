@@ -19,12 +19,10 @@ ItemChange::commit(HogDatabase &db, ItemKey key) const
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return db.write_nnint128(key, *to_nnint128());
   }
-  if (std::holds_alternative<Bytes>(change_)) {
+  if (std::holds_alternative<Bytes>(change_))
     return db.write_bytes(key, to_bytes());
-  }
-  if (std::holds_alternative<Deletion>(change_)) {
+  if (std::holds_alternative<Deletion>(change_))
     return db.remove(key);
-  }
   return {};
 }
 

@@ -33,7 +33,7 @@ struct ItemKey {
 template<> struct std::hash<hogd::ItemKey> {
   std::size_t operator()(const hogd::ItemKey &key) const
   {
-    return hogd::SipHash24::get_default()(hogd::byte_view(key));
+    return hogd::SipHash24::get_default()(key.as_bytes());
   }
 };
 
