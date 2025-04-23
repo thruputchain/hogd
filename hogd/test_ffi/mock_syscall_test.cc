@@ -13,6 +13,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/mock_db_server.h"
 #include "hogd/test_ffi/port_allocator.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "syscall.hh"
@@ -91,7 +92,11 @@ int_type_tests(uint32_t inp_1, int128_t const &inp_128,
 
 TEST(MockSyscallTest, IntTypeTests)
 {
-  DBContext db_context(PortAllocator::get());
+  uint32_t port = PortAllocator::get();
+  MockDBServer server(0);
+  server.start_server(port);
+  
+  DBContext db_context(port);
   db_context.advance_new_block();
 
   SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);

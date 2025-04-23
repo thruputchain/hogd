@@ -11,6 +11,7 @@ add_library(
     mock_runtime.cc
     syscall_handler_wrapper.cc
     test_bindings.cc
+    mock_db_server.cc
 )
 
 add_dependencies(

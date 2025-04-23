@@ -63,6 +63,7 @@ public:
     return true;
   }
 
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   void pop_context()
   {
     assert(get_context() == this);
