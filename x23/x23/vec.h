@@ -459,8 +459,14 @@ public:
     std::construct_at(b_.end, std::forward<Args>(args)...);
     return *b_.end++;
   }
-  constexpr void push_back(const value_type &v) { emplace_back(v); }
-  constexpr void push_back(value_type &&v) { emplace_back(std::move(v)); }
+  constexpr void push_back(this auto &self, const value_type &v)
+  {
+    self.emplace_back(v);
+  }
+  constexpr void push_back(this auto &self, value_type &&v)
+  {
+    self.emplace_back(std::move(v));
+  }
   constexpr void pop_back() { shrink(size() - 1); }
   constexpr void swap(Vec &other) noexcept
   {
@@ -504,10 +510,11 @@ public:
       }
     });
   }
-  template<typename Op> void resize_and_overwrite(size_type count, Op op)
+  template<typename Op>
+  void resize_and_overwrite(this auto &self, size_type count, Op op)
   {
-    resize_uninitialized(count + 1);
-    resize(std::move(op)(data(), count));
+    self.resize_uninitialized(count + 1);
+    self.resize(std::move(op)(self.data(), count));
   }
 
   template<std::random_access_iterator IterIn>
