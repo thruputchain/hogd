@@ -24,11 +24,13 @@ namespace hogd {
 // without conflicts.
 //
 // Bytes: A variable-length vector of bytes (also called a byte string). Used
-// to store arbitrary opaque data. If exclusive, any changes to the same key
-// will conflict. Otherwise, will commute if the changes are the same value.
+// to store opaque binary data. If exclusive, any changes to the same key will
+// conflict. Otherwise, will commute if the changes are the same value.
 //
 // Deletion: Used as a placeholder to indicate the item should be removed.
 //
+// TODO(abelay): It's not needed yet, but if more item types are added, it may
+// be cleaner to use an OOP approach instead of std::variant.
 
 struct NNInt128 {
   int128_t base;
@@ -55,6 +57,9 @@ public:
   std::optional<int128_t> to_nnint128() const;
   OwningSpan<const std::byte> to_bytes() const;
   bool is_deletion() const { return std::holds_alternative<Deletion>(change_); }
+
+  // byte_size returns the storage bytes of the item if the change is committed.
+  size_t byte_size() const;
 
   // commit applies the item's changes to the ramdb.
   HogDBStatus<void> commit(HogDatabase &db, ItemKey key) const;
@@ -87,6 +92,20 @@ ItemChange::to_bytes() const
   std::vector<std::byte> buf(tmp->buf);
   auto span = std::span<const std::byte>(buf);
   return OwningSpan(span, [ref = std::move(buf)] {});
+}
+
+inline size_t
+ItemChange::byte_size() const
+{
+  if (std::holds_alternative<NNInt128>(change_))
+    return sizeof(ItemKey) + sizeof(int128_t);
+
+  if (const auto *tmp = std::get_if<Bytes>(&change_); tmp)
+    return sizeof(ItemKey) + tmp->buf.size();
+
+  assert(std::holds_alternative<std::monostate>(change_) ||
+         std::holds_alternative<Deletion>(change_));
+  return 0;
 }
 
 // BlockTX manages a set of pending changes made in a block relative to the
