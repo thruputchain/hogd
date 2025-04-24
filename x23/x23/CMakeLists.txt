@@ -26,6 +26,7 @@ add_library(x23
   threadpool.cc
   threadpool.h
   typename.h
+  uiobuf.h
   utility.h
   vec.h
   x23.h
