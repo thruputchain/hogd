@@ -1,6 +1,15 @@
+#include <cstddef>
+#include <format>
+#include <iterator>
 #include <map>
 #include <print>
 #include <ranges>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <variant>
 
 #include "x23/cleanup.h"
 #include "x23c/defs.h"
@@ -60,6 +69,9 @@ struct GenRs {
 
   void show_decl(const Declaration &d, std::string name_prefix)
   {
+    if (d.qual == Declaration::kVoid) {
+      return;
+    }
     show_comment(d.comment, false);
     if (holds_alternative<string>(d.type)) {
       prtop("pub {}: {},\n", d.id, type_name(d, false));
@@ -83,10 +95,10 @@ struct GenRs {
 
   void show_comment(std::string_view comment, bool chomp, string prefix = {});
 
-  static const string &map_type(const string &);
-  static const string &map_case(const string &);
-  static const string &map_bound(const string &);
-  string type_name(const Declaration &d, bool generate);
+  static string map_type(const string &);
+  static string map_case(const string &);
+  static string map_bound(const string &);
+  string type_name(const Declaration &d, bool generate, bool in_colon_required_setting = false);
 
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
@@ -164,19 +176,27 @@ GenRs::show_type(const StructBody &s, string t)
     do_generations(t + "_" + d.id, d.type);
   }
 
-  prtop("#[repr(C)]\n");
-  prtop("pub struct {} ", t);
-  auto _close = open_brace();
-  scopes_.push_back(t);
-  for (const auto &d : s) {
-    show_decl(d, t);
+  {
+    prtop("#[repr(C)]\n");
+    prtop("#[derive(PartialEq, Debug, Default, Clone)]\n");
+    prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
+    prtop("pub struct {} ", t);
+    auto _close = open_brace();
+    scopes_.push_back(t);
+    for (const auto &d : s) {
+      show_decl(d, t);
+    }
   }
 }
 
 void
 GenRs::show_type(const EnumBody &e, string t)
 {
-  prtop("#[derive(Clone, PartialEq)]\n#[repr(i32)]\npub enum {} ", t);
+  prtop(R"(
+#[derive(Clone, PartialEq, Debug)]
+#[cfg_attr(feature="std", derive(ReadXdrEnum,WriteXdrEnum))]
+#[repr(i32)]
+pub enum {} )", t);
   auto _close = open_brace();
   scopes_.push_back(t);
   
@@ -195,17 +215,7 @@ GenRs::show_type(const EnumBody &e, string t)
     first = false;
     prtop("{} = {},\n", cd.id, cd.val);
   }
-
-  bottom_ += std::format(R"(impl {0} {{
-    pub fn discriminant(self: {0}) -> i32 {{
-        self as i32
-    }}
-}}
-
-)", t);
-
 }
-
 
 void
 GenRs::show_type(const UnionBody &b, string t)
@@ -215,87 +225,112 @@ GenRs::show_type(const UnionBody &b, string t)
     do_generations(t + "_" + d.id, d.type);
   }
 
-  prtop("#[repr(i32)]\n");
-  prtop("pub enum {} ", t);
-  auto _close = open_brace();
-  scopes_.push_back(t);
+  std::string default_decl;
+  std::string default_match;
 
   const string switch_type = map_type(b.switch_type);
 
-  const bool is_enum = (switch_type == b.switch_type);
-  const bool is_bool = (switch_type == "bool");
+    const bool is_enum = (switch_type == b.switch_type);
+    const bool is_bool = (switch_type == "bool");
 
-  auto bool_map = [] (std::string b) -> std::string {
-    if (b == "TRUE") {
-      return "true";
-    }
-    if (b == "FALSE") {
-      return "false";
-    }
-    throw std::runtime_error("unexpected boolean");
-  };
-
-  auto qualified_typename = [&] (std::string c) {
-    if (is_enum) {
-      if (is_bool) {
-        return bool_map(c);
+    auto bool_map = [] (std::string b) -> std::string {
+      if (b == "TRUE") {
+        return "true";
       }
-      return b.switch_type + "::" + c;
-    } else {
+      if (b == "FALSE") {
+        return "false";
+      }
+      throw std::runtime_error("unexpected boolean");
+    };
+
+    auto qualified_typename = [&] (std::string c) {
+      if (is_enum) {
+        if (is_bool) {
+          return bool_map(c);
+        }
+        return b.switch_type + "::" + c;
+      } else {
+        return c;
+      }
+    };
+
+    auto int_qualified_declname = [&] (std::string c) {
+      if (!is_enum) {
+        return std::string("_") + c;
+      }
       return c;
-    }
-  };
+    };
+  {
+    prtop("#[repr(i32)]\n");
+    prtop("#[derive(PartialEq, Debug, Clone)]\n");
+    prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
+    prtop("pub enum {} ", t);
+    auto _close = open_brace();
+    scopes_.push_back(t);
 
-  auto int_qualified_declname = [&] (std::string c) {
-    if (!is_enum) {
-      return std::string("_") + c;
-    }
-    return c;
-  };
-  std::string default_decl = "";
-  std::string default_match = "";
-  for (const auto &a : b.arms) {
-    for (const auto &c : a.cases) {
-      prtop("// case {}:\n", c);
-    }
-    if (a.has_default) {
-      prtop("// default:\n");
-    }
-    show_comment(a.decl.comment, false, "//   ");
-    if (a.decl.qual == Declaration::kVoid) {
-      prtop("//   void;\n");
-      for (const auto& c : a.cases) {
-        prtop("{} = {} as i32,\n", int_qualified_declname(c), qualified_typename(c));
+    for (const auto &a : b.arms) {
+      bool double_case = false;
+      auto double_case_guard = [&double_case] {
+        if (double_case) {
+          throw std::runtime_error("Enums with multiple cases per arm not supported at the moment");
+        }
+        double_case = true;
+      };
+
+      for (const auto &c : a.cases) {
+        double_case_guard();
+        prtop("// case {}:\n", c);
       }
       if (a.has_default) {
-        default_decl = std::format("default {{ {}: i32 }},", b.switch_id);
-        default_match = std::format("{0}::default{{ {1} }} => *{1} ,\n", t, b.switch_id);
+        double_case_guard();
+        prtop("// default:\n");
+      }
+
+      show_comment(a.decl.comment, false, "//   ");
+      if (a.decl.qual == Declaration::kVoid) {
+        prtop("//   void;\n");
+        for (const auto& c : a.cases) {
+          prtop("{} = {} as i32,\n", int_qualified_declname(c), qualified_typename(c));
+        }
+        if (a.has_default) {
+          default_decl = std::format("default {{ {}: i32 }},", b.switch_id);
+          default_match = std::format("{0}::default{{ {1} }} => *{1} ,\n", t, b.switch_id);
+        }
+      }
+      else
+      {
+        std::string name_prefix = t + "_";
+        if (holds_alternative<string>(a.decl.type)) {
+          name_prefix = "";
+        }
+
+        prtop("//   {} {};\n", type_name(a.decl, false), a.decl.id);
+
+        for (const auto& c : a.cases) {
+          prtop("{} {{ {}: {} }} = {} as i32,\n", int_qualified_declname(c),  a.decl.id, name_prefix + type_name(a.decl, false), qualified_typename(c));
+          
+          std::string match_name = std::format("{1}::{0}", int_qualified_declname(c), map_type(b.switch_type));
+
+          if (b.switch_type == "int") {
+            match_name = c;
+          }
+          if (b.switch_type == "unsigned int") {
+            throw std::runtime_error("unsupported enum discriminant type");
+          }
+        }
+        if (a.has_default) {
+          std::format_to(
+            std::back_inserter(default_decl),
+            "default {{ {}: i32, {}: {} }},", b.switch_id, a.decl.id, type_name(a.decl, false));
+          default_match = std::format("{0}::default{{ {1},..}} => *{1},\n", t, b.switch_id);
+        }
       }
     }
-    else
-    {
-      std::string name_prefix = t + "_";
-      if (holds_alternative<string>(a.decl.type)) {
-        name_prefix = "";
-      }
-
-      prtop("//   {} {};\n", type_name(a.decl, false), a.decl.id);
-
-      for (const auto& c : a.cases) {
-        prtop("{} {{ {}: {} }} = {} as i32,\n", int_qualified_declname(c),  a.decl.id, name_prefix + type_name(a.decl, false), qualified_typename(c));
-      }
-      if (a.has_default) {
-        std::format_to(
-          std::back_inserter(default_decl),
-          "default {{ {}: i32, {}: {} }},", b.switch_id, a.decl.id, type_name(a.decl, false));
-        default_match = std::format("{0}::default{{ {1},..}} => *{1},\n", t, b.switch_id);
-
-      }
-    }
+    top_ += std::string(INDENT_WIDTH * indent_, ' ');
+    top_ += default_decl;
+    top_ += "\n";
   }
-  top_ += std::string(INDENT_WIDTH * indent_, ' ');
-  top_ += default_decl;
-  top_ += "\n";
+  
   bottom_ += std::format(R"(impl {0} {{
     pub fn {2}(&self) -> i32 {{
         match self {{
@@ -352,7 +387,7 @@ GenRs::show_comment(std::string_view comment, bool chomp, string prefix)
   }
 }
 
-const string &
+string
 GenRs::map_type(const string &t)
 {
   static const std::map<string, string> type_map{
@@ -362,11 +397,10 @@ GenRs::map_type(const string &t)
   };
   if (auto it = type_map.find(t); it != type_map.end())
     return it->second;
-  else
-    return t;
+  return t;
 }
 
-const string &
+string
 GenRs::map_case(const string &c)
 {
   static const std::map<string, string> case_map{
@@ -375,11 +409,10 @@ GenRs::map_case(const string &c)
   };
   if (auto it = case_map.find(c); it != case_map.end())
     return it->second;
-  else
-    return c;
+  return c;
 }
 
-const string &
+string
 GenRs::map_bound(const string &b)
 {
   static const string defbound = "0xffffffff";
@@ -399,7 +432,7 @@ GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
 }
 
 string
-GenRs::type_name(const Declaration &d, bool generate)
+GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_setting) // rust is weird
 {
   using enum Declaration::Qual;
 
@@ -423,13 +456,21 @@ GenRs::type_name(const Declaration &d, bool generate)
   case kScalar:
     return tname;
   case kPtr:
-    return std::format("alloc::boxed::Box<{}>", tname);
+    if (in_colon_required_setting) {
+      return std::format("Option::<{}>", tname);
+    }
+    return std::format("Option<{}>", tname);
   case kArray:
     return std::format("[{}; {}]", tname, d.bound);
   case kVec:
+    if (in_colon_required_setting) {
+      if (tname == "string"s)
+        return std::format("BytesM::<{}>", map_bound(d.bound));
+      return std::format("VecM::<{}, {}>", tname, map_bound(d.bound));
+    }
     if (tname == "string"s)
-      return std::format("alloc::boxed::Box<[u8]>");// ignoring bounds, for now : map_bound(d.bound));
-    return std::format("alloc::boxed::Box<[{}]>", tname); // Ignoring bounds, for nowmap_bound(d.bound));
+      return std::format("BytesM<{}>", map_bound(d.bound));
+    return std::format("VecM<{}, {}>", tname, map_bound(d.bound));
   default:
     return {}; // suppress warnings
   }
@@ -439,13 +480,28 @@ string
 gen_rs(vector<Definition> *defs)
 {
   GenRs gs;
-  gs.prtop(R"(// -*-Rust-*-
+  std::string preamble = R"(// -*-Rust-*-
+// Generated Code: DO NOT CHECK IN
 
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
-)");
+#![allow(unused_imports)]
+#![allow(dead_code)]
+#![allow(unexpected_cfgs)]
+#![allow(unused_variables)]
+
+use core::option::Option;
+
+use crate::*;
+
+#[cfg(feature="std")]
+use std::io::{Read, Write};
+
+)";
+
   gs.process(*defs);
-  return gs.top_ + R"(
+
+  return preamble + gs.top_ + R"(
 //
 // XDR internals below this point
 //

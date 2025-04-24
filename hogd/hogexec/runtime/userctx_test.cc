@@ -2,7 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -27,18 +30,19 @@ foo(HostCallContext *ctx, uint64_t value)
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST(WasmRuntimeTest, CheckCtxCorrect)
 {
-  auto c = test::load_wasm_from_file("test_invoke.wasm");
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() = test::load_wasm_from_file("test_invoke.wasm");
   WasmiContext context;
 
   context.link_fn("test", "redir_call", &foo);
 
-  auto runtime = context.make_new_runtime(c, ctx_check);
+  auto runtime = context.make_new_runtime(contract, ctx_check, true);
 
-  ASSERT_TRUE(!!runtime);
+  ASSERT_TRUE(runtime);
 
   auto res = runtime->invoke("calltest", UINT64_MAX);
-  EXPECT_TRUE(!!res.result);
-  EXPECT_EQ(*res.result, 15U);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 15U);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 

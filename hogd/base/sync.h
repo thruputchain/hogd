@@ -24,23 +24,44 @@ public:
   T get() const { return val_.load(std::memory_order_relaxed); }
 
   // inc increments the count by val and returns the current count.
-  T inc(T val)
+  T inc(T val = 1)
   {
     T tmp = get() + val;
     val_.store(tmp, std::memory_order_relaxed);
     return tmp;
   }
 
-  // inc increments the count by one and returns the current count.
-  T inc() { return inc(1); }
-
-  constexpr LossyCounter &operator+=(const T &rhs)
+  LossyCounter &operator+=(const T &rhs)
   {
     inc(rhs);
     return *this;
   }
-  constexpr bool operator==(const T &rhs) const { return get() == rhs; }
-  constexpr auto operator<=>(const T &rhs) const { return get() <=> rhs; }
+  bool operator==(const T &rhs) const { return get() == rhs; }
+  auto operator<=>(const T &rhs) const { return get() <=> rhs; }
+
+private:
+  std::atomic<T> val_;
+};
+
+// AtomicCounter provides a counter that is backed by an atomic variable.
+template<std::integral T> class AtomicCounter {
+public:
+  AtomicCounter() : val_(0) {}
+  AtomicCounter(T val) : val_(val) {}
+
+  // get returns the current count
+  T get() const { return val_.load(std::memory_order_acquire); }
+
+  // inc increments the count by val and returns the current count.
+  T inc(T val = 1) { return val_.fetch_add(val, std::memory_order_release); }
+
+  AtomicCounter &operator+=(const T &rhs)
+  {
+    inc(rhs);
+    return *this;
+  }
+  bool operator==(const T &rhs) const { return get() == rhs; }
+  auto operator<=>(const T &rhs) const { return get() <=> rhs; }
 
 private:
   std::atomic<T> val_;

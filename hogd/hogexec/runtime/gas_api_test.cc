@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <optional>
+#include <memory>
 
+#include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -47,8 +50,10 @@ class GasApiTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
+    Contract contract(ContractType::kWasmi);
     // this wasm just invokes an external call.  We're just reusing it here.
-    auto c = test::load_wasm_from_file("test_error_handling.wasm");
+    contract.wasmi_contract() =
+        test::load_wasm_from_file("test_error_handling.wasm");
 
     WasmiContext context;
 
@@ -57,15 +62,14 @@ protected:
     context.link_fn("test", "external_call",
                     &consume_gas_call); // called by "call1"
 
-    runtime_ = context.make_new_runtime(c, nullptr);
+    runtime_ = context.make_new_runtime(contract, nullptr, true);
 
     ASSERT_TRUE(!!runtime_);
   }
 
-  std::optional<WasmiRuntime> runtime_;
+  std::unique_ptr<Runtime> runtime_;
 };
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(GasApiTest, SetGasNoInvoke)
 {
   EXPECT_EQ(runtime_->get_available_gas(), 0);
@@ -87,18 +91,17 @@ TEST_F(GasApiTest, InvokeResetsGas)
 
   auto res = runtime_->invoke("call1", 300);
 
-  EXPECT_TRUE(!!res.result);
+  EXPECT_TRUE(res.result_);
 
-  EXPECT_GE(res.gas_consumed, 100);
+  EXPECT_GE(res.gas_consumed_, 100);
 
   EXPECT_EQ(runtime_->get_available_gas(), 5000);
 
-  EXPECT_TRUE(runtime_->consume_gas(res.gas_consumed));
+  EXPECT_TRUE(runtime_->consume_gas(res.gas_consumed_));
 
   res = runtime_->invoke("call1", 80);
-  EXPECT_FALSE(!!res.result);
-  EXPECT_EQ(res.gas_consumed, 80);
+  EXPECT_FALSE(res.result_);
+  EXPECT_EQ(res.gas_consumed_, 80);
 }
-// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
