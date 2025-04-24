@@ -58,8 +58,8 @@ public:
   OwningSpan<const std::byte> to_bytes() const;
   bool is_deletion() const { return std::holds_alternative<Deletion>(change_); }
 
-  // byte_size returns the storage bytes of the item if the change is committed.
-  size_t byte_size() const;
+  // storage_size returns the bytes needed to store the item if committed.
+  size_t storage_size() const;
 
   // commit applies the item's changes to the ramdb.
   HogDBStatus<void> commit(HogDatabase &db, ItemKey key) const;
@@ -95,7 +95,7 @@ ItemChange::to_bytes() const
 }
 
 inline size_t
-ItemChange::byte_size() const
+ItemChange::storage_size() const
 {
   if (std::holds_alternative<NNInt128>(change_))
     return sizeof(ItemKey) + sizeof(int128_t);
@@ -125,9 +125,11 @@ public:
   HogDBStatus<int128_t> read_nnint128(ItemKey key);
   HogDBStatus<OwningSpan<const std::byte>> read_bytes(ItemKey key);
 
-  // lock reserves the right to change an item.
+  // lock reserves the right to change an item. More than one lock can be
+  // acquired on an item if the changes do not conflict.
   HogDBStatus<void> lock(ItemKey key, const ItemChange &change);
-  // replace modifies an existing request to change an item.
+  // replace modifies an existing request to change an item. The item must be
+  // already locked by the caller.
   HogDBStatus<void> replace(ItemKey key, const ItemChange &old_change,
                             const ItemChange &new_change);
   // unlock drops and undoes a request to change an item.
