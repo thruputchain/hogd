@@ -118,10 +118,9 @@ public:
 
   // for_each_parallel executes func in parallel on each element using a
   // WorkerPool.
-  void for_each_parallel(std::invocable<ItemHeader *> auto func,
+  void for_each_parallel(std::invocable<ItemHeader *> auto func, size_t width,
                          WorkerPool &pool)
   {
-    constexpr size_t kBucketsPerJob = 32;
     pool.for_each_parallel(
         std::ranges::iota_view{0UL, buckets_.size()} |
             std::views::transform([this](size_t i) {
@@ -138,7 +137,7 @@ public:
             func(hdr);
           }
         },
-        kBucketsPerJob);
+        width);
   }
 
 private:

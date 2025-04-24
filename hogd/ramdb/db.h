@@ -92,6 +92,7 @@ public:
   // get_each_parallel reads every item and provides its key, type, and value to
   // a callback that runs in parallel on a worker pool.
   void get_each_parallel(GetEachCallback fn,
+                         size_t width = kDefaultParallelRangeWidth,
                          WorkerPool &pool = WorkerPool::get_default_pool());
 
   // sync writes pending items to disk. Any calls to put() or remove() performed
@@ -179,14 +180,14 @@ Database::get_each(GetEachCallback fn)
 }
 
 inline void
-Database::get_each_parallel(GetEachCallback fn, WorkerPool &pool)
+Database::get_each_parallel(GetEachCallback fn, size_t width, WorkerPool &pool)
 {
   assert(active_);
   map_.for_each_parallel(
       [&fn](ItemHeader *hdr) {
         fn(hdr->get_key(), hdr->type, hdr->get_value());
       },
-      pool);
+      width, pool);
 }
 
 inline DBStatus<uint64_t>

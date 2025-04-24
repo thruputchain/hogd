@@ -1,6 +1,5 @@
 #include "hogd/test_ffi/test_bindings.h"
 
-#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -202,12 +201,12 @@ root_invoke(void *syscall_handler)
 }
 
 struct ForeignHostFnResult
-mock_syscall_entrypoint(int32_t syscall, const unsigned char *input,
-                        uint32_t input_len, unsigned char *output,
-                        uint32_t output_len)
+mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
+                        uint64_t arg3, uint64_t arg4, uint64_t arg5,
+                        uint64_t arg6)
 {
-  return hogd::mock_syscall_entrypoint(syscall, input, input_len, output,
-                                       output_len);
+  return hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4, arg5,
+                                       arg6);
 }
 
 #ifdef __cplusplus

@@ -52,10 +52,10 @@ void *open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
 void close_syscall_handler(void *syscall_handler);
 
 struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
-                                                   const unsigned char *input,
-                                                   uint32_t input_len,
-                                                   unsigned char *output,
-                                                   uint32_t output_len);
+                                                   uint64_t arg1, uint64_t arg2,
+                                                   uint64_t arg3, uint64_t arg4,
+                                                   uint64_t arg5,
+                                                   uint64_t arg6);
 
 struct ForeignRootInvokeResult root_invoke(void *syscall_handler);
 
