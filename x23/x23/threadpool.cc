@@ -1,5 +1,10 @@
 
+#include <regex>
+
+#include "x23/fileio.h"
 #include "x23/threadpool.h"
+
+#include <print> // XXX
 
 namespace x23 {
 
@@ -72,6 +77,33 @@ ThreadPool::worker(size_t threadno)
 
     work();
   }
+}
+
+unsigned
+nproc()
+{
+  constexpr std::array<int, 256> hex_nibble_popcount = []() consteval {
+    std::array<int, 256> counts{};
+    for (unsigned c = '0'; c <= '9'; ++c)
+      counts[c] = std::popcount(c - '0');
+    for (unsigned c = 'A'; c <= 'F'; ++c)
+      counts[c] = counts[c | 0x20] = std::popcount(c - 'A' + 10);
+    return counts;
+  }();
+  static const std::regex allowed_rx(R"(^Cpus_allowed:\s+([0-9a-f,]+)$)",
+                                     std::regex::multiline);
+
+  std::smatch matches;
+  if (auto allowed = readfile<std::string>("/proc/self/status");
+      allowed && regex_search(*allowed, matches, allowed_rx)) {
+    unsigned sum = 0;
+    for (char c : matches.str(1))
+      sum += hex_nibble_popcount[c];
+    if (sum > 0)
+      return sum;
+  }
+
+  return std::thread::hardware_concurrency();
 }
 
 } // namespace x23

@@ -11,14 +11,25 @@
 // Set to 1 if you are on arm and the compiler supports __builtin_arm_yield.
 #cmakedefine01 HAVE_BUILTIN_ARM_YIELD
 
-// Set to 1 if <new> properly defines hardware_destructive_interference_size.
-#cmakedefine01 HAVE_HARDWARE_DESTRUCTIVE_INTERFERENCE_SIZE
-
 // Set to 1 if your operating system supports epoll
-#cmakedefine01 HAVE_EPOLL
+#cmakedefine01 USE_EPOLL
 
 // Set to 1 if your operating system supports the accept4 syscall
 #cmakedefine01 HAVE_ACCEPT4
 
 // Set to 1 if you can't call consteval functions from inside if consteval
 #cmakedefine01 HAVE_BROKEN_P2564R3
+
+// Define to 1 to enable tracing of coroutine flow (when
+// x23::CoroTrace::enable is true), 0 to disable, or leave undefined
+// to use !defined(NDEBUG)
+#cmakedefine X23_CORO_TRACE @X23_CORO_TRACE@
+
+// Define to 1 if you have the abi::__cxa_demangle function
+#cmakedefine01 HAVE_CXA_DEMANGLE
+
+// Define to 1 if you have std::stacktrace
+#cmakedefine01 HAVE_STD_STACKTRACE
+
+// Define to 1 if you have a working std::atomic<std::shared_ptr<T>>
+#cmakedefine01 HAVE_ATOMIC_SHARED_PTR

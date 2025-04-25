@@ -11,16 +11,28 @@
 
 namespace x23 {
 
+namespace detail {
+
+template<typename T> struct RefOps {
+  static void incref(T *p) noexcept(noexcept(p->incref())) { p->incref(); }
+  static void decref(T *p) noexcept(noexcept(p->decref())) { p->decref(); }
+  static T *get(T *p) noexcept { return p; }
+};
+
+} // namespace detail
+
 // Refcounted pointer for classes with incref()/decref() methods.  If
 // you just want to delete at 0 reference count, use std::shared_ptr.
 // If you need something else, then define `incref()` and `decref()`
-// methods on your class.
-template<typename T> class RefPtr {
+// methods on your class, or define some other Ops adapter object for
+// other methods.
+template<typename T, typename Ops = detail::RefOps<T>> class RefPtr {
 public:
   using element_type = T;
+  using ops = Ops;
 
   RefPtr(std::nullptr_t) noexcept : p_(nullptr) {}
-  RefPtr(T &t) : p_(&t) { p_->incref(); }
+  RefPtr(T &t) : p_(&t) { ops::incref(p_); }
   RefPtr(const RefPtr &other) : RefPtr(*other) {}
   RefPtr(RefPtr &&other) noexcept : p_(std::exchange(other.p_, nullptr)) {}
   ~RefPtr() { clear(); }
@@ -33,26 +45,28 @@ public:
   {
     if (p_ != other.p_) {
       if (p_)
-        p_->decref();
+        ops::decref(p_);
       p_ = other.p_;
       if (p_)
-        p_->incref();
+        ops::incref(p_);
     }
     return *this;
   }
   RefPtr &operator=(RefPtr &&other) noexcept
   {
-    clear();
-    p_ = std::exchange(other.p_, nullptr);
+    if (this != &other) {
+      clear();
+      p_ = std::exchange(other.p_, nullptr);
+    }
     return *this;
   }
-  T *get() const { return p_; }
-  T &operator*() const { return *p_; }
-  T *operator->() const { return p_; }
+  auto get() const noexcept { return ops::get(p_); }
+  decltype(auto) operator*() const noexcept { return *get(); }
+  auto operator->() const noexcept { return get(); }
   void clear()
   {
     if (p_)
-      std::exchange(p_, nullptr)->decref();
+      ops::decref(std::exchange(p_, nullptr));
   }
 
 private:
