@@ -18,8 +18,11 @@
 namespace hogd {
 
 class SystemCallHandler;
+class NativeRuntime;
 
-// A single native contract.
+// One native contract.  Can be invoked with a method id and calldata,
+// just like a regular contract.
+//
 // Native contracts run within the trust boundary of the system call handler;
 // as such, they cannot be generated from user-submitted code.
 // When creating a native contract (for anything other than a test case),
@@ -33,9 +36,19 @@ class SystemCallHandler;
 // than those provided by the syscall handler).
 //
 // These requirements need not be enforced within a test.
+//
+// Unless there is a compelling reason to do so,
+// each native contract method (the lambda) should be stateless, and,
+// like a regular contract, only manage persistent state via the
+// SystemCallHandler interface.
+//
+// Native contracts do not come with metering built in.  Each native contract
+// method should therefore make gas metering calls (consume_gas) to the supplied
+// runtime pointer, as necessary.
 class NativeContract {
 public:
-  using function_t = std::function<InvokeStatus<int32_t>(SystemCallHandler &)>;
+  using function_t = std::function<InvokeStatus<int32_t>(SystemCallHandler &,
+                                                         NativeRuntime &)>;
 
   NativeContract(std::unordered_map<MethodID, function_t> functions)
     : functions_(std::move(functions))
@@ -47,13 +60,14 @@ public:
   NativeContract &operator=(NativeContract const &) = delete;
 
   InvokeStatus<int32_t> invoke(MethodID method,
-                               SystemCallHandler &syscall_handler);
+                               SystemCallHandler &syscall_handler,
+                               NativeRuntime &runtime);
 
 private:
   std::unordered_map<MethodID, function_t> functions_;
 };
 
-// Context that instantiates native contracts from a predefined set of
+// Context that can instantiate native contracts from a predefined set of
 // contracts.
 class NativeContext : public RuntimeContext {
 public:
@@ -83,7 +97,18 @@ private:
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contracts_;
 };
 
-// Wrapper around one native contract
+// Wrapper around one instantiation of a native contract.
+//
+// Note that creating multiple copies of a native contract
+// (e.g. within one transaction) does NOT duplicate memory,
+// or implement any kind of state reversion other than the
+// state managed by the SystemCallHandler (so if at all possible,
+// all state managed by a native contract should be mediated by
+// the SystemCallHandler).
+//
+// Does not, by default, implement any kind of gas metering.
+// As necessary, the methods inside the NativeContract
+// should implement their own metering.
 class NativeRuntime : public Runtime {
 public:
   // should be called only from within NativeContext::make_new_runtime

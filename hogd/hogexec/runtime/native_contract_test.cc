@@ -31,17 +31,20 @@ protected:
     auto contract_0 = std::make_unique<NativeContract>(
         std::unordered_map<MethodID, NativeContract::function_t>{
             {0,
-             [](SystemCallHandler & /*unused*/) -> InvokeStatus<int32_t> {
-               return 0;
-             }},
-            {1, [](SystemCallHandler & /*unused*/) -> InvokeStatus<int32_t> {
+             [](SystemCallHandler & /*unused*/, NativeRuntime & /*unused*/)
+                 -> InvokeStatus<int32_t> { return 0; }},
+            {1,
+             [](SystemCallHandler & /*unused*/,
+                NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
                return InvokeError{InvokeErrorCode::kDeterministic};
              }}});
 
     // Invokes another contract, returns the error code of the other contract
     auto contract_1 = std::make_unique<NativeContract>(
         std::unordered_map<MethodID, NativeContract::function_t>{
-            {0, [](SystemCallHandler &handler) -> InvokeStatus<int32_t> {
+            {0,
+             [](SystemCallHandler &handler,
+                NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
                auto const &calldata = handler.get_calldata();
 
                if (calldata.size() != 36) {

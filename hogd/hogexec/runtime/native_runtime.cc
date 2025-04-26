@@ -15,12 +15,13 @@
 namespace hogd {
 
 InvokeStatus<int32_t>
-NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler)
+NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
+                       NativeRuntime &runtime)
 {
   auto it = functions_.find(method);
   if (it == functions_.end())
     return InvokeError{InvokeErrorCode::kDeterministic};
-  return it->second(syscall_handler);
+  return it->second(syscall_handler, runtime);
 }
 
 std::unique_ptr<Runtime>
@@ -55,7 +56,8 @@ NativeRuntime::invoke_internal(std::string_view method_name)
     return InvokeError{InvokeErrorCode::kUnrecoverable};
   }
 
-  return contract_.invoke(*method_id, *host_call_context_->syscall_handler);
+  return contract_.invoke(*method_id, *host_call_context_->syscall_handler,
+                          *this);
 }
 
 } // namespace hogd
