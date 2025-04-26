@@ -28,6 +28,15 @@ struct HostCallContext {
   SystemCallHandler *syscall_handler = nullptr;
 };
 
+inline std::unique_ptr<HostCallContext>
+make_new_host_call_context(SystemCallHandler *syscall_handler)
+{
+  // ctor of Runtime is responsible for filling in out->runtime pointer.
+  auto out = std::make_unique<HostCallContext>();
+  out->syscall_handler = syscall_handler;
+  return out;
+}
+
 enum class RuntimeEngine {
   kWasmi = 0,
 };
