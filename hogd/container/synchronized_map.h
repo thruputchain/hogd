@@ -143,6 +143,7 @@ public:
   {
     assert(std::has_single_bit(locks_.size()));
     assert(locks_.size() == buckets_.size());
+    assert(ul.owns_lock());
 
     size_t idx = hash_fn_(key) & (buckets_.size() - 1);
     if (ul.mutex() != std::addressof(locks_[idx]))
@@ -186,12 +187,11 @@ public:
   // for_each_parallel executes func in parallel on each element using a
   // WorkerPool.
   template<typename F>
-  void for_each_parallel(F func,
+  void for_each_parallel(F func, size_t width = kDefaultParallelRangeWidth,
                          WorkerPool &pool = WorkerPool::get_default_pool())
   {
     assert(locks_.size() == buckets_.size());
 
-    constexpr size_t kBucketsPerJob = 32;
     pool.for_each_parallel(
         std::views::zip(locks_, buckets_),
         [func](std::pair<std::mutex &, Map &> arg) {
@@ -200,7 +200,7 @@ public:
             func(v);
           }
         },
-        kBucketsPerJob);
+        width);
   }
 
 private:

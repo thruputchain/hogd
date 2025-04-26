@@ -2,8 +2,10 @@
 
 #include <sys/socket.h>
 
-#include "tests/xdrtest.hh"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
+
+#include "tests/xdrtest.hh"
 
 using namespace std::string_literals;
 //using namespace x23;

@@ -7,6 +7,9 @@ if (NOT CMAKE_CXX_STANDARD)
     message(STATUS "Using Clang, setting libc++")
     add_compile_options(-stdlib=libc++ -fexperimental-library)
     add_link_options(-stdlib=libc++ -fexperimental-library)
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    message(STATUS "Using GCC, adding libstdc++exp")
+    link_libraries(stdc++exp) # needed for C++23 stacktrace library
   endif()
 endif()
 

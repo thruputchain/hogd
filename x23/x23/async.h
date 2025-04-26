@@ -27,6 +27,8 @@
 //   initially connected to it.  You can think of it as a "future" in
 //   the generic sense of the word (though unfortunately the terms
 //   promise and future are confusingly overloaded with coroutines).
+//   (Note: the promise_type of an Async is a subtype of Awaitable,
+//   and the Async behaves like a unique reference to the Awaitable.)
 //
 // * CoroCB<T> is a trivially-copyable callback-like function taking
 //   an argument of type T.  It should fit in a register and be
@@ -61,25 +63,21 @@
 //       });
 //     }
 //
-// If you use CoroCB as your principal callback abstraction,
-// occasionally you may want to register a callback when you don't
-// have a coroutine.  For this you can use the cb_to_coro function,
-// for example:
-//
-//       register_callback(cb_to_coro<int>([](int result) {
-//          std::println("unimplemented event, previous result was {}",
-//                       result);
-//       }));
+// * The function make_async<R>() creates a matched
+//   std::pair<Async<R>, CoroCB<R>>.  This can be used for low-level
+//   event harness code:  return the Async for the invoking coroutine
+//   to co_await, and save the CoroCB to be invoked when the event
+//   fires.
 //
 // * Any funtion returning the vacuous type Detached can be a
 //   coroutine that uses co_await and co_return (co_returing void),
 //   but cannot itself be co_awaited.  This is useful for completing
 //   work in the background.
 //
-// * Any function returning void whose final argument is Callback-like
-//   type (meaning Callback<T> or any other movable type for which
-//   callback_traits has been specialized) can be a co_routine if it
-//   returns via "co_return t" for some t of type T.
+// * Any function returning void whose final argument is a
+//   Callback-like type (meaning Callback<T> or any other movable type
+//   for which callback_traits has been specialized) can be a
+//   co_routine if it returns via "co_return t" for some t of type T.
 //
 // * If a coroutine's return_value function expects type
 //   std::expected<T, E> and the coroutine has an object r of type
@@ -121,6 +119,8 @@
 
 #include <x23/cleanup.h>
 #include <x23/config.h>
+#include <x23/corotrace.h>
+#include <x23/typename.h>
 #include <x23/utility.h>
 
 namespace x23 {
@@ -220,8 +220,10 @@ template<typename R> class AwaitableImpl {
 public:
   using resume_type = R;
 
+  AwaitableImpl(AwaitableImpl &&) = delete;
+
   //
-  // Functions for use on the callback/callee/"promise" side
+  // Functions for use on the callee/"promise" side
   //
 
   // Call once to indicate a result is pending.  This is to catch bugs
@@ -271,8 +273,16 @@ public:
     // result_ or exception_, so use acquire semantics to access it.
     return resume_lock_.test_and_set(std::memory_order_acquire);
   }
-  void await_suspend(std::coroutine_handle<> h) noexcept
+  void await_suspend(std::coroutine_handle<> h
+#if X23_CORO_TRACE
+                     ,
+                     source_location sloc = source_location::current()
+#endif // X23_CORO_TRACE
+                         ) noexcept
   {
+#if X23_CORO_TRACE
+    corotrace.set_suspend(h, sloc, "Awaitable", type_name<R>());
+#endif // X23_CORO_TRACE
     caller_.store(h, std::memory_order_release);
     // Once we store a non-NULL coroutine_handle, the callee may
     // resume us and destroy the Awaitable at any time, so we must no
@@ -350,12 +360,14 @@ public:
       pause_instruction();
     while (!(h = caller_.load(std::memory_order_relaxed)));
     caller_.load(std::memory_order_acquire);
+#if X23_CORO_TRACE
+    corotrace.clear_suspend(h);
+#endif // X23_CORO_TRACE
     return h;
   }
 
 protected:
   AwaitableImpl() noexcept {}
-  AwaitableImpl(AwaitableImpl &&) = delete;
   ~AwaitableImpl()
   {
     // You cannot discard an Awaitable without co_awaiting it, unless
@@ -487,8 +499,8 @@ template<typename R> struct callback_traits<CoroCB<R>> {
 // though it cannot be copied since it destroys the coroutine in its
 // destructor.  A non-coroutine function can return an Async by
 // passing back the result of another function returning an Async, or
-// can create a trivial Async that returning a specific value by
-// calling async_return(R).
+// can create a trivial Async that returns a specific value by calling
+// async_return(R).
 //
 // Note that you must get the result of an Async before destroying it,
 // as the result is likely being produced in a different thread that
@@ -498,6 +510,19 @@ template<typename R> struct [[nodiscard]] Async {
   struct promise_type;
   using handle_type = std::coroutine_handle<promise_type>;
   struct promise_type : Awaitable<R> {
+#if X23_CORO_TRACE
+    promise_type(const auto &...args)
+    {
+      std::coroutine_handle<> h =
+          std::coroutine_handle<promise_type>::from_promise(*this);
+      corotrace.set_alloc(h, GetLoc{}(args...), type_name<Async>());
+    }
+    ~promise_type()
+    {
+      corotrace.clear_alloc(
+          std::coroutine_handle<promise_type>::from_promise(*this));
+    }
+#endif // X23_CORO_TRACE
     Async get_return_object()
     {
       return Async{std::coroutine_handle<promise_type>::from_promise(*this)};
@@ -519,7 +544,7 @@ template<typename R> struct [[nodiscard]] Async {
   // Run Async to completion and make a callback with the result.
   void operator()(detail::is_callback_of<R> auto cb)
   {
-    // To defer destroying callee_, move Async into this
+    // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);
     co_return co_await self;
   }
@@ -581,15 +606,15 @@ async_return(R &&r)
 // coroutines to co_await.
 template<typename R>
 std::pair<Async<R>, CoroCB<R>>
-make_async()
+make_async(SLOC_PARM0)
 {
   CoroCB<R> cb;
-  Async<R> async = [&cb] -> Async<R> {
+  Async<R> async = [&cb](SLOC_PARM0) -> Async<R> {
     auto h = co_await GetCoro<typename Async<R>::promise_type>{};
     cb = h.promise();
     co_await std::suspend_always{};
     std::unreachable();
-  }();
+  }(SLOC_VAR);
   return std::pair{std::move(async), cb};
 }
 
@@ -610,6 +635,20 @@ async_map(auto f, Async<void> a) -> Async<decltype(f())>
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
   struct promise_type {
+#if X23_CORO_TRACE
+    template<typename... Args> promise_type(const Args &...args)
+    {
+      std::coroutine_handle<> h =
+          std::coroutine_handle<promise_type>::from_promise(*this);
+      corotrace.set_alloc(h, GetLoc{}(args...), "Detached");
+    }
+    ~promise_type()
+    {
+      corotrace.clear_alloc(
+          std::coroutine_handle<promise_type>::from_promise(*this));
+    }
+#endif // X23_CORO_TRACE
+
     Detached get_return_object() const noexcept { return {}; }
     std::suspend_never initial_suspend() const noexcept { return {}; }
     void return_void() const noexcept {}
@@ -617,13 +656,27 @@ struct Detached {
     std::suspend_never final_suspend() const noexcept { return {}; }
   };
 
+  Detached(Detached &&) noexcept = delete;
+
 private:
-  // Make constructors private to flag an error in case a function
+  // Make constructor private to flag an error in case a function
   // returns Detached without using coroutine operations (i.e.,
   // co_await or co_return) to avoid weird surprises.
   Detached() noexcept = default;
-  Detached(Detached &&) noexcept = delete;
 };
+
+// A concept that's 99% likely to determine whether a type is
+// awaitable.  You could have types that are awaitable but only with
+// specific promise types not including Detached::promise_type, in
+// which case this will fail even if the type is awaitable in other
+// types of coroutine.
+template<typename A>
+concept is_awaitable =
+    requires(A a, std::coroutine_handle<Detached::promise_type> h) {
+      { a.await_ready() } -> std::same_as<bool>;
+      a.await_suspend(h);
+      a.await_resume();
+    };
 
 namespace detail {
 

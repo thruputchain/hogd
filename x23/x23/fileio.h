@@ -5,24 +5,31 @@
 #include <filesystem>
 
 #include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <x23/cleanup.h>
 #include <x23/err.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 
 namespace x23 {
 
-template<is_bytevec BufT>
+template<is_bytevec BufT, typename Read = decltype(&::read)>
 std::expected<size_t, Errno>
-read(BorrowedFd fd, BufT *buf, size_t len)
+read(BorrowedFd fd, BufT *buf, size_t len, Read readfn = &::read)
+    requires requires(int f, void *b, size_t l) {
+      { read(f, b, l) } -> std::convertible_to<ssize_t>;
+    }
 {
   size_t old_size = buf->size();
   std::expected<ssize_t, Errno> ret;
-  buf->resize_and_overwrite(old_size + len, [fd = fd.get(), len, old_size,
+  buf->resize_and_overwrite(old_size + len, [fd = fd.get(), len, &readfn,
+                                             old_size,
                                              &ret](auto *p, size_t count) {
-    if (ssize_t n = ::read(fd, p + old_size, len); n >= 0) {
+    if (ssize_t n = (*readfn)(fd, p + old_size, len); n >= 0) {
       ret = n;
       return old_size + n;
     }
@@ -35,7 +42,7 @@ read(BorrowedFd fd, BufT *buf, size_t len)
 // Keep reading until you have read len bytes.  Returns ECONNRESET on
 // a premature EOF.
 template<is_bytevec BufT>
-std::expected<void, Errno>
+std::expected<size_t, Errno>
 fullread(BorrowedFd fd, BufT *buf, size_t len)
 {
   size_t nread = 0;
@@ -48,7 +55,7 @@ fullread(BorrowedFd fd, BufT *buf, size_t len)
     nread += *r;
     len -= *r;
   }
-  return {};
+  return nread;
 }
 
 struct SeekBounds {
@@ -77,7 +84,7 @@ readall(BorrowedFd fd, BufT *buf)
 }
 
 template<is_bytevec BufT = Str>
-std::expected<Buf, Errno>
+std::expected<BufT, Errno>
 readfile(std::filesystem::path p)
 {
   UniqueFd fd(open(p.c_str(), O_RDONLY));
@@ -92,11 +99,5 @@ std::expected<void, Errno> fullwrite(BorrowedFd fd, BufView buf);
 std::expected<void, Errno> writefile(const std::filesystem::path &p,
                                      BufView buf, bool sync = false,
                                      int mode = 0666);
-
-// Set (on) or clear (!on) the O_NONBLOCK flag on a file descriptor
-void set_nonblock(BorrowedFd fd, bool on = true);
-
-// Listen on a TCP port on any IP address (allowing IPv4 and IPv6)
-UniqueFd tcplisten(std::uint16_t port);
 
 } // namespace x23

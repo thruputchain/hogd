@@ -107,7 +107,9 @@ public:
            std::indirectly_unary_invocable<
                std::projected<std::ranges::iterator_t<R>, Proj>>
                Func>
-  void for_each_parallel(R &&r, Func f, size_t width = 1, Proj proj = {})
+  void for_each_parallel(R &&r, Func f,
+                         size_t width = kDefaultParallelRangeWidth,
+                         Proj proj = {})
   {
     std::vector<std::future<void>> completions;
 #if defined(__cpp_lib_ranges_chunk)

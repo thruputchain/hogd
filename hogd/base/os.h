@@ -16,6 +16,11 @@ size_t available_parallelism();
 
 } // namespace os_detail
 
+// the default log2 number of shards per core.
+inline constexpr int kDefaultShardBaseOrder = 9;
+// the default number of elements to batch in parallel range operations.
+inline constexpr size_t kDefaultParallelRangeWidth = 32;
+
 // available_parallelism returns the maximum number of cores that this process
 // is permitted to run on.
 inline size_t
@@ -25,8 +30,6 @@ available_parallelism()
       os_detail::available_parallelism();
   return cores;
 }
-
-inline constexpr int kDefaultShardBaseOrder = 9;
 
 // scalable_shard_order returns the log2 number of shards needed for good
 // multicore scalability.
