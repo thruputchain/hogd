@@ -5,14 +5,14 @@
 #include <utility>
 
 #include "db_read_interface.hh"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"
-#include "x23/fileio.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 

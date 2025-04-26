@@ -62,7 +62,7 @@ public:
     : contracts_(std::move(native_contracts))
   {}
 
-  ~NativeContext() override {}
+  ~NativeContext() override = default;
 
   std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
                                             SystemCallHandler *syscall_handler,
@@ -90,7 +90,7 @@ public:
   NativeRuntime(NativeContract &contract,
                 std::unique_ptr<HostCallContext> host_call_context);
 
-  ~NativeRuntime() override {}
+  ~NativeRuntime() override = default;
 
   [[nodiscard]] uint64_t get_available_gas() const noexcept override
   {
