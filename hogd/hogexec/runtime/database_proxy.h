@@ -7,7 +7,7 @@
 #include <variant>
 
 #include "contract.hh"
-#include "db_read_interface.hh"
+#include "executor_to_db_rpc.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -43,7 +43,7 @@ public:
   get_deployment(BlockID block_id, ContractAddress const &addr);
 
 private:
-  using read_client_t = DatabaseSnapshotReadInterfaceV1::client<
+  using read_client_t = DatabaseToExecutorInterfaceV1::client<
       x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   read_client_t read_client_;

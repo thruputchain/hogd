@@ -20,7 +20,7 @@ NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
 {
   auto it = functions_.find(method);
   if (it == functions_.end())
-    return InvokeError{InvokeErrorCode::kDeterministic};
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   return it->second(syscall_handler, runtime);
 }
 
@@ -53,7 +53,7 @@ NativeRuntime::invoke_internal(std::string_view method_name)
 {
   auto method_id = Runtime::method_id_from_name(std::string(method_name));
   if (!method_id) {
-    return InvokeError{InvokeErrorCode::kUnrecoverable};
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
   }
 
   return contract_.invoke(*method_id, *host_call_context_->syscall_handler,

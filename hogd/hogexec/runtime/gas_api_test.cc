@@ -23,14 +23,14 @@ error(HostFnErrorCode const &code)
 HostFnResult
 success(int32_t value)
 {
-  return {HostFnErrorCode::kNoneOrRecoverable, value};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, value};
 }
 
 HostFnResult
 consume_gas_call(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(100)) {
-    return error(HostFnErrorCode::kOutOfGas);
+    return error(HostFnErrorCode::kHostOutOfGas);
   }
   return success(0);
 }
@@ -39,7 +39,7 @@ HostFnResult
 consume_gas_call2(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(5000)) {
-    return error(HostFnErrorCode::kOutOfGas);
+    return error(HostFnErrorCode::kHostOutOfGas);
   }
   return success(0);
 }

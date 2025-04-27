@@ -3,7 +3,7 @@
 #include <unordered_map>
 
 #include "contract.hh"
-#include "db_read_interface.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "rpc_types.hh"
@@ -25,11 +25,30 @@ namespace hogd {
 // things.
 class BlockSnapshotServer {
 public:
-  using rpc_service = DatabaseSnapshotReadInterfaceV1;
+  using rpc_service = DatabaseToExecutorInterfaceV1;
 
   BlockSnapshotServer(BlockID block_id) : block_id_(block_id) {}
 
   static x23::Async<void> db_snapshot_read_null();
+
+  static x23::Async<ExpectedStorageCost>
+      try_reserve_delta(BlockID, TransactionID, AddressAndKey, StorageDelta,
+                        StorageItemRPCFlagSet);
+  static x23::Async<void> commit_transaction(BlockID, TransactionID);
+  static x23::Async<void> abort_transaction(BlockID, TransactionID);
+
+  // Create a new subtransaction on top of the current (sub)transaction.
+  static x23::Async<RPCError> push_new_subtransaction(BlockID block,
+                                                      TransactionID);
+
+  // Revert one or more subtransactions.
+  static x23::Async<RPCError>
+  pop_subtransactions(BlockID block, TransactionID tx, uint32_t popcount);
+
+  x23::Async<void> commit_contract_create(BlockID block, Contract contract);
+  x23::Async<void> commit_contract_deploy(BlockID block,
+                                          ContractAddress const &contract_addr,
+                                          SHA256Hash const &hash);
 
   x23::Async<ExpectedStorageItem>
   get_snapshot_item(BlockID block, AddressAndKey const &addrkey);
@@ -52,6 +71,6 @@ private:
 };
 
 static_assert(
-    is_DatabaseSnapshotReadInterfaceV1<BlockSnapshotServer *, x23::Async>);
+    is_DatabaseToExecutorInterfaceV1<BlockSnapshotServer *, x23::Async>);
 
 } // namespace hogd

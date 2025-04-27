@@ -30,6 +30,19 @@ syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
+std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
+                                ContractAddress &output_address)
+{
+  SyscallStatus<ContractAddress> status = syscall_handler.get_current_address();
+  if (!status) {
+    return {status.error().code(), 0};
+  }
+
+  output_address = *status;
+  return {SyscallErrorCode::kNone, 0};
+}
+
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_GetSourceTransactionHash_inner(SystemCallHandler &syscall_handler,
                                        SHA256Hash &output_source_tx_hash)
@@ -90,7 +103,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
       output_return_buffer_len = 0;
     }
 
-    return {{HostFnErrorCode::kNoneOrRecoverable,
+    return {{HostFnErrorCode::kHostNoneOrRecoverable,
              static_cast<int32_t>(*invoke_res)},
             gas_amount};
   }
@@ -104,7 +117,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_buffer)
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {HostFnError{HostFnErrorCode::kExit},
+    return {HostFnError{HostFnErrorCode::kHostExit},
             static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)};
   }
 
@@ -115,7 +128,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
               input_buffer.size());
   syscall_handler.set_return_buffer(std::move(buffer));
 
-  return {HostFnError{HostFnErrorCode::kReturn}, 0};
+  return {HostFnError{HostFnErrorCode::kHostReturn}, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -138,7 +151,7 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnResult, GasAmount>
 syscall_Exit_inner(const int32_t input_code)
 {
-  return {{HostFnErrorCode::kExit, input_code}, 0};
+  return {{HostFnErrorCode::kHostExit, input_code}, 0};
 }
 
 } // namespace hogd

@@ -14,13 +14,13 @@ MockContract::invoke(std::string_view method)
 {
   auto id = Runtime::method_id_from_name(std::string(method));
   if (!id.has_value()) {
-    return InvokeError{InvokeErrorCode::kUnrecoverable};
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
   }
   auto res = entry_point_(foreign_context_, *id);
 
   auto code = static_cast<InvokeErrorCode>(res.panic);
 
-  if (code == InvokeErrorCode::kNone) {
+  if (code == InvokeErrorCode::kInvokeNone) {
     return InvokeStatus<int32_t>{res.result_code};
   }
   return InvokeError{code};

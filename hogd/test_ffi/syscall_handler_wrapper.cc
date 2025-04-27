@@ -23,9 +23,10 @@ SyscallHandlerContext::root_invoke()
 {
   if (!push_context()) {
     return ForeignRootInvokeResult{
-        .result = ForeignInvokeResult{.result_code = 9,
-                                      .panic = std::to_underlying(
-                                          InvokeErrorCode::kUnrecoverable)},
+        .result =
+            ForeignInvokeResult{.result_code = 9,
+                                .panic = std::to_underlying(
+                                    InvokeErrorCode::kInvokeUnrecoverable)},
         .gas_consumed = 0};
   }
   x23::Defer _([this]() { pop_context(); });
@@ -36,7 +37,7 @@ SyscallHandlerContext::root_invoke()
     return ForeignRootInvokeResult{
         .result = ForeignInvokeResult{.result_code = *res.result_,
                                       .panic = std::to_underlying(
-                                          InvokeErrorCode::kNone)},
+                                          InvokeErrorCode::kInvokeNone)},
         .gas_consumed = res.gas_consumed_};
   }
 

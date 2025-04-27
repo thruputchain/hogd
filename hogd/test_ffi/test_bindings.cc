@@ -118,7 +118,8 @@ close_syscall_handler(void *syscall_handler) noexcept
 
 constexpr ForeignRootInvokeResult kUnrecoverableError = {
     .result = {.result_code = 0,
-               .panic = std::to_underlying(InvokeErrorCode::kUnrecoverable)},
+               .panic =
+                   std::to_underlying(InvokeErrorCode::kInvokeUnrecoverable)},
     .gas_consumed = 0};
 
 ForeignRootInvokeResult

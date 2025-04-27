@@ -203,7 +203,7 @@ parse_mock(Inputs const &tuple_args)
 }
 
 constexpr static std::pair<HostFnResult, GasAmount> kFaultResult = {
-    {HostFnErrorCode::kNoneOrRecoverable,
+    {HostFnErrorCode::kHostNoneOrRecoverable,
      static_cast<int32_t>(SyscallErrorCode::kFault)},
     kGenericBadSyscallCost};
 
@@ -216,7 +216,8 @@ inline static std::pair<HostFnErrorCode, int32_t>
 convert_return_t(HostFnStatus<SyscallErrorCode> const &value)
 {
   if (value) {
-    return {HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(*value)};
+    return {HostFnErrorCode::kHostNoneOrRecoverable,
+            static_cast<int32_t>(*value)};
   }
   return {value.error().code(), 0};
 }
@@ -355,7 +356,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
     if (syscall_logfd != -1) {
       auto [host_fn_code, syscall_code] = convert_return_t(res.first);
       std::string log_string;
-      if (host_fn_code != HostFnErrorCode::kNoneOrRecoverable ||
+      if (host_fn_code != HostFnErrorCode::kHostNoneOrRecoverable ||
           syscall_code != 0) {
         log_string = std::format("Syscall Error: {} {}",
                                  HostFnErrorCategory{}.message(

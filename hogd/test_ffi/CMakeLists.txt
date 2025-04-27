@@ -11,7 +11,6 @@ add_library(
     mock_runtime.cc
     syscall_handler_wrapper.cc
     test_bindings.cc
-    mock_db_server.cc
 )
 
 add_dependencies(
@@ -28,6 +27,7 @@ target_include_directories(
 target_link_libraries(
   test_ffi
   runtime
+  runtime_test_util
 )
 
 add_executable(

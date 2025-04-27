@@ -17,7 +17,7 @@ impl WasmiInvokeResult {
     pub fn success(res: i32) -> WasmiInvokeResult {
         Self {
             result: res,
-            error: InvokeErrorCode::kNone as i32,
+            error: InvokeErrorCode::kInvokeNone as i32,
         }
     }
 }

@@ -29,7 +29,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
 {
   if (arg0 >= kSyscallTable.size()) {
     // invalid syscall
-    return {{HostFnErrorCode::kNoneOrRecoverable,
+    return {{HostFnErrorCode::kHostNoneOrRecoverable,
              static_cast<int32_t>(SyscallErrorCode::kNoSyscall)},
             kNoSyscallCost};
   }
@@ -60,7 +60,7 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   auto [err, gas_consumed] = syscall_entry_inner(call_context, arg0, arg1, arg2,
                                                  arg3, arg4, arg5, arg6);
   if (!call_context->runtime->consume_gas(gas_consumed)) {
-    return {HostFnErrorCode::kOutOfGas, 0};
+    return {HostFnErrorCode::kHostOutOfGas, 0};
   }
   return err;
 }
