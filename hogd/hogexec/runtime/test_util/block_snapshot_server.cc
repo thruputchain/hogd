@@ -4,9 +4,12 @@
 #include <cstdlib>
 #include <utility>
 
-#include "db_read_interface.hh"
+#include "contract.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -27,15 +30,15 @@ BlockSnapshotServer::get_snapshot_item(BlockID block,
                                        AddressAndKey const &addrkey)
 {
   if (block != block_id_) {
-    co_return ExpectedStorageItem(RPCError::kBadBlockID);
+    co_return ExpectedStorageItem(RPCError::kRPCBadBlockID);
   }
 
   auto m = items_.take();
   auto it = m->find(addrkey);
   if (it == m->end()) {
-    co_return ExpectedStorageItem(RPCError::kNoStorageItem);
+    co_return ExpectedStorageItem(RPCError::kRPCNoStorageItem);
   }
-  ExpectedStorageItem out(RPCError::kNone);
+  ExpectedStorageItem out(RPCError::kRPCNone);
   out.item() = it->second;
   co_return out;
 }
@@ -44,15 +47,15 @@ BlockSnapshotServer::get_contract(BlockID block,
                                   SHA256Hash const &contract_hash)
 {
   if (block != block_id_) {
-    co_return ExpectedContract(RPCError::kBadBlockID);
+    co_return ExpectedContract(RPCError::kRPCBadBlockID);
   }
 
   auto m = contracts_.take();
   auto it = m->find(contract_hash);
   if (it == m->end()) {
-    co_return ExpectedContract(RPCError::kContractNotExist);
+    co_return ExpectedContract(RPCError::kRPCContractNotExist);
   }
-  ExpectedContract out(RPCError::kNone);
+  ExpectedContract out(RPCError::kRPCNone);
   out.contract() = it->second;
   co_return out;
 }
@@ -62,17 +65,72 @@ BlockSnapshotServer::get_deployment(BlockID block,
                                     ContractAddress const &contract_address)
 {
   if (block != block_id_) {
-    co_return ExpectedDeployment(RPCError::kBadBlockID);
+    co_return ExpectedDeployment(RPCError::kRPCBadBlockID);
   }
 
   auto m = deployments_.take();
   auto it = m->find(contract_address);
   if (it == m->end()) {
-    co_return ExpectedDeployment(RPCError::kNoContractDeployed);
+    co_return ExpectedDeployment(RPCError::kRPCNoContractDeployed);
   }
-  ExpectedDeployment out(RPCError::kNone);
+  ExpectedDeployment out(RPCError::kRPCNone);
   out.deployed_hash() = it->second;
   co_return out;
+}
+
+x23::Async<void>
+BlockSnapshotServer::commit_contract_create(BlockID block, Contract contract)
+{
+  if (block != block_id_) {
+    co_return;
+  }
+
+  auto h = sha256(contract);
+  contracts_->emplace(h, std::move(contract));
+}
+x23::Async<void>
+BlockSnapshotServer::commit_contract_deploy(BlockID block,
+                                            ContractAddress const &addr,
+                                            SHA256Hash const &hash)
+{
+  if (block != block_id_) {
+    co_return;
+  }
+
+  deployments_->emplace(addr, hash);
+}
+
+x23::Async<RPCError>
+BlockSnapshotServer::push_new_subtransaction(BlockID block, TransactionID tx)
+{
+  co_return RPCError::kRPCUnimplemented;
+}
+
+x23::Async<RPCError>
+BlockSnapshotServer::pop_subtransactions(BlockID block, TransactionID tx,
+                                         uint32_t popcount)
+{
+  co_return RPCError::kRPCUnimplemented;
+}
+
+x23::Async<ExpectedStorageCost>
+BlockSnapshotServer::try_reserve_delta(BlockID block, TransactionID tx,
+                                       AddressAndKey addrkey,
+                                       StorageDelta delta,
+                                       StorageItemRPCFlagSet flags)
+{
+  co_return ExpectedStorageCost(RPCError::kRPCUnimplemented);
+}
+x23::Async<void>
+BlockSnapshotServer::commit_transaction(BlockID block, TransactionID tx)
+{
+  co_return; // unimplemented
+}
+x23::Async<void>
+BlockSnapshotServer::abort_transaction(BlockID block, TransactionID tx)
+{
+  co_return;
+  // unimplemented;
 }
 
 void

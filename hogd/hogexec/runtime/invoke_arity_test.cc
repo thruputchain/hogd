@@ -22,7 +22,7 @@ namespace {
 HostFnResult
 arity0(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kNoneOrRecoverable, 100};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 100};
 }
 
 HostFnResult
@@ -31,7 +31,7 @@ arity1(HostCallContext * /*unused*/, uint64_t arg0)
   if (arg0 != 1) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 101};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 101};
 }
 
 HostFnResult
@@ -40,7 +40,7 @@ arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1)
   if (arg0 != 1 || arg1 != 2) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 102};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 102};
 }
 
 HostFnResult
@@ -50,7 +50,7 @@ arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 103};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 103};
 }
 
 HostFnResult
@@ -60,7 +60,7 @@ arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 104};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 104};
 }
 
 HostFnResult
@@ -70,7 +70,7 @@ arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 105};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 105};
 }
 
 } // namespace

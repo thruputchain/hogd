@@ -59,7 +59,8 @@ SystemCallHandler::root_invoke()
 {
   auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
   if (!runtime) {
-    return InvokeResult{.result_ = InvokeError{InvokeErrorCode::kDeterministic},
+    return InvokeResult{.result_ =
+                            InvokeError{InvokeErrorCode::kInvokeDeterministic},
                         .gas_consumed_ = 0};
   }
 

@@ -10,8 +10,8 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
-#include "hogd/test_ffi/mock_db_server.h"
 #include "hogd/test_ffi/port_allocator.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "syscall.hh"
@@ -61,7 +61,7 @@ span_type_test(std::span<const std::byte> span_in,
 TEST(MockSyscallTest, IntTypeTest)
 {
   uint32_t port = PortAllocator::get();
-  MockDBServer server(0);
+  BlockSnapshotServer server(0);
   server.start_server(port);
 
   DBContext db_context(port);
@@ -99,7 +99,7 @@ TEST(MockSyscallTest, IntTypeTest)
 TEST(MockSyscallTest, SpanTest)
 {
   uint32_t port = PortAllocator::get();
-  MockDBServer server(0);
+  BlockSnapshotServer server(0);
   server.start_server(port);
 
   DBContext db_context(port);

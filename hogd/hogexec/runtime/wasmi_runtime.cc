@@ -98,7 +98,7 @@ WasmiRuntime::invoke_internal(std::string_view method_name)
                    method_name.size());
 
   InvokeErrorCode wasmi_error{res.error};
-  if (wasmi_error != InvokeErrorCode::kNone) {
+  if (wasmi_error != InvokeErrorCode::kInvokeNone) {
     return InvokeError{wasmi_error};
   }
   return res.result;

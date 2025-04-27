@@ -12,7 +12,7 @@
 #include <variant>
 
 #include "contract.hh"
-#include "db_read_interface.hh"
+#include "executor_to_db_rpc.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -24,7 +24,7 @@ namespace hogd {
 
 namespace {
 
-std::optional<DatabaseSnapshotReadInterfaceV1::client<
+std::optional<DatabaseToExecutorInterfaceV1::client<
     x23::RpcStream<x23::RpcLogger>::ClientRef>>
 connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
 {
@@ -34,7 +34,7 @@ connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
     return std::nullopt;
   }
   auto client_config = x23::rpc_stream_logged(cp, *fd);
-  return client_config.template client<DatabaseSnapshotReadInterfaceV1>();
+  return client_config.template client<DatabaseToExecutorInterfaceV1>();
 }
 
 } // namespace
@@ -68,10 +68,10 @@ DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
   auto res = read_client_.get_snapshot_item(block_id, addrkey)();
 
-  if (res.error() == RPCError::kNone) {
+  if (res.error() == RPCError::kRPCNone) {
     co_return std::make_unique<const StorageItem>(res.item());
   }
-  if (res.error() == RPCError::kNoStorageItem) {
+  if (res.error() == RPCError::kRPCNoStorageItem) {
     co_return nullptr;
   }
   throw std::runtime_error("unhandleable error");
@@ -82,10 +82,10 @@ DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
   auto res = read_client_.get_contract(block_id, contract_hash)();
 
-  if (res.error() == RPCError::kNone) {
+  if (res.error() == RPCError::kRPCNone) {
     co_return std::make_shared<const Contract>(res.contract());
   }
-  if (res.error() == RPCError::kContractNotExist) {
+  if (res.error() == RPCError::kRPCContractNotExist) {
     co_return nullptr;
   }
   throw std::runtime_error("unhandleable error");
@@ -96,10 +96,10 @@ DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
   auto res = read_client_.get_deployment(block_id, addr)();
 
-  if (res.error() == RPCError::kNone) {
+  if (res.error() == RPCError::kRPCNone) {
     co_return res.deployed_hash();
   }
-  if (res.error() == RPCError::kNoContractDeployed) {
+  if (res.error() == RPCError::kRPCNoContractDeployed) {
     co_return std::nullopt;
   }
   throw std::runtime_error("unhandleable error");

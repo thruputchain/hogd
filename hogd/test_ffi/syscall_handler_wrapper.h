@@ -83,7 +83,7 @@ recoverable_error(SyscallErrorCode code)
 {
   return ForeignHostFnResult{.result_code = std::to_underlying(code),
                              .panic = std::to_underlying(
-                                 HostFnErrorCode::kNoneOrRecoverable)};
+                                 HostFnErrorCode::kHostNoneOrRecoverable)};
 }
 
 constexpr ForeignHostFnResult
@@ -91,7 +91,7 @@ unrecoverable_error()
 {
   return ForeignHostFnResult{.result_code = 0,
                              .panic = std::to_underlying(
-                                 HostFnErrorCode::kUnrecoverable)};
+                                 HostFnErrorCode::kHostUnrecoverable)};
 }
 
 // Translate various types of syscall return types into FFI-safe return type
@@ -192,7 +192,7 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     if (syscall_logfd != -1) {
       auto [host_fn_code, syscall_code] = convert_return_t(res.first);
       std::string log_string;
-      if (host_fn_code != HostFnErrorCode::kNoneOrRecoverable ||
+      if (host_fn_code != HostFnErrorCode::kHostNoneOrRecoverable ||
           syscall_code != 0) {
         log_string = std::format("Syscall Error: {} {}",
                                  HostFnErrorCategory{}.message(

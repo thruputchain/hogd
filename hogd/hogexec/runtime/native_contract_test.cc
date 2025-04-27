@@ -36,7 +36,7 @@ protected:
             {1,
              [](SystemCallHandler & /*unused*/,
                 NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
-               return InvokeError{InvokeErrorCode::kDeterministic};
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }}});
 
     // Invokes another contract, returns the error code of the other contract
@@ -48,7 +48,7 @@ protected:
                auto const &calldata = handler.get_calldata();
 
                if (calldata.size() != 36) {
-                 return InvokeError{InvokeErrorCode::kDeterministic};
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                MethodID invoked_id =
                    *reinterpret_cast<const MethodID *>(calldata.data());
@@ -70,7 +70,7 @@ protected:
                if (invoke_res.first) {
                  return std::to_underlying(*invoke_res.first);
                }
-               return InvokeError{InvokeErrorCode::kDeterministic};
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }}});
 
     std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -110,7 +110,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
   res = runtime->invoke(1, UINT64_MAX);
 
   ASSERT_FALSE(res.result_);
-  ASSERT_EQ(res.result_.error(), InvokeErrorCode::kDeterministic);
+  ASSERT_EQ(res.result_.error(), InvokeErrorCode::kInvokeDeterministic);
 }
 
 } // namespace hogd

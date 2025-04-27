@@ -39,10 +39,12 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
     // For now, at least, we handle all as deterministic errors.
     match code {
         wasmi::core::TrapCode::OutOfFuel => {
-            return WasmiInvokeResult::error(InvokeErrorCode::kOutOfGas);
+            return WasmiInvokeResult::error(InvokeErrorCode::kInvokeOutOfGas);
         }
         _ => {
-            return WasmiInvokeResult::error(InvokeErrorCode::kDeterministic);
+            return WasmiInvokeResult::error(
+                InvokeErrorCode::kInvokeDeterministic,
+            );
         }
     }
 }
@@ -86,7 +88,7 @@ impl WasmiRuntime {
             Some(v) => v,
             _ => {
                 return WasmiInvokeResult::error(
-                    InvokeErrorCode::kDeterministic,
+                    InvokeErrorCode::kInvokeDeterministic,
                 );
             }
         };
@@ -102,7 +104,7 @@ impl WasmiRuntime {
                 }
                 _ => {
                     return WasmiInvokeResult::error(
-                        InvokeErrorCode::kDeterministic,
+                        InvokeErrorCode::kInvokeDeterministic,
                     );
                 }
             },
@@ -119,7 +121,7 @@ impl WasmiRuntime {
                     Some(trampoline_error) => trampoline_error.clone(),
                     None => {
                         return WasmiInvokeResult::error(
-                            InvokeErrorCode::kUnrecoverable,
+                            InvokeErrorCode::kInvokeUnrecoverable,
                         );
                     }
                 };
@@ -127,7 +129,7 @@ impl WasmiRuntime {
                 match my_error.error {
                     external_call::TrampolineErrorEnum::OutOfGas => {
                         return WasmiInvokeResult::error(
-                            InvokeErrorCode::kOutOfGas,
+                            InvokeErrorCode::kInvokeOutOfGas,
                         );
                     }
                     external_call::TrampolineErrorEnum::Return => {
@@ -139,12 +141,12 @@ impl WasmiRuntime {
                     }
                     external_call::TrampolineErrorEnum::ValidationFailure => {
                         return WasmiInvokeResult::error(
-                            InvokeErrorCode::kValidationFailure,
+                            InvokeErrorCode::kInvokeValidationFailure,
                         );
                     }
                     _ => {
                         return WasmiInvokeResult::error(
-                            InvokeErrorCode::kUnrecoverable,
+                            InvokeErrorCode::kInvokeUnrecoverable,
                         );
                     }
                 }
@@ -165,7 +167,7 @@ pub extern "C" fn wasmi_invoke(
     assert_runtime_not_null(runtime);
 
     if method_name == core::ptr::null() {
-        return WasmiInvokeResult::error(InvokeErrorCode::kDeterministic);
+        return WasmiInvokeResult::error(InvokeErrorCode::kInvokeDeterministic);
     }
 
     let method_name_slice =
@@ -173,7 +175,11 @@ pub extern "C" fn wasmi_invoke(
 
     let string = match std::str::from_utf8(&method_name_slice) {
         Ok(v) => v,
-        _ => return WasmiInvokeResult::error(InvokeErrorCode::kDeterministic),
+        _ => {
+            return WasmiInvokeResult::error(
+                InvokeErrorCode::kInvokeDeterministic,
+            )
+        }
     };
 
     let r = unsafe { &mut *runtime };
