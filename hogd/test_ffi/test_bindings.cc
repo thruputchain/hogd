@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <utility>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -20,7 +21,9 @@
 #include "hogd/test_ffi/port_allocator.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -55,15 +58,17 @@ open_runtime_context() noexcept
       make_hogexec_context(RuntimeEngine::kWasmi));
   return out;
 }
+
 void
 close_runtime_context(void *context) noexcept
 {
   delete static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
 }
+
 bool
-add_contract_and_method(void *context, uint32_t mock_contract_id,
-                        ForeignEntryPoint entry_point,
-                        void *foreign_context) noexcept
+register_new_contract(void *context, uint32_t mock_contract_id,
+                      ForeignEntryPoint entry_point,
+                      void *foreign_context) noexcept
 {
   if (context == nullptr)
     return false;
@@ -172,20 +177,68 @@ close_runtime_context(void *context)
   hogd::close_runtime_context(context);
 }
 int
-add_contract_and_method(void *context, uint32_t mock_contract_id,
-                        ForeignEntryPoint entry_point, void *foreign_context)
+register_new_contract(void *context, uint32_t mock_contract_id,
+                      ForeignEntryPoint entry_point, void *foreign_context)
 {
-  return (hogd::add_contract_and_method(context, mock_contract_id, entry_point,
-                                        foreign_context))
+  return (hogd::register_new_contract(context, mock_contract_id, entry_point,
+                                      foreign_context))
              ? 0
              : 1;
+}
+
+int
+setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
+                      uint32_t contract_len)
+{
+  if (context == nullptr || db == nullptr) {
+    return 1;
+  }
+  auto *context_cast =
+      static_cast<std::shared_ptr<hogd::MockRuntimeContext> *>(context);
+  auto *db_cast = static_cast<hogd::DBContext *>(db);
+
+  hogd::Contract contract;
+  try {
+    x23::deserialize(&contract, std::span(contract_bytes, contract_len));
+  } catch (x23::XdrException &e) {
+    return 1;
+  }
+
+  // make sure the contract has already been registered with the instantiation
+  // context
+  if (contract.contract_type() == hogd::ContractType::kMockTest) {
+    if (!((*context_cast)->has_mock_contract(contract.mock_contract_id()))) {
+      return 1;
+    }
+  }
+
+  db_cast->get_snapshot_server().setup_create_contract(std::move(contract));
+  return 0;
+}
+
+int
+setup_deploy_contract(void *db, const uint8_t *deployment_addr,
+                      const uint8_t *contract_hash)
+{
+  if (db == nullptr) {
+    return 1;
+  }
+  auto *db_cast = static_cast<hogd::DBContext *>(db);
+
+  hogd::SHA256Hash h;
+  std::memcpy(h.data(), contract_hash, h.size());
+  hogd::ContractAddress addr;
+  std::memcpy(addr.data(), deployment_addr, addr.size());
+
+  db_cast->get_snapshot_server().setup_create_deployment(std::move(addr),
+                                                         std::move(h));
+  return 0;
 }
 
 void *
 open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
                      unsigned int signed_tx_len)
 {
-  std::println("opening syscall handler");
   return hogd::open_syscall_handler(db, rc, signed_tx, signed_tx_len);
 }
 

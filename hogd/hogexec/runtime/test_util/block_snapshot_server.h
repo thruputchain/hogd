@@ -45,10 +45,11 @@ public:
   static x23::Async<RPCError>
   pop_subtransactions(BlockID block, TransactionID tx, uint32_t popcount);
 
-  x23::Async<void> commit_contract_create(BlockID block, Contract contract);
-  x23::Async<void> commit_contract_deploy(BlockID block,
-                                          ContractAddress const &contract_addr,
-                                          SHA256Hash const &hash);
+  static x23::Async<void> commit_contract_create(BlockID block,
+                                                 Contract contract);
+  static x23::Async<void>
+  commit_contract_deploy(BlockID block, ContractAddress const &contract_addr,
+                         SHA256Hash const &hash);
 
   x23::Async<ExpectedStorageItem>
   get_snapshot_item(BlockID block, AddressAndKey const &addrkey);
@@ -58,6 +59,10 @@ public:
   get_deployment(BlockID block, ContractAddress const &contract_address);
 
   void start_server(uint32_t port_number);
+
+  // Only used within test setup
+  void setup_create_contract(Contract contract);
+  void setup_create_deployment(ContractAddress addr, SHA256Hash contract_hash);
 
 private:
   BlockID block_id_;
