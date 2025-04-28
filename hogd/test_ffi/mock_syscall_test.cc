@@ -60,12 +60,7 @@ span_type_test(std::span<const std::byte> span_in,
 
 TEST(MockSyscallTest, IntTypeTest)
 {
-  uint32_t port = PortAllocator::get();
-  BlockSnapshotServer server(0);
-  server.start_server(port);
-
-  DBContext db_context(port);
-  db_context.advance_new_block();
+  DBContext db_context(PortAllocator::get());
 
   SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());
@@ -98,12 +93,7 @@ TEST(MockSyscallTest, IntTypeTest)
 
 TEST(MockSyscallTest, SpanTest)
 {
-  uint32_t port = PortAllocator::get();
-  BlockSnapshotServer server(0);
-  server.start_server(port);
-
-  DBContext db_context(port);
-  db_context.advance_new_block();
+  DBContext db_context(PortAllocator::get());
 
   SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());

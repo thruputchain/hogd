@@ -81,23 +81,14 @@ BlockSnapshotServer::get_deployment(BlockID block,
 x23::Async<void>
 BlockSnapshotServer::commit_contract_create(BlockID block, Contract contract)
 {
-  if (block != block_id_) {
-    co_return;
-  }
-
-  auto h = sha256(contract);
-  contracts_->emplace(h, std::move(contract));
+  co_return; // unimplemented
 }
 x23::Async<void>
 BlockSnapshotServer::commit_contract_deploy(BlockID block,
                                             ContractAddress const &addr,
                                             SHA256Hash const &hash)
 {
-  if (block != block_id_) {
-    co_return;
-  }
-
-  deployments_->emplace(addr, hash);
+  co_return; // unimplemented
 }
 
 x23::Async<RPCError>
@@ -149,6 +140,19 @@ BlockSnapshotServer::start_server(uint32_t port_number)
       x23::rpc_stream_logged(cp, *c).server(server);
     }
   }(cp_, this, std::move(lfd));
+}
+
+void
+BlockSnapshotServer::setup_create_contract(Contract contract)
+{
+  auto h = sha256(contract);
+  contracts_->emplace(h, contract);
+}
+void
+BlockSnapshotServer::setup_create_deployment(ContractAddress addr,
+                                             SHA256Hash contract_hash)
+{
+  deployments_->emplace(addr, contract_hash);
 }
 
 } // namespace hogd
