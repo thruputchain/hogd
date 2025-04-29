@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "hogd/hogexec/runtime/runtime.h"
 #include "contract.hh"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 
 namespace hogd {

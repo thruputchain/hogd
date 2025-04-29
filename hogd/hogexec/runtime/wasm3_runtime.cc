@@ -37,7 +37,8 @@ Wasm3Context::make_new_runtime(Contract const &contract,
   if (contract.contract_type() != ContractType::kWasmi)
     return nullptr;
 
-  auto module = wasm3_env_.parse_module(contract.wasmi_contract().data(), contract.wasmi_contract().size());
+  auto module = wasm3_env_.parse_module(contract.wasmi_contract().data(),
+                                        contract.wasmi_contract().size());
   if (!module) {
     return nullptr;
   }

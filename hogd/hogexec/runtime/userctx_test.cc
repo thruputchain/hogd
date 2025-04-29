@@ -39,7 +39,7 @@ protected:
     ASSERT_TRUE(runtime_);
   } */
 
-  //std::unique_ptr<Runtime> runtime_;
+  // std::unique_ptr<Runtime> runtime_;
 };
 
 TEST_P(UserContextTest, CheckCtxCorrect)
