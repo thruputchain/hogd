@@ -3,18 +3,21 @@
 #pragma once
 
 #include <algorithm>
-#include <concepts>
+#include <cassert>
 #include <functional>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <ranges>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/os.h"
+#include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 
 namespace hogd {
