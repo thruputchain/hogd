@@ -25,11 +25,11 @@ public:
   Wasm3Context() = default;
   ~Wasm3Context() override = default;
 
-  std::unique_ptr<Runtime> make_new_runtime(ContractBlob const &contract,
+  std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
                                             SystemCallHandler *syscall_handler,
                                             bool do_verify) override;
 
-  bool verify_contract(ContractBlob const & /*unused*/) const override
+  bool verify_contract(Contract const & /*unused*/) const override
   {
     return true;
   }

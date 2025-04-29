@@ -150,20 +150,20 @@ Function::m3_err_to_invoke_status(M3Result res)
   assert(res != m3Err_none);
 
   if (res == m3Err_outOfGasError) {
-    return hogd::InvokeError{hogd::InvokeErrorCode::kOutOfGas};
+    return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeOutOfGas};
   }
   if (is_nondeterminisic_error(res)) {
-    return hogd::InvokeError{hogd::InvokeErrorCode::kUnrecoverable};
+    return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeUnrecoverable};
   }
   if (res == m3Err_hogdExit) {
     return hogd::InvokeStatus<int32_t>{detail::wasm3_err_code};
   }
   if (res == m3Err_validationFailure) {
-    return hogd::InvokeError{hogd::InvokeErrorCode::kValidationFailure};
+    return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeValidationFailure};
   }
 
   // all other errors
-  return hogd::InvokeError{hogd::InvokeErrorCode::kDeterministic};
+  return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeDeterministic};
 }
 
 std::unique_ptr<Runtime>

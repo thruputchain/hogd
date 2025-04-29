@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -20,7 +21,7 @@ namespace {
 HostFnResult
 arity0(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kNoneOrRecoverable, 100};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 100};
 }
 
 HostFnResult
@@ -29,7 +30,7 @@ arity1(HostCallContext * /*unused*/, uint64_t arg0)
   if (arg0 != 1) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 101};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 101};
 }
 
 HostFnResult
@@ -38,7 +39,7 @@ arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1)
   if (arg0 != 1 || arg1 != 2) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 102};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 102};
 }
 
 HostFnResult
@@ -48,7 +49,7 @@ arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 103};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 103};
 }
 
 HostFnResult
@@ -58,7 +59,7 @@ arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 104};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 104};
 }
 
 HostFnResult
@@ -68,7 +69,7 @@ arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 105};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 105};
 }
 
 } // namespace
@@ -78,7 +79,9 @@ class InvokeArityTests : public ::testing::TestWithParam<RuntimeEngine> {
 protected:
   void SetUp() override
   {
-    auto c = test::load_wasm_from_file("test_invoke_arity.wasm");
+    Contract contract(ContractType::kWasmi);
+    contract.wasmi_contract() =
+        test::load_wasm_from_file("test_invoke_arity.wasm");
 
     auto context = make_runtime_context(GetParam());
 
@@ -88,7 +91,7 @@ protected:
     context->link_fn("test", "arg3", &arity3);
     context->link_fn("test", "arg4", &arity4);
     context->link_fn("test", "arg5", &arity5);
-    runtime_ = context->make_new_runtime(c, nullptr, true);
+    runtime_ = context->make_new_runtime(contract, nullptr, true);
     ASSERT_TRUE(!!runtime_);
   }
 

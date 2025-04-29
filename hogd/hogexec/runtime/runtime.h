@@ -28,6 +28,15 @@ struct HostCallContext {
   SystemCallHandler *syscall_handler = nullptr;
 };
 
+inline std::unique_ptr<HostCallContext>
+make_new_host_call_context(SystemCallHandler *syscall_handler)
+{
+  // ctor of Runtime is responsible for filling in out->runtime pointer.
+  auto out = std::make_unique<HostCallContext>();
+  out->syscall_handler = syscall_handler;
+  return out;
+}
+
 enum class RuntimeEngine {
   kWasmi = 0,
   kWasm3 = 1,
@@ -110,11 +119,10 @@ public:
 
   // Perform any required validation checks on the contract.
   // In the case of webassembly, this is the webassembly validator.
-  virtual bool verify_contract(ContractBlob const &contract) const = 0;
+  virtual bool verify_contract(Contract const &contract) const = 0;
 
   virtual std::unique_ptr<Runtime>
-  make_new_runtime(ContractBlob const &contract,
-                   SystemCallHandler *syscall_handler,
+  make_new_runtime(Contract const &contract, SystemCallHandler *syscall_handler,
                    bool do_contract_verify) = 0;
 
   virtual bool link_fn_nargs(std::string_view module_name,

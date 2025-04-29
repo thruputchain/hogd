@@ -32,11 +32,11 @@ public:
   bool link_fn_nargs(std::string_view module_name, std::string_view fn_name,
                      void *fn_ptr, uint8_t nargs) override;
 
-  std::unique_ptr<Runtime> make_new_runtime(const ContractBlob &contract,
+  std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
                                             SystemCallHandler *syscall_handler,
                                             bool do_contract_verify) override;
 
-  bool verify_contract(const ContractBlob & /*unused*/) const override
+  bool verify_contract(Contract const & /*unused*/) const override
   {
     return true;
   };
@@ -44,6 +44,11 @@ public:
   // Sets the function pointer and context that a mocked contract calls into.
   void set_trampoline(uint32_t contract, ForeignEntryPoint entry_point,
                       void *foreign_context);
+
+  bool has_mock_contract(uint32_t id) const
+  {
+    return mocked_contracts_.contains(id);
+  }
 
 private:
   std::map<uint32_t, MockContract> mocked_contracts_;
@@ -55,6 +60,11 @@ private:
 // which is essentially a wrapper around a function pointer.
 // Note that mocked contracts do not on their own track gas usage,
 // aside from that explicitly consumed by syscalls.
+//
+// Also note that the host_call_context_ in a mock contract
+// does NOT keept track of a SystemCallHandler* pointer.
+// The mock testing system uses a separate method for tracking
+// SystemCallHandler* context.
 class MockRuntime : public Runtime {
 public:
   MockRuntime(MockContract contract)

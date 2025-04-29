@@ -145,20 +145,20 @@ wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
   int32_t ret_val = result.result;
 
   switch (code) {
-  case kNoneOrRecoverable:
+  case kHostNoneOrRecoverable:
     m3ApiReturn(ret_val);
     std::terminate(); // assert that m3ApiReturn macro actually returns
-  case kUnrecoverable:
+  case kHostUnrecoverable:
     m3ApiTrap(m3Err_unrecoverableSystemError);
-  case kOutOfGas:
+  case kHostOutOfGas:
     m3ApiTrap(m3Err_outOfGasError);
-  case kExit:
+  case kHostExit:
     wasm3_err_code = result.result;
     m3ApiTrap(m3Err_hogdExit);
-  case kReturn:
+  case kHostReturn:
     wasm3_err_code = 0;
     m3ApiTrap(m3Err_hogdExit);
-  case kValidationFailure:
+  case kHostValidationFailure:
     m3ApiTrap(m3Err_validationFailure);
   default:
     m3ApiTrap(m3Err_unrecoverableSystemError);
@@ -309,7 +309,7 @@ public:
   hogd::InvokeStatus<int32_t> call(Args... args)
   {
     if (!m3func_) {
-      return hogd::InvokeError{hogd::InvokeErrorCode::kDeterministic};
+      return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeDeterministic};
     }
 
     const void *arg_ptrs[] = {reinterpret_cast<const void *>(&args)...};

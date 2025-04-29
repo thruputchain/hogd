@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -21,14 +22,14 @@ foo(HostCallContext *ctx, uint64_t value)
 {
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
   EXPECT_TRUE(value == 12);
-  return {HostFnErrorCode::kNoneOrRecoverable, 15};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 15};
 }
 
 } // namespace
 
 class UserContextTest : public ::testing::TestWithParam<RuntimeEngine> {
 protected:
-  void SetUp() override
+  /*void SetUp() override
   {
     auto c = test::load_wasm_from_file("test_invoke.wasm");
     auto context = make_runtime_context(GetParam());
@@ -36,14 +37,24 @@ protected:
     runtime_ = context->make_new_runtime(c, ctx_check, true);
 
     ASSERT_TRUE(runtime_);
-  }
+  } */
 
-  std::unique_ptr<Runtime> runtime_;
+  //std::unique_ptr<Runtime> runtime_;
 };
 
 TEST_P(UserContextTest, CheckCtxCorrect)
 {
-  auto res = runtime_->invoke("calltest", UINT64_MAX);
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() = test::load_wasm_from_file("test_invoke.wasm");
+  auto context = make_runtime_context(GetParam());
+
+  context->link_fn("test", "redir_call", &foo);
+
+  auto runtime = context->make_new_runtime(contract, ctx_check, true);
+
+  ASSERT_TRUE(runtime);
+
+  auto res = runtime->invoke("calltest", UINT64_MAX);
   EXPECT_TRUE(res.result_);
   EXPECT_EQ(*res.result_, 15U);
 }

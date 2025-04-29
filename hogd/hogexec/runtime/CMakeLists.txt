@@ -6,10 +6,15 @@ set_source_files_properties(
     ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
     PROPERTIES GENERATED TRUE)
 
+add_subdirectory(test_util)
+
 add_library(
   runtime
+  database_proxy.cc
+  execution_mode.cc
   invocation_frame.cc
   item_view.cc
+  native_runtime.cc
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
@@ -30,12 +35,15 @@ add_library(
 add_executable(
   runtime_test
   error_handling_test.cc
-  instantiate_test.cc
-  item_view_test.cc
-  invoke_arity_test.cc
+  execution_mode_test.cc
   gas_api_test.cc
+  instantiate_test.cc
+  invoke_arity_test.cc
+  item_view_test.cc
   memory_access_test.cc
+  native_contract_test.cc
   syscall_entry_outer_tests.cc
+  syscall_parse_tests.cc
   userctx_test.cc
 )
 
@@ -43,10 +51,8 @@ target_link_libraries(
   runtime
   wasmi_lib
   runtime_trampoline
-  protocol
   m3 # wasm3
-  base
-  crypto
+  hogd
 )
 
 add_dependencies(
@@ -71,6 +77,7 @@ target_include_directories(
 target_link_libraries(
   runtime_test
   runtime
+  runtime_test_util
   GTest::gtest_main
 )
 gtest_discover_tests(runtime_test)

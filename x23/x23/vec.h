@@ -53,6 +53,7 @@
 
 #include <x23/cleanup.h>
 #include <x23/config.h>
+#include <x23/typename.h>
 
 namespace x23 {
 
@@ -287,7 +288,8 @@ public:
   constexpr Vec(Vec<value_type, MS, allocator_type> &&other)
       noexcept(max_size() >= Vec<value_type, MS, allocator_type>::max_size())
   {
-    if constexpr (std::remove_reference_t<decltype(other)>::max_size() > max_size())
+    if constexpr (std::remove_reference_t<decltype(other)>::max_size() >
+                  max_size())
       // Okay to throw, other will still delete memory
       check_size(other.size());
     b_ = other.b_;
@@ -314,7 +316,7 @@ public:
     try {
       append_range(std::forward<R>(r));
     } catch (...) {
-      resize(0);
+      realloc(0);
       throw;
     }
   }
@@ -348,7 +350,8 @@ public:
   constexpr Vec &operator=(Vec<T, MS, allocator_type> &&other)
       noexcept(max_size() <= Vec<T, MS, allocator_type>::max_size())
   {
-    if constexpr (std::remove_reference_t<decltype(other)>::max_size() > max_size())
+    if constexpr (std::remove_reference_t<decltype(other)>::max_size() >
+                  max_size())
       check_size(other.size());
     realloc(0);
     a_ = std::move(other.a_);
@@ -360,7 +363,8 @@ public:
   constexpr Vec &operator=(const Vec<T, MS, R> &other)
   {
     size_type new_size = other.size();
-    if constexpr (std::remove_reference_t<decltype(other)>::max_size() > max_size())
+    if constexpr (std::remove_reference_t<decltype(other)>::max_size() >
+                  max_size())
       check_size(new_size);
     if (new_size > capacity()) {
       realloc(0);
@@ -374,9 +378,9 @@ public:
     return *this;
   }
 
-  constexpr Vec &operator+=(std::ranges::range auto &rg)
+  constexpr Vec &operator+=(std::ranges::range auto &&rg)
   {
-    append_range(rg);
+    append_range(std::forward<decltype(rg)>(rg));
     return *this;
   }
 
@@ -439,14 +443,30 @@ public:
   constexpr void shrink_to_fit() { realloc(size()); }
 
   constexpr void clear() noexcept { shrink(0); }
+  void erase(iterator first, iterator last)
+  {
+    std::move(last, end(), first);
+    shrink(size() - (last - first));
+  }
+  void erase(iterator pos)
+  {
+    std::move(pos + 1, end(), pos);
+    shrink(size() - 1);
+  }
   template<typename... Args> reference emplace_back(Args &&...args)
   {
     ensure();
     std::construct_at(b_.end, std::forward<Args>(args)...);
     return *b_.end++;
   }
-  constexpr void push_back(const value_type &v) { emplace_back(v); }
-  constexpr void push_back(value_type &&v) { emplace_back(std::move(v)); }
+  constexpr void push_back(this auto &self, const value_type &v)
+  {
+    self.emplace_back(v);
+  }
+  constexpr void push_back(this auto &self, value_type &&v)
+  {
+    self.emplace_back(std::move(v));
+  }
   constexpr void pop_back() { shrink(size() - 1); }
   constexpr void swap(Vec &other) noexcept
   {
@@ -490,10 +510,11 @@ public:
       }
     });
   }
-  template<typename Op> void resize_and_overwrite(size_type count, Op op)
+  template<typename Op>
+  void resize_and_overwrite(this auto &self, size_type count, Op op)
   {
-    resize_uninitialized(count + 1);
-    resize(std::move(op)(data(), count));
+    self.resize_uninitialized(count + 1);
+    self.resize(std::move(op)(self.data(), count));
   }
 
   template<std::random_access_iterator IterIn>
@@ -588,7 +609,7 @@ public:
 protected:
   template<typename, size_t, typename> friend class Vec;
 
-  static constexpr const char *tname() { return typeid(T).name(); }
+  static constexpr std::string_view tname() { return type_name<T>(); }
 
   constexpr void shrink(size_type new_size) noexcept
   {

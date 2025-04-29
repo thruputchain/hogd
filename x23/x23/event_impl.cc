@@ -1,10 +1,10 @@
 
 #include "x23/event.h"
-#include "x23/fileio.h"
+#include "x23/sockio.h"
 
 namespace x23::detail {
 
-#if HAVE_EPOLL
+#if USE_EPOLL
 
 CoroPollImpl::CoroPollImpl(ThreadPool &pool)
   : pool_(pool), epollfd_(epoll_create1(EPOLL_CLOEXEC))
@@ -74,7 +74,8 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode)
   }
   else {
     if (old_mode == kActive &&
-        epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1)
+        epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1 &&
+	errno != EBADF && errno != ENOENT)
       Errno{}.raise("EPOLL_CTL_DEL failed");
     docbs(fdp);
   }
@@ -87,6 +88,12 @@ CoroPollImpl::time_to_stop()
     return false;
   pool_.drain();
   return !numcoro_;
+}
+
+int
+CoroPollImpl::get_max_fd()
+{
+  return state_size_;
 }
 
 BorrowedFd
@@ -104,8 +111,7 @@ CoroPollImpl::always_eof()
     int newfd = fds[0];
     try {
       set_nonblock(newfd);
-    }
-    catch (...) {
+    } catch (...) {
       close(newfd);
       throw;
     }
@@ -138,24 +144,27 @@ CoroPollImpl::getfd(BorrowedFd fd)
   assert(fd.get() >= 0);
 
   if (size_t(fd.get()) >= state_size_) {
-    ++want_resize_;
-    Defer _c([this] { --want_resize_; });
-
     std::lock_guard _lg(resize_lock_);
     if (size_t(fd.get()) >= state_size_) {
-      size_t new_size = std::max<size_t>(fd.get() + 1uz, 2 * state_size_);
-      FdState *new_state = new FdState[new_size];
+      size_t new_size = std::max<size_t>(fd.get() + 1UZ, 2 * state_size_);
+      auto *new_state = new FdState[new_size];
       std::move(state_.load(), state_ + state_size_, new_state);
       delete[] state_.exchange(new_state);
       state_size_ = new_size;
     }
   }
-  else if (want_resize_)
-    // Crude way to avoid writer starvation--briefly grab write lock
-    (void)std::lock_guard{resize_lock_};
 
-  std::shared_lock sl(resize_lock_);
-  return FdPtr{state_ + fd.get(), std::move(sl)};
+  auto sl = resize_lock_.hold_shared();
+  return FdPtr{.p_ = state_ + fd.get(), .lk_ = std::move(sl)};
+}
+
+std::shared_ptr<BufferedReader>
+CoroPollImpl::get_reader(BorrowedFd fd)
+{
+  auto fdp = getfd(fd);
+  if (fdp->mode == FdState::kPoisoned)
+    return nullptr;
+  return getfd(fd)->reader();
 }
 
 void
@@ -169,7 +178,7 @@ CoroPollImpl::check(int timeout)
     Errno{}.raise("epoll_wait failed");
   }
 
-  std::shared_lock lk(resize_lock_);
+  auto lk = resize_lock_.hold_shared();
   std::vector<std::coroutine_handle<>> coroqueue;
   Errno err = stop_requested() ? EBADF : 0;
   for (int i = 0; i < n; ++i) {
@@ -184,7 +193,7 @@ CoroPollImpl::check(int timeout)
         }
       }
   }
-  lk.unlock();
+  lk.reset();
 
   pool_.go(coroqueue);
 }
@@ -192,7 +201,9 @@ CoroPollImpl::check(int timeout)
 void
 CoroPollImpl::reset(BorrowedFd fd)
 {
-  setmode(getfd(fd), FdState::Mode::kFree);
+  auto fdp = getfd(fd);
+  fdp->buf_clear();
+  setmode(fdp, FdState::Mode::kFree);
 }
 
 void
@@ -209,7 +220,7 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
       pool_.go(h);
 }
 
-#else // !HAVE_EPOLL
+#else // !USE_EPOLL
 
 CoroPollImpl::CoroPollImpl(ThreadPool &pool_) : pool_(pool_)
 {
@@ -235,6 +246,16 @@ CoroPollImpl::time_to_stop()
   return state_->empty();
 }
 
+std::shared_ptr<BufferedReader>
+CoroPollImpl::get_reader(BorrowedFd fd)
+{
+  auto s = state_.take();
+  auto &f = (*s)[fd.get()];
+  if (f.poisoned)
+    return nullptr;
+  return f.reader();
+}
+
 void
 CoroPollImpl::check(int timeout)
 {
@@ -245,9 +266,10 @@ CoroPollImpl::check(int timeout)
     pollfds.push_back({selfpipe_[0].get(), pollflags[0], 0});
     for (const auto &kv : *ptr) {
       const FdState &f = kv.second;
-      if (f.poisoned)
+      short events;
+      if (f.poisoned || !(events = f.events()))
         continue;
-      pollfds.push_back({kv.first, f.events(), 0});
+      pollfds.push_back({kv.first, events, 0});
     }
   }
 
@@ -279,11 +301,18 @@ CoroPollImpl::check(int timeout)
         if (auto h = std::exchange(f.callbacks[write], nullptr)
                          .set_result_without_resuming(0))
           cbs.push_back(h);
-    if (!f.callbacks[0] && !f.callbacks[1])
-      ptr->erase(it);
   }
   ptr.reset();
   pool_.go(cbs);
+}
+
+int
+CoroPollImpl::get_max_fd()
+{
+  auto ptr = state_.take();
+  if (ptr->empty())
+    return 0;
+  return 1 + std::ranges::max(*ptr | std::views::keys);
 }
 
 std::vector<std::coroutine_handle<>>
@@ -293,7 +322,7 @@ CoroPollImpl::report_badfd(FdState &f)
   for (unsigned write = 0; write < 2; ++write)
     if (f.callbacks[write])
       if (auto h = std::exchange(f.callbacks[write], nullptr)
-                       .set_result_without_resuming(0))
+                       .set_result_without_resuming(EBADF))
         ret.push_back(h);
   return ret;
 }
@@ -316,8 +345,13 @@ CoroPollImpl::reset(BorrowedFd fd)
   if (auto it = ptr->find(fd.get()); it != ptr->end()) {
     auto work = report_badfd(it->second);
     ptr->erase(it);
-    if (ptr->empty() && stop_requested())
-      wake();
+    // Note we must always wake, even when the events are not empty
+    // and no stop is requested.  The reason is that poll keeps a
+    // reference to sockets, which means closing a file descriptor
+    // will not close the socket (and hence not send a TCP FIN
+    // segment) while poll is still waiting for an event.  Waking the
+    // poll thread ensures closed file descriptors also close sockets.
+    wake();
     ptr.reset();
     pool_.go(work);
   }
@@ -348,7 +382,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem cb)
 void
 CoroPollImpl::wake()
 {
-  char z = '\0';
+  static const char z = '\0';
   write(selfpipe_[1].get(), &z, 1);
 }
 
@@ -361,12 +395,12 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
     auto &f = (*ptr)[fd.get()];
     if (f.callbacks[write])
       h = std::exchange(f.callbacks[write], nullptr)
-	.set_result_without_resuming(err);
+              .set_result_without_resuming(err);
   }
   if (h)
     pool_.go(h);
 }
 
-#endif // !HAVE_EPOLL
+#endif // !USE_EPOLL
 
 } // namespace x23::detail

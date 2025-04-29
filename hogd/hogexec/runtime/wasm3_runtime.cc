@@ -30,11 +30,14 @@ Wasm3Runtime::set_available_gas(uint64_t gas) noexcept
 }
 
 std::unique_ptr<Runtime>
-Wasm3Context::make_new_runtime(ContractBlob const &contract,
+Wasm3Context::make_new_runtime(Contract const &contract,
                                SystemCallHandler *syscall_handler,
                                bool /*unused*/)
 {
-  auto module = wasm3_env_.parse_module(contract.data(), contract.size());
+  if (contract.contract_type() != ContractType::kWasmi)
+    return nullptr;
+
+  auto module = wasm3_env_.parse_module(contract.wasmi_contract().data(), contract.wasmi_contract().size());
   if (!module) {
     return nullptr;
   }
@@ -79,7 +82,7 @@ Wasm3Runtime::invoke_internal(std::string_view method_name)
   std::string method_name_string(method_name);
   auto fn = wasm3_runtime_->find_function(method_name_string.c_str());
   if (!fn) {
-    return InvokeError{InvokeErrorCode::kDeterministic};
+    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   }
   return fn->call();
 }

@@ -43,19 +43,42 @@ void *open_runtime_context();
 void close_runtime_context(void *context);
 
 // Returns 0 for success, nonzero for some error code
-int add_contract_and_method(void *context, uint32_t mock_contract_id,
-                            ForeignEntryPoint entry_point,
-                            void *foreign_context);
+// These errors should not be handled by a contract,
+// but are SDK or usage errors (i.e. invalid context pointer)
+//
+// Note that this does NOT cause the contract to be "created" within the
+// database. That still requires some syscall (or setup) that creates a
+// Contract(ContractType::kMockTest, id) within the database.  If that creation
+// is performed without calling this method, instantiating the contract will
+// fail.
+int register_new_contract(void *context, uint32_t mock_contract_id,
+                          ForeignEntryPoint entry_point, void *foreign_context);
+
+// Methods to assist in setup for a test.
+// Note that methods for implementing view isolation of one block from a
+// sibling block are not implemented; thus, these setup methods just write to
+// whatever state is in the database.
+// TODO(geoff): Update these methods, and the appropriate parts of the test sdk,
+// when that code is merged into the db.
+//
+// setup_create_contract creates a contract that is _visible_ in the current
+// block. Returns 0 on success, 1 otherwise.
+int setup_create_contract(void *context, void *db,
+                          uint8_t const *contract_bytes, uint32_t contract_len);
+// setup_create_contract creates a contract that is _visible_ in the current
+// block.
+int setup_deploy_contract(void *db, const uint8_t *deployment_addr,
+                          const uint8_t *contract_hash);
 
 void *open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
                            unsigned int signed_tx_len);
 void close_syscall_handler(void *syscall_handler);
 
 struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
-                                                   const unsigned char *input,
-                                                   uint32_t input_len,
-                                                   unsigned char *output,
-                                                   uint32_t output_len);
+                                                   uint64_t arg1, uint64_t arg2,
+                                                   uint64_t arg3, uint64_t arg4,
+                                                   uint64_t arg5,
+                                                   uint64_t arg6);
 
 struct ForeignRootInvokeResult root_invoke(void *syscall_handler);
 

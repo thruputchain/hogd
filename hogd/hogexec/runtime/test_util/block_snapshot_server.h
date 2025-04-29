@@ -1,0 +1,81 @@
+#pragma once
+
+#include <unordered_map>
+
+#include "contract.hh"
+#include "executor_to_db_rpc.hh"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "rpc_types.hh"
+#include "storage_item.hh"
+#include "types.hh"
+#include "x23/async.h"
+#include "x23/event.h"
+#include "x23/mvar.h"
+#include "x23/threadpool.h"
+
+namespace hogd {
+
+// Serve rpcs for runtime tests.
+//
+// Initialize manually with database snapshot state.
+//
+// Eventually, once the DB is merged in, this will get replaced
+// by a full mock database.  But that code is pending @abelay merging
+// things.
+class BlockSnapshotServer {
+public:
+  using rpc_service = DatabaseToExecutorInterfaceV1;
+
+  BlockSnapshotServer(BlockID block_id) : block_id_(block_id) {}
+
+  static x23::Async<void> db_snapshot_read_null();
+
+  static x23::Async<ExpectedStorageCost>
+      try_reserve_delta(BlockID, TransactionID, AddressAndKey, StorageDelta,
+                        StorageItemRPCFlagSet);
+  static x23::Async<void> commit_transaction(BlockID, TransactionID);
+  static x23::Async<void> abort_transaction(BlockID, TransactionID);
+
+  // Create a new subtransaction on top of the current (sub)transaction.
+  static x23::Async<RPCError> push_new_subtransaction(BlockID block,
+                                                      TransactionID);
+
+  // Revert one or more subtransactions.
+  static x23::Async<RPCError>
+  pop_subtransactions(BlockID block, TransactionID tx, uint32_t popcount);
+
+  static x23::Async<void> commit_contract_create(BlockID block,
+                                                 Contract contract);
+  static x23::Async<void>
+  commit_contract_deploy(BlockID block, ContractAddress const &contract_addr,
+                         SHA256Hash const &hash);
+
+  x23::Async<ExpectedStorageItem>
+  get_snapshot_item(BlockID block, AddressAndKey const &addrkey);
+  x23::Async<ExpectedContract> get_contract(BlockID block,
+                                            SHA256Hash const &contract_hash);
+  x23::Async<ExpectedDeployment>
+  get_deployment(BlockID block, ContractAddress const &contract_address);
+
+  void start_server(uint32_t port_number);
+
+  // Only used within test setup
+  void setup_create_contract(Contract contract);
+  void setup_create_deployment(ContractAddress addr, SHA256Hash contract_hash);
+
+private:
+  BlockID block_id_;
+
+  x23::ThreadPool pool_ = x23::ThreadPool(2);
+  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
+
+  x23::MVar<std::unordered_map<AddressAndKey, StorageItem>> items_;
+  x23::MVar<std::unordered_map<SHA256Hash, Contract>> contracts_;
+  x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>> deployments_;
+};
+
+static_assert(
+    is_DatabaseToExecutorInterfaceV1<BlockSnapshotServer *, x23::Async>);
+
+} // namespace hogd

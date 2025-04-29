@@ -52,7 +52,8 @@ name:
 
 needs_context:
   type: boolean (yes/no)
-  required: yes
+  required: no
+    default: true
   description: Defines whether or not a SyscallHandler& reference is passed
   to the syscall.  Most syscalls will have this as a yes; there are
   a few (i.e. SHA256) where this is not required.
@@ -244,8 +245,12 @@ def gen_inner_outer(syscall):
   
   if "needs_gas" in syscall and syscall["needs_gas"]:
     inner_arg_decl_strs = ["WrappedGasAmount remaining_gas"] + inner_arg_decl_strs
-
-  if syscall["needs_context"]:
+  
+  #needs context defaults to True
+  needs_context = True
+  if "needs_context" in syscall and not syscall["needs_context"]:
+    needs_context = False
+  if needs_context:
     inner_arg_decl_strs = ["SystemCallHandler& syscall_handler"] + inner_arg_decl_strs
 
   inner_arg_decls = ", ".join(inner_arg_decl_strs);
@@ -679,8 +684,8 @@ namespace hogd {{
 def gen_mock_switch_case(syscall):
   name = syscall["name"]
   return f"""  case SyscallNo::k{name}:
-  return mock_syscall_parser<{name}_input, {name}_output,
-                               &syscall_{name}_inner>(syscall_no, input_span, output_span);
+  return mock_syscall_parser<SyscallNo::k{name}, {name}_input, {name}_output,
+                               &syscall_{name}_inner>(arg1, arg2, arg3, arg4, arg5, arg6);
 """
 
 def gen_mock_syscall_entry_cc(spec):
@@ -701,13 +706,10 @@ def gen_mock_syscall_entry_cc(spec):
 namespace hogd {{
 
 ForeignHostFnResult
-mock_syscall_entrypoint(int32_t syscall, const unsigned char *input,
-                        uint32_t input_len, unsigned char *output,
-                        uint32_t output_len) noexcept
+mock_syscall_entrypoint(uint64_t syscall,
+                        uint64_t arg1, uint64_t arg2, uint64_t arg3,
+                        uint64_t arg4, uint64_t arg5, uint64_t arg6) noexcept
 {{
-  std::span<const uint8_t> input_span = std::span(input, input_len);
-  std::span<uint8_t> output_span = std::span(output, output_len);
-
   auto syscall_no = static_cast<SyscallNo>(syscall);
 
   switch (syscall_no) {{

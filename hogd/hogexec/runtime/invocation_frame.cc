@@ -10,6 +10,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -176,11 +177,10 @@ InvocationFrameStack::get_item_view(StorageKey const &key)
   }
 
   // item view not yet accessed in current transaction; looking up in snapshot
-  // TODO(geoff): perform the lookup in snapshot_cache_
-  // auto const* snapshot_item = ...
+  auto const *snapshot_item = snapshot_cache_.try_get_snapshot_item(addrkey);
 
   // snapshot_item might be nullptr; this is handled in ItemView
-  return *frame_stack_.back().add_item_view(addrkey, ItemView(nullptr));
+  return *frame_stack_.back().add_item_view(addrkey, ItemView(snapshot_item));
 }
 
 } // namespace hogd

@@ -7,9 +7,12 @@
 #include <format>
 #include <memory>
 #include <source_location>
+#include <string_view>
+#include <utility>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/sync.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 

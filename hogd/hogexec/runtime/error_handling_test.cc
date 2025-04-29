@@ -25,13 +25,13 @@ throw_runtime_error(HostCallContext * /*unused*/)
 HostFnResult
 throw_unrecoverable_host_error(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kUnrecoverable, 0};
+  return {HostFnErrorCode::kHostUnrecoverable, 0};
 }
 
 HostFnResult
 throw_validation_error(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kValidationFailure, 0};
+  return {HostFnErrorCode::kHostValidationFailure, 0};
 }
 
 HostFnResult
@@ -43,19 +43,19 @@ throw_bad_alloc(HostCallContext * /*unused*/)
 HostFnResult
 good_call(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kNoneOrRecoverable, 10};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 10};
 }
 
 HostFnResult
 exit_call(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kExit, 10};
+  return {HostFnErrorCode::kHostExit, 10};
 }
 
 HostFnResult
 return_syscall(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kReturn, 0};
+  return {HostFnErrorCode::kHostReturn, 0};
 }
 
 // Wasmi doesn't necessarily insert a "consume gas" instruction into its
@@ -65,7 +65,7 @@ HostFnResult
 consume_too_much_gas(HostCallContext *context)
 {
   bool _ = context->runtime->consume_gas(context->runtime->get_available_gas());
-  return {HostFnErrorCode::kOutOfGas, 0};
+  return {HostFnErrorCode::kHostOutOfGas, 0};
 }
 
 namespace {
@@ -80,9 +80,9 @@ reentrance(HostCallContext * /*unused*/)
 
   auto res = s_runtime->invoke("unreachable", UINT64_MAX);
   if (!res.result_.has_value()) {
-    return {HostFnErrorCode::kUnrecoverable, 0};
+    return {HostFnErrorCode::kHostUnrecoverable, 0};
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 0};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 0};
 }
 
 } // namespace
@@ -91,12 +91,13 @@ class ErrorHandlingTest : public ::testing::TestWithParam<RuntimeEngine> {
 protected:
   void SetUp() override
   {
-    contract_ = test::load_wasm_from_file("test_error_handling.wasm");
-    context_ = make_runtime_context(GetParam());
+    contract_.contract_type(ContractType::kWasmi);
+    contract_.wasmi_contract() =
+        test::load_wasm_from_file("test_error_handling.wasm");
     context_->link_fn("test", "good_call", &good_call);
   }
-  ContractBlob contract_;
-  std::shared_ptr<RuntimeContext> context_;
+  Contract contract_;
+  std::shared_ptr<RuntimeContext> context_ = make_runtime_context(GetParam());
   std::unique_ptr<Runtime> runtime_;
 };
 
@@ -118,7 +119,8 @@ TEST_P(ErrorHandlingTest, RuntimeError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 }
 
 TEST_P(ErrorHandlingTest, ExitHandling)
@@ -143,7 +145,8 @@ TEST_P(ErrorHandlingTest, HostError)
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 }
 
 TEST_P(ErrorHandlingTest, ValidationError)
@@ -156,7 +159,7 @@ TEST_P(ErrorHandlingTest, ValidationError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_EQ(res.result_.error(),
-            InvokeError{InvokeErrorCode::kValidationFailure});
+            InvokeError{InvokeErrorCode::kInvokeValidationFailure});
 }
 
 TEST_P(ErrorHandlingTest, OtherWeirdError)
@@ -169,7 +172,8 @@ TEST_P(ErrorHandlingTest, OtherWeirdError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 }
 
 TEST_P(ErrorHandlingTest, WasmError)
@@ -188,7 +192,8 @@ TEST_P(ErrorHandlingTest, WasmError)
   res = runtime_->invoke("unreachable", UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kDeterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeDeterministic});
 }
 
 TEST_P(ErrorHandlingTest, NonexistFn)
@@ -206,7 +211,8 @@ TEST_P(ErrorHandlingTest, NonexistFn)
   res = runtime_->invoke("blah", UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kDeterministic});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeDeterministic});
 }
 
 TEST_P(ErrorHandlingTest, FollowBadWithGood)
@@ -219,7 +225,8 @@ TEST_P(ErrorHandlingTest, FollowBadWithGood)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
@@ -248,7 +255,8 @@ TEST_P(ErrorHandlingTest, FollowReallyBadWithGood)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kUnrecoverable});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
 
   res = runtime_->invoke("call2", UINT64_MAX);
 
@@ -274,7 +282,7 @@ TEST_P(ErrorHandlingTest, Reentrance)
 
 TEST_P(ErrorHandlingTest, NullHandling)
 {
-  ContractBlob null_contract;
+  Contract null_contract(ContractType::kWasmi);
   runtime_ = context_->make_new_runtime(null_contract, nullptr, true);
 
   EXPECT_FALSE(runtime_);
@@ -302,12 +310,12 @@ TEST_P(ErrorHandlingTest, OutOfGas)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kInvokeOutOfGas});
 
   res = runtime_->invoke("call1", 1);
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kInvokeOutOfGas});
 }
 
 TEST_P(ErrorHandlingTest, NoGas)
@@ -323,7 +331,7 @@ TEST_P(ErrorHandlingTest, NoGas)
     return;
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kInvokeOutOfGas});
 }
 
 TEST_P(ErrorHandlingTest, Spin)
@@ -339,7 +347,7 @@ TEST_P(ErrorHandlingTest, Spin)
   auto res = runtime_->invoke("spin", 10000);
 
   EXPECT_FALSE(res.result_);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kOutOfGas});
+  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kInvokeOutOfGas});
 }
 
 INSTANTIATE_TEST_SUITE_P(AllEngines, ErrorHandlingTest,

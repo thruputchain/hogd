@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -14,11 +15,13 @@ class MemoryAccessTest : public ::testing::TestWithParam<RuntimeEngine> {
 protected:
   void SetUp() override
   {
-    auto c = test::load_wasm_from_file("test_set_memory.wasm");
+    Contract contract(ContractType::kWasmi);
+    // this wasm just invokes an external call.  We're just reusing it here.
+    contract.wasmi_contract() =
+        test::load_wasm_from_file("test_set_memory.wasm");
     auto context = make_runtime_context(GetParam());
-    runtime_ = context->make_new_runtime(c, nullptr, true);
-
-    ASSERT_TRUE(runtime_);
+    runtime_ = context->make_new_runtime(contract, nullptr, true);
+    ASSERT_TRUE(!!runtime_);
   }
 
   std::unique_ptr<Runtime> runtime_;

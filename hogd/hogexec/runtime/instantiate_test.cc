@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "hogd/hogexec/runtime/runtime.h"
+#include "contract.hh"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 
 namespace hogd {
@@ -11,9 +12,11 @@ protected:
 
 TEST_P(InstantiateTest, MissingImportFail)
 {
-  auto c = test::load_wasm_from_file("test_invoke.wasm");
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() = test::load_wasm_from_file("test_invoke.wasm");
+
   auto context = make_runtime_context(GetParam());
-  auto runtime = context->make_new_runtime(c, nullptr, true);
+  auto runtime = context->make_new_runtime(contract, nullptr, true);
 
   if (engine_has_eager_link_guards(GetParam())) {
     EXPECT_FALSE(runtime);
