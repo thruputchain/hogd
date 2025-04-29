@@ -13,13 +13,10 @@
 
 namespace hogd {
 
-StorageSnapshotCache::StorageSnapshotCache(BlockID block_id, DatabaseProxy& db_proxy)
-  : block_id_(block_id)
-  , db_proxy_(db_proxy)
-{
-
-}
-
+StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
+                                           DatabaseProxy &db_proxy)
+  : block_id_(block_id), db_proxy_(db_proxy)
+{}
 
 std::optional<SHA256Hash>
 StorageSnapshotCache::try_get_deployed_contract_hash(
@@ -48,7 +45,7 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
       return *obj;
     }
   }
-  
+
   auto db_res = db_proxy_.get_contract(block_id_, hash)();
 
   // TODO(geoff): If we decide to NOT reset the cache after every block,

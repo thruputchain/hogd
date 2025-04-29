@@ -4,8 +4,8 @@
 #include <memory>
 #include <optional>
 
-#include "hogd/base/xdr_util.h"
 #include "contract.hh"
+#include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "rpc_types.hh"
@@ -34,7 +34,7 @@ namespace hogd {
 // (and still probably involves extra copies).
 class StorageSnapshotCache {
 public:
-  StorageSnapshotCache(BlockID block_id, DatabaseProxy& db_proxy);
+  StorageSnapshotCache(BlockID block_id, DatabaseProxy &db_proxy);
   // delete move and copy
   StorageSnapshotCache(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache(StorageSnapshotCache &&) = delete;
@@ -51,11 +51,9 @@ private:
   // Note: the contract_cache_ does not need to be reset (although it is not
   // incorrect to reset it) after every block.
   // Future PRs will have a storage object cache, which will need to be reset.
-  SynchronizedMap<SHA256Hash, std::shared_ptr<const Contract>>
-      contract_cache_;
+  SynchronizedMap<SHA256Hash, std::shared_ptr<const Contract>> contract_cache_;
   // Neither does the deployment cache
-  SynchronizedMap<ContractAddress, std::optional<SHA256Hash>>
-      deployment_cache_;
+  SynchronizedMap<ContractAddress, std::optional<SHA256Hash>> deployment_cache_;
 
   SynchronizedMap<AddressAndKey, std::unique_ptr<const StorageItem>>
       snapshot_item_cache_;
