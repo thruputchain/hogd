@@ -39,11 +39,12 @@ SystemCallHandler::SystemCallHandler(
         },
         snapshot_cache),
     newly_created_contracts_([&] {
-      std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
+      std::unordered_map<SHA256Hash, NewContractEntry> contracts;
 
       for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
         contracts.emplace(sha256(contract),
-                          std::make_shared<const Contract>(contract));
+                          NewContractEntry(
+                              std::make_shared<const Contract>(contract)));
       }
       return contracts;
     }()),
@@ -172,13 +173,22 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
     // hash always is a hash of a contract that the runtime can access.
     assert(it != newly_created_contracts_.end());
 
-    load_contract = it->second;
+    if (!it->second.validated) {
+      if (!runtime_context_->verify_contract(*it->second.contract)) {
+        // Validation of a newly created contract fails.  Cannot therefore
+        // instantiate the contract.
+        return nullptr;
+      }
+      it->second.validated = true;
+    }
+
+    load_contract = it->second.contract;
   }
 
   // actually make the new runtime
-  // TODO(geoff): do verification when contracts are created, not each time.
+  // Verification happens when contracts are created, not at this point.
   assert(load_contract);
-  return runtime_context_->make_new_runtime(*load_contract, this, true);
+  return runtime_context_->make_new_runtime(*load_contract, this, false);
 }
 
 Calldata const &

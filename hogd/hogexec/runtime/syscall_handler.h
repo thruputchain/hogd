@@ -111,10 +111,14 @@ private:
   const SignedTransaction signed_tx_;
   InvocationFrameStack invocation_frame_stack_;
 
+  struct NewContractEntry {
+    std::shared_ptr<const Contract> contract;
+    bool validated = false;
+  };
+
   // Searchable map of contracts that are implicitly created by the current
   // transaction.
-  const std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>
-      newly_created_contracts_;
+  std::unordered_map<SHA256Hash, NewContractEntry> newly_created_contracts_;
 
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;
