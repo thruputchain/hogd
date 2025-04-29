@@ -3,13 +3,13 @@
 #include <sys/socket.h>
 
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 
 namespace x23 {
 
 RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
 {
-  // XXX - use getsockname to show something more useful?
-  peername_ = std::format("fd {}", peerfd);
+  peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
 }
 
 std::string
@@ -63,7 +63,7 @@ RpcStreamImpl::fail()
 }
 
 Detached
-RpcStreamImpl::write_record(Buf b)
+RpcStreamImpl::write_record(Buf b SLOC_ARG)
 {
   if (ss_.stop_requested())
     co_return;
@@ -76,7 +76,7 @@ RpcStreamImpl::write_record(Buf b)
 }
 
 Async<std::expected<std::uint32_t, Errno>>
-RpcStreamImpl::read_uint()
+RpcStreamImpl::read_uint(SLOC_ARG0)
 {
   Buf b;
   if (co_await co_await cp_->read(fd_, &b, 4) != 4)
@@ -85,7 +85,7 @@ RpcStreamImpl::read_uint()
 }
 
 Async<std::expected<Buf, Errno>>
-RpcStreamImpl::read_record()
+RpcStreamImpl::read_record(SLOC_ARG0)
 {
   Buf b;
   bool done = false;
@@ -102,20 +102,20 @@ RpcStreamImpl::read_record()
 }
 
 std::uint32_t
-RpcStreamImpl::gen_call_xid(CoroCB<Buf> cb)
+RpcStreamImpl::gen_call_xid(Awaitable<Buf> &a)
 {
   auto cs = cstate_.take();
   if (ss_.stop_requested())
     throw XdrException("RPC call on failed file descriptor");
   for (;;) {
     std::uint32_t xid = ++cs->lastxid_;
-    if (auto r = cs->xidmap_.emplace(xid, cb); r.second) [[likely]]
+    if (auto r = cs->xidmap_.emplace(xid, a); r.second) [[likely]]
       return xid;
   }
 }
 
 Detached
-RpcStreamImpl::reader()
+RpcStreamImpl::reader(SLOC_ARG0)
 {
   using enum msg_type;
   auto _r = shared_from_this();
@@ -151,7 +151,7 @@ RpcStreamImpl::reader()
 }
 
 Detached
-RpcStreamImpl::serve_call(const rpc_msg &call, BufView args)
+RpcStreamImpl::serve_call(const rpc_msg &call, BufView args SLOC_ARG)
 {
   using enum accept_stat;
   using enum reject_stat;

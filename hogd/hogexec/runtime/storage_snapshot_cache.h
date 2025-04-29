@@ -3,55 +3,16 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
-#include <span>
 
+#include "hogd/base/xdr_util.h"
 #include "contract.hh"
-#include "hogd/base/hashmap.h"
-#include "hogd/base/types.h"
+#include "hogd/container/synchronized_map.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
-
-namespace detail {
-
-struct CachedContract {
-  SHA256Hash contract_hash_;
-  std::shared_ptr<const Contract> contract_;
-
-  std::span<const std::byte> get_key() const { return get_key(contract_hash_); }
-  static std::span<const std::byte> get_key(SHA256Hash const &hash)
-  {
-    return std::as_bytes(std::span(hash));
-  }
-};
-
-struct CachedDeployment {
-  ContractAddress address_;
-  SHA256Hash deployed_hash_;
-
-  std::span<const std::byte> get_key() const { return get_key(address_); }
-  static std::span<const std::byte> get_key(ContractAddress const &address)
-  {
-    return std::as_bytes(std::span(address));
-  }
-};
-
-struct CachedStorageItem {
-  AddressAndKey addrkey_;
-  std::unique_ptr<StorageItem> item_;
-
-  std::span<const std::byte> get_key() const { return get_key(addrkey_); }
-
-  static std::span<const std::byte> get_key(AddressAndKey addrkey)
-  {
-    // AddressAndKey is a struct with two bytespans, laid out consecutively.
-    const auto *addrkey_ptr = reinterpret_cast<const uint8_t *>(&addrkey);
-    return std::as_bytes(std::span(addrkey_ptr, sizeof(AddressAndKey)));
-  }
-};
-
-} // namespace detail
 
 // Root cache for objects read from the ledger.
 // Can be shared between concurrent transactions,
@@ -73,11 +34,7 @@ struct CachedStorageItem {
 // (and still probably involves extra copies).
 class StorageSnapshotCache {
 public:
-  StorageSnapshotCache(int lg_bucket_count)
-    : contract_cache_(lg_bucket_count), deployment_cache_(lg_bucket_count),
-      item_cache_(lg_bucket_count)
-  {}
-
+  StorageSnapshotCache(BlockID block_id, DatabaseProxy& db_proxy);
   // delete move and copy
   StorageSnapshotCache(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache(StorageSnapshotCache &&) = delete;
@@ -91,9 +48,20 @@ public:
   const StorageItem *try_get_snapshot_item(AddressAndKey const &addrkey);
 
 private:
-  HashMap<detail::CachedContract> contract_cache_;
-  HashMap<detail::CachedDeployment> deployment_cache_;
-  HashMap<detail::CachedStorageItem> item_cache_;
+  // Note: the contract_cache_ does not need to be reset (although it is not
+  // incorrect to reset it) after every block.
+  // Future PRs will have a storage object cache, which will need to be reset.
+  SynchronizedMap<SHA256Hash, std::shared_ptr<const Contract>>
+      contract_cache_;
+  // Neither does the deployment cache
+  SynchronizedMap<ContractAddress, std::optional<SHA256Hash>>
+      deployment_cache_;
+
+  SynchronizedMap<AddressAndKey, std::unique_ptr<const StorageItem>>
+      snapshot_item_cache_;
+
+  const BlockID block_id_;
+  DatabaseProxy &db_proxy_;
 };
 
 } // namespace hogd

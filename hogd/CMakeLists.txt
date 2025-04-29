@@ -1,6 +1,8 @@
 # Build each shared module
-add_subdirectory(crypto)
 add_subdirectory(base)
+add_subdirectory(container)
+add_subdirectory(crypto)
+add_subdirectory(metrics)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
 
@@ -15,8 +17,10 @@ target_link_libraries(
   crypto
 )
 
-# Then build the modules for the hogdb and hogexec executables
-add_subdirectory(coord)
+# Additional libraries that are not included by default (i.e., in hogd library)
+add_subdirectory(ramdb)
+
+# Finally, build the hogdb, hogexec, and coord executables
 add_subdirectory(hogdb)
 add_subdirectory(hogexec)
 

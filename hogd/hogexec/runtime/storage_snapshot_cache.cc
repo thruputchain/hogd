@@ -3,72 +3,74 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "contract.hh"
+#include "hogd/hogexec/runtime/database_proxy.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
 
+StorageSnapshotCache::StorageSnapshotCache(BlockID block_id, DatabaseProxy& db_proxy)
+  : block_id_(block_id)
+  , db_proxy_(db_proxy)
+{
+
+}
+
+
 std::optional<SHA256Hash>
 StorageSnapshotCache::try_get_deployed_contract_hash(
     ContractAddress const &addr)
 {
-  auto key = detail::CachedDeployment::get_key(addr);
-  auto cached_obj =
-      deployment_cache_.modify_element(key, [&](auto const &v) -> SHA256Hash {
-        assert(v.address_ == addr);
-        return v.deployed_hash_;
-      });
-
-  if (cached_obj.has_value()) {
-    return cached_obj;
+  {
+    auto [obj, ul] = deployment_cache_.find(addr);
+    if (obj) {
+      return *obj;
+    }
   }
-  // TODO(geoff): query from storage (unimplemented here)
 
-  return std::nullopt;
+  auto db_res = db_proxy_.get_deployment(block_id_, addr)();
+
+  // caches both positive and negative lookups
+  deployment_cache_.insert(addr, db_res);
+  return db_res;
 }
 
 std::shared_ptr<const Contract>
 StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 {
-  auto key = detail::CachedContract::get_key(hash);
-  auto cached_obj = contract_cache_.modify_element(
-      key, [&](auto const &v) -> std::shared_ptr<const Contract> {
-        assert(v.contract_hash_ == hash);
-        return v.contract_;
-      });
-  if (cached_obj.has_value()) {
-    return *cached_obj;
+  {
+    auto [obj, ul] = contract_cache_.find(hash);
+    if (obj) {
+      return *obj;
+    }
   }
+  
+  auto db_res = db_proxy_.get_contract(block_id_, hash)();
 
-  // TODO(geoff): query from storage (unimplemented here)
-
-  return nullptr;
+  // TODO(geoff): If we decide to NOT reset the cache after every block,
+  // then the contract cache needs to only cache positive lookups
+  contract_cache_.insert(hash, db_res);
+  return db_res;
 }
 
 const StorageItem *
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
-  auto key = detail::CachedStorageItem::get_key(addrkey);
-
-  auto cached_obj = item_cache_.modify_element(key, [&](auto const &v) {
-    assert(v.addrkey_ == addrkey);
-    return v.item_.get();
-  });
-
-  if (cached_obj.has_value()) {
-    // The item cache caches positive and negative lookups;
-    // cached_obj is a std::optional<std::optional<StorageItem>>,
-    // signaling first whether the item is in the cache
-    // and second, if present in the cache, whether the item actually
-    // exists in the snapshot.
-    return *cached_obj;
+  {
+    auto [obj, ul] = snapshot_item_cache_.find(addrkey);
+    if (obj) {
+      return obj->get();
+    }
   }
 
-  // TODO(geoff): query from storage (unimplemented here)
-
-  return nullptr;
+  auto db_res = db_proxy_.get_snapshot_item(block_id_, addrkey)();
+  auto const *out = db_res.get();
+  snapshot_item_cache_.insert(addrkey, std::move(db_res));
+  return out;
 }
 
 } // namespace hogd

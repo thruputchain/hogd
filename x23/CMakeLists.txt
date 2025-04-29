@@ -15,7 +15,12 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   message(STATUS "Using Clang, setting libc++")
   add_compile_options(-stdlib=libc++ -fexperimental-library)
   add_link_options(-stdlib=libc++ -fexperimental-library)
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -stdlib=libc++ -fexperimental-library")
   set(USE_LIBCXX ON)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  message(STATUS "Using GCC, adding libstdc++exp")
+  list(APPEND CMAKE_REQUIRED_LIBRARIES stdc++exp)
+  link_libraries(stdc++exp) # needed for C++23 stacktrace library
 endif()
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -29,10 +34,24 @@ if(X23_IS_TOP_LEVEL)
   endif()
 endif()
 
-include(cmake/pause.cmake)
-include(cmake/interference_size.cmake)
-include(cmake/epoll.cmake)
+set(X23_CORO_TRACE "" CACHE STRING
+  "Enable coroutine tracing (0=off, 1=on, empty=auto based on NDEBUG)")
+
+# Only pass X23_CORO_TRACE to configure_file if it's explicitly set
+if(NOT X23_CORO_TRACE STREQUAL "")
+    message(STATUS "X23_CORO_TRACE explicitly set to ${X23_CORO_TRACE}")
+else()
+    # If it's empty, unset it so it becomes undefined for #cmakedefine
+    unset(X23_CORO_TRACE)
+    message(STATUS "X23_CORO_TRACE is empty, will use !defined(NDEBUG)")
+endif()
+
 include(cmake/accept4.cmake)
+include(cmake/atomicsharedptr.cmake)
+include(cmake/demangle.cmake)
+include(cmake/epoll.cmake)
+include(cmake/pause.cmake)
+include(cmake/stacktrace.cmake)
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
@@ -141,23 +160,42 @@ function(use_x23 target)
   endif()
 endfunction()
 
+set(SUBMODULE_DIRS ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/external)
+
+execute_process(
+  COMMAND git rev-parse --show-toplevel
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  RESULT_VARIABLE GIT_TOPLEVEL_RESULT
+  OUTPUT_VARIABLE GIT_TOPLEVEL
+  ERROR_QUIET
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if((GIT_TOPLEVEL_RESULT EQUAL 0) AND NOT (GIT_TOPLEVEL EQUAL CMAKE_SOURCE_DIR))
+  list(APPEND SUBMODULE_DIRS ${GIT_TOPLEVEL} ${GIT_TOPLEVEL}/external)
+endif()
+
 set(GOOGLETEST_PATH "" CACHE PATH "Path to googletest")
 set(BENCHMARK_PATH "" CACHE PATH "Path to Google benchmark")
 
 if(NOT GOOGLETEST_PATH)
-  if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/googletest)
-    set(GOOGLETEST_PATH ${CMAKE_SOURCE_DIR}/googletest
-      CACHE PATH "Path to googletest" FORCE)
-  endif()
+  foreach(dir IN LISTS SUBMODULE_DIRS)
+    if(IS_DIRECTORY ${dir}/googletest)
+      set(GOOGLETEST_PATH ${dir}/googletest
+	CACHE PATH "Path to googletest" FORCE)
+      break()
+    endif()
+  endforeach()
 endif()
 
-if(GOOGLETEST_PATH)
-  if(NOT BENCHMARK_PATH)
-    if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/benchmark)
-      set(BENCHMARK_PATH ${CMAKE_SOURCE_DIR}/benchmark
+if(GOOGLETEST_PATH AND NOT BENCHMARK_PATH)
+  foreach(dir IN LISTS SUBMODULE_DIRS)
+    if(IS_DIRECTORY ${dir}/benchmark)
+      set(BENCHMARK_PATH ${dir}/benchmark
 	CACHE PATH "Path to Google benchmark" FORCE)
+      break()
     endif()
-  endif()
+  endforeach()
 endif()
 
 if(X23_IS_TOP_LEVEL)

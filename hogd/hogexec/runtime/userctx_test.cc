@@ -22,7 +22,7 @@ foo(HostCallContext *ctx, uint64_t value)
 {
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
   EXPECT_TRUE(value == 12);
-  return {HostFnErrorCode::kNoneOrRecoverable, 15};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 15};
 }
 
 } // namespace
