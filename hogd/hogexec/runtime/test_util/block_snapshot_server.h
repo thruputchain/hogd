@@ -32,14 +32,14 @@ public:
   static x23::Async<void> db_snapshot_read_null();
 
   static x23::Async<ExpectedStorageCost>
-      try_reserve_delta(BlockID, TransactionID, AddressAndKey, StorageDelta,
-                        StorageItemRPCFlagSet);
-  static x23::Async<void> commit_transaction(BlockID, TransactionID);
-  static x23::Async<void> abort_transaction(BlockID, TransactionID);
+  try_reserve_delta(BlockID block, TransactionID tx, AddressAndKey addrkey,
+                    StorageDelta delta, StorageItemRPCFlagSet flags);
+  static x23::Async<void> commit_transaction(BlockID block, TransactionID tx);
+  static x23::Async<void> abort_transaction(BlockID block, TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.
   static x23::Async<RPCError> push_new_subtransaction(BlockID block,
-                                                      TransactionID);
+                                                      TransactionID tx);
 
   // Revert one or more subtransactions.
   static x23::Async<RPCError>
@@ -61,7 +61,7 @@ public:
   void start_server(uint32_t port_number);
 
   // Only used within test setup
-  void setup_create_contract(Contract contract);
+  void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr, SHA256Hash contract_hash);
 
 private:

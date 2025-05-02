@@ -5,7 +5,6 @@
 #include <utility>
 
 #include "contract.hh"
-#include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "rpc_types.hh"
@@ -143,7 +142,7 @@ BlockSnapshotServer::start_server(uint32_t port_number)
 }
 
 void
-BlockSnapshotServer::setup_create_contract(Contract contract)
+BlockSnapshotServer::setup_create_contract(Contract const &contract)
 {
   auto h = sha256(contract);
   contracts_->emplace(h, contract);
