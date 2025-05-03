@@ -102,7 +102,7 @@ RetrocausalQueue::apply_consume_delta(
                    .cumulative_prior_size_ =
                        it->second->cumulative_prior_size_ +
                        delta.partial_consumed_number});
-    assert(it->second->block_.cumulative_prior_size_ == consumed_size_);
+    assert(it->second->cumulative_prior_size_ == consumed_size_);
   }
 }
 
