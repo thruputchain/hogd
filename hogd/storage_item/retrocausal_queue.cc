@@ -4,7 +4,7 @@
 #include <memory>
 #include <utility>
 
-#include "hogd/base/types.h"
+#include "hogd/base/compiler.h"
 #include "retrocausal_queue.hh"
 #include "x23/vec.h"
 
@@ -19,11 +19,11 @@ RetrocausalQueue::RetrocausalQueue(
     total_size_(parent.total_size_ + current_round_block.entries.size()),
     consumed_size_(parent.consumed_size_)
 {
-#if DEBUG
-  for (auto [block_number, _] : parent.blocks_) {
-    assert(block_number != current_round_block.block_number);
+  if constexpr (is_debug_build()) {
+    for (auto const& [block_number, _] : parent.blocks_) {
+      assert(block_number != current_round_block.block_number);
+    }
   }
-#endif
 
   assert(consume_delta.max_fully_consumed_block_number !=
          current_round_block.block_number);
