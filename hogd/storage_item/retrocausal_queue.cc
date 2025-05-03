@@ -21,7 +21,7 @@ RetrocausalQueue::RetrocausalQueue(
     consumed_size_(parent.consumed_size_)
 {
   if constexpr (is_debug_build()) {
-    for (auto const &[block_number, _] : parent.blocks_) {
+    for (auto const& [block_number, _] : parent.blocks_) {
       assert(block_number != current_round_block.block_number);
     }
   }
