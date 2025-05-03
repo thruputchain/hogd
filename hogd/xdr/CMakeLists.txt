@@ -8,6 +8,8 @@ add_xdr(
 	../../protocol/transaction.x
 	../../protocol/types.x 
 	../../protocol/storage_item.x
+	../../protocol/storage_lock.x
+	../../protocol/retrocausal_queue.x
 	syscall.x 
 	syscall_args.x
 )

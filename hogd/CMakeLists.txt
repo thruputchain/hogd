@@ -3,6 +3,7 @@ add_subdirectory(base)
 add_subdirectory(container)
 add_subdirectory(crypto)
 add_subdirectory(metrics)
+add_subdirectory(storage_item)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
 
