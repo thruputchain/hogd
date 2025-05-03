@@ -5,6 +5,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_item/retrocausal_queue.h"
+#include "hogd/storage_item/storage_costs.h"
 #include "storage_item.hh"
 
 namespace hogd {
@@ -54,5 +55,27 @@ StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
 {
   return StorageItem(StorageItemType::kRetrocausalQueue);
 }
+
+int128_t
+StorageItemWrapper::BytestringWrapper::storage_cost() const
+{
+  return bytestring_cost(bytestring_.size());
+}
+
+int128_t
+StorageItemWrapper::NonnegativeIntWrapper::storage_cost()
+{
+  return kBaseItemCost;
+}
+
+int128_t
+StorageItemWrapper::RetrocausalQueueWrapper::storage_cost() const
+{
+  return retrocausal_queue_cost(queue_.get_active_stats());
+}
+
+
+
+
 
 } // namespace hogd

@@ -2,6 +2,7 @@ add_library(
   storage_item
   retrocausal_queue.cc
   storage_item_wrapper.cc
+  storage_lock_util.cc
 )
 
 target_link_libraries(

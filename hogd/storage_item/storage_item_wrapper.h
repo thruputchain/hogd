@@ -35,18 +35,22 @@ public:
   StorageItemType type() const;
   StorageItem to_wire_item() const;
 
+  int128_t storage_cost() const;
+
 private:
   struct BytestringWrapper {
     Bytestring bytestring_;
     constexpr static StorageItemType kItemType = StorageItemType::kBytestring;
     StorageItem to_wire_item() const;
-  };
+    int128_t storage_cost() const;
+  };  
 
   struct NonnegativeIntWrapper {
     int128_t nnint_;
     constexpr static StorageItemType kItemType =
         StorageItemType::kNonnegativeInt;
     StorageItem to_wire_item() const;
+    static int128_t storage_cost();
   };
 
   struct RetrocausalQueueWrapper {
@@ -54,6 +58,7 @@ private:
     constexpr static StorageItemType kItemType =
         StorageItemType::kRetrocausalQueue;
     static StorageItem to_wire_item();
+    int128_t storage_cost() const;
   };
 
   std::variant<BytestringWrapper, NonnegativeIntWrapper,
