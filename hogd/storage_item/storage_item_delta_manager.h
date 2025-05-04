@@ -115,6 +115,9 @@ private:
   // kSetItemTypeClass -> kNone
   void revert_set_typeclass_lock(TypeSpecificLock const &type_specific_lock);
 
+  // kSetItemTypeClass -> kSetItemTypeClass
+  // Requires: previous lock is a set_typeclass lock, and reserving delta
+  // does not require upgrading to an exclusive lock.
   std::optional<StorageLock>
   handle_try_reserve_from_set_typeclass_lock(StorageDelta const &delta,
                                              StorageLock const &prev_lock);

@@ -193,8 +193,8 @@ struct UnmodifiedState {
 // can be acquired to prevent other transactions from modifying the item.
 //
 // Key operations:
-// - try_set_variant(): Attempts to acquire a reference and set the variant
-// state
+// - try_set_variant(): Attempts to set the variant
+// state.  Acquires a reference if successful.
 // - release_reference(): Releases a reference, potentially reverting to
 // UnmodifiedState
 // - get_cost_after_commit(): Calculates storage costs after a delta is
