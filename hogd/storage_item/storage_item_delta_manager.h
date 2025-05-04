@@ -79,8 +79,6 @@ public:
   // Locking methods
   // upgrade from previous_lock_type to kExclusiveLock or
   // kPermanentExclusiveLock.
-  // Caller can decide (externally) whether to make the lock kExclusiveLock or
-  // kPermanentExclusiveLock.
   [[nodiscard]] std::optional<MeteredStorageLock>
   try_acquire_exclusive_lock(StorageDelta const &delta,
                              StorageLockType previous_lock_type,

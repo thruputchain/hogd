@@ -28,56 +28,6 @@ StorageItemDeltaManager::StorageItemDeltaManager(
     committed_item_cost_(committed_item_ ? committed_item_->storage_cost() : 0),
     invalid_state_flag_(invalid_state_flag)
 {}
-/*
-StorageItemDeltaManager::RefcountedVariant::commit_retrocausal_queue_modify(
-    RetrocausalQueueDelta const &queue_delta)
-{
-  assert(std::holds_alternative<RetrocausalQueueArgs>(variant_));
-  assert(refcount_ > 0);
-  auto &args = get_variant_arm_unchecked<RetrocausalQueueArgs>();
-
-  for (auto const &entry : queue_delta.insert.added_entries) {
-    auto it = args.consumed_but_not_inserted_entries_.find(entry);
-    if (it == args.consumed_but_not_inserted_entries_.end()) {
-      args.persistable_entries_.insert(entry);
-    }
-    else {
-      args.consumed_but_not_inserted_entries_.erase(it);
-      if (args.consumed_but_not_inserted_entries_.empty()) {
-        unmark_as_in_bad_state();
-      }
-    }
-    args.new_entries_.push_back(entry);
-  }
-
-  if (queue_delta.consume) {
-    assert(!args.consume_has_committed_);
-    // not strictly necessary, but we maintain the invariant that at the end of
-    // the block consumer_lock_ is released, just to be careful.
-    if (args.consumer_lock_) {
-      args.consumer_lock_ = false;
-    }
-    args.consume_has_committed_ = true;
-    if (queue_delta.consume->past_block_consume !=
-        RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number =
-                                                  0,
-                                              .partial_consumed_number = 0}) {
-      args.past_consume_delta_.emplace(queue_delta.consume->past_block_consume);
-    }
-
-    for (auto const &consumed_entry :
-         queue_delta.consume->current_block_consumed) {
-      auto res = args.persistable_entries_.erase(consumed_entry);
-      if (res == 0) {
-        if (args.consumed_but_not_inserted_entries_.empty()) {
-          mark_as_in_bad_state();
-        }
-        args.consumed_but_not_inserted_entries_.insert(consumed_entry);
-      }
-    }
-  }
-}
-*/
 
 bool
 StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
@@ -153,11 +103,11 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   case StorageDeltaType::kRetrocausalQueue:
   {
     auto &args = variant_.get_variant_arm_unchecked<RetrocausalQueueArgs>();
+    args.commit_insert(delta.retrocausal_queue().insert, *invalid_state_flag_);
     if (delta.retrocausal_queue().consume) {
       args.commit_consume(*delta.retrocausal_queue().consume,
                           *invalid_state_flag_);
     }
-    args.commit_insert(delta.retrocausal_queue().insert, *invalid_state_flag_);
   } break;
   default:
     throw std::runtime_error("unimpl");
@@ -598,22 +548,5 @@ StorageItemDeltaManager::get_concurrent_retrocausal_queue_entry(uint32_t index)
   return variant_.get_variant_arm_unchecked<RetrocausalQueueArgs>()
       .get_concurrent_retrocausal_queue_entry(index);
 }
-
-/*
-
-std::optional<QueueEntry>
-StorageItemDeltaManager::RefcountedVariant::
-    get_concurrent_retrocausal_queue_entry(uint32_t index)
-{
-  assert(std::holds_alternative<RetrocausalQueueArgs>(variant_));
-  assert(refcount_ > 0);
-  auto &args = get_variant_arm_unchecked<RetrocausalQueueArgs>();
-
-  if (index >= args.new_entries_.size()) {
-    return std::nullopt;
-  }
-
-  return args.new_entries_[index];
-} */
 
 } // namespace hogd
