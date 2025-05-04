@@ -279,8 +279,8 @@ RefcountedDeltaVariant::to_item(
           if constexpr (requires(decltype(arm) &a) { a.to_item(); }) {
             return arm.to_item();
           }
-          else if constexpr (requires(decltype(arm) &a) {
-                               a.to_item(previous_item.get());
+          else if constexpr (requires(decltype(arm) &a, const StorageItemWrapper* b) {
+                               a.to_item(b);
                              }) {
             return arm.to_item(previous_item.get());
           }
