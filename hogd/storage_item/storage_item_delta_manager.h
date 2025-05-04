@@ -30,7 +30,7 @@ class StorageItemDeltaManager {
 public:
   StorageItemDeltaManager(
       std::shared_ptr<const StorageItemWrapper> snapshot_state,
-      InvalidStateFlag* invalid_state_flag);
+      InvalidStateFlag *invalid_state_flag);
 
   // Disable copy
   StorageItemDeltaManager(const StorageItemDeltaManager &) = delete;
@@ -116,7 +116,8 @@ private:
   void revert_set_typeclass_lock(TypeSpecificLock const &type_specific_lock);
 
   std::optional<StorageLock>
-  handle_try_reserve_from_set_typeclass_lock(StorageDelta const &delta, StorageLock const &prev_lock);
+  handle_try_reserve_from_set_typeclass_lock(StorageDelta const &delta,
+                                             StorageLock const &prev_lock);
 
   void produce_next_round_item();
 
@@ -128,7 +129,7 @@ private:
   int128_t unreleased_storage_cost_ = 0;
 
   RefcountedDeltaVariant variant_;
-  InvalidStateFlag* invalid_state_flag_;
+  InvalidStateFlag *invalid_state_flag_;
 };
 
 } // namespace hogd

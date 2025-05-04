@@ -9,10 +9,10 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/storage_item/storage_costs.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/storage_item/invalid_state_flag.h"
+#include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
@@ -47,8 +47,7 @@ expect_final(StorageItemDeltaManager &item, int128_t nnint)
 TEST(StorageItemFrame, RewriteVariantTypeNullStart)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr,
-                               &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
@@ -110,8 +109,7 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
 {
   auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(base_item,
-                               &invalid_state_flag);
+  StorageItemDeltaManager item(base_item, &invalid_state_flag);
 
   StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -153,7 +151,7 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                         &invalid_state_flag);
+                                &invalid_state_flag);
   expect_final(item, bytestring_delta.bytestring());
   expect_final(item2, bytestring_delta.bytestring());
   ASSERT_FALSE(invalid_state_flag.is_invalid());
@@ -169,7 +167,7 @@ TEST(StorageItemFrame, DeleteItem)
 
   // committing an empty round keeps item active
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                         &invalid_state_flag);
+                                &invalid_state_flag);
 
   ASSERT_TRUE(item2.get_snapshot_item());
 
@@ -184,10 +182,11 @@ TEST(StorageItemFrame, DeleteItem)
 
   item2.commit(StorageDelta(StorageDeltaType::kDelete), *delete_lock);
   ASSERT_FALSE(invalid_state_flag.is_invalid());
-  ASSERT_FALSE(item2.get_post_close_block_item()); // item2 has the item deleted post block
+  ASSERT_FALSE(item2.get_post_close_block_item()); // item2 has the item deleted
+                                                   // post block
 
   StorageItemDeltaManager item3(item2.get_post_close_block_item(),
-                         &invalid_state_flag);
+                                &invalid_state_flag);
 
   EXPECT_FALSE(item3.get_snapshot_item());
   ASSERT_FALSE(invalid_state_flag.is_invalid());

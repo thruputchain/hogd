@@ -9,7 +9,6 @@ namespace hogd {
 
 class InvalidStateFlag {
 public:
-
   InvalidStateFlag() = default;
 
   InvalidStateFlag(InvalidStateFlag const &) = delete;
@@ -38,4 +37,4 @@ private:
   std::atomic<int64_t> invalid_state_count_ = 0;
 };
 
-}  // namespace hogd
+} // namespace hogd

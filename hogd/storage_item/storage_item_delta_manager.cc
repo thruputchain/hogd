@@ -23,7 +23,7 @@ namespace hogd {
 
 StorageItemDeltaManager::StorageItemDeltaManager(
     std::shared_ptr<const StorageItemWrapper> snapshot_state,
-    InvalidStateFlag* invalid_state_flag)
+    InvalidStateFlag *invalid_state_flag)
   : committed_item_(std::move(snapshot_state)),
     committed_item_cost_(committed_item_ ? committed_item_->storage_cost() : 0),
     invalid_state_flag_(invalid_state_flag)
@@ -86,7 +86,8 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
 
   switch (delta.type()) {
   case StorageDeltaType::kBytestringSet:
-    return variant_.try_set_variant<BytestringArgs>(delta.bytestring()) != nullptr;
+    return variant_.try_set_variant<BytestringArgs>(delta.bytestring()) !=
+           nullptr;
   case StorageDeltaType::kNonnegativeIntSetAdd:
     if (auto *args = variant_.try_set_variant<NNIntSetAddArgs>(
             from_xdr(delta.nnint().set_value))) {
@@ -152,10 +153,10 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   case StorageDeltaType::kRetrocausalQueue:
   {
     auto &args = variant_.get_variant_arm_unchecked<RetrocausalQueueArgs>();
-    args.commit_consume(*delta.retrocausal_queue().consume, *invalid_state_flag_);
+    args.commit_consume(*delta.retrocausal_queue().consume,
+                        *invalid_state_flag_);
     args.commit_insert(delta.retrocausal_queue().insert, *invalid_state_flag_);
-  }
-   break;
+  } break;
   default:
     throw std::runtime_error("unimpl");
   }
@@ -370,8 +371,7 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
 
     auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
 
-    auto reserve_res =
-        args.try_reserve_add(req_sub_amount - prev_sub_amount);
+    auto reserve_res = args.try_reserve_add(req_sub_amount - prev_sub_amount);
     if (!reserve_res) {
       return std::nullopt;
     }
@@ -519,17 +519,20 @@ StorageItemDeltaManager::commit(StorageDelta const &delta,
   switch (lock.lock_.lock_type()) {
   case StorageLockType::kSetItemTypeClass:
     revert_set_typeclass_lock_to_set_typeclass(lock.lock_, delta);
-    required_storage = variant_.get_cost_after_commit(delta, committed_item_.get());
+    required_storage =
+        variant_.get_cost_after_commit(delta, committed_item_.get());
     commit_delta(delta, false);
     break;
   case StorageLockType::kExclusiveLock:
     revert_exclusive_lock_to_set_typeclass(delta);
-    required_storage = variant_.get_cost_after_commit(delta, committed_item_.get());
+    required_storage =
+        variant_.get_cost_after_commit(delta, committed_item_.get());
     commit_delta(delta, false);
     break;
   case StorageLockType::kPermanentExclusiveLock:
     revert_exclusive_lock_to_set_typeclass(delta);
-    required_storage = variant_.get_cost_after_commit(delta, committed_item_.get());
+    required_storage =
+        variant_.get_cost_after_commit(delta, committed_item_.get());
     commit_delta(delta, true);
     break;
   case StorageLockType::kNone:
@@ -539,15 +542,12 @@ StorageItemDeltaManager::commit(StorageDelta const &delta,
   }
   assert(required_storage >= 0);
 
-
   // want: required_storage = base_storage + unreleased_storage_cost_.
   int128_t locked_storage = lock.locked_tokens_;
-  assert(committed_item_cost_ + unreleased_storage_cost_ +
-             locked_storage >=
+  assert(committed_item_cost_ + unreleased_storage_cost_ + locked_storage >=
          required_storage);
 
-  int128_t storage_excess = committed_item_cost_ +
-                            unreleased_storage_cost_ +
+  int128_t storage_excess = committed_item_cost_ + unreleased_storage_cost_ +
                             locked_storage - required_storage;
   assert(storage_excess >= 0);
 

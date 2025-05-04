@@ -38,7 +38,10 @@ struct BytestringArgs {
     return candidate_bytestring == bytestring_set_;
   }
 
-  int128_t get_cost() const { return kBaseItemCost + bytestring_cost(bytestring_set_.size()); }
+  int128_t get_cost() const
+  {
+    return kBaseItemCost + bytestring_cost(bytestring_set_.size());
+  }
 
   std::shared_ptr<const StorageItemWrapper> to_item() const;
 };
@@ -99,7 +102,8 @@ public:
     return true;
   }
 
-  void commit_consume(RetrocausalQueueConsumeDelta const &consume_delta, InvalidStateFlag& invalid_state_flag)
+  void commit_consume(RetrocausalQueueConsumeDelta const &consume_delta,
+                      InvalidStateFlag &invalid_state_flag)
   {
     assert(consumer_lock_);
     consumer_lock_ = false;
@@ -114,7 +118,8 @@ public:
     consumer_lock_ = false;
   }
 
-  void commit_insert(RetrocausalQueueInsertDelta const &insert_delta, InvalidStateFlag& invalid_state_flag)
+  void commit_insert(RetrocausalQueueInsertDelta const &insert_delta,
+                     InvalidStateFlag &invalid_state_flag)
   {
     // TODO
     insert_committed_ = true;

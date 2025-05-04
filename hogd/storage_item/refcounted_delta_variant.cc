@@ -185,7 +185,8 @@ RetrocausalQueueArgs::get_cost(RetrocausalQueueDelta const &delta,
 }
 
 std::optional<QueueEntry>
-RetrocausalQueueArgs::get_concurrent_retrocausal_queue_entry(uint32_t index) const
+RetrocausalQueueArgs::get_concurrent_retrocausal_queue_entry(
+    uint32_t index) const
 {
   if (index < new_entries_.size()) {
     return new_entries_[index];
@@ -195,7 +196,7 @@ RetrocausalQueueArgs::get_concurrent_retrocausal_queue_entry(uint32_t index) con
 
 int128_t
 ExclusiveLockedState::get_cost(StorageDelta const &delta,
-                                const StorageItemWrapper *base_item)
+                               const StorageItemWrapper *base_item)
 {
   switch (delta.type()) {
   case StorageDeltaType::kBytestringSet:
@@ -207,27 +208,23 @@ ExclusiveLockedState::get_cost(StorageDelta const &delta,
   case StorageDeltaType::kRetrocausalQueue:
   {
     auto past_stats = [&] {
-        if (delta.retrocausal_queue().consume) {
-            return base_item->queue().get_stats_after_consume(
-                delta.retrocausal_queue().consume->past_block_consume);
-        }
-        return base_item->queue().get_active_stats();
+      if (delta.retrocausal_queue().consume) {
+        return base_item->queue().get_stats_after_consume(
+            delta.retrocausal_queue().consume->past_block_consume);
+      }
+      return base_item->queue().get_active_stats();
     }();
 
-    int64_t new_count =
-        delta.retrocausal_queue()
-            .insert.added_entries.size();
+    int64_t new_count = delta.retrocausal_queue().insert.added_entries.size();
     int64_t consumed_count =
         (delta.retrocausal_queue().consume
              ? delta.retrocausal_queue().consume->current_block_consumed.size()
              : 0);
-    auto current_block_stats = RetrocausalQueueStats{
-        .active_block_count = (new_count > 0) ? 1U : 0U,
-        .active_size = new_count - consumed_count
-    };
+    auto current_block_stats =
+        RetrocausalQueueStats{.active_block_count = (new_count > 0) ? 1U : 0U,
+                              .active_size = new_count - consumed_count};
     return retrocausal_queue_cost(past_stats) +
-           retrocausal_queue_cost(current_block_stats) +
-           kBaseItemCost;
+           retrocausal_queue_cost(current_block_stats) + kBaseItemCost;
   }
   default:
     assert(false);
@@ -279,7 +276,8 @@ RefcountedDeltaVariant::to_item(
           if constexpr (requires(decltype(arm) &a) { a.to_item(); }) {
             return arm.to_item();
           }
-          else if constexpr (requires(decltype(arm) &a, const StorageItemWrapper* b) {
+          else if constexpr (requires(decltype(arm) &a,
+                                      const StorageItemWrapper *b) {
                                a.to_item(b);
                              }) {
             return arm.to_item(previous_item.get());
