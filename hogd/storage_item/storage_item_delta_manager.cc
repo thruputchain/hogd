@@ -182,27 +182,30 @@ StorageItemDeltaManager::try_acquire_exclusive_lock(
   {
     // do we have the only exclusive lock?
     bool res = (variant_.refcount() == 1);
+    // If we have a SetTypeClass lock, then nobody can have an exclusive lock or
+    // a permanent exclusive lock
     assert(!variant_.has_permanent_exclusive_lock());
     assert(!variant_.has_variant_arm<ExclusiveLockedState>());
 
-    if (res) {
-      // release the reference we had, and then acquire one for exclusive state
-      variant_.release_reference();
-      [[maybe_unused]] auto *r =
-          variant_.try_set_variant<ExclusiveLockedState>();
-      assert(r);
-
-      auto required_cost =
-          variant_.get_cost_after_commit(delta, committed_item_.get());
-
-      return MeteredStorageLock{
-          .lock_ = StorageLock(desired_lock_type),
-          .locked_tokens_ =
-              std::max<int128_t>(0, required_cost - unreleased_storage_cost_ -
-                                        committed_item_cost_),
-      };
+    if (!res) {
+      // we don't have the only reference, so we can't upgrade to exclusive
+      return std::nullopt;
     }
-    return std::nullopt;
+
+    // release the reference we had, and then acquire one for exclusive state
+    variant_.release_reference();
+    [[maybe_unused]] auto *r = variant_.try_set_variant<ExclusiveLockedState>();
+    assert(r);
+
+    auto required_cost =
+        variant_.get_cost_after_commit(delta, committed_item_.get());
+
+    return MeteredStorageLock{
+        .lock_ = StorageLock(desired_lock_type),
+        .locked_tokens_ =
+            std::max<int128_t>(0, required_cost - unreleased_storage_cost_ -
+                                      committed_item_cost_),
+    };
   }
   case StorageLockType::kExclusiveLock:
   case StorageLockType::kPermanentExclusiveLock:
@@ -532,7 +535,7 @@ StorageItemDeltaManager::revert(StorageLock const &lock)
   assert(variant_.refcount() == initial_refcount - 1);
 }
 
-std::optional<QueueEntry>
+Nondeterministic<std::optional<QueueEntry>>
 StorageItemDeltaManager::get_concurrent_retrocausal_queue_entry(uint32_t index)
 {
   // This is a read method, not a write method.  Therefore, this does not check

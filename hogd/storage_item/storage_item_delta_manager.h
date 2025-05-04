@@ -79,13 +79,16 @@ public:
   // Locking methods
   // upgrade from previous_lock_type to kExclusiveLock or
   // kPermanentExclusiveLock.
+  // The StorageDelta argument is used only to compute required storage costs.
   [[nodiscard]] std::optional<MeteredStorageLock>
   try_acquire_exclusive_lock(StorageDelta const &delta,
                              StorageLockType previous_lock_type,
                              StorageLockType desired_lock_type);
 
-  // WARNING: nondeterministic
-  std::optional<QueueEntry>
+  // Read the index-th entry of the retrocausal queue,
+  // from the current block (i.e. the retrocausal entries).
+  // Returns nullopt if there is no such entry (yet).
+  Nondeterministic<std::optional<QueueEntry>>
   get_concurrent_retrocausal_queue_entry(uint32_t index);
 
 private:
