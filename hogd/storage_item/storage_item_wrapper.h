@@ -43,7 +43,7 @@ private:
     constexpr static StorageItemType kItemType = StorageItemType::kBytestring;
     StorageItem to_wire_item() const;
     int128_t storage_cost() const;
-  };  
+  };
 
   struct NonnegativeIntWrapper {
     int128_t nnint_;

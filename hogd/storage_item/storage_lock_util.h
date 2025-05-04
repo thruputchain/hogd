@@ -13,8 +13,7 @@ struct MeteredStorageLock {
   bool operator==(const MeteredStorageLock &) const = default;
 };
 
-StorageItemTypeClass
-delta_to_typeclass(StorageDelta const &delta);
+StorageItemTypeClass delta_to_typeclass(StorageDelta const &delta);
 
 StorageLock delta_to_lock(StorageDelta const &delta);
 

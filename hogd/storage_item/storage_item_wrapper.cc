@@ -74,8 +74,11 @@ StorageItemWrapper::RetrocausalQueueWrapper::storage_cost() const
   return retrocausal_queue_cost(queue_.get_active_stats());
 }
 
-
-
-
+int128_t
+StorageItemWrapper::storage_cost() const
+{
+  return std::visit([](auto const &v) { return v.storage_cost(); },
+                    storage_item_);
+}
 
 } // namespace hogd
