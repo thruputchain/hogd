@@ -188,9 +188,9 @@ StorageItemDeltaManager::try_acquire_exclusive_lock(
     if (res) {
       // release the reference we had, and then acquire one for exclusive state
       variant_.release_reference();
-      [[maybe_unused]] auto *res =
+      [[maybe_unused]] auto *r =
           variant_.try_set_variant<ExclusiveLockedState>();
-      assert(res);
+      assert(r);
 
       auto required_cost =
           variant_.get_cost_after_commit(delta, committed_item_.get());
