@@ -176,6 +176,13 @@ TEST(RefcountedDeltaVariant, RCQCosts)
                                                        .added_entries = {}}),
                                     item.get()));
   // insertion, even those that are consumed, still create a new block
+  EXPECT_EQ(
+      item->storage_cost() - kRCQCostPerEntry + kRCQCostPerBlock,
+      variant.get_cost_after_commit(
+          make_rcq_delta(std::nullopt,
+                         RetrocausalQueueInsertDelta{
+                             .added_entries = {make_test_queue_entry(1)}}),
+          item.get()));
   arg->commit_insert(
       RetrocausalQueueInsertDelta{.added_entries = {make_test_queue_entry(1)}},
       invalid_state_flag);
