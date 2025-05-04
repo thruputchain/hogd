@@ -12,7 +12,7 @@ namespace hogd {
 // used when computing storage costs
 struct RetrocausalQueueStats {
   uint64_t active_block_count;
-  uint64_t active_size;
+  int64_t active_size;
 
   bool operator==(const RetrocausalQueueStats &) const = default;
 };
@@ -82,7 +82,7 @@ public:
 private:
   struct BlockState {
     RetrocausalQueueBlock block_;
-    uint64_t cumulative_prior_size_;
+    int64_t cumulative_prior_size_;
   };
 
   // Applies a consume delta to the retrocausal queue.
@@ -95,9 +95,9 @@ private:
   uint64_t current_block_number_;
 
   // Total number of entries that have ever been inserted into the queue.
-  uint64_t total_size_;
+  int64_t total_size_;
   // Total number of entries that have been consumed from the queue.
-  uint64_t consumed_size_;
+  int64_t consumed_size_;
 
   bool committed_consume_ = false;
 };

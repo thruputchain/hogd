@@ -14,7 +14,6 @@ make_test_queue_entry(uint8_t value)
 {
   return {value};
 }
-
 } // namespace
 
 TEST(RetrocausalQueue, InsertThenConsume)

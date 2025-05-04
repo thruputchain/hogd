@@ -1,6 +1,7 @@
 #include "hogd/storage_item/retrocausal_queue.h"
 
 #include <cassert>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -96,13 +97,15 @@ RetrocausalQueue::apply_consume_delta(
     }
 
     consumed_size_ += delta.partial_consumed_number;
+    assert(delta.partial_consumed_number <=
+           std::numeric_limits<int64_t>::max());
 
     it->second = std::make_shared<BlockState>(
         BlockState{.block_ = {.entries = std::move(new_entries),
                               .block_number = it->second->block_.block_number},
                    .cumulative_prior_size_ =
                        it->second->cumulative_prior_size_ +
-                       delta.partial_consumed_number});
+                       static_cast<int64_t>(delta.partial_consumed_number)});
     assert(it->second->cumulative_prior_size_ == consumed_size_);
   }
 }
@@ -126,11 +129,12 @@ RetrocausalQueue::get_stats_after_consume(
     return RetrocausalQueueStats{.active_block_count = 0, .active_size = 0};
   }
   assert(it->first > delta.max_fully_consumed_block_number);
+  assert(delta.partial_consumed_number <= std::numeric_limits<int64_t>::max());
 
   return RetrocausalQueueStats{
       .active_block_count = current_block_number_ - it->first + 1,
       .active_size = total_size_ - it->second->cumulative_prior_size_ -
-                     delta.partial_consumed_number};
+                     static_cast<int64_t>(delta.partial_consumed_number)};
 }
 
 } // namespace hogd
