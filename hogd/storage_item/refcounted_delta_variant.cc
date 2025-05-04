@@ -87,7 +87,7 @@ NNIntSetAddArgs::revert_add(int128_t add_value)
 
 namespace {
 x23::Vec<QueueEntry>
-make_block(std::set<QueueEntry> const &entries)
+make_block(std::multiset<QueueEntry> const &entries)
 {
   x23::Vec<QueueEntry> new_block;
   for (auto entry : entries) {
@@ -152,7 +152,7 @@ RetrocausalQueueArgs::get_cost(RetrocausalQueueDelta const &delta,
     return std::nullopt;
   }();
 
-  auto past_stats = [&]() {
+  auto past_stats = [&] {
     if (base_item) {
       assert(base_item->type() == StorageItemType::kRetrocausalQueue);
       auto const &queue = base_item->queue();

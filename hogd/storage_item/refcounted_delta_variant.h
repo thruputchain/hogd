@@ -134,11 +134,11 @@ private:
   // always first, etc).
   std::vector<QueueEntry> new_entries_;
   // new_entries_ \setminus consumed entries, in a canonical order
-  std::set<QueueEntry> persistable_entries_;
+  std::multiset<QueueEntry> persistable_entries_;
   // During validation, we might try to consume entries before the
   // corresponding insert transaction executes. At the end of the block, we
   // assert that this set is empty.
-  std::set<QueueEntry> consumed_but_not_inserted_entries_;
+  std::multiset<QueueEntry> consumed_but_not_inserted_entries_;
 };
 
 // Exclusive locked state
