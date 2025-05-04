@@ -153,8 +153,10 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   case StorageDeltaType::kRetrocausalQueue:
   {
     auto &args = variant_.get_variant_arm_unchecked<RetrocausalQueueArgs>();
-    args.commit_consume(*delta.retrocausal_queue().consume,
-                        *invalid_state_flag_);
+    if (delta.retrocausal_queue().consume) {
+      args.commit_consume(*delta.retrocausal_queue().consume,
+                          *invalid_state_flag_);
+    }
     args.commit_insert(delta.retrocausal_queue().insert, *invalid_state_flag_);
   } break;
   default:

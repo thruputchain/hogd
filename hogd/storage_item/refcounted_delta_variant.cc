@@ -14,6 +14,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -182,6 +183,50 @@ RetrocausalQueueArgs::get_cost(RetrocausalQueueDelta const &delta,
 
   return kBaseItemCost + retrocausal_queue_cost(past_stats) +
          retrocausal_queue_cost(new_stats);
+}
+
+void
+RetrocausalQueueArgs::commit_consume(
+    RetrocausalQueueConsumeDelta const &consume_delta,
+    InvalidStateFlag &invalid_state_flag)
+{
+  assert(consumer_lock_);
+  assert(!past_consume_delta_.has_value());
+  consumer_lock_ = false;
+  past_consume_delta_ = consume_delta.past_block_consume;
+
+  for (auto const &consumed_entry : consume_delta.current_block_consumed) {
+    auto res = persistable_entries_.erase(consumed_entry);
+    if (res == 0) {
+      if (consumed_but_not_inserted_entries_.empty()) {
+        invalid_state_flag.mark_as_invalid();
+      }
+      consumed_but_not_inserted_entries_.insert(consumed_entry);
+    }
+  }
+}
+
+void
+RetrocausalQueueArgs::commit_insert(
+    RetrocausalQueueInsertDelta const &insert_delta,
+    InvalidStateFlag &invalid_state_flag)
+{
+  for (auto const &entry : insert_delta.added_entries) {
+    auto it = consumed_but_not_inserted_entries_.find(entry);
+    if (it == consumed_but_not_inserted_entries_.end()) {
+      persistable_entries_.insert(entry);
+    }
+    else {
+      // consumed_but_not_inserted_entries is not empty right now, as we just
+      // found an item in it.
+      consumed_but_not_inserted_entries_.erase(it);
+      if (consumed_but_not_inserted_entries_.empty()) {
+        invalid_state_flag.unmark_as_invalid();
+      }
+    }
+    new_entries_.push_back(entry);
+  }
+  insert_committed_ = true;
 }
 
 std::optional<QueueEntry>

@@ -81,6 +81,7 @@ struct DeleteArgs {
   static std::shared_ptr<const StorageItemWrapper> to_item() { return nullptr; }
 };
 
+// Retrocausal queue state
 class RetrocausalQueueArgs {
 public:
   static bool typeclass_match() { return true; }
@@ -103,13 +104,7 @@ public:
   }
 
   void commit_consume(RetrocausalQueueConsumeDelta const &consume_delta,
-                      InvalidStateFlag &invalid_state_flag)
-  {
-    assert(consumer_lock_);
-    consumer_lock_ = false;
-    past_consume_delta_ = consume_delta.past_block_consume;
-    // TODO RC consume entries
-  }
+                      InvalidStateFlag &invalid_state_flag);
 
   void revert_consume()
   {
@@ -119,11 +114,7 @@ public:
   }
 
   void commit_insert(RetrocausalQueueInsertDelta const &insert_delta,
-                     InvalidStateFlag &invalid_state_flag)
-  {
-    // TODO
-    insert_committed_ = true;
-  }
+                     InvalidStateFlag &invalid_state_flag);
 
   std::optional<QueueEntry>
   get_concurrent_retrocausal_queue_entry(uint32_t index) const;
@@ -167,7 +158,6 @@ struct ExclusiveLockedState {
 
 // Unmodified state -- the variant is in this state if and only if refcount is
 // 0.
-
 struct UnmodifiedState {
   static bool typeclass_match() { return true; }
   static std::shared_ptr<const StorageItemWrapper>
@@ -177,6 +167,41 @@ struct UnmodifiedState {
   }
 };
 
+// RefcountedDeltaVariant manages the state of a storage item that can be
+// modified by multiple concurrent transactions. It uses a reference count to
+// track active reservations and maintains variant state based on the type of
+// modifications being made.
+//
+// The variant can be in one of several states:
+// - BytestringArgs: For bytestring storage items that can be set to specific
+// values
+// - NNIntSetAddArgs: For non-negative integer items that support atomic add
+// operations
+// - RetrocausalQueueArgs: For retrocausal queue items that support
+// insert/consume operations
+// - ExclusiveLockedState: When an item is exclusively locked by a transaction.
+// Note that a transaction can put the variant in this state in two ways; one,
+// by performing a storage operation with a kExclusiveLock flag set, and two, by
+// performing multiple reservations of different typeclasses on the same item
+// (via e.g. try_invoke()).
+// - DeleteArgs: When an item is marked for deletion
+// - UnmodifiedState: The default state when no transactions are modifying the
+// item
+//
+// The refcount tracks how many transactions have active reservations. When it
+// drops to 0, the variant reverts to UnmodifiedState. Permanent exclusive locks
+// can be acquired to prevent other transactions from modifying the item.
+//
+// Key operations:
+// - try_set_variant(): Attempts to acquire a reference and set the variant
+// state
+// - release_reference(): Releases a reference, potentially reverting to
+// UnmodifiedState
+// - get_cost_after_commit(): Calculates storage costs after a delta is
+// committed
+// - matches_typeclass(): Checks if current state matches a storage item type
+// - to_item(): Converts variant state into a StorageItemWrapper, to be passed
+// to the next block.
 class RefcountedDeltaVariant {
   using variant_t =
       std::variant<BytestringArgs, NNIntSetAddArgs, RetrocausalQueueArgs,
@@ -231,6 +256,7 @@ public:
   }
 
   // Must already have a reference to the variant for the expected type.
+  // Does not acquire a reference.
   template<typename VariantArm> auto &get_variant_arm_unchecked(this auto &self)
   {
     assert(self.refcount_ > 0);
@@ -243,6 +269,8 @@ public:
     return std::holds_alternative<VariantArm>(variant_);
   }
 
+  // Returns true if the current state matches the given typeclass.
+  // Requires: refcount_ > 0
   bool matches_typeclass(StorageItemTypeClass typeclass) const;
 
   void set_permanent_exclusive_lock() { permanent_exclusive_lock_ = true; }
@@ -253,6 +281,8 @@ public:
 
   uint32_t refcount() const { return refcount_; }
 
+  // Converts the current state into a StorageItemWrapper, to be passed to the
+  // next block.
   std::shared_ptr<const StorageItemWrapper>
   to_item(std::shared_ptr<const StorageItemWrapper> previous_item) const;
 
