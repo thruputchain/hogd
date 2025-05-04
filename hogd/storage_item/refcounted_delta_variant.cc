@@ -58,7 +58,6 @@ NNIntSetAddArgs::try_reserve_add(int128_t add_value)
   if (integer_add_overflow(total_subtracted_, add_value, &desired_subtracted)) {
     // more than INT128_MIN is subtracted from the counter.
     // This is impossible, if we want to maintain that set+add >= 0.
-
     return false;
   }
 
@@ -176,10 +175,11 @@ RetrocausalQueueArgs::get_cost(RetrocausalQueueDelta const &delta,
   // then, logically speaking, there isn't a new block, but we still count it
   // for storage costs until a later consume.
 
-  RetrocausalQueueStats new_stats = {.active_block_count =
-                                         new_entry_count > 0 ? 1U : 0U,
-                                     .active_size = new_entry_count -
-                                                    consumed_entry_count};
+  RetrocausalQueueStats new_stats = {
+      .active_block_count =
+          (new_entries_.empty() && delta.insert.added_entries.empty()) ? 0U
+                                                                       : 1U,
+      .active_size = new_entry_count - consumed_entry_count};
 
   return kBaseItemCost + retrocausal_queue_cost(past_stats) +
          retrocausal_queue_cost(new_stats);

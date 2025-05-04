@@ -59,7 +59,7 @@ StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
 int128_t
 StorageItemWrapper::BytestringWrapper::storage_cost() const
 {
-  return bytestring_cost(bytestring_.size());
+  return kBaseItemCost + bytestring_cost(bytestring_.size());
 }
 
 int128_t
@@ -71,7 +71,7 @@ StorageItemWrapper::NonnegativeIntWrapper::storage_cost()
 int128_t
 StorageItemWrapper::RetrocausalQueueWrapper::storage_cost() const
 {
-  return retrocausal_queue_cost(queue_.get_active_stats());
+  return kBaseItemCost + retrocausal_queue_cost(queue_.get_active_stats());
 }
 
 int128_t
