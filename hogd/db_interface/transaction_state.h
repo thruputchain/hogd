@@ -52,8 +52,7 @@ public:
   // - the delta that was added for this address+key, or std::nullopt if the
   // delta was reverted.
   // - the lock that was added for this address+key (i.e. if the associated
-  // delta is nullopt,
-  //   we need to release the lock).
+  // delta is nullopt, we need to release the lock).
   std::unordered_map<AddressAndKey,
                      std::pair<std::optional<StorageDelta>, MeteredStorageLock>>
   extract_results();
@@ -76,18 +75,14 @@ private:
 // Manage the state of all transactions in a block.
 // Lightweight wrapper around a synchronized map of TransactionState objects.
 class TransactionStateManager {
-
-  std::pair<TransactionState *, std::unique_lock<std::mutex>>
-  get(TransactionID txid)
-  {
-    auto [state, ul] = tx_states_.find(txid);
-    if (!state) {
-      return tx_states_.insert(txid, TransactionState());
-    }
-    return {state, std::move(ul)};
-  }
-
 public:
+  // Get the state associated with one transaction.
+  // Returns a pointer to the state and a unique lock on the state.
+  // If the state does not exist, it is created.
+  std::pair<TransactionState *, std::unique_lock<std::mutex>>
+  get(TransactionID txid);
+
+private:
   using TransactionStateMap = SynchronizedMap<TransactionID, TransactionState>;
   TransactionStateMap tx_states_;
 };

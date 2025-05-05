@@ -1,12 +1,14 @@
 #include "transaction_state.h"
 
 #include <cassert>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/storage_item/storage_lock_util.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -64,6 +66,16 @@ TransactionState::extract_results()
   }
 
   return result;
+}
+
+std::pair<TransactionState *, std::unique_lock<std::mutex>>
+TransactionStateManager::get(TransactionID txid)
+{
+  auto [state, ul] = tx_states_.find(txid);
+  if (!state) {
+    return tx_states_.insert(txid, TransactionState());
+  }
+  return {state, std::move(ul)};
 }
 
 } // namespace hogd
