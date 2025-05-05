@@ -28,7 +28,7 @@ public:
 
   constexpr static StorageItemType get_item_type()
   {
-    return StorageItemType::kBytestring;
+    return StorageItemType::kItemTypeBytestring;
   }
 
   Bytestring bytestring_;
@@ -42,7 +42,7 @@ public:
 
   constexpr static StorageItemType get_item_type()
   {
-    return StorageItemType::kNonnegativeInt;
+    return StorageItemType::kItemTypeNonnegativeInt;
   }
 
   int128_t base_value_;
@@ -54,7 +54,7 @@ class DeletedItem {
 public:
   constexpr static StorageDelta get_delta()
   {
-    return StorageDelta(StorageDeltaType::kDelete);
+    return StorageDelta(StorageDeltaType::kDeltaTypeDelete);
   }
 
   constexpr static SyscallStatus<void> validate() { return {}; }

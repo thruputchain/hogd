@@ -23,7 +23,7 @@ TEST(ItemView, Exists)
   EXPECT_TRUE(proxy.set(write1));
   ASSERT_TRUE(proxy.get_item_type());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  EXPECT_EQ(*proxy.get_item_type(), StorageItemType::kBytestring);
+  EXPECT_EQ(*proxy.get_item_type(), StorageItemType::kItemTypeBytestring);
 }
 
 TEST(ItemView, SetBytestring)

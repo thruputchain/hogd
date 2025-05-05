@@ -43,7 +43,7 @@ private:
   struct BytestringWrapper {
     // The underlying bytestring value
     Bytestring bytestring_;
-    constexpr static StorageItemType kItemType = StorageItemType::kBytestring;
+    constexpr static StorageItemType kItemType = StorageItemType::kItemTypeBytestring;
     // Converts to wire format for network transmission
     StorageItem to_wire_item() const;
     // Returns storage cost based on bytestring length
@@ -54,8 +54,7 @@ private:
   struct NonnegativeIntWrapper {
     // The underlying non-negative integer value
     int128_t nnint_;
-    constexpr static StorageItemType kItemType =
-        StorageItemType::kNonnegativeInt;
+    constexpr static StorageItemType kItemType = StorageItemType::kItemTypeNonnegativeInt;
     // Converts to wire format for network transmission
     StorageItem to_wire_item() const;
     // Returns fixed storage cost for non-negative integers
@@ -66,8 +65,7 @@ private:
   struct RetrocausalQueueWrapper {
     // The underlying retrocausal queue
     RetrocausalQueue queue_;
-    constexpr static StorageItemType kItemType =
-        StorageItemType::kRetrocausalQueue;
+    constexpr static StorageItemType kItemType = StorageItemType::kItemTypeRetrocausalQueue;
     // Converts to wire format for network transmission
     // Note: The RCQ type is automatically fully serialized and transferred.
     // We merely send over the fact that an RCQ exists.

@@ -16,7 +16,7 @@ namespace {
 StorageDelta
 make_bytestring_set(Bytestring const &string)
 {
-  StorageDelta out(StorageDeltaType::kBytestringSet);
+  StorageDelta out(StorageDeltaType::kDeltaTypeBytestringSet);
   out.bytestring() = string;
   return out;
 }
@@ -24,7 +24,7 @@ make_bytestring_set(Bytestring const &string)
 StorageDelta
 make_nnint128_set_add(int128_t set, int128_t add)
 {
-  StorageDelta out(StorageDeltaType::kNonnegativeIntSetAdd);
+  StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
   out.nnint() = NonnegativeInt128SetAddArgs{.set_value = to_xdr(set),
                                             .add_value = to_xdr(add)};
 

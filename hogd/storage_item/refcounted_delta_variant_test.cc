@@ -94,7 +94,7 @@ auto
 make_rcq_delta(std::optional<RetrocausalQueueConsumeDelta> consume_delta,
                RetrocausalQueueInsertDelta insert_delta)
 {
-  StorageDelta delta(StorageDeltaType::kRetrocausalQueue);
+  StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
   if (consume_delta) {
     delta.retrocausal_queue().consume.emplace(*consume_delta);
   }

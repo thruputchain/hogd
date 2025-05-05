@@ -268,7 +268,7 @@ SystemCallHandler::get_bytestring(StorageKey const &storage_key)
     if (!unmodified_item->base_item_) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_item_->type() != StorageItemType::kBytestring) {
+    if (unmodified_item->base_item_->type() != StorageItemType::kItemTypeBytestring) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     return std::as_bytes(std::span(unmodified_item->base_item_->bytestring()));
@@ -306,7 +306,7 @@ SystemCallHandler::get_nnint(StorageKey const &storage_key)
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
     if (unmodified_item->base_item_->type() !=
-        StorageItemType::kNonnegativeInt) {
+        StorageItemType::kItemTypeNonnegativeInt) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     return {{from_xdr(unmodified_item->base_item_->nnint()), 0}};
