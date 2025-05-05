@@ -9,12 +9,12 @@ add_library(
 
 target_link_libraries(
   storage_item
-  protocol
+  hogd
 )
 
 add_dependencies(
   storage_item
-  protocol
+  hogd
 )
 
 add_executable(

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <functional>
 #include <initializer_list>
