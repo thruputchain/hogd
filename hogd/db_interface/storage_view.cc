@@ -11,7 +11,6 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
@@ -109,8 +108,7 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
 
   auto [item, ul] = modified_items_.insert(
       addrkey, StorageItemDeltaManager(parent_item, &invalid_state_flag_));
-  auto res = mod_lambda(item);
-  return res;
+  return mod_lambda(item);
 }
 
 void

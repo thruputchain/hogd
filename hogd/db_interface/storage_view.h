@@ -40,7 +40,7 @@ class InMemoryDatabase;
 //
 // StorageView stores a database snapshot that has not yet been closed,
 // and therefore makes public all methods necessary for modifying storage.
-// 
+//
 // A view contains exactly the information required, once it is closed,
 // to produce a database transaction for one block.
 // TODO(geoff): implementation of conversion of a view into a db transaction.
