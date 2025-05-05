@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -46,7 +47,15 @@ public:
   // Extract the results of the transaction, i.e. the set of all deltas and
   // associated locks that commit in the final view of the transaction. This
   // method must be called at most once per transaction.
-  std::unordered_map<AddressAndKey, std::pair<StorageDelta, MeteredStorageLock>>
+  //
+  // Each entry in the returned map is a pair of:
+  // - the delta that was added for this address+key, or std::nullopt if the
+  // delta was reverted.
+  // - the lock that was added for this address+key (i.e. if the associated
+  // delta is nullopt,
+  //   we need to release the lock).
+  std::unordered_map<AddressAndKey,
+                     std::pair<std::optional<StorageDelta>, MeteredStorageLock>>
   extract_results();
 
 private:
