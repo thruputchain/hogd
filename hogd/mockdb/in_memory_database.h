@@ -41,7 +41,7 @@ public:
   {
     items_->erase(addrkey);
     if (item) {
-      items_->emplace(addrkey, item);
+      items_->emplace(addrkey, std::move(item));
     }
   }
 
