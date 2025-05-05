@@ -268,7 +268,8 @@ SystemCallHandler::get_bytestring(StorageKey const &storage_key)
     if (!unmodified_item->base_item_) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_item_->type() != StorageItemType::kItemTypeBytestring) {
+    if (unmodified_item->base_item_->type() !=
+        StorageItemType::kItemTypeBytestring) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     return std::as_bytes(std::span(unmodified_item->base_item_->bytestring()));

@@ -2,13 +2,16 @@
 
 #include <cassert>
 #include <cstddef>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/container/synchronized_map.h"
 #include "hogd/storage_item/storage_lock_util.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
@@ -22,21 +25,27 @@ struct SubTransactionState {
 class TransactionState {
 public:
   TransactionState();
+
+  TransactionState(TransactionState const &) = delete;
+  TransactionState &operator=(TransactionState const &) = delete;
+  TransactionState(TransactionState &&) = default;
+  TransactionState &operator=(TransactionState &&) = default;
+
   void push_subtransaction();
   void pop_subtransactions(uint32_t count);
 
   // Add a storage delta and associated lock for a given address+key pair.
-  // The lock must have been acquired by the caller (via querying the appropriate
-  // StorageItemDeltaManager).
-  // The delta will be added to the current subtransaction.
-  // Any previous delta for this address+key in the current subtransaction will be overwritten.
-  // The lock will be held until the transaction completes. (TODO(geoff): impl early release, if necessary)
+  // The lock must have been acquired by the caller (via querying the
+  // appropriate StorageItemDeltaManager). The delta will be added to the
+  // current subtransaction. Any previous delta for this address+key in the
+  // current subtransaction will be overwritten. The lock will be held until the
+  // transaction completes. (TODO(geoff): impl early release, if necessary)
   void add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
                  MeteredStorageLock &&new_lock);
 
-  // Extract the results of the transaction, i.e. the set of all deltas and associated locks
-  // that commit in the final view of the transaction.
-  // This method must be called at most once per transaction.
+  // Extract the results of the transaction, i.e. the set of all deltas and
+  // associated locks that commit in the final view of the transaction. This
+  // method must be called at most once per transaction.
   std::unordered_map<AddressAndKey, std::pair<StorageDelta, MeteredStorageLock>>
   extract_results();
 
@@ -53,6 +62,25 @@ private:
   std::unordered_map<AddressAndKey, MeteredStorageLock> held_locks_;
   std::vector<SubTransactionState> subtransaction_stack_;
   bool finished_ = false;
+};
+
+// Manage the state of all transactions in a block.
+// Lightweight wrapper around a synchronized map of TransactionState objects.
+class TransactionStateManager {
+
+  std::pair<TransactionState *, std::unique_lock<std::mutex>>
+  get(TransactionID txid)
+  {
+    auto [state, ul] = tx_states_.find(txid);
+    if (!state) {
+      return tx_states_.insert(txid, TransactionState());
+    }
+    return {state, std::move(ul)};
+  }
+
+public:
+  using TransactionStateMap = SynchronizedMap<TransactionID, TransactionState>;
+  TransactionStateMap tx_states_;
 };
 
 } // namespace hogd

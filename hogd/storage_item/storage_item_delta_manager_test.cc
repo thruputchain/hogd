@@ -171,8 +171,9 @@ TEST(StorageItemFrame, DeleteItem)
 
   ASSERT_TRUE(item2.get_snapshot_item());
 
-  auto delete_lock = item2.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
-                                       StorageLock(StorageLockType::kNone));
+  auto delete_lock =
+      item2.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
+                        StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(delete_lock);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -197,8 +198,9 @@ TEST(StorageItemFrame, ExclusiveLockAcquire)
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag);
 
-  auto lock1 = item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
-                                StorageLock(StorageLockType::kNone));
+  auto lock1 =
+      item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
+                       StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lock1);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -371,9 +373,9 @@ TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
   ASSERT_FALSE(
       item.try_acquire_exclusive_lock(bytestring_delta, StorageLockType::kNone,
                                       StorageLockType::kExclusiveLock));
-  ASSERT_FALSE(
-      item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd),
-                       StorageLock(StorageLockType::kNone)));
+  ASSERT_FALSE(item.try_reserve(
+      StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd),
+      StorageLock(StorageLockType::kNone)));
 
   // exclusive lock was committed but released, so we can acquire shared lock.
   // Was not written in permanent exclusive mode.
@@ -410,13 +412,14 @@ TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
   ASSERT_FALSE(
       item.try_acquire_exclusive_lock(bytestring_delta, StorageLockType::kNone,
                                       StorageLockType::kExclusiveLock));
-  ASSERT_FALSE(
-      item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd),
-                       StorageLock(StorageLockType::kNone)));
+  ASSERT_FALSE(item.try_reserve(
+      StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd),
+      StorageLock(StorageLockType::kNone)));
 
   // cannot reacquire lock after permament lock commits
-  ASSERT_FALSE(item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
-                                StorageLock(StorageLockType::kNone)));
+  ASSERT_FALSE(
+      item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
+                       StorageLock(StorageLockType::kNone)));
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 

@@ -289,15 +289,18 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
                  args.typeclass_match();
         }
         else if constexpr (std::same_as<args_t, BytestringArgs>) {
-          return typeclass.item_type() == StorageItemType::kItemTypeBytestring &&
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeBytestring &&
                  args.typeclass_match(typeclass.bytestring());
         }
         else if constexpr (std::same_as<args_t, NNIntSetAddArgs>) {
-          return typeclass.item_type() == StorageItemType::kItemTypeNonnegativeInt &&
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeNonnegativeInt &&
                  args.typeclass_match(from_xdr(typeclass.nnint_set()));
         }
         else if constexpr (std::same_as<args_t, RetrocausalQueueArgs>) {
-          return typeclass.item_type() == StorageItemType::kItemTypeRetrocausalQueue &&
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeRetrocausalQueue &&
                  args.typeclass_match();
         }
         else {
@@ -354,7 +357,8 @@ RefcountedDeltaVariant::get_cost_after_commit(
           return args.get_cost();
         }
         else if constexpr (std::same_as<args_t, NNIntSetAddArgs>) {
-          assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+          assert(delta.type() ==
+                 StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
           return args.get_cost();
         }
         else if constexpr (std::same_as<args_t, RetrocausalQueueArgs>) {
