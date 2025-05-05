@@ -43,7 +43,7 @@ make_exclusive_lock()
 AddressAndKey
 make_addrkey(uint8_t i)
 {
-  AddressAndKey addrkey;
+  AddressAndKey addrkey{};
   addrkey.address[0] = i;
   return addrkey;
 }

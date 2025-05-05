@@ -58,7 +58,7 @@ TransactionState::extract_results()
                      std::make_pair(std::move(delta), held_locks_.at(addrkey)));
     }
   }
-
+  
   for (auto &[addrkey, lock] : held_locks_) {
     result.emplace(addrkey, std::make_pair(std::nullopt, std::move(lock)));
   }
