@@ -35,10 +35,10 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
   assert(!variant_.has_permanent_exclusive_lock());
 
   switch (delta.type()) {
-  case StorageDeltaType::kBytestringSet:
+  case StorageDeltaType::kDeltaTypeBytestringSet:
     return variant_.try_set_variant<BytestringArgs>(delta.bytestring()) !=
            nullptr;
-  case StorageDeltaType::kNonnegativeIntSetAdd:
+  case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     if (auto *args = variant_.try_set_variant<NNIntSetAddArgs>(
             from_xdr(delta.nnint().set_value))) {
       int128_t add_value = from_xdr(delta.nnint().add_value);
@@ -64,9 +64,9 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
       return true;
     }
     return false;
-  case StorageDeltaType::kDelete:
+  case StorageDeltaType::kDeltaTypeDelete:
     return variant_.try_set_variant<DeleteArgs>() != nullptr;
-  case StorageDeltaType::kRetrocausalQueue:
+  case StorageDeltaType::kDeltaTypeRetrocausalQueue:
   {
     bool requires_consume = delta.retrocausal_queue().consume != nullptr;
     if (auto *args = variant_.try_set_variant<RetrocausalQueueArgs>()) {
@@ -88,9 +88,9 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
 {
   assert(variant_.refcount() > 0);
   switch (delta.type()) {
-  case StorageDeltaType::kBytestringSet:
+  case StorageDeltaType::kDeltaTypeBytestringSet:
     break;
-  case StorageDeltaType::kNonnegativeIntSetAdd:
+  case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
   {
     auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
     int128_t add_value = from_xdr(delta.nnint().add_value);
@@ -98,9 +98,9 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
       args.commit_add(add_value);
     }
   } break;
-  case StorageDeltaType::kDelete:
+  case StorageDeltaType::kDeltaTypeDelete:
     break;
-  case StorageDeltaType::kRetrocausalQueue:
+  case StorageDeltaType::kDeltaTypeRetrocausalQueue:
   {
     auto &args = variant_.get_variant_arm_unchecked<RetrocausalQueueArgs>();
     args.commit_insert(delta.retrocausal_queue().insert, *invalid_state_flag_);
@@ -253,7 +253,7 @@ StorageItemDeltaManager::revert_set_typeclass_lock(
     TypeSpecificLock const &type_specific_lock)
 {
   switch (type_specific_lock.item_type()) {
-  case StorageItemType::kNonnegativeInt:
+  case StorageItemType::kItemTypeNonnegativeInt:
   {
     int128_t sub_amount =
         from_xdr(type_specific_lock.nnint_subtracted_amount());
@@ -264,7 +264,7 @@ StorageItemDeltaManager::revert_set_typeclass_lock(
     }
     break;
   }
-  case StorageItemType::kRetrocausalQueue:
+  case StorageItemType::kItemTypeRetrocausalQueue:
   {
     auto &args = variant_.get_variant_arm_unchecked<RetrocausalQueueArgs>();
     if (type_specific_lock.consume_lock() == 1) {
@@ -307,7 +307,7 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   assert(variant_.matches_typeclass(req_lock.full_typeclass_lock().typeclass));
 
   switch (req_lock.full_typeclass_lock().extra_lock_data.item_type()) {
-  case StorageItemType::kNonnegativeInt:
+  case StorageItemType::kItemTypeNonnegativeInt:
   {
     int128_t prev_sub_amount =
         from_xdr(prev_typeclass_lock.extra_lock_data.nnint_subtracted_amount());
@@ -333,7 +333,7 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
 
     return req_lock;
   } break;
-  case StorageItemType::kRetrocausalQueue:
+  case StorageItemType::kItemTypeRetrocausalQueue:
   {
     assert(variant_.has_variant_arm<RetrocausalQueueArgs>());
     auto &args = variant_.get_variant_arm_unchecked<RetrocausalQueueArgs>();
@@ -412,14 +412,14 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
 {
   assert(lock.lock_type() == StorageLockType::kSetItemTypeClass);
   switch (delta.type()) {
-  case StorageDeltaType::kBytestringSet:
+  case StorageDeltaType::kDeltaTypeBytestringSet:
     // nothing to do
     break;
-  case StorageDeltaType::kNonnegativeIntSetAdd:
+  case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
   {
     assert(lock.full_typeclass_lock().extra_lock_data.item_type() ==
-           StorageItemType::kNonnegativeInt);
-    assert(delta.type() == StorageDeltaType::kNonnegativeIntSetAdd);
+           StorageItemType::kItemTypeNonnegativeInt);
+    assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
 
     int128_t actual_sub_amount =
         std::min<int128_t>(0, from_xdr(delta.nnint().add_value));
@@ -439,10 +439,10 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     }
     break;
   }
-  case StorageDeltaType::kDelete:
+  case StorageDeltaType::kDeltaTypeDelete:
     // nothing to do
     break;
-  case StorageDeltaType::kRetrocausalQueue:
+  case StorageDeltaType::kDeltaTypeRetrocausalQueue:
   {
     // If we took out the consume lock, but no longer need it
     if (lock.full_typeclass_lock().extra_lock_data.consume_lock() == 1) {

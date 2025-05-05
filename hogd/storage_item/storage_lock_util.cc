@@ -14,22 +14,22 @@ StorageItemTypeClass
 delta_to_typeclass(StorageDelta const &delta)
 {
   switch (delta.type()) {
-  case StorageDeltaType::kBytestringSet:
+  case StorageDeltaType::kDeltaTypeBytestringSet:
   {
-    auto out = StorageItemTypeClass(StorageItemType::kBytestring);
+    auto out = StorageItemTypeClass(StorageItemType::kItemTypeBytestring);
     out.bytestring() = delta.bytestring();
     return out;
   }
-  case StorageDeltaType::kNonnegativeIntSetAdd:
+  case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
   {
-    auto out = StorageItemTypeClass(StorageItemType::kNonnegativeInt);
+    auto out = StorageItemTypeClass(StorageItemType::kItemTypeNonnegativeInt);
     out.nnint_set() = delta.nnint().set_value;
     return out;
   }
-  case StorageDeltaType::kDelete:
-    return StorageItemTypeClass(StorageItemType::kDeleted);
-  case StorageDeltaType::kRetrocausalQueue:
-    return StorageItemTypeClass(StorageItemType::kRetrocausalQueue);
+  case StorageDeltaType::kDeltaTypeDelete:
+    return StorageItemTypeClass(StorageItemType::kItemTypeDeleted);
+  case StorageDeltaType::kDeltaTypeRetrocausalQueue:
+    return StorageItemTypeClass(StorageItemType::kItemTypeRetrocausalQueue);
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -42,28 +42,28 @@ delta_to_lock(StorageDelta const &delta)
   StorageLock lock(StorageLockType::kSetItemTypeClass);
   lock.full_typeclass_lock().typeclass = delta_to_typeclass(delta);
   switch (delta.type()) {
-  case StorageDeltaType::kBytestringSet:
+  case StorageDeltaType::kDeltaTypeBytestringSet:
     lock.full_typeclass_lock().extra_lock_data.item_type(
-        StorageItemType::kBytestring);
+        StorageItemType::kItemTypeBytestring);
     return lock;
-  case StorageDeltaType::kNonnegativeIntSetAdd:
+  case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     lock.full_typeclass_lock().extra_lock_data.item_type(
-        StorageItemType::kNonnegativeInt);
+        StorageItemType::kItemTypeNonnegativeInt);
     lock.full_typeclass_lock().extra_lock_data.nnint_subtracted_amount() =
         to_xdr(std::min<int128_t>(0, from_xdr(delta.nnint().add_value)));
     return lock;
-  case StorageDeltaType::kRetrocausalQueue:
+  case StorageDeltaType::kDeltaTypeRetrocausalQueue:
   {
     lock.full_typeclass_lock().extra_lock_data.item_type(
-        StorageItemType::kRetrocausalQueue);
+        StorageItemType::kItemTypeRetrocausalQueue);
     if (delta.retrocausal_queue().consume) {
       lock.full_typeclass_lock().extra_lock_data.consume_lock() = 1;
     }
     return lock;
   }
-  case StorageDeltaType::kDelete:
+  case StorageDeltaType::kDeltaTypeDelete:
     lock.full_typeclass_lock().extra_lock_data.item_type(
-        StorageItemType::kDeleted);
+        StorageItemType::kItemTypeDeleted);
     return lock;
   default:
     throw std::runtime_error("unimplemented");

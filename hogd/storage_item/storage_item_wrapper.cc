@@ -37,7 +37,7 @@ StorageItemWrapper::to_wire_item() const
 StorageItem
 StorageItemWrapper::BytestringWrapper::to_wire_item() const
 {
-  StorageItem item(StorageItemType::kBytestring);
+  StorageItem item(StorageItemType::kItemTypeBytestring);
   item.bytestring() = bytestring_;
   return item;
 }
@@ -45,7 +45,7 @@ StorageItemWrapper::BytestringWrapper::to_wire_item() const
 StorageItem
 StorageItemWrapper::NonnegativeIntWrapper::to_wire_item() const
 {
-  StorageItem item(StorageItemType::kNonnegativeInt);
+  StorageItem item(StorageItemType::kItemTypeNonnegativeInt);
   item.nnint() = to_xdr(nnint_);
   return item;
 }
@@ -53,7 +53,7 @@ StorageItemWrapper::NonnegativeIntWrapper::to_wire_item() const
 StorageItem
 StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
 {
-  return StorageItem(StorageItemType::kRetrocausalQueue);
+  return StorageItem(StorageItemType::kItemTypeRetrocausalQueue);
 }
 
 int128_t

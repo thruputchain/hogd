@@ -105,7 +105,7 @@ RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item) const
       .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
   if (past_consume_delta_) {
     assert(previous_item);
-    assert(previous_item->type() == StorageItemType::kRetrocausalQueue);
+    assert(previous_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
     consume_delta = *past_consume_delta_;
   }
 
@@ -124,7 +124,7 @@ RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item) const
   };
 
   if (previous_item &&
-      previous_item->type() == StorageItemType::kRetrocausalQueue) {
+      previous_item->type() == StorageItemType::kItemTypeRetrocausalQueue) {
     return make_output(previous_item->queue());
   }
   // otherwise, no parent, so make empty one just for the ctor
@@ -153,7 +153,7 @@ RetrocausalQueueArgs::get_cost(RetrocausalQueueDelta const &delta,
 
   auto past_stats = [&] {
     if (base_item) {
-      assert(base_item->type() == StorageItemType::kRetrocausalQueue);
+      assert(base_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
       auto const &queue = base_item->queue();
 
       if (consume_delta) {
@@ -244,13 +244,13 @@ ExclusiveLockedState::get_cost(StorageDelta const &delta,
                                const StorageItemWrapper *base_item)
 {
   switch (delta.type()) {
-  case StorageDeltaType::kBytestringSet:
+  case StorageDeltaType::kDeltaTypeBytestringSet:
     return kBaseItemCost + bytestring_cost(delta.bytestring().size());
-  case StorageDeltaType::kNonnegativeIntSetAdd:
+  case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     return kBaseItemCost;
-  case StorageDeltaType::kDelete:
+  case StorageDeltaType::kDeltaTypeDelete:
     return 0;
-  case StorageDeltaType::kRetrocausalQueue:
+  case StorageDeltaType::kDeltaTypeRetrocausalQueue:
   {
     auto past_stats = [&] {
       if (delta.retrocausal_queue().consume) {
@@ -285,19 +285,22 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
       [&typeclass](auto const &args) {
         using args_t = std::decay_t<decltype(args)>;
         if constexpr (std::same_as<args_t, DeleteArgs>) {
-          return typeclass.item_type() == StorageItemType::kDeleted &&
+          return typeclass.item_type() == StorageItemType::kItemTypeDeleted &&
                  args.typeclass_match();
         }
         else if constexpr (std::same_as<args_t, BytestringArgs>) {
-          return typeclass.item_type() == StorageItemType::kBytestring &&
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeBytestring &&
                  args.typeclass_match(typeclass.bytestring());
         }
         else if constexpr (std::same_as<args_t, NNIntSetAddArgs>) {
-          return typeclass.item_type() == StorageItemType::kNonnegativeInt &&
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeNonnegativeInt &&
                  args.typeclass_match(from_xdr(typeclass.nnint_set()));
         }
         else if constexpr (std::same_as<args_t, RetrocausalQueueArgs>) {
-          return typeclass.item_type() == StorageItemType::kRetrocausalQueue &&
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeRetrocausalQueue &&
                  args.typeclass_match();
         }
         else {
@@ -346,19 +349,20 @@ RefcountedDeltaVariant::get_cost_after_commit(
       [&](auto const &args) -> int128_t {
         using args_t = std::decay_t<decltype(args)>;
         if constexpr (std::same_as<args_t, DeleteArgs>) {
-          assert(delta.type() == StorageDeltaType::kDelete);
+          assert(delta.type() == StorageDeltaType::kDeltaTypeDelete);
           return 0;
         }
         else if constexpr (std::same_as<args_t, BytestringArgs>) {
-          assert(delta.type() == StorageDeltaType::kBytestringSet);
+          assert(delta.type() == StorageDeltaType::kDeltaTypeBytestringSet);
           return args.get_cost();
         }
         else if constexpr (std::same_as<args_t, NNIntSetAddArgs>) {
-          assert(delta.type() == StorageDeltaType::kNonnegativeIntSetAdd);
+          assert(delta.type() ==
+                 StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
           return args.get_cost();
         }
         else if constexpr (std::same_as<args_t, RetrocausalQueueArgs>) {
-          assert(delta.type() == StorageDeltaType::kRetrocausalQueue);
+          assert(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
           return args.get_cost(delta.retrocausal_queue(), base_item);
         }
         else if constexpr (std::same_as<args_t, UnmodifiedState>) {

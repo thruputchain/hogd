@@ -29,7 +29,7 @@ expect_final(StorageItemDeltaManager &item, Bytestring const &bytestring)
 {
   auto snapshot = item.get_post_close_block_item();
   ASSERT_TRUE(snapshot);
-  EXPECT_EQ(snapshot->type(), StorageItemType::kBytestring);
+  EXPECT_EQ(snapshot->type(), StorageItemType::kItemTypeBytestring);
   EXPECT_EQ(snapshot->bytestring(), bytestring);
 }
 void
@@ -37,7 +37,7 @@ expect_final(StorageItemDeltaManager &item, int128_t nnint)
 {
   auto snapshot = item.get_post_close_block_item();
   ASSERT_TRUE(snapshot);
-  EXPECT_EQ(snapshot->type(), StorageItemType::kNonnegativeInt);
+  EXPECT_EQ(snapshot->type(), StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(snapshot->nnint(), nnint);
 }
 
@@ -50,13 +50,13 @@ TEST(StorageItemFrame, RewriteVariantTypeNullStart)
   StorageItemDeltaManager item(nullptr, &invalid_state_flag);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
+    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
     delta.nnint().set_value = to_xdr(set);
     delta.nnint().add_value = to_xdr(add);
     return delta;
   };
 
-  StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
+  StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   StorageDelta nnint_set_add_1 = make_nnint_delta(0, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_3 = make_nnint_delta(5, -3);
@@ -111,11 +111,11 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(base_item, &invalid_state_flag);
 
-  StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
+  StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
+    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
     delta.nnint().set_value = to_xdr(set);
     delta.nnint().add_value = to_xdr(add);
     return delta;
@@ -171,16 +171,17 @@ TEST(StorageItemFrame, DeleteItem)
 
   ASSERT_TRUE(item2.get_snapshot_item());
 
-  auto delete_lock = item2.try_reserve(StorageDelta(StorageDeltaType::kDelete),
-                                       StorageLock(StorageLockType::kNone));
+  auto delete_lock =
+      item2.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
+                        StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(delete_lock);
 
-  StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
+  StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
   EXPECT_FALSE(
       item2.try_reserve(bytestring_delta, StorageLock(StorageLockType::kNone)));
 
-  item2.commit(StorageDelta(StorageDeltaType::kDelete), *delete_lock);
+  item2.commit(StorageDelta(StorageDeltaType::kDeltaTypeDelete), *delete_lock);
   ASSERT_FALSE(invalid_state_flag.is_invalid());
   ASSERT_FALSE(item2.get_post_close_block_item()); // item2 has the item deleted
                                                    // post block
@@ -197,11 +198,12 @@ TEST(StorageItemFrame, ExclusiveLockAcquire)
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag);
 
-  auto lock1 = item.try_reserve(StorageDelta(StorageDeltaType::kDelete),
-                                StorageLock(StorageLockType::kNone));
+  auto lock1 =
+      item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
+                       StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lock1);
 
-  StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
+  StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
 
   auto lock2 = item.try_reserve(bytestring_delta, lock1->lock_);
@@ -220,7 +222,7 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
   StorageItemDeltaManager item(nullptr, &invalid_state_flag);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
+    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
     delta.nnint().set_value = to_xdr(set);
     delta.nnint().add_value = to_xdr(add);
     return delta;
@@ -249,7 +251,7 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
   ASSERT_EQ(lock3->lock_.lock_type(), StorageLockType::kSetItemTypeClass);
 
   EXPECT_EQ(lock3->lock_.full_typeclass_lock().typeclass.item_type(),
-            StorageItemTypeClass::kNonnegativeInt);
+            StorageItemTypeClass::kItemTypeNonnegativeInt);
   EXPECT_EQ(lock3->lock_.full_typeclass_lock()
                 .extra_lock_data.nnint_subtracted_amount(),
             to_xdr(int128_t{-4}));
@@ -259,7 +261,7 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
 
   EXPECT_EQ(lock4->lock_.lock_type(), StorageLockType::kSetItemTypeClass);
   EXPECT_EQ(lock4->lock_.full_typeclass_lock().typeclass.item_type(),
-            StorageItemTypeClass::kNonnegativeInt);
+            StorageItemTypeClass::kItemTypeNonnegativeInt);
   EXPECT_EQ(lock4->lock_.full_typeclass_lock()
                 .extra_lock_data.nnint_subtracted_amount(),
             to_xdr(int128_t{-5}));
@@ -280,7 +282,7 @@ TEST(StorageItemFrame, NNIntFromExclusiveLock)
   StorageItemDeltaManager item(nullptr, &invalid_state_flag);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
+    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
     delta.nnint().set_value = to_xdr(set);
     delta.nnint().add_value = to_xdr(add);
     return delta;
@@ -316,7 +318,7 @@ TEST(StorageItemFrame, ExclusiveBytestring)
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag);
 
-  StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
+  StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
 
   auto res =
@@ -345,7 +347,7 @@ TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
   StorageItemDeltaManager item(nullptr, &invalid_state_flag);
 
   // This is just a placeholder for the test
-  StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
+  StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
 
   ASSERT_TRUE(item.try_acquire_exclusive_lock(bytestring_delta,
@@ -366,18 +368,18 @@ TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
                                       StorageLockType::kExclusiveLock);
   ASSERT_TRUE(lock);
 
-  item.commit(StorageDelta(StorageDeltaType::kDelete), *lock);
+  item.commit(StorageDelta(StorageDeltaType::kDeltaTypeDelete), *lock);
 
   ASSERT_FALSE(
       item.try_acquire_exclusive_lock(bytestring_delta, StorageLockType::kNone,
                                       StorageLockType::kExclusiveLock));
-  ASSERT_FALSE(
-      item.try_reserve(StorageDelta(StorageDeltaType::kNonnegativeIntSetAdd),
-                       StorageLock(StorageLockType::kNone)));
+  ASSERT_FALSE(item.try_reserve(
+      StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd),
+      StorageLock(StorageLockType::kNone)));
 
   // exclusive lock was committed but released, so we can acquire shared lock.
   // Was not written in permanent exclusive mode.
-  ASSERT_TRUE(item.try_reserve(StorageDelta(StorageDeltaType::kDelete),
+  ASSERT_TRUE(item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
                                StorageLock(StorageLockType::kNone)));
 
   ASSERT_FALSE(invalid_state_flag.is_invalid());
@@ -389,7 +391,7 @@ TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
   StorageItemDeltaManager item(nullptr, &invalid_state_flag);
 
   // merely a placeholder for the test
-  StorageDelta bytestring_delta(StorageDeltaType::kBytestringSet);
+  StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
 
   ASSERT_TRUE(item.try_acquire_exclusive_lock(bytestring_delta,
@@ -405,25 +407,26 @@ TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
       StorageLockType::kPermanentExclusiveLock));
   ASSERT_TRUE(lock);
 
-  item.commit(StorageDelta(StorageDeltaType::kDelete), *lock);
+  item.commit(StorageDelta(StorageDeltaType::kDeltaTypeDelete), *lock);
 
   ASSERT_FALSE(
       item.try_acquire_exclusive_lock(bytestring_delta, StorageLockType::kNone,
                                       StorageLockType::kExclusiveLock));
-  ASSERT_FALSE(
-      item.try_reserve(StorageDelta(StorageDeltaType::kNonnegativeIntSetAdd),
-                       StorageLock(StorageLockType::kNone)));
+  ASSERT_FALSE(item.try_reserve(
+      StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd),
+      StorageLock(StorageLockType::kNone)));
 
   // cannot reacquire lock after permament lock commits
-  ASSERT_FALSE(item.try_reserve(StorageDelta(StorageDeltaType::kDelete),
-                                StorageLock(StorageLockType::kNone)));
+  ASSERT_FALSE(
+      item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
+                       StorageLock(StorageLockType::kNone)));
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
 TEST(StorageItemFrame, NNIntSimpleSetAdd)
 {
   auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kNonnegativeIntSetAdd);
+    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
     delta.nnint().set_value = to_xdr(set);
     delta.nnint().add_value = to_xdr(add);
     return delta;
@@ -446,7 +449,7 @@ TEST(StorageItemFrame, NNIntSimpleSetAdd)
 TEST(StorageItemCosts, ExclusiveLockCostMatchNoPriorCommit)
 {
   auto make_bytestring_delta = [](x23::Vec<uint8_t> vec) {
-    StorageDelta delta(StorageDeltaType::kBytestringSet);
+    StorageDelta delta(StorageDeltaType::kDeltaTypeBytestringSet);
     delta.bytestring() = std::move(vec);
     return delta;
   };
