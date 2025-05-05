@@ -22,15 +22,17 @@ TransactionState::TransactionState()
 void
 TransactionState::push_subtransaction()
 {
+  assert(!finished_);
   subtransaction_stack_.emplace_back();
 }
 
 void
 TransactionState::pop_subtransactions(uint32_t count)
 {
+  assert(!finished_);
   assert(subtransaction_stack_.size() > count);
   subtransaction_stack_.resize(subtransaction_stack_.size() - count);
-  assert(subtransaction_stack_.size() > 0);
+  assert(!subtransaction_stack_.empty());
 }
 
 void

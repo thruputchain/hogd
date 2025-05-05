@@ -32,7 +32,14 @@ public:
   TransactionState(TransactionState &&) = default;
   TransactionState &operator=(TransactionState &&) = default;
 
+  // Open a new subtransaction.  This is e.g. called when a transaction begins
+  // a new try_invoke frame.
+  // New add_delta operations will always be added to the most recent
+  // subtransaction.
   void push_subtransaction();
+
+  // Close the most recent `count` subtransactions.  This is e.g. called when
+  // a call frame (that contained some number of try_invoke frames) reverts.
   void pop_subtransactions(uint32_t count);
 
   // Add a storage delta and associated lock for a given address+key pair.
