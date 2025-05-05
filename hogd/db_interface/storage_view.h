@@ -77,7 +77,10 @@ protected:
 
   // the value of the item, before any modifications of the current block are
   // applied. Should not be called after the block is closed.
-  std::shared_ptr<const StorageItemWrapper>
+  //
+  // Returns the pointer, not a shared_ptr, as callers of this
+  // (generally RPC read methods) will not need ownership of the item.
+  const StorageItemWrapper *
   get_snapshot_storage_item(AddressAndKey const &addrkey);
 
   // Methods relevant for contracts
