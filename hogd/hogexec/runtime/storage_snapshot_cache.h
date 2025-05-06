@@ -8,6 +8,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -41,11 +42,12 @@ public:
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
-  std::shared_ptr<const Contract>
+  SystemStatus<std::shared_ptr<const Contract>> 
   try_get_contract_by_hash(SHA256Hash const &hash);
-  std::optional<SHA256Hash>
+  SystemStatus<std::optional<SHA256Hash>>
   try_get_deployed_contract_hash(ContractAddress const &addr);
-  const StorageItem *try_get_snapshot_item(AddressAndKey const &addrkey);
+  SystemStatus<const StorageItem *>
+  try_get_snapshot_item(AddressAndKey const &addrkey);
 
 private:
   // Note: the contract_cache_ does not need to be reset (although it is not

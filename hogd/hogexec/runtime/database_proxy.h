@@ -38,24 +38,24 @@ public:
   DatabaseProxy(DatabaseProxy &&) = delete;
   DatabaseProxy &operator=(DatabaseProxy &&) = delete;
 
-  x23::Async<HostFnStatus<std::unique_ptr<const StorageItem>>>
+  x23::Async<SystemStatus<std::unique_ptr<const StorageItem>>>
   get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey);
-  x23::Async<HostFnStatus<std::shared_ptr<const Contract>>>
+  x23::Async<SystemStatus<std::shared_ptr<const Contract>>>
   get_contract(BlockID block_id, SHA256Hash const &contract_hash);
-  x23::Async<HostFnStatus<std::optional<SHA256Hash>>>
+  x23::Async<SystemStatus<std::optional<SHA256Hash>>>
   get_deployment(BlockID block_id, ContractAddress const &addr);
 
-  x23::Async<HostFnStatus<std::optional<RetrocausalQueueBlock>>>
+  x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
   get_next_retrocausal_queue_block(BlockID block_id,
                                    AddressAndKey const &addrkey,
                                    uint64_t search_start_number);
 
-  x23::Async<HostFnStatus<std::optional<QueueEntry>>>
+  x23::Async<SystemStatus<std::optional<QueueEntry>>>
   get_concurrent_retrocausal_queue_entry(BlockID block_id,
                                          AddressAndKey const &addrkey,
                                          uint32_t index);
 
-  x23::Async<HostFnStatus<std::optional<int128_t>>>
+  x23::Async<SystemStatus<std::optional<int128_t>>>
   try_reserve_delta(BlockID block_id, TransactionID tx_id,
                     AddressAndKey const &addrkey, StorageDelta const &delta,
                     StorageItemRPCFlagSet flags);

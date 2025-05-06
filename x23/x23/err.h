@@ -2,11 +2,14 @@
 
 #pragma once
 
+#include <cerrno>
+#include <concepts>
 #include <expected>
 #include <format>
+#include <string>
 #include <system_error>
 
-#include <errno.h>
+#include <type_traits>
 
 namespace x23 {
 
@@ -112,7 +115,7 @@ public:
   {
     return std::system_category();
   }
-  explicit operator bool() const { return err_; }
+  explicit operator bool() const { return err_ != 0; }
 
 private:
   int err_;

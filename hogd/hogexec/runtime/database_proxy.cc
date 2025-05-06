@@ -13,7 +13,6 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -44,26 +43,26 @@ connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
 
 template<typename T, auto NullValue>
 auto
-to_host_fn_error_code(auto err, auto &&f)
+to_system_error_code(auto err, auto &&f)
 {
   using ret_t = decltype(f(std::move(get<1>(err))));
   switch (err.error()) {
   case RPCError::kRPCNone:
-    return HostFnStatus<ret_t>(f(std::move(get<1>(err))));
+    return SystemStatus<ret_t>(f(std::move(get<1>(err))));
   case RPCError::kRPCNoStorageItem:
   case RPCError::kRPCNoContractDeployed:
   case RPCError::kRPCNoQueueEntry:
   case RPCError::kRPCStorageWriteFailed:
-    return HostFnStatus<ret_t>(NullValue);
+    return SystemStatus<ret_t>(NullValue);
   case RPCError::kRPCBadBlockID:
-    return HostFnStatus<ret_t>(
-        HostFnError{HostFnErrorCode::kHostAbortTransaction});
+    return SystemStatus<ret_t>(
+        SystemError{SystemErrorCode::kAbortTransaction});
   case RPCError::kRPCValidationFailure:
-    return HostFnStatus<ret_t>(
-        HostFnError{HostFnErrorCode::kHostValidationFailure});
+    return SystemStatus<ret_t>(
+        SystemError{SystemErrorCode::kValidationFailure});
   default:
-    return HostFnStatus<ret_t>(
-        HostFnError{HostFnErrorCode::kHostUnrecoverable});
+    return SystemStatus<ret_t>(
+        SystemError{SystemErrorCode::kUnrecoverable});
   }
 }
 
@@ -93,49 +92,49 @@ DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp,
     }())
 {}
 
-x23::Async<HostFnStatus<std::unique_ptr<const StorageItem>>>
+x23::Async<SystemStatus<std::unique_ptr<const StorageItem>>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
   auto res = co_await read_client_.get_snapshot_item(block_id, addrkey);
-  co_return to_host_fn_error_code<StorageItem, nullptr>(
+  co_return to_system_error_code<StorageItem, nullptr>(
       res, [](StorageItem &&x) {
         return std::make_unique<StorageItem>(std::move(x));
       });
 }
 
-x23::Async<HostFnStatus<std::shared_ptr<const Contract>>>
+x23::Async<SystemStatus<std::shared_ptr<const Contract>>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
   auto res = co_await read_client_.get_contract(block_id, contract_hash);
-  co_return to_host_fn_error_code<const Contract, nullptr>(
+  co_return to_system_error_code<const Contract, nullptr>(
       res,
       [](const Contract &x) { return std::make_shared<const Contract>(x); });
 }
 
-x23::Async<HostFnStatus<std::optional<SHA256Hash>>>
+x23::Async<SystemStatus<std::optional<SHA256Hash>>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
   auto res = co_await read_client_.get_deployment(block_id, addr);
-  co_return to_host_fn_error_code<SHA256Hash, std::nullopt>(
+  co_return to_system_error_code<SHA256Hash, std::nullopt>(
       res, [](SHA256Hash &&x) {
         return std::make_optional<SHA256Hash>(std::move(x));
       });
 }
 
-x23::Async<HostFnStatus<std::optional<RetrocausalQueueBlock>>>
+x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
 DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
                                                 AddressAndKey const &addrkey,
                                                 uint64_t search_start_number)
 {
   auto res = co_await read_client_.get_next_retrocausal_queue_block(
       block_id, addrkey, search_start_number);
-  co_return to_host_fn_error_code<RetrocausalQueueBlock, std::nullopt>(
+  co_return to_system_error_code<RetrocausalQueueBlock, std::nullopt>(
       res, [](RetrocausalQueueBlock &&x) {
         return std::make_optional<RetrocausalQueueBlock>(std::move(x));
       });
 }
 
-x23::Async<HostFnStatus<std::optional<QueueEntry>>>
+x23::Async<SystemStatus<std::optional<QueueEntry>>>
 DatabaseProxy::get_concurrent_retrocausal_queue_entry(
     BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
 {
@@ -143,13 +142,13 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(
       co_await read_client_.get_concurrent_retrocausal_queue_entry(block_id,
                                                                    addrkey,
                                                                    index);
-  co_return to_host_fn_error_code<QueueEntry, std::nullopt>(
+  co_return to_system_error_code<QueueEntry, std::nullopt>(
       res, [](QueueEntry &&x) {
         return std::make_optional<QueueEntry>(std::move(x));
       });
 }
 
-x23::Async<HostFnStatus<std::optional<int128_t>>>
+x23::Async<SystemStatus<std::optional<int128_t>>>
 DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
                                  AddressAndKey const &addrkey,
                                  StorageDelta const &delta,
@@ -157,7 +156,7 @@ DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
 {
   auto res = co_await read_client_.try_reserve_delta(block_id, tx_id, addrkey,
                                                      delta, flags);
-  co_return to_host_fn_error_code<int128_xdr, std::nullopt>(
+  co_return to_system_error_code<int128_t, std::nullopt>(
       res, [](int128_xdr &&x) {
         return std::make_optional<int128_t>(from_xdr(std::move(x)));
       });

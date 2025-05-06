@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "hogd/hogexec/runtime/item_view.h"
+#include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -95,7 +96,7 @@ public:
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
   // Reference invalidated by any other call to get_item_view
-  ItemView &get_item_view(StorageKey const &key);
+  SystemStatus<ItemView *> get_item_view(StorageKey const &key);
 
 private:
   std::vector<InvocationFrame> frame_stack_;

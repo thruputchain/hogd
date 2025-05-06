@@ -70,6 +70,53 @@ operator==(const SyscallErrorCode &lhs, const std::error_code &rhs)
 
 template<typename T> using SyscallStatus = std::expected<T, SyscallError>;
 
+
+class SystemErrorCategory : public std::error_category {
+public:
+  const char *name() const noexcept override { return "system"; }
+  std::string message(int code) const override;
+};
+
+enum class SystemErrorCode {
+  // Unrecoverable error (e.g. out of memory, or critical logic error).
+  // Only recourse is to abort entire transaction and possibly crash binary.
+  // Signals serious error, which we should investigate.
+  kUnrecoverable,
+  // Nondeterministic error that occurs during normal course of operation.
+  // E.g. a transaction is being executed concurrently with the whole block
+  // getting cancelled.
+  // Only recourse is to abort the entire transaction.
+  kAbortTransaction,
+  // Failure during validation of a transaction.  Signals that the whole
+  // block must be aborted.
+  kValidationFailure,
+};
+
+struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
+  explicit SystemError(SystemErrorCode err) : EnumError(err) {}
+
+  HostFnError to_host_fn_error() const {
+    switch (code()) {
+    case SystemErrorCode::kUnrecoverable:
+      return HostFnError{HostFnErrorCode::kHostUnrecoverable};
+    case SystemErrorCode::kAbortTransaction:
+      return HostFnError{HostFnErrorCode::kHostAbortTransaction};
+    case SystemErrorCode::kValidationFailure:
+      return HostFnError{HostFnErrorCode::kHostValidationFailure};
+    }
+    assert(false);
+  }
+};
+
+// Enable comparisons between HostFnErrorCode and std::error_code.
+inline bool
+operator==(const SystemErrorCode &lhs, const std::error_code &rhs)
+{
+  return SystemError{lhs} == rhs;
+}
+
+template<typename T> using SystemStatus = std::expected<T, SystemError>;
+
 // Result of one host function invocation. Most host functions will return a
 // HostFnStatus<SyscallErrorCode>, which is unwrapped to this result type.
 // However, the kExit host function return code also needs an exit code
