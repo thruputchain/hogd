@@ -59,28 +59,28 @@ DbExecutorServer::try_reserve_delta(BlockID block, TransactionID tx,
   co_return out;
 }
 
-x23::Async<void>
+x23::Async<RPCError>
 DbExecutorServer::commit_transaction(BlockID block, TransactionID tx)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
-    co_return;
+    co_return RPCError::kRPCBadBlockID;
   }
 
   block_data->commit_transaction(tx);
-  co_return;
+  co_return RPCError::kRPCNone;
 }
 
-x23::Async<void>
+x23::Async<RPCError>
 DbExecutorServer::abort_transaction(BlockID block, TransactionID tx)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
-    co_return;
+    co_return RPCError::kRPCBadBlockID;
   }
 
   block_data->abort_transaction(tx);
-  co_return;
+  co_return RPCError::kRPCNone;
 }
 
 x23::Async<RPCError>
@@ -128,30 +128,30 @@ DbExecutorServer::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
   co_return out;
 }
 
-x23::Async<void>
+x23::Async<RPCError>
 DbExecutorServer::commit_contract_create(BlockID block, Contract contract)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
-    co_return;
+    co_return RPCError::kRPCBadBlockID;
   }
 
   block_data->commit_contract_create(contract);
-  co_return;
+  co_return RPCError::kRPCNone;
 }
 
-x23::Async<void>
+x23::Async<RPCError>
 DbExecutorServer::commit_contract_deploy(BlockID block,
                                          ContractAddress const &addr,
                                          SHA256Hash const &hash)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
-    co_return;
+    co_return RPCError::kRPCBadBlockID;
   }
 
   block_data->commit_contract_deploy(addr, hash);
-  co_return;
+  co_return RPCError::kRPCNone;
 }
 
 x23::Async<ExpectedContract>

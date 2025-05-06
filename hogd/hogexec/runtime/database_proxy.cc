@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -41,20 +42,49 @@ connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
   return client_config.template client<DatabaseToExecutorInterfaceV1>();
 }
 
+struct VoidMarker {};
+
 template<typename T, auto NullValue>
 constexpr auto
 to_system_error_code(auto err, auto &&f)
 {
-  using ret_t = decltype(f(std::move(get<1>(err))));
-  return [&] -> SystemStatus<ret_t> {
-    switch (err.error()) {
-    case RPCError::kRPCNone:
+  constexpr bool kHasReturnType = requires { f(std::move(get<1>(err))); };
+  auto type_lambda = [&] {
+    if constexpr (kHasReturnType) {
       return f(std::move(get<1>(err)));
+    } else {
+      return VoidMarker{};
+    }
+  };
+
+  using ret_t = std::conditional_t<kHasReturnType, decltype(type_lambda()), void>;
+  
+  return [&] -> SystemStatus<ret_t> {
+    RPCError err_code;
+    if constexpr (kHasReturnType) {
+      err_code = err.error();
+    } else {
+      err_code = err;
+    }
+
+    switch (err_code) {
+    case RPCError::kRPCNone:
+      if constexpr (kHasReturnType) {
+        return f(std::move(get<1>(err)));
+      } else {
+        static_assert(std::is_same_v<decltype(err), RPCError>);
+        static_assert(std::is_same_v<decltype(NullValue), VoidMarker>);
+        return {};
+      }
     case RPCError::kRPCNoStorageItem:
     case RPCError::kRPCNoContractDeployed:
     case RPCError::kRPCNoQueueEntry:
     case RPCError::kRPCStorageWriteFailed:
-      return NullValue;
+      if constexpr (kHasReturnType) {
+        return NullValue;
+      } else {
+        return {};
+      }
     case RPCError::kRPCBadBlockID:
       return SystemError{SystemErrorCode::kAbortTransaction};
     case RPCError::kRPCValidationFailure:
@@ -161,16 +191,18 @@ DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
       });
 }
 
-x23::Async<void>
+x23::Async<SystemStatus<void>>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
 {
-  co_await read_client_.commit_transaction(block_id, tx_id);
+  auto res = co_await read_client_.commit_transaction(block_id, tx_id);
+  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
 }
 
-x23::Async<void>
+x23::Async<SystemStatus<void>>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
-  co_await read_client_.abort_transaction(block_id, tx_id);
+  auto res = co_await read_client_.abort_transaction(block_id, tx_id);
+  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
 }
 
 } // namespace hogd

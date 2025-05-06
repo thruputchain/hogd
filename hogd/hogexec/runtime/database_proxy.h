@@ -59,8 +59,10 @@ public:
                     AddressAndKey const &addrkey, StorageDelta const &delta,
                     StorageItemRPCFlagSet flags);
 
-  x23::Async<void> commit_transaction(BlockID block_id, TransactionID tx_id);
-  x23::Async<void> abort_transaction(BlockID block_id, TransactionID tx_id);
+  x23::Async<SystemStatus<void>> commit_transaction(BlockID block_id,
+                                                   TransactionID tx_id);
+  x23::Async<SystemStatus<void>> abort_transaction(BlockID block_id,
+                                                   TransactionID tx_id);
 
 private:
   using read_client_t = DatabaseToExecutorInterfaceV1::client<

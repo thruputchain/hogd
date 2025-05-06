@@ -34,8 +34,8 @@ public:
   static x23::Async<ExpectedStorageCost>
   try_reserve_delta(BlockID block, TransactionID tx, AddressAndKey addrkey,
                     StorageDelta delta, StorageItemRPCFlagSet flags);
-  static x23::Async<void> commit_transaction(BlockID block, TransactionID tx);
-  static x23::Async<void> abort_transaction(BlockID block, TransactionID tx);
+  static x23::Async<RPCError> commit_transaction(BlockID block, TransactionID tx);
+  static x23::Async<RPCError> abort_transaction(BlockID block, TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.
   static x23::Async<RPCError> push_new_subtransaction(BlockID block,
@@ -45,9 +45,9 @@ public:
   static x23::Async<RPCError>
   pop_subtransactions(BlockID block, TransactionID tx, uint32_t popcount);
 
-  static x23::Async<void> commit_contract_create(BlockID block,
+  static x23::Async<RPCError> commit_contract_create(BlockID block,
                                                  Contract contract);
-  static x23::Async<void>
+  static x23::Async<RPCError>
   commit_contract_deploy(BlockID block, ContractAddress const &contract_addr,
                          SHA256Hash const &hash);
 

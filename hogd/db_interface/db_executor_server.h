@@ -35,15 +35,15 @@ public:
   x23::Async<ExpectedStorageCost>
   try_reserve_delta(BlockID block, TransactionID tx, AddressAndKey addrkey,
                     StorageDelta delta, StorageItemRPCFlagSet flags);
-  x23::Async<void> commit_transaction(BlockID block, TransactionID tx);
-  x23::Async<void> abort_transaction(BlockID block, TransactionID tx);
+  x23::Async<RPCError> commit_transaction(BlockID block, TransactionID tx);
+  x23::Async<RPCError> abort_transaction(BlockID block, TransactionID tx);
   x23::Async<RPCError> push_new_subtransaction(BlockID block, TransactionID tx);
   x23::Async<RPCError> pop_subtransactions(BlockID block, TransactionID tx,
                                            uint32_t popcount);
   x23::Async<ExpectedStorageItem>
   get_snapshot_item(BlockID block, AddressAndKey const &addrkey);
-  x23::Async<void> commit_contract_create(BlockID block, Contract contract);
-  x23::Async<void> commit_contract_deploy(BlockID block,
+  x23::Async<RPCError> commit_contract_create(BlockID block, Contract contract);
+  x23::Async<RPCError> commit_contract_deploy(BlockID block,
                                           ContractAddress const &addr,
                                           SHA256Hash const &hash);
   x23::Async<ExpectedContract> get_contract(BlockID block,
