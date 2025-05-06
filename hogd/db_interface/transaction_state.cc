@@ -82,14 +82,15 @@ TransactionState::extract_results()
   return result;
 }
 
-std::pair<TransactionState *, std::unique_lock<std::mutex>>
+std::pair<TransactionState &, std::unique_lock<std::mutex>>
 TransactionStateManager::get(TransactionID txid)
 {
   auto [state, ul] = tx_states_.find(txid);
   if (!state) {
-    return tx_states_.insert(txid, TransactionState());
+    auto [ptr, lock] = tx_states_.insert(txid, TransactionState());
+    return {*ptr, std::move(lock)};
   }
-  return {state, std::move(ul)};
+  return {*state, std::move(ul)};
 }
 
 } // namespace hogd
