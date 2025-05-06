@@ -21,6 +21,29 @@ namespace hogd {
 DBStatus<void>
 Snapshotter::snapshot()
 {
+  PerThread<SnapshotStats> perthread_stats{};
+  // Publish snapshot lsn so main threads are aware of the ongoing snapshot.
+  map_.register_in_progress_snapshot(
+      begin_lsn_, end_lsn_,
+      [this, &perthread_stats](uint64_t hash, ItemHeader *src_item) {
+        // If a put() operation runs into an item that is about to be
+        // overwritten that should be part of the snapshot, it triggers
+        // this callback to stuff a copy of the item in the snapshot's
+        // disk-bound loglets.
+
+        ScopedDiskWrite record = disk_writer_.write_record(hash);
+        DBStatus<uint64_t> ret = record.modify(src_item);
+        if (!ret) [[unlikely]]
+          return;
+        // ret LSN ignored; it is meaningless outside of
+        // redo log.
+
+        record.reset(); // trigger writeback
+
+        perthread_stats->forwarded_items++;
+        perthread_stats->forwarded_bytes += src_item->total_bytes();
+      });
+
   ElapsedTimer timer{};
   DBStatus<SnapshotStats> stats{SnapshotStats{}};
 
@@ -52,6 +75,15 @@ Snapshotter::snapshot()
     }
   }
 
+  // Ensure no ongoing or later put()s see the snapshot in progress.
+  map_.register_in_progress_snapshot(0, 0, nullptr);
+
+  // Aggregate the stats from the callbacks from the map.
+  std::unique_lock ul = perthread_stats.lock_threads();
+  perthread_stats.for_each(ul, [this, &stats](SnapshotStats &s) {
+    stats.value() += s;
+  });
+
   double seconds = timer.elapsed();
   info("snapshot took {:.3f} s (not including disk sync)", seconds);
 
@@ -61,6 +93,10 @@ Snapshotter::snapshot()
   info("...total items scanned {}", stats->items);
   info("...total bytes scanned {}", print_iec_bytes(stats->bytes, true));
   info("...scan rate {:.1f} MiB/s", stats->bytes / seconds / (1LU << 20));
+  info("...total items forwarded from ongoing put() ops {}",
+       stats->forwarded_items);
+  info("...total bytes forwarded from ongoing put() ops {}",
+       print_iec_bytes(stats->forwarded_bytes, true));
 
   return {};
 }
@@ -105,8 +141,6 @@ Snapshotter::snapshot_one(Loglet &src)
               ItemStorage::kTombstone) [[unlikely]] {
             return;
           }
-
-          disk_writer_.write_record(hash);
 
           ScopedDiskWrite record = disk_writer_.write_record(hash);
           ret = record.modify(src_item);

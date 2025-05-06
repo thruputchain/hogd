@@ -180,7 +180,8 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
   if (!ret) [[unlikely]]
     return ret.error();
 
-  item->lsn = *ret;
+  const uint64_t new_lsn = *ret;
+  item->lsn = new_lsn;
 
   auto [ul, bu, cnt] = acquire_bucket(hash);
   record.reset();
@@ -189,9 +190,22 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
   // Check if the key already exists.
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
+      // If the item that is about to be overwritten should be included in an
+      // ongoing snapshot, make sure the snapshot gets a copy of the item.
+      uint64_t &old_lsn = (*bu)->lsn;
+      if (snap_end_lsn_)
+        warn("See snapshot lsn is {}, snap range {} {}", old_lsn,
+             snap_begin_lsn_, snap_end_lsn_);
+      if (snap_end_lsn_ && old_lsn >= snap_begin_lsn_ &&
+          old_lsn < snap_end_lsn_)
+        snap_add_item_cb_(hash, *bu);
+
       // Is the item size unchanged? Update in place.
       if ((*bu)->get_value().size() == val.size()) {
         (*bu)->type = type;
+        // Updating the LSN for update-in-place ensures that we don't
+        // inadvertently forward this new value into an ongoing snapshot.
+        (*bu)->lsn = new_lsn;
         std::ranges::copy(val, (*bu)->get_value().begin());
         allocator_.free<true>(item);
         return {};
@@ -374,6 +388,23 @@ ScalableMap::modify_locked(
     }
   }
   return false;
+}
+
+void
+ScalableMap::register_in_progress_snapshot(
+    uint64_t begin_lsn, uint64_t end_lsn,
+    std::function<void(uint64_t, ItemHeader *)> add_item_cb)
+{
+  std::vector<std::unique_lock<std::mutex>> locks{};
+  locks.reserve(mutexes_.size());
+
+  for (auto &mu : mutexes_)
+    locks.emplace_back(mu);
+
+  snap_begin_lsn_ = begin_lsn;
+  snap_end_lsn_ = begin_lsn;
+
+  snap_add_item_cb_ = add_item_cb;
 }
 
 } // namespace hogd

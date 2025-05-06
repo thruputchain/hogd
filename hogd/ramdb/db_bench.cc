@@ -266,6 +266,32 @@ do_snapshot(int num, int cores, int value_size)
   return measure([&benchmark, end_lsn] { benchmark->snapshot(end_lsn); });
 }
 
+double
+do_snapshot_ongoing_puts(int num, int cores, int value_size)
+{
+  std::unique_ptr<Benchmark> benchmark = make_benchmark(num, cores, value_size);
+  benchmark->prefill();
+  DBStatus<uint64_t> ret = benchmark->sync();
+  if (unlikely(!ret))
+    fail(ret.error());
+
+  uint64_t end_lsn = ret.value();
+
+  std::atomic<bool> done{};
+
+  std::thread bg{[&benchmark, &done]() {
+    while (!done)
+      benchmark->write_items();
+  }};
+
+  double r = measure([&benchmark, end_lsn] { benchmark->snapshot(end_lsn); });
+
+  done = true;
+  bg.join();
+
+  return r;
+}
+
 using bench_fn = double (*)(int num, int cores, int value_size);
 
 void
@@ -285,6 +311,9 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
     {"delete", "deletes items", do_deletions},
     {"reload", "reloads items from disk", do_reload},
     {"snapshot", "fills some, then snapshots", do_snapshot},
+    {"snapshot_ongoing_puts",
+     "fills some, then snapshots while puts are running in the background",
+     do_snapshot_ongoing_puts},
 };
 
 } // namespace

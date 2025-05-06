@@ -19,6 +19,8 @@ struct SnapshotStats {
   size_t live_items;
   size_t bytes;
   size_t live_bytes;
+  size_t forwarded_items;
+  size_t forwarded_bytes;
 
   SnapshotStats &operator+=(const SnapshotStats &stats)
   {
@@ -26,6 +28,8 @@ struct SnapshotStats {
     live_items += stats.live_items;
     bytes += stats.bytes;
     live_bytes += stats.live_bytes;
+    forwarded_items += stats.forwarded_items;
+    forwarded_bytes += stats.forwarded_bytes;
     return *this;
   }
 };
