@@ -1,5 +1,8 @@
 add_library(
   db_interface
+  block_manager.cc
+  block_state.cc
+  db_coord_server.cc
   storage_view.cc
   transaction_state.cc
 )
@@ -8,6 +11,7 @@ target_link_libraries(
   db_interface
   hogd
   storage_item
+  mock_db
 )
 
 add_dependencies(
@@ -17,6 +21,7 @@ add_dependencies(
 
 add_executable(
   db_interface_test
+  block_manager_test.cc
   transaction_state_test.cc
 )
 

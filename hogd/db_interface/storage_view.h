@@ -126,8 +126,6 @@ public:
 
   // TODO(geoff): This isn't strictly necessary, but useful sanity check
   void close_block() { closed_ = true; }
-  void assert_block_closed() { assert(closed_); }
-  void assert_block_not_closed() { assert(!closed_); }
 
   // parent must not be another storage view (i.e. call unlink_parent first).
   void commit_to_database();

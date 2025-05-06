@@ -10,6 +10,7 @@
 #include "hogd/storage_item/storage_lock_util.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "storage_lock.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -42,6 +43,17 @@ TransactionState::add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
   assert(!finished_);
   subtransaction_stack_.back().deltas_[addrkey] = std::move(delta);
   held_locks_[addrkey] = std::move(new_lock);
+}
+
+StorageLock
+TransactionState::get_lock(AddressAndKey const &addrkey)
+{
+  assert(!finished_);
+  auto it = held_locks_.find(addrkey);
+  if (it == held_locks_.end()) {
+    return StorageLock(StorageLockType::kNone);
+  }
+  return it->second.lock_;
 }
 
 std::unordered_map<AddressAndKey,
