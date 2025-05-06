@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 
+#include <cassert>
 #include <chrono>
 #include <cstdio>
 #include <exception>
@@ -52,18 +53,21 @@ to_system_error_code(auto err, auto &&f)
   auto type_lambda = [&] {
     if constexpr (kHasReturnType) {
       return f(std::move(get<1>(err)));
-    } else {
+    }
+    else {
       return VoidMarker{};
     }
   };
 
-  using ret_t = std::conditional_t<kHasReturnType, decltype(type_lambda()), void>;
-  
+  using ret_t =
+      std::conditional_t<kHasReturnType, decltype(type_lambda()), void>;
+
   return [&] -> SystemStatus<ret_t> {
     RPCError err_code;
     if constexpr (kHasReturnType) {
       err_code = err.error();
-    } else {
+    }
+    else {
       err_code = err;
     }
 
@@ -71,7 +75,8 @@ to_system_error_code(auto err, auto &&f)
     case RPCError::kRPCNone:
       if constexpr (kHasReturnType) {
         return f(std::move(get<1>(err)));
-      } else {
+      }
+      else {
         static_assert(std::is_same_v<decltype(err), RPCError>);
         static_assert(std::is_same_v<decltype(NullValue), VoidMarker>);
         return {};
@@ -82,8 +87,12 @@ to_system_error_code(auto err, auto &&f)
     case RPCError::kRPCStorageWriteFailed:
       if constexpr (kHasReturnType) {
         return NullValue;
-      } else {
-        return {};
+      }
+      else {
+        // This should never happen -- none of the rpc errors that have a return
+        // type of void should return this kind of error code.
+        assert(false);
+        return SystemError{SystemErrorCode::kUnrecoverable};
       }
     case RPCError::kRPCBadBlockID:
       return SystemError{SystemErrorCode::kAbortTransaction};

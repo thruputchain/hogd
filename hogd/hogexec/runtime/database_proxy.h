@@ -60,7 +60,7 @@ public:
                     StorageItemRPCFlagSet flags);
 
   x23::Async<SystemStatus<void>> commit_transaction(BlockID block_id,
-                                                   TransactionID tx_id);
+                                                    TransactionID tx_id);
   x23::Async<SystemStatus<void>> abort_transaction(BlockID block_id,
                                                    TransactionID tx_id);
 

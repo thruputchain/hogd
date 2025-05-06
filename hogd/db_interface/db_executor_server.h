@@ -44,8 +44,8 @@ public:
   get_snapshot_item(BlockID block, AddressAndKey const &addrkey);
   x23::Async<RPCError> commit_contract_create(BlockID block, Contract contract);
   x23::Async<RPCError> commit_contract_deploy(BlockID block,
-                                          ContractAddress const &addr,
-                                          SHA256Hash const &hash);
+                                              ContractAddress const &addr,
+                                              SHA256Hash const &hash);
   x23::Async<ExpectedContract> get_contract(BlockID block,
                                             SHA256Hash const &contract_hash);
   x23::Async<ExpectedDeployment>
