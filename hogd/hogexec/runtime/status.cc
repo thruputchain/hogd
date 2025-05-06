@@ -46,6 +46,8 @@ InvokeResult::to_host_fn_result() const
       return {SyscallErrorCode::kDeterministicWasm, gas_consumed_};
     case kInvokeOutOfGas:
       return {HostFnError{HostFnErrorCode::kHostOutOfGas}, gas_consumed_};
+    case kInvokeAbortTransaction:
+      return {HostFnError{HostFnErrorCode::kHostAbortTransaction}, gas_consumed_};
     default:
       return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, gas_consumed_};
     }

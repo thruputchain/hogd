@@ -51,6 +51,7 @@ handle_result(HostFnResult const &res)
   case HostFnErrorCode::kHostOutOfGas:
   case HostFnErrorCode::kHostReturn:
   case HostFnErrorCode::kHostValidationFailure:
+  case HostFnErrorCode::kHostAbortTransaction:
     return error(res.first);
   case HostFnErrorCode::kHostExit:
     return host_exit(res.second);

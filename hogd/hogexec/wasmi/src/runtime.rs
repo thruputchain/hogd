@@ -144,6 +144,11 @@ impl WasmiRuntime {
                             InvokeErrorCode::kInvokeValidationFailure,
                         );
                     }
+                    external_call::TrampolineErrorEnum::AbortTransaction => {
+                        return WasmiInvokeResult::error(
+                            InvokeErrorCode::kInvokeAbortTransaction,
+                        );
+                    }
                     _ => {
                         return WasmiInvokeResult::error(
                             InvokeErrorCode::kInvokeUnrecoverable,

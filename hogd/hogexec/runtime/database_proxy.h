@@ -8,6 +8,8 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/types.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -41,6 +43,23 @@ public:
   get_contract(BlockID block_id, SHA256Hash const &contract_hash);
   x23::Async<std::optional<SHA256Hash>>
   get_deployment(BlockID block_id, ContractAddress const &addr);
+
+  x23::Async<std::optional<RetrocausalQueueBlock>>
+  get_next_retrocausal_queue_block(BlockID block_id, AddressAndKey const &addrkey,
+                                  uint64_t search_start_number);
+
+  x23::Async<std::optional<QueueEntry>>
+  get_concurrent_retrocausal_queue_entry(BlockID block_id,
+                                        AddressAndKey const &addrkey,
+                                        uint32_t index);
+
+  x23::Async<std::optional<int128_t>>
+  try_reserve_delta(BlockID block_id, TransactionID tx_id,
+                    AddressAndKey const &addrkey, StorageDelta const &delta,
+                    StorageItemRPCFlagSet flags);
+
+  x23::Async<void> commit_transaction(BlockID block_id, TransactionID tx_id);
+  x23::Async<void> abort_transaction(BlockID block_id, TransactionID tx_id);
 
 private:
   using read_client_t = DatabaseToExecutorInterfaceV1::client<
