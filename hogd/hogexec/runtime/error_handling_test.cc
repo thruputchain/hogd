@@ -159,7 +159,8 @@ TEST_F(WasmiErrorHandlingTest, AbortTransaction)
 
   ASSERT_TRUE(runtime_);
   auto res = runtime_->invoke("call1", UINT64_MAX);
-  EXPECT_EQ(res.result_.error(), InvokeError{InvokeErrorCode::kInvokeAbortTransaction});
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeAbortTransaction});
 }
 
 TEST_F(WasmiErrorHandlingTest, ValidationError)

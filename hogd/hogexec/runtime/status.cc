@@ -47,7 +47,8 @@ InvokeResult::to_host_fn_result() const
     case kInvokeOutOfGas:
       return {HostFnError{HostFnErrorCode::kHostOutOfGas}, gas_consumed_};
     case kInvokeAbortTransaction:
-      return {HostFnError{HostFnErrorCode::kHostAbortTransaction}, gas_consumed_};
+      return {HostFnError{HostFnErrorCode::kHostAbortTransaction},
+              gas_consumed_};
     default:
       return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, gas_consumed_};
     }
