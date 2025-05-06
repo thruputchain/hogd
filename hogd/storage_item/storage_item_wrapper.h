@@ -14,9 +14,9 @@ namespace hogd {
 // StorageItemWrapper is not threadsafe.
 class StorageItemWrapper {
 public:
-  StorageItemWrapper(Bytestring const &bytestring);
+  StorageItemWrapper(Bytestring bytestring);
   StorageItemWrapper(int128_t nnint_value);
-  StorageItemWrapper(RetrocausalQueue const &queue);
+  StorageItemWrapper(RetrocausalQueue queue);
 
   auto &bytestring(this auto &self)
   {

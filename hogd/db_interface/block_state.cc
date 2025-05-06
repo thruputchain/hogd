@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/base/types.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -35,7 +36,7 @@ BlockState::commit_to_database()
   storage_view_.commit_to_database();
 }
 
-bool
+std::optional<int128_t>
 BlockState::try_reserve_storage_delta(TransactionID txid,
                                       AddressAndKey const &addrkey,
                                       StorageDelta delta,
@@ -44,15 +45,17 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
   assert(is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
 
-  auto lock = tx->get_lock(addrkey);
+  auto lock = tx.get_lock(addrkey);
 
   auto res =
       storage_view_.try_reserve_storage_delta(addrkey, delta, lock, flags);
 
   if (res) {
-    tx->add_delta(addrkey, std::move(delta), std::move(*res));
+    int128_t cost = res->locked_tokens_;
+    tx.add_delta(addrkey, std::move(delta), std::move(*res));
+    return cost;
   }
-  return res.has_value();
+  return std::nullopt;
 }
 
 void
@@ -60,7 +63,7 @@ BlockState::commit_transaction(TransactionID txid)
 {
   assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
-  auto deltas = tx->extract_results();
+  auto deltas = tx.extract_results();
 
   for (auto const &[addr, entry] : deltas) {
     auto const &[delta, lock] = entry;
@@ -78,7 +81,7 @@ BlockState::abort_transaction(TransactionID txid)
 {
   assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
-  auto deltas = tx->extract_results();
+  auto deltas = tx.extract_results();
   for (auto const &[addr, entry] : deltas) {
     auto const &[_, lock] = entry;
     storage_view_.revert_storage_lock(addr, lock.lock_);
@@ -98,6 +101,20 @@ BlockState::commit_contract_deploy(ContractAddress const &addr,
 {
   assert(!is_closed());
   storage_view_.commit_contract_deploy(addr, contract_hash);
+}
+
+void
+BlockState::push_subtransaction(TransactionID txid)
+{
+  auto [tx, tx_lock] = tx_manager_.get(txid);
+  tx.push_subtransaction();
+}
+
+void
+BlockState::pop_subtransactions(TransactionID txid, uint32_t count)
+{
+  auto [tx, tx_lock] = tx_manager_.get(txid);
+  tx.pop_subtransactions(count);
 }
 
 } // namespace hogd

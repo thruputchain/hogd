@@ -1,5 +1,6 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 
+#include <utility>
 #include <variant>
 
 #include "hogd/base/types.h"
@@ -10,14 +11,14 @@
 
 namespace hogd {
 
-StorageItemWrapper::StorageItemWrapper(Bytestring const &bytestring)
-  : storage_item_(BytestringWrapper{.bytestring_ = bytestring})
+StorageItemWrapper::StorageItemWrapper(Bytestring bytestring)
+  : storage_item_(BytestringWrapper{.bytestring_ = std::move(bytestring)})
 {}
 StorageItemWrapper::StorageItemWrapper(int128_t nnint_value)
   : storage_item_(NonnegativeIntWrapper{.nnint_ = nnint_value})
 {}
-StorageItemWrapper::StorageItemWrapper(RetrocausalQueue const &queue)
-  : storage_item_(RetrocausalQueueWrapper{.queue_ = queue})
+StorageItemWrapper::StorageItemWrapper(RetrocausalQueue queue)
+  : storage_item_(RetrocausalQueueWrapper{.queue_ = std::move(queue)})
 {}
 
 StorageItemType
