@@ -14,6 +14,7 @@
 #include "hogd/storage_item/storage_lock_util.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "storage_lock.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -50,6 +51,9 @@ public:
   // transaction completes. (TODO(geoff): impl early release, if necessary)
   void add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
                  MeteredStorageLock &&new_lock);
+
+  // Get the lock held by the current transaction for a given address+key pair.
+  StorageLock get_lock(AddressAndKey const &addrkey);
 
   // Extract the results of the transaction, i.e. the set of all deltas and
   // associated locks that commit in the final view of the transaction. This
