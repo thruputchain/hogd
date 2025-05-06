@@ -1,6 +1,6 @@
-
 #include "hogd/db_interface/block_manager.h"
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <mutex>
@@ -25,15 +25,35 @@ BlockManager::BlockManager(BlockID root_id, InMemoryDatabase *base_database)
   block_cache_.emplace(last_committed_id_, Block());
 }
 
-void
+bool
 BlockManager::commit_block(BlockID id)
 {
   std::vector<std::shared_ptr<BlockState>> blocks_to_gc;
 
   {
     std::lock_guard lock(mtx_);
-    assert(id != last_committed_id_);
-    assert(block_cache_.contains(id));
+
+    if (!block_cache_.contains(id)) {
+      return false;
+    }
+
+    if (id == last_committed_id_) {
+      return false;
+    }
+
+    if (!block_cache_.at(id).block_is_closed()) {
+      return false;
+    }
+
+    auto descendant_check = [&] {
+      auto const &lc = block_cache_.at(last_committed_id_);
+      return std::ranges::any_of(lc.children_, [id](auto const &child) {
+        return child == id;
+      });
+    }();
+    if (!descendant_check) {
+      return false;
+    }
 
     // TODO(geoff): consider putting last_committed onto a queue
     // of elements that can be committed to DB and then removed.
@@ -79,6 +99,7 @@ BlockManager::commit_block(BlockID id)
   }
   // redundant with dtor, but to be explicit
   blocks_to_gc.clear();
+  return true;
 }
 
 std::vector<std::shared_ptr<BlockState>>

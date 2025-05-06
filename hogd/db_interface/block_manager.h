@@ -32,7 +32,10 @@ public:
   // committed block.  This might be a reasonable thing to do.  Depends on
   // whether there's any part of the state that needs to get kept around for a
   // bit longer. Could be made a part of this, or could be a separate rpc.
-  void commit_block(BlockID id);
+  //
+  // Returns true if the block commits, false if there is some error
+  // (such as if the id does not exist, or is not closed)
+  bool commit_block(BlockID id);
 
   // returns nullptr if id is not active
   std::shared_ptr<BlockState> get_block_data(BlockID id);
