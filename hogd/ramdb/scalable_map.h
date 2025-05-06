@@ -86,11 +86,13 @@ public:
 
   // modify_locked finds an item for a given key, and runs fn on it with
   // the bucket lock held. It returns true if the item was found.
+  // hash is passed the hash of the key associated with the item.
   //
   // This method shouldn't normally be called directly, but it is useful for log
   // compaction.
-  bool modify_locked(std::span<const std::byte> key,
-                     const std::function<void(ItemHeader **h)> &fn);
+  bool
+  modify_locked(std::span<const std::byte> key,
+                const std::function<void(ItemHeader **h, size_t hash)> &fn);
 
   // size returns an estimate of the number of elements in the map.
   size_t size() const

@@ -4,6 +4,7 @@
 #include <bit>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stop_token>
@@ -173,6 +174,7 @@ Database::background_worker(const std::stop_token &stoken)
   while (true) {
     bool expand = false;
     bool compact;
+    bool snapshot;
     {
       // wait for change in status or timeout.
       std::scoped_lock g(lock_);
@@ -182,6 +184,8 @@ Database::background_worker(const std::stop_token &stoken)
                    [this] { return run_expand_ || run_compact_; });
       if (stoken.stop_requested())
         return;
+
+      snapshot = snapshotter_.has_value();
       compact = run_compact_;
       run_expand_ = false;
 
@@ -189,6 +193,9 @@ Database::background_worker(const std::stop_token &stoken)
       if (!active_ && map_.prepare_expand())
         expand = true;
     }
+
+    if (snapshot)
+      snapshotter_->run(item_allocator_);
 
     // run item compactor if needed.
     if (compact) {
@@ -242,6 +249,48 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   heap_size += (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize;
 
   return heap_size;
+}
+
+DBStatus<void>
+Database::snapshot(const std::string &path, uint64_t begin_lsn,
+                   uint64_t end_lsn)
+{
+  info("begin snapshot from lsn {} -> lsn {} to {}", begin_lsn, end_lsn, path);
+
+  if (begin_lsn > end_lsn) {
+    warn("bad snapshot begin and end lsns {} to {}", begin_lsn, end_lsn);
+    return DBError{DBCode::kTooBig};
+  }
+
+  constexpr bool kChunkedSnapshot = false;
+  constexpr size_t kMaxFileSize = kChunkedSnapshot
+                                      ? kDiskLogFileThreshold
+                                      : std::numeric_limits<size_t>::max();
+  DiskWriter snap_writer{*loglet_allocator_, dir_, path, kMaxFileSize,
+                         write_head_order_};
+  snap_writer.init(begin_lsn); // start snap writer bg thread
+
+  {
+    std::scoped_lock g(lock_);
+
+    if (snapshotter_) {
+      warn("tried to start a snapshot while one was already ongoing");
+      return DBError{DBCode::kExists};
+    }
+
+    // put()s with lsn s.t. begin_lsn <= lsn <= end_lsn
+    snapshotter_.emplace(pool_, snap_writer, map_,
+                         item_allocator_.take_loglets(), begin_lsn, end_lsn);
+
+    // trigger background worker which serializes the work with compacting
+    cv_.notify_one();
+  }
+
+  // wait for the snapshot to be complete
+  DBStatus<void> ret = snapshotter_->get_result();
+  snapshotter_.reset();
+
+  return ret;
 }
 
 } // namespace hogd

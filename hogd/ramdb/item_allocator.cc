@@ -44,13 +44,21 @@ ItemHead::get(ItemAllocator &allocator, size_t kv_len)
   if (head_ && head_->bytes_left() >= sizeof(ItemHeader) + kv_len) [[likely]]
     return head_.get();
 
-  // Otherwise the head is full or has not yet been allocated. Try to allocate
+  // Otherwise the head is full or has not yet been allocated. Allocate
   // a new one.
+  roll_over(allocator);
+
+  return head_.get();
+}
+
+inline void
+ItemHead::roll_over(ItemAllocator &allocator)
+{
+  allocator_ = &allocator;
+
   if (head_)
     allocator_->give_to_compactor(std::move(head_));
-  allocator_ = &allocator;
   head_ = make_unique_loglet(allocator_->allocator_, LogletMode::kMemoryItems);
-  return head_.get();
 }
 
 } // namespace detail
@@ -160,8 +168,9 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
 
     // try to move the item to the new loglet.
     [[maybe_unused]] bool found = map_->modify_locked(
-        src_item->get_key(), [this, alloc_loglet, src_item, &bytes_moved,
-                              &stats, &storage](ItemHeader **hptr) mutable {
+        src_item->get_key(),
+        [this, alloc_loglet, src_item, &bytes_moved, &stats,
+         &storage](ItemHeader **hptr, size_t /* hash */) mutable {
           // recheck if the item became dead before the lock was held.
           if (storage.load(std::memory_order_relaxed) ==
               ItemStorage::kTombstone) [[unlikely]] {
@@ -200,6 +209,13 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
 
   stats.loglets_freed++;
   return stats;
+}
+
+void
+ItemAllocator::roll_heads()
+{
+  std::unique_lock ul = head_.lock_threads();
+  head_.for_each(ul, [this](detail::ItemHead &head) { head.roll_over(*this); });
 }
 
 } // namespace hogd

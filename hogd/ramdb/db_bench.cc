@@ -67,11 +67,13 @@ public:
   // delete_items deletes all the kv-pairs in the benchmark.
   void delete_items();
   // sync flushes and synchronizes all changes to disk.
-  void sync();
+  uint64_t sync();
   // initializes the database with items (initial state for benchmarks).
   void prefill();
   // closes the DB and reloads all of its contents from disk.
   void reload_db(size_t num);
+  // fills a DB and then triggers a snapshot.
+  void snapshot(uint64_t end_lsn);
 
 private:
   // the number of kv-pairs to access
@@ -132,12 +134,13 @@ Benchmark::delete_items()
   });
 }
 
-void
+uint64_t
 Benchmark::sync()
 {
   DBStatus<uint64_t> ret = db_->sync();
   if (unlikely(!ret))
     fail(ret.error());
+  return ret.value();
 }
 
 void
@@ -158,6 +161,14 @@ Benchmark::reload_db(size_t num)
   if (!db)
     fail(db.error());
   db_ = std::move(*db);
+}
+
+void
+Benchmark::snapshot(uint64_t end_lsn)
+{
+  DBStatus<void> ret = db_->snapshot("snapshot.dat", 0, end_lsn);
+  if (unlikely(!ret))
+    fail(ret.error());
 }
 
 std::unique_ptr<Benchmark>
@@ -241,6 +252,20 @@ do_reload(int num, int cores, int value_size)
   return measure([&benchmark, num] { benchmark->reload_db(num); });
 }
 
+double
+do_snapshot(int num, int cores, int value_size)
+{
+  std::unique_ptr<Benchmark> benchmark = make_benchmark(num, cores, value_size);
+  benchmark->prefill();
+  DBStatus<uint64_t> ret = benchmark->sync();
+  if (unlikely(!ret))
+    fail(ret.error());
+
+  uint64_t end_lsn = ret.value();
+
+  return measure([&benchmark, end_lsn] { benchmark->snapshot(end_lsn); });
+}
+
 using bench_fn = double (*)(int num, int cores, int value_size);
 
 void
@@ -259,6 +284,7 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
     {"read", "reads items", do_reads},
     {"delete", "deletes items", do_deletions},
     {"reload", "reloads items from disk", do_reload},
+    {"snapshot", "fills some, then snapshots", do_snapshot},
 };
 
 } // namespace

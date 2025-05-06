@@ -14,6 +14,7 @@
 #include "hogd/ramdb/item_allocator.h"
 #include "hogd/ramdb/loglet.h"
 #include "hogd/ramdb/scalable_map.h"
+#include "hogd/ramdb/snapshotter.h"
 
 namespace hogd {
 
@@ -50,7 +51,9 @@ public:
                                                 [this] { notify_low_mem(); })),
       pool_(available_parallelism()),
       item_allocator_(*loglet_allocator_, pool_, &map_),
-      disk_writer_(*loglet_allocator_, dir_, write_head_order),
+      disk_writer_(*loglet_allocator_, dir_, "{}.log", kDiskLogFileThreshold,
+                   write_head_order),
+      write_head_order_{write_head_order},
       map_(item_allocator_, disk_writer_, lock_order, bucket_order),
       bg_th_(
           [this](const std::stop_token &stoken) { background_worker(stoken); })
@@ -100,7 +103,17 @@ public:
 
   // sync writes pending items to disk. Any calls to put() or remove() performed
   // before this call are guaranteed to be recoverable after a failure.
+  // returns an lsn that can be passed to snapshot() to indicate which
+  // items should be included in a snapshot.
   DBStatus<uint64_t> sync();
+
+  // write all of the state changes that happened at after begin_lsn (which is 0
+  // or an lsn previously returned by sync() but before end_lsn (which is an
+  // lsn previously returned by a different call to sync()).
+  // begin_lsn must always be an lsn from an earlier call to sync() than
+  // end_lsn.
+  DBStatus<void> snapshot(const std::string &path, uint64_t begin_lsn,
+                          uint64_t end_lsn);
 
   // set_active indicates to the database that it is in a state of activity (if
   // yes is true) or inactivity (if yes is false).  When inactive, items should
@@ -126,19 +139,27 @@ private:
   WorkerPool pool_;
   ItemAllocator item_allocator_;
   DiskWriter disk_writer_;
+  int write_head_order_;
   ScalableMap map_;
 
-  std::mutex lock_; // protects cv_, active_, run_expand_, and run_compact_.
+  // protects cv_, active_, run_expand_, run_compact_, and
+  // snapshotter_.
+  std::mutex lock_;
   std::condition_variable_any cv_;
   bool active_{true};
   bool run_expand_{false};
   bool run_compact_{false};
+  std::optional<Snapshotter> snapshotter_;
 
   // runs background_worker().
   std::jthread bg_th_;
 
   // called when memory is low.
   void notify_low_mem();
+
+  // helper used by background worked in snapshotting.
+  DBStatus<void> snapshot_one(UniqueLoglet &src);
+
   // background_worker performs periodic background work.
   void background_worker(const std::stop_token &stoken);
 };
@@ -200,9 +221,20 @@ Database::get_each_parallel(GetEachCallback fn, size_t width, WorkerPool &pool)
       width, pool);
 }
 
+// Only safe to call while Database instance is quiescent (no ongoing calls to
+// put, get, remove, etc).
 inline DBStatus<uint64_t>
 Database::sync()
 {
+  // We assume no ongoing put() operations, etc. Rolling over the per-thread log
+  // heads here ensures that all completed modifications are part of compactable
+  // loglets and aren't sitting in the per-thread heads. This is important
+  // since the snapshotter only traverses compactable loglets.
+  // This also establishes the sensible invariant that every synced update
+  // is in compactable loglets and not part of an active log head mixed with
+  // unsynced updates.
+  item_allocator_.roll_heads();
+
   return disk_writer_.sync();
 }
 

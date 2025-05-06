@@ -176,9 +176,11 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
   // Write to on-disk log first.
   size_t hash = calculate_hash(key);
   ScopedDiskWrite record = disk_writer_.write_record(hash);
-  DBStatus<void> ret = record.modify(item);
+  DBStatus<uint64_t> ret = record.modify(item);
   if (!ret) [[unlikely]]
     return ret.error();
+
+  item->lsn = *ret;
 
   auto [ul, bu, cnt] = acquire_bucket(hash);
   record.reset();
@@ -359,13 +361,15 @@ ScalableMap::do_expand()
 }
 
 bool
-ScalableMap::modify_locked(std::span<const std::byte> key,
-                           const std::function<void(ItemHeader **h)> &fn)
+ScalableMap::modify_locked(
+    std::span<const std::byte> key,
+    const std::function<void(ItemHeader **h, size_t hash)> &fn)
 {
-  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  size_t hash = calculate_hash(key);
+  auto [ul, bu, ignore] = acquire_bucket(hash);
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
-      fn(bu);
+      fn(bu, hash);
       return true;
     }
   }

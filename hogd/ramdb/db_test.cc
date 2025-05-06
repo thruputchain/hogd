@@ -239,6 +239,157 @@ TEST_F(DatabaseTest, Active)
   check_integrity();
 }
 
+TEST_F(DatabaseTest, Snapshot)
+{
+  insert_many(kInsertions, kThreads);
+  remove_every_n(3);
+
+  DBStatus<uint64_t> lsn = db_->sync();
+  EXPECT_TRUE(lsn);
+  if (lsn.has_value()) {
+    EXPECT_EQ(*lsn, 1);
+  }
+
+  std::string path = "test-snapshot.snap";
+
+  DBStatus<void> ret = db_->snapshot(path, 0, lsn.value());
+  EXPECT_TRUE(ret);
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  check_integrity();
+
+  // ensure the checkpoint file exists
+  ErrnoStatus<File> f = dir_.openat(path, O_RDONLY);
+  ASSERT_TRUE(static_cast<bool>(f));
+
+  // replace the recovery log with the snapshot to see if it recovers...
+  ErrnoStatus<void> r = dir_.rename(path, "0.log");
+  ASSERT_TRUE(static_cast<bool>(r));
+
+  // the DB should succeed when we restore from disk.
+  ret = open_db();
+  EXPECT_TRUE(static_cast<bool>(ret));
+
+  check_integrity();
+}
+
+TEST_F(DatabaseTest, SnapshotRepeatable)
+{
+  // check to make sure that if we take multiple full snapshots with
+  // the last one spanning lsns that we can still recover properly.
+
+  insert_many(kInsertions, kThreads);
+  remove_every_n(3);
+
+  DBStatus<uint64_t> lsn = db_->sync();
+  EXPECT_TRUE(lsn);
+  if (lsn.has_value()) {
+    EXPECT_EQ(*lsn, 1);
+  }
+
+  std::string path = "test-snapshot-0-1.snap";
+
+  DBStatus<void> ret = db_->snapshot(path, 0, lsn.value());
+  EXPECT_TRUE(ret);
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  check_integrity();
+
+  // ensure the checkpoint file exists
+  ErrnoStatus<File> f = dir_.openat(path, O_RDONLY);
+  ASSERT_TRUE(static_cast<bool>(f));
+
+  remove_every_n(1);
+  insert_many(kInsertions, kThreads);
+
+  DBStatus<uint64_t> lsn2 = db_->sync();
+  EXPECT_TRUE(lsn2);
+  if (lsn2.has_value()) {
+    EXPECT_EQ(*lsn2, 2);
+  }
+
+  path = "test-snapshot-0-2.snap";
+
+  ret = db_->snapshot(path, 0, lsn2.value());
+  EXPECT_TRUE(ret);
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  check_integrity();
+
+  // replace the recovery log with the snapshot to see if it recovers...
+  ErrnoStatus<void> r = dir_.rename(path, "0.log");
+  ASSERT_TRUE(static_cast<bool>(r));
+
+  // the DB should succeed when we restore from disk.
+  ret = open_db();
+  EXPECT_TRUE(static_cast<bool>(ret));
+
+  check_integrity();
+}
+TEST_F(DatabaseTest, SnapshotIncremental)
+{
+  std::string path0 = "test-snapshot-0-1.snap";
+  std::string path1 = "test-snapshot-1-2.snap";
+
+  insert_many(kInsertions, kThreads);
+  remove_every_n(3);
+
+  DBStatus<uint64_t> lsn = db_->sync();
+  ASSERT_TRUE(lsn);
+  if (lsn.has_value()) {
+    ASSERT_EQ(*lsn, 1);
+  }
+
+  DBStatus<void> ret = db_->snapshot(path0, 0, lsn.value());
+  ASSERT_TRUE(ret);
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
+
+  check_integrity();
+
+  // ensure the checkpoint file exists
+  ErrnoStatus<File> f0 = dir_.openat(path0, O_RDONLY);
+  ASSERT_TRUE(static_cast<bool>(f0));
+
+  // snapshot 0-1 okay, add more and sync, do incremental snapshot
+
+  insert_many(kInsertions / 2, kThreads);
+
+  DBStatus<uint64_t> lsn2 = db_->sync();
+  ASSERT_TRUE(lsn2);
+  if (lsn2.has_value()) {
+    ASSERT_EQ(*lsn2, 2);
+  }
+
+  ret = db_->snapshot(path1, lsn.value(), lsn2.value());
+  ASSERT_TRUE(ret);
+
+  check_integrity();
+
+  // ensure the checkpoint file exists
+  ErrnoStatus<File> f1 = dir_.openat(path1, O_RDONLY);
+  ASSERT_TRUE(static_cast<bool>(f1));
+
+  // replace the recovery log with the snapshot to see if it recovers...
+  ErrnoStatus<void> r = dir_.rename(path0, "0.log");
+  ASSERT_TRUE(static_cast<bool>(r));
+  r = dir_.rename(path1, "1.log");
+  ASSERT_TRUE(static_cast<bool>(r));
+
+  // the DB should succeed when we restore from disk.
+  ret = open_db();
+  ASSERT_TRUE(static_cast<bool>(ret));
+
+  check_integrity();
+}
+
 } // namespace hogd
 
 int

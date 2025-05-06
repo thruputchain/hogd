@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <iterator>
 #include <optional>
@@ -127,6 +128,12 @@ inline ErrnoStatus<void>
 sys_unlink(const std::string &path)
 {
   return make_errno_status<void>(unlink(path.c_str()));
+}
+
+inline ErrnoStatus<void>
+sys_rename(const std::string &old_path, const std::string &new_path)
+{
+  return make_errno_status<void>(rename(old_path.c_str(), new_path.c_str()));
 }
 
 inline std::string
@@ -300,6 +307,12 @@ Directory::unlink_all() const
   }
 
   return {};
+}
+
+ErrnoStatus<void>
+Directory::rename(std::string_view old_path, std::string_view new_path) const
+{
+  return sys_rename(get_file_path(old_path), get_file_path(new_path));
 }
 
 ErrnoStatus<void>
