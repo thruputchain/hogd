@@ -59,9 +59,7 @@ SystemCallHandler::root_invoke()
 {
   auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
   if (!runtime) {
-    return InvokeResult{.result_ =
-                            InvokeError{
-                                InvokeErrorCode::kInvokeAbortTransaction},
+    return InvokeResult{.result_ = runtime.error().to_invoke_error(),
                         .gas_consumed_ = 0};
   }
   if (!runtime.value()) {
@@ -109,7 +107,7 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit)
 {
   auto runtime = resolve_runtime(invocation.invoked_address);
   if (!runtime) {
-    return std::pair{HostFnError{HostFnErrorCode::kHostAbortTransaction}, 0};
+    return std::pair{runtime.error().to_host_fn_error(), 0};
   }
   if (!runtime.value()) {
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};

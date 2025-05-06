@@ -106,6 +106,19 @@ struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
     }
     assert(false);
   }
+
+  InvokeError to_invoke_error() const
+  {
+    switch (code()) {
+    case SystemErrorCode::kUnrecoverable:
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    case SystemErrorCode::kAbortTransaction:
+      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+    case SystemErrorCode::kValidationFailure:
+      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+    }
+    assert(false);
+  }
 };
 
 // Enable comparisons between HostFnErrorCode and std::error_code.
