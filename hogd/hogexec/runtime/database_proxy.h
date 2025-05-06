@@ -28,6 +28,8 @@ struct LocalMockDB {
 using DatabaseIdentifier = std::variant<LocalMockDB>;
 
 // Abstract away database sharding from the rest of the executor.
+// Handles the RPC Error codes, changing them into restricted forms
+// that the executor can handle (or abort on).
 class DatabaseProxy {
 public:
   DatabaseProxy(x23::CoroPoll &cp, DatabaseIdentifier identifier);
