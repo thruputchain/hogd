@@ -20,11 +20,14 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
 {
   auto status = syscall_handler.get_nnint(input_key);
   if (!status) {
-    return {status.error().code(), 0};
+    return {status.error().to_host_fn_error(), 0};
+  }
+  if (!status.value()) {
+    return {status.value().error().code(), 0};
   }
 
-  output_current_set = status->first;
-  output_current_add = status->second;
+  output_current_set = status.value().value().first;
+  output_current_add = status.value().value().second;
 
   return {SyscallErrorCode::kNone, 0};
 }
@@ -38,7 +41,10 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
   auto status =
       syscall_handler.set_nnint(input_key, input_set_value, input_add_value);
   if (!status) {
-    return {status.error().code(), 0};
+    return {status.error().to_host_fn_error(), 0};
+  }
+  if (!status.value()) {
+    return {status.value().error().code(), 0};
   }
 
   return {SyscallErrorCode::kNone, 0};

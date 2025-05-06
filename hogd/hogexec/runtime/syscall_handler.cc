@@ -59,14 +59,18 @@ SystemCallHandler::root_invoke()
 {
   auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
   if (!runtime) {
+    return InvokeResult{.result_ = runtime.error().to_invoke_error(),
+                        .gas_consumed_ = 0};
+  }
+  if (!runtime.value()) {
     return InvokeResult{.result_ =
                             InvokeError{InvokeErrorCode::kInvokeDeterministic},
                         .gas_consumed_ = 0};
   }
 
   invocation_frame_stack_.start_frame(signed_tx_.tx.invocation);
-  auto res = runtime->invoke(signed_tx_.tx.invocation.method,
-                             signed_tx_.tx.invocation.gas_limit);
+  auto res = runtime.value()->invoke(signed_tx_.tx.invocation.method,
+                                     signed_tx_.tx.invocation.gas_limit);
   invocation_frame_stack_.finish_frame(res);
 
   if (!res.is_root_success())
@@ -102,13 +106,15 @@ std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit)
 {
   auto runtime = resolve_runtime(invocation.invoked_address);
-
   if (!runtime) {
+    return std::pair{runtime.error().to_host_fn_error(), 0};
+  }
+  if (!runtime.value()) {
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
   invocation_frame_stack_.start_frame(invocation);
-  auto res = runtime->invoke(invocation.method, gas_limit);
+  auto res = runtime.value()->invoke(invocation.method, gas_limit);
   invocation_frame_stack_.finish_frame(res);
 
   return res.to_host_fn_result();
@@ -140,11 +146,16 @@ SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
       std::move(returned_buffer));
 }
 
-std::unique_ptr<Runtime>
+SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
   // check if the address has a deployed contract hash
-  auto deployed_hash = snapshot_cache_.try_get_deployed_contract_hash(addr);
+  auto deployed_hash_expect =
+      snapshot_cache_.try_get_deployed_contract_hash(addr);
+  if (!deployed_hash_expect) {
+    return deployed_hash_expect.error();
+  }
+  auto deployed_hash = *deployed_hash_expect;
 
   if (!deployed_hash) {
     // There was no deployment in the previous snapshot.
@@ -161,7 +172,12 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // At this point, we have a deployment and the hash of the contract.
   // We now resolve the actual contract code from the snapshot.
-  auto load_contract = snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
+  auto load_contract_expect =
+      snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
+  if (!load_contract_expect) {
+    return load_contract_expect.error();
+  }
+  auto &load_contract = *load_contract_expect;
 
   if (!load_contract) {
     // Not found committed contract in the snapshot.
@@ -255,16 +271,20 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   return deploy_addr;
 }
 
-SyscallStatus<std::span<const std::byte>>
+SystemStatus<SyscallStatus<std::span<const std::byte>>>
 SystemCallHandler::get_bytestring(StorageKey const &storage_key)
 {
-  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
+  if (!item_view) {
+    return item_view.error();
+  }
+  assert(*item_view);
 
-  if (auto const *bytestring_item = item_view.template get<BytestringItem>()) {
+  if (auto const *bytestring_item = (*item_view)->get<BytestringItem>()) {
     return std::as_bytes(std::span(bytestring_item->bytestring_));
   }
 
-  if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
+  if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
     if (!unmodified_item->base_item_) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
@@ -278,11 +298,15 @@ SystemCallHandler::get_bytestring(StorageKey const &storage_key)
   return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
 }
 
-SyscallStatus<void>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_bytestring(StorageKey const &storage_key,
                                   std::span<const std::byte> input_bytestring)
 {
-  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
+  if (!item_view) {
+    return item_view.error();
+  }
+  assert(*item_view);
 
   Bytestring new_string;
   new_string.resize_uninitialized(input_bytestring.size());
@@ -290,19 +314,23 @@ SystemCallHandler::set_bytestring(StorageKey const &storage_key,
               reinterpret_cast<const uint8_t *>(input_bytestring.data()),
               input_bytestring.size());
 
-  return item_view.set(BytestringItem(std::move(new_string)));
+  return (*item_view)->set(BytestringItem(std::move(new_string)));
 }
 
-SyscallStatus<std::pair<int128_t, int128_t>>
+SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
 SystemCallHandler::get_nnint(StorageKey const &storage_key)
 {
-  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
+  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
+  if (!item_view) {
+    return item_view.error();
+  }
+  assert(*item_view);
 
-  if (auto const *nnint_item = item_view.template get<NNIntItem>()) {
-    return {{nnint_item->base_value_, nnint_item->add_value_}};
+  if (auto const *nnint_item = (*item_view)->get<NNIntItem>()) {
+    return {std::make_pair(nnint_item->base_value_, nnint_item->add_value_)};
   }
 
-  if (auto const *unmodified_item = item_view.template get<UnmodifiedItem>()) {
+  if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
     if (!unmodified_item->base_item_) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
@@ -310,26 +338,36 @@ SystemCallHandler::get_nnint(StorageKey const &storage_key)
         StorageItemType::kItemTypeNonnegativeInt) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
-    return {{from_xdr(unmodified_item->base_item_->nnint()), 0}};
+    return {std::make_pair(from_xdr(unmodified_item->base_item_->nnint()), 0)};
   }
 
   return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
 }
 
-SyscallStatus<void>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKey const &storage_key, int128_t set_value,
                              int128_t add_value)
 {
-  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
-  return item_view.set(
-      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
+  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
+  if (!item_view) {
+    return item_view.error();
+  }
+  assert(*item_view);
+
+  return (*item_view)
+      ->set(NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
 }
 
-SyscallStatus<void>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKey const &storage_key)
 {
-  auto &item_view = invocation_frame_stack_.get_item_view(storage_key);
-  return item_view.set(DeletedItem{});
+  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
+  if (!item_view) {
+    return item_view.error();
+  }
+  assert(*item_view);
+
+  return (*item_view)->set(DeletedItem{});
 }
 
 } // namespace hogd

@@ -12,6 +12,22 @@
 namespace hogd {
 
 std::string
+SystemErrorCategory::message(int code) const
+{
+  assert(SystemError::is_in_enum_range(code));
+  switch (static_cast<SystemErrorCode>(code)) {
+  case SystemErrorCode::kUnrecoverable:
+    return "kUnrecoverable";
+  case SystemErrorCode::kAbortTransaction:
+    return "kAbortTransaction";
+  case SystemErrorCode::kValidationFailure:
+    return "kValidationFailure";
+  default:
+    assert(false);
+  }
+}
+
+std::string
 HostFnErrorCategory::message(int code) const
 {
   assert(HostFnError::is_in_enum_range(code));
@@ -46,6 +62,9 @@ InvokeResult::to_host_fn_result() const
       return {SyscallErrorCode::kDeterministicWasm, gas_consumed_};
     case kInvokeOutOfGas:
       return {HostFnError{HostFnErrorCode::kHostOutOfGas}, gas_consumed_};
+    case kInvokeAbortTransaction:
+      return {HostFnError{HostFnErrorCode::kHostAbortTransaction},
+              gas_consumed_};
     default:
       return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, gas_consumed_};
     }

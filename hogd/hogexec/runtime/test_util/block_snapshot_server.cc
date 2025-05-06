@@ -77,17 +77,17 @@ BlockSnapshotServer::get_deployment(BlockID block,
   co_return out;
 }
 
-x23::Async<void>
+x23::Async<RPCError>
 BlockSnapshotServer::commit_contract_create(BlockID block, Contract contract)
 {
-  co_return; // unimplemented
+  co_return RPCError::kRPCUnimplemented; // unimplemented
 }
-x23::Async<void>
+x23::Async<RPCError>
 BlockSnapshotServer::commit_contract_deploy(BlockID block,
                                             ContractAddress const &addr,
                                             SHA256Hash const &hash)
 {
-  co_return; // unimplemented
+  co_return RPCError::kRPCUnimplemented; // unimplemented
 }
 
 x23::Async<RPCError>
@@ -111,15 +111,15 @@ BlockSnapshotServer::try_reserve_delta(BlockID block, TransactionID tx,
 {
   co_return ExpectedStorageCost(RPCError::kRPCUnimplemented);
 }
-x23::Async<void>
+x23::Async<RPCError>
 BlockSnapshotServer::commit_transaction(BlockID block, TransactionID tx)
 {
-  co_return; // unimplemented
+  co_return RPCError::kRPCUnimplemented; // unimplemented
 }
-x23::Async<void>
+x23::Async<RPCError>
 BlockSnapshotServer::abort_transaction(BlockID block, TransactionID tx)
 {
-  co_return;
+  co_return RPCError::kRPCUnimplemented;
   // unimplemented;
 }
 

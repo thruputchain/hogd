@@ -35,6 +35,12 @@ throw_validation_error(HostCallContext * /*unused*/)
 }
 
 HostFnResult
+throw_abort_transaction(HostCallContext * /*unused*/)
+{
+  return {HostFnErrorCode::kHostAbortTransaction, 0};
+}
+
+HostFnResult
 throw_bad_alloc(HostCallContext * /*unused*/)
 {
   throw std::bad_alloc();
@@ -141,11 +147,20 @@ TEST_F(WasmiErrorHandlingTest, HostError)
   runtime_ = context_.make_new_runtime(contract_, nullptr, true);
 
   ASSERT_TRUE(runtime_);
-
   auto res = runtime_->invoke("call1", UINT64_MAX);
-
   EXPECT_EQ(res.result_.error(),
             InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
+}
+
+TEST_F(WasmiErrorHandlingTest, AbortTransaction)
+{
+  context_.link_fn("test", "external_call", &throw_abort_transaction);
+  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+
+  ASSERT_TRUE(runtime_);
+  auto res = runtime_->invoke("call1", UINT64_MAX);
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeAbortTransaction});
 }
 
 TEST_F(WasmiErrorHandlingTest, ValidationError)

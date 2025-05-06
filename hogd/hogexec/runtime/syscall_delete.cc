@@ -16,7 +16,10 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
 {
   auto status = syscall_handler.delete_object(input_key);
   if (!status) {
-    return {status.error().code(), 0};
+    return {status.error().to_host_fn_error(), 0};
+  }
+  if (!status.value()) {
+    return {status.value().error().code(), 0};
   }
 
   return {SyscallErrorCode::kNone, 0};

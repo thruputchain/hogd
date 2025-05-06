@@ -1,18 +1,24 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 
+#include <cassert>
 #include <chrono>
 #include <cstdio>
 #include <exception>
 #include <format>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
+#include <utility>
 #include <variant>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -35,6 +41,67 @@ connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
   }
   auto client_config = x23::rpc_stream_logged(cp, *fd);
   return client_config.template client<DatabaseToExecutorInterfaceV1>();
+}
+
+struct VoidMarker {};
+
+template<typename T, auto NullValue>
+constexpr auto
+to_system_error_code(auto err, auto &&f)
+{
+  constexpr bool kHasReturnType = requires { f(std::move(get<1>(err))); };
+  auto type_lambda = [&] {
+    if constexpr (kHasReturnType) {
+      return f(std::move(get<1>(err)));
+    }
+    else {
+      return VoidMarker{};
+    }
+  };
+
+  using ret_t =
+      std::conditional_t<kHasReturnType, decltype(type_lambda()), void>;
+
+  return [&] -> SystemStatus<ret_t> {
+    RPCError err_code;
+    if constexpr (kHasReturnType) {
+      err_code = err.error();
+    }
+    else {
+      err_code = err;
+    }
+
+    switch (err_code) {
+    case RPCError::kRPCNone:
+      if constexpr (kHasReturnType) {
+        return f(std::move(get<1>(err)));
+      }
+      else {
+        static_assert(std::is_same_v<decltype(err), RPCError>);
+        static_assert(std::is_same_v<decltype(NullValue), VoidMarker>);
+        return {};
+      }
+    case RPCError::kRPCNoStorageItem:
+    case RPCError::kRPCNoContractDeployed:
+    case RPCError::kRPCNoQueueEntry:
+    case RPCError::kRPCStorageWriteFailed:
+      if constexpr (kHasReturnType) {
+        return NullValue;
+      }
+      else {
+        // This should never happen -- none of the rpc errors that have a return
+        // type of void should return this kind of error code.
+        assert(false);
+        return SystemError{SystemErrorCode::kUnrecoverable};
+      }
+    case RPCError::kRPCBadBlockID:
+      return SystemError{SystemErrorCode::kAbortTransaction};
+    case RPCError::kRPCValidationFailure:
+      return SystemError{SystemErrorCode::kValidationFailure};
+    default:
+      return SystemError{SystemErrorCode::kUnrecoverable};
+    }
+  }();
 }
 
 } // namespace
@@ -63,46 +130,88 @@ DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp,
     }())
 {}
 
-x23::Async<std::unique_ptr<const StorageItem>>
+x23::Async<SystemStatus<std::unique_ptr<const StorageItem>>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
-  auto res = read_client_.get_snapshot_item(block_id, addrkey)();
-
-  if (res.error() == RPCError::kRPCNone) {
-    co_return std::make_unique<const StorageItem>(res.item());
-  }
-  if (res.error() == RPCError::kRPCNoStorageItem) {
-    co_return nullptr;
-  }
-  throw std::runtime_error("unhandleable error");
+  auto res = co_await read_client_.get_snapshot_item(block_id, addrkey);
+  co_return to_system_error_code<StorageItem, nullptr>(
+      res, [](StorageItem &&x) {
+        return std::make_unique<StorageItem>(std::move(x));
+      });
 }
 
-x23::Async<std::shared_ptr<const Contract>>
+x23::Async<SystemStatus<std::shared_ptr<const Contract>>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
-  auto res = read_client_.get_contract(block_id, contract_hash)();
-
-  if (res.error() == RPCError::kRPCNone) {
-    co_return std::make_shared<const Contract>(res.contract());
-  }
-  if (res.error() == RPCError::kRPCContractNotExist) {
-    co_return nullptr;
-  }
-  throw std::runtime_error("unhandleable error");
+  auto res = co_await read_client_.get_contract(block_id, contract_hash);
+  co_return to_system_error_code<const Contract, nullptr>(
+      res,
+      [](const Contract &x) { return std::make_shared<const Contract>(x); });
 }
 
-x23::Async<std::optional<SHA256Hash>>
+x23::Async<SystemStatus<std::optional<SHA256Hash>>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
-  auto res = read_client_.get_deployment(block_id, addr)();
+  auto res = co_await read_client_.get_deployment(block_id, addr);
+  co_return to_system_error_code<SHA256Hash, std::nullopt>(
+      res, [](SHA256Hash &&x) {
+        return std::make_optional<SHA256Hash>(std::move(x));
+      });
+}
 
-  if (res.error() == RPCError::kRPCNone) {
-    co_return res.deployed_hash();
-  }
-  if (res.error() == RPCError::kRPCNoContractDeployed) {
-    co_return std::nullopt;
-  }
-  throw std::runtime_error("unhandleable error");
+x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
+DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
+                                                AddressAndKey const &addrkey,
+                                                uint64_t search_start_number)
+{
+  auto res = co_await read_client_.get_next_retrocausal_queue_block(
+      block_id, addrkey, search_start_number);
+  co_return to_system_error_code<RetrocausalQueueBlock, std::nullopt>(
+      res, [](RetrocausalQueueBlock &&x) {
+        return std::make_optional<RetrocausalQueueBlock>(std::move(x));
+      });
+}
+
+x23::Async<SystemStatus<std::optional<QueueEntry>>>
+DatabaseProxy::get_concurrent_retrocausal_queue_entry(
+    BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
+{
+  auto res =
+      co_await read_client_.get_concurrent_retrocausal_queue_entry(block_id,
+                                                                   addrkey,
+                                                                   index);
+  co_return to_system_error_code<QueueEntry, std::nullopt>(
+      res, [](QueueEntry &&x) {
+        return std::make_optional<QueueEntry>(std::move(x));
+      });
+}
+
+x23::Async<SystemStatus<std::optional<int128_t>>>
+DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
+                                 AddressAndKey const &addrkey,
+                                 StorageDelta const &delta,
+                                 StorageItemRPCFlagSet flags)
+{
+  auto res = co_await read_client_.try_reserve_delta(block_id, tx_id, addrkey,
+                                                     delta, flags);
+  co_return to_system_error_code<int128_t, std::nullopt>(
+      res, [](int128_xdr &&x) {
+        return std::make_optional<int128_t>(from_xdr(std::move(x)));
+      });
+}
+
+x23::Async<SystemStatus<void>>
+DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
+{
+  auto res = co_await read_client_.commit_transaction(block_id, tx_id);
+  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
+}
+
+x23::Async<SystemStatus<void>>
+DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
+{
+  auto res = co_await read_client_.abort_transaction(block_id, tx_id);
+  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
 }
 
 } // namespace hogd

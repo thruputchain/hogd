@@ -22,14 +22,17 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
 {
   auto status = syscall_handler.get_bytestring(input_key);
   if (!status) {
-    return {status.error().code(), 0};
+    return {status.error().to_host_fn_error(), 0};
+  }
+  if (!status.value()) {
+    return {status.value().error().code(), 0};
   }
 
-  output_written_len =
-      std::min<RuntimeMemoryLength>(output_bytestring.size(), status->size());
+  output_written_len = std::min<RuntimeMemoryLength>(output_bytestring.size(),
+                                                     status.value()->size());
 
   std::memcpy(reinterpret_cast<uint8_t *>(output_bytestring.data()),
-              status->data(), output_written_len);
+              status.value()->data(), output_written_len);
 
   return {SyscallErrorCode::kNone, 0};
 };
@@ -41,10 +44,13 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
 {
   auto status = syscall_handler.get_bytestring(input_key);
   if (!status) {
-    return {status.error().code(), 0};
+    return {status.error().to_host_fn_error(), 0};
+  }
+  if (!status.value()) {
+    return {status.value().error().code(), 0};
   }
 
-  output_length = (*status).size();
+  output_length = status.value()->size();
 
   return {SyscallErrorCode::kNone, 0};
 };
@@ -56,7 +62,10 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
 {
   auto status = syscall_handler.set_bytestring(input_key, input_bytestring);
   if (!status) {
-    return {status.error().code(), 0};
+    return {status.error().to_host_fn_error(), 0};
+  }
+  if (!status.value()) {
+    return {status.value().error().code(), 0};
   }
 
   return {SyscallErrorCode::kNone, 0};
