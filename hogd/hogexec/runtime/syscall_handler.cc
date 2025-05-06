@@ -60,7 +60,8 @@ SystemCallHandler::root_invoke()
   auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
   if (!runtime) {
     return InvokeResult{.result_ =
-                            InvokeError{InvokeErrorCode::kInvokeAbortTransaction},
+                            InvokeError{
+                                InvokeErrorCode::kInvokeAbortTransaction},
                         .gas_consumed_ = 0};
   }
   if (!runtime.value()) {
@@ -71,7 +72,7 @@ SystemCallHandler::root_invoke()
 
   invocation_frame_stack_.start_frame(signed_tx_.tx.invocation);
   auto res = runtime.value()->invoke(signed_tx_.tx.invocation.method,
-                             signed_tx_.tx.invocation.gas_limit);
+                                     signed_tx_.tx.invocation.gas_limit);
   invocation_frame_stack_.finish_frame(res);
 
   if (!res.is_root_success())
@@ -151,7 +152,8 @@ SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
   // check if the address has a deployed contract hash
-  auto deployed_hash_expect = snapshot_cache_.try_get_deployed_contract_hash(addr);
+  auto deployed_hash_expect =
+      snapshot_cache_.try_get_deployed_contract_hash(addr);
   if (!deployed_hash_expect) {
     return deployed_hash_expect.error();
   }
@@ -172,11 +174,12 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 
   // At this point, we have a deployment and the hash of the contract.
   // We now resolve the actual contract code from the snapshot.
-  auto load_contract_expect = snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
+  auto load_contract_expect =
+      snapshot_cache_.try_get_contract_by_hash(*deployed_hash);
   if (!load_contract_expect) {
     return load_contract_expect.error();
   }
-  auto& load_contract = *load_contract_expect;
+  auto &load_contract = *load_contract_expect;
 
   if (!load_contract) {
     // Not found committed contract in the snapshot.
@@ -353,8 +356,8 @@ SystemCallHandler::set_nnint(StorageKey const &storage_key, int128_t set_value,
   }
   assert(*item_view);
 
-  return (*item_view)->set(
-      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
+  return (*item_view)
+      ->set(NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
 }
 
 SystemStatus<SyscallStatus<void>>

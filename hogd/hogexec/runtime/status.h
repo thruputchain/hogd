@@ -70,7 +70,6 @@ operator==(const SyscallErrorCode &lhs, const std::error_code &rhs)
 
 template<typename T> using SyscallStatus = std::expected<T, SyscallError>;
 
-
 class SystemErrorCategory : public std::error_category {
 public:
   const char *name() const noexcept override { return "system"; }
@@ -95,7 +94,8 @@ enum class SystemErrorCode {
 struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
   explicit SystemError(SystemErrorCode err) : EnumError(err) {}
 
-  HostFnError to_host_fn_error() const {
+  HostFnError to_host_fn_error() const
+  {
     switch (code()) {
     case SystemErrorCode::kUnrecoverable:
       return HostFnError{HostFnErrorCode::kHostUnrecoverable};

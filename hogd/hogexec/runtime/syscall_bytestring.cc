@@ -28,9 +28,8 @@ syscall_BytestringGet_inner(SystemCallHandler &syscall_handler,
     return {status.value().error().code(), 0};
   }
 
-
-  output_written_len =
-      std::min<RuntimeMemoryLength>(output_bytestring.size(), status.value()->size());
+  output_written_len = std::min<RuntimeMemoryLength>(output_bytestring.size(),
+                                                     status.value()->size());
 
   std::memcpy(reinterpret_cast<uint8_t *>(output_bytestring.data()),
               status.value()->data(), output_written_len);

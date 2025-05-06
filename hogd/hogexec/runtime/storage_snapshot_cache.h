@@ -42,7 +42,7 @@ public:
   StorageSnapshotCache &operator=(StorageSnapshotCache const &) = delete;
   StorageSnapshotCache &operator=(StorageSnapshotCache &&) = delete;
 
-  SystemStatus<std::shared_ptr<const Contract>> 
+  SystemStatus<std::shared_ptr<const Contract>>
   try_get_contract_by_hash(SHA256Hash const &hash);
   SystemStatus<std::optional<SHA256Hash>>
   try_get_deployed_contract_hash(ContractAddress const &addr);

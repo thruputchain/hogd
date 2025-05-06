@@ -31,7 +31,7 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
   }
 
   auto db_res = db_proxy_.get_deployment(block_id_, addr)();
-  if (!db_res) {  
+  if (!db_res) {
     return db_res.error();
   }
   auto out = db_res.value();

@@ -100,9 +100,9 @@ public:
   // === Nonnegative Integer syscalls ===
   SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
   get_nnint(StorageKey const &storage_key);
-  SystemStatus<SyscallStatus<void>>
-  set_nnint(StorageKey const &storage_key,
-            int128_t set_value, int128_t add_value);
+  SystemStatus<SyscallStatus<void>> set_nnint(StorageKey const &storage_key,
+                                              int128_t set_value,
+                                              int128_t add_value);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
@@ -128,7 +128,8 @@ private:
   // that address in the current context (i.e. if a contract is deployed there
   // in the snapshot, or by a prior action of the current transaction that was
   // not rolled back by a revert).
-  SystemStatus<std::unique_ptr<Runtime>> resolve_runtime(ContractAddress const &addr);
+  SystemStatus<std::unique_ptr<Runtime>>
+  resolve_runtime(ContractAddress const &addr);
 
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the

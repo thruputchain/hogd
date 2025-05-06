@@ -55,14 +55,12 @@ to_system_error_code(auto err, auto &&f)
   case RPCError::kRPCStorageWriteFailed:
     return SystemStatus<ret_t>(NullValue);
   case RPCError::kRPCBadBlockID:
-    return SystemStatus<ret_t>(
-        SystemError{SystemErrorCode::kAbortTransaction});
+    return SystemStatus<ret_t>(SystemError{SystemErrorCode::kAbortTransaction});
   case RPCError::kRPCValidationFailure:
     return SystemStatus<ret_t>(
         SystemError{SystemErrorCode::kValidationFailure});
   default:
-    return SystemStatus<ret_t>(
-        SystemError{SystemErrorCode::kUnrecoverable});
+    return SystemStatus<ret_t>(SystemError{SystemErrorCode::kUnrecoverable});
   }
 }
 

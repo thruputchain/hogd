@@ -21,7 +21,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
                            ContractAddress &output_sender)
 {
-  SyscallStatus<ContractAddress> status = syscall_handler.get_msg_sender();
+  auto status = syscall_handler.get_msg_sender();
   if (!status) {
     return {status.error().code(), 0};
   }
@@ -34,12 +34,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
                                 ContractAddress &output_address)
 {
-  SyscallStatus<ContractAddress> status = syscall_handler.get_current_address();
-  if (!status) {
-    return {status.error().code(), 0};
-  }
-
-  output_address = *status;
+  output_address = syscall_handler.get_current_address();
   return {SyscallErrorCode::kNone, 0};
 }
 

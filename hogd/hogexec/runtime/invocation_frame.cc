@@ -149,7 +149,7 @@ InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
   return &iter->second;
 }
 
-SystemStatus<ItemView*>
+SystemStatus<ItemView *>
 InvocationFrameStack::get_item_view(StorageKey const &key)
 {
   const int32_t stack_depth = frame_stack_.size();
@@ -183,7 +183,8 @@ InvocationFrameStack::get_item_view(StorageKey const &key)
   }
 
   // snapshot_item might be nullptr; this is handled in ItemView
-  return frame_stack_.back().add_item_view(addrkey, ItemView(snapshot_item.value()));
+  return frame_stack_.back().add_item_view(addrkey,
+                                           ItemView(snapshot_item.value()));
 }
 
 } // namespace hogd
