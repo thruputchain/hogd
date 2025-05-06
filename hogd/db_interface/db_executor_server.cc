@@ -244,6 +244,7 @@ DbExecutorServer::get_concurrent_retrocausal_queue_entry(
 
   ExpectedQueueEntry out;
   out.error(RPCError::kRPCNone);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   out.queue_entry() = *entry.get();
   co_return out;
 }
