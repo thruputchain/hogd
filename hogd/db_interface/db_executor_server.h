@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <memory>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
@@ -49,6 +50,14 @@ public:
                                             SHA256Hash const &contract_hash);
   x23::Async<ExpectedDeployment>
   get_deployment(BlockID block, ContractAddress const &contract_address);
+
+  // RCQ operations
+  x23::Async<ExpectedRetrocausalQueueBlock>
+  get_next_retrocausal_queue_block(BlockID block, AddressAndKey const &addrkey,
+                                   uint64_t search_start_number);
+
+  x23::Async<ExpectedQueueEntry> get_concurrent_retrocausal_queue_entry(
+      BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
 private:
   BlockManager *block_manager_;

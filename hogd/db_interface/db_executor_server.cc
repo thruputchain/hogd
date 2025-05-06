@@ -195,4 +195,57 @@ DbExecutorServer::get_deployment(BlockID block,
   co_return out;
 }
 
+x23::Async<ExpectedRetrocausalQueueBlock>
+DbExecutorServer::get_next_retrocausal_queue_block(BlockID block,
+                                                   AddressAndKey const &addrkey,
+                                                   uint64_t search_start_number)
+{
+  auto block_data = block_manager_->get_block_data(block);
+  if (!block_data) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
+  }
+
+  auto item =
+      block_data->get_snapshot_view()->get_post_block_storage_item(addrkey);
+  if (!item) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoStorageItem);
+  }
+
+  if (item->type() != StorageItemType::kItemTypeRetrocausalQueue) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoStorageItem);
+  }
+
+  auto const &queue = item->queue();
+  const auto *next_block = queue.try_get_next_block(search_start_number);
+  if (!next_block) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoQueueEntry);
+  }
+
+  ExpectedRetrocausalQueueBlock out;
+  out.error(RPCError::kRPCNone);
+  out.queue_block() = *next_block;
+  co_return out;
+}
+
+x23::Async<ExpectedQueueEntry>
+DbExecutorServer::get_concurrent_retrocausal_queue_entry(
+    BlockID block, AddressAndKey const &addrkey, uint32_t index)
+{
+  auto block_data = block_manager_->get_block_data(block);
+  if (!block_data) {
+    co_return ExpectedQueueEntry(RPCError::kRPCBadBlockID);
+  }
+
+  auto entry =
+      block_data->get_concurrent_retrocausal_queue_entry(addrkey, index);
+  if (!entry.get()) {
+    co_return ExpectedQueueEntry(RPCError::kRPCNoQueueEntry);
+  }
+
+  ExpectedQueueEntry out;
+  out.error(RPCError::kRPCNone);
+  out.queue_entry() = *entry.get();
+  co_return out;
+}
+
 } // namespace hogd

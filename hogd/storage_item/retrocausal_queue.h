@@ -58,16 +58,17 @@ public:
 
   RetrocausalQueue(uint64_t current_block_number);
 
-  // allow move and copy
+  // allow move but not copy
   RetrocausalQueue(RetrocausalQueue &&) = default;
   RetrocausalQueue &operator=(RetrocausalQueue &&) noexcept = default;
-  RetrocausalQueue(RetrocausalQueue const &) = default;
-  RetrocausalQueue &operator=(RetrocausalQueue const &) noexcept = default;
+  RetrocausalQueue(RetrocausalQueue const &) = delete;
+  RetrocausalQueue &operator=(RetrocausalQueue const &) noexcept = delete;
 
   // Returns the next block in the queue, or nullptr if the queue is empty.
   // Does not return current block entries.
   // Starts searching from block number search_start_number.
-  const RetrocausalQueueBlock *try_get_next_block(uint64_t search_start_number);
+  const RetrocausalQueueBlock *
+  try_get_next_block(uint64_t search_start_number) const;
 
   uint64_t get_current_block_number() const { return current_block_number_; }
 

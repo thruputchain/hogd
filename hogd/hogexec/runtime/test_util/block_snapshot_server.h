@@ -58,6 +58,19 @@ public:
   x23::Async<ExpectedDeployment>
   get_deployment(BlockID block, ContractAddress const &contract_address);
 
+  static x23::Async<ExpectedRetrocausalQueueBlock>
+  get_next_retrocausal_queue_block(BlockID block, AddressAndKey const &addrkey,
+                                   uint64_t search_start_number)
+  {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCUnimplemented);
+  }
+
+  static x23::Async<ExpectedQueueEntry> get_concurrent_retrocausal_queue_entry(
+      BlockID block, AddressAndKey const &addrkey, uint32_t index)
+  {
+    co_return ExpectedQueueEntry(RPCError::kRPCUnimplemented);
+  }
+
   void start_server(uint32_t port_number);
 
   // Only used within test setup

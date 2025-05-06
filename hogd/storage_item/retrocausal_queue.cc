@@ -63,7 +63,7 @@ RetrocausalQueue::RetrocausalQueue(uint64_t current_block_number)
 {}
 
 const RetrocausalQueueBlock *
-RetrocausalQueue::try_get_next_block(uint64_t search_start_number)
+RetrocausalQueue::try_get_next_block(uint64_t search_start_number) const
 {
   auto it = blocks_.lower_bound(search_start_number);
   if (it == blocks_.end()) {

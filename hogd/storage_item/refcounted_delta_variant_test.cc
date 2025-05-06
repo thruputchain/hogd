@@ -120,7 +120,7 @@ TEST(RefcountedDeltaVariant, RCQCosts)
                                         make_test_queue_entry(2)},
                             .block_number = 1});
 
-  auto item = std::make_shared<const StorageItemWrapper>(queue2);
+  auto item = std::make_shared<const StorageItemWrapper>(std::move(queue2));
 
   EXPECT_EQ(
       item->storage_cost(),
