@@ -8,7 +8,6 @@
 #include <format>
 #include <string>
 #include <system_error>
-
 #include <type_traits>
 
 namespace x23 {
