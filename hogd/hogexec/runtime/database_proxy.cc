@@ -42,26 +42,27 @@ connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
 }
 
 template<typename T, auto NullValue>
-auto
+constexpr auto
 to_system_error_code(auto err, auto &&f)
 {
   using ret_t = decltype(f(std::move(get<1>(err))));
-  switch (err.error()) {
-  case RPCError::kRPCNone:
-    return SystemStatus<ret_t>(f(std::move(get<1>(err))));
-  case RPCError::kRPCNoStorageItem:
-  case RPCError::kRPCNoContractDeployed:
-  case RPCError::kRPCNoQueueEntry:
-  case RPCError::kRPCStorageWriteFailed:
-    return SystemStatus<ret_t>(NullValue);
-  case RPCError::kRPCBadBlockID:
-    return SystemStatus<ret_t>(SystemError{SystemErrorCode::kAbortTransaction});
-  case RPCError::kRPCValidationFailure:
-    return SystemStatus<ret_t>(
-        SystemError{SystemErrorCode::kValidationFailure});
-  default:
-    return SystemStatus<ret_t>(SystemError{SystemErrorCode::kUnrecoverable});
-  }
+  return [&] -> SystemStatus<ret_t> {
+    switch (err.error()) {
+    case RPCError::kRPCNone:
+      return f(std::move(get<1>(err)));
+    case RPCError::kRPCNoStorageItem:
+    case RPCError::kRPCNoContractDeployed:
+    case RPCError::kRPCNoQueueEntry:
+    case RPCError::kRPCStorageWriteFailed:
+      return NullValue;
+    case RPCError::kRPCBadBlockID:
+      return SystemError{SystemErrorCode::kAbortTransaction};
+    case RPCError::kRPCValidationFailure:
+      return SystemError{SystemErrorCode::kValidationFailure};
+    default:
+      return SystemError{SystemErrorCode::kUnrecoverable};
+    }
+  }();
 }
 
 } // namespace
