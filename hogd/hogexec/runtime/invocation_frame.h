@@ -96,6 +96,7 @@ public:
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 
   // Reference invalidated by any other call to get_item_view
+  // The returned pointer is never null
   SystemStatus<ItemView *> get_item_view(StorageKey const &key);
 
 private:
