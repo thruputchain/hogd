@@ -79,6 +79,7 @@ BlockManager::commit_block(BlockID id)
         }
       }
       assert(committed_child_found);
+      block_cache_.erase(it);
       return out;
     }();
 

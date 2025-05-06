@@ -2,6 +2,7 @@ add_library(
   db_interface
   block_manager.cc
   block_state.cc
+  db_coord_server.cc
   storage_view.cc
   transaction_state.cc
 )

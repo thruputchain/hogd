@@ -69,6 +69,11 @@ TEST(BlockManagerTest, AddSequenceOfChildren)
   ASSERT_TRUE(b3);
   b3->close_block();
   EXPECT_TRUE(m.commit_block(3));
+
+  EXPECT_FALSE(m.get_block_data(0));
+  EXPECT_FALSE(m.get_block_data(1));
+  EXPECT_FALSE(m.get_block_data(2));
+  EXPECT_TRUE(m.get_block_data(3));
 }
 
 } // namespace hogd
