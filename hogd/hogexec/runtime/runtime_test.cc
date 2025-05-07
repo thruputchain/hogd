@@ -1,8 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstdlib>
-
-#include "hogd/base/status.h"
 #include "hogd/init.h"
 
 int
