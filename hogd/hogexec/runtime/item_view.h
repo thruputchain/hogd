@@ -149,7 +149,7 @@ public:
   {
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
       return std::holds_alternative<ItemType>(delta_args_)
-                 ? static_cast<const ItemType *>(
+                 ? const_cast<const ItemType *>(
                        &std::get<ItemType>(delta_args_))
                  : nullptr;
     }
