@@ -213,5 +213,74 @@ TEST_F(ItemViewTest, RCQRead)
   check_item(11, true);
   check_item(std::nullopt, true);
   check_item(std::nullopt, true);
+
+  // Check that we get the exact same pattern during validation
+  ExecutionModeData validation_mode_data = ExecutionModeData(
+      std::in_place_type_t<ValidationModeData>(),
+      std::get<ProposalModeData>(execution_mode_data).proposal_data());
+
+  auto validate_rcq_item = RetrocausalQueueItem(*item);
+
+  auto check_item_validation = [&](std::optional<uint8_t> const &expected_entry,
+                                   bool advance_cursor) {
+    auto r =
+        validate_rcq_item.get_next_item(validation_mode_data, advance_cursor);
+    ASSERT_TRUE(r.has_value());
+    if (expected_entry) {
+      ASSERT_TRUE(r.value().has_value());
+      EXPECT_EQ(r.value().value(),
+                make_test_queue_entry(expected_entry.value()));
+    }
+    else {
+      EXPECT_FALSE(r.value());
+    }
+  };
+
+  // exact same sequence of read and write operations as above
+  // but in validation mode, so we should get the exact same result
+
+  check_item_validation(1, false);
+  check_item_validation(1, false);
+  check_item_validation(1, false);
+  check_item_validation(1, true);
+  check_item_validation(2, false);
+  check_item_validation(2, false);
+  check_item_validation(2, true);
+  check_item_validation(3, false);
+  check_item_validation(3, true);
+  check_item_validation(4, true);
+  check_item_validation(5, false);
+  check_item_validation(5, true);
+  check_item_validation(6, true);
+  check_item_validation(std::nullopt, true);
+  check_item_validation(std::nullopt, true);
+
+  validate_rcq_item.insert_entry(make_test_queue_entry(7));
+
+  check_item_validation(7, false);
+  check_item_validation(7, true);
+  check_item_validation(8, false);
+  check_item_validation(8, true);
+  check_item_validation(9, false);
+
+  validate_rcq_item.insert_entry(make_test_queue_entry(10));
+
+  check_item_validation(10, false);
+  check_item_validation(10, true);
+
+  check_item_validation(9, false);
+  check_item_validation(9, true);
+
+  check_item_validation(std::nullopt, true);
+  check_item_validation(std::nullopt, true);
+
+  check_item_validation(11, false);
+  check_item_validation(11, true);
+  check_item_validation(std::nullopt, true);
+  check_item_validation(std::nullopt, true);
+
+  EXPECT_TRUE(
+      std::get<ValidationModeData>(validation_mode_data).check_all_consumed());
 }
+
 } // namespace hogd

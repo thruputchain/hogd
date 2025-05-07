@@ -29,7 +29,7 @@ SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
     return nullptr;
   }
 
-  auto it = blocks_.upper_bound(search_start_index);
+  auto it = blocks_.lower_bound(search_start_index);
   if (it != blocks_.end()) {
     return it->second.get();
   }
@@ -58,7 +58,7 @@ SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
 SystemStatus<const RetrocausalQueueBlock *>
 SnapshotStorageItem::get_next_rcq_block(uint64_t search_start_block)
 {
-  // Only valid for RCQ items
+  // This method is only valid for RCQ items
   if (!std::holds_alternative<RetrocausalQueueEntry>(entry_)) {
     return nullptr;
   }

@@ -6,7 +6,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <utility>
 #include <variant>
 #include <vector>
