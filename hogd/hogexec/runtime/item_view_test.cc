@@ -180,7 +180,7 @@ TEST_F(ItemViewTest, RCQRead)
   check_item(std::nullopt, true);
   check_item(std::nullopt, true);
 
-  // current behavior is to read self entries before concurrent entries
+  // behavior is to read self entries before concurrent entries
 
   server_.setup_add_concurrent_rcq_item(AddressAndKey{},
                                         make_test_queue_entry(8));
@@ -206,12 +206,12 @@ TEST_F(ItemViewTest, RCQRead)
   check_item(std::nullopt, true);
   check_item(std::nullopt, true);
 
-  server_.setup_add_concurrent_rcq_item(AddressAndKey{}, make_test_queue_entry(11));
+  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
+                                        make_test_queue_entry(11));
 
   check_item(11, false);
   check_item(11, true);
   check_item(std::nullopt, true);
   check_item(std::nullopt, true);
-  
 }
 } // namespace hogd

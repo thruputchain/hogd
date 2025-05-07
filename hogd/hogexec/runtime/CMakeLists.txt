@@ -41,10 +41,11 @@ add_executable(
   item_view_test.cc
   memory_access_test.cc
   native_contract_test.cc
+  runtime_test.cc
+  snapshot_storage_item_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
   userctx_test.cc
-  snapshot_storage_item_test.cc
 )
 target_link_libraries(
   runtime
@@ -77,7 +78,7 @@ target_link_libraries(
   runtime_test
   runtime
   runtime_test_util
-  GTest::gtest_main
+  GTest::gtest
 )
 gtest_discover_tests(runtime_test)
 

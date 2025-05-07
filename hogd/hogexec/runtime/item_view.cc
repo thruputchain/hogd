@@ -134,7 +134,21 @@ NNIntItem::validate() const
 
 // RetrocausalQueueItem implementation
 
-// The logic here should mirror that of advance_cursor()
+// This queue consumes entries in the following order:
+// 1. Entries from past blocks.
+// 2. self entries created within the transaction
+// 3. concurrent entries not from this transaction
+//
+// 2 and 3 can get interleaved if, for example,
+// a transaction first consumes a concurrent entry and then
+// creates a self entry.
+//
+// As a subtle point, this ordering is important for providing
+// a sensible "peek" behavior.  If I peek at the head of the queue,
+// then later, when I consume the next entry, I should logically always
+// get that same entry.  But if we swapped steps 2 and 3, then
+// the entry I peeked at might not be the same as the entry I consume
+// (since a concurrent entry might have been added in the meantime).
 HostFnStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                                     bool advance_cursor)
