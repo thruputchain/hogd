@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstring>
 #include <memory>
-#include <optional>
 #include <utility>
 #include <vector>
 
@@ -59,7 +58,6 @@ protected:
   static constexpr uint32_t kPortNumber = 12345;
   void SetUp() override
   {
-    x23::RpcLogger::default_logfd = 1;
     server_.start_server(kPortNumber);
     db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{kPortNumber});
   }
