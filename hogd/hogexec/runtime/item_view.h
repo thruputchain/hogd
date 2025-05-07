@@ -1,11 +1,15 @@
 #pragma once
 
+#include <cassert>
 #include <optional>
 #include <variant>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "retrocausal_queue.hh"
 #include "storage_item.hh"
 
 namespace hogd {
@@ -26,10 +30,8 @@ public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
 
-  constexpr static StorageItemType get_item_type()
-  {
-    return StorageItemType::kItemTypeBytestring;
-  }
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kItemTypeBytestring;
 
   Bytestring bytestring_;
 };
@@ -39,11 +41,8 @@ class NNIntItem {
 public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
-
-  constexpr static StorageItemType get_item_type()
-  {
-    return StorageItemType::kItemTypeNonnegativeInt;
-  }
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kItemTypeNonnegativeInt;
 
   int128_t base_value_;
   int128_t add_value_;
@@ -59,10 +58,45 @@ public:
 
   constexpr static SyscallStatus<void> validate() { return {}; }
 
-  constexpr static std::optional<StorageItemType> get_item_type()
+  constexpr static std::optional<StorageItemType> kItemType = std::nullopt;
+};
+
+class RetrocausalQueueItem {
+public:
+  RetrocausalQueueItem(SnapshotStorageItem &base_item) : base_item_(base_item)
+  {}
+
+  StorageDelta get_delta() const
   {
-    return std::nullopt;
+    StorageDelta delta =
+        StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+    delta.retrocausal_queue() = queue_delta_;
+    return delta;
   }
+
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kItemTypeRetrocausalQueue;
+
+  HostFnStatus<std::optional<QueueEntry>>
+  get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
+
+  void insert_entry(QueueEntry const &entry);
+
+private:
+  SystemStatus<const RetrocausalQueueBlock *>
+  get_next_block(uint64_t search_start_index) const;
+
+  HostFnStatus<std::optional<QueueEntry>>
+  get_next_concurrent_entry(uint32_t index,
+                            ExecutionModeData &execution_mode_data) const;
+
+  const QueueEntry *get_next_self_entry(uint32_t index) const;
+
+  RetrocausalQueueDelta queue_delta_{};
+  uint32_t self_consumed_index_ = 0;
+  uint32_t locally_consumed_index_ = 0;
+
+  SnapshotStorageItem &base_item_;
 };
 
 // Represent state of an ItemView that has not been modified during
@@ -80,7 +114,7 @@ public:
 
   std::optional<StorageItemType> get_item_type() const;
 
-  const StorageItem *const base_item_;
+  SnapshotStorageItem &base_item_;
 };
 
 // Maintain the modifications of one InvocationFrame to one address.
@@ -89,17 +123,41 @@ public:
 // it.
 class ItemView {
 public:
-  ItemView(const StorageItem *base_item)
-    : delta_args_(UnmodifiedItem{.base_item_ = base_item})
+  ItemView(SnapshotStorageItem *base_item)
+    : delta_args_(UnmodifiedItem{.base_item_ = *base_item})
   {}
 
   std::optional<StorageItemType> get_item_type() const;
 
-  template<typename ItemType> const auto *get()
+  // Returns a pointer to the item view if it is of the given type,
+  // otherwise returns nullptr.
+  //
+  // Some types, like the NNInt, use a validate() method to ensure
+  // that no bad data is written.  For those types, to make sure that
+  // we do not forget to validate, we return a const pointer
+  // and thus force the caller to go through the set() method
+  // to modify the item.
+  //
+  // However, some data types, like the RetrocausalQueueItem, are
+  // nontrivially costly to copy.  The ItemView*s that are returned from
+  // InvocationFrameStack::get_item_view() are already copy-on-write (within a
+  // frame), so it is safe to modify them without worrying about frame reverts.
+  // It's still required to go through the set() method to change the type.
+  // These types cannot have a validate() method, as that nonconst interface
+  // does not allow us to statically enforce that the validate is called.
+  template<typename ItemType> auto *get()
   {
-    return std::holds_alternative<ItemType>(delta_args_)
-               ? &std::get<ItemType>(delta_args_)
-               : nullptr;
+    if constexpr (requires(ItemType const &item) { item.validate(); }) {
+      return std::holds_alternative<ItemType>(delta_args_)
+                 ? const_cast<const ItemType *>(
+                       &std::get<ItemType>(delta_args_))
+                 : nullptr;
+    }
+    else {
+      return std::holds_alternative<ItemType>(delta_args_)
+                 ? &std::get<ItemType>(delta_args_)
+                 : nullptr;
+    }
   }
 
   template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
@@ -110,7 +168,10 @@ public:
       return validate_result;
     }
 
-    auto validate_type = can_accept_type(type.get_item_type());
+    // The only item type that needs the get_item_type() method,
+    // instead of the constant, is UnmodifiedItem, which is never passed through
+    // this method anyways.
+    auto validate_type = can_accept_type(type.kItemType);
     if (!validate_type) {
       // no type mismatch; if you want to change an object's type,
       // you must explicitly delete it first.

@@ -53,6 +53,8 @@ public:
                    RetrocausalQueueBlock current_round_block);
 
   // Ctor if current block is empty
+  // The difference between this and the other ctor is that this ctor does not
+  // increment the block number.
   RetrocausalQueue(RetrocausalQueue const &parent,
                    RetrocausalQueuePastBlockConsumeDelta const &consume_delta);
 

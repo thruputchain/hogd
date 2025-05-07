@@ -3,10 +3,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
+#include <vector>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -38,9 +41,10 @@ BlockSnapshotServer::get_snapshot_item(BlockID block,
     co_return ExpectedStorageItem(RPCError::kRPCNoStorageItem);
   }
   ExpectedStorageItem out(RPCError::kRPCNone);
-  out.item() = it->second;
+  out.item() = it->second.to_wire_item();
   co_return out;
 }
+
 x23::Async<ExpectedContract>
 BlockSnapshotServer::get_contract(BlockID block,
                                   SHA256Hash const &contract_hash)
@@ -141,6 +145,46 @@ BlockSnapshotServer::start_server(uint32_t port_number)
   }(cp_, this, std::move(lfd));
 }
 
+x23::Async<ExpectedRetrocausalQueueBlock>
+BlockSnapshotServer::get_next_retrocausal_queue_block(
+    BlockID block, AddressAndKey const &addrkey, uint64_t search_start_number)
+{
+  if (block != block_id_) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
+  }
+  auto m = items_.take();
+  auto it = m->find(addrkey);
+  if (it == m->end()) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoStorageItem);
+  }
+  auto &queue = it->second.queue();
+  auto const *out = queue.try_get_next_block(search_start_number);
+  if (!out) {
+    co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoQueueEntry);
+  }
+  ExpectedRetrocausalQueueBlock blk(RPCError::kRPCNone);
+  blk.queue_block() = *out;
+  co_return blk;
+}
+
+x23::Async<ExpectedQueueEntry>
+BlockSnapshotServer::get_concurrent_retrocausal_queue_entry(
+    BlockID block, AddressAndKey const &addrkey, uint32_t index)
+{
+  auto m = concurrent_rcq_items_.take();
+  auto it = m->find(addrkey);
+  if (it == m->end()) {
+    co_return ExpectedQueueEntry(RPCError::kRPCNoQueueEntry);
+  }
+  auto &entries = it->second;
+  if (index >= entries.size()) {
+    co_return ExpectedQueueEntry(RPCError::kRPCNoQueueEntry);
+  }
+  ExpectedQueueEntry out(RPCError::kRPCNone);
+  out.queue_entry() = entries[index];
+  co_return out;
+}
+
 void
 BlockSnapshotServer::setup_create_contract(Contract const &contract)
 {
@@ -152,6 +196,27 @@ BlockSnapshotServer::setup_create_deployment(ContractAddress addr,
                                              SHA256Hash contract_hash)
 {
   deployments_->emplace(addr, contract_hash);
+}
+
+void
+BlockSnapshotServer::setup_create_item(AddressAndKey addrkey,
+                                       StorageItemWrapper item)
+{
+  items_->emplace(addrkey, std::move(item));
+}
+
+void
+BlockSnapshotServer::setup_add_concurrent_rcq_item(AddressAndKey addrkey,
+                                                   QueueEntry entry)
+{
+  auto it = concurrent_rcq_items_->find(addrkey);
+  if (it == concurrent_rcq_items_->end()) {
+    concurrent_rcq_items_->emplace(addrkey,
+                                   std::vector<QueueEntry>{std::move(entry)});
+  }
+  else {
+    it->second.push_back(entry);
+  }
 }
 
 } // namespace hogd

@@ -120,4 +120,25 @@ TEST(RetrocausalQueue, CostCountingBasic)
       (RetrocausalQueueStats{.active_block_count = 2, .active_size = 5}));
 }
 
+TEST(RetrocausalQueue, EmptyBlockInsert)
+{
+  RetrocausalQueue queue(0);
+  RetrocausalQueue queue2(
+      queue,
+      RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number =
+                                                0,
+                                            .partial_consumed_number = 0},
+      RetrocausalQueueBlock{.entries = {}, .block_number = 1});
+  auto const *blk = queue2.try_get_next_block(0);
+  ASSERT_FALSE(blk);
+
+  EXPECT_EQ(queue2.get_current_block_number(), 1);
+
+  RetrocausalQueue queue3(queue2, RetrocausalQueuePastBlockConsumeDelta{
+                                      .max_fully_consumed_block_number = 0,
+                                      .partial_consumed_number = 0});
+
+  EXPECT_EQ(queue3.get_current_block_number(), 1);
+}
+
 } // namespace hogd

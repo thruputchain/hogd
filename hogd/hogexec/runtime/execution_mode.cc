@@ -3,9 +3,12 @@
 #include <cassert>
 #include <cstddef>
 #include <optional>
+#include <utility>
 
 #include "hogd/base/types.h"
+#include "retrocausal_queue.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -55,6 +58,45 @@ ValidationModeData::consume_nondeterministic_bit()
   return out;
 }
 
+void
+ProposalModeData::log_queue_entry_observation(AddressAndKey addrkey,
+                                              uint32_t index, QueueEntry entry)
+{
+  auto &entries = queue_entry_observations_[addrkey];
+  if (entries.size() > index) {
+    assert(entries[index] == entry);
+    return;
+  }
+  // new observation: log to the entries list for this addrkey,
+  // and push to the end of the overall nondeterministic sequence
+  assert(entries.size() == index);
+  entries.emplace_back(std::move(entry));
+  proposal_data_.observed_queue_entry_sequence.emplace_back(entries.back());
+}
+
+std::optional<Nondeterministic<QueueEntry>>
+ValidationModeData::consume_queue_entry_observation(AddressAndKey addrkey,
+                                                    uint32_t index)
+{
+  auto &entries = queue_entry_observations_[addrkey];
+
+  if (index < entries.size()) {
+    // re-observing an entry
+    return entries[index];
+  }
+  // observing a new entry
+  if (next_queue_entry_index_ >=
+      proposal_data_.observed_queue_entry_sequence.size()) {
+    // validation failure -- no new entries to observe
+    return std::nullopt;
+  }
+  auto out =
+      proposal_data_.observed_queue_entry_sequence[next_queue_entry_index_];
+  next_queue_entry_index_++;
+  entries.push_back(out);
+  return out;
+}
+
 bool
 ValidationModeData::validate() const
 {
@@ -78,6 +120,11 @@ ValidationModeData::validate() const
       if ((last_byte & last_byte_mask) != 0)
         return false;
     }
+  }
+
+  if (next_queue_entry_index_ !=
+      proposal_data_.observed_queue_entry_sequence.size()) {
+    return false;
   }
 
   return true;
