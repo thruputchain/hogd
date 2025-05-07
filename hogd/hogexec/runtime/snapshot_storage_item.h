@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -140,6 +141,8 @@ private:
       return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
                           DeletedEntry>{std::in_place_type<DeletedEntry>};
     }
+    assert(false);
+    std::unreachable();
   }
 
   std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry, DeletedEntry>
