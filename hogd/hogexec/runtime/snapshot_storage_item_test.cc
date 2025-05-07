@@ -11,6 +11,7 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogd/hogexec/runtime/test_util/queue_util.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
@@ -22,37 +23,6 @@
 #include "x23/vec.h"
 
 namespace hogd {
-
-namespace {
-QueueEntry
-make_test_queue_entry(uint8_t value)
-{
-  return {value};
-}
-
-RetrocausalQueue
-add_queue_block(RetrocausalQueue const &parent, x23::Vec<QueueEntry> entries)
-{
-  return RetrocausalQueue(
-      parent,
-      RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number =
-                                                0,
-                                            .partial_consumed_number = 0},
-      RetrocausalQueueBlock{.entries = std::move(entries),
-                            .block_number =
-                                parent.get_current_block_number() + 1});
-}
-
-RetrocausalQueue
-make_queue(std::vector<x23::Vec<QueueEntry>> const &blocks)
-{
-  RetrocausalQueue queue(0);
-  for (auto const &block : blocks) {
-    queue = add_queue_block(queue, block);
-  }
-  return queue;
-}
-} // namespace
 
 class SnapshotStorageItemTest : public ::testing::Test {
 protected:

@@ -1,6 +1,7 @@
 add_library(
   runtime_test_util
   block_snapshot_server.cc
+  queue_util.cc
 )
 
 add_dependencies(

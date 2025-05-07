@@ -163,8 +163,21 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
 
     if (advance_cursor) {
       size_t blk_size = next_block->entries.size();
-      assert(queue_delta_.consume->past_block_consume.partial_consumed_number <
-             blk_size);
+      assert(!queue_delta_.consume ||
+             queue_delta_.consume->past_block_consume.partial_consumed_number <
+                 blk_size);
+      if (!queue_delta_.consume) {
+        assert(next_block->block_number > 0);
+        queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
+            .past_block_consume =
+                {
+                    .max_fully_consumed_block_number =
+                        0, // can be 0, if we don't consume a full block
+                    .partial_consumed_number = 0,
+                },
+            .current_block_consumed = {},
+        });
+      }
       queue_delta_.consume->past_block_consume.partial_consumed_number++;
 
       if (queue_delta_.consume->past_block_consume.partial_consumed_number ==

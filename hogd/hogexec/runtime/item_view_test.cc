@@ -1,15 +1,19 @@
+#include <gtest/gtest.h>
+
 #include <cassert>
 #include <cstring>
 #include <memory>
 #include <optional>
-
-#include <gtest/gtest.h>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogd/hogexec/runtime/test_util/queue_util.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -40,6 +44,13 @@ protected:
     return std::make_unique<SnapshotStorageItem>(
         StorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
         BlockID{1}, *db_proxy_);
+  }
+
+  std::unique_ptr<SnapshotStorageItem> make_rcq_item()
+  {
+    return std::make_unique<SnapshotStorageItem>(
+        StorageItem(StorageItemType::kItemTypeRetrocausalQueue),
+        AddressAndKey{}, BlockID{1}, *db_proxy_);
   }
 };
 
@@ -117,6 +128,56 @@ TEST_F(ItemViewTest, NNIntSetAddValidation)
 
   EXPECT_TRUE(proxy.set(NNIntItem(0, 0)));
   EXPECT_FALSE(proxy.set(NNIntItem(0, -1)));
+}
+
+TEST_F(ItemViewTest, RCQRead)
+{
+  auto item = make_rcq_item();
+  auto rcq_item = RetrocausalQueueItem(*item);
+
+  // set up data in db to read
+  auto queue = make_queue({{make_test_queue_entry(1)},
+                           {make_test_queue_entry(2), make_test_queue_entry(3)},
+                           {},
+                           {make_test_queue_entry(4), make_test_queue_entry(5)},
+                           {},
+                           {},
+                           {make_test_queue_entry(6)},
+                           {},
+                           {}});
+
+  server_.setup_create_item(AddressAndKey{},
+                            StorageItemWrapper(std::move(queue)));
+  ExecutionModeData execution_mode_data = ProposalModeData();
+
+  auto check_item = [&](std::optional<uint8_t> const &expected_entry,
+                        bool advance_cursor) {
+    auto r = rcq_item.get_next_item(execution_mode_data, advance_cursor);
+    ASSERT_TRUE(r.has_value());
+    if (expected_entry) {
+      ASSERT_TRUE(r.value().has_value());
+      EXPECT_EQ(r.value().value(),
+                make_test_queue_entry(expected_entry.value()));
+    }
+    else {
+      EXPECT_FALSE(r.value());
+    }
+  };
+
+  check_item(1, false);
+  check_item(1, false);
+  check_item(1, false);
+  check_item(1, true);
+  check_item(2, false);
+  check_item(2, false);
+  check_item(2, true);
+  check_item(3, false);
+  check_item(3, true);
+  check_item(4, true);
+  check_item(5, false);
+  check_item(5, true);
+  check_item(6, true);
+  check_item(std::nullopt, true);
 }
 
 } // namespace hogd

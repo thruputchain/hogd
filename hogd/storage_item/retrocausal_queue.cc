@@ -87,7 +87,10 @@ RetrocausalQueue::apply_consume_delta(
 
   if (delta.partial_consumed_number > 0) {
     assert(it != blocks_.end());
+    assert(it->second->block_.block_number >
+           delta.max_fully_consumed_block_number);
     auto new_entries = x23::Vec<QueueEntry>{};
+    assert(it->second->block_.entries.size() > delta.partial_consumed_number);
     new_entries.reserve(it->second->block_.entries.size() -
                         delta.partial_consumed_number);
     for (auto i = delta.partial_consumed_number;
