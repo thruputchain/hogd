@@ -6,7 +6,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -30,21 +29,8 @@ public:
   // Construct from a StorageItem (by value)
   explicit SnapshotStorageItem(StorageItem item, AddressAndKey addrkey,
                                BlockID block_id, DatabaseProxy &db_proxy)
-    : entry_([&item] -> std::variant<BytestringEntry, NNIntEntry,
-                                     RetrocausalQueueEntry> {
-        switch (item.type()) {
-        case StorageItemType::kItemTypeBytestring:
-          return BytestringEntry{std::move(item.bytestring())};
-        case StorageItemType::kItemTypeNonnegativeInt:
-          return NNIntEntry{from_xdr(item.nnint())};
-        case StorageItemType::kItemTypeRetrocausalQueue:
-          return RetrocausalQueueEntry();
-        default:
-          assert(false);
-          throw std::runtime_error("should never get kDeleted from database");
-        }
-      }()),
-      addrkey_(addrkey), block_id_(block_id), db_proxy_(db_proxy)
+    : entry_(make_variant(std::move(item))), addrkey_(addrkey),
+      block_id_(block_id), db_proxy_(db_proxy)
   {}
 
   // Delete copy and move
@@ -91,26 +77,63 @@ private:
         StorageItemType::kItemTypeNonnegativeInt;
   };
 
+  // StorageSnapshotCache caches negative lookups as a DeletedEntry,
+  // instead of a nullptr, because deleted entries might still be created
+  // in this block and then we need to be able to have
+  // the nondeterministic queue entry available for the address.
+  struct DeletedEntry {
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kItemTypeDeleted;
+  };
+
   class RetrocausalQueueEntry {
   public:
     RetrocausalQueueEntry() = default;
+
+    RetrocausalQueueEntry(RetrocausalQueueEntry const &) = delete;
+    RetrocausalQueueEntry &operator=(RetrocausalQueueEntry const &) = delete;
+    RetrocausalQueueEntry(RetrocausalQueueEntry &&) = delete;
+    RetrocausalQueueEntry &operator=(RetrocausalQueueEntry &&) = delete;
+
     constexpr static StorageItemType kItemType =
         StorageItemType::kItemTypeRetrocausalQueue;
 
     // only returns from past blocks
-    const RetrocausalQueueBlock *
+    SystemStatus<const RetrocausalQueueBlock *>
     get_next_block(DatabaseProxy &db_proxy, BlockID block_id,
-                   AddressAndKey const &addrkey,
-                   uint64_t search_start_index) const;
+                   AddressAndKey const &addrkey, uint64_t search_start_index);
 
   private:
     std::map<uint64_t, std::unique_ptr<RetrocausalQueueBlock>> blocks_;
-    uint64_t max_observed_block_number_ = 0;
     // no need to repeatedly query for blocks above this number.
     std::optional<uint64_t> block_number_upper_bound_ = std::nullopt;
   };
 
-  std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry> entry_;
+  static std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
+                      DeletedEntry>
+  make_variant(StorageItem item)
+  {
+    switch (item.type()) {
+    case StorageItemType::kItemTypeBytestring:
+      return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
+                          DeletedEntry>{std::in_place_type<BytestringEntry>,
+                                        std::move(item.bytestring())};
+    case StorageItemType::kItemTypeNonnegativeInt:
+      return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
+                          DeletedEntry>{std::in_place_type<NNIntEntry>,
+                                        from_xdr(item.nnint())};
+    case StorageItemType::kItemTypeRetrocausalQueue:
+      return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
+                          DeletedEntry>{
+          std::in_place_type<RetrocausalQueueEntry>};
+    case StorageItemType::kItemTypeDeleted:
+      return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
+                          DeletedEntry>{std::in_place_type<DeletedEntry>};
+    }
+  }
+
+  std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry, DeletedEntry>
+      entry_;
   const AddressAndKey addrkey_;
 
   const BlockID block_id_;

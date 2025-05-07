@@ -42,7 +42,12 @@ ItemView::get_item_type() const
 {
   return std::visit(
       [](auto const &v) -> std::optional<StorageItemType> {
-        return v.get_item_type();
+        if constexpr (requires { v.kItemType; }) {
+          return v.kItemType;
+        }
+        else {
+          return v.get_item_type();
+        }
       },
       delta_args_);
 }
@@ -262,12 +267,13 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     return HostFnError{HostFnErrorCode::kHostValidationFailure};
   }
   if (bit_res->get()) {
-    auto res = validation_data.get_queue_entry_observation(base_item_.addrkey(),
-                                                           index);
+    auto res =
+        validation_data.consume_queue_entry_observation(base_item_.addrkey(),
+                                                        index);
     if (!res.has_value()) {
       return HostFnError{HostFnErrorCode::kHostValidationFailure};
     }
-    return *res;
+    return res.value().get();
   }
   return {std::nullopt};
 }

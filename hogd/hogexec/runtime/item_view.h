@@ -30,10 +30,8 @@ public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
 
-  constexpr static StorageItemType get_item_type()
-  {
-    return StorageItemType::kItemTypeBytestring;
-  }
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kItemTypeBytestring;
 
   Bytestring bytestring_;
 };
@@ -43,11 +41,8 @@ class NNIntItem {
 public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
-
-  constexpr static StorageItemType get_item_type()
-  {
-    return StorageItemType::kItemTypeNonnegativeInt;
-  }
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kItemTypeNonnegativeInt;
 
   int128_t base_value_;
   int128_t add_value_;
@@ -63,10 +58,7 @@ public:
 
   constexpr static SyscallStatus<void> validate() { return {}; }
 
-  constexpr static std::optional<StorageItemType> get_item_type()
-  {
-    return std::nullopt;
-  }
+  constexpr static std::optional<StorageItemType> kItemType = std::nullopt;
 };
 
 class RetrocausalQueueItem {
@@ -84,10 +76,8 @@ public:
 
   constexpr static SyscallStatus<void> validate() { return {}; }
 
-  constexpr static StorageItemType get_item_type()
-  {
-    return StorageItemType::kItemTypeRetrocausalQueue;
-  }
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kItemTypeRetrocausalQueue;
 
   HostFnStatus<std::optional<QueueEntry>>
   get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
@@ -109,9 +99,6 @@ private:
   uint32_t locally_consumed_index_ = 0;
 
   SnapshotStorageItem &base_item_;
-
-  // StorageSnapshotCacheEntry const *queue_snapshot_cache_entry_;
-  // NondeterministicReadCacheEntry &nondeterministic_read_cache_entry_;
 };
 
 // Represent state of an ItemView that has not been modified during
@@ -159,7 +146,10 @@ public:
       return validate_result;
     }
 
-    auto validate_type = can_accept_type(type.get_item_type());
+    // The only item type that needs the get_item_type() method,
+    // instead of the constant, is UnmodifiedItem, which is never passed through
+    // this method anyways.
+    auto validate_type = can_accept_type(type.kItemType);
     if (!validate_type) {
       // no type mismatch; if you want to change an object's type,
       // you must explicitly delete it first.

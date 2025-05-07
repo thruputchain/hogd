@@ -1,16 +1,52 @@
+#include <cassert>
 #include <cstring>
+#include <memory>
 #include <optional>
 
 #include <gtest/gtest.h>
 
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/item_view.h"
+#include "hogd/hogexec/runtime/snapshot_storage_item.h"
+#include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
+#include "types.hh"
+#include "x23/event.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
-TEST(ItemView, Exists)
+class ItemViewTest : public ::testing::Test {
+protected:
+  static constexpr uint32_t kPortNumber = 12345;
+  void SetUp() override
+  {
+    server_.start_server(kPortNumber);
+    db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{kPortNumber});
+  }
+
+  BlockSnapshotServer server_ = BlockSnapshotServer(1);
+
+  x23::ThreadPool pool_ = x23::ThreadPool(2);
+  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
+
+  std::unique_ptr<DatabaseProxy> db_proxy_;
+
+  std::unique_ptr<SnapshotStorageItem> make_empty_item()
+  {
+    assert(db_proxy_);
+    return std::make_unique<SnapshotStorageItem>(
+        StorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{},
+        BlockID{1}, *db_proxy_);
+  }
+};
+
+TEST_F(ItemViewTest, Exists)
 {
-  ItemView proxy(nullptr);
+  auto item = make_empty_item();
+  ItemView proxy(item.get());
   EXPECT_FALSE(proxy.get_item_type());
 
   Bytestring bytes{0, 1, 2, 3};
@@ -26,9 +62,10 @@ TEST(ItemView, Exists)
   EXPECT_EQ(*proxy.get_item_type(), StorageItemType::kItemTypeBytestring);
 }
 
-TEST(ItemView, SetBytestring)
+TEST_F(ItemViewTest, SetBytestring)
 {
-  ItemView proxy(nullptr);
+  auto item = make_empty_item();
+  ItemView proxy(item.get());
 
   Bytestring bytes{0, 1, 2, 3}, bytes2{3, 2, 1, 0},
       bytes_long(kBytestringMaxLen + 10, 0);
@@ -47,9 +84,10 @@ TEST(ItemView, SetBytestring)
   EXPECT_EQ(get_res->bytestring_, bytes2);
 }
 
-TEST(ItemView, NNIntSetAddPositiveSet)
+TEST_F(ItemViewTest, NNIntSetAddPositiveSet)
 {
-  ItemView proxy(nullptr);
+  auto item = make_empty_item();
+  ItemView proxy(item.get());
 
   ASSERT_FALSE(proxy.template get<NNIntItem>());
   EXPECT_TRUE(proxy.set(NNIntItem(100, 10)));
@@ -63,9 +101,10 @@ TEST(ItemView, NNIntSetAddPositiveSet)
   EXPECT_FALSE(proxy.template get<BytestringItem>());
 }
 
-TEST(ItemView, NNIntSetAddValidation)
+TEST_F(ItemViewTest, NNIntSetAddValidation)
 {
-  ItemView proxy(nullptr);
+  auto item = make_empty_item();
+  ItemView proxy(item.get());
   ASSERT_FALSE(proxy.template get<NNIntItem>());
 
   EXPECT_TRUE(proxy.set(NNIntItem(100, -10)));

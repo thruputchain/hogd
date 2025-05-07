@@ -20,9 +20,8 @@ namespace hogd {
 //
 // Initialize manually with database snapshot state.
 //
-// Eventually, once the DB is merged in, this will get replaced
-// by a full mock database.  But that code is pending @abelay merging
-// things.
+// Eventually, once the DB is merged in, this may get replaced
+// by a full mock database.
 class BlockSnapshotServer {
 public:
   using rpc_service = DatabaseToExecutorInterfaceV1;

@@ -55,6 +55,40 @@ ValidationModeData::consume_nondeterministic_bit()
   return out;
 }
 
+void
+ProposalModeData::log_queue_entry_observation(AddressAndKey addrkey,
+                                              uint32_t index, QueueEntry entry)
+{
+  auto &entries = queue_entry_observations_[addrkey];
+  if (entries.size() > index) {
+    assert(entries[index] == entry);
+    return;
+  }
+  assert(entries.size() == index);
+  entries.push_back(entry);
+}
+
+std::optional<Nondeterministic<QueueEntry>>
+ValidationModeData::consume_queue_entry_observation(AddressAndKey addrkey,
+                                                    uint32_t index)
+{
+  auto &entries = queue_entry_observations_[addrkey];
+
+  if (index < entries.size()) {
+    // re-observing an entry
+    return entries[index];
+  }
+  // observing a new entry
+  if (next_queue_entry_index_ >= entries.size()) {
+    // validation failure -- no new entries to observe
+    return std::nullopt;
+  }
+  auto out = entries[next_queue_entry_index_];
+  next_queue_entry_index_++;
+  entries.push_back(out);
+  return out;
+}
+
 bool
 ValidationModeData::validate() const
 {
@@ -78,6 +112,11 @@ ValidationModeData::validate() const
       if ((last_byte & last_byte_mask) != 0)
         return false;
     }
+  }
+
+  if (next_queue_entry_index_ !=
+      proposal_data_.observed_queue_entry_sequence.size()) {
+    return false;
   }
 
   return true;

@@ -18,6 +18,7 @@ add_library(
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
+  snapshot_storage_item.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
