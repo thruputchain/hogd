@@ -39,6 +39,16 @@ public:
   SnapshotStorageItem(SnapshotStorageItem &&) = delete;
   SnapshotStorageItem &operator=(SnapshotStorageItem &&) = delete;
 
+  // We choose not to expose a queue() method,
+  // instead wrapping calls to the queue in these methods.
+  // This is because we might reasonably read from concurrent rcq entries,
+  // even if the snapshot item is not a rcq item (it might be empty, or have
+  // been deleted and then created as a queue this block).  As such, the
+  // nondeterministic concurrent queue reads can't be stored in the variant, and
+  // data structures that lazily load the queue have to be stored outside the
+  // variant.  So it's easier (and slightly less memory) to wrap accesses in
+  // these methods, rather than storing the same data access parameters in and
+  // out of the variant.
   SystemStatus<const RetrocausalQueueBlock *>
   get_next_rcq_block(uint64_t search_start_block);
   SystemStatus<Nondeterministic<std::optional<QueueEntry>>>

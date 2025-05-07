@@ -63,12 +63,17 @@ public:
   bool validate() const;
 
   // Consumes and returns the next nondeterministic bit from the proposal
-  // Returns nullopt if no more bits are available
+  // Returns nullopt if no more bits are available (which is a validation
+  // failure)
   std::optional<Nondeterministic<bool>> consume_nondeterministic_bit();
+
+  // Consumes and returns the next nondeterministic queue entry from the
+  // proposal Returns nullopt if no more queue entries are available (which is a
+  // validation failure)
   std::optional<Nondeterministic<QueueEntry>>
   consume_queue_entry_observation(AddressAndKey addrkey, uint32_t index);
 
-  // Returns true if all proposal bits have been consumed
+  // Returns true if entirety of the nondeterministic data has been consumed
   bool check_all_consumed() const;
 
 private:
