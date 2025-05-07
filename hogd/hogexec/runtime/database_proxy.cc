@@ -130,13 +130,13 @@ DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp,
     }())
 {}
 
-x23::Async<SystemStatus<std::unique_ptr<const StorageItem>>>
+x23::Async<SystemStatus<std::optional<StorageItem>>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
   auto res = co_await read_client_.get_snapshot_item(block_id, addrkey);
-  co_return to_system_error_code<StorageItem, nullptr>(
+  co_return to_system_error_code<StorageItem, std::nullopt>(
       res, [](StorageItem &&x) {
-        return std::make_unique<StorageItem>(std::move(x));
+        return std::make_optional<StorageItem>(std::move(x));
       });
 }
 

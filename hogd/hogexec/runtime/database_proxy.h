@@ -39,7 +39,7 @@ public:
   DatabaseProxy(DatabaseProxy &&) = delete;
   DatabaseProxy &operator=(DatabaseProxy &&) = delete;
 
-  x23::Async<SystemStatus<std::unique_ptr<const StorageItem>>>
+  x23::Async<SystemStatus<std::optional<StorageItem>>>
   get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey);
   x23::Async<SystemStatus<std::shared_ptr<const Contract>>>
   get_contract(BlockID block_id, SHA256Hash const &contract_hash);

@@ -285,14 +285,15 @@ SystemCallHandler::get_bytestring(StorageKey const &storage_key)
   }
 
   if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    if (!unmodified_item->base_item_) {
+    if (unmodified_item->base_item_.type() ==
+        StorageItemType::kItemTypeDeleted) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_item_->type() !=
+    if (unmodified_item->base_item_.type() !=
         StorageItemType::kItemTypeBytestring) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
-    return std::as_bytes(std::span(unmodified_item->base_item_->bytestring()));
+    return std::as_bytes(std::span(unmodified_item->base_item_.bytestring()));
   }
 
   return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
@@ -331,14 +332,15 @@ SystemCallHandler::get_nnint(StorageKey const &storage_key)
   }
 
   if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    if (!unmodified_item->base_item_) {
+    if (unmodified_item->base_item_.type() ==
+        StorageItemType::kItemTypeDeleted) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_item_->type() !=
+    if (unmodified_item->base_item_.type() !=
         StorageItemType::kItemTypeNonnegativeInt) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
-    return {std::make_pair(from_xdr(unmodified_item->base_item_->nnint()), 0)};
+    return {std::make_pair(unmodified_item->base_item_.nnint(), 0)};
   }
 
   return SyscallError{SyscallErrorCode::kInvalidSyscallInput};

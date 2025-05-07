@@ -1,11 +1,15 @@
 #pragma once
 
+#include <cassert>
 #include <optional>
 #include <variant>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "retrocausal_queue.hh"
 #include "storage_item.hh"
 
 namespace hogd {
@@ -65,6 +69,51 @@ public:
   }
 };
 
+class RetrocausalQueueItem {
+public:
+  RetrocausalQueueItem(SnapshotStorageItem &base_item) : base_item_(base_item)
+  {}
+
+  StorageDelta get_delta() const
+  {
+    StorageDelta delta =
+        StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+    delta.retrocausal_queue() = queue_delta_;
+    return delta;
+  }
+
+  constexpr static SyscallStatus<void> validate() { return {}; }
+
+  constexpr static StorageItemType get_item_type()
+  {
+    return StorageItemType::kItemTypeRetrocausalQueue;
+  }
+
+  HostFnStatus<std::optional<QueueEntry>>
+  get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
+
+  void insert_entry(QueueEntry const &entry);
+
+private:
+  SystemStatus<const RetrocausalQueueBlock *>
+  get_next_block(uint64_t search_start_index) const;
+
+  HostFnStatus<std::optional<QueueEntry>>
+  get_next_concurrent_entry(uint32_t index,
+                            ExecutionModeData &execution_mode_data) const;
+
+  const QueueEntry *get_next_self_entry(uint32_t index) const;
+
+  RetrocausalQueueDelta queue_delta_{};
+  uint32_t self_consumed_index_ = 0;
+  uint32_t locally_consumed_index_ = 0;
+
+  SnapshotStorageItem &base_item_;
+
+  // StorageSnapshotCacheEntry const *queue_snapshot_cache_entry_;
+  // NondeterministicReadCacheEntry &nondeterministic_read_cache_entry_;
+};
+
 // Represent state of an ItemView that has not been modified during
 // the current transaction.
 // Should never be created outside of ItemView, but might be
@@ -80,7 +129,7 @@ public:
 
   std::optional<StorageItemType> get_item_type() const;
 
-  const StorageItem *const base_item_;
+  SnapshotStorageItem &base_item_;
 };
 
 // Maintain the modifications of one InvocationFrame to one address.
@@ -89,8 +138,8 @@ public:
 // it.
 class ItemView {
 public:
-  ItemView(const StorageItem *base_item)
-    : delta_args_(UnmodifiedItem{.base_item_ = base_item})
+  ItemView(SnapshotStorageItem *base_item)
+    : delta_args_(UnmodifiedItem{.base_item_ = *base_item})
   {}
 
   std::optional<StorageItemType> get_item_type() const;

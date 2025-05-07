@@ -8,6 +8,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -46,7 +47,7 @@ public:
   try_get_contract_by_hash(SHA256Hash const &hash);
   SystemStatus<std::optional<SHA256Hash>>
   try_get_deployed_contract_hash(ContractAddress const &addr);
-  SystemStatus<const StorageItem *>
+  SystemStatus<SnapshotStorageItem *>
   try_get_snapshot_item(AddressAndKey const &addrkey);
 
 private:
@@ -57,7 +58,7 @@ private:
   // Neither does the deployment cache
   SynchronizedMap<ContractAddress, std::optional<SHA256Hash>> deployment_cache_;
 
-  SynchronizedMap<AddressAndKey, std::unique_ptr<const StorageItem>>
+  SynchronizedMap<AddressAndKey, std::unique_ptr<SnapshotStorageItem>>
       snapshot_item_cache_;
 
   const BlockID block_id_;
