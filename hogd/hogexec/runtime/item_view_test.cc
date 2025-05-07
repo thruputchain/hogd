@@ -205,5 +205,13 @@ TEST_F(ItemViewTest, RCQRead)
 
   check_item(std::nullopt, true);
   check_item(std::nullopt, true);
+
+  server_.setup_add_concurrent_rcq_item(AddressAndKey{}, make_test_queue_entry(11));
+
+  check_item(11, false);
+  check_item(11, true);
+  check_item(std::nullopt, true);
+  check_item(std::nullopt, true);
+  
 }
 } // namespace hogd
