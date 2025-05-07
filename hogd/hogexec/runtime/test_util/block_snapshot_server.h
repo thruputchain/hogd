@@ -73,6 +73,7 @@ public:
   void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr, SHA256Hash contract_hash);
   void setup_create_item(AddressAndKey addrkey, StorageItemWrapper item);
+  void setup_add_concurrent_rcq_item(AddressAndKey addrkey, QueueEntry entry);
 
 private:
   BlockID block_id_;
@@ -83,6 +84,8 @@ private:
   x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
   x23::MVar<std::unordered_map<SHA256Hash, Contract>> contracts_;
   x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>> deployments_;
+  x23::MVar<std::unordered_map<AddressAndKey, std::vector<QueueEntry>>>
+      concurrent_rcq_items_;
 };
 
 static_assert(

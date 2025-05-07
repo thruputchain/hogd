@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -131,4 +132,44 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
   check_get_block(5, 7, {make_test_queue_entry(6)});
 }
 
+TEST_F(SnapshotStorageItemTest, RCQGetConcurrentEntries)
+{
+
+  SnapshotStorageItem test_item(StorageItem(
+                                    StorageItemType::kItemTypeRetrocausalQueue),
+                                AddressAndKey{}, BlockID{1}, *db_proxy_);
+  auto check_concurrent_entry =
+      [&](uint32_t index, std::optional<QueueEntry> const &expected_entry) {
+        auto entry = test_item.get_concurrent_rcq_entry(index);
+        ASSERT_TRUE(entry.has_value());
+        EXPECT_EQ(entry.value().get(), expected_entry);
+      };
+
+  check_concurrent_entry(0, std::nullopt);
+  check_concurrent_entry(1, std::nullopt);
+
+  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
+                                        make_test_queue_entry(1));
+  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
+                                        make_test_queue_entry(2));
+  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
+                                        make_test_queue_entry(3));
+
+  check_concurrent_entry(0, make_test_queue_entry(1));
+  check_concurrent_entry(1, make_test_queue_entry(2));
+  check_concurrent_entry(2, make_test_queue_entry(3));
+  check_concurrent_entry(3, std::nullopt);
+
+  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
+                                        make_test_queue_entry(4));
+  server_.setup_add_concurrent_rcq_item(AddressAndKey{},
+                                        make_test_queue_entry(5));
+
+  check_concurrent_entry(0, make_test_queue_entry(1));
+  check_concurrent_entry(1, make_test_queue_entry(2));
+  check_concurrent_entry(2, make_test_queue_entry(3));
+  check_concurrent_entry(3, make_test_queue_entry(4));
+  check_concurrent_entry(4, make_test_queue_entry(5));
+  check_concurrent_entry(5, std::nullopt);
+}
 } // namespace hogd

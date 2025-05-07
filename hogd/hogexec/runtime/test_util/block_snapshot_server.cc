@@ -8,6 +8,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -169,7 +170,18 @@ x23::Async<ExpectedQueueEntry>
 BlockSnapshotServer::get_concurrent_retrocausal_queue_entry(
     BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
-  co_return ExpectedQueueEntry(RPCError::kRPCUnimplemented);
+  auto m = concurrent_rcq_items_.take();
+  auto it = m->find(addrkey);
+  if (it == m->end()) {
+    co_return ExpectedQueueEntry(RPCError::kRPCNoQueueEntry);
+  }
+  auto &entries = it->second;
+  if (index >= entries.size()) {
+    co_return ExpectedQueueEntry(RPCError::kRPCNoQueueEntry);
+  }
+  ExpectedQueueEntry out(RPCError::kRPCNone);
+  out.queue_entry() = entries[index];
+  co_return out;
 }
 
 void
@@ -190,6 +202,19 @@ BlockSnapshotServer::setup_create_item(AddressAndKey addrkey,
                                        StorageItemWrapper item)
 {
   items_->emplace(addrkey, std::move(item));
+}
+
+void
+BlockSnapshotServer::setup_add_concurrent_rcq_item(AddressAndKey addrkey,
+                                                   QueueEntry entry)
+{
+  auto it = concurrent_rcq_items_->find(addrkey);
+  if (it == concurrent_rcq_items_->end()) {
+    concurrent_rcq_items_->emplace(addrkey, std::vector<QueueEntry>{entry});
+  }
+  else {
+    it->second.push_back(entry);
+  }
 }
 
 } // namespace hogd
