@@ -172,7 +172,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   auto const *next_block = next_block_status.value();
 
   if (next_block) {
-    assert(next_block->entries.size() > 0);
+    assert(!next_block->entries.empty());
     assert(partial_consume_quantity < next_block->entries.size());
 
     if (advance_cursor) {
@@ -274,8 +274,11 @@ RetrocausalQueueItem::get_next_concurrent_entry(
     auto &rcq_entry = out.value();
 
     if (rcq_entry.get().has_value()) {
+      // NOLINTBEGIN(bugprone-unchecked-optional-access)
       proposal_data.log_queue_entry_observation(base_item_.addrkey(), index,
                                                 {*rcq_entry.get()});
+      // NOLINTEND(bugprone-unchecked-optional-access)
+
       proposal_data.log_nondeterministic_bit({true});
     }
     else {
