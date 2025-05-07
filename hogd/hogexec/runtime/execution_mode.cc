@@ -3,9 +3,12 @@
 #include <cassert>
 #include <cstddef>
 #include <optional>
+#include <utility>
 
 #include "hogd/base/types.h"
+#include "retrocausal_queue.hh"
 #include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -64,8 +67,11 @@ ProposalModeData::log_queue_entry_observation(AddressAndKey addrkey,
     assert(entries[index] == entry);
     return;
   }
+  // new observation: log to the entries list for this addrkey,
+  // and push to the end of the overall nondeterministic sequence
   assert(entries.size() == index);
-  entries.push_back(entry);
+  entries.emplace_back(std::move(entry));
+  proposal_data_.observed_queue_entry_sequence.emplace_back(entries.back());
 }
 
 std::optional<Nondeterministic<QueueEntry>>
@@ -79,11 +85,12 @@ ValidationModeData::consume_queue_entry_observation(AddressAndKey addrkey,
     return entries[index];
   }
   // observing a new entry
-  if (next_queue_entry_index_ >= entries.size()) {
+  if (next_queue_entry_index_ >=
+      proposal_data_.observed_queue_entry_sequence.size()) {
     // validation failure -- no new entries to observe
     return std::nullopt;
   }
-  auto out = entries[next_queue_entry_index_];
+  auto out = proposal_data_.observed_queue_entry_sequence[next_queue_entry_index_];
   next_queue_entry_index_++;
   entries.push_back(out);
   return out;
