@@ -13,4 +13,5 @@ target_link_libraries(
   runtime_test_util
   hogd
   protocol
+  storage_item
 )

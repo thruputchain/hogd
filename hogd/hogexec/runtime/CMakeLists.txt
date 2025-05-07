@@ -44,6 +44,7 @@ add_executable(
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
   userctx_test.cc
+  snapshot_storage_item_test.cc
 )
 target_link_libraries(
   runtime

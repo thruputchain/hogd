@@ -90,7 +90,8 @@ ValidationModeData::consume_queue_entry_observation(AddressAndKey addrkey,
     // validation failure -- no new entries to observe
     return std::nullopt;
   }
-  auto out = proposal_data_.observed_queue_entry_sequence[next_queue_entry_index_];
+  auto out =
+      proposal_data_.observed_queue_entry_sequence[next_queue_entry_index_];
   next_queue_entry_index_++;
   entries.push_back(out);
   return out;

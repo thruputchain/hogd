@@ -6,6 +6,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -59,24 +60,19 @@ public:
   x23::Async<ExpectedDeployment>
   get_deployment(BlockID block, ContractAddress const &contract_address);
 
-  static x23::Async<ExpectedRetrocausalQueueBlock>
+  x23::Async<ExpectedRetrocausalQueueBlock>
   get_next_retrocausal_queue_block(BlockID block, AddressAndKey const &addrkey,
-                                   uint64_t search_start_number)
-  {
-    co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCUnimplemented);
-  }
+                                   uint64_t search_start_number);
 
-  static x23::Async<ExpectedQueueEntry> get_concurrent_retrocausal_queue_entry(
-      BlockID block, AddressAndKey const &addrkey, uint32_t index)
-  {
-    co_return ExpectedQueueEntry(RPCError::kRPCUnimplemented);
-  }
+  x23::Async<ExpectedQueueEntry> get_concurrent_retrocausal_queue_entry(
+      BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
   void start_server(uint32_t port_number);
 
   // Only used within test setup
   void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr, SHA256Hash contract_hash);
+  void setup_create_item(AddressAndKey addrkey, StorageItemWrapper item);
 
 private:
   BlockID block_id_;
@@ -84,7 +80,7 @@ private:
   x23::ThreadPool pool_ = x23::ThreadPool(2);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
-  x23::MVar<std::unordered_map<AddressAndKey, StorageItem>> items_;
+  x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
   x23::MVar<std::unordered_map<SHA256Hash, Contract>> contracts_;
   x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>> deployments_;
 };

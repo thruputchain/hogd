@@ -121,7 +121,8 @@ TEST(ExecutionModeTest, QueueEntryObservations)
   ValidationModeData validation(proposal.proposal_data());
   // Test assumes that the observations are in the same order as the proposal
 
-  auto check_consume = [&](AddressAndKey addrkey, uint32_t index, const QueueEntry& expected) {
+  auto check_consume = [&](AddressAndKey addrkey, uint32_t index,
+                           const QueueEntry &expected) {
     auto res = validation.consume_queue_entry_observation(addrkey, index);
     ASSERT_TRUE(res);
     EXPECT_EQ(res->get(), expected);
