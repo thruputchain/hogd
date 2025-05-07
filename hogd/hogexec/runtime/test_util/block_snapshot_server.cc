@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
+#include <vector>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -210,7 +211,8 @@ BlockSnapshotServer::setup_add_concurrent_rcq_item(AddressAndKey addrkey,
 {
   auto it = concurrent_rcq_items_->find(addrkey);
   if (it == concurrent_rcq_items_->end()) {
-    concurrent_rcq_items_->emplace(addrkey, std::vector<QueueEntry>{entry});
+    concurrent_rcq_items_->emplace(addrkey,
+                                   std::vector<QueueEntry>{std::move(entry)});
   }
   else {
     it->second.push_back(entry);

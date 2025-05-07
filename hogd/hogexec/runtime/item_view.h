@@ -74,8 +74,6 @@ public:
     return delta;
   }
 
-  constexpr static SyscallStatus<void> validate() { return {}; }
-
   constexpr static StorageItemType kItemType =
       StorageItemType::kItemTypeRetrocausalQueue;
 
@@ -131,11 +129,35 @@ public:
 
   std::optional<StorageItemType> get_item_type() const;
 
-  template<typename ItemType> const auto *get()
+  // Returns a pointer to the item view if it is of the given type,
+  // otherwise returns nullptr.
+  //
+  // Some types, like the NNInt, use a validate() method to ensure
+  // that no bad data is written.  For those types, to make sure that
+  // we do not forget to validate, we return a const pointer
+  // and thus force the caller to go through the set() method
+  // to modify the item.
+  //
+  // However, some data types, like the RetrocausalQueueItem, are
+  // nontrivially costly to copy.  The ItemView*s that are returned from
+  // InvocationFrameStack::get_item_view() are already copy-on-write (within a
+  // frame), so it is safe to modify them without worrying about frame reverts.
+  // It's still required to go through the set() method to change the type.
+  // These types cannot have a validate() method, as that nonconst interface
+  // does not allow us to statically enforce that the validate is called.
+  template<typename ItemType> auto *get()
   {
-    return std::holds_alternative<ItemType>(delta_args_)
-               ? &std::get<ItemType>(delta_args_)
-               : nullptr;
+    if constexpr (requires(ItemType const &item) { item.validate(); }) {
+      return std::holds_alternative<ItemType>(delta_args_)
+                 ? static_cast<const ItemType *>(
+                       &std::get<ItemType>(delta_args_))
+                 : nullptr;
+    }
+    else {
+      return std::holds_alternative<ItemType>(delta_args_)
+                 ? &std::get<ItemType>(delta_args_)
+                 : nullptr;
+    }
   }
 
   template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
