@@ -196,7 +196,18 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   // otherwise, nothing in past block to consume.  Try current block.
   assert(partial_consume_quantity == 0);
 
-  // Step 2: try to consume concurrent entries not from this transaction
+  // Step 2: look to consume entries created within the transaction
+  auto const *self_consume_res = get_next_self_entry(self_consumed_index_);
+
+  if (self_consume_res) {
+    if (advance_cursor) {
+      ++self_consumed_index_;
+      queue_delta_.consume->current_block_consumed.push_back(*self_consume_res);
+    }
+    return {*self_consume_res};
+  }
+
+  // Step 3: try to consume concurrent entries not from this transaction
   auto concurrent_entry =
       get_next_concurrent_entry(locally_consumed_index_, execution_mode_data);
   if (!concurrent_entry.has_value()) {
@@ -214,17 +225,6 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
     // NOLINTEND(bugprone-unchecked-optional-access)
 
     return {concurrent_entry};
-  }
-
-  // Step 3: look to consume entries created within the transaction
-  auto const *self_consume_res = get_next_self_entry(self_consumed_index_);
-
-  if (self_consume_res) {
-    if (advance_cursor) {
-      ++self_consumed_index_;
-      queue_delta_.consume->current_block_consumed.push_back(*self_consume_res);
-    }
-    return {*self_consume_res};
   }
 
   // Step 4: nothing to consume
