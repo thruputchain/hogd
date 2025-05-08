@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstring>
 #include <optional>
-#include <print>
 #include <span>
 #include <type_traits>
 
@@ -71,7 +70,6 @@ read_unaligned(const void *ptr)
   else {
     std::memcpy(&value, ptr, sizeof(T));
   }
-  std::println("read_unaligned: size {}", sizeof(T));
   return value;
 }
 

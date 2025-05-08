@@ -39,9 +39,12 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
   auto status =
       syscall_handler.deploy_contract(input_nonce, input_contract_hash);
   if (!status) {
-    return {status.error().code(), 0};
+    return {status.error().to_host_fn_error(), 0};
   }
-  output_deployed_address = *status;
+  if (!status.value()) {
+    return {status.value().error().code(), 0};
+  }
+  output_deployed_address = *status.value();
 
   return {SyscallErrorCode::kNone, 0};
 }
