@@ -149,7 +149,7 @@ InvocationFrame::get_item_view(AddressAndKey const &addrkey)
 ItemView *
 InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
 {
-  assert(modified_items_.contains(addrkey));
+  assert(!modified_items_.contains(addrkey));
   auto [iter, _] = modified_items_.emplace(addrkey, std::move(new_view));
   return &iter->second;
 }

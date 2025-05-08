@@ -33,6 +33,7 @@ add_library(
 
 add_executable(
   runtime_test
+  bytestring_test.cc
   error_handling_test.cc
   execution_mode_test.cc
   gas_api_test.cc
@@ -78,6 +79,7 @@ target_link_libraries(
   runtime_test
   runtime
   runtime_test_util
+  db_interface
   GTest::gtest
 )
 gtest_discover_tests(runtime_test)
