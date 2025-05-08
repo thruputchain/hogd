@@ -7,6 +7,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -115,6 +116,13 @@ BlockState::pop_subtransactions(TransactionID txid, uint32_t count)
 {
   auto [tx, tx_lock] = tx_manager_.get(txid);
   tx.pop_subtransactions(count);
+}
+
+Nondeterministic<std::optional<QueueEntry>>
+BlockState::get_concurrent_retrocausal_queue_entry(AddressAndKey const &addrkey,
+                                                   uint32_t index)
+{
+  return storage_view_.get_concurrent_retrocausal_queue_entry(addrkey, index);
 }
 
 } // namespace hogd

@@ -16,6 +16,7 @@
 #include "hogd/storage_item/storage_item_delta_manager.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/storage_item/storage_lock_util.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -151,6 +152,13 @@ public:
   int128_t commit_storage_delta(AddressAndKey const &addrkey,
                                 StorageDelta const &delta,
                                 MeteredStorageLock const &lock);
+
+  // Read the (nondeterministically indexed) index-th entry of the retrocausal
+  // queue, from the entries of the current block. Returns nullopt if there is
+  // no such entry (yet).
+  Nondeterministic<std::optional<QueueEntry>>
+  get_concurrent_retrocausal_queue_entry(AddressAndKey const &addrkey,
+                                         uint32_t index);
 
   void commit_contract_create(Contract const &contract);
   void commit_contract_deploy(ContractAddress const &addr,

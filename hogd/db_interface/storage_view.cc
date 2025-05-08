@@ -227,4 +227,18 @@ StorageView::commit_contract_deploy(ContractAddress const &addr,
   contract_deployments_->emplace(addr, contract_hash);
 }
 
+Nondeterministic<std::optional<QueueEntry>>
+StorageView::get_concurrent_retrocausal_queue_entry(
+    AddressAndKey const &addrkey, uint32_t index)
+{
+  assert(!closed_);
+
+  auto [item, ul] = modified_items_.find(addrkey);
+  if (item) {
+    return item->get_concurrent_retrocausal_queue_entry(index);
+  }
+
+  return std::nullopt;
+}
+
 } // namespace hogd
