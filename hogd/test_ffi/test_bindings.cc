@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <print>
 #include <span>
@@ -16,6 +17,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
@@ -54,7 +56,13 @@ advance_new_block(void *db) noexcept
 void *
 open_runtime_context() noexcept
 {
-  auto *out = new std::shared_ptr<hogd::MockRuntimeContext>();
+  std::shared_ptr<hogd::MockRuntimeContext> *out;
+  try {
+    out = new std::shared_ptr<hogd::MockRuntimeContext>();
+  } catch (std::exception const &e) {
+    std::println("error creating runtime context: {}", e.what());
+    return nullptr;
+  }
   *out = std::make_shared<hogd::MockRuntimeContext>(
       make_hogexec_context(RuntimeEngine::kWasmi));
   return out;
@@ -111,14 +119,21 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
   } catch (x23::XdrBadInput const &e) {
     return nullptr;
   }
-
-  return new SyscallHandlerContext(*runtime_context, stx, *db_context);
+  try {
+    auto *out = static_cast<void *>(
+        new SyscallHandlerContext(*runtime_context, stx, *db_context));
+    std::println("created syscall handler context {}", out);
+    return out;
+  } catch (std::exception const &e) {
+    std::println("error creating syscall handler context: {}", e.what());
+    return nullptr;
+  }
 }
 
 void
 close_syscall_handler(void *syscall_handler) noexcept
 {
-  std::println("closing syscall handler{}", syscall_handler);
+  std::println("closing syscall handler {}", syscall_handler);
   delete static_cast<SyscallHandlerContext *>(syscall_handler);
 }
 
@@ -264,6 +279,12 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
 {
   return hogd::mock_syscall_entrypoint(syscall, arg1, arg2, arg3, arg4, arg5,
                                        arg6);
+}
+
+void
+enable_syscall_logging()
+{
+  hogd::syscall_logfd = 1;
 }
 
 #ifdef __cplusplus

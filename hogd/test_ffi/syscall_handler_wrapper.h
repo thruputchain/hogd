@@ -154,9 +154,11 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     // message.
     if (syscall_logfd != -1) {
       auto log_string =
+          "Syscall " + x23::show(Syscall) + " input: " +
           x23::show(make_syscall_input_struct<InputArg>(std::tuple{
               SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                  std::get<Is>(parsed_args))...}));
+                  std::get<Is>(parsed_args))...})) +
+          "\n";
       write(syscall_logfd, log_string.c_str(), log_string.size());
     }
 
@@ -197,13 +199,17 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
         log_string = std::format("Syscall Error: {} {}",
                                  HostFnErrorCategory{}.message(
                                      std::to_underlying(host_fn_code)),
-                                 x23::show(SyscallErrorCode(syscall_code)));
+                                 x23::show(SyscallErrorCode(syscall_code))) +
+                     "\n";
       }
       else {
-        log_string = x23::show(
-            make_syscall_output_struct<InputArg, OutputArg>(std::tuple{
+        log_string =
+            "Syscall " + x23::show(Syscall) + " output: " +
+            x23::show(make_syscall_output_struct<InputArg,
+                                                 OutputArg>(std::tuple{
                 SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                    std::get<Is>(parsed_args))...}));
+                    std::get<Is>(parsed_args))...})) +
+            "\n";
       }
       write(syscall_logfd, log_string.c_str(), log_string.size());
     }
