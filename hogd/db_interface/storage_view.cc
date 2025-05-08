@@ -16,6 +16,7 @@
 #include "hogd/storage_item/storage_item_delta_manager.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/storage_item/storage_lock_util.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -225,6 +226,20 @@ StorageView::commit_contract_deploy(ContractAddress const &addr,
 {
   assert(!closed_);
   contract_deployments_->emplace(addr, contract_hash);
+}
+
+Nondeterministic<std::optional<QueueEntry>>
+StorageView::get_concurrent_retrocausal_queue_entry(
+    AddressAndKey const &addrkey, uint32_t index)
+{
+  assert(!closed_);
+
+  auto [item, ul] = modified_items_.find(addrkey);
+  if (item) {
+    return item->get_concurrent_retrocausal_queue_entry(index);
+  }
+
+  return std::nullopt;
 }
 
 } // namespace hogd

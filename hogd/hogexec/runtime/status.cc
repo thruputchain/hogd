@@ -24,6 +24,7 @@ SystemErrorCategory::message(int code) const
     return "kValidationFailure";
   default:
     assert(false);
+    std::unreachable();
   }
 }
 

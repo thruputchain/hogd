@@ -226,7 +226,7 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
                                                .contract_hash = contract_hash});
 }
 
-SyscallStatus<ContractAddress>
+SystemStatus<SyscallStatus<ContractAddress>>
 SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
@@ -236,7 +236,12 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   // This causes a load of the contract to the cache,
   // but this is in most cases no-cost, as a deployed contract will _probably_
   // be immediately invoked with e.g. a constructor
-  auto load_contract = snapshot_cache_.try_get_contract_by_hash(contract_hash);
+  auto load_contract_status =
+      snapshot_cache_.try_get_contract_by_hash(contract_hash);
+  if (!load_contract_status) {
+    return load_contract_status.error();
+  }
+  auto &load_contract = *load_contract_status;
 
   if (!load_contract) {
     // try loading from local context
@@ -251,8 +256,12 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
-  if (snapshot_cache_.try_get_deployed_contract_hash(deploy_addr)) {
-    // Contract has been deployed to query address in a previous block
+  auto deploy_check_status =
+      snapshot_cache_.try_get_deployed_contract_hash(deploy_addr);
+  if (!deploy_check_status) {
+    return deploy_check_status.error();
+  }
+  if (*deploy_check_status) {
     return SyscallError{SyscallErrorCode::kContractAlreadyDeployed};
   }
 

@@ -4,13 +4,13 @@
 #include <cstdlib>
 #include <memory>
 
-#include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/db_interface/block_manager.h"
+#include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
-#include "types.hh"
 #include "x23/event.h"
 #include "x23/threadpool.h"
 
@@ -33,13 +33,18 @@ public:
 
   // Allows direct modification of the committed database -- not for use
   // within a contract, just within setup.
-  auto &get_snapshot_server() { return snapshot_server_; }
+  auto &get_base_db() { return db_; }
+  auto &get_block_manager() { return block_manager_; }
+
+  BlockID get_current_block_id() const { return current_block_id_; }
 
 private:
   x23::ThreadPool pool_;
   x23::CoroPoll cp_;
   BlockID current_block_id_ = 0;
-  BlockSnapshotServer snapshot_server_;
+  InMemoryDatabase db_;
+  BlockManager block_manager_;
+  DbExecutorServer executor_server_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;
 };

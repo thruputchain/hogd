@@ -105,6 +105,7 @@ struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
       return HostFnError{HostFnErrorCode::kHostValidationFailure};
     }
     assert(false);
+    std::unreachable();
   }
 
   InvokeError to_invoke_error() const
@@ -118,6 +119,7 @@ struct SystemError : public EnumError<SystemErrorCode, SystemErrorCategory> {
       return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
     }
     assert(false);
+    std::unreachable();
   }
 };
 
