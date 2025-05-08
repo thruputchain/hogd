@@ -116,8 +116,8 @@ DbExecutorServer::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
     co_return ExpectedStorageItem(RPCError::kRPCBadBlockID);
   }
 
-  auto item =
-      block_data->get_snapshot_view()->get_post_block_storage_item(addrkey);
+  auto const *item =
+      block_data->get_snapshot_view()->get_snapshot_storage_item(addrkey);
   if (!item) {
     co_return ExpectedStorageItem(RPCError::kRPCNoStorageItem);
   }
@@ -163,7 +163,7 @@ DbExecutorServer::get_contract(BlockID block, SHA256Hash const &contract_hash)
   }
 
   auto contract =
-      block_data->get_snapshot_view()->get_post_block_contract(contract_hash);
+      block_data->get_snapshot_view()->get_snapshot_contract(contract_hash);
   if (!contract) {
     co_return ExpectedContract(RPCError::kRPCContractNotExist);
   }
@@ -183,7 +183,7 @@ DbExecutorServer::get_deployment(BlockID block,
     co_return ExpectedDeployment(RPCError::kRPCBadBlockID);
   }
 
-  auto hash = block_data->get_snapshot_view()->get_post_block_deployment(
+  auto hash = block_data->get_snapshot_view()->get_snapshot_deployment(
       contract_address);
   if (!hash) {
     co_return ExpectedDeployment(RPCError::kRPCNoContractDeployed);
@@ -205,8 +205,8 @@ DbExecutorServer::get_next_retrocausal_queue_block(BlockID block,
     co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
   }
 
-  auto item =
-      block_data->get_snapshot_view()->get_post_block_storage_item(addrkey);
+  auto const *item =
+      block_data->get_snapshot_view()->get_snapshot_storage_item(addrkey);
   if (!item) {
     co_return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoStorageItem);
   }

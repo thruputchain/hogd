@@ -26,6 +26,63 @@
 namespace hogd {
 
 class InMemoryDatabase;
+class ParentBlockView;
+
+// A read-only view of the database state that is not modified by the current
+// block.
+class SnapshotStorageView {
+public:
+  // Disable move and copy
+  SnapshotStorageView(SnapshotStorageView const &) = delete;
+  SnapshotStorageView &operator=(SnapshotStorageView const &) = delete;
+  SnapshotStorageView(SnapshotStorageView &&) = delete;
+  SnapshotStorageView &operator=(SnapshotStorageView &&) = delete;
+
+  // the value of the item, before any modifications of the current block are
+  // applied. Should not be called after the block is closed.
+  //
+  // Returns the pointer, not a shared_ptr, as callers of this
+  // (generally RPC read methods) will not need ownership of the item.
+  const StorageItemWrapper *
+  get_snapshot_storage_item(AddressAndKey const &addrkey);
+
+  // Methods relevant for contracts
+  // TODO(geoff): is there a cleaner way to manage this than
+  // just method duplication?
+  // Read from snapshot data, not data created by concurrent operations.
+  // Should not be called after the block is closed.
+  std::optional<SHA256Hash>
+  get_snapshot_deployment(ContractAddress const &addr);
+  std::shared_ptr<const Contract> get_snapshot_contract(SHA256Hash const &hash);
+
+protected:
+  // Lookup committed item from parent StorageView or from parent database.
+  std::shared_ptr<const StorageItemWrapper>
+  get_parent_storage_item(AddressAndKey const &addrkey);
+
+  SnapshotStorageView(InMemoryDatabase *root_db) : parent_view_(root_db) {}
+  SnapshotStorageView(ParentBlockView *parent_view) : parent_view_(parent_view)
+  {}
+
+  SynchronizedMap<AddressAndKey, StorageItemDeltaManager> modified_items_;
+  InvalidStateFlag invalid_state_flag_;
+
+  // simple impl, for now
+  x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>
+      contract_deployments_;
+  x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
+      contract_creates_;
+
+  // Does NOT own the parent StorageView.
+  // The ParentBlockView is owned by BlockState and might be freed at any time
+  // (after unlink_parent is called).  As such, the ParentBlockView pointer
+  // should never be exposed outside of this interface. It is always accessed
+  // while mtx_ is held (in shared mode). unlink_parent acquires the mutex in
+  // exclusive mode, so by the time unlink_parent returns, any pending accesses
+  // to the parent_view_ have finished.
+  std::shared_mutex mtx_;
+  std::variant<ParentBlockView *, InMemoryDatabase *> parent_view_;
+};
 
 // Maintains one consistent view of the database state for a single block.
 // Manages concurrent modifications (via try_reserve deltas) of transactions
@@ -49,7 +106,7 @@ class InMemoryDatabase;
 // Closing this block enables calling as_parent(), which produces a
 // ParentBlockView that does not provide methods to modify storage,
 // but does provide methods to read the state of storage _after_ that block.
-class ParentBlockView {
+class ParentBlockView : protected SnapshotStorageView {
 public:
   // Disable move and copy
   ParentBlockView(ParentBlockView const &) = delete;
@@ -73,49 +130,19 @@ public:
   bool is_closed() const { return closed_; }
 
 protected:
-  ParentBlockView(InMemoryDatabase *root_db) : parent_view_(root_db) {}
-  ParentBlockView(ParentBlockView *parent_view) : parent_view_(parent_view) {}
+  template<typename... Args>
+  ParentBlockView(Args... args)
+    : SnapshotStorageView(std::forward<Args>(args)...)
+  {}
 
-  // the value of the item, before any modifications of the current block are
-  // applied. Should not be called after the block is closed.
-  //
-  // Returns the pointer, not a shared_ptr, as callers of this
-  // (generally RPC read methods) will not need ownership of the item.
-  const StorageItemWrapper *
-  get_snapshot_storage_item(AddressAndKey const &addrkey);
+  auto get_parent_storage_item(AddressAndKey const &addrkey)
+      -> std::shared_ptr<const StorageItemWrapper>
+  {
+    assert(closed_);
+    return SnapshotStorageView::get_parent_storage_item(addrkey);
+  }
 
-  // Methods relevant for contracts
-  // TODO(geoff): is there a cleaner way to manage this than
-  // just method duplication?
-  // Read from snapshot data, not data created by concurrent operations.
-  // Should not be called after the block is closed.
-  std::optional<SHA256Hash>
-  get_snapshot_deployment(ContractAddress const &addr);
-  std::shared_ptr<const Contract> get_snapshot_contract(SHA256Hash const &hash);
-
-  // Lookup committed item from parent StorageView or from parent database.
-  std::shared_ptr<const StorageItemWrapper>
-  get_parent_storage_item(AddressAndKey const &addrkey);
-
-  SynchronizedMap<AddressAndKey, StorageItemDeltaManager> modified_items_;
-  InvalidStateFlag invalid_state_flag_;
   bool closed_ = false;
-
-  // simple impl, for now
-  x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>
-      contract_deployments_;
-  x23::MVar<std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>>
-      contract_creates_;
-
-  // Does NOT own the parent StorageView.
-  // The ParentBlockView is owned by BlockState and might be freed at any time
-  // (after unlink_parent is called).  As such, the ParentBlockView pointer
-  // should never be exposed outside of this interface. It is always accessed
-  // while mtx_ is held (in shared mode). unlink_parent acquires the mutex in
-  // exclusive mode, so by the time unlink_parent returns, any pending accesses
-  // to the parent_view_ have finished.
-  std::shared_mutex mtx_;
-  std::variant<ParentBlockView *, InMemoryDatabase *> parent_view_;
 };
 
 // A StorageView extends a ParentBlockView with methods to modify the database.
@@ -142,6 +169,8 @@ public:
     assert(closed_);
     return this;
   }
+
+  SnapshotStorageView *as_snapshot() { return this; }
 
   std::optional<MeteredStorageLock>
   try_reserve_storage_delta(AddressAndKey const &addrkey,

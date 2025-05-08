@@ -25,12 +25,10 @@
 namespace hogd {
 
 const StorageItemWrapper *
-ParentBlockView::get_snapshot_storage_item(AddressAndKey const &addrkey)
+SnapshotStorageView::get_snapshot_storage_item(AddressAndKey const &addrkey)
 {
-  assert(!closed_);
-
   {
-    // Check modified items first
+    // Check cache of modified items first
     auto [item, ul] = modified_items_.find(addrkey);
 
     if (item)
@@ -47,9 +45,8 @@ ParentBlockView::get_snapshot_storage_item(AddressAndKey const &addrkey)
 }
 
 std::shared_ptr<const StorageItemWrapper>
-ParentBlockView::get_parent_storage_item(AddressAndKey const &addrkey)
+SnapshotStorageView::get_parent_storage_item(AddressAndKey const &addrkey)
 {
-  assert(closed_);
   std::shared_lock lk(mtx_);
   return std::visit(
       [&addrkey](auto *parent) {
@@ -164,7 +161,7 @@ StorageView::commit_to_database()
 }
 
 std::optional<SHA256Hash>
-ParentBlockView::get_snapshot_deployment(ContractAddress const &addr)
+SnapshotStorageView::get_snapshot_deployment(ContractAddress const &addr)
 {
   std::shared_lock lock(mtx_);
   return std::visit(
@@ -173,7 +170,7 @@ ParentBlockView::get_snapshot_deployment(ContractAddress const &addr)
 }
 
 std::shared_ptr<const Contract>
-ParentBlockView::get_snapshot_contract(SHA256Hash const &hash)
+SnapshotStorageView::get_snapshot_contract(SHA256Hash const &hash)
 {
   std::shared_lock lock(mtx_);
   return std::visit(

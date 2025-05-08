@@ -69,7 +69,7 @@ public:
                               SHA256Hash const &contract_hash);
 
   // parent block view is a read-only view of storage items.
-  auto *get_snapshot_view() { return storage_view_.as_parent(); }
+  auto *get_snapshot_view() { return storage_view_.as_snapshot(); }
 
   // WARNING: nondeterministic
   Nondeterministic<std::optional<QueueEntry>>
