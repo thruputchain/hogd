@@ -1,5 +1,6 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 
+#include <cassert>
 #include <cstdlib>
 #include <memory>
 
@@ -10,20 +11,30 @@
 namespace hogd {
 
 DBContext::DBContext(uint32_t db_read_port)
-  : pool_(2), cp_(pool_), snapshot_server_(current_block_id_),
-    db_proxy_(nullptr), snapshot_cache_(nullptr)
+  : pool_(2), cp_(pool_), block_manager_(current_block_id_, &db_),
+    executor_server_(&block_manager_), db_proxy_(nullptr),
+    snapshot_cache_(nullptr)
 {
-  snapshot_server_.start_server(db_read_port);
+  executor_server_.start_server(db_read_port);
   db_proxy_ =
       std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
                                                            db_read_port});
-  snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(current_block_id_, *db_proxy_);
+
+  advance_new_block();
 }
 
 void
 DBContext::advance_new_block()
 {
+  if (current_block_id_ > 0) {
+    auto b = block_manager_.get_block_data(current_block_id_);
+    assert(b);
+    b->close_block();
+  }
+
+  [[maybe_unused]] auto res =
+      block_manager_.add_child(current_block_id_, current_block_id_ + 1);
+  assert(res);
   current_block_id_++;
   snapshot_cache_ =
       std::make_unique<StorageSnapshotCache>(current_block_id_, *db_proxy_);

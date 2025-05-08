@@ -14,6 +14,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
@@ -212,7 +213,10 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     }
   }
 
-  db_cast->get_snapshot_server().setup_create_contract(std::move(contract));
+  auto h = sha256(contract);
+
+  db_cast->get_base_db().write_contract(h, std::make_shared<hogd::Contract>(
+                                               std::move(contract)));
   return 0;
 }
 
@@ -230,8 +234,7 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
   hogd::ContractAddress addr;
   std::memcpy(addr.data(), deployment_addr, addr.size());
 
-  db_cast->get_snapshot_server().setup_create_deployment(std::move(addr),
-                                                         std::move(h));
+  db_cast->get_base_db().write_deployment(std::move(addr), std::move(h));
   return 0;
 }
 
