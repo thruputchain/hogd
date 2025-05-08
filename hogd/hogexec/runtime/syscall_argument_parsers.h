@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include <optional>
+#include <print>
 #include <span>
 #include <type_traits>
 
@@ -19,9 +20,9 @@ namespace hogd {
 
 template<typename T> class WritableOutput {
 public:
-  WritableOutput(std::optional<T> value, void *ptr)
-    : value_(std::move(value)), original_pointer_(ptr)
-  {}
+  WritableOutput(void *ptr) : value_(T{}), original_pointer_(ptr) {}
+
+  WritableOutput() : value_(std::nullopt), original_pointer_(nullptr) {}
 
   T &get()
   {
@@ -70,6 +71,7 @@ read_unaligned(const void *ptr)
   else {
     std::memcpy(&value, ptr, sizeof(T));
   }
+  std::println("read_unaligned: size {}", sizeof(T));
   return value;
 }
 
@@ -79,11 +81,9 @@ WritableOutput<T>
 check_user_argument(std::span<std::byte> contract_memory, uint64_t user_offset)
 {
   if (!check_memory_range(contract_memory.size(), user_offset, sizeof(T))) {
-    return WritableOutput<T>(std::nullopt, nullptr);
+    return WritableOutput<T>();
   }
-  return WritableOutput<T>(read_unaligned<T>(contract_memory.data() +
-                                             user_offset),
-                           contract_memory.data() + user_offset);
+  return WritableOutput<T>(contract_memory.data() + user_offset);
 }
 
 template<typename T>
@@ -93,7 +93,7 @@ check_user_argument_mock(uint64_t user_offset)
 {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   auto *ptr = reinterpret_cast<void *>(user_offset);
-  return WritableOutput<T>(read_unaligned<T>(ptr), ptr);
+  return WritableOutput<T>(ptr);
 }
 
 template<typename T>
