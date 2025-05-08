@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -63,15 +64,19 @@ make_native_contract(uint32_t contract_id)
 }
 } // namespace
 
-TEST_F(BytestringTest, ReadBytestring)
+TEST_F(BytestringTest, ReadWriteBytestring)
 {
   // A native contract with the following methods:
   // 0: takes the input calldata and writes it to a hardcoded storage key.
+  // 1: Reads the bytestring from the hardcoded storage key and returns it.
+  // 2: Invokes method 0 and then method 1, checking that the written value is
+  // read correctly.
   auto native_contract_0 = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+             std::println("Invoke 0");
              auto const &calldata = handler.get_calldata();
              auto key = StorageKey{};
              auto res =
@@ -81,6 +86,73 @@ TEST_F(BytestringTest, ReadBytestring)
                return res.error().to_invoke_error();
              }
              if (!res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return 0;
+           }},
+          {1,
+           [](SystemCallHandler &handler,
+              NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+             auto key = StorageKey{};
+             auto res = handler.get_bytestring(key);
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             if (!res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             ReturnBuffer out;
+             out.resize(res.value().value().size());
+             std::memcpy(out.data(), res.value().value().data(),
+                         res.value().value().size());
+
+             handler.set_return_buffer(std::move(out));
+             return 0;
+           }},
+          {2,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+             auto calldata = handler.get_calldata();
+
+             auto [r0, _g0] =
+                 handler.invoke(Invocation{.invoked_address =
+                                               handler.get_current_address(),
+                                           .method = 0,
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = calldata},
+                                runtime.get_available_gas());
+
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             auto [r1, _g1] =
+                 handler.invoke(Invocation{.invoked_address =
+                                               handler.get_current_address(),
+                                           .method = 1,
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+                                runtime.get_available_gas());
+
+             if (!r1.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             auto returned_buffer = handler.get_return_buffer();
+             if (!returned_buffer.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             auto const &returned_buffer_data = returned_buffer.value();
+
+             if (returned_buffer_data->size() != calldata.size()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             if (std::memcmp(returned_buffer_data->data(), calldata.data(),
+                             calldata.size()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -104,7 +176,7 @@ TEST_F(BytestringTest, ReadBytestring)
           .tx =
               Transaction{
                   .invocation = Invocation{.invoked_address = ContractAddress{},
-                                           .method = 0,
+                                           .method = 2,
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {0, 1, 2, 3, 4, 5}},
               }},
