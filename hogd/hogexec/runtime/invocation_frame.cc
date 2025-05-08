@@ -34,6 +34,12 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &frame)
         new_contract_deployments_.emplace(addr, hash);
     assert(inserted_new);
   }
+
+  // transfer modified items from child frame to current frame
+  for (auto &[addr, item] : frame.modified_items_) {
+    modified_items_.erase(addr);
+    modified_items_.emplace(addr, std::move(item));
+  }
 }
 
 void
@@ -77,7 +83,6 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
   // The wasm stack is reset automatically).
   if (result.should_frame_revert()) {
     assert(!frame_stack_.empty());
-
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {

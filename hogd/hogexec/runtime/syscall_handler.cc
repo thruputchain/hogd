@@ -123,6 +123,7 @@ void
 SystemCallHandler::commit_last_call_frame_success(InvocationFrame &frame)
 {
   committed_logs_ = frame.extract_logs();
+  modified_items_ = frame.extract_modified_items();
 }
 
 SyscallStatus<const ReturnBuffer *>

@@ -12,6 +12,7 @@
 
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -47,6 +48,10 @@ public:
   // current call frame.
   void log(std::span<const std::byte> message);
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
+  std::unordered_map<AddressAndKey, ItemView> extract_modified_items()
+  {
+    return std::move(modified_items_);
+  }
 
   // returned pointer is invalidated by any call to add_item_view
   ItemView *get_item_view(AddressAndKey const &addrkey);

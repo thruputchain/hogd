@@ -11,6 +11,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
+#include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "syscall.hh"
@@ -120,6 +121,7 @@ private:
 
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;
+  std::unordered_map<AddressAndKey, ItemView> modified_items_;
 
   StorageSnapshotCache &snapshot_cache_;
 
