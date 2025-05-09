@@ -100,6 +100,10 @@ SystemCallHandler::try_commit_transaction()
   std::atomic<bool> failed = false;
   x23::MVar<std::optional<SystemError>> error = std::nullopt;
 
+  if (pending_ops == 0) {
+    cb();
+  }
+
   for (auto const &[addrkey, item_view] : modified_items_) {
     [](AddressAndKey const &addrkey, ItemView const &item_view,
        auto &pending_ops, auto &cb, PerTransactionDatabaseProxy &db_proxy,
