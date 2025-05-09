@@ -306,9 +306,10 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
   // 0: Performs a bytestring write of "hello".
   // 1: Performs a bytestring write of "world".
   // 2: Invokes method 0, in a try_invoke frame.  Then invokes method 1, in
-  // another try_invoke frame. (sequential try invokes) 3: Invokes method 0, in
-  // a try_invoke frame.  Then returns an error. 4: Invokes method 3, in a
-  // regular frame.  Then invokes method 1, in a try_invoke frame.
+  // another try_invoke frame. (sequential try invokes)
+  // 3: Invokes method 0, in a try_invoke frame.  Then returns an error.
+  // 4: Invokes method 3, in a regular frame.  Then invokes method 1, in a
+  // try_invoke frame.
   auto native_contract_0 = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
