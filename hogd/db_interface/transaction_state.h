@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <atomic>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -93,9 +94,23 @@ public:
   std::pair<TransactionState &, std::unique_lock<std::mutex>>
   get(TransactionID txid);
 
+  // Returns the number of new transactions created.
+  uint64_t new_transaction_count() const { return new_transaction_count_.load(std::memory_order_acquire); }
+  uint64_t closed_transaction_count() const { return closed_transaction_count_.load(std::memory_order_acquire); }
+
+  // Call when a transaction is committed or aborted.
+  void increment_closed() { closed_transaction_count_.fetch_add(1, std::memory_order_release); }
+
+  // Asserts that all opened transactions have been committed or aborted.
+  void assert_all_closed() const {
+    assert(new_transaction_count() == closed_transaction_count());
+  }
+
 private:
   using TransactionStateMap = SynchronizedMap<TransactionID, TransactionState>;
   TransactionStateMap tx_states_;
+  std::atomic<uint64_t> new_transaction_count_{0};
+  std::atomic<uint64_t> closed_transaction_count_{0};
 };
 
 } // namespace hogd

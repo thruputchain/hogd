@@ -75,6 +75,7 @@ BlockState::commit_transaction(TransactionID txid)
       storage_view_.revert_storage_lock(addr, lock.lock_);
     }
   }
+  tx_manager_.increment_closed();
 }
 
 void
@@ -87,6 +88,7 @@ BlockState::abort_transaction(TransactionID txid)
     auto const &[_, lock] = entry;
     storage_view_.revert_storage_lock(addr, lock.lock_);
   }
+  tx_manager_.increment_closed();
 }
 
 void
@@ -123,6 +125,13 @@ BlockState::get_concurrent_retrocausal_queue_entry(AddressAndKey const &addrkey,
                                                    uint32_t index)
 {
   return storage_view_.get_concurrent_retrocausal_queue_entry(addrkey, index);
+}
+
+void
+BlockState::close_block()
+{
+  storage_view_.close_block();
+  tx_manager_.assert_all_closed();
 }
 
 } // namespace hogd

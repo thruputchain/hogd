@@ -78,7 +78,7 @@ public:
 
   bool has_bad_item() const { return storage_view_.has_bad_item(); }
 
-  void close_block() { storage_view_.close_block(); }
+  void close_block();
   bool is_closed() const { return storage_view_.is_closed(); }
 
   void push_subtransaction(TransactionID txid);
