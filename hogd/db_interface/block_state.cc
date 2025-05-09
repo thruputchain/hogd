@@ -43,7 +43,7 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
                                       StorageDelta delta,
                                       StorageItemRPCFlagSet flags)
 {
-  assert(is_closed());
+  assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
 
   auto lock = tx.get_lock(addrkey);

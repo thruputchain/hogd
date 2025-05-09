@@ -4,7 +4,6 @@
 #include <gtest/gtest.h>
 
 #include <memory>
-#include <print>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -32,7 +31,6 @@ class BytestringTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-
     constexpr static uint32_t kPortNumber = 10000;
 
     db_executor_server_.start_server(kPortNumber);
@@ -65,8 +63,7 @@ make_native_contract(uint32_t contract_id)
 } // namespace
 
 TEST_F(BytestringTest, ReadWriteBytestring)
-{
-  // A native contract with the following methods:
+{ // A native contract with the following methods:
   // 0: takes the input calldata and writes it to a hardcoded storage key.
   // 1: Reads the bytestring from the hardcoded storage key and returns it.
   // 2: Invokes method 0 and then method 1, checking that the written value is
@@ -76,7 +73,6 @@ TEST_F(BytestringTest, ReadWriteBytestring)
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
-             std::println("Invoke 0");
              auto const &calldata = handler.get_calldata();
              auto key = StorageKey{};
              auto res =
@@ -180,11 +176,15 @@ TEST_F(BytestringTest, ReadWriteBytestring)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {0, 1, 2, 3, 4, 5}},
               }},
-      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0), runtime_context);
+      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 1, 0), runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
   ASSERT_EQ(*res.result_, 0);
+
+  auto r = handler.try_commit_transaction()();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(*r);
 }
 
 } // namespace hogd

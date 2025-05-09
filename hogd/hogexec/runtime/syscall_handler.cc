@@ -111,21 +111,24 @@ SystemCallHandler::try_commit_transaction()
       co_await db_proxy.coropoll().pool_.bg();
 
       auto delta = item_view.get_delta();
-
       if (delta) {
+        // Try to reserve the delta in the database.
         auto res = co_await db_proxy.try_reserve_delta(
             addrkey, *delta,
             std::to_underlying(StorageItemRPCFlags::kStorageNone));
 
         if (!res.has_value()) {
+          // System error: store the first error encountered.
           auto err = error.take();
           if (!err->has_value()) {
             *err = res.error();
           }
         }
-        if (!res.value().has_value()) {
+        else if (!res.value().has_value()) {
+          // Operation failed (but not a system error): mark as failed.
           failed = true;
         }
+        // TODO(geoff): storage costs here
       }
 
       auto count = pending_ops.fetch_sub(1);
