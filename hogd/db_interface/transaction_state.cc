@@ -1,5 +1,6 @@
 #include "transaction_state.h"
 
+#include <atomic>
 #include <cassert>
 #include <mutex>
 #include <optional>
@@ -88,6 +89,7 @@ TransactionStateManager::get(TransactionID txid)
   auto [state, ul] = tx_states_.find(txid);
   if (!state) {
     auto [ptr, lock] = tx_states_.insert(txid, TransactionState());
+    new_transaction_count_.fetch_add(1, std::memory_order_release);
     return {*ptr, std::move(lock)};
   }
   return {*state, std::move(ul)};

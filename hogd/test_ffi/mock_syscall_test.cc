@@ -79,7 +79,7 @@ TEST(MockSyscallTest, IntTypeTest)
       inp_1, reinterpret_cast<uint64_t>(&inp_128),
       reinterpret_cast<uint64_t>(&inp_128_by_value),
       reinterpret_cast<uint64_t>(&out_1), reinterpret_cast<uint64_t>(&out_2),
-      reinterpret_cast<uint64_t>(&out_128));
+      reinterpret_cast<uint64_t>(&out_128), 0);
   context.pop_context();
 
   ASSERT_EQ(res.panic, 0);
@@ -108,7 +108,8 @@ TEST(MockSyscallTest, SpanTest)
       mock_syscall_parser<SyscallNo::kExit, std::tuple<x23::Vec<uint8_t>>,
                           std::tuple<x23::Vec<uint8_t>>, &span_type_test>(
           reinterpret_cast<uint64_t>(inp_span.data()), inp_span.size(),
-          reinterpret_cast<uint64_t>(out_span.data()), out_span.size(), 0, 0);
+          reinterpret_cast<uint64_t>(out_span.data()), out_span.size(), 0, 0,
+          0);
   context.pop_context();
 
   ASSERT_EQ(res.panic, 0);

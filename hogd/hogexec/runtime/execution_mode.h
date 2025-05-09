@@ -48,9 +48,8 @@ class ValidationModeData {
 public:
   ValidationModeData(const ValidationModeData &) = delete;
   ValidationModeData &operator=(const ValidationModeData &) = delete;
-  ValidationModeData(ValidationModeData &&) = delete;
-  ValidationModeData &operator=(ValidationModeData &&) = delete;
-
+  ValidationModeData(ValidationModeData &&) noexcept = default;
+  ValidationModeData &operator=(ValidationModeData &&) noexcept = delete;
   // Constructs validation data with proposal to validate against
   ValidationModeData(NondeterministicProposalData proposal_data)
     : proposal_data_(std::move(proposal_data))
@@ -78,7 +77,7 @@ public:
 
 private:
   // Proposal data containing expected nondeterministic choices
-  const NondeterministicProposalData proposal_data_;
+  NondeterministicProposalData proposal_data_;
 
   // Index of next nondeterministic bit to consume from proposal
   uint32_t next_nondeterministic_bit_index_ = 0;

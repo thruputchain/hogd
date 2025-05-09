@@ -1,10 +1,12 @@
 add_xdr(
 	protocol
+	../../protocol/batch.x
 	../../protocol/contract.x
 	../../protocol/coord.x
 	../../protocol/db_coord.x
 	../../protocol/executor_to_db_rpc.x
 	../../protocol/ffi_enums.x
+	../../protocol/proposal.x
 	../../protocol/rpc_types.x
 	../../protocol/transaction.x
 	../../protocol/types.x 

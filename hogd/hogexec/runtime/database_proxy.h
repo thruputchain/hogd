@@ -66,11 +66,62 @@ public:
   x23::Async<SystemStatus<void>> abort_transaction(BlockID block_id,
                                                    TransactionID tx_id);
 
+  x23::Async<SystemStatus<void>> push_new_subtransaction(BlockID block_id,
+                                                         TransactionID tx_id);
+  x23::Async<SystemStatus<void>> pop_subtransactions(BlockID block_id,
+                                                     TransactionID tx_id,
+                                                     uint32_t count = 1);
+  x23::CoroPoll &coropoll() { return cp_; }
+
 private:
+  x23::CoroPoll &cp_;
   using read_client_t = DatabaseToExecutorInterfaceV1::client<
       x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   read_client_t read_client_;
 };
 
+// A DatabaseProxy that is scoped to a single transaction.
+class PerTransactionDatabaseProxy {
+public:
+  PerTransactionDatabaseProxy(DatabaseProxy &db_proxy, BlockID block_id,
+                              TransactionID tx_id)
+    : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
+  {}
+
+  x23::Async<SystemStatus<std::optional<int128_t>>>
+  try_reserve_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
+                    StorageItemRPCFlagSet flags)
+  {
+    return db_proxy_.try_reserve_delta(block_id_, tx_id_, addrkey, delta,
+                                       flags);
+  }
+
+  x23::Async<SystemStatus<void>> push_new_subtransaction()
+  {
+    return db_proxy_.push_new_subtransaction(block_id_, tx_id_);
+  }
+
+  x23::Async<SystemStatus<void>> pop_subtransactions(uint32_t count)
+  {
+    return db_proxy_.pop_subtransactions(block_id_, tx_id_, count);
+  }
+
+  x23::Async<SystemStatus<void>> commit_transaction()
+  {
+    return db_proxy_.commit_transaction(block_id_, tx_id_);
+  }
+
+  x23::Async<SystemStatus<void>> abort_transaction()
+  {
+    return db_proxy_.abort_transaction(block_id_, tx_id_);
+  }
+
+  x23::CoroPoll &coropoll() { return db_proxy_.coropoll(); }
+
+private:
+  DatabaseProxy &db_proxy_;
+  const BlockID block_id_;
+  const TransactionID tx_id_;
+};
 } // namespace hogd

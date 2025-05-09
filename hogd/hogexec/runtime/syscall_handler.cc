@@ -13,6 +13,8 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -22,6 +24,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -29,14 +32,15 @@ namespace hogd {
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
     SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
+    PerTransactionDatabaseProxy db_proxy, ExecutionModeData execution_mode_data,
     std::shared_ptr<RuntimeContext> runtime_context)
   : runtime_context_(std::move(runtime_context)),
-    signed_tx_(std::move(signed_tx)),
+    signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
     invocation_frame_stack_(
-        [this](InvocationFrame &last_frame) {
-          commit_last_call_frame_success(last_frame);
+        [this](InvocationFrame &&last_frame) {
+          commit_last_call_frame_success(std::move(last_frame));
         },
-        snapshot_cache),
+        snapshot_cache, db_proxy_),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
@@ -46,6 +50,7 @@ SystemCallHandler::SystemCallHandler(
       }
       return contracts;
     }()),
+    execution_mode_data_(std::move(execution_mode_data)),
     snapshot_cache_(snapshot_cache)
 {
   if (!runtime_context_) {
@@ -67,14 +72,69 @@ SystemCallHandler::root_invoke()
                         .gas_consumed_ = 0};
   }
 
-  invocation_frame_stack_.start_frame(signed_tx_.tx.invocation);
+  auto start_status =
+      invocation_frame_stack_.start_frame(signed_tx_.tx.invocation,
+                                          std::to_underlying(
+                                              InvokeFlag::kInvokeFlagNone));
+  if (!start_status.has_value()) {
+    return InvokeResult{.result_ = start_status.error().to_invoke_error(),
+                        .gas_consumed_ = 0};
+  }
+
   auto res = runtime.value()->invoke(signed_tx_.tx.invocation.method,
                                      signed_tx_.tx.invocation.gas_limit);
-  invocation_frame_stack_.finish_frame(res);
+  auto finish_status =
+      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  if (!finish_status.has_value()) {
+    return InvokeResult{.result_ = finish_status.error().to_invoke_error(),
+                        .gas_consumed_ = 0};
+  }
+  res = finish_status.value();
 
   if (!res.is_root_success())
     return res.to_root_error();
+  root_invoked_succeeded_ = true;
   return res;
+}
+
+x23::Async<SystemStatus<bool>>
+SystemCallHandler::try_commit_transaction()
+{
+  assert(!transaction_committed_);
+  if (!root_invoked_succeeded_) {
+
+    auto st = co_await db_proxy_.abort_transaction();
+    if (!st.has_value()) {
+      co_return st.error();
+    }
+
+    co_return false;
+  }
+  assert(last_frame_.has_value());
+
+  auto r = co_await last_frame_.value().try_acquire_frame_locks(db_proxy_);
+  if (!r.has_value()) {
+    co_return r.error();
+  }
+
+  bool result = r.value();
+
+  // check if any of the 2pc database operations failed
+  if (result) {
+    auto res = co_await db_proxy_.commit_transaction();
+    if (!res.has_value()) {
+      co_return res.error();
+    }
+    transaction_committed_ = true;
+    co_return true;
+  }
+
+  auto res = co_await db_proxy_.abort_transaction();
+  if (!res.has_value()) {
+    co_return res.error();
+  }
+  transaction_committed_ = true;
+  co_return false;
 }
 
 // can only be called when call_frame_stack_ is nonempty
@@ -83,7 +143,8 @@ ContractAddress
 SystemCallHandler::get_current_address() const
 {
   return invocation_frame_stack_.get_active_frame()
-      .active_invocation_.invoked_address;
+      .active_invocation()
+      .invoked_address;
 }
 
 SHA256Hash
@@ -102,7 +163,8 @@ SystemCallHandler::get_msg_sender() const
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit)
+SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
+                          InvokeFlagSet flags)
 {
   auto runtime = resolve_runtime(invocation.invoked_address);
   if (!runtime) {
@@ -112,18 +174,25 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  invocation_frame_stack_.start_frame(invocation);
+  auto start_status = invocation_frame_stack_.start_frame(invocation, flags);
+  if (!start_status.has_value()) {
+    return {start_status.error().to_host_fn_error(), 0};
+  }
   auto res = runtime.value()->invoke(invocation.method, gas_limit);
-  invocation_frame_stack_.finish_frame(res);
+  auto finish_status =
+      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  if (!finish_status.has_value()) {
+    return {finish_status.error().to_host_fn_error(), 0};
+  }
+  res = finish_status.value();
 
   return res.to_host_fn_result();
 }
 
 void
-SystemCallHandler::commit_last_call_frame_success(InvocationFrame &frame)
+SystemCallHandler::commit_last_call_frame_success(InvocationFrame &&frame)
 {
-  committed_logs_ = frame.extract_logs();
-  modified_items_ = frame.extract_modified_items();
+  last_frame_.emplace(std::move(frame));
 }
 
 SyscallStatus<const ReturnBuffer *>
@@ -200,7 +269,9 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 Calldata const &
 SystemCallHandler::get_calldata() const
 {
-  return invocation_frame_stack_.get_active_frame().active_invocation_.calldata;
+  return invocation_frame_stack_.get_active_frame()
+      .active_invocation()
+      .calldata;
 }
 
 SyscallStatus<void>

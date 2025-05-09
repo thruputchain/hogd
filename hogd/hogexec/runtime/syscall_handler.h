@@ -2,21 +2,23 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
-#include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -39,6 +41,8 @@ class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache,
+                    PerTransactionDatabaseProxy db_proxy,
+                    ExecutionModeData execution_mode_data,
                     std::shared_ptr<RuntimeContext> runtime_context = nullptr);
 
   // Disable move and copy.
@@ -51,10 +55,16 @@ public:
   // Starts the invocation that is specified within signed_tx_.
   InvokeResult root_invoke();
 
+  // Attempt to commit the current transaction to the database.
+  // Requirement: root_invoke() must be called first, and
+  // that must have returned successfully.
+  x23::Async<SystemStatus<bool>> try_commit_transaction();
+
   // Create and run a child call frame.
   // Should be called from within a syscall.
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-  invoke(Invocation const &invocation, GasAmount gas_limit);
+  invoke(Invocation const &invocation, GasAmount gas_limit,
+         InvokeFlagSet flags);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -77,8 +87,6 @@ public:
   void set_return_buffer(ReturnBuffer &&returned_buffer);
 
   SyscallStatus<void> log(std::span<const std::byte> message);
-
-  std::vector<LogEntry> const &get_logs() const { return committed_logs_; }
 
   static ContractAddress
   static_get_deploy_address(ContractAddress const &sender,
@@ -112,6 +120,7 @@ public:
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
   const SignedTransaction signed_tx_;
+  PerTransactionDatabaseProxy db_proxy_;
   InvocationFrameStack invocation_frame_stack_;
 
   // Searchable map of contracts that are implicitly created by the current
@@ -119,9 +128,12 @@ private:
   const std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>
       newly_created_contracts_;
 
+  ExecutionModeData execution_mode_data_;
+
   // only set at the end of the transaction
-  std::vector<LogEntry> committed_logs_;
-  std::unordered_map<AddressAndKey, ItemView> modified_items_;
+  std::optional<InvocationFrame> last_frame_;
+  bool root_invoked_succeeded_ = false;
+  bool transaction_committed_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
 
@@ -136,7 +148,7 @@ private:
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the
   // transaction.
-  void commit_last_call_frame_success(InvocationFrame &frame);
+  void commit_last_call_frame_success(InvocationFrame &&frame);
 };
 
 } // namespace hogd
