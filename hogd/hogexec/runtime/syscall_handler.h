@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -86,8 +87,6 @@ public:
 
   SyscallStatus<void> log(std::span<const std::byte> message);
 
-  std::vector<LogEntry> const &get_logs() const { return committed_logs_; }
-
   static ContractAddress
   static_get_deploy_address(ContractAddress const &sender,
                             SHA256Hash const &nonce,
@@ -129,8 +128,7 @@ private:
       newly_created_contracts_;
 
   // only set at the end of the transaction
-  std::vector<LogEntry> committed_logs_;
-  std::unordered_map<AddressAndKey, ItemView> modified_items_;
+  std::optional<InvocationFrame> last_frame_;
   bool root_invoked_succeeded_ = false;
   bool transaction_committed_ = false;
 
@@ -147,7 +145,7 @@ private:
   // Commit the last call frame, if the last call frame succeeds.
   // Extracts relevant data structures, to prepare for committing the
   // transaction.
-  void commit_last_call_frame_success(InvocationFrame &frame);
+  void commit_last_call_frame_success(InvocationFrame &&frame);
 };
 
 } // namespace hogd

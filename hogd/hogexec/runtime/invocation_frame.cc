@@ -78,6 +78,66 @@ InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
   to_return_ = std::move(return_buffer);
 }
 
+x23::Async<SystemStatus<bool>>
+InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
+{
+  auto [async, cb] = x23::make_async<void>();
+  std::atomic<uint32_t> pending_ops = modified_items_.size();
+  std::atomic<bool> failed = false;
+  x23::MVar<std::optional<SystemError>> error = std::nullopt;
+
+  if (pending_ops == 0) {
+    cb();
+  }
+
+  for (auto const &[addrkey, item_view] : modified_items_) {
+    [](AddressAndKey const &addrkey, ItemView const &item_view,
+       auto &pending_ops, auto &cb, PerTransactionDatabaseProxy &db_proxy,
+       auto &error, auto &failed) -> x23::Detached {
+      co_await db_proxy.coropoll().pool_.bg();
+
+      auto delta = item_view.get_delta();
+      if (delta) {
+        // Try to reserve the delta in the database.
+        auto res = co_await db_proxy.try_reserve_delta(
+            addrkey, *delta,
+            std::to_underlying(StorageItemRPCFlags::kStorageNone));
+
+        if (!res.has_value()) {
+          // System error: store the first error encountered.
+          auto err = error.take();
+          if (!err->has_value()) {
+            *err = res.error();
+          }
+        }
+        else if (!res.value().has_value()) {
+          // Operation failed (but not a system error): mark as failed.
+          failed = true;
+        }
+        // TODO(geoff): storage costs here
+      }
+
+      auto count = pending_ops.fetch_sub(1);
+      if (count == 1) {
+        cb();
+      }
+    }(addrkey, item_view, pending_ops, cb, db_proxy, error, failed);
+  }
+  // wait for all the operations to finish
+  async();
+
+  // check whether some kind of system error occurred
+  {
+    auto err = error.take();
+    if (err->has_value()) {
+      co_return *(*err);
+    }
+  }
+
+  // check if any of the 2pc database operations failed
+  co_return !failed;
+}
+
 void
 InvocationFrameStack::start_frame(Invocation const &invocation)
 {
@@ -123,7 +183,7 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
     else if (stack_size == 1) {
       // last frame -- push frame contents to external caller
       // (SystemCallHandler), via the supplied lambda
-      last_frame_action_(frame_stack_.back());
+      last_frame_action_(std::move(frame_stack_.back()));
     }
 
     frame_stack_.pop_back();

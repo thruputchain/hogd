@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -63,6 +64,9 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
+  x23::Async<SystemStatus<bool>>
+  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
+
 private:
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
@@ -80,9 +84,10 @@ private:
 // Stack of invocation frames.
 class InvocationFrameStack {
 public:
-  InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action,
-                       StorageSnapshotCache &snapshot_cache,
-                       PerTransactionDatabaseProxy &db_proxy)
+  InvocationFrameStack(
+      std::function<void(InvocationFrame &&)> last_frame_action,
+      StorageSnapshotCache &snapshot_cache,
+      PerTransactionDatabaseProxy &db_proxy)
     : last_frame_action_(std::move(last_frame_action)),
       snapshot_cache_(snapshot_cache), db_proxy_(db_proxy)
   {}
@@ -115,7 +120,7 @@ public:
 
 private:
   std::vector<InvocationFrame> frame_stack_;
-  std::function<void(InvocationFrame &)> last_frame_action_;
+  std::function<void(InvocationFrame &&)> last_frame_action_;
   StorageSnapshotCache &snapshot_cache_;
   PerTransactionDatabaseProxy &db_proxy_;
 };

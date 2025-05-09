@@ -40,8 +40,8 @@ SystemCallHandler::SystemCallHandler(
   : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
     invocation_frame_stack_(
-        [this](InvocationFrame &last_frame) {
-          commit_last_call_frame_success(last_frame);
+        [this](InvocationFrame &&last_frame) {
+          commit_last_call_frame_success(std::move(last_frame));
         },
         snapshot_cache, db_proxy_),
     newly_created_contracts_([&] {
@@ -94,76 +94,31 @@ SystemCallHandler::try_commit_transaction()
 {
   assert(root_invoked_succeeded_);
   assert(!transaction_committed_);
+  assert(last_frame_.has_value());
 
-  auto [async, cb] = x23::make_async<void>();
-  std::atomic<uint32_t> pending_ops = modified_items_.size();
-  std::atomic<bool> failed = false;
-  x23::MVar<std::optional<SystemError>> error = std::nullopt;
-
-  if (pending_ops == 0) {
-    cb();
-  }
-
-  for (auto const &[addrkey, item_view] : modified_items_) {
-    [](AddressAndKey const &addrkey, ItemView const &item_view,
-       auto &pending_ops, auto &cb, PerTransactionDatabaseProxy &db_proxy,
-       auto &error, auto &failed) -> x23::Detached {
-      co_await db_proxy.coropoll().pool_.bg();
-
-      auto delta = item_view.get_delta();
-      if (delta) {
-        // Try to reserve the delta in the database.
-        auto res = co_await db_proxy.try_reserve_delta(
-            addrkey, *delta,
-            std::to_underlying(StorageItemRPCFlags::kStorageNone));
-
-        if (!res.has_value()) {
-          // System error: store the first error encountered.
-          auto err = error.take();
-          if (!err->has_value()) {
-            *err = res.error();
-          }
-        }
-        else if (!res.value().has_value()) {
-          // Operation failed (but not a system error): mark as failed.
-          failed = true;
-        }
-        // TODO(geoff): storage costs here
-      }
-
-      auto count = pending_ops.fetch_sub(1);
-      if (count == 1) {
-        cb();
-      }
-    }(addrkey, item_view, pending_ops, cb, db_proxy_, error, failed);
-  }
-  // wait for all the operations to finish
-  async();
-
-  // check whether some kind of system error occurred
-  {
-    auto err = error.take();
-    if (err->has_value()) {
-      co_return *(*err);
-    }
-  }
-
-  // check if any of the 2pc database operations failed
-  if (failed) {
-    auto r = co_await db_proxy_.abort_transaction();
-    if (!r.has_value()) {
-      co_return r.error();
-    }
-    transaction_committed_ = true;
-    co_return false;
-  }
-
-  auto r = co_await db_proxy_.commit_transaction();
+  auto r = co_await last_frame_.value().try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
     co_return r.error();
   }
+
+  bool result = r.value();
+
+  // check if any of the 2pc database operations failed
+  if (result) {
+    auto res = co_await db_proxy_.commit_transaction();
+    if (!res.has_value()) {
+      co_return res.error();
+    }
+    transaction_committed_ = true;
+    co_return true;
+  }
+
+  auto res = co_await db_proxy_.abort_transaction();
+  if (!res.has_value()) {
+    co_return res.error();
+  }
   transaction_committed_ = true;
-  co_return true;
+  co_return false;
 }
 
 // can only be called when call_frame_stack_ is nonempty
@@ -212,10 +167,9 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit)
 }
 
 void
-SystemCallHandler::commit_last_call_frame_success(InvocationFrame &frame)
+SystemCallHandler::commit_last_call_frame_success(InvocationFrame &&frame)
 {
-  committed_logs_ = frame.extract_logs();
-  modified_items_ = frame.extract_modified_items();
+  last_frame_.emplace(std::move(frame));
 }
 
 SyscallStatus<const ReturnBuffer *>
