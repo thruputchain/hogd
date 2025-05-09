@@ -7,7 +7,7 @@ from yaml import CLoader as Loader, CDumper as Dumper
 import argparse
 import os
 
-syscall_argcount = 6
+syscall_argcount = 7
 
 # Map from c++ to xdr typenames
 cpp_to_xdr_typenames = {
