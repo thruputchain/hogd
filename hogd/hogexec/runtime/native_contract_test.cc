@@ -96,7 +96,9 @@ protected:
 TEST_F(NativeContractTest, BasicInstantiate)
 {
   StorageSnapshotCache snapshot(0, *db_proxy_);
-  SystemCallHandler handler(SignedTransaction{}, snapshot, runtime_context_);
+  SystemCallHandler handler(SignedTransaction{}, snapshot,
+                            PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
+                            runtime_context_);
 
   Contract contract(ContractType::kNative);
 

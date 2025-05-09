@@ -13,6 +13,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -29,14 +30,15 @@ namespace hogd {
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
     SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
+    PerTransactionDatabaseProxy db_proxy,
     std::shared_ptr<RuntimeContext> runtime_context)
   : runtime_context_(std::move(runtime_context)),
-    signed_tx_(std::move(signed_tx)),
+    signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
     invocation_frame_stack_(
         [this](InvocationFrame &last_frame) {
           commit_last_call_frame_success(last_frame);
         },
-        snapshot_cache),
+        snapshot_cache, db_proxy_),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
@@ -70,7 +72,11 @@ SystemCallHandler::root_invoke()
   invocation_frame_stack_.start_frame(signed_tx_.tx.invocation);
   auto res = runtime.value()->invoke(signed_tx_.tx.invocation.method,
                                      signed_tx_.tx.invocation.gas_limit);
-  invocation_frame_stack_.finish_frame(res);
+  auto st = invocation_frame_stack_.finish_frame(res);
+  if (!st.has_value()) {
+    return InvokeResult{.result_ = st.error().to_invoke_error(),
+                        .gas_consumed_ = 0};
+  }
 
   if (!res.is_root_success())
     return res.to_root_error();
@@ -114,7 +120,10 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit)
 
   invocation_frame_stack_.start_frame(invocation);
   auto res = runtime.value()->invoke(invocation.method, gas_limit);
-  invocation_frame_stack_.finish_frame(res);
+  auto st = invocation_frame_stack_.finish_frame(res);
+  if (!st.has_value()) {
+    return {st.error().to_host_fn_error(), 0};
+  }
 
   return res.to_host_fn_result();
 }

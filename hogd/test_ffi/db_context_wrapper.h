@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <cstdlib>
 #include <memory>
@@ -31,6 +32,12 @@ public:
     return *snapshot_cache_;
   }
 
+  PerTransactionDatabaseProxy get_new_db_proxy()
+  {
+    return PerTransactionDatabaseProxy(*db_proxy_, current_block_id_,
+                                       current_tx_id_.fetch_add(1));
+  }
+
   // Allows direct modification of the committed database -- not for use
   // within a contract, just within setup.
   auto &get_base_db() { return db_; }
@@ -47,6 +54,7 @@ private:
   DbExecutorServer executor_server_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;
+  std::atomic<TransactionID> current_tx_id_ = 0;
 };
 
 } // namespace hogd

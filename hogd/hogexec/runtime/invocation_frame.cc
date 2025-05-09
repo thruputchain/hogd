@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
@@ -40,12 +41,25 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &frame)
     modified_items_.erase(addr);
     modified_items_.emplace(addr, std::move(item));
   }
+
+  try_invoke_frame_count_ += frame.try_invoke_frame_count_;
 }
 
-void
-InvocationFrame::commit_failed_child_frame()
+SystemStatus<void>
+InvocationFrame::commit_failed_child_frame(
+    InvocationFrame &frame, PerTransactionDatabaseProxy &db_proxy)
 {
   child_return_buffer_ = std::nullopt;
+
+  if (frame.try_invoke_frame_count_ > 0) {
+
+    auto st = db_proxy.pop_subtransactions(frame.try_invoke_frame_count_)();
+    if (!st.has_value()) {
+      return st.error();
+    }
+  }
+
+  return {};
 }
 
 void
@@ -70,7 +84,7 @@ InvocationFrameStack::start_frame(Invocation const &invocation)
   frame_stack_.emplace_back(invocation);
 }
 
-void
+SystemStatus<void>
 InvocationFrameStack::finish_frame(InvokeResult const &result)
 {
   // If a contract has the REVERT_SAFE flag set, then it can be called again
@@ -88,7 +102,12 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
     if (!frame_stack_.empty()) {
       // Contents of the frame are entirely dropped. We just need to notify
       // the parent (if there is one) that it had a failed frame.
-      frame_stack_.back().commit_failed_child_frame();
+      auto st =
+          frame_stack_.back().commit_failed_child_frame(frame_stack_.back(),
+                                                        db_proxy_);
+      if (!st.has_value()) {
+        return st.error();
+      }
     }
   }
   else {
@@ -109,6 +128,7 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
 
     frame_stack_.pop_back();
   }
+  return {};
 }
 
 std::optional<ContractAddress>

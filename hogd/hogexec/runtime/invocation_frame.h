@@ -10,9 +10,10 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -39,7 +40,11 @@ public:
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &frame);
   // revert the child invocation frame
-  void commit_failed_child_frame();
+  // Responsible for releasing any try_invoke frames created during the child
+  // frame.
+  SystemStatus<void>
+  commit_failed_child_frame(InvocationFrame &frame,
+                            PerTransactionDatabaseProxy &db_proxy);
 
   // set the value returned from the current call frame.
   void set_frame_return(ReturnBuffer &&return_buffer);
@@ -66,6 +71,9 @@ private:
   // frames)
   std::vector<LogEntry> logs_;
 
+  uint32_t try_invoke_frame_count_ = 0;
+
+  // elements modified during the current call frame (and child frames)
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
 };
 
@@ -73,9 +81,10 @@ private:
 class InvocationFrameStack {
 public:
   InvocationFrameStack(std::function<void(InvocationFrame &)> last_frame_action,
-                       StorageSnapshotCache &snapshot_cache)
+                       StorageSnapshotCache &snapshot_cache,
+                       PerTransactionDatabaseProxy &db_proxy)
     : last_frame_action_(std::move(last_frame_action)),
-      snapshot_cache_(snapshot_cache)
+      snapshot_cache_(snapshot_cache), db_proxy_(db_proxy)
   {}
 
   auto &get_active_frame(this auto &self)
@@ -86,7 +95,7 @@ public:
   bool empty() const { return frame_stack_.empty(); }
 
   void start_frame(Invocation const &invocation);
-  void finish_frame(InvokeResult const &result);
+  SystemStatus<void> finish_frame(InvokeResult const &result);
 
   std::optional<ContractAddress> get_msg_sender() const;
 
@@ -108,6 +117,7 @@ private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &)> last_frame_action_;
   StorageSnapshotCache &snapshot_cache_;
+  PerTransactionDatabaseProxy &db_proxy_;
 };
 
 } // namespace hogd

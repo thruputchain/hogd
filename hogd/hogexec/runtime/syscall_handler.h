@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -39,6 +40,7 @@ class SystemCallHandler {
 public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache,
+                    PerTransactionDatabaseProxy db_proxy,
                     std::shared_ptr<RuntimeContext> runtime_context = nullptr);
 
   // Disable move and copy.
@@ -112,6 +114,7 @@ public:
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
   const SignedTransaction signed_tx_;
+  PerTransactionDatabaseProxy db_proxy_;
   InvocationFrameStack invocation_frame_stack_;
 
   // Searchable map of contracts that are implicitly created by the current

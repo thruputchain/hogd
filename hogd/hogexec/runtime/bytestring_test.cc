@@ -180,7 +180,7 @@ TEST_F(BytestringTest, ReadWriteBytestring)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {0, 1, 2, 3, 4, 5}},
               }},
-      snapshot, runtime_context);
+      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0), runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);

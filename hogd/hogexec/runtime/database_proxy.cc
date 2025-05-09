@@ -214,4 +214,19 @@ DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
   co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
 }
 
+x23::Async<SystemStatus<void>>
+DatabaseProxy::push_new_subtransaction(BlockID block_id, TransactionID tx_id)
+{
+  auto res = co_await read_client_.push_new_subtransaction(block_id, tx_id);
+  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
+}
+
+x23::Async<SystemStatus<void>>
+DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
+                                   uint32_t count)
+{
+  auto res = co_await read_client_.pop_subtransactions(block_id, tx_id, count);
+  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
+}
+
 } // namespace hogd
