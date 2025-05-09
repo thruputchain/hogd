@@ -74,6 +74,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const ContractAddress &input_address,
                      MethodID input_method, GasAmount input_gas_limit,
                      std::span<const std::byte> input_calldata,
+                     InvokeFlagSet input_flags,
                      RuntimeMemoryLength &output_return_buffer_len)
 {
   Calldata calldata;

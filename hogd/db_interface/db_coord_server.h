@@ -29,9 +29,10 @@ public:
   static x23::Async<void> dbcoord_null() { co_return; }
 
   // RPC methods
-  x23::Async<RPCError> dbcoord_open_snapshot(BlockID parent_id, BlockID new_id);
-  x23::Async<RPCError> dbcoord_commit_snapshot(BlockID id);
-  x23::Async<RPCError> dbcoord_close_snapshot(BlockID id);
+  x23::Async<DbResult> dbcoord_open_snapshot(BlockID parent_id, BlockID new_id);
+  x23::Async<DbBlockResult> dbcoord_commit_snapshot(BlockID id);
+  x23::Async<DbBlockResult> dbcoord_close_snapshot(BlockID id);
+  static x23::Async<DbResult> dbcoord_abandon_snapshot(BlockID id);
 
 private:
   BlockManager *block_manager_;

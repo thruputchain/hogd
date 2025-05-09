@@ -128,9 +128,9 @@ template<SyscallNo Syscall, typename InputArg, typename OutputArg,
          auto InnerSyscallFunc>
 ForeignHostFnResult
 mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-                    uint64_t arg5, uint64_t arg6)
+                    uint64_t arg5, uint64_t arg6, uint64_t arg7)
 {
-  auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6};
+  auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
   using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
 
   // Again, parameter packs as structured bindings gets rid of the annoying

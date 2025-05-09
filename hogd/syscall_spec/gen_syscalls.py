@@ -415,6 +415,7 @@ def gen_syscall_arg_xdr(spec):
   return f"""// clang-format off
 %#include "types.hh"
 %#include "syscall.hh"
+%#include "transaction.hh"
 
 namespace hogd {{
   // clang-format on
@@ -683,15 +684,24 @@ namespace hogd {{
 # ===== Mock syscall entry =====
 def gen_mock_switch_case(syscall):
   name = syscall["name"]
+  args = []
+  for i in range(0, syscall_argcount):
+    args.append(f"arg{i + 1}")
+  args_str = ", ".join(args)
   return f"""  case SyscallNo::k{name}:
   return mock_syscall_parser<SyscallNo::k{name}, {name}_input, {name}_output,
-                               &syscall_{name}_inner>(arg1, arg2, arg3, arg4, arg5, arg6);
+                               &syscall_{name}_inner>({args_str});
 """
 
 def gen_mock_syscall_entry_cc(spec):
   switch_body = ""
   for call in spec:
     switch_body += gen_mock_switch_case(call)
+
+  args = []
+  for i in range(0, syscall_argcount):
+    args.append(f"uint64_t arg{i + 1}")
+  args_str = ", ".join(args)
   
   return f"""#include "hogd/test_ffi/mock_syscall_entry.h"
 
@@ -707,8 +717,7 @@ namespace hogd {{
 
 ForeignHostFnResult
 mock_syscall_entrypoint(uint64_t syscall,
-                        uint64_t arg1, uint64_t arg2, uint64_t arg3,
-                        uint64_t arg4, uint64_t arg5, uint64_t arg6) noexcept
+                        {args_str}) noexcept
 {{
   auto syscall_no = static_cast<SyscallNo>(syscall);
 

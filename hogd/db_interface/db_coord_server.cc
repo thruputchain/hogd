@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <utility>
 
+#include "db_coord.hh"
 #include "hogd/base/types.h"
 #include "rpc_types.hh"
 #include "x23/async.h"
@@ -14,33 +15,49 @@
 
 namespace hogd {
 
-x23::Async<RPCError>
+x23::Async<DbResult>
 DbCoordServer::dbcoord_open_snapshot(BlockID parent_id, BlockID new_id)
 {
   if (block_manager_->add_child(parent_id, new_id)) {
-    co_return RPCError::kRPCNone;
+    co_return DbResult::DbResultOK;
   }
-  co_return RPCError::kRPCBadBlockID;
+  co_return DbResult::DbResultError;
 }
 
-x23::Async<RPCError>
+x23::Async<DbBlockResult>
 DbCoordServer::dbcoord_commit_snapshot(BlockID id)
 {
   if (block_manager_->commit_block(id)) {
-    co_return RPCError::kRPCNone;
+    //(geoff) TODO: Replace with actual BlockHash if available
+    DbBlockResult result(DbResult::DbResultOK);
+    // result.block_hash = ...; // Set block_hash if available
+    co_return result;
   }
-  co_return RPCError::kRPCBadBlockID;
+  DbBlockResult result(DbResult::DbResultError);
+  co_return result;
 }
 
-x23::Async<RPCError>
+x23::Async<DbBlockResult>
 DbCoordServer::dbcoord_close_snapshot(BlockID id)
 {
   auto blk = block_manager_->get_block_data(id);
   if (!blk) {
-    co_return RPCError::kRPCBadBlockID;
+    DbBlockResult result(DbResult::DbResultError);
+    co_return result;
   }
   blk->close_block();
-  co_return RPCError::kRPCNone;
+  DbBlockResult result(DbResult::DbResultOK);
+  // TODO(geoff): Set block_hash if available
+  // result.block_hash = ...; // Set block_hash if available
+  co_return result;
+}
+
+x23::Async<DbResult>
+DbCoordServer::dbcoord_abandon_snapshot(BlockID id)
+{
+  // TODO(geoff): Implement actual abandon logic if needed
+  // For now, just return ok for stub
+  co_return DbResult::DbResultOK;
 }
 
 void

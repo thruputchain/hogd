@@ -77,8 +77,8 @@ void close_syscall_handler(void *syscall_handler);
 struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg1, uint64_t arg2,
                                                    uint64_t arg3, uint64_t arg4,
-                                                   uint64_t arg5,
-                                                   uint64_t arg6);
+                                                   uint64_t arg5, uint64_t arg6,
+                                                   uint64_t arg7);
 
 struct ForeignRootInvokeResult root_invoke(void *syscall_handler);
 
