@@ -21,6 +21,8 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "rpc_types.hh"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
@@ -41,6 +43,19 @@ protected:
                                                              10000});
     [[maybe_unused]] auto res = block_manager_.add_child(0, 1);
     assert(res);
+    block_number_++;
+  }
+
+  void advance_block()
+  {
+    auto r = block_manager_.get_block_data(block_number_);
+    assert(r);
+    r->close_block();
+
+    [[maybe_unused]] auto r2 =
+        block_manager_.add_child(block_number_, block_number_ + 1);
+    assert(r2);
+    block_number_++;
   }
 
   x23::ThreadPool pool_ = x23::ThreadPool(1);
@@ -51,6 +66,7 @@ protected:
   DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
+  BlockID block_number_ = 0;
 };
 
 namespace {
@@ -187,6 +203,92 @@ TEST_F(BytestringTest, ReadWriteBytestring)
   auto r = handler.try_commit_transaction()();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
+}
+
+TEST_F(BytestringTest, TryInvokeGoodWorkflow)
+{ // A native contract with the following methods:
+  // 0: Invokes method 1, in a try_invoke frame.
+  // 1: Makes a bytestring write.
+  auto native_contract_0 = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+             auto const &calldata = handler.get_calldata();
+             auto [r0, _g0] = handler.invoke(
+                 Invocation{.invoked_address = handler.get_current_address(),
+                            .method = 1,
+                            .gas_limit = UINT64_MAX,
+                            .calldata = calldata},
+                 runtime.get_available_gas(),
+                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             if (r0.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return 0;
+           }},
+          {1,
+           [](SystemCallHandler &handler,
+              NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+             auto key = StorageKey{};
+             auto res =
+                 handler.set_bytestring(key, std::as_bytes(std::span{"hello"}));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+
+             return 0;
+           }},
+      });
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  // mark the contract as existing and deployed within the database
+  auto contract_0 = make_native_contract(0);
+  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
+  in_memory_db_.write_deployment(ContractAddress{}, sha256(*contract_0));
+
+  // now invoke the contract
+  StorageSnapshotCache snapshot(1, *db_proxy_);
+
+  auto handler = SystemCallHandler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation = Invocation{.invoked_address = ContractAddress{},
+                                           .method = 0,
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}},
+              }},
+      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 1, 0),
+      ProposalModeData{}, runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.result_);
+  ASSERT_EQ(*res.result_, 0);
+
+  auto r = handler.try_commit_transaction()();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(*r);
+
+  advance_block();
+
+  auto read_res =
+      db_proxy_->get_snapshot_item(block_number_, AddressAndKey{})();
+  ASSERT_TRUE(read_res.has_value());
+  auto expect_span = std::as_bytes(std::span{"hello"});
+  Bytestring expect;
+  expect.resize(expect_span.size());
+  std::memcpy(expect.data(), expect_span.data(), expect_span.size());
+  ASSERT_EQ(read_res.value().value().bytestring(), expect);
 }
 
 } // namespace hogd
