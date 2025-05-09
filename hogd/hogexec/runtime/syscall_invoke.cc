@@ -86,7 +86,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(Invocation(input_address, input_method,
                                         input_gas_limit, calldata),
-                             remaining_gas.gas_amount_);
+                             remaining_gas.gas_amount_, input_flags);
 
   // invocation returned successfully
   if (invoke_res) {

@@ -11,6 +11,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -65,7 +66,8 @@ protected:
                               .calldata = {}
 
                    },
-                   std::numeric_limits<GasAmount>::max());
+                   std::numeric_limits<GasAmount>::max(),
+                   std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
                if (invoke_res.first) {
                  return std::to_underlying(*invoke_res.first);
@@ -98,7 +100,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
   StorageSnapshotCache snapshot(0, *db_proxy_);
   SystemCallHandler handler(SignedTransaction{}, snapshot,
                             PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-                            runtime_context_);
+                            ProposalModeData{}, runtime_context_);
 
   Contract contract(ContractType::kNative);
 

@@ -1,25 +1,32 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <iterator>
 #include <optional>
 #include <span>
 #include <utility>
+#include <variant>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/mvar.h"
 #include "x23/vec.h"
 
 namespace hogd {
 
-InvocationFrame::InvocationFrame(Invocation invocation)
-  : active_invocation_(std::move(invocation))
+InvocationFrame::InvocationFrame(Invocation invocation, InvokeFlagSet flags)
+  : active_invocation_(std::move(invocation)), flags_(flags)
 {}
 
 void
@@ -139,14 +146,59 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 }
 
 void
-InvocationFrameStack::start_frame(Invocation const &invocation)
+InvocationFrameStack::start_frame(Invocation const &invocation,
+                                  InvokeFlagSet flags)
 {
-  frame_stack_.emplace_back(invocation);
+  frame_stack_.emplace_back(invocation, flags);
 }
 
 SystemStatus<void>
-InvocationFrameStack::finish_frame(InvokeResult const &result)
+InvocationFrameStack::finish_frame(InvokeResult result,
+                                   ExecutionModeData &execution_mode_data)
 {
+  // handle the try_invoke data
+  assert(!frame_stack_.empty());
+  if (frame_stack_.back().is_try_invoke()) {
+    // Only relevant in the case where the deterministic part of the frame
+    // succeeds.
+    if (result.is_frame_success()) {
+      bool acq_success = false;
+
+      // If we're in proposal mode, we need to acquire the frame locks.
+      if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
+        auto acq_res = frame_stack_.back().try_acquire_frame_locks(db_proxy_)();
+        if (!acq_res.has_value()) {
+          return acq_res.error();
+        }
+        acq_success = acq_res.value();
+
+        std::get<ProposalModeData>(execution_mode_data)
+            .log_nondeterministic_bit(acq_success);
+      }
+      else {
+        // Otherwise, we're in validation mode, so we read the nondeterministic
+        // bit from the validation metadata.
+        auto res = std::get<ValidationModeData>(execution_mode_data)
+                       .consume_nondeterministic_bit();
+        if (!res.has_value()) {
+          return SystemError{SystemErrorCode::kValidationFailure};
+        }
+        acq_success = res.value().get();
+      }
+
+      // If the frame locks were not acquired successfully, then we mark
+      // the entire frame as failing.
+      if (!acq_success) {
+        // TODO(geoff): perhaps add additional gas consumption
+        result = InvokeResult{
+            .result_ = InvokeError{InvokeErrorCode::kInvokeDeterministic},
+            .gas_consumed_ = result.gas_consumed_,
+        };
+      }
+    }
+    // otherwise nothing to do here with try_invoke
+  }
+
   // If a contract has the REVERT_SAFE flag set, then it can be called again
   // after it has been reverted. A contract might not be REVERT_SAFE because
   // reversion does NOT reset a wasm's internal memory or other internal state.
@@ -156,38 +208,38 @@ InvocationFrameStack::finish_frame(InvokeResult const &result)
   // module's internal state -- not just memory, but also tables and globals.
   // The wasm stack is reset automatically).
   if (result.should_frame_revert()) {
-    assert(!frame_stack_.empty());
-    frame_stack_.pop_back();
 
-    if (!frame_stack_.empty()) {
+    if (frame_stack_.size() >= 2) {
+      size_t stack_size = frame_stack_.size();
       // Contents of the frame are entirely dropped. We just need to notify
       // the parent (if there is one) that it had a failed frame.
-      auto st =
-          frame_stack_.back().commit_failed_child_frame(frame_stack_.back(),
-                                                        db_proxy_);
+      auto st = frame_stack_[stack_size - 2].commit_failed_child_frame(
+          frame_stack_[stack_size - 1], db_proxy_);
       if (!st.has_value()) {
         return st.error();
       }
     }
-  }
-  else {
-    // commit child invocation frame successfully
-    assert(result.is_frame_success());
-
-    size_t stack_size = frame_stack_.size();
-    if (stack_size >= 2) {
-      // Commit the frame to it's parent
-      frame_stack_[stack_size - 2].commit_successful_child_frame(
-          frame_stack_.back());
-    }
-    else if (stack_size == 1) {
-      // last frame -- push frame contents to external caller
-      // (SystemCallHandler), via the supplied lambda
-      last_frame_action_(std::move(frame_stack_.back()));
-    }
-
     frame_stack_.pop_back();
+    return {};
   }
+
+  // commit child invocation frame successfully
+  assert(result.is_frame_success());
+
+  size_t stack_size = frame_stack_.size();
+  if (stack_size >= 2) {
+    // Commit the frame to it's parent
+    frame_stack_[stack_size - 2].commit_successful_child_frame(
+        frame_stack_.back());
+  }
+  else if (stack_size == 1) {
+    // last frame -- push frame contents to external caller
+    // (SystemCallHandler), via the supplied lambda
+    last_frame_action_(std::move(frame_stack_.back()));
+  }
+
+  frame_stack_.pop_back();
+
   return {};
 }
 

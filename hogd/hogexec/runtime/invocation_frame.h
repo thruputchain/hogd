@@ -36,7 +36,7 @@ public:
   // Set to nullopt on failed calls, or before any child call happens.
   std::optional<ReturnBuffer> child_return_buffer_ = std::nullopt;
 
-  InvocationFrame(Invocation invocation);
+  InvocationFrame(Invocation invocation, InvokeFlagSet flags);
 
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &frame);
@@ -59,6 +59,11 @@ public:
     return std::move(modified_items_);
   }
 
+  bool is_try_invoke() const
+  {
+    return (flags_ & std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke)) != 0;
+  }
+
   // returned pointer is invalidated by any call to add_item_view
   ItemView *get_item_view(AddressAndKey const &addrkey);
   // returns pointer to the newly created view
@@ -70,6 +75,9 @@ public:
 private:
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
+
+  // flags on the invocation
+  const InvokeFlagSet flags_;
 
   // Accumulates log entries created in the current call frame (and child
   // frames)
@@ -99,8 +107,9 @@ public:
   }
   bool empty() const { return frame_stack_.empty(); }
 
-  void start_frame(Invocation const &invocation);
-  SystemStatus<void> finish_frame(InvokeResult const &result);
+  void start_frame(Invocation const &invocation, InvokeFlagSet flags);
+  SystemStatus<void> finish_frame(InvokeResult result,
+                                  ExecutionModeData &execution_mode_data);
 
   std::optional<ContractAddress> get_msg_sender() const;
 

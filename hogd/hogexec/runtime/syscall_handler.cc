@@ -15,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -35,7 +36,7 @@ namespace hogd {
 // and/or shared contexts.
 SystemCallHandler::SystemCallHandler(
     SignedTransaction signed_tx, StorageSnapshotCache &snapshot_cache,
-    PerTransactionDatabaseProxy db_proxy,
+    PerTransactionDatabaseProxy db_proxy, ExecutionModeData execution_mode_data,
     std::shared_ptr<RuntimeContext> runtime_context)
   : runtime_context_(std::move(runtime_context)),
     signed_tx_(std::move(signed_tx)), db_proxy_(std::move(db_proxy)),
@@ -53,6 +54,7 @@ SystemCallHandler::SystemCallHandler(
       }
       return contracts;
     }()),
+    execution_mode_data_(std::move(execution_mode_data)),
     snapshot_cache_(snapshot_cache)
 {
   if (!runtime_context_) {
@@ -74,10 +76,12 @@ SystemCallHandler::root_invoke()
                         .gas_consumed_ = 0};
   }
 
-  invocation_frame_stack_.start_frame(signed_tx_.tx.invocation);
+  invocation_frame_stack_.start_frame(signed_tx_.tx.invocation,
+                                      std::to_underlying(
+                                          InvokeFlag::kInvokeFlagNone));
   auto res = runtime.value()->invoke(signed_tx_.tx.invocation.method,
                                      signed_tx_.tx.invocation.gas_limit);
-  auto st = invocation_frame_stack_.finish_frame(res);
+  auto st = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   if (!st.has_value()) {
     return InvokeResult{.result_ = st.error().to_invoke_error(),
                         .gas_consumed_ = 0};
@@ -146,7 +150,8 @@ SystemCallHandler::get_msg_sender() const
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit)
+SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
+                          InvokeFlagSet flags)
 {
   auto runtime = resolve_runtime(invocation.invoked_address);
   if (!runtime) {
@@ -156,9 +161,9 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit)
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  invocation_frame_stack_.start_frame(invocation);
+  invocation_frame_stack_.start_frame(invocation, flags);
   auto res = runtime.value()->invoke(invocation.method, gas_limit);
-  auto st = invocation_frame_stack_.finish_frame(res);
+  auto st = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   if (!st.has_value()) {
     return {st.error().to_host_fn_error(), 0};
   }

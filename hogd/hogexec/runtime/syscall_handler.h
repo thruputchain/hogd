@@ -12,6 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
@@ -43,6 +44,7 @@ public:
   SystemCallHandler(SignedTransaction signed_tx,
                     StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
+                    ExecutionModeData execution_mode_data,
                     std::shared_ptr<RuntimeContext> runtime_context = nullptr);
 
   // Disable move and copy.
@@ -63,7 +65,8 @@ public:
   // Create and run a child call frame.
   // Should be called from within a syscall.
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-  invoke(Invocation const &invocation, GasAmount gas_limit);
+  invoke(Invocation const &invocation, GasAmount gas_limit,
+         InvokeFlagSet flags);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -126,6 +129,8 @@ private:
   // transaction.
   const std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>>
       newly_created_contracts_;
+
+  ExecutionModeData execution_mode_data_;
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;

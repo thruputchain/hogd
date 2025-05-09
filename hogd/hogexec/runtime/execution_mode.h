@@ -48,9 +48,8 @@ class ValidationModeData {
 public:
   ValidationModeData(const ValidationModeData &) = delete;
   ValidationModeData &operator=(const ValidationModeData &) = delete;
-  ValidationModeData(ValidationModeData &&) = delete;
+  ValidationModeData(ValidationModeData &&) = default;
   ValidationModeData &operator=(ValidationModeData &&) = delete;
-
   // Constructs validation data with proposal to validate against
   ValidationModeData(NondeterministicProposalData proposal_data)
     : proposal_data_(std::move(proposal_data))

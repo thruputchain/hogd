@@ -15,6 +15,7 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
@@ -112,25 +113,25 @@ TEST_F(BytestringTest, ReadWriteBytestring)
               NativeRuntime &runtime) -> InvokeStatus<int32_t> {
              auto calldata = handler.get_calldata();
 
-             auto [r0, _g0] =
-                 handler.invoke(Invocation{.invoked_address =
-                                               handler.get_current_address(),
-                                           .method = 0,
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = calldata},
-                                runtime.get_available_gas());
+             auto [r0, _g0] = handler.invoke(
+                 Invocation{.invoked_address = handler.get_current_address(),
+                            .method = 0,
+                            .gas_limit = UINT64_MAX,
+                            .calldata = calldata},
+                 runtime.get_available_gas(),
+                 std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
              if (!r0.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto [r1, _g1] =
-                 handler.invoke(Invocation{.invoked_address =
-                                               handler.get_current_address(),
-                                           .method = 1,
-                                           .gas_limit = UINT64_MAX,
-                                           .calldata = {}},
-                                runtime.get_available_gas());
+             auto [r1, _g1] = handler.invoke(
+                 Invocation{.invoked_address = handler.get_current_address(),
+                            .method = 1,
+                            .gas_limit = UINT64_MAX,
+                            .calldata = {}},
+                 runtime.get_available_gas(),
+                 std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -176,7 +177,8 @@ TEST_F(BytestringTest, ReadWriteBytestring)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {0, 1, 2, 3, 4, 5}},
               }},
-      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 1, 0), runtime_context);
+      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 1, 0),
+      ProposalModeData{}, runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
