@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
