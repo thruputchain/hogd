@@ -108,7 +108,7 @@ to_system_error_code(auto err, auto &&f)
 
 DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp,
                              DatabaseIdentifier db_identifier)
-  : read_client_([&] {
+  : cp_(cp), read_client_([&] {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
 

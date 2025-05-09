@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -19,10 +20,14 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/event.h"
+#include "x23/mvar.h"
 
 namespace hogd {
 
@@ -80,7 +85,78 @@ SystemCallHandler::root_invoke()
 
   if (!res.is_root_success())
     return res.to_root_error();
+  root_invoked_succeeded_ = true;
   return res;
+}
+
+x23::Async<SystemStatus<bool>>
+SystemCallHandler::try_commit_transaction()
+{
+  assert(root_invoked_succeeded_);
+  assert(!transaction_committed_);
+
+  auto [async, cb] = x23::make_async<void>();
+  std::atomic<uint32_t> pending_ops = modified_items_.size();
+  std::atomic<bool> failed = false;
+  x23::MVar<std::optional<SystemError>> error = std::nullopt;
+
+  for (auto const &[addrkey, item_view] : modified_items_) {
+    [](AddressAndKey const &addrkey, ItemView const &item_view,
+       auto &pending_ops, auto &cb, PerTransactionDatabaseProxy &db_proxy,
+       auto &error, auto &failed) -> x23::Detached {
+      co_await db_proxy.coropoll().pool_.bg();
+
+      auto delta = item_view.get_delta();
+
+      if (delta) {
+        auto res = co_await db_proxy.try_reserve_delta(
+            addrkey, *delta,
+            std::to_underlying(StorageItemRPCFlags::kStorageNone));
+
+        if (!res.has_value()) {
+          auto err = error.take();
+          if (!err->has_value()) {
+            *err = res.error();
+          }
+        }
+        if (!res.value().has_value()) {
+          failed = true;
+        }
+      }
+
+      auto count = pending_ops.fetch_sub(1);
+      if (count == 1) {
+        cb();
+      }
+    }(addrkey, item_view, pending_ops, cb, db_proxy_, error, failed);
+  }
+  // wait for all the operations to finish
+  async();
+
+  // check whether some kind of system error occurred
+  {
+    auto err = error.take();
+    if (err->has_value()) {
+      co_return *(*err);
+    }
+  }
+
+  // check if any of the 2pc database operations failed
+  if (failed) {
+    auto r = co_await db_proxy_.abort_transaction();
+    if (!r.has_value()) {
+      co_return r.error();
+    }
+    transaction_committed_ = true;
+    co_return false;
+  }
+
+  auto r = co_await db_proxy_.commit_transaction();
+  if (!r.has_value()) {
+    co_return r.error();
+  }
+  transaction_committed_ = true;
+  co_return true;
 }
 
 // can only be called when call_frame_stack_ is nonempty

@@ -18,6 +18,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -52,6 +53,11 @@ public:
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Starts the invocation that is specified within signed_tx_.
   InvokeResult root_invoke();
+
+  // Attempt to commit the current transaction to the database.
+  // Requirement: root_invoke() must be called first, and
+  // that must have returned successfully.
+  x23::Async<SystemStatus<bool>> try_commit_transaction();
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
@@ -125,6 +131,8 @@ private:
   // only set at the end of the transaction
   std::vector<LogEntry> committed_logs_;
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
+  bool root_invoked_succeeded_ = false;
+  bool transaction_committed_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
 
