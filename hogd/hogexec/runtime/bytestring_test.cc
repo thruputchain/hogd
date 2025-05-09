@@ -297,7 +297,7 @@ TEST_F(BytestringTest, TryInvokeGoodWorkflow)
   Bytestring expect;
   expect.resize(expect_span.size());
   std::memcpy(expect.data(), expect_span.data(), expect_span.size());
-  // NOLINTNEXTLINE(bugprone-uncheked-optional-access)
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   ASSERT_EQ(read_res.value().value().bytestring(), expect);
 }
 
@@ -451,7 +451,7 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
     Bytestring expect;
     expect.resize(expect_span.size());
     std::memcpy(expect.data(), expect_span.data(), expect_span.size());
-    // NOLINTNEXTLINE(bugprone-uncheked-optional-access)
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ASSERT_EQ(read_res.value().value().bytestring(), expect);
   }
 
@@ -521,7 +521,7 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
     Bytestring expect;
     expect.resize(expect_span.size());
     std::memcpy(expect.data(), expect_span.data(), expect_span.size());
-    // NOLINTNEXTLINE(bugprone-uncheked-optional-access)
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ASSERT_EQ(read_res.value().value().bytestring(), expect);
   }
 }
