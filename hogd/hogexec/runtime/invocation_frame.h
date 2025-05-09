@@ -27,8 +27,10 @@ class StorageSnapshotCache;
 // Stores all relevant data structures for one Invocation in a transaction.
 class InvocationFrame {
 public:
+  InvocationFrame(Invocation invocation, InvokeFlagSet flags);
+
   // the invocation that started this call frame
-  const Invocation active_invocation_;
+  Invocation const &active_invocation() const { return active_invocation_; }
 
   // new deployments that were created during this (and child) call frames
   std::map<ContractAddress, SHA256Hash> new_contract_deployments_;
@@ -36,9 +38,6 @@ public:
   // The value of the last _child_ call frame's returned string.
   // Set to nullopt on failed calls, or before any child call happens.
   std::optional<ReturnBuffer> child_return_buffer_ = std::nullopt;
-
-  // NOLINTNEXTLINE(bugprone-exception-escape)
-  InvocationFrame(Invocation invocation, InvokeFlagSet flags);
 
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &&frame);
@@ -79,6 +78,8 @@ public:
   try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
 
 private:
+  Invocation active_invocation_;
+
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
 

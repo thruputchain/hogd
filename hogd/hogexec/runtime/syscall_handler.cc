@@ -142,7 +142,8 @@ ContractAddress
 SystemCallHandler::get_current_address() const
 {
   return invocation_frame_stack_.get_active_frame()
-      .active_invocation_.invoked_address;
+      .active_invocation()
+      .invoked_address;
 }
 
 SHA256Hash
@@ -266,7 +267,9 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 Calldata const &
 SystemCallHandler::get_calldata() const
 {
-  return invocation_frame_stack_.get_active_frame().active_invocation_.calldata;
+  return invocation_frame_stack_.get_active_frame()
+      .active_invocation()
+      .calldata;
 }
 
 SyscallStatus<void>

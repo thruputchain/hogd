@@ -255,9 +255,10 @@ std::optional<ContractAddress>
 InvocationFrameStack::get_msg_sender() const
 {
   return frame_stack_.size() >= 2
-             ? std::optional<
-                   ContractAddress>{frame_stack_[frame_stack_.size() - 2]
-                                        .active_invocation_.invoked_address}
+             ? std::optional<ContractAddress>{frame_stack_[frame_stack_.size() -
+                                                           2]
+                                                  .active_invocation()
+                                                  .invoked_address}
              : std::nullopt;
 }
 
@@ -302,7 +303,7 @@ InvocationFrameStack::get_item_view(StorageKey const &key)
 
   auto &active_frame = get_active_frame();
   AddressAndKey addrkey{.address =
-                            active_frame.active_invocation_.invoked_address,
+                            active_frame.active_invocation().invoked_address,
                         .key = key};
 
   // do we already have a frame in the top active frame
