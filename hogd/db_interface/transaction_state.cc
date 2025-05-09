@@ -1,5 +1,6 @@
 #include "transaction_state.h"
 
+#include <atomic>
 #include <cassert>
 #include <mutex>
 #include <optional>
