@@ -43,13 +43,14 @@ public:
   void commit_successful_child_frame(InvocationFrame &&frame);
 
   // revert the child invocation frame.
-  // Does not clean up the child frame, but is responsible for handling the parent
-  // frame's response to the child frame's failure.
+  // Does not clean up the child frame, but is responsible for handling the
+  // parent frame's response to the child frame's failure.
   void commit_failed_child_frame();
 
   // Mark the current frame as failed.
   // Used to clean up failed try_invoke frames.
-  SystemStatus<void> mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
+  SystemStatus<void>
+  mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
 
   // set the value returned from the current call frame.
   void set_frame_return(ReturnBuffer &&return_buffer);
@@ -111,7 +112,8 @@ public:
   }
   bool empty() const { return frame_stack_.empty(); }
 
-  SystemStatus<void> start_frame(Invocation const &invocation, InvokeFlagSet flags);
+  SystemStatus<void> start_frame(Invocation const &invocation,
+                                 InvokeFlagSet flags);
   SystemStatus<void> finish_frame(InvokeResult result,
                                   ExecutionModeData &execution_mode_data);
 

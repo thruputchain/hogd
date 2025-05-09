@@ -36,8 +36,6 @@ InvocationFrame::InvocationFrame(Invocation invocation, InvokeFlagSet flags)
 void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
-  std::println("committing successful child frame: try_count {} ",
-              frame.try_invoke_frame_count_);
   child_return_buffer_ = frame.to_return_;
   logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
                std::make_move_iterator(frame.logs_.end()));
@@ -58,7 +56,8 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 }
 
 SystemStatus<void>
-InvocationFrame::mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const
+InvocationFrame::mark_frame_as_failed(
+    PerTransactionDatabaseProxy &db_proxy) const
 {
   if (try_invoke_frame_count_ > 0) {
     auto st = db_proxy.pop_subtransactions(try_invoke_frame_count_)();
@@ -221,8 +220,6 @@ InvocationFrameStack::finish_frame(InvokeResult result,
   // module's internal state -- not just memory, but also tables and globals.
   // The wasm stack is reset automatically).
   if (result.should_frame_revert()) {
-    std::println("reverting frame");
-
     auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {
       return st.error();

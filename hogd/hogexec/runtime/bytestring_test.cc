@@ -35,7 +35,6 @@ class BytestringTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    x23::RpcLogger::default_logfd = 1;
     constexpr static uint32_t kPortNumber = 10000;
 
     db_executor_server_.start_server(kPortNumber);
@@ -80,7 +79,8 @@ make_native_contract(uint32_t contract_id)
   return contract;
 }
 
-ContractAddress make_contract_address(uint8_t id)
+ContractAddress
+make_contract_address(uint8_t id)
 {
   ContractAddress address{};
   address[0] = id;
@@ -305,15 +305,15 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
   // A native contract with the following methods:
   // 0: Performs a bytestring write of "hello".
   // 1: Performs a bytestring write of "world".
-  // 2: Invokes method 0, in a try_invoke frame.  Then invokes method 1, in another try_invoke frame. (sequential try invokes)
-  // 3: Invokes method 0, in a try_invoke frame.  Then returns an error.
-  // 4: Invokes method 3, in a regular frame.  Then invokes method 1, in a try_invoke frame.
+  // 2: Invokes method 0, in a try_invoke frame.  Then invokes method 1, in
+  // another try_invoke frame. (sequential try invokes) 3: Invokes method 0, in
+  // a try_invoke frame.  Then returns an error. 4: Invokes method 3, in a
+  // regular frame.  Then invokes method 1, in a try_invoke frame.
   auto native_contract_0 = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
-                std::println("method 0");
              auto key = StorageKey{};
              auto res =
                  handler.set_bytestring(key, std::as_bytes(std::span{"hello"}));
@@ -325,7 +325,6 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
           {1,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
-                std::println("method 1");
              auto key = StorageKey{};
              auto res =
                  handler.set_bytestring(key, std::as_bytes(std::span{"world"}));
@@ -337,7 +336,6 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
           {2,
            [](SystemCallHandler &handler,
               NativeRuntime &runtime) -> InvokeStatus<int32_t> {
-                std::println("method 2");
              // Try invoke method 0
              auto [r0, _g0] = handler.invoke(
                  Invocation{.invoked_address = handler.get_current_address(),
@@ -423,15 +421,14 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
     StorageSnapshotCache snapshot(block_number_, *db_proxy_);
     auto handler = SystemCallHandler(
         SignedTransaction{
-            .tx = Transaction{
-                .invocation = Invocation{
-                    .invoked_address = make_contract_address(1),
-                    .method = 2,
-                    .gas_limit = UINT64_MAX,
-                    .calldata = {}
-                },
-            }
-        },
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = make_contract_address(1),
+                                   .method = 2,
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                }},
         snapshot, PerTransactionDatabaseProxy(*db_proxy_, 1, 0),
         ProposalModeData{}, runtime_context);
     auto res = handler.root_invoke();
@@ -443,7 +440,9 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
 
     advance_block();
     // Check that the last write was "world"
-    auto read_res = db_proxy_->get_snapshot_item(block_number_, AddressAndKey{.address = make_contract_address(1), .key = StorageKey{}})();
+    auto read_res = db_proxy_->get_snapshot_item(
+        block_number_, AddressAndKey{.address = make_contract_address(1),
+                                     .key = StorageKey{}})();
     ASSERT_TRUE(read_res.has_value());
     ASSERT_TRUE(read_res.value().has_value());
     auto expect_span = std::as_bytes(std::span{"world"});
@@ -460,15 +459,14 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
     StorageSnapshotCache snapshot(block_number_, *db_proxy_);
     auto handler = SystemCallHandler(
         SignedTransaction{
-            .tx = Transaction{
-                .invocation = Invocation{
-                    .invoked_address = make_contract_address(2),
-                    .method = 3,
-                    .gas_limit = UINT64_MAX,
-                    .calldata = {}
-                },
-            }
-        },
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = make_contract_address(2),
+                                   .method = 3,
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                }},
         snapshot, PerTransactionDatabaseProxy(*db_proxy_, 2, 0),
         ProposalModeData{}, runtime_context);
     auto res = handler.root_invoke();
@@ -478,7 +476,9 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
     ASSERT_FALSE(*commit_res); // Transaction should not commit
     advance_block();
     // Storage should not be updated
-    auto read_res = db_proxy_->get_snapshot_item(block_number_, AddressAndKey{.address = make_contract_address(2), .key = StorageKey{}})();
+    auto read_res = db_proxy_->get_snapshot_item(
+        block_number_, AddressAndKey{.address = make_contract_address(2),
+                                     .key = StorageKey{}})();
     // Should be empty or not present
     ASSERT_TRUE(read_res.has_value());
     ASSERT_FALSE(read_res.value().has_value());
@@ -491,15 +491,14 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
     StorageSnapshotCache snapshot(block_number_, *db_proxy_);
     auto handler = SystemCallHandler(
         SignedTransaction{
-            .tx = Transaction{
-                .invocation = Invocation{
-                    .invoked_address = make_contract_address(3),
-                    .method = 4,
-                    .gas_limit = UINT64_MAX,
-                    .calldata = {}
-                },
-            }
-        },
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = make_contract_address(3),
+                                   .method = 4,
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                }},
         snapshot, PerTransactionDatabaseProxy(*db_proxy_, 3, 0),
         ProposalModeData{}, runtime_context);
     auto res = handler.root_invoke();
@@ -510,7 +509,9 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
     ASSERT_TRUE(*commit_res);
     advance_block();
     // Storage should be updated to "world"
-    auto read_res = db_proxy_->get_snapshot_item(block_number_, AddressAndKey{.address = make_contract_address(3), .key = StorageKey{}})();
+    auto read_res = db_proxy_->get_snapshot_item(
+        block_number_, AddressAndKey{.address = make_contract_address(3),
+                                     .key = StorageKey{}})();
     ASSERT_TRUE(read_res.has_value());
     ASSERT_TRUE(read_res.value().has_value());
     auto expect_span = std::as_bytes(std::span{"world"});

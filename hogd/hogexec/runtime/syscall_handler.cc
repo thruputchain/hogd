@@ -76,9 +76,10 @@ SystemCallHandler::root_invoke()
                         .gas_consumed_ = 0};
   }
 
-  auto start_status = invocation_frame_stack_.start_frame(signed_tx_.tx.invocation,
-                                      std::to_underlying(
-                                          InvokeFlag::kInvokeFlagNone));
+  auto start_status =
+      invocation_frame_stack_.start_frame(signed_tx_.tx.invocation,
+                                          std::to_underlying(
+                                              InvokeFlag::kInvokeFlagNone));
   if (!start_status.has_value()) {
     return InvokeResult{.result_ = start_status.error().to_invoke_error(),
                         .gas_consumed_ = 0};
@@ -86,7 +87,8 @@ SystemCallHandler::root_invoke()
 
   auto res = runtime.value()->invoke(signed_tx_.tx.invocation.method,
                                      signed_tx_.tx.invocation.gas_limit);
-  auto finish_status = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  auto finish_status =
+      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   if (!finish_status.has_value()) {
     return InvokeResult{.result_ = finish_status.error().to_invoke_error(),
                         .gas_consumed_ = 0};
@@ -103,6 +105,12 @@ SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_);
   if (!root_invoked_succeeded_) {
+
+    auto st = co_await db_proxy_.abort_transaction();
+    if (!st.has_value()) {
+      co_return st.error();
+    }
+
     co_return false;
   }
   assert(last_frame_.has_value());
@@ -173,7 +181,8 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
     return {start_status.error().to_host_fn_error(), 0};
   }
   auto res = runtime.value()->invoke(invocation.method, gas_limit);
-  auto finish_status = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  auto finish_status =
+      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   if (!finish_status.has_value()) {
     return {finish_status.error().to_host_fn_error(), 0};
   }
