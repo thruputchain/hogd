@@ -12,6 +12,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
@@ -39,13 +40,16 @@ public:
   InvocationFrame(Invocation invocation, InvokeFlagSet flags);
 
   // merge child invocation frame into self
-  void commit_successful_child_frame(InvocationFrame &frame);
-  // revert the child invocation frame
-  // Responsible for releasing any try_invoke frames created during the child
-  // frame.
-  SystemStatus<void>
-  commit_failed_child_frame(InvocationFrame &frame,
-                            PerTransactionDatabaseProxy &db_proxy);
+  void commit_successful_child_frame(InvocationFrame &&frame);
+
+  // revert the child invocation frame.
+  // Does not clean up the child frame, but is responsible for handling the parent
+  // frame's response to the child frame's failure.
+  void commit_failed_child_frame();
+
+  // Mark the current frame as failed.
+  // Used to clean up failed try_invoke frames.
+  SystemStatus<void> mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const;
 
   // set the value returned from the current call frame.
   void set_frame_return(ReturnBuffer &&return_buffer);
@@ -107,7 +111,7 @@ public:
   }
   bool empty() const { return frame_stack_.empty(); }
 
-  void start_frame(Invocation const &invocation, InvokeFlagSet flags);
+  SystemStatus<void> start_frame(Invocation const &invocation, InvokeFlagSet flags);
   SystemStatus<void> finish_frame(InvokeResult result,
                                   ExecutionModeData &execution_mode_data);
 

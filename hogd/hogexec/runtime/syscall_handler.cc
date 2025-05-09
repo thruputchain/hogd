@@ -76,14 +76,19 @@ SystemCallHandler::root_invoke()
                         .gas_consumed_ = 0};
   }
 
-  invocation_frame_stack_.start_frame(signed_tx_.tx.invocation,
+  auto start_status = invocation_frame_stack_.start_frame(signed_tx_.tx.invocation,
                                       std::to_underlying(
                                           InvokeFlag::kInvokeFlagNone));
+  if (!start_status.has_value()) {
+    return InvokeResult{.result_ = start_status.error().to_invoke_error(),
+                        .gas_consumed_ = 0};
+  }
+
   auto res = runtime.value()->invoke(signed_tx_.tx.invocation.method,
                                      signed_tx_.tx.invocation.gas_limit);
-  auto st = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
-  if (!st.has_value()) {
-    return InvokeResult{.result_ = st.error().to_invoke_error(),
+  auto finish_status = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  if (!finish_status.has_value()) {
+    return InvokeResult{.result_ = finish_status.error().to_invoke_error(),
                         .gas_consumed_ = 0};
   }
 
@@ -96,8 +101,10 @@ SystemCallHandler::root_invoke()
 x23::Async<SystemStatus<bool>>
 SystemCallHandler::try_commit_transaction()
 {
-  assert(root_invoked_succeeded_);
   assert(!transaction_committed_);
+  if (!root_invoked_succeeded_) {
+    co_return false;
+  }
   assert(last_frame_.has_value());
 
   auto r = co_await last_frame_.value().try_acquire_frame_locks(db_proxy_);
@@ -161,11 +168,14 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  invocation_frame_stack_.start_frame(invocation, flags);
+  auto start_status = invocation_frame_stack_.start_frame(invocation, flags);
+  if (!start_status.has_value()) {
+    return {start_status.error().to_host_fn_error(), 0};
+  }
   auto res = runtime.value()->invoke(invocation.method, gas_limit);
-  auto st = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
-  if (!st.has_value()) {
-    return {st.error().to_host_fn_error(), 0};
+  auto finish_status = invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+  if (!finish_status.has_value()) {
+    return {finish_status.error().to_host_fn_error(), 0};
   }
 
   return res.to_host_fn_result();

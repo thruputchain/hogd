@@ -27,12 +27,17 @@ namespace hogd {
 
 InvocationFrame::InvocationFrame(Invocation invocation, InvokeFlagSet flags)
   : active_invocation_(std::move(invocation)), flags_(flags)
-{}
+{
+  if (is_try_invoke()) {
+    try_invoke_frame_count_ = 1;
+  }
+}
 
 void
-InvocationFrame::commit_successful_child_frame(InvocationFrame &frame)
+InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
-
+  std::println("committing successful child frame: try_count {} ",
+              frame.try_invoke_frame_count_);
   child_return_buffer_ = frame.to_return_;
   logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
                std::make_move_iterator(frame.logs_.end()));
@@ -53,20 +58,21 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &frame)
 }
 
 SystemStatus<void>
-InvocationFrame::commit_failed_child_frame(
-    InvocationFrame &frame, PerTransactionDatabaseProxy &db_proxy)
+InvocationFrame::mark_frame_as_failed(PerTransactionDatabaseProxy &db_proxy) const
 {
-  child_return_buffer_ = std::nullopt;
-
-  if (frame.try_invoke_frame_count_ > 0) {
-
-    auto st = db_proxy.pop_subtransactions(frame.try_invoke_frame_count_)();
+  if (try_invoke_frame_count_ > 0) {
+    auto st = db_proxy.pop_subtransactions(try_invoke_frame_count_)();
     if (!st.has_value()) {
       return st.error();
     }
   }
-
   return {};
+}
+
+void
+InvocationFrame::commit_failed_child_frame()
+{
+  child_return_buffer_ = std::nullopt;
 }
 
 void
@@ -145,11 +151,18 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
   co_return !failed;
 }
 
-void
+SystemStatus<void>
 InvocationFrameStack::start_frame(Invocation const &invocation,
                                   InvokeFlagSet flags)
 {
   frame_stack_.emplace_back(invocation, flags);
+  if (frame_stack_.back().is_try_invoke()) {
+    auto st = db_proxy_.push_new_subtransaction()();
+    if (!st.has_value()) {
+      return st.error();
+    }
+  }
+  return {};
 }
 
 SystemStatus<void>
@@ -208,18 +221,15 @@ InvocationFrameStack::finish_frame(InvokeResult result,
   // module's internal state -- not just memory, but also tables and globals.
   // The wasm stack is reset automatically).
   if (result.should_frame_revert()) {
+    std::println("reverting frame");
 
-    if (frame_stack_.size() >= 2) {
-      size_t stack_size = frame_stack_.size();
-      // Contents of the frame are entirely dropped. We just need to notify
-      // the parent (if there is one) that it had a failed frame.
-      auto st = frame_stack_[stack_size - 2].commit_failed_child_frame(
-          frame_stack_[stack_size - 1], db_proxy_);
-      if (!st.has_value()) {
-        return st.error();
-      }
+    auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
+    if (!st.has_value()) {
+      return st.error();
     }
     frame_stack_.pop_back();
+    frame_stack_.back().commit_failed_child_frame();
+
     return {};
   }
 
@@ -230,7 +240,7 @@ InvocationFrameStack::finish_frame(InvokeResult result,
   if (stack_size >= 2) {
     // Commit the frame to it's parent
     frame_stack_[stack_size - 2].commit_successful_child_frame(
-        frame_stack_.back());
+        std::move(frame_stack_.back()));
   }
   else if (stack_size == 1) {
     // last frame -- push frame contents to external caller
