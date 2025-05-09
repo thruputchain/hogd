@@ -31,7 +31,7 @@
 
 namespace hogd {
 
-class BytestringTest : public ::testing::Test {
+class TryInvokeTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
@@ -68,6 +68,11 @@ protected:
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   BlockID block_number_ = 0;
+
+  TransactionID allocate_txid() { return next_tx_id_++; }
+
+private:
+  TransactionID next_tx_id_ = 0;
 };
 
 namespace {
@@ -88,7 +93,9 @@ make_contract_address(uint8_t id)
 }
 } // namespace
 
-TEST_F(BytestringTest, ReadWriteBytestring)
+// Not really a try invoke test, but it's a convenient way to test general
+// invocation.
+TEST_F(TryInvokeTest, ReadWriteBytestring)
 { // A native contract with the following methods:
   // 0: takes the input calldata and writes it to a hardcoded storage key.
   // 1: Reads the bytestring from the hardcoded storage key and returns it.
@@ -214,7 +221,7 @@ TEST_F(BytestringTest, ReadWriteBytestring)
   ASSERT_TRUE(*r);
 }
 
-TEST_F(BytestringTest, TryInvokeGoodWorkflow)
+TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
 { // A native contract with the following methods:
   // 0: Invokes method 1, in a try_invoke frame.
   // 1: Makes a bytestring write.
@@ -301,7 +308,7 @@ TEST_F(BytestringTest, TryInvokeGoodWorkflow)
   ASSERT_EQ(read_res.value().value().bytestring(), expect);
 }
 
-TEST_F(BytestringTest, TryInvokeHandleErrors)
+TEST_F(TryInvokeTest, TryInvokeHandleErrors)
 {
   // A native contract with the following methods:
   // 0: Performs a bytestring write of "hello".
@@ -524,6 +531,283 @@ TEST_F(BytestringTest, TryInvokeHandleErrors)
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ASSERT_EQ(read_res.value().value().bytestring(), expect);
   }
+}
+
+TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
+{
+  // Test on try invoke responding to rejection from the database.
+
+  // Native contract with the following methods:
+  // 0: Loads the calldata, interprets it as two int8_t values [a, b], and
+  // performs an nnint_set_add of (a, b) on a storage key.
+  //
+  // 1:
+  // Load the calldata, and interpret it as two booleans [b1, b2].
+  // Invoke method 0 with parameters (10, -5), in a try_invoke frame. Then
+  // invoke method 0 with parameters (5, 10), in another try_invoke frame.
+  // Assert that b1 is true if and only if the first invocation of method 0
+  // succeeded. Assert that b2 is true if and only if the second invocation of
+  // method 0 succeeded. Then return success.
+  //
+  // 2:
+  // Load the calldata, and interpret it as a boolean.
+  // Invoke method 0 with parameters (5, -5), in a try_invoke frame.
+  // Assert that the try_invoke frame returns successfully if and only if the
+  // input boolean is true. Then return success.
+
+  auto native_contract_db_failure = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [](SystemCallHandler &handler,
+              NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+             auto const &calldata = handler.get_calldata();
+             if (calldata.size() != 2) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             auto key = StorageKey{};
+             // Interpret calldata bytes as int8_t for set_value and add_value
+             auto set_value = static_cast<int8_t>(calldata[0]);
+             auto add_value = static_cast<int8_t>(calldata[1]);
+
+             auto system_res = handler.set_nnint(key, set_value, add_value);
+
+             if (!system_res.has_value()) {
+               // System-level error during async operation
+               return system_res.error().to_invoke_error();
+             }
+
+             auto const &syscall_res = system_res.value();
+             if (!syscall_res.has_value()) {
+               // Syscall itself reported an error (e.g., invalid arguments for
+               // set_nnint)
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return 0; // Success
+           }},
+          {1,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+             auto const &calldata = handler.get_calldata();
+             if (calldata.size() != 2) { // Expecting two booleans
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             bool expect_first_succeeds = static_cast<bool>(calldata[0]);
+             bool expect_second_succeeds = static_cast<bool>(calldata[1]);
+
+             Calldata args_first_invoke = {10, static_cast<uint8_t>(-5)};
+             auto [r0, _g0] = handler.invoke(
+                 Invocation{.invoked_address = handler.get_current_address(),
+                            .method = 0,
+                            .gas_limit = UINT64_MAX,
+                            .calldata = args_first_invoke},
+                 runtime.get_available_gas(),
+                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             bool first_succeeded = (r0.value() == SyscallErrorCode::kNone);
+             if (first_succeeded != expect_first_succeeds) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             Calldata args_second_invoke = {5, 10};
+             auto [r1, _g1] = handler.invoke(
+                 Invocation{.invoked_address = handler.get_current_address(),
+                            .method = 0,
+                            .gas_limit = UINT64_MAX,
+                            .calldata = args_second_invoke},
+                 runtime.get_available_gas(),
+                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+
+             if (!r1.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             bool second_succeeded = (r1.value() == SyscallErrorCode::kNone);
+             if (second_succeeded != expect_second_succeeds) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return 0;
+           }},
+          {2,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+             auto const &calldata = handler.get_calldata();
+             if (calldata.size() != 1) { // Expecting one boolean
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             bool expect_invoke_succeeds = static_cast<bool>(calldata[0]);
+
+             Calldata args_invoke = {5, static_cast<uint8_t>(-5)};
+             auto [r0, _g0] = handler.invoke(
+                 Invocation{.invoked_address = handler.get_current_address(),
+                            .method = 0,
+                            .gas_limit = UINT64_MAX,
+                            .calldata = args_invoke},
+                 runtime.get_available_gas(),
+                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+
+             if (!r0.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             bool invoke_succeeded = (r0.value() == SyscallErrorCode::kNone);
+             if (invoke_succeeded != expect_invoke_succeeds) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return 0;
+           }}});
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_db_failure));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  auto contract_template = make_native_contract(0); // native_id = 0
+  in_memory_db_.write_contract(sha256(*contract_template), contract_template);
+
+  // Test case 1:
+  // Test that try invoke can acquire an exclusive lock.
+  ContractAddress tc1_addr = make_contract_address(30); // Using a new address
+  in_memory_db_.write_deployment(tc1_addr, sha256(*contract_template));
+  StorageSnapshotCache tc1_snapshot(block_number_, *db_proxy_);
+
+  // TC1.1: First, invoke method 1 with parameters [true, true]. This should
+  // succeed. This should leave, in the database, an exclusive lock on the item.
+  SystemCallHandler tc1_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation = Invocation{.invoked_address = tc1_addr,
+                                           .method = 1,
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {1, 1}},
+              }},
+      tc1_snapshot,
+      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
+      ProposalModeData{}, runtime_context);
+  {
+    auto res = tc1_handler.root_invoke();
+    ASSERT_TRUE(res.result_);
+    ASSERT_EQ(*res.result_, 0);
+  }
+
+  // TC1.2: Then, in the same block, before committing the first transaction,
+  // create a second transaction that invokes method 2 with parameter [false].
+  // This should succeed (the try invoke fails, because the first tx still holds
+  // the exclusive lock).
+  SystemCallHandler tc1_handler2(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation = Invocation{.invoked_address = tc1_addr,
+                                           .method = 2,
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {0}},
+              }},
+      tc1_snapshot,
+      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
+      ProposalModeData{}, runtime_context);
+  {
+    auto res = tc1_handler2.root_invoke();
+    ASSERT_TRUE(res.result_);
+    ASSERT_EQ(*res.result_, 0);
+    auto commit_res = tc1_handler2.try_commit_transaction()();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res);
+  }
+
+  // TC1.3: Then commit the first transaction (releasing the exclusive lock to a
+  // set_typeclass lock).
+  {
+    auto commit_res = tc1_handler.try_commit_transaction()();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res);
+  }
+
+  // TC1.4: Then invoke method 2 again, with parameter [true]. This should
+  // succeed.
+  SystemCallHandler tc1_handler3(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation = Invocation{.invoked_address = tc1_addr,
+                                           .method = 2,
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {1}},
+              }},
+      tc1_snapshot,
+      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
+      ProposalModeData{}, runtime_context);
+  {
+    auto res = tc1_handler3.root_invoke();
+    ASSERT_TRUE(res.result_);
+    ASSERT_EQ(*res.result_, 0);
+    auto commit_res = tc1_handler3.try_commit_transaction()();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res);
+  }
+
+  advance_block();
+
+  // Test case 2:
+  // Test that try invoke can handle a rejection from the database.
+  // First, invoke method 2, with parameter [true].  This should succeed.
+  // Commit the first transaction.
+  // Then, invoke method 1 with parameters [false, true].  This should succeed.
+  // Commit the second transaction.
+  ContractAddress tc2_addr = make_contract_address(31); // New address for TC2
+  in_memory_db_.write_deployment(tc2_addr, sha256(*contract_template));
+  StorageSnapshotCache tc2_snapshot(
+      block_number_, *db_proxy_); // Snapshot for the current block
+
+  // Step 1 & 2: Invoke M2({true}) and commit.
+  SystemCallHandler tc2_handler1(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation = Invocation{.invoked_address = tc2_addr,
+                                           .method = 2,
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {1}}, // true
+              }},
+      tc2_snapshot,
+      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
+      ProposalModeData{}, runtime_context);
+  {
+    auto res = tc2_handler1.root_invoke();
+    ASSERT_TRUE(res.result_);
+    ASSERT_EQ(*res.result_, 0);
+    auto commit_res = tc2_handler1.try_commit_transaction()();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res);
+  }
+
+  // Step 3 & 4: Invoke M1({false, true}) and commit.
+  SystemCallHandler tc2_handler2(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation = Invocation{.invoked_address = tc2_addr,
+                                           .method = 1,
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {0, 1}}, // {false, true}
+              }},
+      tc2_snapshot,
+      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
+      ProposalModeData{}, runtime_context);
+  {
+    auto res = tc2_handler2.root_invoke();
+    ASSERT_TRUE(res.result_);
+    ASSERT_EQ(*res.result_, 0);
+    auto commit_res = tc2_handler2.try_commit_transaction()();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res);
+  }
+
+  advance_block();
 }
 
 } // namespace hogd

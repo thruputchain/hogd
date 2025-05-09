@@ -116,8 +116,8 @@ public:
 
   SystemStatus<void> start_frame(Invocation const &invocation,
                                  InvokeFlagSet flags);
-  SystemStatus<void> finish_frame(InvokeResult result,
-                                  ExecutionModeData &execution_mode_data);
+  SystemStatus<InvokeResult>
+  finish_frame(InvokeResult result, ExecutionModeData &execution_mode_data);
 
   std::optional<ContractAddress> get_msg_sender() const;
 

@@ -89,6 +89,7 @@ SystemCallHandler::root_invoke()
     return InvokeResult{.result_ = finish_status.error().to_invoke_error(),
                         .gas_consumed_ = 0};
   }
+  res = finish_status.value();
 
   if (!res.is_root_success())
     return res.to_root_error();
@@ -183,6 +184,7 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
   if (!finish_status.has_value()) {
     return {finish_status.error().to_host_fn_error(), 0};
   }
+  res = finish_status.value();
 
   return res.to_host_fn_result();
 }

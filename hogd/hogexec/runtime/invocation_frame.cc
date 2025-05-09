@@ -165,7 +165,7 @@ InvocationFrameStack::start_frame(Invocation const &invocation,
   return {};
 }
 
-SystemStatus<void>
+SystemStatus<InvokeResult>
 InvocationFrameStack::finish_frame(InvokeResult result,
                                    ExecutionModeData &execution_mode_data)
 {
@@ -228,7 +228,7 @@ InvocationFrameStack::finish_frame(InvokeResult result,
     frame_stack_.pop_back();
     frame_stack_.back().commit_failed_child_frame();
 
-    return {};
+    return result;
   }
 
   // commit child invocation frame successfully
@@ -248,7 +248,7 @@ InvocationFrameStack::finish_frame(InvokeResult result,
 
   frame_stack_.pop_back();
 
-  return {};
+  return result;
 }
 
 std::optional<ContractAddress>

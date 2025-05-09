@@ -33,7 +33,6 @@ add_library(
 
 add_executable(
   runtime_test
-  bytestring_test.cc
   error_handling_test.cc
   execution_mode_test.cc
   gas_api_test.cc
@@ -46,6 +45,7 @@ add_executable(
   snapshot_storage_item_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
+  try_invoke_test.cc
   userctx_test.cc
 )
 target_link_libraries(
