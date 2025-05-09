@@ -48,6 +48,7 @@ class ValidationModeData {
 public:
   ValidationModeData(const ValidationModeData &) = delete;
   ValidationModeData &operator=(const ValidationModeData &) = delete;
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ValidationModeData(ValidationModeData &&) noexcept = default;
   ValidationModeData &operator=(ValidationModeData &&) noexcept = delete;
   // Constructs validation data with proposal to validate against

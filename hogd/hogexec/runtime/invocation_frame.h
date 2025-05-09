@@ -37,6 +37,7 @@ public:
   // Set to nullopt on failed calls, or before any child call happens.
   std::optional<ReturnBuffer> child_return_buffer_ = std::nullopt;
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   InvocationFrame(Invocation invocation, InvokeFlagSet flags);
 
   // merge child invocation frame into self
