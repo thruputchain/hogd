@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <mutex>
@@ -7,7 +8,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <atomic>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -95,14 +95,24 @@ public:
   get(TransactionID txid);
 
   // Returns the number of new transactions created.
-  uint64_t new_transaction_count() const { return new_transaction_count_.load(std::memory_order_acquire); }
-  uint64_t closed_transaction_count() const { return closed_transaction_count_.load(std::memory_order_acquire); }
+  uint64_t new_transaction_count() const
+  {
+    return new_transaction_count_.load(std::memory_order_acquire);
+  }
+  uint64_t closed_transaction_count() const
+  {
+    return closed_transaction_count_.load(std::memory_order_acquire);
+  }
 
   // Call when a transaction is committed or aborted.
-  void increment_closed() { closed_transaction_count_.fetch_add(1, std::memory_order_release); }
+  void increment_closed()
+  {
+    closed_transaction_count_.fetch_add(1, std::memory_order_release);
+  }
 
   // Asserts that all opened transactions have been committed or aborted.
-  void assert_all_closed() const {
+  void assert_all_closed() const
+  {
     assert(new_transaction_count() == closed_transaction_count());
   }
 

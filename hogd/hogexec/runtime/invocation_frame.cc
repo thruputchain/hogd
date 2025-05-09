@@ -142,6 +142,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
   {
     auto err = error.take();
     if (err->has_value()) {
+      // NOLINTNEXTLINE(bugprone-uncheked-optional-access)
       co_return *(*err);
     }
   }

@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 
-#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -21,14 +20,11 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/event.h"
-#include "x23/mvar.h"
 
 namespace hogd {
 

@@ -6,7 +6,6 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -14,7 +13,6 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
-#include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "syscall.hh"
