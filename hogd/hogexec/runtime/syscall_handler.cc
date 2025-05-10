@@ -20,6 +20,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -450,6 +451,83 @@ SystemCallHandler::delete_object(StorageKey const &storage_key)
   assert(*item_view);
 
   return (*item_view)->set(DeletedItem{});
+}
+
+namespace {
+auto
+queue_entry_from_span(std::span<const std::byte> span)
+{
+  QueueEntry new_entry;
+  new_entry.resize_uninitialized(span.size());
+  std::memcpy(new_entry.data(), reinterpret_cast<const uint8_t *>(span.data()),
+              span.size());
+  return new_entry;
+}
+
+SyscallStatus<RetrocausalQueueItem *>
+retrocausal_queue_item_from_view(ItemView *item_view)
+{
+  if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
+    return queue_item;
+  }
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    RetrocausalQueueItem new_item(unmodified_item->base_item_);
+
+    auto set_status = item_view->set(new_item);
+    if (!set_status.has_value()) {
+      return set_status.error();
+    }
+    return item_view->get<RetrocausalQueueItem>();
+  }
+  return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+}
+} // namespace
+
+SystemStatus<SyscallStatus<void>>
+SystemCallHandler::retrocausal_queue_insert(
+    StorageKey const &key, std::span<const std::byte> queue_entry)
+{
+  auto item_view = invocation_frame_stack_.get_item_view(key);
+  if (!item_view) {
+    return item_view.error();
+  }
+  assert(*item_view);
+
+  auto queue_item = retrocausal_queue_item_from_view(*item_view);
+  if (!queue_item.has_value()) {
+    return queue_item.error();
+  }
+
+  // Now we have either grabbed the preexisting RCQItem, or created a new one.
+  // In either case, we can now insert the new entry.
+  queue_item.value()->insert_entry(queue_entry_from_span(queue_entry));
+  return {};
+}
+
+SystemStatus<SyscallStatus<QueueEntry>>
+SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
+{
+  auto item_view = invocation_frame_stack_.get_item_view(key);
+  if (!item_view) {
+    return item_view.error();
+  }
+  assert(*item_view);
+
+  auto queue_item = retrocausal_queue_item_from_view(*item_view);
+  if (!queue_item.has_value()) {
+    return queue_item.error();
+  }
+
+  auto entry = queue_item.value()->get_next_item(execution_mode_data_, !peek);
+  if (!entry.has_value()) {
+    return entry.error();
+  }
+
+  auto &value = entry.value();
+  if (value.has_value()) {
+    return value.value();
+  }
+  return SyscallError{SyscallErrorCode::kNoRetrocausalQueueEntry};
 }
 
 } // namespace hogd

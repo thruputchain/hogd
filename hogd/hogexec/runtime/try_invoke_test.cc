@@ -1,7 +1,8 @@
+#include <gtest/gtest.h>
+
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-#include <gtest/gtest.h>
 
 #include <memory>
 #include <span>
@@ -13,85 +14,23 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_executor_server.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
-#include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
-#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/event.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
-class TryInvokeTest : public ::testing::Test {
+class TryInvokeTest : public ::testing::Test,
+                      public NativeContractTestFramework {
 protected:
-  void SetUp() override
-  {
-    constexpr static uint32_t kPortNumber = 10000;
-
-    db_executor_server_.start_server(kPortNumber);
-
-    db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             10000});
-    [[maybe_unused]] auto res = block_manager_.add_child(0, 1);
-    assert(res);
-    block_number_++;
-  }
-
-  void advance_block()
-  {
-    auto r = block_manager_.get_block_data(block_number_);
-    assert(r);
-    r->close_block();
-
-    [[maybe_unused]] auto r2 =
-        block_manager_.add_child(block_number_, block_number_ + 1);
-    assert(r2);
-    block_number_++;
-  }
-
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
-  InMemoryDatabase in_memory_db_ = InMemoryDatabase();
-  BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
-  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
-
-  std::unique_ptr<DatabaseProxy> db_proxy_;
-  BlockID block_number_ = 0;
-
-  TransactionID allocate_txid() { return next_tx_id_++; }
-
-private:
-  TransactionID next_tx_id_ = 0;
+  void SetUp() override {}
 };
-
-namespace {
-auto
-make_native_contract(uint32_t contract_id)
-{
-  auto contract = std::make_shared<Contract>(ContractType::kNative);
-  contract->native_contract_id() = contract_id;
-  return contract;
-}
-
-ContractAddress
-make_contract_address(uint8_t id)
-{
-  ContractAddress address{};
-  address[0] = id;
-  return address;
-}
-} // namespace
 
 // Not really a try invoke test, but it's a convenient way to test general
 // invocation.
@@ -198,9 +137,8 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
   in_memory_db_.write_deployment(ContractAddress{}, sha256(*contract_0));
 
   // now invoke the contract
-  StorageSnapshotCache snapshot(1, *db_proxy_);
 
-  auto handler = SystemCallHandler(
+  auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -209,8 +147,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {0, 1, 2, 3, 4, 5}},
               }},
-      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 1, 0),
-      ProposalModeData{}, runtime_context);
+      runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -273,9 +210,8 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
   in_memory_db_.write_deployment(ContractAddress{}, sha256(*contract_0));
 
   // now invoke the contract
-  StorageSnapshotCache snapshot(1, *db_proxy_);
 
-  auto handler = SystemCallHandler(
+  auto handler = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -284,8 +220,7 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {}},
               }},
-      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 1, 0),
-      ProposalModeData{}, runtime_context);
+      runtime_context);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
@@ -297,15 +232,14 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
 
   advance_block();
 
-  auto read_res =
-      db_proxy_->get_snapshot_item(block_number_, AddressAndKey{})();
+  auto read_res = lookup_storage_item_from_db(AddressAndKey{});
   ASSERT_TRUE(read_res.has_value());
   auto expect_span = std::as_bytes(std::span{"hello"});
   Bytestring expect;
   expect.resize(expect_span.size());
   std::memcpy(expect.data(), expect_span.data(), expect_span.size());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  ASSERT_EQ(read_res.value().value().bytestring(), expect);
+  ASSERT_EQ(read_res.value().bytestring(), expect);
 }
 
 TEST_F(TryInvokeTest, TryInvokeHandleErrors)
@@ -427,8 +361,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
   // Invoke method 2, starting with a clean contract deployment
   in_memory_db_.write_deployment(make_contract_address(1), sha256(*contract_0));
   {
-    StorageSnapshotCache snapshot(block_number_, *db_proxy_);
-    auto handler = SystemCallHandler(
+    auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
                 Transaction{
@@ -438,8 +371,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
-        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 1, 0),
-        ProposalModeData{}, runtime_context);
+        runtime_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
     ASSERT_EQ(*res.result_, 0);
@@ -449,25 +381,23 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
 
     advance_block();
     // Check that the last write was "world"
-    auto read_res = db_proxy_->get_snapshot_item(
-        block_number_, AddressAndKey{.address = make_contract_address(1),
-                                     .key = StorageKey{}})();
+    auto read_res = lookup_storage_item_from_db(
+        AddressAndKey{.address = make_contract_address(1),
+                      .key = StorageKey{}});
     ASSERT_TRUE(read_res.has_value());
-    ASSERT_TRUE(read_res.value().has_value());
     auto expect_span = std::as_bytes(std::span{"world"});
     Bytestring expect;
     expect.resize(expect_span.size());
     std::memcpy(expect.data(), expect_span.data(), expect_span.size());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    ASSERT_EQ(read_res.value().value().bytestring(), expect);
+    ASSERT_EQ(read_res.value().bytestring(), expect);
   }
 
   // Test case 2: unwinding a frame that contains a try_invoke
   // Invoke method 3, starting with a clean contract deployment
   in_memory_db_.write_deployment(make_contract_address(2), sha256(*contract_0));
   {
-    StorageSnapshotCache snapshot(block_number_, *db_proxy_);
-    auto handler = SystemCallHandler(
+    auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
                 Transaction{
@@ -477,8 +407,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
-        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 2, 0),
-        ProposalModeData{}, runtime_context);
+        runtime_context);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.result_); // Should return error
     auto commit_res = handler.try_commit_transaction()();
@@ -486,20 +415,18 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
     ASSERT_FALSE(*commit_res); // Transaction should not commit
     advance_block();
     // Storage should not be updated
-    auto read_res = db_proxy_->get_snapshot_item(
-        block_number_, AddressAndKey{.address = make_contract_address(2),
-                                     .key = StorageKey{}})();
+    auto read_res = lookup_storage_item_from_db(
+        AddressAndKey{.address = make_contract_address(2),
+                      .key = StorageKey{}});
     // Should be empty or not present
-    ASSERT_TRUE(read_res.has_value());
-    ASSERT_FALSE(read_res.value().has_value());
+    ASSERT_FALSE(read_res.has_value());
   }
 
   // Test case 3: bad try_invoke followed by a good
   // Invoke method 4, starting with a clean contract deployment
   in_memory_db_.write_deployment(make_contract_address(3), sha256(*contract_0));
   {
-    StorageSnapshotCache snapshot(block_number_, *db_proxy_);
-    auto handler = SystemCallHandler(
+    auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
                 Transaction{
@@ -509,8 +436,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
-        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 3, 0),
-        ProposalModeData{}, runtime_context);
+        runtime_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
     ASSERT_EQ(*res.result_, 0);
@@ -519,17 +445,16 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
     ASSERT_TRUE(*commit_res);
     advance_block();
     // Storage should be updated to "world"
-    auto read_res = db_proxy_->get_snapshot_item(
-        block_number_, AddressAndKey{.address = make_contract_address(3),
-                                     .key = StorageKey{}})();
+    auto read_res = lookup_storage_item_from_db(
+        AddressAndKey{.address = make_contract_address(3),
+                      .key = StorageKey{}});
     ASSERT_TRUE(read_res.has_value());
-    ASSERT_TRUE(read_res.value().has_value());
     auto expect_span = std::as_bytes(std::span{"world"});
     Bytestring expect;
     expect.resize(expect_span.size());
     std::memcpy(expect.data(), expect_span.data(), expect_span.size());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    ASSERT_EQ(read_res.value().value().bytestring(), expect);
+    ASSERT_EQ(read_res.value().bytestring(), expect);
   }
 }
 
@@ -672,11 +597,10 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   // Test that try invoke can acquire an exclusive lock.
   ContractAddress tc1_addr = make_contract_address(30); // Using a new address
   in_memory_db_.write_deployment(tc1_addr, sha256(*contract_template));
-  StorageSnapshotCache tc1_snapshot(block_number_, *db_proxy_);
 
   // TC1.1: First, invoke method 1 with parameters [true, true]. This should
   // succeed. This should leave, in the database, an exclusive lock on the item.
-  SystemCallHandler tc1_handler(
+  SystemCallHandler tc1_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -685,9 +609,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {1, 1}},
               }},
-      tc1_snapshot,
-      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
-      ProposalModeData{}, runtime_context);
+      runtime_context);
   {
     auto res = tc1_handler.root_invoke();
     ASSERT_TRUE(res.result_);
@@ -698,7 +620,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   // create a second transaction that invokes method 2 with parameter [false].
   // This should succeed (the try invoke fails, because the first tx still holds
   // the exclusive lock).
-  SystemCallHandler tc1_handler2(
+  SystemCallHandler tc1_handler2 = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -707,9 +629,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {0}},
               }},
-      tc1_snapshot,
-      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
-      ProposalModeData{}, runtime_context);
+      runtime_context);
   {
     auto res = tc1_handler2.root_invoke();
     ASSERT_TRUE(res.result_);
@@ -729,7 +649,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
 
   // TC1.4: Then invoke method 2 again, with parameter [true]. This should
   // succeed.
-  SystemCallHandler tc1_handler3(
+  SystemCallHandler tc1_handler3 = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -738,9 +658,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {1}},
               }},
-      tc1_snapshot,
-      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
-      ProposalModeData{}, runtime_context);
+      runtime_context);
   {
     auto res = tc1_handler3.root_invoke();
     ASSERT_TRUE(res.result_);
@@ -760,11 +678,9 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   // Commit the second transaction.
   ContractAddress tc2_addr = make_contract_address(31); // New address for TC2
   in_memory_db_.write_deployment(tc2_addr, sha256(*contract_template));
-  StorageSnapshotCache tc2_snapshot(
-      block_number_, *db_proxy_); // Snapshot for the current block
 
   // Step 1 & 2: Invoke M2({true}) and commit.
-  SystemCallHandler tc2_handler1(
+  SystemCallHandler tc2_handler1 = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -773,9 +689,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {1}}, // true
               }},
-      tc2_snapshot,
-      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
-      ProposalModeData{}, runtime_context);
+      runtime_context);
   {
     auto res = tc2_handler1.root_invoke();
     ASSERT_TRUE(res.result_);
@@ -786,7 +700,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   }
 
   // Step 3 & 4: Invoke M1({false, true}) and commit.
-  SystemCallHandler tc2_handler2(
+  SystemCallHandler tc2_handler2 = make_new_system_call_handler(
       SignedTransaction{
           .tx =
               Transaction{
@@ -795,9 +709,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
                                            .gas_limit = UINT64_MAX,
                                            .calldata = {0, 1}}, // {false, true}
               }},
-      tc2_snapshot,
-      PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid()),
-      ProposalModeData{}, runtime_context);
+      runtime_context);
   {
     auto res = tc2_handler2.root_invoke();
     ASSERT_TRUE(res.result_);

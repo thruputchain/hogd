@@ -28,6 +28,7 @@ add_library(
   syscall_invoke.cc
   syscall_log.cc
   syscall_nnint.cc
+  syscall_rcq.cc
   wasmi_runtime.cc
 )
 
@@ -41,6 +42,7 @@ add_executable(
   item_view_test.cc
   memory_access_test.cc
   native_contract_test.cc
+  rcq_test.cc
   runtime_test.cc
   snapshot_storage_item_test.cc
   syscall_entry_outer_tests.cc

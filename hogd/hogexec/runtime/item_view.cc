@@ -134,6 +134,19 @@ NNIntItem::validate() const
 
 // RetrocausalQueueItem implementation
 
+void
+RetrocausalQueueItem::add_empty_consume_delta()
+{
+  queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
+      .past_block_consume =
+          {
+              .max_fully_consumed_block_number = 0,
+              .partial_consumed_number = 0,
+          },
+      .current_block_consumed = {},
+  });
+}
+
 // This queue consumes entries in the following order:
 // 1. Entries from past blocks.
 // 2. self entries created within the transaction
@@ -149,7 +162,7 @@ NNIntItem::validate() const
 // get that same entry.  But if we swapped steps 2 and 3, then
 // the entry I peeked at might not be the same as the entry I consume
 // (since a concurrent entry might have been added in the meantime).
-HostFnStatus<std::optional<QueueEntry>>
+SystemStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                                     bool advance_cursor)
 {
@@ -167,7 +180,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
 
   auto next_block_status = get_next_block(block_index);
   if (!next_block_status.has_value()) {
-    return next_block_status.error().to_host_fn_error();
+    return next_block_status.error();
   }
   auto const *next_block = next_block_status.value();
 
@@ -182,15 +195,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                  blk_size);
       if (!queue_delta_.consume) {
         assert(next_block->block_number > 0);
-        queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
-            .past_block_consume =
-                {
-                    .max_fully_consumed_block_number =
-                        0, // can be 0, if we don't consume a full block
-                    .partial_consumed_number = 0,
-                },
-            .current_block_consumed = {},
-        });
+        add_empty_consume_delta();
       }
       queue_delta_.consume->past_block_consume.partial_consumed_number++;
 
@@ -216,6 +221,9 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   if (self_consume_res) {
     if (advance_cursor) {
       ++self_consumed_index_;
+      if (!queue_delta_.consume) {
+        add_empty_consume_delta();
+      }
       queue_delta_.consume->current_block_consumed.push_back(*self_consume_res);
     }
     return {*self_consume_res};
@@ -233,6 +241,9 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     if (advance_cursor) {
       ++locally_consumed_index_;
+      if (!queue_delta_.consume) {
+        add_empty_consume_delta();
+      }
       queue_delta_.consume->current_block_consumed.push_back(
           *concurrent_entry.value());
     }
@@ -260,14 +271,14 @@ RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
   return nullptr;
 }
 
-HostFnStatus<std::optional<QueueEntry>>
+SystemStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
   if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
     auto out = base_item_.get_concurrent_rcq_entry(index);
     if (!out.has_value()) {
-      return out.error().to_host_fn_error();
+      return out.error();
     }
 
     auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
@@ -294,14 +305,14 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
   auto bit_res = validation_data.consume_nondeterministic_bit();
   if (!bit_res.has_value()) {
-    return HostFnError{HostFnErrorCode::kHostValidationFailure};
+    return SystemError{SystemErrorCode::kValidationFailure};
   }
   if (bit_res->get()) {
     auto res =
         validation_data.consume_queue_entry_observation(base_item_.addrkey(),
                                                         index);
     if (!res.has_value()) {
-      return HostFnError{HostFnErrorCode::kHostValidationFailure};
+      return SystemError{SystemErrorCode::kValidationFailure};
     }
     return res.value().get();
   }

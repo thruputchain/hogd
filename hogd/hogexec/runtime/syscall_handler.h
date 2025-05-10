@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "retrocausal_queue.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -116,6 +117,13 @@ public:
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
   delete_object(StorageKey const &storage_key);
+
+  // === Retrocausal Queue syscalls ===
+  SystemStatus<SyscallStatus<void>>
+  retrocausal_queue_insert(StorageKey const &key,
+                           std::span<const std::byte> queue_entry);
+  SystemStatus<SyscallStatus<QueueEntry>>
+  retrocausal_queue_consume(StorageKey const &key, bool peek);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
