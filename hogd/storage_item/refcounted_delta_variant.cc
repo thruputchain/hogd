@@ -105,8 +105,10 @@ RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item) const
       .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
   if (past_consume_delta_) {
     if (previous_item) {
-      assert(previous_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
-    } else {
+      assert(previous_item->type() ==
+             StorageItemType::kItemTypeRetrocausalQueue);
+    }
+    else {
 
       assert(past_consume_delta_ == kEmptyConsume);
     }

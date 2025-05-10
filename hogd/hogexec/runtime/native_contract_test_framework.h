@@ -30,10 +30,11 @@ namespace hogd {
 // Common setup utilities for testing native contracts.
 class NativeContractTestFramework {
 public:
-  NativeContractTestFramework(bool enable_logging = false) { 
+  NativeContractTestFramework(bool enable_logging = false)
+  {
     if (enable_logging) {
-        x23::RpcLogger::default_logfd = 1;
-    } 
+      x23::RpcLogger::default_logfd = 1;
+    }
     initialize();
   }
 

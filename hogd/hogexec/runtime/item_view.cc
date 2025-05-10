@@ -138,10 +138,11 @@ void
 RetrocausalQueueItem::add_empty_consume_delta()
 {
   queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
-      .past_block_consume = {
-        .max_fully_consumed_block_number = 0,
-        .partial_consumed_number = 0,
-      },
+      .past_block_consume =
+          {
+              .max_fully_consumed_block_number = 0,
+              .partial_consumed_number = 0,
+          },
       .current_block_consumed = {},
   });
 }
