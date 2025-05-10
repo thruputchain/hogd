@@ -14,22 +14,15 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_executor_server.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
-#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
-#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/event.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
