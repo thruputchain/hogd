@@ -149,7 +149,7 @@ NNIntItem::validate() const
 // get that same entry.  But if we swapped steps 2 and 3, then
 // the entry I peeked at might not be the same as the entry I consume
 // (since a concurrent entry might have been added in the meantime).
-HostFnStatus<std::optional<QueueEntry>>
+SystemStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                                     bool advance_cursor)
 {
@@ -167,7 +167,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
 
   auto next_block_status = get_next_block(block_index);
   if (!next_block_status.has_value()) {
-    return next_block_status.error().to_host_fn_error();
+    return next_block_status.error();
   }
   auto const *next_block = next_block_status.value();
 
@@ -260,14 +260,14 @@ RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
   return nullptr;
 }
 
-HostFnStatus<std::optional<QueueEntry>>
+SystemStatus<std::optional<QueueEntry>>
 RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
   if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
     auto out = base_item_.get_concurrent_rcq_entry(index);
     if (!out.has_value()) {
-      return out.error().to_host_fn_error();
+      return out.error();
     }
 
     auto &proposal_data = std::get<ProposalModeData>(execution_mode_data);
@@ -294,14 +294,14 @@ RetrocausalQueueItem::get_next_concurrent_entry(
   auto &validation_data = std::get<ValidationModeData>(execution_mode_data);
   auto bit_res = validation_data.consume_nondeterministic_bit();
   if (!bit_res.has_value()) {
-    return HostFnError{HostFnErrorCode::kHostValidationFailure};
+    return SystemError{SystemErrorCode::kValidationFailure};
   }
   if (bit_res->get()) {
     auto res =
         validation_data.consume_queue_entry_observation(base_item_.addrkey(),
                                                         index);
     if (!res.has_value()) {
-      return HostFnError{HostFnErrorCode::kHostValidationFailure};
+      return SystemError{SystemErrorCode::kValidationFailure};
     }
     return res.value().get();
   }

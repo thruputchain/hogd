@@ -28,6 +28,7 @@ add_library(
   syscall_invoke.cc
   syscall_log.cc
   syscall_nnint.cc
+  syscall_rcq.cc
   wasmi_runtime.cc
 )
 

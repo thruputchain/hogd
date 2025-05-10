@@ -77,7 +77,7 @@ public:
   constexpr static StorageItemType kItemType =
       StorageItemType::kItemTypeRetrocausalQueue;
 
-  HostFnStatus<std::optional<QueueEntry>>
+  SystemStatus<std::optional<QueueEntry>>
   get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
 
   void insert_entry(QueueEntry const &entry);
@@ -86,7 +86,7 @@ private:
   SystemStatus<const RetrocausalQueueBlock *>
   get_next_block(uint64_t search_start_index) const;
 
-  HostFnStatus<std::optional<QueueEntry>>
+  SystemStatus<std::optional<QueueEntry>>
   get_next_concurrent_entry(uint32_t index,
                             ExecutionModeData &execution_mode_data) const;
 
@@ -162,10 +162,12 @@ public:
 
   template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
   {
-    auto validate_result = type.validate();
-    if (!validate_result) {
-      // Validation check asserts that the written item type is well-formed.
-      return validate_result;
+    if constexpr (requires(ItemType const &item) { item.validate(); }) {  
+      auto validate_result = type.validate();
+      if (!validate_result) {
+        // Validation check asserts that the written item type is well-formed.
+        return validate_result;
+      }
     }
 
     // The only item type that needs the get_item_type() method,
@@ -178,7 +180,7 @@ public:
       return validate_type;
     }
 
-    delta_args_ = type;
+    delta_args_.emplace<ItemType>(type);
     return {};
   }
 
@@ -188,7 +190,7 @@ private:
   SyscallStatus<void>
   can_accept_type(std::optional<StorageItemType> item_type) const;
 
-  std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem>
+  std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem, RetrocausalQueueItem>
       delta_args_;
 };
 
