@@ -454,21 +454,23 @@ SystemCallHandler::delete_object(StorageKey const &storage_key)
 }
 
 namespace {
-auto queue_entry_from_span(std::span<const std::byte> span) {
+auto
+queue_entry_from_span(std::span<const std::byte> span)
+{
   QueueEntry new_entry;
   new_entry.resize_uninitialized(span.size());
-  std::memcpy(new_entry.data(),
-              reinterpret_cast<const uint8_t *>(span.data()),
+  std::memcpy(new_entry.data(), reinterpret_cast<const uint8_t *>(span.data()),
               span.size());
   return new_entry;
 }
 
-SyscallStatus<RetrocausalQueueItem*>
-retrocausal_queue_item_from_view(ItemView* item_view) {
-  if (auto* queue_item = item_view->get<RetrocausalQueueItem>()) {
+SyscallStatus<RetrocausalQueueItem *>
+retrocausal_queue_item_from_view(ItemView *item_view)
+{
+  if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
     return queue_item;
   }
-  if (auto const* unmodified_item = item_view->get<UnmodifiedItem>()) {
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     RetrocausalQueueItem new_item(unmodified_item->base_item_);
 
     auto set_status = item_view->set(new_item);
@@ -479,11 +481,11 @@ retrocausal_queue_item_from_view(ItemView* item_view) {
   }
   return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
 }
-}
+} // namespace
 
 SystemStatus<SyscallStatus<void>>
-SystemCallHandler::retrocausal_queue_insert(StorageKey const &key,
-                                            std::span<const std::byte> queue_entry)
+SystemCallHandler::retrocausal_queue_insert(
+    StorageKey const &key, std::span<const std::byte> queue_entry)
 {
   auto item_view = invocation_frame_stack_.get_item_view(key);
   if (!item_view) {
@@ -503,8 +505,7 @@ SystemCallHandler::retrocausal_queue_insert(StorageKey const &key,
 }
 
 SystemStatus<SyscallStatus<QueueEntry>>
-SystemCallHandler::retrocausal_queue_consume(StorageKey const &key,
-                                             bool peek)
+SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
 {
   auto item_view = invocation_frame_stack_.get_item_view(key);
   if (!item_view) {
@@ -522,13 +523,11 @@ SystemCallHandler::retrocausal_queue_consume(StorageKey const &key,
     return entry.error();
   }
 
-  auto& value = entry.value();
+  auto &value = entry.value();
   if (value.has_value()) {
     return value.value();
   }
   return SyscallError{SyscallErrorCode::kNoRetrocausalQueueEntry};
 }
-
-
 
 } // namespace hogd

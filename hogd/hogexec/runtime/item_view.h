@@ -162,7 +162,7 @@ public:
 
   template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
   {
-    if constexpr (requires(ItemType const &item) { item.validate(); }) {  
+    if constexpr (requires(ItemType const &item) { item.validate(); }) {
       auto validate_result = type.validate();
       if (!validate_result) {
         // Validation check asserts that the written item type is well-formed.
@@ -190,7 +190,8 @@ private:
   SyscallStatus<void>
   can_accept_type(std::optional<StorageItemType> item_type) const;
 
-  std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem, RetrocausalQueueItem>
+  std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
+               RetrocausalQueueItem>
       delta_args_;
 };
 

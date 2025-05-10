@@ -23,7 +23,7 @@ syscall_RetrocausalQueueInsert_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }
-  auto& rcq_syscall_status = *status;
+  auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
     return {rcq_syscall_status.error().code(), 0};
   }
