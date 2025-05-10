@@ -134,6 +134,18 @@ NNIntItem::validate() const
 
 // RetrocausalQueueItem implementation
 
+void
+RetrocausalQueueItem::add_empty_consume_delta()
+{
+  queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
+      .past_block_consume = {
+        .max_fully_consumed_block_number = 0,
+        .partial_consumed_number = 0,
+      },
+      .current_block_consumed = {},
+  });
+}
+
 // This queue consumes entries in the following order:
 // 1. Entries from past blocks.
 // 2. self entries created within the transaction
@@ -182,15 +194,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                  blk_size);
       if (!queue_delta_.consume) {
         assert(next_block->block_number > 0);
-        queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
-            .past_block_consume =
-                {
-                    .max_fully_consumed_block_number =
-                        0, // can be 0, if we don't consume a full block
-                    .partial_consumed_number = 0,
-                },
-            .current_block_consumed = {},
-        });
+        add_empty_consume_delta();
       }
       queue_delta_.consume->past_block_consume.partial_consumed_number++;
 
@@ -216,6 +220,9 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   if (self_consume_res) {
     if (advance_cursor) {
       ++self_consumed_index_;
+      if (!queue_delta_.consume) {
+        add_empty_consume_delta();
+      }
       queue_delta_.consume->current_block_consumed.push_back(*self_consume_res);
     }
     return {*self_consume_res};
@@ -233,6 +240,9 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
     // NOLINTBEGIN(bugprone-unchecked-optional-access)
     if (advance_cursor) {
       ++locally_consumed_index_;
+      if (!queue_delta_.consume) {
+        add_empty_consume_delta();
+      }
       queue_delta_.consume->current_block_consumed.push_back(
           *concurrent_entry.value());
     }

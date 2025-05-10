@@ -518,7 +518,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
     return queue_item.error();
   }
 
-  auto entry = queue_item.value()->get_next_item(execution_mode_data_, peek);
+  auto entry = queue_item.value()->get_next_item(execution_mode_data_, !peek);
   if (!entry.has_value()) {
     return entry.error();
   }

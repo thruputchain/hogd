@@ -104,8 +104,12 @@ RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item) const
   RetrocausalQueuePastBlockConsumeDelta consume_delta{
       .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
   if (past_consume_delta_) {
-    assert(previous_item);
-    assert(previous_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
+    if (previous_item) {
+      assert(previous_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
+    } else {
+
+      assert(past_consume_delta_ == kEmptyConsume);
+    }
     consume_delta = *past_consume_delta_;
   }
 
@@ -129,7 +133,7 @@ RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item) const
   }
   // otherwise, no parent, so make empty one just for the ctor
   RetrocausalQueue fake_parent(0);
-  assert(!past_consume_delta_);
+  assert(!past_consume_delta_ || *past_consume_delta_ == kEmptyConsume);
 
   return make_output(fake_parent);
 }

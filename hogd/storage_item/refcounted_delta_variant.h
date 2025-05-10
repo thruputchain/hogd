@@ -139,6 +139,9 @@ private:
   // corresponding insert transaction executes. At the end of the block, we
   // assert that this set is empty.
   std::multiset<QueueEntry> consumed_but_not_inserted_entries_;
+
+  static constexpr RetrocausalQueuePastBlockConsumeDelta kEmptyConsume{
+      .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
 };
 
 // Exclusive locked state

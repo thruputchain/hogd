@@ -30,63 +30,7 @@ class TryInvokeTest : public ::testing::Test,
                       public NativeContractTestFramework {
 protected:
   void SetUp() override {}
-  /*   constexpr static uint32_t kPortNumber = 10000;
-
-     db_executor_server_.start_server(kPortNumber);
-
-     db_proxy_ =
-         std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                              10000});
-     [[maybe_unused]] auto res = block_manager_.add_child(0, 1);
-     assert(res);
-     block_number_++;
-   }
-
-   void advance_block()
-   {
-     auto r = block_manager_.get_block_data(block_number_);
-     assert(r);
-     r->close_block();
-
-     [[maybe_unused]] auto r2 =
-         block_manager_.add_child(block_number_, block_number_ + 1);
-     assert(r2);
-     block_number_++;
-   }
-
-   x23::ThreadPool pool_ = x23::ThreadPool(1);
-   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
-   InMemoryDatabase in_memory_db_ = InMemoryDatabase();
-   BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
-   DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
-
-   std::unique_ptr<DatabaseProxy> db_proxy_;
-   BlockID block_number_ = 0;
-
-   TransactionID allocate_txid() { return next_tx_id_++; }
-
- private:
-   TransactionID next_tx_id_ = 0; */
 };
-
-namespace {
-auto
-make_native_contract(uint32_t contract_id)
-{
-  auto contract = std::make_shared<Contract>(ContractType::kNative);
-  contract->native_contract_id() = contract_id;
-  return contract;
-}
-
-ContractAddress
-make_contract_address(uint8_t id)
-{
-  ContractAddress address{};
-  address[0] = id;
-  return address;
-}
-} // namespace
 
 // Not really a try invoke test, but it's a convenient way to test general
 // invocation.

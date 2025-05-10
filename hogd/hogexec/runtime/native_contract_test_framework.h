@@ -1,11 +1,14 @@
 #pragma once
 
 #include <cassert>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
@@ -27,7 +30,12 @@ namespace hogd {
 // Common setup utilities for testing native contracts.
 class NativeContractTestFramework {
 public:
-  NativeContractTestFramework() { initialize(); }
+  NativeContractTestFramework(bool enable_logging = false) { 
+    if (enable_logging) {
+        x23::RpcLogger::default_logfd = 1;
+    } 
+    initialize();
+  }
 
   void advance_block()
   {
@@ -64,6 +72,26 @@ public:
       throw std::runtime_error("lookup_storage_item_from_db: db lookup failed");
     }
     return *r;
+  }
+
+  static auto make_native_contract(uint32_t contract_id)
+  {
+    auto contract = std::make_shared<Contract>(ContractType::kNative);
+    contract->native_contract_id() = contract_id;
+    return contract;
+  }
+
+  static ContractAddress make_contract_address(uint8_t id)
+  {
+    ContractAddress address{};
+    address[0] = id;
+    return address;
+  }
+  static StorageKey make_storage_key(std::string_view str)
+  {
+    StorageKey key{};
+    std::memcpy(key.data(), str.data(), str.size());
+    return key;
   }
 
 private:
