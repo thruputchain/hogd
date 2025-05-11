@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/worker_pool.h"
 
@@ -146,8 +147,8 @@ public:
     assert(ul.owns_lock());
 
     size_t idx = hash_fn_(key) & (buckets_.size() - 1);
-    if (ul.mutex() != std::addressof(locks_[idx]))
-      throw std::invalid_argument("Wrong lock.");
+    if (ul.mutex() != std::addressof(locks_[idx])) [[unlikely]]
+      panic("Wrong lock.");
     return buckets_[idx].erase(key);
   }
 

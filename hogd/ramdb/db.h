@@ -147,6 +147,13 @@ Database::get(std::span<const std::byte> key)
   return map_.get(key);
 }
 
+inline DBStatus<OwningSpan<const std::byte>>
+Database::get_if_type(std::span<const std::byte> key, uint8_t type)
+{
+  assert(active_);
+  return map_.get_if_type(key, type);
+}
+
 inline DBStatus<void>
 Database::get_if_type(std::span<const std::byte> key, uint8_t type,
                       std::span<std::byte> val_out)

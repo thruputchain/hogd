@@ -2,111 +2,17 @@
 
 #pragma once
 
-#include <memory>
 #include <optional>
-#include <unordered_map>
 #include <utility>
-#include <variant>
-#include <vector>
 
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/db.h"
+#include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
-
-//
-// These track changes for the item types currently supported by hogdb:
-//
-// NNInt128: a non-negative integer type that allows commutative operations
-// without conflicts.
-//
-// Bytes: A variable-length vector of bytes (also called a byte string). Used
-// to store opaque binary data. If exclusive, any changes to the same key will
-// conflict. Otherwise, will commute if the changes are the same value.
-//
-// Deletion: Used as a placeholder to indicate the item should be removed.
-//
-// TODO(abelay): It's not needed yet, but if more item types are added, it may
-// be cleaner to use an OOP approach instead of std::variant.
-
-struct NNInt128 {
-  int128_t base;
-  int128_t delta;
-};
-
-struct Bytes {
-  std::vector<std::byte> buf;
-  bool exclusive;
-};
-
-struct Deletion {};
-
-// ItemChange represents a pending modification to an item.
-class ItemChange {
-public:
-  ItemChange() = default;
-  ItemChange(NNInt128 &&nnint) : change_(std::move(nnint)) {}
-  ItemChange(Bytes &&bytes) : change_(std::move(bytes)) {}
-  ItemChange(Deletion &&d) : change_(std::move(d)) {}
-  ~ItemChange() = default;
-
-  // getters
-  std::optional<int128_t> to_nnint128() const;
-  OwningSpan<const std::byte> to_bytes() const;
-  bool is_deletion() const { return std::holds_alternative<Deletion>(change_); }
-
-  // storage_size returns the bytes needed to store the item if committed.
-  size_t storage_size() const;
-
-  // commit applies the item's changes to the ramdb.
-  HogDBStatus<void> commit(HogDatabase &db, ItemKey key) const;
-
-  // apply merges a change into this one. It can return kConflict if the change
-  // does not commute.
-  HogDBStatus<void> apply(const ItemChange &change);
-  // undo reverts a change from this one.
-  void undo(const ItemChange &change);
-
-private:
-  std::variant<std::monostate, NNInt128, Bytes, Deletion> change_;
-};
-
-inline std::optional<int128_t>
-ItemChange::to_nnint128() const
-{
-  const auto *tmp = std::get_if<NNInt128>(&change_);
-  if (!tmp)
-    return std::nullopt;
-  return tmp->base + tmp->delta;
-}
-
-inline OwningSpan<const std::byte>
-ItemChange::to_bytes() const
-{
-  const auto *tmp = std::get_if<Bytes>(&change_);
-  if (!tmp)
-    return {};
-  std::vector<std::byte> buf(tmp->buf);
-  auto span = std::span<const std::byte>(buf);
-  return OwningSpan(span, [ref = std::move(buf)] {});
-}
-
-inline size_t
-ItemChange::storage_size() const
-{
-  if (std::holds_alternative<NNInt128>(change_))
-    return sizeof(ItemKey) + sizeof(int128_t);
-
-  if (const auto *tmp = std::get_if<Bytes>(&change_); tmp)
-    return sizeof(ItemKey) + tmp->buf.size();
-
-  assert(std::holds_alternative<std::monostate>(change_) ||
-         std::holds_alternative<Deletion>(change_));
-  return 0;
-}
 
 // BlockTX manages a set of pending changes made in a block relative to the
 // current snapshot state. They can be applied to the ramdb via commit().
@@ -125,14 +31,15 @@ public:
   HogDBStatus<int128_t> read_nnint128(ItemKey key);
   HogDBStatus<OwningSpan<const std::byte>> read_bytes(ItemKey key);
 
-  // lock reserves the right to change an item. More than one lock can be
-  // acquired on an item if the changes do not conflict.
-  HogDBStatus<void> lock(ItemKey key, const ItemChange &change);
-  // replace modifies an existing request to change an item. The item must be
-  // already locked by the caller.
-  HogDBStatus<void> replace(ItemKey key, const ItemChange &old_change,
-                            const ItemChange &new_change);
-  // unlock drops and undoes a request to change an item.
+  // lock reserves the right to apply change to an item. If exclusive is false,
+  // More than one change can be made to an item if they commute.
+  HogDBStatus<void> lock(ItemKey key, const ItemChange &change,
+                         bool exclusive = false);
+  // modify_lock modifies an existing change to an item that was reserved with
+  // lock().
+  HogDBStatus<void> modify_lock(ItemKey key, const ItemChange &old_change,
+                                const ItemChange &new_change);
+  // unlock unreserves the right to apply change to an item and reverts it.
   void unlock(ItemKey key, const ItemChange &change);
 
   // commit applies all changes to the database.
@@ -141,6 +48,7 @@ public:
 private:
   struct ItemLock {
     ItemChange change;
+    bool exclusive;
     size_t ref;
   };
 
@@ -173,32 +81,14 @@ BlockTX::read_bytes(ItemKey key)
 }
 
 inline HogDBStatus<void>
-BlockTX::lock(ItemKey key, const ItemChange &change)
+BlockTX::lock(ItemKey key, const ItemChange &change, bool exclusive)
 {
   auto [val, ul] = locks_[key];
+  if ((val.exclusive || exclusive) && val.ref > 0)
+    return HogDBError(HogDBCode::kConflict);
   val.ref++;
-  return val.change.apply(change);
-}
-
-inline HogDBStatus<void>
-BlockTX::replace(ItemKey key, const ItemChange &old_change,
-                 const ItemChange &new_change)
-{
-  auto [val, ul] = locks_[key];
-  assert(val.ref > 0);
-  if (val.ref == 1) {
-    val.change = new_change;
-    return {};
-  }
-
-  ItemChange tmp = val.change;
-  tmp.undo(old_change);
-  HogDBStatus<void> ret = tmp.apply(new_change);
-  if (!ret)
-    return ret.error();
-
-  val.change = tmp;
-  return {};
+  val.exclusive = exclusive;
+  return val.change.merge(change);
 }
 
 inline void
@@ -207,10 +97,10 @@ BlockTX::unlock(ItemKey key, const ItemChange &change)
   auto [val, ul] = locks_[key];
   assert(val.ref > 0);
   if (--val.ref == 0) {
-    val.change = ItemChange();
+    locks_.remove(key, ul);
     return;
   }
-  val.change.undo(change);
+  val.change.undo_merge(change);
 }
 
 } // namespace hogd

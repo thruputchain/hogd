@@ -21,7 +21,7 @@ struct ItemKey {
   uint128_t addr;
   uint128_t key;
 
-  bool operator==(const ItemKey &rhs) const
+  bool operator==(const ItemKey &rhs) const noexcept
   {
     return addr == rhs.addr && key == rhs.key;
   }
@@ -31,7 +31,7 @@ struct ItemKey {
 } // namespace hogd
 
 template<> struct std::hash<hogd::ItemKey> {
-  std::size_t operator()(const hogd::ItemKey &key) const
+  std::size_t operator()(const hogd::ItemKey &key) const noexcept
   {
     return hogd::SipHash24::get_default()(key.as_bytes());
   }
