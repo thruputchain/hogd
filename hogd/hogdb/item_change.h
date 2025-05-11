@@ -26,7 +26,9 @@
 
 namespace hogd {
 
-// is_item is a concept that defines the required methods for a DB item.
+// is_item is a concept that defines the required methods for a class that
+// tracks a change to a DB item. Each class that implements this concept is an
+// item type.
 template<typename T>
 concept is_item = requires(T t, HogDatabase &db, ItemKey key, const T &arg) {
   // applies the change to the ramdb.
@@ -143,7 +145,7 @@ public:
   // merge merges a change into this one. It returns kConflict if the change
   // does not commute.
   HogDBStatus<void> merge(const ItemChange &change);
-  // undo_merge reverts a change from this one.
+  // undo_merge reverts a change that was merged with this one.
   void undo_merge(const ItemChange &change);
 
   // storage_size returns the bytes needed to store the item if committed.

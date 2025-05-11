@@ -52,7 +52,8 @@ void
 InvokeTX::abort()
 {
   for (const auto &[key, vec] : changes_) {
-    block_.unlock(key, vec.back().change);
+    if (!vec.empty())
+      block_.unlock(key, vec.back().change);
   }
   changes_.clear();
 }
