@@ -1,6 +1,6 @@
 #include "hogd/hogdb/invoke_tx.h"
 
-// TODO(amb): remove when llvm adds std::ranges::uper_bound to include cleaner.
+// TODO(amb): remove when llvm adds std::ranges::upper_bound to include cleaner.
 #include <algorithm> // NOLINT(misc-include-cleaner)
 #include <cassert>
 #include <cstddef>
@@ -66,7 +66,7 @@ InvokeTX::rollback_to_savepoint(int depth)
     if (vec.empty() || vec.back().tx_depth <= tx_depth_)
       continue;
 
-    // revert and erase history if change made after savepoint.
+    // revert and erase the history of changes made after savepoint.
     ItemChange tmp{std::move(vec.back().change)};
     // NOLINTNEXTLINE(misc-include-cleaner)
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},

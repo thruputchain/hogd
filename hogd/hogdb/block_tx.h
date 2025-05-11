@@ -36,7 +36,7 @@ public:
   HogDBStatus<void> lock(ItemKey key, const ItemChange &change,
                          bool exclusive = false);
   // modify_lock modifies an existing change to an item that was reserved with
-  // lock().
+  // lock(). It could still fail if new_change has a conflict.
   HogDBStatus<void> modify_lock(ItemKey key, const ItemChange &old_change,
                                 const ItemChange &new_change);
   // unlock unreserves the right to apply change to an item and reverts it.
@@ -62,6 +62,8 @@ BlockTX::read_nnint128(ItemKey key)
   auto [val, ul] = locks_.find(key);
   if (!val)
     return db_.read_nnint128(key);
+  if (val->change.is_deletion())
+    return HogDBError(HogDBCode::kNotFound);
   std::optional ret = val->change.to_nnint128();
   if (!ret)
     return HogDBError(HogDBCode::kTypeMismatch);
@@ -74,6 +76,8 @@ BlockTX::read_bytes(ItemKey key)
   auto [val, ul] = locks_.find(key);
   if (!val)
     return db_.read_bytes(key);
+  if (val->change.is_deletion())
+    return HogDBError(HogDBCode::kNotFound);
   OwningSpan<const std::byte> ret = val->change.to_bytes();
   if (!ret)
     return HogDBError(HogDBCode::kTypeMismatch);

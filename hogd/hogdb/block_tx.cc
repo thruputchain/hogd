@@ -28,7 +28,7 @@ BlockTX::modify_lock(ItemKey key, const ItemChange &old_change,
   if (!ret)
     return ret.error();
 
-  val.change = tmp;
+  val.change = std::move(tmp);
   return {};
 }
 
