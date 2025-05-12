@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <concepts>
 #include <optional>
 #include <variant>
 
@@ -101,6 +102,26 @@ private:
   SnapshotStorageItem &base_item_;
 };
 
+class AssetBalanceItem {
+public:
+  AssetBalanceItem(uint128_t initial_asset_balance)
+    : asset_balance_(initial_asset_balance)
+    , initial_asset_balance_(initial_asset_balance)
+  {}
+
+  StorageDelta get_delta() const;
+
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kItemTypeAssetBalance;
+
+  SyscallStatus<void> validate() const;
+
+  int128_t asset_balance_;
+
+private:
+  int128_t initial_asset_balance_;
+};
+
 // Represent state of an ItemView that has not been modified during
 // the current transaction.
 // Should never be created outside of ItemView, but might be
@@ -111,8 +132,6 @@ public:
   {
     return std::nullopt;
   }
-
-  // no validate() method, to ensure that set<UnmodifiedType> does not compile
 
   std::optional<StorageItemType> get_item_type() const;
 
@@ -164,6 +183,7 @@ public:
 
   template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
   {
+    static_assert(!std::same_as<ItemType, UnmodifiedItem>);
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
       auto validate_result = type.validate();
       if (!validate_result) {

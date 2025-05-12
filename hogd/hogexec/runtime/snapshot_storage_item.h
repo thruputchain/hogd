@@ -119,32 +119,46 @@ private:
     std::optional<uint64_t> block_number_upper_bound_ = std::nullopt;
   };
 
+  class AssetBalanceEntry {
+  public:
+    uint128_t asset_balance_;
+
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kItemTypeAssetBalance;
+  };
+
   static std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
-                      DeletedEntry>
+                      AssetBalanceEntry, DeletedEntry>
   make_variant(StorageItem item)
   {
     switch (item.type()) {
     case StorageItemType::kItemTypeBytestring:
       return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
-                          DeletedEntry>{std::in_place_type<BytestringEntry>,
-                                        std::move(item.bytestring())};
+                          AssetBalanceEntry, DeletedEntry>{
+          std::in_place_type<BytestringEntry>, std::move(item.bytestring())};
     case StorageItemType::kItemTypeNonnegativeInt:
       return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
-                          DeletedEntry>{std::in_place_type<NNIntEntry>,
-                                        from_xdr(item.nnint())};
+                          AssetBalanceEntry, DeletedEntry>{
+          std::in_place_type<NNIntEntry>, from_xdr(item.nnint())};
     case StorageItemType::kItemTypeRetrocausalQueue:
       return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
-                          DeletedEntry>{
+                          AssetBalanceEntry, DeletedEntry>{
           std::in_place_type<RetrocausalQueueEntry>};
     case StorageItemType::kItemTypeDeleted:
       return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
-                          DeletedEntry>{std::in_place_type<DeletedEntry>};
+                          AssetBalanceEntry, DeletedEntry>{
+          std::in_place_type<DeletedEntry>};
+    case StorageItemType::kItemTypeAssetBalance:
+      return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
+                          AssetBalanceEntry, DeletedEntry>{
+          std::in_place_type<AssetBalanceEntry>, from_xdr(item.asset_balance())};
     }
     assert(false);
     std::unreachable();
   }
 
-  std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry, DeletedEntry>
+  std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
+               AssetBalanceEntry, DeletedEntry>
       entry_;
   const AddressAndKey addrkey_;
 

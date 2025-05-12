@@ -28,7 +28,7 @@ namespace hogd {
 std::shared_ptr<const StorageItemWrapper>
 BytestringArgs::to_item() const
 {
-  return std::make_shared<const StorageItemWrapper>(bytestring_set_);
+  return std::make_shared<const StorageItemWrapper>(StorageItemWrapper::BytestringMarker{}, bytestring_set_);
 }
 
 std::shared_ptr<const StorageItemWrapper>
@@ -46,7 +46,7 @@ NNIntSetAddArgs::to_item() const
     out = new_value + total_add;
   }
 
-  return std::make_shared<const StorageItemWrapper>(out);
+  return std::make_shared<const StorageItemWrapper>(StorageItemWrapper::NonnegativeIntMarker{}, out);
 }
 
 bool
@@ -120,12 +120,14 @@ RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item) const
     x23::Vec<QueueEntry> new_block = make_block(persistable_entries_);
     if (insert_committed_) {
       return std::make_shared<const StorageItemWrapper>(
+          StorageItemWrapper::RetrocausalQueueMarker{},
           RetrocausalQueue(parent, consume_delta,
                            RetrocausalQueueBlock{.entries = new_block,
                                                  .block_number =
                                                      new_block_number}));
     }
     return std::make_shared<const StorageItemWrapper>(
+        StorageItemWrapper::RetrocausalQueueMarker{},
         RetrocausalQueue(parent, consume_delta));
   };
 

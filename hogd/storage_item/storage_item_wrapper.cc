@@ -11,14 +11,18 @@
 
 namespace hogd {
 
-StorageItemWrapper::StorageItemWrapper(Bytestring bytestring)
+StorageItemWrapper::StorageItemWrapper(BytestringMarker, Bytestring bytestring)
   : storage_item_(BytestringWrapper{.bytestring_ = std::move(bytestring)})
 {}
-StorageItemWrapper::StorageItemWrapper(int128_t nnint_value)
+StorageItemWrapper::StorageItemWrapper(NonnegativeIntMarker, int128_t nnint_value)
   : storage_item_(NonnegativeIntWrapper{.nnint_ = nnint_value})
 {}
-StorageItemWrapper::StorageItemWrapper(RetrocausalQueue queue)
+StorageItemWrapper::StorageItemWrapper(RetrocausalQueueMarker,
+                                       RetrocausalQueue queue)
   : storage_item_(RetrocausalQueueWrapper{.queue_ = std::move(queue)})
+{}
+StorageItemWrapper::StorageItemWrapper(AssetBalanceMarker, uint128_t asset_balance)
+  : storage_item_(AssetBalanceWrapper{.asset_balance_ = asset_balance})
 {}
 
 StorageItemType
@@ -57,6 +61,14 @@ StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
   return StorageItem(StorageItemType::kItemTypeRetrocausalQueue);
 }
 
+StorageItem
+StorageItemWrapper::AssetBalanceWrapper::to_wire_item() const
+{
+  StorageItem item(StorageItemType::kItemTypeAssetBalance);
+  item.asset_balance() = to_xdr(asset_balance_);
+  return item;
+}
+
 int128_t
 StorageItemWrapper::BytestringWrapper::storage_cost() const
 {
@@ -73,6 +85,12 @@ int128_t
 StorageItemWrapper::RetrocausalQueueWrapper::storage_cost() const
 {
   return kBaseItemCost + retrocausal_queue_cost(queue_.get_active_stats());
+}
+
+int128_t
+StorageItemWrapper::AssetBalanceWrapper::storage_cost()
+{
+  return kBaseItemCost;
 }
 
 int128_t

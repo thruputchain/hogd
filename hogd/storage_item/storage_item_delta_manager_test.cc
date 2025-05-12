@@ -107,7 +107,8 @@ TEST(StorageItemFrame, RewriteVariantTypeNullStart)
 
 TEST(StorageItemFrame, RewriteVariantFromBase)
 {
-  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
+  auto base_item = std::make_shared<StorageItemWrapper>(
+    StorageItemWrapper::BytestringMarker{}, Bytestring{0, 1, 2, 3});
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(base_item, &invalid_state_flag);
 
@@ -160,7 +161,8 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
 TEST(StorageItemFrame, DeleteItem)
 {
   InvalidStateFlag invalid_state_flag;
-  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
+  auto base_item = std::make_shared<StorageItemWrapper>(
+    StorageItemWrapper::BytestringMarker{}, Bytestring{0, 1, 2, 3});
 
   StorageItemDeltaManager item(base_item, &invalid_state_flag);
   ASSERT_TRUE(item.get_snapshot_item());

@@ -5,6 +5,7 @@
 #include <variant>
 
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -326,6 +327,31 @@ RetrocausalQueueItem::get_next_self_entry(uint32_t index) const
     return &queue_delta_.insert.added_entries[index];
   }
   return nullptr;
+}
+
+// AssetBalanceItem implementation
+StorageDelta
+AssetBalanceItem::get_delta() const
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeAssetTransfer);
+  assert(initial_asset_balance_ >= 0);
+  assert(!integer_add_overflow<int128_t>(asset_balance_, -initial_asset_balance_));
+  int128_t transfer_amount = asset_balance_ - initial_asset_balance_;
+  delta.transfer_amount() = to_xdr(transfer_amount);
+  return delta;
+}
+
+SyscallStatus<void>
+AssetBalanceItem::validate() const
+{
+  if (asset_balance_ < 0) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  assert(initial_asset_balance_ >= 0);
+  assert(!integer_add_overflow<int128_t>(asset_balance_, -initial_asset_balance_));
+
+  return {};
 }
 
 std::optional<StorageItemType>

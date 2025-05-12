@@ -147,7 +147,7 @@ TEST_F(ItemViewTest, RCQRead)
                            {}});
 
   server_.setup_create_item(AddressAndKey{},
-                            StorageItemWrapper(std::move(queue)));
+                            StorageItemWrapper(StorageItemWrapper::RetrocausalQueueMarker{}, std::move(queue)));
   ExecutionModeData execution_mode_data = ProposalModeData();
 
   auto check_item = [&](std::optional<uint8_t> const &expected_entry,

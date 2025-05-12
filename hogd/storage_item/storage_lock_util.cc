@@ -30,6 +30,8 @@ delta_to_typeclass(StorageDelta const &delta)
     return StorageItemTypeClass(StorageItemType::kItemTypeDeleted);
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
     return StorageItemTypeClass(StorageItemType::kItemTypeRetrocausalQueue);
+  case StorageDeltaType::kDeltaTypeAssetTransfer:
+    return StorageItemTypeClass(StorageItemType::kItemTypeAssetBalance);
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -65,6 +67,24 @@ delta_to_lock(StorageDelta const &delta)
     lock.full_typeclass_lock().extra_lock_data.item_type(
         StorageItemType::kItemTypeDeleted);
     return lock;
+  case StorageDeltaType::kDeltaTypeAssetTransfer:
+  {
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kItemTypeAssetBalance);
+    auto xfer = from_xdr(delta.transfer_amount());
+    if (xfer > 0) {
+      lock.full_typeclass_lock().extra_lock_data.asset_balance_lock() = AssetBalanceLock{
+        .asset_add_amount = to_xdr(xfer),
+        .asset_subtract_amount = {.highbits = 0, .lowbits = 0},
+      };
+    } else {
+      lock.full_typeclass_lock().extra_lock_data.asset_balance_lock() = AssetBalanceLock{
+        .asset_add_amount = {.highbits = 0, .lowbits = 0},
+        .asset_subtract_amount = to_xdr(-xfer),
+      };
+    }
+    return lock;
+  }
   default:
     throw std::runtime_error("unimplemented");
   }

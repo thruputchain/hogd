@@ -14,9 +14,17 @@ namespace hogd {
 // StorageItemWrapper is not threadsafe.
 class StorageItemWrapper {
 public:
-  StorageItemWrapper(Bytestring bytestring);
-  StorageItemWrapper(int128_t nnint_value);
-  StorageItemWrapper(RetrocausalQueue queue);
+  // markers for disambiguating constructors
+  struct BytestringMarker {};
+  struct NonnegativeIntMarker {};
+  struct RetrocausalQueueMarker {};
+  struct AssetBalanceMarker {};
+
+  // Constructors for different storage item types
+  StorageItemWrapper(BytestringMarker, Bytestring bytestring);
+  StorageItemWrapper(NonnegativeIntMarker, int128_t nnint_value);
+  StorageItemWrapper(RetrocausalQueueMarker, RetrocausalQueue queue);
+  StorageItemWrapper(AssetBalanceMarker, uint128_t asset_balance);
 
   auto &bytestring(this auto &self)
   {
@@ -31,6 +39,11 @@ public:
   auto &queue(this auto &self)
   {
     return std::get<RetrocausalQueueWrapper>(self.storage_item_).queue_;
+  }
+
+  auto &asset_balance(this auto &self)
+  {
+    return std::get<AssetBalanceWrapper>(self.storage_item_).asset_balance_;
   }
 
   StorageItemType type() const;
@@ -78,8 +91,20 @@ private:
     int128_t storage_cost() const;
   };
 
+  // Wrapper for asset balance storage items
+  struct AssetBalanceWrapper {
+    // The underlying asset balance
+    uint128_t asset_balance_;
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kItemTypeAssetBalance;
+    // Converts to wire format for network transmission
+    StorageItem to_wire_item() const;
+    // Returns storage cost based on asset balance
+    static int128_t storage_cost();
+  };
+
   std::variant<BytestringWrapper, NonnegativeIntWrapper,
-               RetrocausalQueueWrapper>
+               RetrocausalQueueWrapper, AssetBalanceWrapper>
       storage_item_;
 };
 
