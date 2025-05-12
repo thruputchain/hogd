@@ -1,3 +1,5 @@
+// invoke_tx.h - handles transactions for contract invocations
+
 #pragma once
 
 #include <cassert>
@@ -40,9 +42,10 @@ public:
   void release_savepoint(int depth);
 
   //
-  // All of the read_* methods below read the current state of an item in the
-  // transaction. They will return kTypeMistmatch if the stored type is
-  // different from the requested type or kNotFound if the item does not exist.
+  // All of the read_* methods below read the current value of an item in just
+  // this transaction relative to the snapshot state. They will return
+  // kTypeMistmatch if the stored type is different from the requested type or
+  // kNotFound if the item does not exist.
   //
 
   HogDBStatus<int128_t> read_nnint128(ItemKey key);

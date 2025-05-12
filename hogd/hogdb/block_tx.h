@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <optional>
 #include <utility>
 
 #include "hogd/base/span.h"
@@ -25,15 +24,6 @@ public:
   // getters
   HogDatabase &get_db() const { return db_; }
 
-  //
-  // The read_* methods below read the current state of an item in the block
-  // view. They will return kTypeMismatch if the stored type is different from
-  // the requested type or kNotFound if the item does not exist.
-  //
-
-  HogDBStatus<int128_t> read_nnint128(ItemKey key);
-  HogDBStatus<OwningSpan<const std::byte>> read_bytes(ItemKey key);
-
   // lock reserves the right to apply change to an item. If exclusive is false,
   // More than one change can be made to an item if they commute.
   HogDBStatus<void> lock(ItemKey key, const ItemChange &change,
@@ -47,6 +37,8 @@ public:
 
   // commit applies all changes to the database.
   HogDBStatus<void> commit();
+  // abort drops all changes.
+  void abort() { locks_.clear(); }
 
 private:
   struct ItemLock {
@@ -58,34 +50,6 @@ private:
   HogDatabase &db_;
   SynchronizedMap<ItemKey, ItemLock> locks_;
 };
-
-inline HogDBStatus<int128_t>
-BlockTX::read_nnint128(ItemKey key)
-{
-  auto [val, ul] = locks_.find(key);
-  if (!val)
-    return db_.read_nnint128(key);
-  if (val->change.is_deletion())
-    return HogDBError(HogDBCode::kNotFound);
-  std::optional ret = val->change.to_nnint128();
-  if (!ret)
-    return HogDBError(HogDBCode::kTypeMismatch);
-  return *ret;
-}
-
-inline HogDBStatus<OwningSpan<const std::byte>>
-BlockTX::read_bytes(ItemKey key)
-{
-  auto [val, ul] = locks_.find(key);
-  if (!val)
-    return db_.read_bytes(key);
-  if (val->change.is_deletion())
-    return HogDBError(HogDBCode::kNotFound);
-  OwningSpan<const std::byte> ret = val->change.to_bytes();
-  if (!ret)
-    return HogDBError(HogDBCode::kTypeMismatch);
-  return ret;
-}
 
 inline HogDBStatus<void>
 BlockTX::lock(ItemKey key, const ItemChange &change, bool exclusive)
