@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cassert>
 #include <unordered_map>
 #include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
@@ -81,6 +83,21 @@ private:
   const ItemChange *read_change(ItemKey key) const;
   // request_change tries to apply a change to the transaction.
   HogDBStatus<void> request_change(ItemKey key, ItemChange &&change);
+
+  void assert_is_valid() const
+  {
+    assert(tx_depth_ >= 0);
+    if constexpr (is_debug_build()) {
+      for (const auto &[key, vec] : changes_) {
+        [[maybe_unused]] int depth = 0;
+        for (const ItemVersion &item : vec) {
+          assert(item.tx_depth >= depth);
+          assert(item.tx_depth <= tx_depth_);
+          depth = item.tx_depth + 1;
+        }
+      }
+    }
+  }
 };
 
 inline int
@@ -104,6 +121,15 @@ inline HogDBStatus<void>
 InvokeTX::request_nnint128(ItemKey key, int128_t base, int128_t delta)
 {
   return request_change(key, NNInt128{base, delta});
+}
+
+inline HogDBStatus<void>
+InvokeTX::request_nnint128(ItemKey key, int128_t delta)
+{
+  return block_.get_db().read_nnint128(key).and_then(
+      [this, key, delta](int128_t base) {
+        return request_change(key, NNInt128{base, delta});
+      });
 }
 
 inline HogDBStatus<void>

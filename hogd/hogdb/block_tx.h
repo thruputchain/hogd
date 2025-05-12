@@ -22,6 +22,9 @@ public:
   BlockTX(HogDatabase &db) : db_(db) {}
   ~BlockTX() = default;
 
+  // getters
+  HogDatabase &get_db() const { return db_; }
+
   //
   // The read_* methods below read the current state of an item in the block
   // view. They will return kTypeMismatch if the stored type is different from

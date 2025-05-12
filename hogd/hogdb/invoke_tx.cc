@@ -22,7 +22,9 @@ InvokeTX::read_nnint128(ItemKey key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
-    return block_.read_nnint128(key);
+    return block_.get_db().read_nnint128(key);
+  if (change->is_deletion())
+    return HogDBError(HogDBCode::kNotFound);
   std::optional ret = change->to_nnint128();
   if (!ret)
     return HogDBError(HogDBCode::kTypeMismatch);
@@ -34,7 +36,9 @@ InvokeTX::read_bytes(ItemKey key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
-    return block_.read_bytes(key);
+    return block_.get_db().read_bytes(key);
+  if (change->is_deletion())
+    return HogDBError(HogDBCode::kNotFound);
   OwningSpan<const std::byte> ret = change->to_bytes();
   if (!ret)
     return HogDBError(HogDBCode::kTypeMismatch);
@@ -44,6 +48,8 @@ InvokeTX::read_bytes(ItemKey key)
 void
 InvokeTX::commit()
 {
+  assert_is_valid();
+
   // changes are already applied to BlockTX, so we merely clear them here.
   changes_.clear();
 }
@@ -51,6 +57,8 @@ InvokeTX::commit()
 void
 InvokeTX::abort()
 {
+  assert_is_valid();
+
   for (const auto &[key, vec] : changes_) {
     if (!vec.empty())
       block_.unlock(key, vec.back().change);
@@ -61,6 +69,8 @@ InvokeTX::abort()
 HogDBStatus<void>
 InvokeTX::rollback_to_savepoint(int depth)
 {
+  assert_is_valid();
+
   tx_depth_ = depth - 1;
   for (auto &[key, vec] : changes_) {
     // skip if no changes made after savepoint.
@@ -88,6 +98,8 @@ InvokeTX::rollback_to_savepoint(int depth)
 void
 InvokeTX::release_savepoint(int depth)
 {
+  assert_is_valid();
+
   tx_depth_ = depth - 1;
   for (auto &[key, vec] : changes_) {
     // skip if no changes made after savepoint.

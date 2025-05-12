@@ -40,7 +40,7 @@ public:
   // push_item places src in the buffer and reserves space for its KV pair.
   ItemHeader *push_item(ItemHeader *src);
 
-  // take_buffer returns all pending buffers including the head and resets to
+  // take_buffer returns all pending loglets including the head and resets to
   // an empty buffer.
   std::vector<UniqueLoglet> take_buffer();
 
