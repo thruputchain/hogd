@@ -363,4 +363,38 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltasRevert)
   EXPECT_EQ(balance, 355);
 }
 
+TEST(RefcountedDeltaVariant, AssetBalanceValidationOutOfBounds)
+{
+  AssetBalanceArgs arg(100);
+  InvalidStateFlag invalid_state_flag;
+
+  arg.commit_transfer(-100,
+                      AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                                       .asset_subtract_amount =
+                                           to_xdr(int128_t{0})},
+                      invalid_state_flag);
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  arg.commit_transfer(-1,
+                      AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                                       .asset_subtract_amount =
+                                           to_xdr(int128_t{0})},
+                      invalid_state_flag);
+  ASSERT_TRUE(invalid_state_flag.is_invalid());
+
+  arg.commit_transfer(-5,
+                      AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                                       .asset_subtract_amount =
+                                           to_xdr(int128_t{0})},
+                      invalid_state_flag);
+  ASSERT_TRUE(invalid_state_flag.is_invalid());
+
+  arg.commit_transfer(6,
+                      AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                                       .asset_subtract_amount =
+                                           to_xdr(int128_t{0})},
+                      invalid_state_flag);
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+}
+
 } // namespace hogd
