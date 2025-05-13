@@ -16,6 +16,7 @@
 
 namespace hogd {
 
+struct Contract;
 class SystemCallHandler;
 class NativeRuntime;
 
