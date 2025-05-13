@@ -51,8 +51,7 @@ public:
   // for contracts, will investigate) we may want to expose an interface of the
   // form "release_lock" or "pop_lock", which would release a held lock,
   // exchanging with a previously held (weaker) lock. That would require
-  // maintenance of a ''lock stack'' in the TransactionCache, and a fair amount
-  // of nontrivial (possibly bugprone) logic in the executor. We may add that
+  // maintenance of a ''lock stack'' in the TransactionCache. We may add that
   // later, but for now it is not crucial.
 
   // Commit the delta operation under the given lock.

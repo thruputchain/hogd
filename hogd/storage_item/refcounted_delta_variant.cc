@@ -323,20 +323,11 @@ AssetBalanceArgs::revert_lock(AssetBalanceLock const &held_lock)
 
 void
 AssetBalanceArgs::commit_transfer(int128_t transfer_amount,
-                                  AssetBalanceLock const &held_lock,
                                   InvalidStateFlag &invalid_state_flag)
 {
-  int128_t add_lock = from_xdr(held_lock.asset_add_amount);
-  int128_t sub_lock = from_xdr(held_lock.asset_subtract_amount);
-  assert(add_lock >= 0);
-  assert(sub_lock <= 0);
 
   bool is_initially_invalid = (!balance_lower_bound_.is_in_range<uint128_t>() ||
                                !balance_upper_bound_.is_in_range<uint128_t>());
-
-  // release locks
-  balance_upper_bound_ -= add_lock;
-  balance_lower_bound_ -= sub_lock;
 
   // perform the actual transfer
   balance_upper_bound_ += transfer_amount;
@@ -429,6 +420,11 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
                      StorageItemType::kItemTypeRetrocausalQueue &&
                  args.typeclass_match();
         }
+        else if constexpr (std::same_as<args_t, AssetBalanceArgs>) {
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeAssetBalance &&
+                 args.typeclass_match(0);
+        }
         else {
           static_assert(
               std::same_as<args_t, ExclusiveLockedState> ||
@@ -491,9 +487,14 @@ RefcountedDeltaVariant::get_cost_after_commit(
           assert(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
           return args.get_cost(delta.retrocausal_queue(), base_item);
         }
+        else if constexpr (std::same_as<args_t, AssetBalanceArgs>) {
+          assert(delta.type() == StorageDeltaType::kDeltaTypeAssetTransfer);
+          return args.get_cost();
+        }
         else if constexpr (std::same_as<args_t, UnmodifiedState>) {
           throw std::runtime_error("impossible: we must have refcount_ > 0");
         }
+
         else {
           static_assert(
               std::same_as<args_t, ExclusiveLockedState>,

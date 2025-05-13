@@ -355,7 +355,8 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltasRevert)
   EXPECT_EQ(r3->asset_subtract_amount, to_xdr(int128_t{-151}));
 
   // Step 7: commit transfer of 155 based on lock r3
-  arg.commit_transfer(155, *r3, invalid_state_flag);
+  arg.revert_lock(*r3);
+  arg.commit_transfer(155, invalid_state_flag);
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
   auto item = arg.to_item();
@@ -368,32 +369,18 @@ TEST(RefcountedDeltaVariant, AssetBalanceValidationOutOfBounds)
   AssetBalanceArgs arg(100);
   InvalidStateFlag invalid_state_flag;
 
-  arg.commit_transfer(-100,
-                      AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
-                                       .asset_subtract_amount =
-                                           to_xdr(int128_t{0})},
-                      invalid_state_flag);
+  arg.commit_transfer(-100, invalid_state_flag);
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
   arg.commit_transfer(-1,
-                      AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
-                                       .asset_subtract_amount =
-                                           to_xdr(int128_t{0})},
+
                       invalid_state_flag);
   ASSERT_TRUE(invalid_state_flag.is_invalid());
 
-  arg.commit_transfer(-5,
-                      AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
-                                       .asset_subtract_amount =
-                                           to_xdr(int128_t{0})},
-                      invalid_state_flag);
+  arg.commit_transfer(-5, invalid_state_flag);
   ASSERT_TRUE(invalid_state_flag.is_invalid());
 
-  arg.commit_transfer(6,
-                      AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
-                                       .asset_subtract_amount =
-                                           to_xdr(int128_t{0})},
-                      invalid_state_flag);
+  arg.commit_transfer(6, invalid_state_flag);
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 

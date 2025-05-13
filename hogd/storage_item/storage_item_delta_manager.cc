@@ -30,6 +30,7 @@ StorageItemDeltaManager::StorageItemDeltaManager(
     invalid_state_flag_(invalid_state_flag), mode_(mode)
 {}
 
+// reserving from a StorageLockType::kNone lock
 bool
 StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
 {
@@ -78,6 +79,25 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
     }
     return false;
   }
+  case StorageDeltaType::kDeltaTypeAssetTransfer:
+  {
+    if (mode_ == BlockExecutionMode::kBlockExecutionModeValidation) {
+      return true;
+    }
+    uint128_t previous_balance =
+        committed_item_ ? committed_item_->asset_balance() : 0;
+    if (auto *args =
+            variant_.try_set_variant<AssetBalanceArgs>(previous_balance)) {
+      return args
+          ->try_reserve_transfer_lock(from_xdr(delta.transfer_amount()),
+                                      AssetBalanceLock{.asset_add_amount =
+                                                           to_xdr(int128_t{0}),
+                                                       .asset_subtract_amount =
+                                                           to_xdr(int128_t{0})})
+          .has_value();
+    }
+    return false;
+  }
   default:
     throw std::runtime_error("unknown delta type");
   }
@@ -109,6 +129,12 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
       args.commit_consume(*delta.retrocausal_queue().consume,
                           *invalid_state_flag_);
     }
+  } break;
+  case StorageDeltaType::kDeltaTypeAssetTransfer:
+  {
+    auto &args = variant_.get_variant_arm_unchecked<AssetBalanceArgs>();
+    args.commit_transfer(from_xdr(delta.transfer_amount()),
+                         *invalid_state_flag_);
   } break;
   default:
     throw std::runtime_error("unimpl");
@@ -273,6 +299,12 @@ StorageItemDeltaManager::revert_set_typeclass_lock(
     }
     break;
   }
+  case StorageItemType::kItemTypeAssetBalance:
+  {
+    auto &args = variant_.get_variant_arm_unchecked<AssetBalanceArgs>();
+    args.revert_lock(type_specific_lock.asset_balance_lock());
+    break;
+  }
   default:
     break;
   }
@@ -289,7 +321,7 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   assert(variant_.refcount() > 0);
   assert(!variant_.has_permanent_exclusive_lock());
 
-  auto req_lock = delta_to_lock(delta);
+  auto req_lock = delta_to_lock(delta, mode_);
   assert(req_lock.lock_type() == StorageLockType::kSetItemTypeClass);
 
   if (req_lock.full_typeclass_lock().typeclass !=
@@ -320,6 +352,10 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
     assert(req_sub_amount <= 0);
     assert(prev_sub_amount != std::numeric_limits<int128_t>::min());
     if (prev_sub_amount <= req_sub_amount) {
+      // Note: Unlike in AssetBalanceArgs, we don't need to modify req_lock
+      // here, as we don't actually return it. We could modify req_lock and set
+      // the appropriate lock parameters based on std::min(prev_sub_amount,
+      // req_sub_amount), but this achieves the same effect.
       return prev_lock;
     }
 
@@ -348,6 +384,30 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
     assert(req_lock.full_typeclass_lock() == prev_typeclass_lock);
     return req_lock;
   }
+  case StorageItemType::kItemTypeAssetBalance:
+  {
+    assert(variant_.has_variant_arm<AssetBalanceArgs>());
+    if (mode_ == BlockExecutionMode::kBlockExecutionModeValidation) {
+      assert(req_lock.full_typeclass_lock()
+                 .extra_lock_data.asset_balance_lock()
+                 .asset_add_amount == to_xdr(int128_t{0}));
+      return req_lock;
+    }
+    auto &args = variant_.get_variant_arm_unchecked<AssetBalanceArgs>();
+    auto const &prev_lock_data =
+        prev_lock.full_typeclass_lock().extra_lock_data.asset_balance_lock();
+    auto res = args.try_reserve_transfer_lock(from_xdr(delta.transfer_amount()),
+                                              prev_lock_data);
+    if (!res) {
+      return std::nullopt;
+    }
+    // We need to modify the lock parameters in the lock that we return,
+    // as AssetBalanceArgs has both an add and a sub lock and
+    // we can't just take the minimum of two vars (as in NNIntSetAddArgs).
+    req_lock.full_typeclass_lock().extra_lock_data.asset_balance_lock() =
+        res.value();
+    return req_lock;
+  }
   default:
     return prev_lock;
   }
@@ -369,7 +429,7 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
       int128_t required_storage =
           variant_.get_cost_after_commit(delta, committed_item_.get()) -
           unreleased_storage_cost_ - committed_item_cost_;
-      return MeteredStorageLock{.lock_ = delta_to_lock(delta),
+      return MeteredStorageLock{.lock_ = delta_to_lock(delta, mode_),
                                 .locked_tokens_ =
                                     std::max<int128_t>(required_storage, 0)};
     }
@@ -452,6 +512,13 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
             .revert_consume();
       }
     }
+    break;
+  }
+  case StorageDeltaType::kDeltaTypeAssetTransfer:
+  {
+    auto &args = variant_.get_variant_arm_unchecked<AssetBalanceArgs>();
+    args.revert_lock(
+        lock.full_typeclass_lock().extra_lock_data.asset_balance_lock());
     break;
   }
   default:

@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -285,4 +286,24 @@ TEST_F(ItemViewTest, RCQRead)
       std::get<ValidationModeData>(validation_mode_data).check_all_consumed());
 }
 
+TEST_F(ItemViewTest, AssetBalanceOverflow)
+{
+  auto item = make_empty_item();
+  ItemView proxy(item.get());
+  AssetBalanceItem asset_balance_item(100);
+  ASSERT_TRUE(proxy.set(asset_balance_item));
+
+  const auto *asset_balance_item_res = proxy.template get<AssetBalanceItem>();
+  ASSERT_TRUE(asset_balance_item_res);
+  EXPECT_EQ(asset_balance_item_res->asset_balance_, 100);
+
+  AssetBalanceItem new_item = *asset_balance_item_res;
+
+  new_item.asset_balance_ =
+      100 + static_cast<uint128_t>(std::numeric_limits<int128_t>::max());
+  EXPECT_TRUE(proxy.set(new_item));
+
+  new_item.asset_balance_++;
+  EXPECT_FALSE(proxy.set(new_item));
+}
 } // namespace hogd

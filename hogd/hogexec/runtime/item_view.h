@@ -213,7 +213,7 @@ private:
   can_accept_type(std::optional<StorageItemType> item_type) const;
 
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
-               RetrocausalQueueItem>
+               RetrocausalQueueItem, AssetBalanceItem>
       delta_args_;
 };
 

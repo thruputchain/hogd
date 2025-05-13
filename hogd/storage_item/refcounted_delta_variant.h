@@ -152,7 +152,7 @@ public:
       balance_upper_bound_(starting_asset_balance)
   {}
 
-  static bool typeclass_match() { return true; }
+  static bool typeclass_match(uint128_t /*unused*/) { return true; }
   std::shared_ptr<const StorageItemWrapper> to_item() const;
 
   static constexpr int128_t get_cost() { return kBaseItemCost; }
@@ -167,8 +167,8 @@ public:
 
   // Validation should call this commit.
   // Proposal should call this commit.
+  // Any held lock must be released earlier, before calling this.
   void commit_transfer(int128_t transfer_amount,
-                       AssetBalanceLock const &held_lock,
                        InvalidStateFlag &invalid_state_flag);
 
 private:
@@ -240,9 +240,9 @@ struct UnmodifiedState {
 // - to_item(): Converts variant state into a StorageItemWrapper, to be passed
 // to the next block.
 class RefcountedDeltaVariant {
-  using variant_t =
-      std::variant<BytestringArgs, NNIntSetAddArgs, RetrocausalQueueArgs,
-                   ExclusiveLockedState, DeleteArgs, UnmodifiedState>;
+  using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs,
+                                 RetrocausalQueueArgs, ExclusiveLockedState,
+                                 DeleteArgs, AssetBalanceArgs, UnmodifiedState>;
 
 public:
   RefcountedDeltaVariant() = default;

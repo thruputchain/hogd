@@ -5,6 +5,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 
@@ -39,7 +40,7 @@ delta_to_typeclass(StorageDelta const &delta)
 }
 
 StorageLock
-delta_to_lock(StorageDelta const &delta)
+delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode)
 {
   StorageLock lock(StorageLockType::kSetItemTypeClass);
   lock.full_typeclass_lock().typeclass = delta_to_typeclass(delta);
@@ -71,6 +72,16 @@ delta_to_lock(StorageDelta const &delta)
   {
     lock.full_typeclass_lock().extra_lock_data.item_type(
         StorageItemType::kItemTypeAssetBalance);
+    // These lock parameters may be overwritten in the StorageItemDeltaManager,
+    // based on the contents of a previously held lock.
+    if (mode == BlockExecutionMode::kBlockExecutionModeValidation) {
+      lock.full_typeclass_lock().extra_lock_data.asset_balance_lock() =
+          AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                           .asset_subtract_amount = to_xdr(int128_t{0})};
+      return lock;
+    }
+    // In proposal mode, we need to set the lock parameters based on the
+    // transfer amount.
     auto xfer = from_xdr(delta.transfer_amount());
     if (xfer > 0) {
       lock.full_typeclass_lock().extra_lock_data.asset_balance_lock() =
