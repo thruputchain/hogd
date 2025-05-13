@@ -12,7 +12,6 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -20,6 +19,8 @@
 #include "types.hh"
 
 namespace hogd {
+
+class DatabaseProxy;
 
 // SnapshotStorageItem wraps a view of a database StorageItem,
 // as it exists in the block's snapshot state,
