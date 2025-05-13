@@ -34,7 +34,8 @@ DBContext::advance_new_block()
   }
 
   [[maybe_unused]] auto res =
-      block_manager_.add_child(current_block_id_, current_block_id_ + 1, BlockExecutionMode::kBlockExecutionModeProposal);
+      block_manager_.add_child(current_block_id_, current_block_id_ + 1,
+                               BlockExecutionMode::kBlockExecutionModeProposal);
   assert(res);
   current_block_id_++;
   snapshot_cache_ =

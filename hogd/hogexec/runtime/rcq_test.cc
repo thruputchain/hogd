@@ -10,6 +10,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include <memory>
@@ -21,7 +22,10 @@ namespace hogd {
 
 class RCQTest : public ::testing::Test, public NativeContractTestFramework {
 protected:
-  RCQTest() : NativeContractTestFramework(false) {}
+  RCQTest()
+    : NativeContractTestFramework(
+          BlockExecutionMode::kBlockExecutionModeProposal, false)
+  {}
 
   void SetUp() override
   {

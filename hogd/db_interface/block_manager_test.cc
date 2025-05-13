@@ -10,7 +10,8 @@ namespace hogd {
 
 TEST(BlockManagerTest, CommitCleanup)
 {
-  constexpr static BlockExecutionMode kMode = BlockExecutionMode::kBlockExecutionModeProposal;
+  constexpr static BlockExecutionMode kMode =
+      BlockExecutionMode::kBlockExecutionModeProposal;
   InMemoryDatabase db;
   BlockManager m(0, &db);
   // block 0 doesn't have state that can be manipulated;
@@ -50,7 +51,8 @@ TEST(BlockManagerTest, CommitCleanup)
 
 TEST(BlockManagerTest, AddSequenceOfChildren)
 {
-  constexpr static BlockExecutionMode kMode = BlockExecutionMode::kBlockExecutionModeProposal;
+  constexpr static BlockExecutionMode kMode =
+      BlockExecutionMode::kBlockExecutionModeProposal;
 
   InMemoryDatabase db;
   BlockManager m(0, &db);

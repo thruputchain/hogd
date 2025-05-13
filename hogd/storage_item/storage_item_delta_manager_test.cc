@@ -44,15 +44,13 @@ expect_final(StorageItemDeltaManager &item, int128_t nnint)
 
 } // namespace
 
-class StorageItemDeltaManagerTest : public ::testing::TestWithParam<BlockExecutionMode> {
- protected: 
-  void SetUp() override {
-    mode_ = GetParam();
-  }
+class StorageItemDeltaManagerTest
+  : public ::testing::TestWithParam<BlockExecutionMode> {
+protected:
+  void SetUp() override { mode_ = GetParam(); }
 
   BlockExecutionMode mode_;
 };
-
 
 // Change the typeclass of a storage item during execution
 TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
@@ -401,7 +399,8 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockMultiAcquire)
 TEST_P(StorageItemDeltaManagerTest, PermanentExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, BlockExecutionMode::kBlockExecutionModeProposal);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag,
+                               BlockExecutionMode::kBlockExecutionModeProposal);
 
   // merely a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -468,7 +467,8 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
   };
 
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, BlockExecutionMode::kBlockExecutionModeProposal);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag,
+                               BlockExecutionMode::kBlockExecutionModeProposal);
 
   auto bdelta_4 = make_bytestring_delta({0, 1, 2, 3});
   auto bdelta_6 = make_bytestring_delta({0, 1, 2, 3, 4, 5});
@@ -494,8 +494,9 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-INSTANTIATE_TEST_SUITE_P(BlockModes, StorageItemDeltaManagerTest,
-                        ::testing::Values(BlockExecutionMode::kBlockExecutionModeProposal,
-                            BlockExecutionMode::kBlockExecutionModeValidation));
+INSTANTIATE_TEST_SUITE_P(
+    BlockModes, StorageItemDeltaManagerTest,
+    ::testing::Values(BlockExecutionMode::kBlockExecutionModeProposal,
+                      BlockExecutionMode::kBlockExecutionModeValidation));
 
 } // namespace hogd

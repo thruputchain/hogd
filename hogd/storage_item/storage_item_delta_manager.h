@@ -31,8 +31,7 @@ class StorageItemDeltaManager {
 public:
   StorageItemDeltaManager(
       std::shared_ptr<const StorageItemWrapper> snapshot_state,
-      InvalidStateFlag *invalid_state_flag,
-      BlockExecutionMode mode);
+      InvalidStateFlag *invalid_state_flag, BlockExecutionMode mode);
 
   // Disable copy
   StorageItemDeltaManager(const StorageItemDeltaManager &) = delete;

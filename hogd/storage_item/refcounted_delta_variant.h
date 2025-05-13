@@ -147,22 +147,27 @@ private:
 
 class AssetBalanceArgs {
 public:
-  AssetBalanceArgs(int128_t starting_asset_balance)
-    : balance_lower_bound_(starting_asset_balance), balance_upper_bound_(starting_asset_balance)
+  AssetBalanceArgs(uint128_t starting_asset_balance)
+    : balance_lower_bound_(starting_asset_balance),
+      balance_upper_bound_(starting_asset_balance)
   {}
 
   static bool typeclass_match() { return true; }
   std::shared_ptr<const StorageItemWrapper> to_item() const;
 
-  bool try_reserve_transfer_lock(AssetBalanceLock const &lock,
-                                 InvalidStateFlag &invalid_state_flag);
+  // Validation should skip this try_reserve.
+  // Proposal should call this try_reserve.
+  std::optional<AssetBalanceLock> try_reserve_transfer_lock(int128_t new_transfer_amount,
+                                 AssetBalanceLock const &held_lock);
+
+  // Validation should call this commit.
+  // Proposal should call this commit.
   bool commit_transfer(int128_t transfer_amount,
                        AssetBalanceLock const &held_lock,
                        InvalidStateFlag &invalid_state_flag);
 
 private:
-
-  using balance_t = WideIntegral<int128_t>;
+  using balance_t = WideIntegral<uint128_t>;
 
   balance_t balance_lower_bound_;
   balance_t balance_upper_bound_;

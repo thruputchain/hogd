@@ -249,6 +249,59 @@ RetrocausalQueueArgs::get_concurrent_retrocausal_queue_entry(
   return std::nullopt;
 }
 
+std::optional<AssetBalanceLock>
+AssetBalanceArgs::try_reserve_transfer_lock(int128_t new_transfer_amount,
+                                            AssetBalanceLock const &held_lock)
+{
+  if (new_transfer_amount > 0) {
+    if (from_xdr(held_lock.asset_add_amount) >= new_transfer_amount) {
+      return held_lock;
+    }
+    // otherwise, we must reserve additional addition
+    assert(balance_upper_bound_.is_in_range<uint128_t>());
+    auto balance_upper_bound = balance_upper_bound_.get_capped<uint128_t>();
+    auto old_add_lock = from_xdr(held_lock.asset_add_amount);
+    assert(!integer_sub_overflow<int128_t>(new_transfer_amount, old_add_lock));
+
+    int128_t marginal_upper_bound = new_transfer_amount - old_add_lock;
+    assert(marginal_upper_bound >= 0);
+
+    if (!integer_add_overflow<uint128_t>(balance_upper_bound, marginal_upper_bound)) {
+      balance_upper_bound_ += marginal_upper_bound;
+      assert(balance_upper_bound_.is_in_range<uint128_t>());
+      return AssetBalanceLock{
+        .asset_add_amount = to_xdr(new_transfer_amount),
+        .asset_subtract_amount = held_lock.asset_subtract_amount,
+      };
+    }
+
+    return std::nullopt;
+  }
+
+  // otherwise, reserve the additional subtraction
+  assert(balance_lower_bound_.is_in_range<uint128_t>());
+  if (from_xdr(held_lock.asset_subtract_amount) <= new_transfer_amount) {
+    // no new lock required
+    return held_lock;
+  }
+
+  auto balance_lower_bound = balance_lower_bound_.get_capped<uint128_t>();
+  auto old_sub_lock = from_xdr(held_lock.asset_subtract_amount);
+  assert(!integer_add_overflow<int128_t>(new_transfer_amount, old_sub_lock));
+
+  int128_t marginal_lower_bound = new_transfer_amount - old_sub_lock;
+  if (!integer_add_overflow<uint128_t>(balance_lower_bound, marginal_lower_bound)) {
+    assert(marginal_lower_bound <= 0);
+    balance_lower_bound_ += marginal_lower_bound;
+    assert(balance_lower_bound_.is_in_range<uint128_t>());
+    return AssetBalanceLock{
+      .asset_add_amount = held_lock.asset_add_amount,
+      .asset_subtract_amount = to_xdr(new_transfer_amount),
+    };
+  }
+  return std::nullopt;
+}
+
 int128_t
 ExclusiveLockedState::get_cost(StorageDelta const &delta,
                                const StorageItemWrapper *base_item)

@@ -24,12 +24,10 @@ namespace hogd {
 
 StorageItemDeltaManager::StorageItemDeltaManager(
     std::shared_ptr<const StorageItemWrapper> snapshot_state,
-    InvalidStateFlag *invalid_state_flag,
-    BlockExecutionMode mode)
+    InvalidStateFlag *invalid_state_flag, BlockExecutionMode mode)
   : committed_item_(std::move(snapshot_state)),
     committed_item_cost_(committed_item_ ? committed_item_->storage_cost() : 0),
-    invalid_state_flag_(invalid_state_flag),
-    mode_(mode)
+    invalid_state_flag_(invalid_state_flag), mode_(mode)
 {}
 
 bool
