@@ -116,10 +116,10 @@ public:
 
   SyscallStatus<void> validate() const;
 
-  int128_t asset_balance_;
+  uint128_t asset_balance_;
 
 private:
-  int128_t initial_asset_balance_;
+  uint128_t initial_asset_balance_;
 };
 
 // Represent state of an ItemView that has not been modified during

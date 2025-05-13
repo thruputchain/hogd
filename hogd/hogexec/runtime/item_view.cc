@@ -334,9 +334,8 @@ StorageDelta
 AssetBalanceItem::get_delta() const
 {
   StorageDelta delta(StorageDeltaType::kDeltaTypeAssetTransfer);
-  assert(initial_asset_balance_ >= 0);
   assert(
-      !integer_add_overflow<int128_t>(asset_balance_, -initial_asset_balance_));
+      !integer_sub_overflow<int128_t>(asset_balance_, initial_asset_balance_));
   int128_t transfer_amount = asset_balance_ - initial_asset_balance_;
   delta.transfer_amount() = to_xdr(transfer_amount);
   return delta;
@@ -345,13 +344,10 @@ AssetBalanceItem::get_delta() const
 SyscallStatus<void>
 AssetBalanceItem::validate() const
 {
-  if (asset_balance_ < 0) {
+
+  if (integer_sub_overflow<int128_t>(asset_balance_, initial_asset_balance_)) {
     return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
-
-  assert(initial_asset_balance_ >= 0);
-  assert(
-      !integer_add_overflow<int128_t>(asset_balance_, -initial_asset_balance_));
 
   return {};
 }
