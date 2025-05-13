@@ -39,7 +39,7 @@ struct BytestringArgs {
     return candidate_bytestring == bytestring_set_;
   }
 
-  int128_t get_cost() const
+  constexpr int128_t get_cost() const
   {
     return kBaseItemCost + bytestring_cost(bytestring_set_.size());
   }
@@ -155,17 +155,23 @@ public:
   static bool typeclass_match() { return true; }
   std::shared_ptr<const StorageItemWrapper> to_item() const;
 
+  static constexpr int128_t get_cost() { return kBaseItemCost; }
+
   // Validation should skip this try_reserve.
   // Proposal should call this try_reserve.
   std::optional<AssetBalanceLock>
   try_reserve_transfer_lock(int128_t new_transfer_amount,
                             AssetBalanceLock const &held_lock);
+  // Undoes try_reserve_transfer_lock
+  void revert_lock(AssetBalanceLock const &held_lock);
+
 
   // Validation should call this commit.
   // Proposal should call this commit.
-  bool commit_transfer(int128_t transfer_amount,
+  void commit_transfer(int128_t transfer_amount,
                        AssetBalanceLock const &held_lock,
                        InvalidStateFlag &invalid_state_flag);
+
 
 private:
   using balance_t = WideIntegral<uint128_t>;

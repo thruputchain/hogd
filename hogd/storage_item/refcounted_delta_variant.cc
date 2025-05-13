@@ -304,6 +304,67 @@ AssetBalanceArgs::try_reserve_transfer_lock(int128_t new_transfer_amount,
   return std::nullopt;
 }
 
+void
+AssetBalanceArgs::revert_lock(AssetBalanceLock const &held_lock)
+{
+  int128_t add_lock = from_xdr(held_lock.asset_add_amount);
+  int128_t sub_lock = from_xdr(held_lock.asset_subtract_amount);
+  assert(add_lock >= 0);
+  assert(sub_lock <= 0);
+
+  assert(balance_upper_bound_.is_in_range<uint128_t>());
+  balance_upper_bound_ -= add_lock;
+  assert(balance_upper_bound_.is_in_range<uint128_t>());
+
+  assert(balance_lower_bound_.is_in_range<uint128_t>());
+  balance_lower_bound_ -= sub_lock;
+  assert(balance_lower_bound_.is_in_range<uint128_t>());
+}
+
+void
+AssetBalanceArgs::commit_transfer(int128_t transfer_amount,
+                                  AssetBalanceLock const &held_lock,
+                                  InvalidStateFlag &invalid_state_flag)
+{
+  int128_t add_lock = from_xdr(held_lock.asset_add_amount);
+  int128_t sub_lock = from_xdr(held_lock.asset_subtract_amount);
+  assert(add_lock >= 0);
+  assert(sub_lock <= 0);
+
+  bool is_initially_invalid = (!balance_lower_bound_.is_in_range<uint128_t>() ||
+                              !balance_upper_bound_.is_in_range<uint128_t>());
+
+  // release locks
+  balance_upper_bound_ -= add_lock;
+  balance_lower_bound_ -= sub_lock;
+
+  // perform the actual transfer
+  balance_upper_bound_ += transfer_amount;
+  balance_lower_bound_ += transfer_amount;
+
+  bool is_post_invalid = (!balance_lower_bound_.is_in_range<uint128_t>() ||
+                          !balance_upper_bound_.is_in_range<uint128_t>());
+
+  if (is_initially_invalid && !is_post_invalid) {
+    invalid_state_flag.unmark_as_invalid();
+  }
+  else if (!is_initially_invalid && is_post_invalid) {
+    invalid_state_flag.mark_as_invalid();
+  }
+}
+
+std::shared_ptr<const StorageItemWrapper>
+AssetBalanceArgs::to_item() const
+{
+  assert(balance_lower_bound_.is_in_range<uint128_t>());
+  assert(balance_upper_bound_.is_in_range<uint128_t>());
+  assert(balance_lower_bound_.get_capped<uint128_t>() ==
+         balance_upper_bound_.get_capped<uint128_t>());
+  return std::make_shared<const StorageItemWrapper>(
+      StorageItemWrapper::AssetBalanceMarker{},
+      balance_lower_bound_.get_capped<uint128_t>());
+}
+
 int128_t
 ExclusiveLockedState::get_cost(StorageDelta const &delta,
                                const StorageItemWrapper *base_item)

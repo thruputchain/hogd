@@ -310,4 +310,59 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltas)
   ASSERT_FALSE(arg.try_reserve_transfer_lock(-1, *r1));
 }
 
+TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltasRevert)
+{
+  AssetBalanceArgs arg(200);
+  InvalidStateFlag invalid_state_flag;
+  // Step 1: reserve an add of 100
+  auto r1 = arg.try_reserve_transfer_lock(
+      100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                            .asset_subtract_amount = to_xdr(int128_t{0})});
+  ASSERT_TRUE(r1);
+  EXPECT_EQ(r1->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r1->asset_subtract_amount, to_xdr(int128_t{0}));
+
+  // Step 2: reserve a subtract of 100, from the same lock (r1)
+  auto r1b = arg.try_reserve_transfer_lock(
+      -100, *r1);
+  ASSERT_TRUE(r1b);
+  EXPECT_EQ(r1b->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r1b->asset_subtract_amount, to_xdr(int128_t{-100}));
+
+  // Step 3: Reserve a subtract of 50, from a new lock (r2)
+  auto r2 = arg.try_reserve_transfer_lock(
+      -50, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                            .asset_subtract_amount = to_xdr(int128_t{0})});
+  ASSERT_TRUE(r2);
+  EXPECT_EQ(r2->asset_add_amount, to_xdr(int128_t{0}));
+  EXPECT_EQ(r2->asset_subtract_amount, to_xdr(int128_t{-50}));
+
+
+  // Step 4: Assert that another subtract of 51 from a new lock is not possible
+  ASSERT_FALSE(arg.try_reserve_transfer_lock(
+      -51, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                            .asset_subtract_amount = to_xdr(int128_t{0})}));
+  // Additionally impossible from r1b
+  ASSERT_FALSE(arg.try_reserve_transfer_lock(
+      -151, *r1b));
+
+  // Step 5: Revert r2
+  arg.revert_lock(*r2);
+
+  // Step 6: Assert that a subtract of 151 from r1b is possible, to get lock r3
+  // (Current lock state should allow another subtract of 100, as r2 is released)
+  auto r3 = arg.try_reserve_transfer_lock(-151, *r1b);
+  ASSERT_TRUE(r3);
+  EXPECT_EQ(r3->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r3->asset_subtract_amount, to_xdr(int128_t{-151}));
+
+  // Step 7: commit transfer of 155 based on lock r3
+  arg.commit_transfer(155, *r3, invalid_state_flag);
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  auto item = arg.to_item();
+  auto balance = item->asset_balance();
+  EXPECT_EQ(balance, 355);
+}
+
 } // namespace hogd
