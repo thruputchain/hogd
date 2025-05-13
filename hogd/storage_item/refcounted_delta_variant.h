@@ -165,13 +165,11 @@ public:
   // Undoes try_reserve_transfer_lock
   void revert_lock(AssetBalanceLock const &held_lock);
 
-
   // Validation should call this commit.
   // Proposal should call this commit.
   void commit_transfer(int128_t transfer_amount,
                        AssetBalanceLock const &held_lock,
                        InvalidStateFlag &invalid_state_flag);
-
 
 private:
   using balance_t = WideIntegral<uint128_t>;

@@ -332,7 +332,7 @@ AssetBalanceArgs::commit_transfer(int128_t transfer_amount,
   assert(sub_lock <= 0);
 
   bool is_initially_invalid = (!balance_lower_bound_.is_in_range<uint128_t>() ||
-                              !balance_upper_bound_.is_in_range<uint128_t>());
+                               !balance_upper_bound_.is_in_range<uint128_t>());
 
   // release locks
   balance_upper_bound_ -= add_lock;
