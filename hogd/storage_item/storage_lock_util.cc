@@ -73,15 +73,18 @@ delta_to_lock(StorageDelta const &delta)
         StorageItemType::kItemTypeAssetBalance);
     auto xfer = from_xdr(delta.transfer_amount());
     if (xfer > 0) {
-      lock.full_typeclass_lock().extra_lock_data.asset_balance_lock() = AssetBalanceLock{
-        .asset_add_amount = to_xdr(xfer),
-        .asset_subtract_amount = {.highbits = 0, .lowbits = 0},
-      };
-    } else {
-      lock.full_typeclass_lock().extra_lock_data.asset_balance_lock() = AssetBalanceLock{
-        .asset_add_amount = {.highbits = 0, .lowbits = 0},
-        .asset_subtract_amount = to_xdr(-xfer),
-      };
+      lock.full_typeclass_lock().extra_lock_data.asset_balance_lock() =
+          AssetBalanceLock{
+              .asset_add_amount = to_xdr(xfer),
+              .asset_subtract_amount = {.highbits = 0, .lowbits = 0},
+          };
+    }
+    else {
+      lock.full_typeclass_lock().extra_lock_data.asset_balance_lock() =
+          AssetBalanceLock{
+              .asset_add_amount = {.highbits = 0, .lowbits = 0},
+              .asset_subtract_amount = to_xdr(-xfer),
+          };
     }
     return lock;
   }

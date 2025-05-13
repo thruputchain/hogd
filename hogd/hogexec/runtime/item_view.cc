@@ -335,7 +335,8 @@ AssetBalanceItem::get_delta() const
 {
   StorageDelta delta(StorageDeltaType::kDeltaTypeAssetTransfer);
   assert(initial_asset_balance_ >= 0);
-  assert(!integer_add_overflow<int128_t>(asset_balance_, -initial_asset_balance_));
+  assert(
+      !integer_add_overflow<int128_t>(asset_balance_, -initial_asset_balance_));
   int128_t transfer_amount = asset_balance_ - initial_asset_balance_;
   delta.transfer_amount() = to_xdr(transfer_amount);
   return delta;
@@ -349,7 +350,8 @@ AssetBalanceItem::validate() const
   }
 
   assert(initial_asset_balance_ >= 0);
-  assert(!integer_add_overflow<int128_t>(asset_balance_, -initial_asset_balance_));
+  assert(
+      !integer_add_overflow<int128_t>(asset_balance_, -initial_asset_balance_));
 
   return {};
 }

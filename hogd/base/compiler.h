@@ -4,6 +4,7 @@
 
 #include <concepts>
 #include <new>
+#include <type_traits>
 
 #include "hogd/base/types.h"
 
@@ -163,6 +164,15 @@ integer_add_overflow(T a, U b, Result *out)
   return __builtin_add_overflow(a, b, out);
 }
 
+// integer_sub_overflow subtracts b from a and stores the result in out. Returns
+// true if there was an overflow while performing the subtraction.
+template<std::integral T, std::integral U, std::integral Result>
+inline bool
+integer_sub_overflow(T a, U b, Result *out)
+{
+  return __builtin_sub_overflow(a, b, out);
+}
+
 // integer_add_overflow adds b to a without storing the result.  Returns true if
 // there would be an overflow while performing the addition and storing in the
 // type Result.  Result defaults to decltype(a+b).
@@ -177,6 +187,23 @@ integer_add_overflow(T a, U b)
 #else
   Result r;
   return integer_add_overflow(a, b, &r);
+#endif
+}
+
+// integer_sub_overflow subtracts b from a without storing the result. Returns
+// true if there would be an overflow while performing the subtraction and
+// storing in the type Result. Result defaults to decltype(a-b).
+template<typename R = void, std::integral T, std::integral U>
+inline bool
+integer_sub_overflow(T a, U b)
+{
+  using Result = std::conditional_t<std::is_void_v<R>, decltype(a - b), R>;
+  // clang doensn't have sub_overflow_p but does have sub_overflow
+#if defined(__builtin_sub_overflow_p)
+  return __builtin_sub_overflow_p(a, b, Result{0});
+#else
+  Result r;
+  return integer_sub_overflow(a, b, &r);
 #endif
 }
 

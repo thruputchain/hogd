@@ -63,8 +63,10 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
                            {},
                            {}});
 
-  server_.setup_create_item(AddressAndKey{},
-                            StorageItemWrapper(StorageItemWrapper::RetrocausalQueueMarker{}, std::move(queue)));
+  server_.setup_create_item(
+      AddressAndKey{},
+      StorageItemWrapper(StorageItemWrapper::RetrocausalQueueMarker{},
+                         std::move(queue)));
 
   SnapshotStorageItem test_item(StorageItem(
                                     StorageItemType::kItemTypeRetrocausalQueue),

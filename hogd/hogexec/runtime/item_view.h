@@ -105,8 +105,8 @@ private:
 class AssetBalanceItem {
 public:
   AssetBalanceItem(uint128_t initial_asset_balance)
-    : asset_balance_(initial_asset_balance)
-    , initial_asset_balance_(initial_asset_balance)
+    : asset_balance_(initial_asset_balance),
+      initial_asset_balance_(initial_asset_balance)
   {}
 
   StorageDelta get_delta() const;

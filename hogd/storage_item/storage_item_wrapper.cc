@@ -14,14 +14,16 @@ namespace hogd {
 StorageItemWrapper::StorageItemWrapper(BytestringMarker, Bytestring bytestring)
   : storage_item_(BytestringWrapper{.bytestring_ = std::move(bytestring)})
 {}
-StorageItemWrapper::StorageItemWrapper(NonnegativeIntMarker, int128_t nnint_value)
+StorageItemWrapper::StorageItemWrapper(NonnegativeIntMarker,
+                                       int128_t nnint_value)
   : storage_item_(NonnegativeIntWrapper{.nnint_ = nnint_value})
 {}
 StorageItemWrapper::StorageItemWrapper(RetrocausalQueueMarker,
                                        RetrocausalQueue queue)
   : storage_item_(RetrocausalQueueWrapper{.queue_ = std::move(queue)})
 {}
-StorageItemWrapper::StorageItemWrapper(AssetBalanceMarker, uint128_t asset_balance)
+StorageItemWrapper::StorageItemWrapper(AssetBalanceMarker,
+                                       uint128_t asset_balance)
   : storage_item_(AssetBalanceWrapper{.asset_balance_ = asset_balance})
 {}
 

@@ -151,7 +151,8 @@ private:
     case StorageItemType::kItemTypeAssetBalance:
       return std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
                           AssetBalanceEntry, DeletedEntry>{
-          std::in_place_type<AssetBalanceEntry>, from_xdr(item.asset_balance())};
+          std::in_place_type<AssetBalanceEntry>,
+          from_xdr(item.asset_balance())};
     }
     assert(false);
     std::unreachable();

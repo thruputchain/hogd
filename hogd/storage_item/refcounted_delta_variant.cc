@@ -28,7 +28,8 @@ namespace hogd {
 std::shared_ptr<const StorageItemWrapper>
 BytestringArgs::to_item() const
 {
-  return std::make_shared<const StorageItemWrapper>(StorageItemWrapper::BytestringMarker{}, bytestring_set_);
+  return std::make_shared<const StorageItemWrapper>(
+      StorageItemWrapper::BytestringMarker{}, bytestring_set_);
 }
 
 std::shared_ptr<const StorageItemWrapper>
@@ -46,7 +47,8 @@ NNIntSetAddArgs::to_item() const
     out = new_value + total_add;
   }
 
-  return std::make_shared<const StorageItemWrapper>(StorageItemWrapper::NonnegativeIntMarker{}, out);
+  return std::make_shared<const StorageItemWrapper>(
+      StorageItemWrapper::NonnegativeIntMarker{}, out);
 }
 
 bool

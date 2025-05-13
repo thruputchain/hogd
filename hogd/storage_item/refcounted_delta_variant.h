@@ -144,6 +144,28 @@ private:
       .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
 };
 
+class AssetBalanceArgs {
+public:
+  AssetBalanceArgs(int128_t starting_asset_balance)
+    : starting_asset_balance_(starting_asset_balance)
+  {}
+
+  static bool typeclass_match() { return true; }
+  std::shared_ptr<const StorageItemWrapper> to_item() const;
+
+  bool try_reserve_transfer_lock(AssetBalanceLock const &lock,
+                                 InvalidStateFlag &invalid_state_flag);
+  bool commit_transfer(int128_t transfer_amount,
+                       AssetBalanceLock const &held_lock,
+                       InvalidStateFlag &invalid_state_flag);
+
+private:
+  int128_t starting_asset_balance_;
+
+  UInt256Reservation total_added_;
+  UInt256Reservation total_subtracted_;
+};
+
 // Exclusive locked state
 // For convenience, we maintain the invariant that the refcount is 1 whenever
 // the variant is in this state (so i.e. there's never an ExclusiveLockedState

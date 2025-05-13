@@ -22,6 +22,7 @@ add_executable(
   retrocausal_queue_test.cc
   storage_item_delta_manager_test.cc
   refcounted_delta_variant_test.cc
+  wide_integral_test.cc
 )
 
 target_link_libraries(
