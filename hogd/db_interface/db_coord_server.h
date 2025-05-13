@@ -30,7 +30,8 @@ public:
 
   // RPC methods
   x23::Async<DbResult> dbcoord_create_snapshot(BlockID parent_id,
-                                               BlockID new_id);
+                                               BlockID new_id,
+                                               BlockExecutionMode mode);
   static x23::Async<DbResult> dbcoord_open_snapshot(BlockID id)
   {
     co_return DbResult::DbResultError; // TODO(geoff): unclear what to do here

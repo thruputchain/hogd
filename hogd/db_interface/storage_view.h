@@ -60,13 +60,14 @@ protected:
   std::shared_ptr<const StorageItemWrapper>
   get_parent_storage_item(AddressAndKey const &addrkey);
 
-  SnapshotStorageView(InMemoryDatabase *root_db) : parent_view_(root_db) {}
-  SnapshotStorageView(ParentBlockView *parent_view) : parent_view_(parent_view)
+  SnapshotStorageView(InMemoryDatabase *root_db, BlockExecutionMode mode) : mode_(mode), parent_view_(root_db) {}
+  SnapshotStorageView(ParentBlockView *parent_view, BlockExecutionMode mode) : mode_(mode), parent_view_(parent_view)
   {}
 
   SynchronizedMap<AddressAndKey, StorageItemDeltaManager> modified_items_;
   InvalidStateFlag invalid_state_flag_;
-
+  BlockExecutionMode mode_;
+  
   // simple impl, for now
   x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>
       contract_deployments_;

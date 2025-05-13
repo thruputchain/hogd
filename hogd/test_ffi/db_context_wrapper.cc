@@ -7,6 +7,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
+#include "rpc_types.hh"
 
 namespace hogd {
 
@@ -33,7 +34,7 @@ DBContext::advance_new_block()
   }
 
   [[maybe_unused]] auto res =
-      block_manager_.add_child(current_block_id_, current_block_id_ + 1);
+      block_manager_.add_child(current_block_id_, current_block_id_ + 1, BlockExecutionMode::kBlockExecutionModeProposal);
   assert(res);
   current_block_id_++;
   snapshot_cache_ =

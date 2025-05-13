@@ -23,6 +23,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
+#include "x23/rpc.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -38,14 +39,14 @@ public:
     initialize();
   }
 
-  void advance_block()
+  void advance_block(BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal)
   {
     auto r = block_manager_.get_block_data(block_number_);
     assert(r);
     r->close_block();
 
     [[maybe_unused]] auto r2 =
-        block_manager_.add_child(block_number_, block_number_ + 1);
+        block_manager_.add_child(block_number_, block_number_ + 1, mode);
     assert(r2);
     block_number_++;
     storage_snapshot_cache_ =
@@ -96,7 +97,7 @@ public:
   }
 
 private:
-  void initialize()
+  void initialize(BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal)
   {
     constexpr static uint32_t kPortNumber = 10000;
     db_executor_server_.start_server(kPortNumber);
@@ -104,7 +105,7 @@ private:
     db_proxy_ =
         std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
                                                              10000});
-    [[maybe_unused]] auto res = block_manager_.add_child(0, 1);
+    [[maybe_unused]] auto res = block_manager_.add_child(0, 1, mode);
     assert(res);
     block_number_++;
     storage_snapshot_cache_ =

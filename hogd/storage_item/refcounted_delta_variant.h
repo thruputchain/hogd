@@ -13,6 +13,7 @@
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/storage_item/uint256_reservation.h"
+#include "hogd/storage_item/wide_integral.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -147,7 +148,7 @@ private:
 class AssetBalanceArgs {
 public:
   AssetBalanceArgs(int128_t starting_asset_balance)
-    : starting_asset_balance_(starting_asset_balance)
+    : balance_lower_bound_(starting_asset_balance), balance_upper_bound_(starting_asset_balance)
   {}
 
   static bool typeclass_match() { return true; }
@@ -160,10 +161,11 @@ public:
                        InvalidStateFlag &invalid_state_flag);
 
 private:
-  int128_t starting_asset_balance_;
 
-  UInt256Reservation total_added_;
-  UInt256Reservation total_subtracted_;
+  using balance_t = WideIntegral<int128_t>;
+
+  balance_t balance_lower_bound_;
+  balance_t balance_upper_bound_;
 };
 
 // Exclusive locked state
