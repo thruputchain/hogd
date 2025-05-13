@@ -72,6 +72,12 @@ public:
     return std::get<NNIntEntry>(entry_).base_value_;
   }
 
+  uint128_t asset_balance() const
+  {
+    assert(type() == StorageItemType::kItemTypeAssetBalance);
+    return std::get<AssetBalanceEntry>(entry_).asset_balance_;
+  }
+
   auto const &addrkey() const { return addrkey_; }
 
 private:
