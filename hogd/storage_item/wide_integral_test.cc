@@ -63,7 +63,8 @@ TEST(WideIntegralTest, Unsigned)
   EXPECT_EQ(a.get_capped<int8_t>(), -128);
 }
 
-TEST(WideIntegralTest, Assignment) {
+TEST(WideIntegralTest, Assignment)
+{
   // Test assignment operator
   hogd::WideIntegral<uint8_t> a(100);
   a = 50;
@@ -75,7 +76,8 @@ TEST(WideIntegralTest, Assignment) {
   EXPECT_EQ(a.get_capped<uint8_t>(), 255);
 }
 
-TEST(WideIntegralTest, EdgeCases) {
+TEST(WideIntegralTest, EdgeCases)
+{
   // Test edge cases around type limits
   hogd::WideIntegral<int8_t> a(127); // max int8_t
   EXPECT_TRUE(a.is_in_range<int8_t>());
@@ -96,10 +98,12 @@ TEST(WideIntegralTest, EdgeCases) {
   EXPECT_EQ(c.get_capped<uint8_t>(), 255);
 }
 
-TEST(WideIntegralTest, LargeValues) {
+TEST(WideIntegralTest, LargeValues)
+{
   hogd::WideIntegral<uint128_t> a(std::numeric_limits<uint128_t>::max() - 5);
   EXPECT_TRUE(a.is_in_range<uint128_t>());
-  EXPECT_EQ(a.get_capped<uint128_t>(), std::numeric_limits<uint128_t>::max() - 5);
+  EXPECT_EQ(a.get_capped<uint128_t>(),
+            std::numeric_limits<uint128_t>::max() - 5);
 
   a += 5;
   EXPECT_TRUE(a.is_in_range<uint128_t>());

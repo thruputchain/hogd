@@ -202,99 +202,112 @@ TEST(RefcountedDeltaVariant, RCQCosts)
 
 TEST(RefcountedDeltaVariant, AssetBalanceProposal)
 {
-    AssetBalanceArgs arg(0);
+  AssetBalanceArgs arg(0);
 
-    auto r = arg.try_reserve_transfer_lock(100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{100}), .asset_subtract_amount = to_xdr(int128_t{0})});
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
+  auto r = arg.try_reserve_transfer_lock(
+      100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{100}),
+                            .asset_subtract_amount = to_xdr(int128_t{0})});
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
 
-    r = arg.try_reserve_transfer_lock(100, *r);
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
+  r = arg.try_reserve_transfer_lock(100, *r);
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
 
-    r = arg.try_reserve_transfer_lock(50, *r);
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
+  r = arg.try_reserve_transfer_lock(50, *r);
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
 
-    r = arg.try_reserve_transfer_lock(200, *r);
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{200}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
+  r = arg.try_reserve_transfer_lock(200, *r);
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{200}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
 
-    ASSERT_FALSE(arg.try_reserve_transfer_lock(-100, *r));
+  ASSERT_FALSE(arg.try_reserve_transfer_lock(-100, *r));
 }
 
 TEST(RefcountedDeltaVariant, AssetBalanceProposalLargeValues)
 {
-    AssetBalanceArgs arg(std::numeric_limits<uint128_t>::max() - 5);
+  AssetBalanceArgs arg(std::numeric_limits<uint128_t>::max() - 5);
 
-    auto r = arg.try_reserve_transfer_lock(100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}), .asset_subtract_amount = to_xdr(int128_t{0})});
-    ASSERT_FALSE(r);
+  auto r = arg.try_reserve_transfer_lock(
+      100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                            .asset_subtract_amount = to_xdr(int128_t{0})});
+  ASSERT_FALSE(r);
 
-    r = arg.try_reserve_transfer_lock(5, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}), .asset_subtract_amount = to_xdr(int128_t{0})});
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{5}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
+  r = arg.try_reserve_transfer_lock(
+      5, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                          .asset_subtract_amount = to_xdr(int128_t{0})});
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{5}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
 }
 
 TEST(RefcountedDeltaVariant, AssetBalanceProposalNegative)
 {
-    AssetBalanceArgs arg(500);
+  AssetBalanceArgs arg(500);
 
-    auto r = arg.try_reserve_transfer_lock(-100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}), .asset_subtract_amount = to_xdr(int128_t{0})});
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{0}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-100}));
+  auto r = arg.try_reserve_transfer_lock(
+      -100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                             .asset_subtract_amount = to_xdr(int128_t{0})});
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{0}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-100}));
 
-    r = arg.try_reserve_transfer_lock(-100, *r);
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{0}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-100}));
+  r = arg.try_reserve_transfer_lock(-100, *r);
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{0}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-100}));
 
-    r = arg.try_reserve_transfer_lock(100, *r);
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-100}));
+  r = arg.try_reserve_transfer_lock(100, *r);
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-100}));
 
-    r = arg.try_reserve_transfer_lock(-50, *r);
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-100}));
+  r = arg.try_reserve_transfer_lock(-50, *r);
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-100}));
 
-    r = arg.try_reserve_transfer_lock(-400, *r);
-    ASSERT_TRUE(r);
-    EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
-    EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-400}));
+  r = arg.try_reserve_transfer_lock(-400, *r);
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-400}));
 
-    ASSERT_FALSE(arg.try_reserve_transfer_lock(-501, *r));
+  ASSERT_FALSE(arg.try_reserve_transfer_lock(-501, *r));
 }
 
-TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltas) {
-    AssetBalanceArgs arg(100);
+TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltas)
+{
+  AssetBalanceArgs arg(100);
 
-    // reserve an add
-    auto r1 = arg.try_reserve_transfer_lock(100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}), .asset_subtract_amount = to_xdr(int128_t{0})});
-    ASSERT_TRUE(r1);
-    EXPECT_EQ(r1->asset_add_amount, to_xdr(int128_t{100}));
-    EXPECT_EQ(r1->asset_subtract_amount, to_xdr(int128_t{0}));
+  // reserve an add
+  auto r1 = arg.try_reserve_transfer_lock(
+      100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                            .asset_subtract_amount = to_xdr(int128_t{0})});
+  ASSERT_TRUE(r1);
+  EXPECT_EQ(r1->asset_add_amount, to_xdr(int128_t{100}));
+  EXPECT_EQ(r1->asset_subtract_amount, to_xdr(int128_t{0}));
 
-    // reserve a subtract, that prevents all other subtracts
-    auto r2 = arg.try_reserve_transfer_lock(-100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}), .asset_subtract_amount = to_xdr(int128_t{0})});
-    ASSERT_TRUE(r2);
-    EXPECT_EQ(r2->asset_add_amount, to_xdr(int128_t{0}));
-    EXPECT_EQ(r2->asset_subtract_amount, to_xdr(int128_t{-100}));
+  // reserve a subtract, that prevents all other subtracts
+  auto r2 = arg.try_reserve_transfer_lock(
+      -100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                             .asset_subtract_amount = to_xdr(int128_t{0})});
+  ASSERT_TRUE(r2);
+  EXPECT_EQ(r2->asset_add_amount, to_xdr(int128_t{0}));
+  EXPECT_EQ(r2->asset_subtract_amount, to_xdr(int128_t{-100}));
 
-    // more adds are still fine
-    r1 = arg.try_reserve_transfer_lock(200, *r1);
-    ASSERT_TRUE(r1);
-    EXPECT_EQ(r1->asset_add_amount, to_xdr(int128_t{200}));
-    EXPECT_EQ(r1->asset_subtract_amount, to_xdr(int128_t{0}));
+  // more adds are still fine
+  r1 = arg.try_reserve_transfer_lock(200, *r1);
+  ASSERT_TRUE(r1);
+  EXPECT_EQ(r1->asset_add_amount, to_xdr(int128_t{200}));
+  EXPECT_EQ(r1->asset_subtract_amount, to_xdr(int128_t{0}));
 
-    // more subtracts are not fine
-    ASSERT_FALSE(arg.try_reserve_transfer_lock(-1, *r1));
+  // more subtracts are not fine
+  ASSERT_FALSE(arg.try_reserve_transfer_lock(-1, *r1));
 }
 
 } // namespace hogd

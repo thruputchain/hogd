@@ -157,8 +157,9 @@ public:
 
   // Validation should skip this try_reserve.
   // Proposal should call this try_reserve.
-  std::optional<AssetBalanceLock> try_reserve_transfer_lock(int128_t new_transfer_amount,
-                                 AssetBalanceLock const &held_lock);
+  std::optional<AssetBalanceLock>
+  try_reserve_transfer_lock(int128_t new_transfer_amount,
+                            AssetBalanceLock const &held_lock);
 
   // Validation should call this commit.
   // Proposal should call this commit.

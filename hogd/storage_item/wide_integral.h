@@ -27,7 +27,6 @@ namespace hogd {
 //   uint8_t capped = w.get_capped<uint8_t>(); // 255
 template<std::integral T> class WideIntegral {
 public:
-
   // Constructs a WideIntegral from a value of the base type T.
   // For negative values, sets highbits_ to -1 to properly represent the sign.
   template<std::integral U>
@@ -43,15 +42,15 @@ public:
 
   // Assignment operator that creates a new WideIntegral from the given value
   // and assigns it to this object.
-  template<std::integral U>
-  WideIntegral &operator=(U value)
+  template<std::integral U> WideIntegral &operator=(U value)
   {
     *this = WideIntegral(value);
     return *this;
   }
 
-  // Addition assignment operator that adds the given value to this WideIntegral.
-  // Handles overflow by incrementing/decrementing highbits_ as needed.
+  // Addition assignment operator that adds the given value to this
+  // WideIntegral. Handles overflow by incrementing/decrementing highbits_ as
+  // needed.
   WideIntegral &operator+=(std::signed_integral auto value)
   {
     if (integer_add_overflow<unsigned_type>(lowbits_, value, &lowbits_)) {
@@ -66,8 +65,9 @@ public:
     return *this;
   }
 
-  // Subtraction assignment operator that subtracts the given value from this WideIntegral.
-  // Handles overflow by incrementing/decrementing highbits_ as needed.
+  // Subtraction assignment operator that subtracts the given value from this
+  // WideIntegral. Handles overflow by incrementing/decrementing highbits_ as
+  // needed.
   WideIntegral &operator-=(std::signed_integral auto value)
   {
     if (integer_sub_overflow<unsigned_type>(lowbits_, value, &lowbits_)) {
@@ -80,12 +80,13 @@ public:
     }
     return *this;
   }
-  // Checks if the current value can fit within the range of the given unsigned integral type.
-  // Returns true if the value can be represented in OutType without overflow.
-  // Returns false if the value is negative or exceeds OutType's maximum value.
+  // Checks if the current value can fit within the range of the given unsigned
+  // integral type. Returns true if the value can be represented in OutType
+  // without overflow. Returns false if the value is negative or exceeds
+  // OutType's maximum value.
   //
-  // The static_assert ensures that the current unsigned_type can hold values at least
-  // as large as OutType's maximum value.
+  // The static_assert ensures that the current unsigned_type can hold values at
+  // least as large as OutType's maximum value.
   template<std::unsigned_integral OutType> bool is_in_range() const
   {
     static_assert(std::numeric_limits<unsigned_type>::max() >=
@@ -97,12 +98,14 @@ public:
     return lowbits_ <= std::numeric_limits<OutType>::max();
   }
 
-  // Checks if the current value can fit within the range of the given signed integral type.
-  // Returns true if the value can be represented in OutType without overflow/underflow.
-  // Returns false if the value exceeds OutType's maximum or minimum value.
+  // Checks if the current value can fit within the range of the given signed
+  // integral type. Returns true if the value can be represented in OutType
+  // without overflow/underflow. Returns false if the value exceeds OutType's
+  // maximum or minimum value.
   //
   // The static_asserts ensure:
-  // 1. The current unsigned_type can hold values at least as large as OutType's maximum
+  // 1. The current unsigned_type can hold values at least as large as OutType's
+  // maximum
   // 2. The two's complement representation invariant holds for OutType
   template<std::signed_integral OutType> bool is_in_range() const
   {
@@ -136,9 +139,8 @@ public:
   }
 
   // Safely converts the current value to the given integral type OutType.
-  // If the value fits within OutType's range (checked via is_in_range<OutType>()),
-  // returns the exact value.
-  // Otherwise returns:
+  // If the value fits within OutType's range (checked via
+  // is_in_range<OutType>()), returns the exact value. Otherwise returns:
   // - OutType's maximum value if the current value is positive
   // - OutType's minimum value if the current value is negative
   //
