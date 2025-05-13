@@ -81,20 +81,26 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
   }
   case StorageDeltaType::kDeltaTypeAssetTransfer:
   {
-    if (mode_ == BlockExecutionMode::kBlockExecutionModeValidation) {
-      return true;
-    }
     uint128_t previous_balance =
         committed_item_ ? committed_item_->asset_balance() : 0;
     if (auto *args =
             variant_.try_set_variant<AssetBalanceArgs>(previous_balance)) {
-      return args
-          ->try_reserve_transfer_lock(from_xdr(delta.transfer_amount()),
-                                      AssetBalanceLock{.asset_add_amount =
-                                                           to_xdr(int128_t{0}),
-                                                       .asset_subtract_amount =
-                                                           to_xdr(int128_t{0})})
-          .has_value();
+      if (mode_ == BlockExecutionMode::kBlockExecutionModeValidation) {
+        // this path keeps the reference acquired
+        return true;
+      }
+
+      auto res =
+          args->try_reserve_transfer_lock(
+                  from_xdr(delta.transfer_amount()),
+                  AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
+                                   .asset_subtract_amount =
+                                       to_xdr(int128_t{0})})
+              .has_value();
+      if (!res) {
+        variant_.release_reference();
+      }
+      return res;
     }
     return false;
   }

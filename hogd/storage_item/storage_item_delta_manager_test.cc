@@ -42,6 +42,15 @@ expect_final(StorageItemDeltaManager &item, int128_t nnint)
   EXPECT_EQ(snapshot->nnint(), nnint);
 }
 
+void
+expect_final_asset(StorageItemDeltaManager &item, uint128_t asset_balance)
+{
+  auto snapshot = item.get_post_close_block_item();
+  ASSERT_TRUE(snapshot);
+  EXPECT_EQ(snapshot->type(), StorageItemType::kItemTypeAssetBalance);
+  EXPECT_EQ(snapshot->asset_balance(), asset_balance);
+}
+
 } // namespace
 
 class StorageItemDeltaManagerTest
@@ -490,6 +499,29 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
 
   ASSERT_EQ(lk_6->locked_tokens_,
             lk_exclusive->locked_tokens_ + bytestring_cost(2));
+}
+
+TEST_P(StorageItemDeltaManagerTest, AssetBalanceTransferNoInitialBalance)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  auto make_asset_transfer_delta = [](int128_t amount) {
+    StorageDelta delta(StorageDeltaType::kDeltaTypeAssetTransfer);
+    delta.transfer_amount() = to_xdr(amount);
+    return delta;
+  };
+
+  auto lock = item.try_reserve(make_asset_transfer_delta(10),
+                               StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock);
+
+  auto lock2 = item.try_reserve(make_asset_transfer_delta(20), lock->lock_);
+  ASSERT_TRUE(lock2);
+
+  item.commit(make_asset_transfer_delta(5), *lock2);
+
+  expect_final_asset(item, uint128_t{5});
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
