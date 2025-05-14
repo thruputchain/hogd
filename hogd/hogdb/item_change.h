@@ -2,11 +2,18 @@
 //
 // Design Overview:
 //
-// Each ItemChange tracks modifications to an item.  ItemChange's can be merged
-// with merge(), allowing for multiple changes to the same item as long as they
-// are the same type and commute (i.e., no conflicts). Each type of ItemChange
-// has different rules for what is considered a conflict.
+// Each ItemChange tracks modifications to an item. Conceptually, an ItemChange
+// has two components: a reservation and a change. The reservation defines what
+// should cause conflicts while the change modifies the item's value if
+// committed. Reservations can be combined into their most restrictive
+// intersection with narrow(). On the other hand, both reservations and changes
+// can be combined with merge().
 //
+// This distinction is useful because subtransactions must contain reservations
+// that are at least as restrictive as the parent transaction for any given
+// item. Otherwise, rolling back could fail because of a lock taken by a
+// different transaction. Therefore the reservation might have to be more
+// restrictive than the change.
 
 #pragma once
 
@@ -33,9 +40,13 @@ template<typename T>
 concept is_item = requires(T t, HogDatabase &db, ItemKey key, const T &arg) {
   // applies the change to the ramdb.
   { t.commit(db, key) } -> std::same_as<HogDBStatus<void>>;
-  // merges together the change with arg (can fail if there is a conflict).
+  // makes the change's reservation at least as restrictive as arg. However,
+  // does not merge the value change in arg. Returns true if possible.
+  { t.narrow(arg) } -> std::same_as<bool>;
+  // merges the change and reservation in arg (will fail if there is a
+  // conflict).
   { t.merge(arg) } -> std::same_as<HogDBStatus<void>>;
-  // reverts the changes in arg that were previously merged.
+  // reverts the change and reservation in arg that was previously merged.
   { t.undo_merge(arg) } -> std::same_as<void>;
   // returns the size in bytes of storage required in ramdb.
   { t.storage_size() } -> std::same_as<size_t>;
@@ -55,6 +66,7 @@ public:
   }
 
   HogDBStatus<void> commit(HogDatabase &db, ItemKey key) const;
+  bool narrow(const NNInt128 &nnint);
   HogDBStatus<void> merge(const NNInt128 &nnint);
   void undo_merge(const NNInt128 &nnint);
 
@@ -91,6 +103,7 @@ public:
   Bytes(std::span<const std::byte> buf) : buf_(buf.begin(), buf.end()) {}
 
   HogDBStatus<void> commit(HogDatabase &db, ItemKey key) const;
+  bool narrow(const Bytes &bytes) { return buf_ == bytes.buf_; }
   HogDBStatus<void> merge(const Bytes &bytes)
   {
     if (buf_ != bytes.buf_)
@@ -118,6 +131,7 @@ static_assert(is_item<Bytes>);
 class Deletion {
 public:
   static HogDBStatus<void> commit(HogDatabase &db, ItemKey key);
+  static bool narrow(const Deletion & /*del*/) { return true; }
   static HogDBStatus<void> merge(const Deletion & /*del*/) { return {}; }
   static void undo_merge(const Deletion &del) {}
   static size_t storage_size() { return 0; }
@@ -138,12 +152,15 @@ public:
   std::optional<int128_t> to_nnint128() const;
   OwningSpan<const std::byte> to_bytes() const;
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
+  bool is_exclusive() const { return exclusive_; }
 
   // commit applies the item's changes to the ramdb.
   HogDBStatus<void> commit(HogDatabase &db, ItemKey key) const;
 
-  // merge merges a change into this one. It returns kConflict if the change
-  // does not commute.
+  // narrow combines the reservation of a change into this one.
+  void narrow(const ItemChange &change);
+  // merge merges the reservation and value of a change into this one. It
+  // returns kConflict if the change does not commute.
   HogDBStatus<void> merge(const ItemChange &change);
   // undo_merge reverts a change that was merged with this one.
   void undo_merge(const ItemChange &change);
@@ -152,6 +169,7 @@ public:
   size_t storage_size() const;
 
 private:
+  bool exclusive_{false};
   std::variant<std::monostate, NNInt128, Bytes, Deletion> type_;
 };
 

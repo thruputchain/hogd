@@ -1,5 +1,6 @@
 #include "hogd/hogdb/item_change.h"
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <span>
@@ -17,6 +18,37 @@ inline HogDBStatus<void>
 NNInt128::commit(HogDatabase &db, ItemKey key) const
 {
   return db.write_nnint128(key, value());
+}
+
+inline bool
+NNInt128::narrow(const NNInt128 &nnint)
+{
+  assert_is_valid();
+  nnint.assert_is_valid();
+
+  // base must be the same to narrow.
+  if (base_ != nnint.base_)
+    return false;
+
+  // narrow the bounds based on the greatest restriction.
+  int128_t plus = std::max(plus_, nnint.plus_);
+  int128_t minus = std::min(minus_, nnint.minus_);
+
+  // check if could go negative.
+  if (base_ + minus < 0)
+    return false;
+
+  // check if could overflow.
+  auto [ign, of] = overflowing_add(base_, plus);
+  if (of)
+    return false;
+
+  // update bounds.
+  plus_ = plus;
+  minus_ = minus;
+
+  assert_is_valid();
+  return true;
 }
 
 inline HogDBStatus<void>
@@ -97,10 +129,30 @@ ItemChange::commit(HogDatabase &db, ItemKey key) const
       type_);
 }
 
+void
+ItemChange::narrow(const ItemChange &change)
+{
+  if (type_.index() != change.type_.index() || change.exclusive_) {
+    exclusive_ = true;
+    return;
+  }
+
+  exclusive_ = !std::visit(
+      [&change](auto &arg) -> bool {
+        if constexpr (!is_monostate<decltype(arg)>)
+          return arg.narrow(
+              std::get<std::decay_t<decltype(arg)>>(change.type_));
+        return {};
+      },
+      type_);
+}
+
 HogDBStatus<void>
 ItemChange::merge(const ItemChange &change)
 {
   if (type_.index() != change.type_.index())
+    return HogDBError(HogDBCode::kConflict);
+  if (exclusive_ || change.exclusive_)
     return HogDBError(HogDBCode::kConflict);
 
   return std::visit(

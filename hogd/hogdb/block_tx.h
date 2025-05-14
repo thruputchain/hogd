@@ -24,10 +24,13 @@ public:
   // getters
   HogDatabase &get_db() const { return db_; }
 
-  // lock reserves the right to apply change to an item. If exclusive is false,
-  // More than one change can be made to an item if they commute.
-  HogDBStatus<void> lock(ItemKey key, const ItemChange &change,
-                         bool exclusive = false);
+  // commit applies all changes to the database.
+  HogDBStatus<void> commit();
+  // abort drops all changes.
+  void abort() { locks_.clear(); }
+
+  // lock reserves the right to apply change to an item.
+  HogDBStatus<void> lock(ItemKey key, const ItemChange &change);
   // modify_lock modifies an existing change to an item that was reserved with
   // lock(). It could still fail if new_change has a conflict.
   HogDBStatus<void> modify_lock(ItemKey key, const ItemChange &old_change,
@@ -35,15 +38,9 @@ public:
   // unlock unreserves the right to apply change to an item and reverts it.
   void unlock(ItemKey key, const ItemChange &change);
 
-  // commit applies all changes to the database.
-  HogDBStatus<void> commit();
-  // abort drops all changes.
-  void abort() { locks_.clear(); }
-
 private:
   struct ItemLock {
     ItemChange change;
-    bool exclusive;
     size_t ref;
   };
 
@@ -52,13 +49,13 @@ private:
 };
 
 inline HogDBStatus<void>
-BlockTX::lock(ItemKey key, const ItemChange &change, bool exclusive)
+BlockTX::lock(ItemKey key, const ItemChange &change)
 {
   auto [val, ul] = locks_[key];
-  if ((val.exclusive || exclusive) && val.ref > 0)
-    return HogDBError(HogDBCode::kConflict);
-  val.ref++;
-  val.exclusive = exclusive;
+  if (++val.ref == 1) {
+    val.change = change;
+    return {};
+  }
   return val.change.merge(change);
 }
 

@@ -66,7 +66,7 @@ InvokeTX::abort()
   changes_.clear();
 }
 
-HogDBStatus<void>
+void
 InvokeTX::rollback_to_savepoint(int depth)
 {
   assert_is_valid();
@@ -84,15 +84,13 @@ InvokeTX::rollback_to_savepoint(int depth)
                                        &ItemVersion::tx_depth),
               vec.end());
     if (!vec.empty()) {
-      HogDBStatus<void> ret = block_.modify_lock(key, tmp, vec.back().change);
-      if (!ret)
-        return ret.error();
+      [[maybe_unused]] HogDBStatus<void> ret =
+          block_.modify_lock(key, tmp, vec.back().change);
+      assert(ret);
       continue;
     }
     block_.unlock(key, tmp);
   }
-
-  return {};
 }
 
 void
@@ -137,6 +135,7 @@ InvokeTX::request_change(ItemKey key, ItemChange &&change)
 
   // otherwise it is an existing change, so the item is already locked.
   ItemVersion &item = v.back();
+  change.narrow(item.change);
   HogDBStatus<void> ret = block_.modify_lock(key, item.change, change);
   if (!ret)
     return ret.error();

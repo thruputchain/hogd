@@ -32,10 +32,8 @@ public:
   // create_savepoint creates a savepoint of the current transaction state. It
   // returns a depth that can be used to restore to this state later.
   int create_savepoint();
-  // rollback_to_savepoint restores the transaction state to a savepoint. It
-  // could fail with kConflict if a lock was acquired on the BlockView that
-  // conflicts with the restored state.
-  HogDBStatus<void> rollback_to_savepoint(int depth);
+  // rollback_to_savepoint restores the transaction state to a savepoint.
+  void rollback_to_savepoint(int depth);
   // release_savepoint removes a savepoint and frees its associated resources.
   // If other savepoints were made after this savepoint, they will be removed
   // as well.
@@ -81,7 +79,7 @@ private:
   BlockTX &block_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
 
-  // read_change returns the most recent version of a change, or nullptr is
+  // read_change returns the most recent version of a change, or nullptr if
   // there is no change.
   const ItemChange *read_change(ItemKey key) const;
   // request_change tries to apply a change to the transaction.
