@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -147,12 +148,14 @@ private:
 
 class AssetBalanceArgs {
 public:
-  AssetBalanceArgs(uint128_t starting_asset_balance)
+  AssetBalanceArgs(int128_t starting_asset_balance)
     : balance_lower_bound_(starting_asset_balance),
       balance_upper_bound_(starting_asset_balance)
-  {}
+  {
+    assert(starting_asset_balance >= 0);
+  }
 
-  static bool typeclass_match(uint128_t /*unused*/) { return true; }
+  static bool typeclass_match(int128_t /*unused*/) { return true; }
   std::shared_ptr<const StorageItemWrapper> to_item() const;
 
   static constexpr int128_t get_cost() { return kBaseItemCost; }
@@ -173,6 +176,8 @@ public:
 
 private:
   using balance_t = WideIntegral<uint128_t>;
+
+  bool in_valid_state() const;
 
   balance_t balance_lower_bound_;
   balance_t balance_upper_bound_;

@@ -231,7 +231,8 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposal)
 
 TEST(RefcountedDeltaVariant, AssetBalanceProposalLargeValues)
 {
-  AssetBalanceArgs arg(std::numeric_limits<uint128_t>::max() - 5);
+  int128_t starting_balance = std::numeric_limits<int128_t>::max() - 5;
+  AssetBalanceArgs arg(starting_balance);
 
   auto r = arg.try_reserve_transfer_lock(
       100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
@@ -368,6 +369,7 @@ TEST(RefcountedDeltaVariant, AssetBalanceValidationOutOfBounds)
 {
   AssetBalanceArgs arg(100);
   InvalidStateFlag invalid_state_flag;
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
 
   arg.commit_transfer(-100, invalid_state_flag);
   ASSERT_FALSE(invalid_state_flag.is_invalid());

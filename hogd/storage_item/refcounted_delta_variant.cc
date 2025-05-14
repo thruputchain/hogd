@@ -266,9 +266,10 @@ AssetBalanceArgs::try_reserve_transfer_lock(int128_t new_transfer_amount,
     int128_t marginal_upper_bound = new_transfer_amount - old_add_lock;
     assert(marginal_upper_bound >= 0);
 
-    if (!integer_add_overflow<uint128_t>(balance_upper_bound,
+    if (!integer_add_overflow<int128_t>(balance_upper_bound,
                                          marginal_upper_bound)) {
       balance_upper_bound_ += marginal_upper_bound;
+      assert(balance_upper_bound_.is_in_range<int128_t>());
       assert(balance_upper_bound_.is_in_range<uint128_t>());
       return AssetBalanceLock{
           .asset_add_amount = to_xdr(new_transfer_amount),
@@ -291,11 +292,12 @@ AssetBalanceArgs::try_reserve_transfer_lock(int128_t new_transfer_amount,
   assert(!integer_add_overflow<int128_t>(new_transfer_amount, old_sub_lock));
 
   int128_t marginal_lower_bound = new_transfer_amount - old_sub_lock;
+  assert(marginal_lower_bound <= 0);
   if (!integer_add_overflow<uint128_t>(balance_lower_bound,
                                        marginal_lower_bound)) {
-    assert(marginal_lower_bound <= 0);
     balance_lower_bound_ += marginal_lower_bound;
-    assert(balance_lower_bound_.is_in_range<uint128_t>());
+    assert(balance_lower_bound_.is_in_range<uint128_t>() ||
+           balance_lower_bound_.is_in_range<int128_t>());
     return AssetBalanceLock{
         .asset_add_amount = held_lock.asset_add_amount,
         .asset_subtract_amount = to_xdr(new_transfer_amount),
@@ -312,29 +314,38 @@ AssetBalanceArgs::revert_lock(AssetBalanceLock const &held_lock)
   assert(add_lock >= 0);
   assert(sub_lock <= 0);
 
-  assert(balance_upper_bound_.is_in_range<uint128_t>());
+  assert(balance_upper_bound_.is_in_range<uint128_t>() &&
+         balance_upper_bound_.is_in_range<int128_t>());
   balance_upper_bound_ -= add_lock;
-  assert(balance_upper_bound_.is_in_range<uint128_t>());
+  assert(balance_upper_bound_.is_in_range<uint128_t>() ||
+         balance_upper_bound_.is_in_range<int128_t>());
 
-  assert(balance_lower_bound_.is_in_range<uint128_t>());
+  assert(balance_lower_bound_.is_in_range<uint128_t>() ||
+         balance_lower_bound_.is_in_range<int128_t>());
   balance_lower_bound_ -= sub_lock;
-  assert(balance_lower_bound_.is_in_range<uint128_t>());
+  assert(balance_lower_bound_.is_in_range<uint128_t>() ||
+         balance_lower_bound_.is_in_range<int128_t>());
+}
+
+bool
+AssetBalanceArgs::in_valid_state() const
+{
+  return (balance_lower_bound_.is_in_range<uint128_t>() &&
+          balance_upper_bound_.is_in_range<uint128_t>()) &&
+         (balance_lower_bound_.is_in_range<int128_t>() &&
+          balance_upper_bound_.is_in_range<int128_t>());
 }
 
 void
 AssetBalanceArgs::commit_transfer(int128_t transfer_amount,
                                   InvalidStateFlag &invalid_state_flag)
 {
-
-  bool is_initially_invalid = (!balance_lower_bound_.is_in_range<uint128_t>() ||
-                               !balance_upper_bound_.is_in_range<uint128_t>());
-
+  bool is_initially_invalid = !in_valid_state();
   // perform the actual transfer
   balance_upper_bound_ += transfer_amount;
   balance_lower_bound_ += transfer_amount;
 
-  bool is_post_invalid = (!balance_lower_bound_.is_in_range<uint128_t>() ||
-                          !balance_upper_bound_.is_in_range<uint128_t>());
+  bool is_post_invalid = !in_valid_state();
 
   if (is_initially_invalid && !is_post_invalid) {
     invalid_state_flag.unmark_as_invalid();
