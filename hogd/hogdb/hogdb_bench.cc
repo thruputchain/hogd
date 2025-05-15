@@ -1,5 +1,6 @@
 // hogdb_bench.cc - benchmarks for hogdb
 
+#include <algorithm>
 #include <bit>
 #include <chrono>
 #include <cstddef>
@@ -168,7 +169,7 @@ Benchmark::run()
   // run invoke_tx in parallel on the workers for all payment ops.
   constexpr size_t kBatchesPerWorker = 4;
   size_t width = ops_.size() / workers_.worker_count() / kBatchesPerWorker;
-  workers_.for_each_parallel(ops_, invoke_fn, width);
+  workers_.for_each_parallel(ops_, invoke_fn, std::max(width, 1UL));
 
   // commit changes to the ramdb.
   HogDBStatus<void> ret = block.commit().and_then(

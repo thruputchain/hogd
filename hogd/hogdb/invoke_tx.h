@@ -51,9 +51,9 @@ public:
 
   //
   // All of the request_* methods below are different operations that can be
-  // performed during the first phase of two-phase commit. They return true if
-  // the request was successful. The request could fail if there was a conflict
-  // (kConflict) or if the input was invalid (e.g., kOverflow).
+  // performed during the first phase of two-phase commit. The request could
+  // fail if there was a conflict (kConflict) or if the input was invalid
+  // (e.g., kOverflow).
   //
 
   // request_nnint128 requests to perform set_add(base, delta).
