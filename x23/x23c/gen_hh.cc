@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cstddef>
 #include <format>
 #include <map>
@@ -29,9 +28,7 @@ struct Gen {
   void show_def(const ConstDef &c)
   {
     show_comment(c.comment, true);
-    string val = c.val;
-    std::ranges::replace(val, '_', '\'');
-    prtop("constexpr auto {} = {};\n", c.id, val);
+    prtop("constexpr auto {} = {};\n", c.id, c.val);
   }
   void show_def(const Typedef &d)
   {

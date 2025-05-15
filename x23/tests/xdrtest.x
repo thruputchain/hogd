@@ -102,7 +102,7 @@ enum StorageDeltaType {
 
 const kBytestringMaxLen = 4096;
 
-const kFoo = 0xABCD'EF_01;
+const kFoo = 0xABCD'EF'01;
 const kBar = 62'500'000'000;
 
 typedef opaque Bytestring<kBytestringMaxLen>;
