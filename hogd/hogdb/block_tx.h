@@ -56,7 +56,13 @@ BlockTX::lock(ItemKey key, const ItemChange &change)
     val.change = change;
     return {};
   }
-  return val.change.merge(change);
+
+  if (HogDBStatus<void> ret = val.change.merge(change); !ret) {
+    val.ref--;
+    return ret.error();
+  }
+
+  return {};
 }
 
 inline void
