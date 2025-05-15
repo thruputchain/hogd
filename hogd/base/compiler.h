@@ -166,6 +166,30 @@ overflowing_add(T a, T b)
   return {ret, overflow};
 }
 
+// overflowing_sub returns a pair of the difference and a boolean indicating if
+// an overflow would occur. If it would, the difference is returned as a
+// wrapped value.
+template<std::integral T>
+std::pair<T, bool>
+overflowing_sub(T a, T b)
+{
+  T ret;
+  bool overflow = __builtin_sub_overflow(a, b, &ret);
+  return {ret, overflow};
+}
+
+// overflowing_mul returns a pair of the product and a boolean indicating if an
+// overflow would occur. If it would, the product is returned as a wrapped
+// value.
+template<std::integral T>
+std::pair<T, bool>
+overflowing_mul(T a, T b)
+{
+  T ret;
+  bool overflow = __builtin_mul_overflow(a, b, &ret);
+  return {ret, overflow};
+}
+
 // integer_add_overflow adds b to a and stores the result in out. Returns
 // true if there was an overflow while performing the addition.
 //
