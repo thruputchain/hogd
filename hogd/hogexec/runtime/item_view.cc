@@ -4,7 +4,6 @@
 #include <optional>
 #include <variant>
 
-#include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -344,11 +343,7 @@ AssetBalanceItem::get_delta() const
 SyscallStatus<void>
 AssetBalanceItem::validate() const
 {
-
-  if (integer_sub_overflow<int128_t>(asset_balance_, initial_asset_balance_)) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
+  assert(!integer_sub_overflow<int128_t>(asset_balance_, initial_asset_balance_));
   return {};
 }
 

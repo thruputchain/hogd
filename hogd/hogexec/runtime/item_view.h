@@ -104,10 +104,12 @@ private:
 
 class AssetBalanceItem {
 public:
-  AssetBalanceItem(uint128_t initial_asset_balance)
+  AssetBalanceItem(int128_t initial_asset_balance)
     : asset_balance_(initial_asset_balance),
       initial_asset_balance_(initial_asset_balance)
-  {}
+  {
+    assert(initial_asset_balance >= 0);
+  }
 
   StorageDelta get_delta() const;
 
@@ -116,10 +118,33 @@ public:
 
   SyscallStatus<void> validate() const;
 
-  uint128_t asset_balance_;
+  int128_t asset_balance_;
 
 private:
-  uint128_t initial_asset_balance_;
+  int128_t initial_asset_balance_;
+};
+
+class NativeTokenBalanceItem {
+public:
+  NativeTokenBalanceItem(int128_t initial_native_token_balance)
+    : native_token_balance_(initial_native_token_balance),
+      initial_native_token_balance_(initial_native_token_balance)
+  {}
+
+  StorageDelta get_delta() const;
+
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kItemTypeAssetBalance;
+
+  SyscallStatus<void> validate() const { return native_token_balance_ >= 0 ? SyscallStatus<void>{} : SyscallError{SyscallErrorCode::kInvalidSyscallInput}; }
+
+  void add_deterministic_native_token_balance(int128_t amount);
+  void add_nondeterministic_native_token_balance(Nondeterministic<int128_t> const &amount);
+
+private:
+  Nondeterministic<int128_t> additional_subtract_amount_;
+  int128_t native_token_balance_;
+  int128_t initial_native_token_balance_;
 };
 
 // Represent state of an ItemView that has not been modified during
