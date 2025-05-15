@@ -1,8 +1,8 @@
+#include <algorithm>
 #include <cstddef>
 #include <format>
 #include <iterator>
 #include <map>
-#include <print>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -25,14 +25,16 @@ struct GenRs {
   vector<string> namespaces_;
   vector<string> scopes_;
 
-  constexpr static int INDENT_WIDTH = 4;
+  constexpr static int kIndentWidth = 4;
 
   void process(const vector<Definition> &defs);
 
   void show_def(const ConstDef &c)
   {
     show_comment(c.comment, true);
-    prtop("pub const {}: u32 = {};\n", c.id, c.val);
+    string val = c.val;
+    std::ranges::replace(val, '\'', '_');
+    prtop("pub const {}: u64 = {};\n", c.id, val);
   }
   void show_def(const Typedef &d)
   {
@@ -104,7 +106,7 @@ struct GenRs {
   void prtop(std::format_string<Args...> fmt, Args &&...args)
   {
     if (top_.empty() || top_.back() == '\n')
-      top_ += std::string(INDENT_WIDTH * indent_, ' ');
+      top_ += std::string(kIndentWidth * indent_, ' ');
     top_ += std::vformat(fmt.get(), std::make_format_args(args...));
   }
 
@@ -326,7 +328,7 @@ GenRs::show_type(const UnionBody &b, string t)
         }
       }
     }
-    top_ += std::string(INDENT_WIDTH * indent_, ' ');
+    top_ += std::string(kIndentWidth * indent_, ' ');
     top_ += default_decl;
     top_ += "\n";
   }
