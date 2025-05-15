@@ -1,4 +1,4 @@
-# Create a hogdb module library
+# Create a ramdb module library
 add_library(
   ramdb
   db.cc

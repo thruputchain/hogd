@@ -84,6 +84,7 @@ InvokeTX::rollback_to_savepoint(int depth)
                                        &ItemVersion::tx_depth),
               vec.end());
     if (!vec.empty()) {
+      // can't fail because reservation <= than previous one.
       [[maybe_unused]] HogDBStatus<void> ret =
           block_.modify_lock(key, tmp, vec.back().change);
       assert(ret);

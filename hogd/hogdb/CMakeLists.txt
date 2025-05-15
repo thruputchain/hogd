@@ -1,7 +1,6 @@
-# Build the backend database (hogdb) executable
-add_executable(
+# Create a hogdb module library
+add_library(
   hogdb
-  hogdb.cc
   block_tx.cc
   invoke_tx.cc
   item_change.cc
@@ -9,6 +8,27 @@ add_executable(
 )
 target_link_libraries(
   hogdb
-  hogd
   ramdb
+  hogd
+)
+
+# Build the backend database (hogdb) executable
+add_executable(
+  hogdb_exec
+  hogdb.cc
+)
+set_property(TARGET hogdb_exec PROPERTY OUTPUT_NAME hogdb)
+target_link_libraries(
+  hogdb_exec
+  hogdb
+)
+
+# Build the hogdb_bench executable
+add_executable(
+  hogdb_bench
+  hogdb_bench.cc
+)
+target_link_libraries(
+  hogdb_bench
+  hogdb
 )
