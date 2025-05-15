@@ -4,10 +4,10 @@
 #include <optional>
 #include <variant>
 
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
