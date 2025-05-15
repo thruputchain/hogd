@@ -78,7 +78,7 @@ private:
 constexpr ItemKey
 make_key(size_t n)
 {
-  return {.addr = n, .key = n};
+  return {n, n};
 }
 
 std::unique_ptr<Database>

@@ -16,16 +16,29 @@
 
 namespace hogd {
 
-// ItemKey is a unique identifier for each item in the ramdb.
-struct ItemKey {
-  uint128_t addr;
-  uint128_t key;
+class ItemKey {
+public:
+  ItemKey(uint128_t addr, uint128_t key)
+    : key_{.addr = addr, .key = key},
+      memoized_hash_(hogd::SipHash24::get_default()(as_bytes()))
+  {}
 
   bool operator==(const ItemKey &rhs) const noexcept
   {
-    return addr == rhs.addr && key == rhs.key;
+    return key_.addr == rhs.key_.addr && key_.key == rhs.key_.key;
   }
-  std::span<const std::byte> as_bytes() const { return byte_view(*this); }
+  std::span<const std::byte> as_bytes() const { return byte_view(key_); }
+  size_t get_hash() const { return memoized_hash_; }
+
+private:
+  // TODO(amb): use protocol header.
+  struct Key {
+    uint128_t addr;
+    uint128_t key;
+  };
+
+  Key key_;
+  size_t memoized_hash_;
 };
 
 } // namespace hogd
@@ -33,7 +46,7 @@ struct ItemKey {
 template<> struct std::hash<hogd::ItemKey> {
   std::size_t operator()(const hogd::ItemKey &key) const noexcept
   {
-    return hogd::SipHash24::get_default()(key.as_bytes());
+    return key.get_hash();
   }
 };
 
