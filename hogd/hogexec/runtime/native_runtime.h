@@ -9,7 +9,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -17,6 +16,7 @@
 
 namespace hogd {
 
+struct Contract;
 class SystemCallHandler;
 class NativeRuntime;
 

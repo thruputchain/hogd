@@ -1,6 +1,13 @@
+#include <cstddef>
+#include <format>
 #include <map>
 #include <ranges>
 #include <set>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <variant>
 
 #include "x23/cleanup.h"
 #include "x23c/defs.h"

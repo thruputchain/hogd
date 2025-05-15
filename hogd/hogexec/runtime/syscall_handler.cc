@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"

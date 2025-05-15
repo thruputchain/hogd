@@ -8,12 +8,14 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
-#include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 
 namespace hogd {
+
+class SnapshotStorageItem;
 
 // Each of the item types has the following methods:
 // get_object_type()
@@ -136,10 +138,16 @@ public:
   constexpr static StorageItemType kItemType =
       StorageItemType::kItemTypeAssetBalance;
 
-  SyscallStatus<void> validate() const { return native_token_balance_ >= 0 ? SyscallStatus<void>{} : SyscallError{SyscallErrorCode::kInvalidSyscallInput}; }
+  SyscallStatus<void> validate() const
+  {
+    return native_token_balance_ >= 0
+               ? SyscallStatus<void>{}
+               : SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
 
   void add_deterministic_native_token_balance(int128_t amount);
-  void add_nondeterministic_native_token_balance(Nondeterministic<int128_t> const &amount);
+  void add_nondeterministic_native_token_balance(
+      Nondeterministic<int128_t> const &amount);
 
 private:
   Nondeterministic<int128_t> additional_subtract_amount_;

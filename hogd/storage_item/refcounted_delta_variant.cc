@@ -267,7 +267,7 @@ AssetBalanceArgs::try_reserve_transfer_lock(int128_t new_transfer_amount,
     assert(marginal_upper_bound >= 0);
 
     if (!integer_add_overflow<int128_t>(balance_upper_bound,
-                                         marginal_upper_bound)) {
+                                        marginal_upper_bound)) {
       balance_upper_bound_ += marginal_upper_bound;
       assert(balance_upper_bound_.is_in_range<int128_t>());
       assert(balance_upper_bound_.is_in_range<uint128_t>());

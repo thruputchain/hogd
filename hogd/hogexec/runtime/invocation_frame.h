@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -21,6 +20,7 @@
 
 namespace hogd {
 
+class PerTransactionDatabaseProxy;
 struct InvokeResult;
 class StorageSnapshotCache;
 

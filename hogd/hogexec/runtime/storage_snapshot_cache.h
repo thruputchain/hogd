@@ -4,16 +4,17 @@
 #include <memory>
 #include <optional>
 
-#include "contract.hh"
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
-#include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"
 #include "types.hh"
 
 namespace hogd {
+
+struct Contract;
+class DatabaseProxy;
+class SnapshotStorageItem;
 
 // Root cache for objects read from the ledger.
 // Can be shared between concurrent transactions,
@@ -48,6 +49,8 @@ public:
   try_get_deployed_contract_hash(ContractAddress const &addr);
   SystemStatus<SnapshotStorageItem *>
   try_get_snapshot_item(AddressAndKey const &addrkey);
+
+  ~StorageSnapshotCache();
 
 private:
   // Note: the contract_cache_ does not need to be reset (although it is not
