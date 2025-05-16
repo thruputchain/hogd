@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
-#include <cstddef>
 #include <utility>
 
 #include "hogd/hogexec/runtime/status.h"
