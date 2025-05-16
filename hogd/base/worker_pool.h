@@ -13,13 +13,13 @@
 #include <mutex>
 #include <queue>
 #include <ranges>
+#include <stop_token>
 #include <thread>
 #include <tuple>
 #include <type_traits>
 #include <vector>
 #include <version>
 
-#include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/os.h"
 #include "hogd/base/unique_function.h"

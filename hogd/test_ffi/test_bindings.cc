@@ -1,7 +1,6 @@
 #include "hogd/test_ffi/test_bindings.h"
 
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -9,7 +8,6 @@
 #include <memory>
 #include <print>
 #include <span>
-#include <unistd.h>
 #include <utility>
 
 #include "contract.hh"
@@ -35,7 +33,12 @@ namespace {
 DBContext *
 make_new_db() noexcept
 {
-  return new DBContext(PortAllocator::get());
+  try {
+    return new DBContext(PortAllocator::get());
+  } catch (std::exception const &e) {
+    std::println("error creating db context: {}", e.what());
+    return nullptr;
+  }
 }
 void
 free_db(DBContext *ptr) noexcept
@@ -116,7 +119,8 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
   try {
     x23::deserialize(&stx,
                      std::span<const unsigned char>(signed_tx, signed_tx_len));
-  } catch (x23::XdrBadInput const &e) {
+  } catch (std::exception const &e) {
+    std::println("error deserializing signed transaction: {}", e.what());
     return nullptr;
   }
   try {
@@ -134,7 +138,11 @@ void
 close_syscall_handler(void *syscall_handler) noexcept
 {
   std::println("closing syscall handler {}", syscall_handler);
-  delete static_cast<SyscallHandlerContext *>(syscall_handler);
+  try {
+    delete static_cast<SyscallHandlerContext *>(syscall_handler);
+  } catch (std::exception const &e) {
+    std::println("error closing syscall handler: {}", e.what());
+  }
 }
 
 constexpr ForeignRootInvokeResult kUnrecoverableError = {
