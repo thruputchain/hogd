@@ -39,6 +39,7 @@ public:
       }
     }
   }
+  WideIntegral() : highbits_(0), lowbits_(0) {}
 
   // Assignment operator that creates a new WideIntegral from the given value
   // and assigns it to this object.

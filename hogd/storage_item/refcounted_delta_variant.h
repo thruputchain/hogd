@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cassert>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -13,7 +12,6 @@
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
-#include "hogd/storage_item/uint256_reservation.h"
 #include "hogd/storage_item/wide_integral.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
@@ -74,7 +72,7 @@ private:
   // total subtracted by any pending or committed reservations
   int128_t total_subtracted_ = 0;
   // total added by any committed reservations
-  UInt256Reservation total_added_;
+  WideIntegral<uint128_t> total_added_;
 };
 
 // Deleted state

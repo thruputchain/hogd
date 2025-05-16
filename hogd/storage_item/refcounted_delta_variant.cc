@@ -36,8 +36,9 @@ BytestringArgs::to_item() const
 std::shared_ptr<const StorageItemWrapper>
 NNIntSetAddArgs::to_item() const
 {
+  assert(!integer_add_overflow<int128_t>(set_value_, total_subtracted_));
   int128_t new_value = set_value_ + total_subtracted_;
-  int128_t total_add = total_added_.get_capped();
+  auto total_add = total_added_.get_capped<int128_t>();
 
   int128_t out = 0;
 
