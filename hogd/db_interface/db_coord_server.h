@@ -30,8 +30,11 @@ public:
   static x23::Async<void> dbcoord_null() { co_return; }
 
   // RPC methods
-  x23::Async<DbResult> dbcoord_create_snapshot(BlockID parent_id, BlockID new_id, BlockExecutionMode mode);
-  static x23::Async<DbResult> dbcoord_open_snapshot(BlockID id) {
+  x23::Async<DbResult> dbcoord_create_snapshot(BlockID parent_id,
+                                               BlockID new_id,
+                                               BlockExecutionMode mode);
+  static x23::Async<DbResult> dbcoord_open_snapshot(BlockID id)
+  {
     co_return DbResult::DbResultError; // TODO(geoff): unimplemented
   }
   x23::Async<DbBlockResult> dbcoord_commit_snapshot(BlockID id);
@@ -40,7 +43,8 @@ public:
 
   static x23::Async<DbCatchupResult> dbcoord_catchup(BlockHeight height)
   {
-    co_return DbCatchupResult{DbResult::DbResultError}; // TODO(geoff): unimplemented
+    co_return DbCatchupResult{
+        DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
 
 private:

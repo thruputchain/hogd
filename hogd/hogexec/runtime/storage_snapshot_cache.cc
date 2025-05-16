@@ -20,8 +20,7 @@ StorageSnapshotCache::StorageSnapshotCache(BlockID block_id,
   : block_id_(block_id), db_proxy_(db_proxy)
 {}
 
-StorageSnapshotCache::~StorageSnapshotCache()
-{}
+StorageSnapshotCache::~StorageSnapshotCache() = default;
 
 SystemStatus<std::optional<SHA256Hash>>
 StorageSnapshotCache::try_get_deployed_contract_hash(
@@ -90,6 +89,7 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
     return out;
   }
 
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto ptr = std::make_unique<SnapshotStorageItem>(*db_res.value(), addrkey,
                                                    block_id_, db_proxy_);
   auto *out = ptr.get();

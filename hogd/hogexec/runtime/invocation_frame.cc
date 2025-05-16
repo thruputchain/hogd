@@ -296,10 +296,13 @@ InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
 }
 
 SystemStatus<ItemView *>
-InvocationFrameStack::get_item_view(StorageKey const &key)
+InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
 {
   const int32_t stack_depth = frame_stack_.size();
   assert(stack_depth > 0);
+
+  StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+  key.contract_data_key() = data_key;
 
   auto &active_frame = get_active_frame();
   AddressAndKey addrkey{.address =

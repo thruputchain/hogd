@@ -1,7 +1,6 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 
 #include <cassert>
-#include <cstddef>
 #include <optional>
 #include <utility>
 
@@ -59,7 +58,7 @@ ValidationModeData::consume_nondeterministic_bit()
 }
 
 void
-ProposalModeData::log_queue_entry_observation(AddressAndKey addrkey,
+ProposalModeData::log_queue_entry_observation(AddressAndKey const &addrkey,
                                               uint32_t index, QueueEntry entry)
 {
   auto &entries = queue_entry_observations_[addrkey];
@@ -75,8 +74,8 @@ ProposalModeData::log_queue_entry_observation(AddressAndKey addrkey,
 }
 
 std::optional<Nondeterministic<QueueEntry>>
-ValidationModeData::consume_queue_entry_observation(AddressAndKey addrkey,
-                                                    uint32_t index)
+ValidationModeData::consume_queue_entry_observation(
+    AddressAndKey const &addrkey, uint32_t index)
 {
   auto &entries = queue_entry_observations_[addrkey];
 

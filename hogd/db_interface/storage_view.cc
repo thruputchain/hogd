@@ -1,7 +1,6 @@
 #include "hogd/db_interface/storage_view.h"
 
 #include <cassert>
-#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -23,6 +22,8 @@
 #include "types.hh"
 
 namespace hogd {
+
+// NOLINTBEGIN(misc-no-recursion)
 
 const StorageItemWrapper *
 SnapshotStorageView::get_snapshot_storage_item(AddressAndKey const &addrkey)
@@ -238,5 +239,7 @@ StorageView::get_concurrent_retrocausal_queue_entry(
 
   return std::nullopt;
 }
+
+// NOLINTEND(misc-no-recursion)
 
 } // namespace hogd

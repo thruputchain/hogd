@@ -1,15 +1,14 @@
 #include "hogd/test_ffi/test_bindings.h"
 
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <memory>
 #include <print>
 #include <span>
-#include <unistd.h>
 #include <utility>
 
 #include "contract.hh"
@@ -35,7 +34,12 @@ namespace {
 DBContext *
 make_new_db() noexcept
 {
-  return new DBContext(PortAllocator::get());
+  try {
+    return new DBContext(PortAllocator::get());
+  } catch (std::exception const &e) {
+    std::println("error creating db context: {}", e.what());
+    return nullptr;
+  }
 }
 void
 free_db(DBContext *ptr) noexcept
@@ -112,20 +116,22 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
   if (!signed_tx) {
     return nullptr;
   }
-  hogd::SignedTransaction stx;
   try {
+    hogd::SignedTransaction stx;
     x23::deserialize(&stx,
                      std::span<const unsigned char>(signed_tx, signed_tx_len));
-  } catch (x23::XdrBadInput const &e) {
-    return nullptr;
-  }
-  try {
     auto *out = static_cast<void *>(
         new SyscallHandlerContext(*runtime_context, stx, *db_context));
     std::println("created syscall handler context {}", out);
     return out;
   } catch (std::exception const &e) {
-    std::println("error creating syscall handler context: {}", e.what());
+    try {
+      std::println("error creating syscall handler context: {}", e.what());
+    } catch (...) {
+      return nullptr;
+    }
+    return nullptr;
+  } catch (...) {
     return nullptr;
   }
 }
@@ -133,8 +139,18 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
 void
 close_syscall_handler(void *syscall_handler) noexcept
 {
-  std::println("closing syscall handler {}", syscall_handler);
-  delete static_cast<SyscallHandlerContext *>(syscall_handler);
+  try {
+    std::println("closing syscall handler {}", syscall_handler);
+    delete static_cast<SyscallHandlerContext *>(syscall_handler);
+  } catch (std::exception const &e) {
+    try {
+      std::println("error closing syscall handler: {}", e.what());
+    } catch (...) {
+      return;
+    }
+  } catch (...) {
+    return;
+  }
 }
 
 constexpr ForeignRootInvokeResult kUnrecoverableError = {
@@ -146,14 +162,25 @@ constexpr ForeignRootInvokeResult kUnrecoverableError = {
 ForeignRootInvokeResult
 root_invoke(void *syscall_handler) noexcept
 {
-  if (!syscall_handler) {
-    std::println("no syscall handler!");
+  try {
+    if (!syscall_handler) {
+      std::println("no syscall handler!");
+      return kUnrecoverableError;
+    }
+
+    auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+    auto res = context->root_invoke();
+    return res;
+  } catch (std::exception const &e) {
+    try {
+      std::println("error invoking root invoke: {}", e.what());
+    } catch (...) {
+      return kUnrecoverableError;
+    }
+  } catch (...) {
     return kUnrecoverableError;
   }
-
-  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-  auto res = context->root_invoke();
-  return res;
+  return kUnrecoverableError;
 }
 
 } // namespace

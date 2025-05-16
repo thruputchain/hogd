@@ -9,7 +9,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -46,7 +45,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
              auto const &calldata = handler.get_calldata();
-             auto key = StorageKey{};
+             auto key = make_storage_key("test");
              auto res =
                  handler.set_bytestring(key,
                                         std::as_bytes(std::span(calldata)));
@@ -62,7 +61,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
           {1,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
-             auto key = StorageKey{};
+             auto key = make_storage_key("test");
              auto res = handler.get_bytestring(key);
              if (!res.has_value()) {
                return res.error().to_invoke_error();
@@ -189,7 +188,7 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
           {1,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
-             auto key = StorageKey{};
+             auto key = make_storage_key("test");
              auto res =
                  handler.set_bytestring(key, std::as_bytes(std::span{"hello"}));
              if (!res.has_value()) {
@@ -232,7 +231,8 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
 
   advance_block();
 
-  auto read_res = lookup_storage_item_from_db(AddressAndKey{});
+  auto read_res = lookup_storage_item_from_db(
+      make_contract_data_addrkey(ContractAddress{}, "test"));
   ASSERT_TRUE(read_res.has_value());
   auto expect_span = std::as_bytes(std::span{"hello"});
   Bytestring expect;
@@ -257,7 +257,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
           {0,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
-             auto key = StorageKey{};
+             auto key = make_storage_key("test");
              auto res =
                  handler.set_bytestring(key, std::as_bytes(std::span{"hello"}));
              if (!res.has_value()) {
@@ -268,7 +268,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
           {1,
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
-             auto key = StorageKey{};
+             auto key = make_storage_key("test");
              auto res =
                  handler.set_bytestring(key, std::as_bytes(std::span{"world"}));
              if (!res.has_value()) {
@@ -382,8 +382,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
     advance_block();
     // Check that the last write was "world"
     auto read_res = lookup_storage_item_from_db(
-        AddressAndKey{.address = make_contract_address(1),
-                      .key = StorageKey{}});
+        make_contract_data_addrkey(make_contract_address(1), "test"));
     ASSERT_TRUE(read_res.has_value());
     auto expect_span = std::as_bytes(std::span{"world"});
     Bytestring expect;
@@ -416,8 +415,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
     advance_block();
     // Storage should not be updated
     auto read_res = lookup_storage_item_from_db(
-        AddressAndKey{.address = make_contract_address(2),
-                      .key = StorageKey{}});
+        make_contract_data_addrkey(make_contract_address(2), "test"));
     // Should be empty or not present
     ASSERT_FALSE(read_res.has_value());
   }
@@ -446,8 +444,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
     advance_block();
     // Storage should be updated to "world"
     auto read_res = lookup_storage_item_from_db(
-        AddressAndKey{.address = make_contract_address(3),
-                      .key = StorageKey{}});
+        make_contract_data_addrkey(make_contract_address(3), "test"));
     ASSERT_TRUE(read_res.has_value());
     auto expect_span = std::as_bytes(std::span{"world"});
     Bytestring expect;
@@ -489,7 +486,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
              if (calldata.size() != 2) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             auto key = StorageKey{};
+             auto key = make_storage_key("test");
              // Interpret calldata bytes as int8_t for set_value and add_value
              auto set_value = static_cast<int8_t>(calldata[0]);
              auto add_value = static_cast<int8_t>(calldata[1]);

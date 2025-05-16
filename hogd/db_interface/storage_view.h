@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cassert>
-#include <cstddef>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
@@ -135,12 +134,14 @@ protected:
     : SnapshotStorageView(std::forward<Args>(args)...)
   {}
 
+  // NOLINTBEGIN(misc-no-recursion)
   auto get_parent_storage_item(AddressAndKey const &addrkey)
       -> std::shared_ptr<const StorageItemWrapper>
   {
     assert(closed_);
     return SnapshotStorageView::get_parent_storage_item(addrkey);
   }
+  // NOLINTEND(misc-no-recursion)
 
   bool closed_ = false;
 };
