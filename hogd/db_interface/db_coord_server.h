@@ -5,6 +5,7 @@
 #include "db_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
+#include "proposal.hh"
 #include "rpc_types.hh"
 #include "x23/async.h"
 #include "x23/event.h"
@@ -29,10 +30,18 @@ public:
   static x23::Async<void> dbcoord_null() { co_return; }
 
   // RPC methods
-  x23::Async<DbResult> dbcoord_open_snapshot(BlockID parent_id, BlockID new_id);
+  x23::Async<DbResult> dbcoord_create_snapshot(BlockID parent_id, BlockID new_id, BlockExecutionMode mode);
+  static x23::Async<DbResult> dbcoord_open_snapshot(BlockID id) {
+    co_return DbResult::DbResultError; // TODO(geoff): unimplemented
+  }
   x23::Async<DbBlockResult> dbcoord_commit_snapshot(BlockID id);
   x23::Async<DbBlockResult> dbcoord_close_snapshot(BlockID id);
   static x23::Async<DbResult> dbcoord_abandon_snapshot(BlockID id);
+
+  static x23::Async<DbCatchupResult> dbcoord_catchup(BlockHeight height)
+  {
+    co_return DbCatchupResult{DbResult::DbResultError}; // TODO(geoff): unimplemented
+  }
 
 private:
   BlockManager *block_manager_;

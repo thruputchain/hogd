@@ -16,7 +16,7 @@
 namespace hogd {
 
 x23::Async<DbResult>
-DbCoordServer::dbcoord_open_snapshot(BlockID parent_id, BlockID new_id)
+DbCoordServer::dbcoord_create_snapshot(BlockID parent_id, BlockID new_id, BlockExecutionMode /*unused*/)
 {
   if (block_manager_->add_child(parent_id, new_id)) {
     co_return DbResult::DbResultOK;
