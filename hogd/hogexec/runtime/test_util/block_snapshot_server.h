@@ -1,12 +1,14 @@
 #pragma once
 
 #include <unordered_map>
+#include <vector>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -72,8 +74,8 @@ public:
   // Only used within test setup
   void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr, SHA256Hash contract_hash);
-  void setup_create_item(AddressAndKey addrkey, StorageItemWrapper item);
-  void setup_add_concurrent_rcq_item(AddressAndKey addrkey, QueueEntry entry);
+  void setup_create_item(AddressAndKey const& addrkey, StorageItemWrapper item);
+  void setup_add_concurrent_rcq_item(AddressAndKey const& addrkey, QueueEntry entry);
 
 private:
   BlockID block_id_;

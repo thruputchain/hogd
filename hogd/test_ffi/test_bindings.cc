@@ -126,6 +126,9 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
   } catch (std::exception const &e) {
     std::println("error creating syscall handler context: {}", e.what());
     return nullptr;
+  } catch (...) {
+    std::println("unknown error creating syscall handler context");
+    return nullptr;
   }
 }
 
@@ -137,6 +140,8 @@ close_syscall_handler(void *syscall_handler) noexcept
     delete static_cast<SyscallHandlerContext *>(syscall_handler);
   } catch (std::exception const &e) {
     std::println("error closing syscall handler: {}", e.what());
+  } catch (...) {
+    std::println("unknown error closing syscall handler");
   }
 }
 
@@ -160,6 +165,9 @@ root_invoke(void *syscall_handler) noexcept
     return res;
   } catch (std::exception const &e) {
     std::println("error invoking root invoke: {}", e.what());
+    return kUnrecoverableError;
+  } catch (...) {
+    std::println("unknown error invoking root invoke");
     return kUnrecoverableError;
   }
 }

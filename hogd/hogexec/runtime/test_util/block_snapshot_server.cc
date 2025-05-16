@@ -199,14 +199,14 @@ BlockSnapshotServer::setup_create_deployment(ContractAddress addr,
 }
 
 void
-BlockSnapshotServer::setup_create_item(AddressAndKey addrkey,
+BlockSnapshotServer::setup_create_item(AddressAndKey const& addrkey,
                                        StorageItemWrapper item)
 {
   items_->emplace(addrkey, std::move(item));
 }
 
 void
-BlockSnapshotServer::setup_add_concurrent_rcq_item(AddressAndKey addrkey,
+BlockSnapshotServer::setup_add_concurrent_rcq_item(AddressAndKey const& addrkey,
                                                    QueueEntry entry)
 {
   auto it = concurrent_rcq_items_->find(addrkey);

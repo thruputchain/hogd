@@ -89,6 +89,7 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
     return out;
   }
 
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto ptr = std::make_unique<SnapshotStorageItem>(*db_res.value(), addrkey,
                                                    block_id_, db_proxy_);
   auto *out = ptr.get();
