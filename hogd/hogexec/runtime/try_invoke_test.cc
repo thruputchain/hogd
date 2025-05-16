@@ -9,7 +9,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
