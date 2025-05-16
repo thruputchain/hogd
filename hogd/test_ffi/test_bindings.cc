@@ -128,11 +128,10 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
     try {
       std::println("error creating syscall handler context: {}", e.what());
     } catch (...) {
-      std::println("unknown error creating syscall handler context");
+      return nullptr;
     }
     return nullptr;
   } catch (...) {
-    std::println("unknown error creating syscall handler context");
     return nullptr;
   }
 }
