@@ -74,8 +74,9 @@ public:
   // Only used within test setup
   void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr, SHA256Hash contract_hash);
-  void setup_create_item(AddressAndKey const& addrkey, StorageItemWrapper item);
-  void setup_add_concurrent_rcq_item(AddressAndKey const& addrkey, QueueEntry entry);
+  void setup_create_item(AddressAndKey const &addrkey, StorageItemWrapper item);
+  void setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
+                                     QueueEntry entry);
 
 private:
   BlockID block_id_;
