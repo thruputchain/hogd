@@ -1,7 +1,6 @@
 #include "hogd/db_interface/storage_view.h"
 
 #include <cassert>
-#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <optional>

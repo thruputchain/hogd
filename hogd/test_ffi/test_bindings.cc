@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -124,7 +125,11 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
     std::println("created syscall handler context {}", out);
     return out;
   } catch (std::exception const &e) {
-    std::println("error creating syscall handler context: {}", e.what());
+    try {
+      std::println("error creating syscall handler context: {}", e.what());
+    } catch (...) {
+      std::println("unknown error creating syscall handler context");
+    }
     return nullptr;
   } catch (...) {
     std::println("unknown error creating syscall handler context");
@@ -139,7 +144,11 @@ close_syscall_handler(void *syscall_handler) noexcept
     std::println("closing syscall handler {}", syscall_handler);
     delete static_cast<SyscallHandlerContext *>(syscall_handler);
   } catch (std::exception const &e) {
-    std::println("error closing syscall handler: {}", e.what());
+    try {
+      std::println("error closing syscall handler: {}", e.what());
+    } catch (...) {
+      std::println("unknown error closing syscall handler");
+    }
   } catch (...) {
     std::println("unknown error closing syscall handler");
   }
@@ -164,7 +173,11 @@ root_invoke(void *syscall_handler) noexcept
     auto res = context->root_invoke();
     return res;
   } catch (std::exception const &e) {
-    std::println("error invoking root invoke: {}", e.what());
+    try {
+      std::println("error invoking root invoke: {}", e.what());
+    } catch (...) {
+      std::println("unknown error invoking root invoke");
+    }
     return kUnrecoverableError;
   } catch (...) {
     std::println("unknown error invoking root invoke");
