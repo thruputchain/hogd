@@ -14,7 +14,7 @@ namespace hogd {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
-                                const StorageKey &input_key,
+                                const StorageKeyContractData &input_key,
                                 int128_t &output_current_set,
                                 int128_t &output_current_add)
 {
@@ -34,7 +34,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
-                                   const StorageKey &input_key,
+                                   const StorageKeyContractData &input_key,
                                    int128_t input_set_value,
                                    int128_t input_add_value)
 {

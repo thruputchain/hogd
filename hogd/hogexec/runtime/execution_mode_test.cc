@@ -83,11 +83,23 @@ TEST(ExecutionModeTest, BadValidationCheck)
   ASSERT_FALSE(ValidationModeData(bad_proposal).validate());
 }
 
+namespace {
+auto
+make_storage_key(uint8_t value)
+{
+  StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+  key.contract_data_key() = StorageKeyContractData{value};
+  return key;
+}
+} // namespace
+
 TEST(ExecutionModeTest, QueueEntryObservations)
 {
   ProposalModeData proposal;
-  AddressAndKey addrkey_1{.address = ContractAddress{1}, .key = StorageKey{1}};
-  AddressAndKey addrkey_2{.address = ContractAddress{2}, .key = StorageKey{2}};
+  AddressAndKey addrkey_1{.address = ContractAddress{1},
+                          .key = make_storage_key(1)};
+  AddressAndKey addrkey_2{.address = ContractAddress{2},
+                          .key = make_storage_key(2)};
 
   // make same observation several times
   proposal.log_queue_entry_observation(addrkey_1, 0, QueueEntry{1});
@@ -122,8 +134,8 @@ TEST(ExecutionModeTest, QueueEntryObservations)
   ValidationModeData validation(proposal.proposal_data());
   // Test assumes that the observations are in the same order as the proposal
 
-  auto check_consume = [&](AddressAndKey addrkey, uint32_t index,
-                           const QueueEntry &expected) {
+  auto check_consume = [&](AddressAndKey const &addrkey, uint32_t index,
+                           QueueEntry const &expected) {
     auto res = validation.consume_queue_entry_observation(addrkey, index);
     ASSERT_TRUE(res);
     EXPECT_EQ(res->get(), expected);

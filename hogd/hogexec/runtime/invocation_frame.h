@@ -133,7 +133,8 @@ public:
 
   // Reference invalidated by any other call to get_item_view
   // The returned pointer is never null
-  SystemStatus<ItemView *> get_item_view(StorageKey const &key);
+  SystemStatus<ItemView *>
+  get_item_view(StorageKeyContractData const &data_key);
 
 private:
   std::vector<InvocationFrame> frame_stack_;

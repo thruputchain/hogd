@@ -102,28 +102,28 @@ public:
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
   SystemStatus<SyscallStatus<std::span<const std::byte>>>
-  get_bytestring(StorageKey const &storage_key);
+  get_bytestring(StorageKeyContractData const &storage_key);
   SystemStatus<SyscallStatus<void>>
-  set_bytestring(StorageKey const &storage_key,
+  set_bytestring(StorageKeyContractData const &storage_key,
                  std::span<const std::byte> input_bytestring);
 
   // === Nonnegative Integer syscalls ===
   SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
-  get_nnint(StorageKey const &storage_key);
-  SystemStatus<SyscallStatus<void>> set_nnint(StorageKey const &storage_key,
-                                              int128_t set_value,
-                                              int128_t add_value);
+  get_nnint(StorageKeyContractData const &storage_key);
+  SystemStatus<SyscallStatus<void>>
+  set_nnint(StorageKeyContractData const &storage_key, int128_t set_value,
+            int128_t add_value);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
-  delete_object(StorageKey const &storage_key);
+  delete_object(StorageKeyContractData const &storage_key);
 
   // === Retrocausal Queue syscalls ===
   SystemStatus<SyscallStatus<void>>
-  retrocausal_queue_insert(StorageKey const &key,
+  retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
   SystemStatus<SyscallStatus<QueueEntry>>
-  retrocausal_queue_consume(StorageKey const &key, bool peek);
+  retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
