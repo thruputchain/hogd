@@ -31,7 +31,7 @@ public:
   // succeed?) made during try_invoke
   void log_nondeterministic_bit(Nondeterministic<bool> bit);
 
-  void log_queue_entry_observation(AddressAndKey addrkey, uint32_t index,
+  void log_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index,
                                    QueueEntry entry);
 
   NondeterministicProposalData proposal_data() const { return proposal_data_; }
@@ -70,7 +70,7 @@ public:
   // proposal Returns nullopt if no more queue entries are available (which is a
   // validation failure)
   std::optional<Nondeterministic<QueueEntry>>
-  consume_queue_entry_observation(AddressAndKey addrkey, uint32_t index);
+  consume_queue_entry_observation(AddressAndKey const &addrkey, uint32_t index);
 
   // Returns true if entirety of the nondeterministic data has been consumed
   bool check_all_consumed() const;

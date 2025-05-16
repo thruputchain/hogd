@@ -35,7 +35,7 @@ public:
                                                BlockExecutionMode mode);
   static x23::Async<DbResult> dbcoord_open_snapshot(BlockID id)
   {
-    co_return DbResult::DbResultError; // TODO(geoff): unclear what to do here
+    co_return DbResult::DbResultError; // TODO(geoff): unimplemented
   }
   x23::Async<DbBlockResult> dbcoord_commit_snapshot(BlockID id);
   x23::Async<DbBlockResult> dbcoord_close_snapshot(BlockID id);
@@ -43,7 +43,8 @@ public:
 
   static x23::Async<DbCatchupResult> dbcoord_catchup(BlockHeight height)
   {
-    co_return DbCatchupResult{DbResult::DbResultError};
+    co_return DbCatchupResult{
+        DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
 
 private:

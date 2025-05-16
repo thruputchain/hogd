@@ -354,7 +354,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
 }
 
 SystemStatus<SyscallStatus<std::span<const std::byte>>>
-SystemCallHandler::get_bytestring(StorageKey const &storage_key)
+SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
   auto item_view = invocation_frame_stack_.get_item_view(storage_key);
   if (!item_view) {
@@ -382,7 +382,7 @@ SystemCallHandler::get_bytestring(StorageKey const &storage_key)
 }
 
 SystemStatus<SyscallStatus<void>>
-SystemCallHandler::set_bytestring(StorageKey const &storage_key,
+SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring)
 {
   auto item_view = invocation_frame_stack_.get_item_view(storage_key);
@@ -401,7 +401,7 @@ SystemCallHandler::set_bytestring(StorageKey const &storage_key,
 }
 
 SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
-SystemCallHandler::get_nnint(StorageKey const &storage_key)
+SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
 {
   auto item_view = invocation_frame_stack_.get_item_view(storage_key);
   if (!item_view) {
@@ -429,8 +429,8 @@ SystemCallHandler::get_nnint(StorageKey const &storage_key)
 }
 
 SystemStatus<SyscallStatus<void>>
-SystemCallHandler::set_nnint(StorageKey const &storage_key, int128_t set_value,
-                             int128_t add_value)
+SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
+                             int128_t set_value, int128_t add_value)
 {
   auto item_view = invocation_frame_stack_.get_item_view(storage_key);
   if (!item_view) {
@@ -443,7 +443,7 @@ SystemCallHandler::set_nnint(StorageKey const &storage_key, int128_t set_value,
 }
 
 SystemStatus<SyscallStatus<void>>
-SystemCallHandler::delete_object(StorageKey const &storage_key)
+SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
   auto item_view = invocation_frame_stack_.get_item_view(storage_key);
   if (!item_view) {
@@ -486,7 +486,7 @@ retrocausal_queue_item_from_view(ItemView *item_view)
 
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::retrocausal_queue_insert(
-    StorageKey const &key, std::span<const std::byte> queue_entry)
+    StorageKeyContractData const &key, std::span<const std::byte> queue_entry)
 {
   auto item_view = invocation_frame_stack_.get_item_view(key);
   if (!item_view) {
@@ -506,7 +506,8 @@ SystemCallHandler::retrocausal_queue_insert(
 }
 
 SystemStatus<SyscallStatus<QueueEntry>>
-SystemCallHandler::retrocausal_queue_consume(StorageKey const &key, bool peek)
+SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
+                                             bool peek)
 {
   auto item_view = invocation_frame_stack_.get_item_view(key);
   if (!item_view) {

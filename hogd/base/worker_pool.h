@@ -8,20 +8,25 @@
 #include <algorithm>
 #include <cassert>
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <mutex>
 #include <queue>
 #include <ranges>
+#include <stop_token>
 #include <thread>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 #include <version>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/os.h"
+#include "hogd/base/types.h"
 #include "hogd/base/unique_function.h"
 
 namespace hogd {
@@ -117,8 +122,8 @@ public:
     std::ranges::for_each(r | std::views::chunk(width),
                           [this, &f, proj,
                            &completions](std::ranges::viewable_range auto &&r) {
-                            completions.emplace_back(
-                                submit([proj, &f, r = std::move(r)] {
+                            completions.emplace_back(submit(
+                                [proj, &f, r = std::forward<decltype(r)>(r)] {
                                   for (auto v : r) {
                                     f(std::invoke(proj, v));
                                   }

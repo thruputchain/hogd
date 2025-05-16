@@ -30,7 +30,7 @@ public:
   // Construct from a StorageItem (by value)
   explicit SnapshotStorageItem(StorageItem item, AddressAndKey addrkey,
                                BlockID block_id, DatabaseProxy &db_proxy)
-    : entry_(make_variant(std::move(item))), addrkey_(addrkey),
+    : entry_(make_variant(std::move(item))), addrkey_(std::move(addrkey)),
       block_id_(block_id), db_proxy_(db_proxy)
   {}
 

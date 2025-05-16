@@ -92,11 +92,19 @@ public:
     address[0] = id;
     return address;
   }
-  static StorageKey make_storage_key(std::string_view str)
+  static StorageKeyContractData make_storage_key(std::string_view str)
   {
-    StorageKey key{};
+    StorageKeyContractData key{};
     std::memcpy(key.data(), str.data(), str.size());
     return key;
+  }
+  static AddressAndKey
+  make_contract_data_addrkey(ContractAddress const &address,
+                             std::string_view str)
+  {
+    StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+    key.contract_data_key() = make_storage_key(str);
+    return AddressAndKey{.address = address, .key = std::move(key)};
   }
 
 private:

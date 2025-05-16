@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
