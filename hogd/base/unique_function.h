@@ -86,7 +86,7 @@ public:
     invoker_ = std::move(uf.invoker_);
     return *this;
   }
-  UniqueFunction &operator=(nullptr_t) noexcept
+  UniqueFunction &operator=(std::nullptr_t) noexcept
   {
     invoker_.reset();
     return *this;
