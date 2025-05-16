@@ -147,10 +147,10 @@ close_syscall_handler(void *syscall_handler) noexcept
     try {
       std::println("error closing syscall handler: {}", e.what());
     } catch (...) {
-      std::println("unknown error closing syscall handler");
+      return;
     }
   } catch (...) {
-    std::println("unknown error closing syscall handler");
+    return;
   }
 }
 
@@ -176,13 +176,12 @@ root_invoke(void *syscall_handler) noexcept
     try {
       std::println("error invoking root invoke: {}", e.what());
     } catch (...) {
-      std::println("unknown error invoking root invoke");
+      return kUnrecoverableError;
     }
-    return kUnrecoverableError;
   } catch (...) {
-    std::println("unknown error invoking root invoke");
     return kUnrecoverableError;
   }
+  return kUnrecoverableError;
 }
 
 } // namespace
