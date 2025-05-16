@@ -21,10 +21,10 @@ public:
   struct AssetBalanceMarker {};
 
   // Constructors for different storage item types
-  StorageItemWrapper(BytestringMarker, Bytestring bytestring);
-  StorageItemWrapper(NonnegativeIntMarker, int128_t nnint_value);
-  StorageItemWrapper(RetrocausalQueueMarker, RetrocausalQueue queue);
-  StorageItemWrapper(AssetBalanceMarker, uint128_t asset_balance);
+  StorageItemWrapper(BytestringMarker /*unused*/, Bytestring bytestring);
+  StorageItemWrapper(NonnegativeIntMarker /*unused*/, int128_t nnint_value);
+  StorageItemWrapper(RetrocausalQueueMarker /*unused*/, RetrocausalQueue queue);
+  StorageItemWrapper(AssetBalanceMarker /*unused*/, uint128_t asset_balance);
 
   auto &bytestring(this auto &self)
   {

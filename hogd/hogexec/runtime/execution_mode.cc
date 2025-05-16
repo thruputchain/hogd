@@ -1,7 +1,6 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 
 #include <cassert>
-#include <cstddef>
 #include <optional>
 #include <utility>
 

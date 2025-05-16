@@ -204,6 +204,7 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposal)
 {
   AssetBalanceArgs arg(0);
 
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   auto r = arg.try_reserve_transfer_lock(
       100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{100}),
                             .asset_subtract_amount = to_xdr(int128_t{0})});
@@ -227,6 +228,7 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposal)
   EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
 
   ASSERT_FALSE(arg.try_reserve_transfer_lock(-100, *r));
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST(RefcountedDeltaVariant, AssetBalanceProposalLargeValues)
@@ -242,9 +244,11 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalLargeValues)
   r = arg.try_reserve_transfer_lock(
       5, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
                           .asset_subtract_amount = to_xdr(int128_t{0})});
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(r);
   EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{5}));
   EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{0}));
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST(RefcountedDeltaVariant, AssetBalanceProposalNegative)
@@ -254,6 +258,7 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalNegative)
   auto r = arg.try_reserve_transfer_lock(
       -100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
                              .asset_subtract_amount = to_xdr(int128_t{0})});
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(r);
   EXPECT_EQ(r->asset_add_amount, to_xdr(int128_t{0}));
   EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-100}));
@@ -279,6 +284,7 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalNegative)
   EXPECT_EQ(r->asset_subtract_amount, to_xdr(int128_t{-400}));
 
   ASSERT_FALSE(arg.try_reserve_transfer_lock(-501, *r));
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltas)
@@ -289,6 +295,7 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltas)
   auto r1 = arg.try_reserve_transfer_lock(
       100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
                             .asset_subtract_amount = to_xdr(int128_t{0})});
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(r1);
   EXPECT_EQ(r1->asset_add_amount, to_xdr(int128_t{100}));
   EXPECT_EQ(r1->asset_subtract_amount, to_xdr(int128_t{0}));
@@ -309,6 +316,7 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltas)
 
   // more subtracts are not fine
   ASSERT_FALSE(arg.try_reserve_transfer_lock(-1, *r1));
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltasRevert)
@@ -319,6 +327,7 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltasRevert)
   auto r1 = arg.try_reserve_transfer_lock(
       100, AssetBalanceLock{.asset_add_amount = to_xdr(int128_t{0}),
                             .asset_subtract_amount = to_xdr(int128_t{0})});
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_TRUE(r1);
   EXPECT_EQ(r1->asset_add_amount, to_xdr(int128_t{100}));
   EXPECT_EQ(r1->asset_subtract_amount, to_xdr(int128_t{0}));
@@ -363,6 +372,7 @@ TEST(RefcountedDeltaVariant, AssetBalanceProposalConcurrentDeltasRevert)
   auto item = arg.to_item();
   auto balance = item->asset_balance();
   EXPECT_EQ(balance, 355);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST(RefcountedDeltaVariant, AssetBalanceValidationOutOfBounds)

@@ -1,7 +1,6 @@
 #include "hogd/test_ffi/test_bindings.h"
 
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -9,7 +8,6 @@
 #include <memory>
 #include <print>
 #include <span>
-#include <unistd.h>
 #include <utility>
 
 #include "contract.hh"
@@ -35,7 +33,12 @@ namespace {
 DBContext *
 make_new_db() noexcept
 {
-  return new DBContext(PortAllocator::get());
+  try {
+    return new DBContext(PortAllocator::get());
+  } catch (std::exception const &e) {
+    std::println("error creating db context: {}", e.what());
+    return nullptr;
+  }
 }
 void
 free_db(DBContext *ptr) noexcept

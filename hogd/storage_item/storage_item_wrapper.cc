@@ -11,18 +11,19 @@
 
 namespace hogd {
 
-StorageItemWrapper::StorageItemWrapper(BytestringMarker, Bytestring bytestring)
+StorageItemWrapper::StorageItemWrapper(BytestringMarker /*unused*/,
+                                       Bytestring bytestring)
   : storage_item_(BytestringWrapper{.bytestring_ = std::move(bytestring)})
 {}
-StorageItemWrapper::StorageItemWrapper(NonnegativeIntMarker,
+StorageItemWrapper::StorageItemWrapper(NonnegativeIntMarker /*unused*/,
                                        int128_t nnint_value)
   : storage_item_(NonnegativeIntWrapper{.nnint_ = nnint_value})
 {}
-StorageItemWrapper::StorageItemWrapper(RetrocausalQueueMarker,
+StorageItemWrapper::StorageItemWrapper(RetrocausalQueueMarker /*unused*/,
                                        RetrocausalQueue queue)
   : storage_item_(RetrocausalQueueWrapper{.queue_ = std::move(queue)})
 {}
-StorageItemWrapper::StorageItemWrapper(AssetBalanceMarker,
+StorageItemWrapper::StorageItemWrapper(AssetBalanceMarker /*unused*/,
                                        uint128_t asset_balance)
   : storage_item_(AssetBalanceWrapper{.asset_balance_ = asset_balance})
 {}
