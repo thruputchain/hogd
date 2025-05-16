@@ -57,7 +57,7 @@ public:
     : nondeterministic_value_(std::forward<Args>(args)...)
   {}
 
-  T const &get() { return nondeterministic_value_; }
+  T const &get() const { return nondeterministic_value_; }
 
 private:
   T nondeterministic_value_;

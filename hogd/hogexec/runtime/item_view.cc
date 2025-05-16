@@ -13,6 +13,7 @@
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -344,9 +345,53 @@ AssetBalanceItem::get_delta() const
 SyscallStatus<void>
 AssetBalanceItem::validate() const
 {
+  if (asset_balance_ < 0) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
   assert(
       !integer_sub_overflow<int128_t>(asset_balance_, initial_asset_balance_));
   return {};
+}
+
+SyscallStatus<void>
+NativeTokenBalanceItem::add_deterministic_native_token_balance(int128_t amount)
+{
+  assert(!integer_add_overflow<int128_t>(native_token_balance_, amount));
+  int128_t new_balance = native_token_balance_ + amount;
+
+  if (new_balance < 0) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+  // In no sensible codepath should a user be able to get more of the native
+  // tokens in one place than exist in the entire supply.
+  assert(new_balance <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+
+  native_token_balance_ = new_balance;
+  return {};
+}
+
+void
+NativeTokenBalanceItem::add_nondeterministic_native_token_lock(
+    Nondeterministic<int128_t> const &amount)
+{
+  int128_t new_sub = amount.get();
+  assert(new_sub >= 0);
+  assert(new_sub <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+
+  additional_subtract_amount_ =
+      Nondeterministic<int128_t>{new_sub + additional_subtract_amount_.get()};
+}
+
+StorageDelta
+NativeTokenBalanceItem::get_delta() const
+{
+  assert(additional_subtract_amount_.get() >= 0);
+  int128_t new_real_balance =
+      native_token_balance_ - additional_subtract_amount_.get();
+  StorageDelta out(StorageDeltaType::kDeltaTypeAssetTransfer);
+  out.transfer_amount() =
+      to_xdr(new_real_balance - initial_native_token_balance_);
+  return out;
 }
 
 std::optional<StorageItemType>

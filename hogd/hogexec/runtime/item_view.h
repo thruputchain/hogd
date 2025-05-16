@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <concepts>
+#include <limits>
 #include <optional>
 #include <variant>
 
@@ -12,6 +13,7 @@
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -131,7 +133,26 @@ public:
   NativeTokenBalanceItem(int128_t initial_native_token_balance)
     : native_token_balance_(initial_native_token_balance),
       initial_native_token_balance_(initial_native_token_balance)
-  {}
+  {
+    assert(initial_native_token_balance >= 0);
+    assert(initial_native_token_balance <=
+           int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+  }
+
+  // This is an overly aggressive assertion.
+  // We require that the maximum possible native token balance required to be
+  // locked for any given storage item is at most the total maximum supply of
+  // native tokens. We then also require that no action by the user can transfer
+  // more than the total supply of native tokens at any one time, and the user
+  // cannot try to hold more that the total amount of native tokens in the
+  // system at any one time. As such, we are guaranteed that for any set of
+  // nondeterministic native token required reservations (from try_reserve in
+  // the db), the sum of those reservations, plus any deltas added manually,
+  // will never overflow int128_t and thus will always fit into a StorageDelta.
+  // (assuming one transaction won't modify more than 2^64 storage items).
+  static_assert(std::numeric_limits<int128_t>::max() >=
+                int128_t{kTotalHogSupply} * int128_t{kHogDivisibility} *
+                    int128_t{std::numeric_limits<uint64_t>::max()});
 
   StorageDelta get_delta() const;
 
@@ -145,8 +166,16 @@ public:
                : SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
 
-  void add_deterministic_native_token_balance(int128_t amount);
-  void add_nondeterministic_native_token_balance(
+  // Returns the balance that the user sees.
+  // This is the balance, without applying any of the nondeterministic locks.
+  int128_t get_user_visible_balance() const { return native_token_balance_; }
+
+  SyscallStatus<void> add_deterministic_native_token_balance(int128_t amount);
+  // Mark the requirement that a certain amount of the native tokens be locked,
+  // based on the response of the db to a try_reserve call.
+  // The input should be nonnegative (the db returns the additional amount to be
+  // locked).
+  void add_nondeterministic_native_token_lock(
       Nondeterministic<int128_t> const &amount);
 
 private:
@@ -246,7 +275,7 @@ private:
   can_accept_type(std::optional<StorageItemType> item_type) const;
 
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
-               RetrocausalQueueItem, AssetBalanceItem>
+               RetrocausalQueueItem, AssetBalanceItem, NativeTokenBalanceItem>
       delta_args_;
 };
 

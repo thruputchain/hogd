@@ -299,11 +299,11 @@ TEST_F(ItemViewTest, AssetBalanceOverflow)
 
   AssetBalanceItem new_item = *asset_balance_item_res;
 
-  new_item.asset_balance_ =
-      100 + static_cast<uint128_t>(std::numeric_limits<int128_t>::max());
   EXPECT_TRUE(proxy.set(new_item));
-
-  new_item.asset_balance_++;
+  new_item.asset_balance_ = std::numeric_limits<int128_t>::max();
+  EXPECT_TRUE(proxy.set(new_item));
+  new_item.asset_balance_ =
+      static_cast<uint128_t>(std::numeric_limits<int128_t>::max()) + 1;
   EXPECT_FALSE(proxy.set(new_item));
 }
 } // namespace hogd

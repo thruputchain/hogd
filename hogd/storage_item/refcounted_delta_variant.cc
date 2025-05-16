@@ -21,6 +21,7 @@
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -478,7 +479,7 @@ RefcountedDeltaVariant::get_cost_after_commit(
 {
   assert(refcount_ > 0);
 
-  return std::visit(
+  auto res = std::visit(
       [&](auto const &args) -> int128_t {
         using args_t = std::decay_t<decltype(args)>;
         if constexpr (std::same_as<args_t, DeleteArgs>) {
@@ -515,6 +516,10 @@ RefcountedDeltaVariant::get_cost_after_commit(
         }
       },
       variant_);
+
+  assert(res >= 0);
+  assert(res <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+  return res;
 }
 
 } // namespace hogd
