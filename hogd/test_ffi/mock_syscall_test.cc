@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/port_allocator.h"

@@ -115,15 +115,10 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
   if (!signed_tx) {
     return nullptr;
   }
-  hogd::SignedTransaction stx;
   try {
+    hogd::SignedTransaction stx;
     x23::deserialize(&stx,
                      std::span<const unsigned char>(signed_tx, signed_tx_len));
-  } catch (std::exception const &e) {
-    std::println("error deserializing signed transaction: {}", e.what());
-    return nullptr;
-  }
-  try {
     auto *out = static_cast<void *>(
         new SyscallHandlerContext(*runtime_context, stx, *db_context));
     std::println("created syscall handler context {}", out);
@@ -137,8 +132,8 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
 void
 close_syscall_handler(void *syscall_handler) noexcept
 {
-  std::println("closing syscall handler {}", syscall_handler);
   try {
+    std::println("closing syscall handler {}", syscall_handler);
     delete static_cast<SyscallHandlerContext *>(syscall_handler);
   } catch (std::exception const &e) {
     std::println("error closing syscall handler: {}", e.what());
@@ -154,14 +149,19 @@ constexpr ForeignRootInvokeResult kUnrecoverableError = {
 ForeignRootInvokeResult
 root_invoke(void *syscall_handler) noexcept
 {
-  if (!syscall_handler) {
-    std::println("no syscall handler!");
+  try {
+    if (!syscall_handler) {
+      std::println("no syscall handler!");
+      return kUnrecoverableError;
+    }
+
+    auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+    auto res = context->root_invoke();
+    return res;
+  } catch (std::exception const &e) {
+    std::println("error invoking root invoke: {}", e.what());
     return kUnrecoverableError;
   }
-
-  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
-  auto res = context->root_invoke();
-  return res;
 }
 
 } // namespace
