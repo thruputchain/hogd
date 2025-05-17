@@ -13,7 +13,6 @@
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
-#include "hogd/storage_item/uint256_reservation.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
