@@ -41,7 +41,7 @@ SnapshotStorageView::get_snapshot_storage_item(AddressAndKey const &addrkey)
 
   // negative and positive lookups are cached
   modified_items_.insert(addrkey,
-                         StorageItemDeltaManager(res, &invalid_state_flag_));
+                         StorageItemDeltaManager(res, &invalid_state_flag_, execution_mode_));
   return res.get();
 }
 
@@ -105,7 +105,7 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
 
   auto parent_item = get_parent_storage_item(addrkey);
   auto [item, ul] = modified_items_.insert(
-      addrkey, StorageItemDeltaManager(parent_item, &invalid_state_flag_));
+      addrkey, StorageItemDeltaManager(parent_item, &invalid_state_flag_, execution_mode_));
   return mod_lambda(item);
 }
 

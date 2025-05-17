@@ -11,6 +11,7 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/storage_item/storage_lock_util.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 
@@ -30,7 +31,8 @@ class StorageItemDeltaManager {
 public:
   StorageItemDeltaManager(
       std::shared_ptr<const StorageItemWrapper> snapshot_state,
-      InvalidStateFlag *invalid_state_flag);
+      InvalidStateFlag *invalid_state_flag,
+      BlockExecutionMode execution_mode);
 
   // Disable copy
   StorageItemDeltaManager(const StorageItemDeltaManager &) = delete;
@@ -134,6 +136,8 @@ private:
 
   RefcountedDeltaVariant variant_;
   InvalidStateFlag *invalid_state_flag_;
+  
+  BlockExecutionMode execution_mode_;
 };
 
 } // namespace hogd

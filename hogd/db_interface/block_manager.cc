@@ -139,7 +139,7 @@ BlockManager::get_block_data(BlockID id)
 }
 
 bool
-BlockManager::add_child(BlockID parent_id, BlockID new_id)
+BlockManager::add_child(BlockID parent_id, BlockID new_id, BlockExecutionMode mode)
 {
   // first add the new block
   std::lock_guard lock(mtx_);
@@ -174,12 +174,12 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id)
 
   if (!parent.block_data_ || parent.block_data_->is_committed_to_database()) {
     // parent is committed to database, so we need to create a new block state
-    block_cache_.emplace(new_id, Block(base_database_));
+    block_cache_.emplace(new_id, Block(base_database_, mode));
   }
   else {
     // parent is not committed to database, so we can use the parent's block
     // state
-    block_cache_.emplace(new_id, Block(parent.block_data_.get()));
+    block_cache_.emplace(new_id, Block(parent.block_data_.get(), mode));
   }
   return true;
 }

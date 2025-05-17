@@ -12,6 +12,7 @@
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
@@ -39,14 +40,21 @@ expect_final(StorageItemDeltaManager &item, int128_t nnint)
   EXPECT_EQ(snapshot->type(), StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(snapshot->nnint(), nnint);
 }
-
 } // namespace
 
+class StorageItemDeltaManagerTest
+  : public ::testing::TestWithParam<BlockExecutionMode> {
+protected:
+  void SetUp() override { mode_ = GetParam(); }
+
+  BlockExecutionMode mode_;
+};
+
 // Change the typeclass of a storage item during execution
-TEST(StorageItemFrame, RewriteVariantTypeNullStart)
+TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
@@ -104,11 +112,12 @@ TEST(StorageItemFrame, RewriteVariantTypeNullStart)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, RewriteVariantFromBase)
+TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
 {
-  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
+  auto base_item = std::make_shared<StorageItemWrapper>(
+       Bytestring{0, 1, 2, 3});
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(base_item, &invalid_state_flag);
+  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -150,23 +159,24 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                                &invalid_state_flag);
+                                &invalid_state_flag, mode_);
   expect_final(item, bytestring_delta.bytestring());
   expect_final(item2, bytestring_delta.bytestring());
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, DeleteItem)
+TEST_P(StorageItemDeltaManagerTest, DeleteItem)
 {
   InvalidStateFlag invalid_state_flag;
-  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
+  auto base_item = std::make_shared<StorageItemWrapper>(
+      Bytestring{0, 1, 2, 3});
 
-  StorageItemDeltaManager item(base_item, &invalid_state_flag);
+  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_);
   ASSERT_TRUE(item.get_snapshot_item());
 
   // committing an empty round keeps item active
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                                &invalid_state_flag);
+                                &invalid_state_flag, mode_);
 
   ASSERT_TRUE(item2.get_snapshot_item());
 
@@ -186,16 +196,16 @@ TEST(StorageItemFrame, DeleteItem)
                                                    // post block
 
   StorageItemDeltaManager item3(item2.get_post_close_block_item(),
-                                &invalid_state_flag);
+                                &invalid_state_flag, mode_);
 
   EXPECT_FALSE(item3.get_snapshot_item());
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, ExclusiveLockAcquire)
+TEST_P(StorageItemDeltaManagerTest, ExclusiveLockAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   auto lock1 =
       item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
@@ -215,10 +225,10 @@ TEST(StorageItemFrame, ExclusiveLockAcquire)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
+TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
@@ -275,10 +285,10 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, NNIntFromExclusiveLock)
+TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLock)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
@@ -312,10 +322,10 @@ TEST(StorageItemFrame, NNIntFromExclusiveLock)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, ExclusiveBytestring)
+TEST_P(StorageItemDeltaManagerTest, ExclusiveBytestring)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -340,10 +350,10 @@ TEST(StorageItemFrame, ExclusiveBytestring)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
+TEST_P(StorageItemDeltaManagerTest, ExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   // This is just a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -384,10 +394,11 @@ TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
+TEST_P(StorageItemDeltaManagerTest, PermanentExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag,
+                               BlockExecutionMode::kBlockExecutionModeProposal);
 
   // merely a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -422,7 +433,7 @@ TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, NNIntSimpleSetAdd)
+TEST_P(StorageItemDeltaManagerTest, NNIntSimpleSetAdd)
 {
   auto make_nnint_delta = [](int128_t set, int128_t add) {
     StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
@@ -431,7 +442,7 @@ TEST(StorageItemFrame, NNIntSimpleSetAdd)
     return delta;
   };
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   StorageDelta nnint_set_add = make_nnint_delta(5, 10);
 
@@ -445,7 +456,7 @@ TEST(StorageItemFrame, NNIntSimpleSetAdd)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemCosts, ExclusiveLockCostMatchNoPriorCommit)
+TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
 {
   auto make_bytestring_delta = [](x23::Vec<uint8_t> vec) {
     StorageDelta delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -454,7 +465,8 @@ TEST(StorageItemCosts, ExclusiveLockCostMatchNoPriorCommit)
   };
 
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag,
+                               BlockExecutionMode::kBlockExecutionModeProposal);
 
   auto bdelta_4 = make_bytestring_delta({0, 1, 2, 3});
   auto bdelta_6 = make_bytestring_delta({0, 1, 2, 3, 4, 5});
@@ -479,5 +491,10 @@ TEST(StorageItemCosts, ExclusiveLockCostMatchNoPriorCommit)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(
+    BlockModes, StorageItemDeltaManagerTest,
+    ::testing::Values(BlockExecutionMode::kBlockExecutionModeProposal,
+                      BlockExecutionMode::kBlockExecutionModeValidation));
 
 } // namespace hogd

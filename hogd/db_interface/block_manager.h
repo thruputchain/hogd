@@ -37,7 +37,7 @@ public:
   // new_id should be a new, never-before-used ID.
   // returns true if new_id is successfully linked to the parent.
   // Otherwise the parent id is no longer a valid block to link to.
-  bool add_child(BlockID parent_id, BlockID new_id);
+  bool add_child(BlockID parent_id, BlockID new_id, BlockExecutionMode mode);
 
 private:
   // One block.
@@ -50,13 +50,13 @@ private:
     Block() = default;
 
     // ctor for block with a parent that has not committed to database.
-    Block(BlockState *parent_state)
-      : block_data_(std::make_shared<BlockState>(parent_state))
+    Block(BlockState *parent_state, BlockExecutionMode mode)
+      : block_data_(std::make_shared<BlockState>(parent_state, mode))
     {}
 
     // ctor for block whose parent has already committed to database.
-    Block(InMemoryDatabase *base_db)
-      : block_data_(std::make_shared<BlockState>(base_db))
+    Block(InMemoryDatabase *base_db, BlockExecutionMode mode)
+      : block_data_(std::make_shared<BlockState>(base_db, mode))
     {}
 
     bool block_is_closed() const

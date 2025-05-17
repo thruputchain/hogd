@@ -15,6 +15,7 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/storage_item/storage_lock_util.h"
 #include "retrocausal_queue.hh"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
@@ -23,10 +24,12 @@ namespace hogd {
 
 StorageItemDeltaManager::StorageItemDeltaManager(
     std::shared_ptr<const StorageItemWrapper> snapshot_state,
-    InvalidStateFlag *invalid_state_flag)
+    InvalidStateFlag *invalid_state_flag,
+    BlockExecutionMode execution_mode)
   : committed_item_(std::move(snapshot_state)),
     committed_item_cost_(committed_item_ ? committed_item_->storage_cost() : 0),
-    invalid_state_flag_(invalid_state_flag)
+    invalid_state_flag_(invalid_state_flag),
+    execution_mode_(execution_mode)
 {}
 
 bool
