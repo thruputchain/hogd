@@ -482,7 +482,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
 {
   if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
     // This test is only valid for validation mode
-    GTEST_SKIP();
+    return;
   }
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
