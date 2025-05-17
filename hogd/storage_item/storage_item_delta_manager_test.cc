@@ -529,6 +529,33 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
 
   expect_final(item, int128_t{2});
 }
+
+TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  ASSERT_FALSE(item.try_reserve(make_nnint_delta(-10, -1),
+                                StorageLock(StorageLockType::kNone)));
+
+  auto nnint_set_add0 = make_nnint_delta(-10, 0);
+  auto lk0 =
+      item.try_reserve(nnint_set_add0, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk0);
+  item.commit(nnint_set_add0, *lk0);
+
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  auto nnint_set_add1 = make_nnint_delta(-10, 1);
+  auto lk1 =
+      item.try_reserve(nnint_set_add1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk1);
+  item.commit(nnint_set_add1, *lk1);
+
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  expect_final(item, int128_t{-9});
+}
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(

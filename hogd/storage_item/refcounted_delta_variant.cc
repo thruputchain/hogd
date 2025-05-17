@@ -67,17 +67,30 @@ NNIntSetAddArgs::try_acquire_bounds_lock(NNIntBoundsLock const &bounds_lock)
   lower_bound_ += from_xdr(bounds_lock.subtract_amount);
   upper_bound_ += from_xdr(bounds_lock.add_amount);
 
-  // assert both bounds are in [0, INT128_MAX]
-  if (lower_bound_.is_in_range<int128_t>() &&
-      upper_bound_.is_in_range<int128_t>() &&
-      lower_bound_.is_in_range<uint128_t>() &&
-      upper_bound_.is_in_range<uint128_t>()) {
+  auto undo_lock = [this, bounds_lock]() {
+    lower_bound_ -= from_xdr(bounds_lock.subtract_amount);
+    upper_bound_ -= from_xdr(bounds_lock.add_amount);
+  };
+
+  // assert both bounds are in [min(0, set_value_), INT128_MAX]
+  if (!lower_bound_.is_in_range<int128_t>() ||
+      !upper_bound_.is_in_range<int128_t>()) {
+    undo_lock();
+    return false;
+  }
+
+  auto lb = lower_bound_.get_capped<int128_t>();
+  if (set_value_ < 0) {
+    // can't acquire negative locks on a set_value_ < 0
+    assert(lb >= set_value_);
+    return true;
+  }
+  if (lb >= 0) {
     return true;
   }
 
   // undo the above operations and return false
-  lower_bound_ -= from_xdr(bounds_lock.subtract_amount);
-  upper_bound_ -= from_xdr(bounds_lock.add_amount);
+  undo_lock();
   return false;
 }
 
