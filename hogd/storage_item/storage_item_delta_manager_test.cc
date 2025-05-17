@@ -4,7 +4,6 @@
 #include <cstring>
 #include <memory>
 #include <optional>
-#include <string>
 #include <utility>
 
 #include "hogd/base/types.h"
