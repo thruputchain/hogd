@@ -25,6 +25,12 @@ namespace hogd {
 //   w += 200;  // Value is now 300, beyond uint8_t range but stored correctly
 //   bool fits = w.is_in_range<uint8_t>();  // false
 //   uint8_t capped = w.get_capped<uint8_t>(); // 255
+//
+// This class has somewhat aggressive static_assertions to ensure that input
+// types do not get autoconverted to incorrect types; this makes the interface
+// somewhat nonergonomic if T is a small type, but this is better than silent
+// bugs and most use cases will have T=int64 or int128, at which point the
+// interface is not affected.
 template<std::integral T> class WideIntegral {
 public:
   // Constructs a WideIntegral from a value of the base type T.
@@ -56,13 +62,12 @@ public:
   // Addition assignment operator that adds the given value to this
   // WideIntegral. Handles overflow by incrementing/decrementing highbits_ as
   // needed.
-  WideIntegral &operator+=(std::signed_integral auto value)
+  WideIntegral &operator+=(std::integral auto value)
   {
     static_assert(sizeof(decltype(value)) <= sizeof(T),
                   "input type is too large to fit in one arm of wide_integral");
     if (integer_add_overflow<unsigned_type>(lowbits_, value, &lowbits_)) {
-
-      if (value > 0) {
+      if (value > 0) { // always true if value is unsigned
         highbits_++;
       }
       else {
@@ -75,7 +80,7 @@ public:
   // Subtraction assignment operator that subtracts the given value from this
   // WideIntegral. Handles overflow by incrementing/decrementing highbits_ as
   // needed.
-  WideIntegral &operator-=(std::signed_integral auto value)
+  WideIntegral &operator-=(std::integral auto value)
   {
     static_assert(sizeof(decltype(value)) <= sizeof(T),
                   "input type is too large to fit in one arm of wide_integral");
