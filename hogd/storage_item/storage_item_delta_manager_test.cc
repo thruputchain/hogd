@@ -554,6 +554,9 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
 
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
+  ASSERT_FALSE(item.try_reserve(make_nnint_delta(-10, -1),
+                                StorageLock(StorageLockType::kNone)));
+
   expect_final(item, int128_t{-9});
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
