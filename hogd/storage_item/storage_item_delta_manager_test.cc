@@ -4,6 +4,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 
 #include "hogd/base/types.h"
@@ -16,6 +17,7 @@
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -564,6 +566,9 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
 INSTANTIATE_TEST_SUITE_P(
     BlockModes, StorageItemDeltaManagerTest,
     ::testing::Values(BlockExecutionMode::kBlockExecutionModeProposal,
-                      BlockExecutionMode::kBlockExecutionModeValidation));
+                      BlockExecutionMode::kBlockExecutionModeValidation),
+    [](const ::testing::TestParamInfo<BlockExecutionMode>& info) {
+        return x23::show(info.param);
+    });
 
 } // namespace hogd
