@@ -51,7 +51,8 @@ struct BytestringArgs {
 class NNIntSetAddArgs {
 public:
   NNIntSetAddArgs(int128_t set_value)
-    : set_value_(set_value), lower_bound_(set_value), upper_bound_(set_value)
+    : set_value_(set_value), lower_bound_(set_value), upper_bound_(set_value),
+      final_value_(set_value)
   {}
 
   bool typeclass_match(int128_t candidate_set_value) const
@@ -67,12 +68,13 @@ public:
   // add can be positive or negative
   void commit_add(int128_t add_value);
 
+  bool in_valid_state() const;
+
 private:
   int128_t set_value_;
 
   using bounds_t = WideIntegral<int128_t>;
-
-  bounds_t lower_bound_, upper_bound_;
+  bounds_t lower_bound_, upper_bound_, final_value_;
 };
 
 // Deleted state

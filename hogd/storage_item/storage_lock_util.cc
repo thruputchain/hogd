@@ -52,16 +52,16 @@ delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode)
         StorageItemType::kItemTypeNonnegativeInt);
     if (mode == BlockExecutionMode::kBlockExecutionModeValidation) {
       lock.full_typeclass_lock().extra_lock_data.nnint_bounds_lock() =
-          NNIntBoundsLock{
-              .add_amount = to_xdr(int128_t{0}),
-              .subtract_amount = to_xdr(int128_t{0})};
-    } else {
+          NNIntBoundsLock{.add_amount = to_xdr(int128_t{0}),
+                          .subtract_amount = to_xdr(int128_t{0})};
+    }
+    else {
       lock.full_typeclass_lock().extra_lock_data.nnint_bounds_lock() =
-        NNIntBoundsLock{
-            .add_amount = to_xdr(
-                std::max<int128_t>(0, from_xdr(delta.nnint().add_value))),
-            .subtract_amount = to_xdr(
-                std::min<int128_t>(0, from_xdr(delta.nnint().add_value)))};
+          NNIntBoundsLock{
+              .add_amount = to_xdr(
+                  std::max<int128_t>(0, from_xdr(delta.nnint().add_value))),
+              .subtract_amount = to_xdr(
+                  std::min<int128_t>(0, from_xdr(delta.nnint().add_value)))};
     }
     return lock;
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:

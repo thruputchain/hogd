@@ -47,7 +47,8 @@ public:
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
 
-  static x23::Async<DbTipResult> dbcoord_get_tip() {
+  static x23::Async<DbTipResult> dbcoord_get_tip()
+  {
     co_return DbTipResult{
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }

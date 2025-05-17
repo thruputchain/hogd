@@ -4,6 +4,7 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <print>
 #include <stdexcept>
 #include <utility>
 
@@ -100,8 +101,20 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
   {
     auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
+    bool valid_before = args.in_valid_state();
     int128_t add_value = from_xdr(delta.nnint().add_value);
     args.commit_add(add_value);
+    bool valid_after = args.in_valid_state();
+    if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+      assert(valid_before);
+      assert(valid_after);
+    }
+    if (valid_before && !valid_after) {
+      invalid_state_flag_->mark_as_invalid();
+    }
+    if (!valid_before && valid_after) {
+      invalid_state_flag_->unmark_as_invalid();
+    }
   } break;
   case StorageDeltaType::kDeltaTypeDelete:
     break;

@@ -1,5 +1,6 @@
 #include "hogd/storage_item/refcounted_delta_variant.h"
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <memory>
@@ -34,9 +35,10 @@ NNIntSetAddArgs::to_item() const
 {
   assert(lower_bound_.is_in_range<int128_t>() &&
          upper_bound_.is_in_range<int128_t>());
-  auto new_value = lower_bound_.get_capped<int128_t>();
-  // assertion fails if there were locks that were acquired but not releases
+  auto new_value = final_value_.get_capped<int128_t>();
+  // assertions fails if there were locks that were acquired but not releases
   assert(new_value == upper_bound_.get_capped<int128_t>());
+  assert(new_value == lower_bound_.get_capped<int128_t>());
 
   return std::make_shared<const StorageItemWrapper>(new_value);
 }
@@ -84,6 +86,18 @@ NNIntSetAddArgs::commit_add(int128_t add_value)
 {
   lower_bound_ += add_value;
   upper_bound_ += add_value;
+  final_value_ += add_value;
+}
+
+bool
+NNIntSetAddArgs::in_valid_state() const
+{
+  if (!final_value_.is_in_range<int128_t>()) {
+    return false;
+  }
+
+  auto val = final_value_.get_capped<int128_t>();
+  return (val >= std::min<int128_t>(set_value_, 0));
 }
 
 namespace {
