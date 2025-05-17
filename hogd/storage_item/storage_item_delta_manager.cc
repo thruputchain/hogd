@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -24,12 +23,10 @@ namespace hogd {
 
 StorageItemDeltaManager::StorageItemDeltaManager(
     std::shared_ptr<const StorageItemWrapper> snapshot_state,
-    InvalidStateFlag *invalid_state_flag,
-    BlockExecutionMode execution_mode)
+    InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode)
   : committed_item_(std::move(snapshot_state)),
     committed_item_cost_(committed_item_ ? committed_item_->storage_cost() : 0),
-    invalid_state_flag_(invalid_state_flag),
-    execution_mode_(execution_mode)
+    invalid_state_flag_(invalid_state_flag), execution_mode_(execution_mode)
 {}
 
 bool
@@ -44,27 +41,34 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     if (auto *args = variant_.try_set_variant<NNIntSetAddArgs>(
             from_xdr(delta.nnint().set_value))) {
+
       int128_t add_value = from_xdr(delta.nnint().add_value);
       int128_t set_value = from_xdr(delta.nnint().set_value);
-      if (add_value >= 0) {
-        // modifying total_added_ is deferred to commit time
+
+      if (set_value < 0 && add_value < 0) {
+        // can only add to a set_value_ < 0
+        variant_.release_reference();
+        return false;
+      }
+
+      if (execution_mode_ ==
+          BlockExecutionMode::kBlockExecutionModeValidation) {
         return true;
       }
 
-      // if set_value <=0 and add_value < 0, delta always fails
-      if (set_value <= 0) {
-        variant_.release_reference();
-        return false;
-      }
+      // The assumption of this method is that there is no lock acquired yet on
+      // this item. Thus, we acquire a new lock.
 
-      // the interesting case;
-      // set_value > 0, add_value < 0
-      auto res = args->try_reserve_add(add_value);
-      if (!res) {
-        variant_.release_reference();
-        return false;
+      NNIntBoundsLock bounds_lock{
+          .add_amount = to_xdr(add_value > 0 ? add_value : 0),
+          .subtract_amount = to_xdr(add_value < 0 ? add_value : 0),
+      };
+
+      if (args->try_acquire_bounds_lock(bounds_lock)) {
+        return true;
       }
-      return true;
+      variant_.release_reference();
+      return false;
     }
     return false;
   case StorageDeltaType::kDeltaTypeDelete:
@@ -97,9 +101,7 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   {
     auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
     int128_t add_value = from_xdr(delta.nnint().add_value);
-    if (add_value > 0) {
-      args.commit_add(add_value);
-    }
+    args.commit_add(add_value);
   } break;
   case StorageDeltaType::kDeltaTypeDelete:
     break;
@@ -249,6 +251,19 @@ StorageItemDeltaManager::revert_exclusive_lock_to_set_typeclass(
   bool res = try_reserve_delta(delta); // reacquires a reference
   assert(res);
   assert(variant_.refcount() == 1);
+
+  // handle type-specific lock data
+  if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
+      auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
+      int128_t add_value = from_xdr(delta.nnint().add_value);
+      NNIntBoundsLock bounds_lock{
+          .add_amount = to_xdr(add_value > 0 ? add_value : 0),
+          .subtract_amount = to_xdr(add_value < 0 ? add_value : 0),
+      };
+      args.release_bounds_lock(bounds_lock);
+    }
+  }
 }
 
 void
@@ -258,12 +273,9 @@ StorageItemDeltaManager::revert_set_typeclass_lock(
   switch (type_specific_lock.item_type()) {
   case StorageItemType::kItemTypeNonnegativeInt:
   {
-    int128_t sub_amount =
-        from_xdr(type_specific_lock.nnint_subtracted_amount());
-    assert(sub_amount <= 0);
     auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
-    if (sub_amount < 0) {
-      args.revert_add(sub_amount);
+    if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+      args.release_bounds_lock(type_specific_lock.nnint_bounds_lock());
     }
     break;
   }
@@ -291,7 +303,7 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   assert(variant_.refcount() > 0);
   assert(!variant_.has_permanent_exclusive_lock());
 
-  auto req_lock = delta_to_lock(delta);
+  auto req_lock = delta_to_lock(delta, execution_mode_);
   assert(req_lock.lock_type() == StorageLockType::kSetItemTypeClass);
 
   if (req_lock.full_typeclass_lock().typeclass !=
@@ -312,28 +324,36 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   switch (req_lock.full_typeclass_lock().extra_lock_data.item_type()) {
   case StorageItemType::kItemTypeNonnegativeInt:
   {
-    int128_t prev_sub_amount =
-        from_xdr(prev_typeclass_lock.extra_lock_data.nnint_subtracted_amount());
-    int128_t req_sub_amount =
-        from_xdr(req_lock.full_typeclass_lock()
-                     .extra_lock_data.nnint_subtracted_amount());
-
-    assert(prev_sub_amount <= 0);
-    assert(req_sub_amount <= 0);
-    assert(prev_sub_amount != std::numeric_limits<int128_t>::min());
-    if (prev_sub_amount <= req_sub_amount) {
-      return prev_lock;
+    if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeValidation) {
+      // nothing to do in validation mode
+      return req_lock;
     }
+    // trying to upgrade one reservation lock to another
+    auto const &prev_bounds_lock =
+        prev_typeclass_lock.extra_lock_data.nnint_bounds_lock();
+    int128_t new_add_amount = from_xdr(delta.nnint().add_value);
+    NNIntBoundsLock req_bounds_lock{
+        .add_amount = to_xdr(
+            std::max(new_add_amount, from_xdr(prev_bounds_lock.add_amount))),
+        .subtract_amount =
+            to_xdr(std::min(new_add_amount,
+                            from_xdr(prev_bounds_lock.subtract_amount))),
+    };
 
     assert(variant_.has_variant_arm<NNIntSetAddArgs>());
-
     auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
 
-    auto reserve_res = args.try_reserve_add(req_sub_amount - prev_sub_amount);
+    args.release_bounds_lock(prev_bounds_lock);
+    auto reserve_res = args.try_acquire_bounds_lock(req_bounds_lock);
     if (!reserve_res) {
+      // reacquire the previous bounds lock
+      [[maybe_unused]] auto r = args.try_acquire_bounds_lock(prev_bounds_lock);
+      assert(r);
       return std::nullopt;
     }
 
+    req_lock.full_typeclass_lock().extra_lock_data.nnint_bounds_lock() =
+        req_bounds_lock;
     return req_lock;
   } break;
   case StorageItemType::kItemTypeRetrocausalQueue:
@@ -371,7 +391,7 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
       int128_t required_storage =
           variant_.get_cost_after_commit(delta, committed_item_.get()) -
           unreleased_storage_cost_ - committed_item_cost_;
-      return MeteredStorageLock{.lock_ = delta_to_lock(delta),
+      return MeteredStorageLock{.lock_ = delta_to_lock(delta, execution_mode_),
                                 .locked_tokens_ =
                                     std::max<int128_t>(required_storage, 0)};
     }
@@ -420,26 +440,19 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     break;
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
   {
+    if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeValidation) {
+      // nothing to do in validation mode
+      return;
+    }
     assert(lock.full_typeclass_lock().extra_lock_data.item_type() ==
            StorageItemType::kItemTypeNonnegativeInt);
     assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
 
-    int128_t actual_sub_amount =
-        std::min<int128_t>(0, from_xdr(delta.nnint().add_value));
-    int128_t locked_sub_amount = from_xdr(
-        lock.full_typeclass_lock().extra_lock_data.nnint_subtracted_amount());
+    auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
 
-    assert(actual_sub_amount <= 0);
-    assert(locked_sub_amount <= 0);
-    assert(actual_sub_amount >= locked_sub_amount);
-    // so locked_sub_amount - actual_sub_amount is negative
-    assert(locked_sub_amount - actual_sub_amount <= 0);
+    args.release_bounds_lock(
+        lock.full_typeclass_lock().extra_lock_data.nnint_bounds_lock());
 
-    int128_t diff = locked_sub_amount - actual_sub_amount;
-    if (diff < 0) {
-      auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
-      args.revert_add(diff);
-    }
     break;
   }
   case StorageDeltaType::kDeltaTypeDelete:

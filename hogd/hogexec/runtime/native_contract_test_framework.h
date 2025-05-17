@@ -31,7 +31,9 @@ namespace hogd {
 // Common setup utilities for testing native contracts.
 class NativeContractTestFramework {
 public:
-  NativeContractTestFramework(bool enable_logging = false, BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal)
+  NativeContractTestFramework(
+      bool enable_logging = false,
+      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal)
   {
     if (enable_logging) {
       x23::RpcLogger::default_logfd = 1;
@@ -39,7 +41,8 @@ public:
     initialize(mode);
   }
 
-  void advance_block(BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal)
+  void advance_block(
+      BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal)
   {
     auto r = block_manager_.get_block_data(block_number_);
     assert(r);

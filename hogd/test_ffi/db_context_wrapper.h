@@ -24,7 +24,8 @@ class DBContext {
 public:
   DBContext(uint32_t db_read_port);
 
-  void advance_new_block(BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal);
+  void advance_new_block(BlockExecutionMode mode =
+                             BlockExecutionMode::kBlockExecutionModeProposal);
 
   StorageSnapshotCache &get_snapshot()
   {

@@ -40,6 +40,13 @@ expect_final(StorageItemDeltaManager &item, int128_t nnint)
   EXPECT_EQ(snapshot->type(), StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(snapshot->nnint(), nnint);
 }
+
+auto
+make_bounds_lock(int128_t add, int128_t sub)
+{
+  return NNIntBoundsLock{.add_amount = to_xdr(add),
+                         .subtract_amount = to_xdr(sub)};
+}
 } // namespace
 
 class StorageItemDeltaManagerTest
@@ -93,9 +100,12 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
       item.try_reserve(nnint_set_add_3, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(nnint_lock_2);
   ASSERT_TRUE(nnint_lock_3);
-  // fails because too much subtraction
-  EXPECT_FALSE(
-      item.try_reserve(nnint_set_add_3, StorageLock(StorageLockType::kNone)));
+
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    // fails because too much subtraction
+    EXPECT_FALSE(
+        item.try_reserve(nnint_set_add_3, StorageLock(StorageLockType::kNone)));
+  }
   item.revert(nnint_lock_3->lock_);
 
   nnint_lock_3 =
@@ -114,8 +124,7 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
 
 TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
 {
-  auto base_item = std::make_shared<StorageItemWrapper>(
-       Bytestring{0, 1, 2, 3});
+  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_);
 
@@ -168,8 +177,7 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
 TEST_P(StorageItemDeltaManagerTest, DeleteItem)
 {
   InvalidStateFlag invalid_state_flag;
-  auto base_item = std::make_shared<StorageItemWrapper>(
-      Bytestring{0, 1, 2, 3});
+  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
 
   StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_);
   ASSERT_TRUE(item.get_snapshot_item());
@@ -261,9 +269,11 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
 
   EXPECT_EQ(lock3->lock_.full_typeclass_lock().typeclass.item_type(),
             StorageItemTypeClass::kItemTypeNonnegativeInt);
-  EXPECT_EQ(lock3->lock_.full_typeclass_lock()
-                .extra_lock_data.nnint_subtracted_amount(),
-            to_xdr(int128_t{-4}));
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    EXPECT_EQ(
+        lock3->lock_.full_typeclass_lock().extra_lock_data.nnint_bounds_lock(),
+        make_bounds_lock(int128_t{10}, int128_t{-4}));
+  }
 
   auto lock4 = item.try_reserve(nnint_set_add_4, lock3->lock_);
   ASSERT_TRUE(lock4);
@@ -271,9 +281,11 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
   EXPECT_EQ(lock4->lock_.lock_type(), StorageLockType::kSetItemTypeClass);
   EXPECT_EQ(lock4->lock_.full_typeclass_lock().typeclass.item_type(),
             StorageItemTypeClass::kItemTypeNonnegativeInt);
-  EXPECT_EQ(lock4->lock_.full_typeclass_lock()
-                .extra_lock_data.nnint_subtracted_amount(),
-            to_xdr(int128_t{-5}));
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    EXPECT_EQ(
+        lock4->lock_.full_typeclass_lock().extra_lock_data.nnint_bounds_lock(),
+        make_bounds_lock(int128_t{10}, int128_t{-5}));
+  }
 
   // return to nnint_set_add_2
   auto final_lock = item.try_reserve(nnint_set_add_2, lock4->lock_);

@@ -31,8 +31,7 @@ class StorageItemDeltaManager {
 public:
   StorageItemDeltaManager(
       std::shared_ptr<const StorageItemWrapper> snapshot_state,
-      InvalidStateFlag *invalid_state_flag,
-      BlockExecutionMode execution_mode);
+      InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode);
 
   // Disable copy
   StorageItemDeltaManager(const StorageItemDeltaManager &) = delete;
@@ -113,6 +112,8 @@ private:
   // kExclusiveLock -> kSetItemTypeClass
   void revert_exclusive_lock_to_set_typeclass(StorageDelta const &delta);
   // kSetItemTypeClass -> kSetItemTypeClass
+  // In essence -- leave the base typeclass lock unchanged,
+  // but release any type-specific lock data.
   void revert_set_typeclass_lock_to_set_typeclass(StorageLock const &lock,
                                                   StorageDelta const &delta);
   // kSetItemTypeClass -> kNone
@@ -136,7 +137,7 @@ private:
 
   RefcountedDeltaVariant variant_;
   InvalidStateFlag *invalid_state_flag_;
-  
+
   BlockExecutionMode execution_mode_;
 };
 

@@ -5,6 +5,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 
@@ -37,7 +38,7 @@ delta_to_typeclass(StorageDelta const &delta)
 }
 
 StorageLock
-delta_to_lock(StorageDelta const &delta)
+delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode)
 {
   StorageLock lock(StorageLockType::kSetItemTypeClass);
   lock.full_typeclass_lock().typeclass = delta_to_typeclass(delta);
@@ -49,8 +50,19 @@ delta_to_lock(StorageDelta const &delta)
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     lock.full_typeclass_lock().extra_lock_data.item_type(
         StorageItemType::kItemTypeNonnegativeInt);
-    lock.full_typeclass_lock().extra_lock_data.nnint_subtracted_amount() =
-        to_xdr(std::min<int128_t>(0, from_xdr(delta.nnint().add_value)));
+    if (mode == BlockExecutionMode::kBlockExecutionModeValidation) {
+      lock.full_typeclass_lock().extra_lock_data.nnint_bounds_lock() =
+          NNIntBoundsLock{
+              .add_amount = to_xdr(int128_t{0}),
+              .subtract_amount = to_xdr(int128_t{0})};
+    } else {
+      lock.full_typeclass_lock().extra_lock_data.nnint_bounds_lock() =
+        NNIntBoundsLock{
+            .add_amount = to_xdr(
+                std::max<int128_t>(0, from_xdr(delta.nnint().add_value))),
+            .subtract_amount = to_xdr(
+                std::min<int128_t>(0, from_xdr(delta.nnint().add_value)))};
+    }
     return lock;
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
   {

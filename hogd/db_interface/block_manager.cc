@@ -139,7 +139,8 @@ BlockManager::get_block_data(BlockID id)
 }
 
 bool
-BlockManager::add_child(BlockID parent_id, BlockID new_id, BlockExecutionMode mode)
+BlockManager::add_child(BlockID parent_id, BlockID new_id,
+                        BlockExecutionMode mode)
 {
   // first add the new block
   std::lock_guard lock(mtx_);

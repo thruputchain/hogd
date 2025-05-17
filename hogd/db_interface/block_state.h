@@ -37,7 +37,9 @@ public:
     assert(!parent->is_committed_to_database());
   }
 
-  BlockState(InMemoryDatabase *base_db, BlockExecutionMode mode) : storage_view_(base_db, mode) {}
+  BlockState(InMemoryDatabase *base_db, BlockExecutionMode mode)
+    : storage_view_(base_db, mode)
+  {}
 
   BlockState(BlockState const &) = delete;
   BlockState &operator=(BlockState const &) = delete;
