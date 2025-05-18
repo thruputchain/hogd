@@ -317,6 +317,36 @@ TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLock)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
+TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  StorageDelta nnint_set_add_1 = make_nnint_delta(-5, 10);
+  StorageDelta nnint_set_add_2 = make_nnint_delta(-10, 4);
+
+  auto lock1 =
+      item.try_reserve(nnint_set_add_1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock1);
+
+  auto lock2 = item.try_reserve(nnint_set_add_2, lock1->lock_);
+  ASSERT_TRUE(lock2);
+
+  EXPECT_EQ(lock2->lock_.lock_type(), StorageLockType::kExclusiveLock);
+
+  // check to assert only one exclusive lock can be given out.
+  EXPECT_FALSE(
+      item.try_acquire_exclusive_lock(nnint_set_add_1, StorageLockType::kNone,
+                                      StorageLockType::kExclusiveLock));
+  item.commit(nnint_set_add_2, *lock2);
+  EXPECT_FALSE(
+      item.try_acquire_exclusive_lock(nnint_set_add_1, StorageLockType::kNone,
+                                      StorageLockType::kExclusiveLock));
+
+  expect_final(item, int128_t{-6});
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+}
+
 TEST_P(StorageItemDeltaManagerTest, ExclusiveBytestring)
 {
   InvalidStateFlag invalid_state_flag;
@@ -566,8 +596,8 @@ INSTANTIATE_TEST_SUITE_P(
     BlockModes, StorageItemDeltaManagerTest,
     ::testing::Values(BlockExecutionMode::kBlockExecutionModeProposal,
                       BlockExecutionMode::kBlockExecutionModeValidation),
-    [](const ::testing::TestParamInfo<BlockExecutionMode>& info) {
-        return x23::show(info.param);
+    [](const ::testing::TestParamInfo<BlockExecutionMode> &info) {
+      return x23::show(info.param);
     });
 
 } // namespace hogd
