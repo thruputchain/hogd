@@ -590,6 +590,52 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
 
   expect_final(item, int128_t{-9});
 }
+
+TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  auto nnint_set_add_pos = make_nnint_delta(0, 10);
+  auto nnint_set_add_neg = make_nnint_delta(0, -6);
+
+  auto lk_pos =
+      item.try_reserve(nnint_set_add_pos, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_pos);
+  item.commit(nnint_set_add_pos, *lk_pos);
+  // value is 10
+
+  auto lk_neg =
+      item.try_reserve(nnint_set_add_neg, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_neg);
+  item.commit(nnint_set_add_neg, *lk_neg);
+  // value is 4
+
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    ASSERT_FALSE(item.try_reserve(nnint_set_add_neg,
+                                  StorageLock(StorageLockType::kNone)));
+  }
+
+  lk_pos =
+      item.try_reserve(nnint_set_add_pos, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_pos);
+  item.commit(nnint_set_add_pos, *lk_pos);
+  // value is 14
+
+  lk_neg =
+      item.try_reserve(nnint_set_add_neg, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_neg);
+  item.commit(nnint_set_add_neg, *lk_neg);
+  // value is 8
+
+  lk_neg =
+      item.try_reserve(nnint_set_add_neg, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_neg);
+  item.commit(nnint_set_add_neg, *lk_neg);
+  // value is 2
+
+  expect_final(item, int128_t{2});
+}
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(
