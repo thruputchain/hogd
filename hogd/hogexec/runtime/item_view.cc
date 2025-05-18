@@ -328,6 +328,48 @@ RetrocausalQueueItem::get_next_self_entry(uint32_t index) const
   return nullptr;
 }
 
+SyscallStatus<void>
+NativeTokenBalanceItem::add_deterministic_native_token_balance(int128_t amount)
+{
+  assert(!integer_add_overflow<int128_t>(native_token_balance_, amount));
+  int128_t new_balance = native_token_balance_ + amount;
+
+  if (new_balance < 0) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+  // In no sensible codepath should a user be able to get more of the native
+  // tokens in one place than exist in the entire supply.
+  assert(new_balance <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+
+  native_token_balance_ = new_balance;
+  return {};
+}
+
+void
+NativeTokenBalanceItem::add_nondeterministic_native_token_lock(
+    Nondeterministic<int128_t> const &amount)
+{
+  int128_t new_sub = amount.get();
+  assert(new_sub >= 0);
+  assert(new_sub <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+
+  additional_subtract_amount_ =
+      Nondeterministic<int128_t>{new_sub + additional_subtract_amount_.get()};
+}
+
+StorageDelta
+NativeTokenBalanceItem::get_delta() const
+{
+  assert(additional_subtract_amount_.get() >= 0);
+  int128_t subtract_amount =
+      native_token_balance_ - initial_native_token_balance_;
+  StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+  out.nnint() = NonnegativeInt128SetAddArgs{
+      .set_value = to_xdr(initial_native_token_balance_),
+      .add_value = to_xdr(subtract_amount - additional_subtract_amount_.get())};
+  return out;
+}
+
 std::optional<StorageItemType>
 UnmodifiedItem::get_item_type() const
 {

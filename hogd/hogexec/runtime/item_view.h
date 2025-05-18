@@ -1,15 +1,17 @@
 #pragma once
 
 #include <cassert>
+#include <limits>
 #include <optional>
 #include <variant>
 
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -100,6 +102,62 @@ private:
   uint32_t locally_consumed_index_ = 0;
 
   SnapshotStorageItem &base_item_;
+};
+
+class NativeTokenBalanceItem {
+public:
+  NativeTokenBalanceItem(int128_t initial_native_token_balance)
+    : native_token_balance_(initial_native_token_balance),
+      initial_native_token_balance_(initial_native_token_balance)
+  {
+    assert(initial_native_token_balance >= 0);
+    assert(initial_native_token_balance <=
+           int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+  }
+
+  // This is an overly aggressive assertion.
+  // We require that the maximum possible native token balance required to be
+  // locked for any given storage item is at most the total maximum supply of
+  // native tokens. We then also require that no action by the user can transfer
+  // more than the total supply of native tokens at any one time, and the user
+  // cannot try to hold more that the total amount of native tokens in the
+  // system at any one time. As such, we are guaranteed that for any set of
+  // nondeterministic native token required reservations (from try_reserve in
+  // the db), the sum of those reservations, plus any deltas added manually,
+  // will never overflow int128_t and thus will always fit into a StorageDelta.
+  // (assuming one transaction won't modify more than 2^64 storage items).
+  static_assert(std::numeric_limits<int128_t>::max() >=
+                int128_t{kTotalHogSupply} * int128_t{kHogDivisibility} *
+                    int128_t{std::numeric_limits<uint64_t>::max()});
+
+  StorageDelta get_delta() const;
+
+  constexpr static StorageItemType kItemType =
+      StorageItemType::kItemTypeNonnegativeInt;
+
+  SyscallStatus<void> validate() const
+  {
+    return native_token_balance_ >= 0
+               ? SyscallStatus<void>{}
+               : SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  // Returns the balance that the user sees.
+  // This is the balance, without applying any of the nondeterministic locks.
+  int128_t get_user_visible_balance() const { return native_token_balance_; }
+
+  SyscallStatus<void> add_deterministic_native_token_balance(int128_t amount);
+  // Mark the requirement that a certain amount of the native tokens be locked,
+  // based on the response of the db to a try_reserve call.
+  // The input should be nonnegative (the db returns the additional amount to be
+  // locked).
+  void add_nondeterministic_native_token_lock(
+      Nondeterministic<int128_t> const &amount);
+
+private:
+  Nondeterministic<int128_t> additional_subtract_amount_;
+  int128_t native_token_balance_;
+  int128_t initial_native_token_balance_;
 };
 
 // Represent state of an ItemView that has not been modified during
