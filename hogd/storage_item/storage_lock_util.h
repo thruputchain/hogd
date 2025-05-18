@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hogd/base/types.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 
@@ -22,6 +23,6 @@ struct MeteredStorageLock {
 StorageItemTypeClass delta_to_typeclass(StorageDelta const &delta);
 
 // Creates a kSetTypeclass lock for the given storage delta
-StorageLock delta_to_lock(StorageDelta const &delta);
+StorageLock delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode);
 
 } // namespace hogd

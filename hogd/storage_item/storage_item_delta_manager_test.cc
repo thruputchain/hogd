@@ -12,9 +12,11 @@
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -40,20 +42,37 @@ expect_final(StorageItemDeltaManager &item, int128_t nnint)
   EXPECT_EQ(snapshot->nnint(), nnint);
 }
 
+auto
+make_bounds_lock(int128_t add, int128_t sub)
+{
+  return NNIntBoundsLock{.add_amount = to_xdr(add),
+                         .subtract_amount = to_xdr(sub)};
+}
+
+auto
+make_nnint_delta(int128_t set, int128_t add)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+  delta.nnint().set_value = to_xdr(set);
+  delta.nnint().add_value = to_xdr(add);
+  return delta;
+};
+
 } // namespace
 
+class StorageItemDeltaManagerTest
+  : public ::testing::TestWithParam<BlockExecutionMode> {
+protected:
+  void SetUp() override { mode_ = GetParam(); }
+
+  BlockExecutionMode mode_;
+};
+
 // Change the typeclass of a storage item during execution
-TEST(StorageItemFrame, RewriteVariantTypeNullStart)
+TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
-
-  auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-    delta.nnint().set_value = to_xdr(set);
-    delta.nnint().add_value = to_xdr(add);
-    return delta;
-  };
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   StorageDelta nnint_set_add_1 = make_nnint_delta(0, 10);
@@ -85,9 +104,12 @@ TEST(StorageItemFrame, RewriteVariantTypeNullStart)
       item.try_reserve(nnint_set_add_3, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(nnint_lock_2);
   ASSERT_TRUE(nnint_lock_3);
-  // fails because too much subtraction
-  EXPECT_FALSE(
-      item.try_reserve(nnint_set_add_3, StorageLock(StorageLockType::kNone)));
+
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    // fails because too much subtraction
+    EXPECT_FALSE(
+        item.try_reserve(nnint_set_add_3, StorageLock(StorageLockType::kNone)));
+  }
   item.revert(nnint_lock_3->lock_);
 
   nnint_lock_3 =
@@ -104,21 +126,14 @@ TEST(StorageItemFrame, RewriteVariantTypeNullStart)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, RewriteVariantFromBase)
+TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
 {
   auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(base_item, &invalid_state_flag);
+  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
-
-  auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-    delta.nnint().set_value = to_xdr(set);
-    delta.nnint().add_value = to_xdr(add);
-    return delta;
-  };
 
   StorageDelta nnint_set_add = make_nnint_delta(0, 10);
 
@@ -150,23 +165,23 @@ TEST(StorageItemFrame, RewriteVariantFromBase)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                                &invalid_state_flag);
+                                &invalid_state_flag, mode_);
   expect_final(item, bytestring_delta.bytestring());
   expect_final(item2, bytestring_delta.bytestring());
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, DeleteItem)
+TEST_P(StorageItemDeltaManagerTest, DeleteItem)
 {
   InvalidStateFlag invalid_state_flag;
   auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
 
-  StorageItemDeltaManager item(base_item, &invalid_state_flag);
+  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_);
   ASSERT_TRUE(item.get_snapshot_item());
 
   // committing an empty round keeps item active
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                                &invalid_state_flag);
+                                &invalid_state_flag, mode_);
 
   ASSERT_TRUE(item2.get_snapshot_item());
 
@@ -186,16 +201,16 @@ TEST(StorageItemFrame, DeleteItem)
                                                    // post block
 
   StorageItemDeltaManager item3(item2.get_post_close_block_item(),
-                                &invalid_state_flag);
+                                &invalid_state_flag, mode_);
 
   EXPECT_FALSE(item3.get_snapshot_item());
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, ExclusiveLockAcquire)
+TEST_P(StorageItemDeltaManagerTest, ExclusiveLockAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   auto lock1 =
       item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
@@ -215,17 +230,10 @@ TEST(StorageItemFrame, ExclusiveLockAcquire)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
+TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
-
-  auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-    delta.nnint().set_value = to_xdr(set);
-    delta.nnint().add_value = to_xdr(add);
-    return delta;
-  };
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(5, -4);
@@ -251,9 +259,11 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
 
   EXPECT_EQ(lock3->lock_.full_typeclass_lock().typeclass.item_type(),
             StorageItemTypeClass::kItemTypeNonnegativeInt);
-  EXPECT_EQ(lock3->lock_.full_typeclass_lock()
-                .extra_lock_data.nnint_subtracted_amount(),
-            to_xdr(int128_t{-4}));
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    EXPECT_EQ(
+        lock3->lock_.full_typeclass_lock().extra_lock_data.nnint_bounds_lock(),
+        make_bounds_lock(int128_t{10}, int128_t{-4}));
+  }
 
   auto lock4 = item.try_reserve(nnint_set_add_4, lock3->lock_);
   ASSERT_TRUE(lock4);
@@ -261,9 +271,11 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
   EXPECT_EQ(lock4->lock_.lock_type(), StorageLockType::kSetItemTypeClass);
   EXPECT_EQ(lock4->lock_.full_typeclass_lock().typeclass.item_type(),
             StorageItemTypeClass::kItemTypeNonnegativeInt);
-  EXPECT_EQ(lock4->lock_.full_typeclass_lock()
-                .extra_lock_data.nnint_subtracted_amount(),
-            to_xdr(int128_t{-5}));
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    EXPECT_EQ(
+        lock4->lock_.full_typeclass_lock().extra_lock_data.nnint_bounds_lock(),
+        make_bounds_lock(int128_t{10}, int128_t{-5}));
+  }
 
   // return to nnint_set_add_2
   auto final_lock = item.try_reserve(nnint_set_add_2, lock4->lock_);
@@ -275,17 +287,10 @@ TEST(StorageItemFrame, NNIntSharedLock2SubSecondFails)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, NNIntFromExclusiveLock)
+TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLock)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
-
-  auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-    delta.nnint().set_value = to_xdr(set);
-    delta.nnint().add_value = to_xdr(add);
-    return delta;
-  };
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(10, -4);
@@ -312,10 +317,40 @@ TEST(StorageItemFrame, NNIntFromExclusiveLock)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, ExclusiveBytestring)
+TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  StorageDelta nnint_set_add_1 = make_nnint_delta(-5, 10);
+  StorageDelta nnint_set_add_2 = make_nnint_delta(-10, 4);
+
+  auto lock1 =
+      item.try_reserve(nnint_set_add_1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock1);
+
+  auto lock2 = item.try_reserve(nnint_set_add_2, lock1->lock_);
+  ASSERT_TRUE(lock2);
+
+  EXPECT_EQ(lock2->lock_.lock_type(), StorageLockType::kExclusiveLock);
+
+  // check to assert only one exclusive lock can be given out.
+  EXPECT_FALSE(
+      item.try_acquire_exclusive_lock(nnint_set_add_1, StorageLockType::kNone,
+                                      StorageLockType::kExclusiveLock));
+  item.commit(nnint_set_add_2, *lock2);
+  EXPECT_FALSE(
+      item.try_acquire_exclusive_lock(nnint_set_add_1, StorageLockType::kNone,
+                                      StorageLockType::kExclusiveLock));
+
+  expect_final(item, int128_t{-6});
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+}
+
+TEST_P(StorageItemDeltaManagerTest, ExclusiveBytestring)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -340,10 +375,10 @@ TEST(StorageItemFrame, ExclusiveBytestring)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
+TEST_P(StorageItemDeltaManagerTest, ExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   // This is just a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -384,10 +419,11 @@ TEST(StorageItemFrame, ExclusiveLockMultiAcquire)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
+TEST_P(StorageItemDeltaManagerTest, PermanentExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag,
+                               BlockExecutionMode::kBlockExecutionModeProposal);
 
   // merely a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -422,16 +458,10 @@ TEST(StorageItemFrame, PermanentExclusiveLockMultiAcquire)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemFrame, NNIntSimpleSetAdd)
+TEST_P(StorageItemDeltaManagerTest, NNIntSimpleSetAdd)
 {
-  auto make_nnint_delta = [](int128_t set, int128_t add) {
-    StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-    delta.nnint().set_value = to_xdr(set);
-    delta.nnint().add_value = to_xdr(add);
-    return delta;
-  };
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
 
   StorageDelta nnint_set_add = make_nnint_delta(5, 10);
 
@@ -445,7 +475,7 @@ TEST(StorageItemFrame, NNIntSimpleSetAdd)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST(StorageItemCosts, ExclusiveLockCostMatchNoPriorCommit)
+TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
 {
   auto make_bytestring_delta = [](x23::Vec<uint8_t> vec) {
     StorageDelta delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -454,7 +484,8 @@ TEST(StorageItemCosts, ExclusiveLockCostMatchNoPriorCommit)
   };
 
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag,
+                               BlockExecutionMode::kBlockExecutionModeProposal);
 
   auto bdelta_4 = make_bytestring_delta({0, 1, 2, 3});
   auto bdelta_6 = make_bytestring_delta({0, 1, 2, 3, 4, 5});
@@ -478,6 +509,141 @@ TEST(StorageItemCosts, ExclusiveLockCostMatchNoPriorCommit)
             lk_exclusive->locked_tokens_ + bytestring_cost(2));
 }
 
+TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
+{
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    // This test is only valid for validation mode
+    return;
+  }
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  // drive invalid and then back to valid
+
+  auto nnint_set_add_pos = make_nnint_delta(0, 10);
+  auto nnint_set_add_neg = make_nnint_delta(0, -6);
+
+  auto lk_pos =
+      item.try_reserve(nnint_set_add_pos, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_pos);
+  item.commit(nnint_set_add_pos, *lk_pos);
+
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  auto lk_neg =
+      item.try_reserve(nnint_set_add_neg, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_neg);
+  item.commit(nnint_set_add_neg, *lk_neg);
+
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  auto lk_neg2 =
+      item.try_reserve(nnint_set_add_neg, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_neg2);
+  item.commit(nnint_set_add_neg, *lk_neg2);
+
+  ASSERT_TRUE(invalid_state_flag.is_invalid());
+
+  auto lk_neg3 =
+      item.try_reserve(nnint_set_add_neg, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_neg3);
+  item.commit(nnint_set_add_neg, *lk_neg3);
+
+  ASSERT_TRUE(invalid_state_flag.is_invalid());
+
+  auto lk_pos2 =
+      item.try_reserve(nnint_set_add_pos, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_pos2);
+  item.commit(nnint_set_add_pos, *lk_pos2);
+
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  expect_final(item, int128_t{2});
+}
+
+TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  ASSERT_FALSE(item.try_reserve(make_nnint_delta(-10, -1),
+                                StorageLock(StorageLockType::kNone)));
+
+  auto nnint_set_add0 = make_nnint_delta(-10, 0);
+  auto lk0 =
+      item.try_reserve(nnint_set_add0, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk0);
+  item.commit(nnint_set_add0, *lk0);
+
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  auto nnint_set_add1 = make_nnint_delta(-10, 1);
+  auto lk1 =
+      item.try_reserve(nnint_set_add1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk1);
+  item.commit(nnint_set_add1, *lk1);
+
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  ASSERT_FALSE(item.try_reserve(make_nnint_delta(-10, -1),
+                                StorageLock(StorageLockType::kNone)));
+
+  expect_final(item, int128_t{-9});
+}
+
+TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  auto nnint_set_add_pos = make_nnint_delta(0, 10);
+  auto nnint_set_add_neg = make_nnint_delta(0, -6);
+
+  auto lk_pos =
+      item.try_reserve(nnint_set_add_pos, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_pos);
+  item.commit(nnint_set_add_pos, *lk_pos);
+  // value is 10
+
+  auto lk_neg =
+      item.try_reserve(nnint_set_add_neg, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_neg);
+  item.commit(nnint_set_add_neg, *lk_neg);
+  // value is 4
+
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    ASSERT_FALSE(item.try_reserve(nnint_set_add_neg,
+                                  StorageLock(StorageLockType::kNone)));
+  }
+
+  lk_pos =
+      item.try_reserve(nnint_set_add_pos, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_pos);
+  item.commit(nnint_set_add_pos, *lk_pos);
+  // value is 14
+
+  lk_neg =
+      item.try_reserve(nnint_set_add_neg, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_neg);
+  item.commit(nnint_set_add_neg, *lk_neg);
+  // value is 8
+
+  lk_neg =
+      item.try_reserve(nnint_set_add_neg, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk_neg);
+  item.commit(nnint_set_add_neg, *lk_neg);
+  // value is 2
+
+  expect_final(item, int128_t{2});
+}
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(
+    BlockModes, StorageItemDeltaManagerTest,
+    ::testing::Values(BlockExecutionMode::kBlockExecutionModeProposal,
+                      BlockExecutionMode::kBlockExecutionModeValidation),
+    [](const ::testing::TestParamInfo<BlockExecutionMode> &info) {
+      return x23::show(info.param);
+    });
 
 } // namespace hogd

@@ -47,6 +47,12 @@ public:
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
 
+  static x23::Async<DbTipResult> dbcoord_get_tip()
+  {
+    co_return DbTipResult{
+        DbResult::DbResultError}; // TODO(geoff): unimplemented
+  }
+
 private:
   BlockManager *block_manager_;
   x23::ThreadPool pool_ = x23::ThreadPool(2);

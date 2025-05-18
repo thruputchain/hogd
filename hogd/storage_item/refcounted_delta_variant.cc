@@ -1,8 +1,8 @@
 #include "hogd/storage_item/refcounted_delta_variant.h"
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -11,7 +11,6 @@
 #include <utility>
 #include <variant>
 
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_item/invalid_state_flag.h"
@@ -34,54 +33,84 @@ BytestringArgs::to_item() const
 std::shared_ptr<const StorageItemWrapper>
 NNIntSetAddArgs::to_item() const
 {
-  int128_t new_value = set_value_ + total_subtracted_;
-  int128_t total_add = total_added_.get_capped();
+  assert(lower_bound_.is_in_range<int128_t>() &&
+         upper_bound_.is_in_range<int128_t>());
+  auto new_value = final_value_.get_capped<int128_t>();
+  // assertions fails if there were locks that were acquired but not releases
+  assert(new_value == upper_bound_.get_capped<int128_t>());
+  assert(new_value == lower_bound_.get_capped<int128_t>());
 
-  int128_t out = 0;
+  return std::make_shared<const StorageItemWrapper>(new_value);
+}
 
-  if (integer_add_overflow<int128_t>(new_value, total_add)) {
-    out = std::numeric_limits<int128_t>::max();
-  }
-  else {
-    out = new_value + total_add;
-  }
+void
+NNIntSetAddArgs::release_bounds_lock(NNIntBoundsLock const &bounds_lock)
+{
+  assert(from_xdr(bounds_lock.add_amount) >= 0);
+  assert(from_xdr(bounds_lock.subtract_amount) <= 0);
 
-  return std::make_shared<const StorageItemWrapper>(out);
+  lower_bound_ -= from_xdr(bounds_lock.subtract_amount);
+  upper_bound_ -= from_xdr(bounds_lock.add_amount);
 }
 
 bool
-NNIntSetAddArgs::try_reserve_add(int128_t add_value)
+NNIntSetAddArgs::try_acquire_bounds_lock(NNIntBoundsLock const &bounds_lock)
 {
-  int128_t desired_subtracted = 0;
-  assert(add_value < 0);
+  assert(from_xdr(bounds_lock.add_amount) >= 0);
+  assert(from_xdr(bounds_lock.subtract_amount) <= 0);
 
-  if (integer_add_overflow(total_subtracted_, add_value, &desired_subtracted)) {
-    // more than INT128_MIN is subtracted from the counter.
-    // This is impossible, if we want to maintain that set+add >= 0.
+  if (set_value_ < 0 && from_xdr(bounds_lock.subtract_amount) < 0) {
+    // can only add to a set_value_ < 0
     return false;
   }
 
-  // desired_subtracted < 0, set_value > 0 => no overflow on addition
-  if (desired_subtracted + set_value_ < 0) {
-    // this new subtraction would drive the value below 0
+  lower_bound_ += from_xdr(bounds_lock.subtract_amount);
+  upper_bound_ += from_xdr(bounds_lock.add_amount);
+
+  auto undo_lock = [this, bounds_lock]() {
+    lower_bound_ -= from_xdr(bounds_lock.subtract_amount);
+    upper_bound_ -= from_xdr(bounds_lock.add_amount);
+  };
+
+  // assert both bounds are in [min(0, set_value_), INT128_MAX]
+  if (!lower_bound_.is_in_range<int128_t>() ||
+      !upper_bound_.is_in_range<int128_t>()) {
+    undo_lock();
     return false;
   }
 
-  total_subtracted_ = desired_subtracted;
-  return true;
+  auto lb = lower_bound_.get_capped<int128_t>();
+  if (set_value_ < 0) {
+    // can't acquire negative locks on a set_value_ < 0
+    assert(lb >= set_value_);
+    return true;
+  }
+  if (lb >= 0) {
+    return true;
+  }
+
+  // undo the above operations and return false
+  undo_lock();
+  return false;
 }
+
 void
 NNIntSetAddArgs::commit_add(int128_t add_value)
 {
-  assert(add_value > 0);
-  total_added_ += add_value;
+  lower_bound_ += add_value;
+  upper_bound_ += add_value;
+  final_value_ += add_value;
 }
 
-void
-NNIntSetAddArgs::revert_add(int128_t add_value)
+bool
+NNIntSetAddArgs::in_valid_state() const
 {
-  assert(add_value < 0);
-  total_subtracted_ -= add_value;
+  if (!final_value_.is_in_range<int128_t>()) {
+    return false;
+  }
+
+  auto val = final_value_.get_capped<int128_t>();
+  return (val >= std::min<int128_t>(set_value_, 0));
 }
 
 namespace {

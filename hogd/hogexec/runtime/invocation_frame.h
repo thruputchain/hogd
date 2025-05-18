@@ -127,7 +127,7 @@ public:
   // (useful for initialization).
   //
   // Also usable to check whether a deployment was rolled back by a reverted
-  // call frame. (even if a corresponding runtime entry exists).
+  // call frame.
   std::optional<SHA256Hash>
   lookup_locally_deployed_contract(ContractAddress const &addr) const;
 

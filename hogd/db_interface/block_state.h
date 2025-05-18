@@ -29,15 +29,17 @@ namespace hogd {
 // never commit anyways, so this does not affect correctness.
 class BlockState {
 public:
-  BlockState(BlockState *parent)
-    : storage_view_(parent->storage_view_.as_parent())
+  BlockState(BlockState *parent, BlockExecutionMode mode)
+    : storage_view_(parent->storage_view_.as_parent(), mode)
   {
     // if parent is committed to database, then we should
     // use the other constructor
     assert(!parent->is_committed_to_database());
   }
 
-  BlockState(InMemoryDatabase *base_db) : storage_view_(base_db) {}
+  BlockState(InMemoryDatabase *base_db, BlockExecutionMode mode)
+    : storage_view_(base_db, mode)
+  {}
 
   BlockState(BlockState const &) = delete;
   BlockState &operator=(BlockState const &) = delete;

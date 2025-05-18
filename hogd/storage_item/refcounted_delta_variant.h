@@ -9,10 +9,10 @@
 #include <vector>
 
 #include "hogd/base/types.h"
+#include "hogd/base/wide_integral.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
-#include "hogd/storage_item/uint256_reservation.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -49,7 +49,10 @@ struct BytestringArgs {
 // NNInt state
 class NNIntSetAddArgs {
 public:
-  NNIntSetAddArgs(int128_t set_value) : set_value_(set_value) {}
+  NNIntSetAddArgs(int128_t set_value)
+    : set_value_(set_value), lower_bound_(set_value), upper_bound_(set_value),
+      final_value_(set_value)
+  {}
 
   bool typeclass_match(int128_t candidate_set_value) const
   {
@@ -58,21 +61,19 @@ public:
   constexpr static int128_t get_cost() { return kBaseItemCost; }
   std::shared_ptr<const StorageItemWrapper> to_item() const;
 
-  // REQUIRES: add_value < 0
-  bool try_reserve_add(int128_t add_value);
-  // REQUIRES: add_value > 0
+  void release_bounds_lock(NNIntBoundsLock const &bounds_lock);
+  bool try_acquire_bounds_lock(NNIntBoundsLock const &bounds_lock);
+
+  // add can be positive or negative
   void commit_add(int128_t add_value);
 
-  // Undoes try_reserve_add
-  // REQUIRES: add_value < 0
-  void revert_add(int128_t add_value);
+  bool in_valid_state() const;
 
 private:
   int128_t set_value_;
-  // total subtracted by any pending or committed reservations
-  int128_t total_subtracted_ = 0;
-  // total added by any committed reservations
-  UInt256Reservation total_added_;
+
+  using bounds_t = WideIntegral<int128_t>;
+  bounds_t lower_bound_, upper_bound_, final_value_;
 };
 
 // Deleted state
