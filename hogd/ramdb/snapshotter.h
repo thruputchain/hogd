@@ -45,7 +45,8 @@ public:
       lls_{std::move(all_lls)}, begin_lsn_{begin_lsn}, end_lsn_{end_lsn},
       future_{promise_.get_future()}
   {
-    debug("snapshot will include {} loglets of items", lls_.size());
+    info("snapshot in lsn range [{}, {}) will include {} loglets of items",
+         begin_lsn_, end_lsn_, lls_.size());
   }
 
   void run(ItemAllocator &item_allocator);

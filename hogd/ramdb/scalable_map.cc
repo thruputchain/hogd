@@ -193,9 +193,6 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
       // If the item that is about to be overwritten should be included in an
       // ongoing snapshot, make sure the snapshot gets a copy of the item.
       uint64_t &old_lsn = (*bu)->lsn;
-      if (snap_end_lsn_)
-        warn("See snapshot lsn is {}, snap range {} {}", old_lsn,
-             snap_begin_lsn_, snap_end_lsn_);
       if (snap_end_lsn_ && old_lsn >= snap_begin_lsn_ &&
           old_lsn < snap_end_lsn_)
         snap_add_item_cb_(hash, *bu);
@@ -402,9 +399,11 @@ ScalableMap::register_in_progress_snapshot(
     locks.emplace_back(mu);
 
   snap_begin_lsn_ = begin_lsn;
-  snap_end_lsn_ = begin_lsn;
+  snap_end_lsn_ = end_lsn;
 
   snap_add_item_cb_ = add_item_cb;
+  debug("Registered snapshot range as {} to {} with cb {}", snap_begin_lsn_,
+        snap_end_lsn_, (bool)snap_add_item_cb_);
 }
 
 } // namespace hogd
