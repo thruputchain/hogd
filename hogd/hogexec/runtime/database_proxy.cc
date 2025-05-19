@@ -45,7 +45,7 @@ connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
 
 struct VoidMarker {};
 
-template<typename T, auto NullValue>
+template<auto NullValue>
 constexpr auto
 to_system_error_code(auto err, auto &&f)
 {
@@ -134,29 +134,27 @@ x23::Async<SystemStatus<std::optional<StorageItem>>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
   auto res = co_await read_client_.get_snapshot_item(block_id, addrkey);
-  co_return to_system_error_code<StorageItem, std::nullopt>(
-      res, [](StorageItem &&x) {
-        return std::make_optional<StorageItem>(std::move(x));
-      });
+  co_return to_system_error_code<std::nullopt>(res, [](StorageItem &&x) {
+    return std::make_optional<StorageItem>(std::move(x));
+  });
 }
 
 x23::Async<SystemStatus<std::shared_ptr<const Contract>>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
   auto res = co_await read_client_.get_contract(block_id, contract_hash);
-  co_return to_system_error_code<const Contract, nullptr>(
-      res,
-      [](const Contract &x) { return std::make_shared<const Contract>(x); });
+  co_return to_system_error_code<nullptr>(res, [](const Contract &x) {
+    return std::make_shared<const Contract>(x);
+  });
 }
 
 x23::Async<SystemStatus<std::optional<SHA256Hash>>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
   auto res = co_await read_client_.get_deployment(block_id, addr);
-  co_return to_system_error_code<SHA256Hash, std::nullopt>(
-      res, [](SHA256Hash &&x) {
-        return std::make_optional<SHA256Hash>(std::move(x));
-      });
+  co_return to_system_error_code<std::nullopt>(res, [](SHA256Hash &&x) {
+    return std::make_optional<SHA256Hash>(std::move(x));
+  });
 }
 
 x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
@@ -166,7 +164,7 @@ DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
 {
   auto res = co_await read_client_.get_next_retrocausal_queue_block(
       block_id, addrkey, search_start_number);
-  co_return to_system_error_code<RetrocausalQueueBlock, std::nullopt>(
+  co_return to_system_error_code<std::nullopt>(
       res, [](RetrocausalQueueBlock &&x) {
         return std::make_optional<RetrocausalQueueBlock>(std::move(x));
       });
@@ -180,13 +178,12 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(
       co_await read_client_.get_concurrent_retrocausal_queue_entry(block_id,
                                                                    addrkey,
                                                                    index);
-  co_return to_system_error_code<QueueEntry, std::nullopt>(
-      res, [](QueueEntry &&x) {
-        return std::make_optional<QueueEntry>(std::move(x));
-      });
+  co_return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
+    return std::make_optional<QueueEntry>(std::move(x));
+  });
 }
 
-x23::Async<SystemStatus<std::optional<int128_t>>>
+x23::Async<SystemStatus<std::optional<Nondeterministic<int128_t>>>>
 DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
                                  AddressAndKey const &addrkey,
                                  StorageDelta const &delta,
@@ -194,9 +191,10 @@ DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
 {
   auto res = co_await read_client_.try_reserve_delta(block_id, tx_id, addrkey,
                                                      delta, flags);
-  co_return to_system_error_code<int128_t, std::nullopt>(
-      res, [](int128_xdr &&x) {
-        return std::make_optional<int128_t>(from_xdr(std::move(x)));
+  co_return to_system_error_code<std::nullopt>(
+      res, [](int128_xdr &&x) -> std::optional<Nondeterministic<int128_t>> {
+        return std::make_optional<Nondeterministic<int128_t>>(
+            from_xdr(std::move(x)));
       });
 }
 
@@ -204,21 +202,21 @@ x23::Async<SystemStatus<void>>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
 {
   auto res = co_await read_client_.commit_transaction(block_id, tx_id);
-  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
+  co_return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
 x23::Async<SystemStatus<void>>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
   auto res = co_await read_client_.abort_transaction(block_id, tx_id);
-  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
+  co_return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
 x23::Async<SystemStatus<void>>
 DatabaseProxy::push_new_subtransaction(BlockID block_id, TransactionID tx_id)
 {
   auto res = co_await read_client_.push_new_subtransaction(block_id, tx_id);
-  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
+  co_return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
 x23::Async<SystemStatus<void>>
@@ -226,7 +224,7 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
   auto res = co_await read_client_.pop_subtransactions(block_id, tx_id, count);
-  co_return to_system_error_code<void, VoidMarker{}>(res, [] {});
+  co_return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
 } // namespace hogd

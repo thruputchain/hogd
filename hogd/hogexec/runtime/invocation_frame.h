@@ -71,14 +71,22 @@ public:
   }
 
   // returned pointer is invalidated by any call to add_item_view
+  // Does not create a new view if it does not exist
   ItemView *get_item_view(AddressAndKey const &addrkey);
   // returns pointer to the newly created view
   ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
   x23::Async<SystemStatus<bool>>
-  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
+  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
+                          StorageSnapshotCache &snapshot_cache);
 
 private:
+  // creates a new view in the frame, if it does not already exist, based on
+  // the snapshot cache.
+  SystemStatus<ItemView *>
+  get_or_add_item_view(AddressAndKey const &addrkey,
+                       StorageSnapshotCache &snapshot_cache);
+
   Invocation active_invocation_;
 
   // buffer (bytestring) to return to parent

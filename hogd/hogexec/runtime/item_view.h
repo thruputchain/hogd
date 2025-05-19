@@ -271,7 +271,9 @@ private:
 
         // debug assertions
         if constexpr (is_debug_build()) {
-          debug_assert_view_types(std::get<UnmodifiedItem>(delta_args_).base_item_, ItemType::kItemType);
+          debug_assert_view_types(
+              std::get<UnmodifiedItem>(delta_args_).base_item_,
+              ItemType::kItemType);
         }
       }
     }
@@ -279,7 +281,8 @@ private:
     return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
 
-  static void debug_assert_view_types(SnapshotStorageItem const &base_item, ItemViewType item_type);
+  static void debug_assert_view_types(SnapshotStorageItem const &base_item,
+                                      ItemViewType item_type);
 
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                RetrocausalQueueItem, NativeTokenBalanceItem>

@@ -56,7 +56,7 @@ public:
                                          AddressAndKey const &addrkey,
                                          uint32_t index);
 
-  x23::Async<SystemStatus<std::optional<int128_t>>>
+  x23::Async<SystemStatus<std::optional<Nondeterministic<int128_t>>>>
   try_reserve_delta(BlockID block_id, TransactionID tx_id,
                     AddressAndKey const &addrkey, StorageDelta const &delta,
                     StorageItemRPCFlagSet flags);
@@ -89,7 +89,7 @@ public:
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
   {}
 
-  x23::Async<SystemStatus<std::optional<int128_t>>>
+  x23::Async<SystemStatus<std::optional<Nondeterministic<int128_t>>>>
   try_reserve_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
                     StorageItemRPCFlagSet flags)
   {

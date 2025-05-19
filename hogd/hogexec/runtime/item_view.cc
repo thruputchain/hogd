@@ -322,12 +322,12 @@ NativeTokenBalanceItem::add_deterministic_native_token_balance(int128_t amount)
 {
   assert(!integer_add_overflow<int128_t>(native_token_balance_, amount));
   native_token_balance_ += amount;
-
   // validate performs the nonnegative check
 
   // In no sensible codepath should a user be able to get more of the native
   // tokens in one place than exist in the entire supply.
-  assert(native_token_balance_ <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+  assert(native_token_balance_ <=
+         int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
 }
 
 void
@@ -361,18 +361,19 @@ UnmodifiedItem::get_item_type() const
   return base_item_.type();
 }
 
-
-void 
-ItemView::debug_assert_view_types(SnapshotStorageItem const &base_item, ItemViewType item_type)
+void
+ItemView::debug_assert_view_types(SnapshotStorageItem const &base_item,
+                                  ItemViewType item_type)
 {
   auto const &addrkey = base_item.addrkey();
   if (item_type == ItemViewType::kNativeTokenBalance) {
-    assert(addrkey.key.type() == StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
-  } else {
-    assert(addrkey.key.type() != StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+    assert(addrkey.key.type() ==
+           StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  }
+  else {
+    assert(addrkey.key.type() !=
+           StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
   }
 }
-
-
 
 } // namespace hogd

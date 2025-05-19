@@ -51,10 +51,11 @@ protected:
   {
     assert(db_proxy_);
     return std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{
-          .address = ContractAddress{},
-          .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
-        },
+        StorageItem(StorageItemType::kItemTypeDeleted),
+        AddressAndKey{
+            .address = ContractAddress{},
+            .key = StorageKey(
+                StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)},
         BlockID{1}, *db_proxy_);
   }
 
@@ -319,7 +320,8 @@ TEST_F(ItemViewTest, NativeTokenBalance)
 
   // the amounts returned from the db are positive;
   // these will be subtracted from the user's balance
-  write.add_nondeterministic_native_token_lock(Nondeterministic<int128_t>(1000));
+  write.add_nondeterministic_native_token_lock(
+      Nondeterministic<int128_t>(1000));
   EXPECT_TRUE(proxy.set(write));
 
   // the nondeterministic sub amount is not visible to the user
