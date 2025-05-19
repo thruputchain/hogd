@@ -171,9 +171,9 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
       if (cost.has_value()) {
         auto map = additional_storage_costs.take();
         assert(cost.value().get() >= 0);
-        if (cost.value().get() > 0) {
-          (*map)[addrkey.address].get() += cost.value().get();
-        }
+        // TODO(geoff): Concievably skippable if cost.value().get() == 0.
+        // See note on NativeTokenBalanceItem::get_delta.
+        (*map)[addrkey.address].get() += cost.value().get();
       }
 
       auto count = pending_ops.fetch_sub(1);
