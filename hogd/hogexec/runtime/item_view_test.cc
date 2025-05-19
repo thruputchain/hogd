@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
@@ -46,6 +47,17 @@ protected:
         BlockID{1}, *db_proxy_);
   }
 
+  std::unique_ptr<SnapshotStorageItem> make_empty_native_token_balance_item()
+  {
+    assert(db_proxy_);
+    return std::make_unique<SnapshotStorageItem>(
+        StorageItem(StorageItemType::kItemTypeDeleted), AddressAndKey{
+          .address = ContractAddress{},
+          .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
+        },
+        BlockID{1}, *db_proxy_);
+  }
+
   std::unique_ptr<SnapshotStorageItem> make_rcq_item()
   {
     return std::make_unique<SnapshotStorageItem>(
@@ -58,7 +70,7 @@ TEST_F(ItemViewTest, Exists)
 {
   auto item = make_empty_item();
   ItemView proxy(item.get());
-  EXPECT_FALSE(proxy.get_item_type());
+  ASSERT_FALSE(proxy.template get<BytestringItem>());
 
   Bytestring bytes{0, 1, 2, 3};
   const auto *get_res = proxy.template get<BytestringItem>();
@@ -68,9 +80,8 @@ TEST_F(ItemViewTest, Exists)
   write1.bytestring_ = bytes;
 
   EXPECT_TRUE(proxy.set(write1));
-  ASSERT_TRUE(proxy.get_item_type());
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  EXPECT_EQ(*proxy.get_item_type(), StorageItemType::kItemTypeBytestring);
+
+  ASSERT_TRUE(proxy.template get<BytestringItem>());
 }
 
 TEST_F(ItemViewTest, SetBytestring)
@@ -281,6 +292,46 @@ TEST_F(ItemViewTest, RCQRead)
 
   EXPECT_TRUE(
       std::get<ValidationModeData>(validation_mode_data).check_all_consumed());
+}
+
+TEST_F(ItemViewTest, NativeTokenBalance)
+{
+  auto item = make_empty_native_token_balance_item();
+  ItemView proxy(item.get());
+
+  ASSERT_FALSE(proxy.template get<NativeTokenBalanceItem>());
+
+  NativeTokenBalanceItem write(100);
+  EXPECT_TRUE(proxy.set(write));
+  EXPECT_TRUE(proxy.template get<NativeTokenBalanceItem>());
+
+  write.add_deterministic_native_token_balance(200);
+  EXPECT_TRUE(proxy.set(write));
+
+  write.add_deterministic_native_token_balance(-400);
+  EXPECT_FALSE(proxy.set(write));
+
+  EXPECT_EQ(write.get_user_visible_balance(), -100);
+
+  // return to a positive deterministic balance, and now
+  // add a nondeterministic sub amount
+  write.add_deterministic_native_token_balance(1000);
+
+  // the amounts returned from the db are positive;
+  // these will be subtracted from the user's balance
+  write.add_nondeterministic_native_token_lock(Nondeterministic<int128_t>(1000));
+  EXPECT_TRUE(proxy.set(write));
+
+  // the nondeterministic sub amount is not visible to the user
+  EXPECT_EQ(write.get_user_visible_balance(), 900);
+
+  auto delta = proxy.get_delta();
+  ASSERT_TRUE(delta.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+  EXPECT_EQ(from_xdr(delta->nnint().set_value), 100);
+  EXPECT_EQ(from_xdr(delta->nnint().add_value), -200);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 } // namespace hogd

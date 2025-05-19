@@ -4,14 +4,17 @@
 #include <optional>
 #include <variant>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -37,21 +40,6 @@ make_nnint128_set_add(int128_t set, int128_t add)
 
 } // namespace
 
-std::optional<StorageItemType>
-ItemView::get_item_type() const
-{
-  return std::visit(
-      [](auto const &v) -> std::optional<StorageItemType> {
-        if constexpr (requires { v.kItemType; }) {
-          return v.kItemType;
-        }
-        else {
-          return v.get_item_type();
-        }
-      },
-      delta_args_);
-}
-
 std::optional<StorageDelta>
 ItemView::get_delta() const
 {
@@ -62,6 +50,7 @@ ItemView::get_delta() const
       delta_args_);
 }
 
+/*
 SyscallStatus<void>
 ItemView::can_accept_type(std::optional<StorageItemType> item_type) const
 {
@@ -81,7 +70,7 @@ ItemView::can_accept_type(std::optional<StorageItemType> item_type) const
   }
 
   return {};
-}
+} */
 
 StorageDelta
 BytestringItem::get_delta() const
@@ -265,7 +254,7 @@ RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
 SystemStatus<const RetrocausalQueueBlock *>
 RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 {
-  if (base_item_.type() == StorageItemType::kItemTypeRetrocausalQueue) {
+  if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
     return base_item_.get_next_rcq_block(search_start_index);
   }
   return nullptr;
@@ -328,21 +317,17 @@ RetrocausalQueueItem::get_next_self_entry(uint32_t index) const
   return nullptr;
 }
 
-SyscallStatus<void>
+void
 NativeTokenBalanceItem::add_deterministic_native_token_balance(int128_t amount)
 {
   assert(!integer_add_overflow<int128_t>(native_token_balance_, amount));
-  int128_t new_balance = native_token_balance_ + amount;
+  native_token_balance_ += amount;
 
-  if (new_balance < 0) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
+  // validate performs the nonnegative check
+
   // In no sensible codepath should a user be able to get more of the native
   // tokens in one place than exist in the entire supply.
-  assert(new_balance <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
-
-  native_token_balance_ = new_balance;
-  return {};
+  assert(native_token_balance_ <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
 }
 
 void
@@ -370,15 +355,24 @@ NativeTokenBalanceItem::get_delta() const
   return out;
 }
 
-std::optional<StorageItemType>
+std::optional<ItemViewType>
 UnmodifiedItem::get_item_type() const
 {
-  if (base_item_.type() == StorageItemType::kItemTypeDeleted) {
-    // no base object exists in the snapshot,
-    // so object has no type
-    return std::nullopt;
-  }
   return base_item_.type();
 }
+
+
+void 
+ItemView::debug_assert_view_types(SnapshotStorageItem const &base_item, ItemViewType item_type)
+{
+  auto const &addrkey = base_item.addrkey();
+  if (item_type == ItemViewType::kNativeTokenBalance) {
+    assert(addrkey.key.type() == StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  } else {
+    assert(addrkey.key.type() != StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  }
+}
+
+
 
 } // namespace hogd

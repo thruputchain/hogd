@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
+#include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -367,12 +368,10 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
   }
 
   if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    if (unmodified_item->base_item_.type() ==
-        StorageItemType::kItemTypeDeleted) {
+    if (!unmodified_item->base_item_.type()) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_item_.type() !=
-        StorageItemType::kItemTypeBytestring) {
+    if (*unmodified_item->base_item_.type() != ItemViewType::kBytestring) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     return std::as_bytes(std::span(unmodified_item->base_item_.bytestring()));
@@ -414,12 +413,10 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
   }
 
   if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    if (unmodified_item->base_item_.type() ==
-        StorageItemType::kItemTypeDeleted) {
+    if (!unmodified_item->base_item_.type()) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_item_.type() !=
-        StorageItemType::kItemTypeNonnegativeInt) {
+    if (*unmodified_item->base_item_.type() != ItemViewType::kNNInt) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     return {std::make_pair(unmodified_item->base_item_.nnint(), 0)};

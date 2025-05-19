@@ -1,12 +1,15 @@
 #pragma once
 
 #include <cassert>
+#include <concepts>
 #include <limits>
 #include <optional>
 #include <variant>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
@@ -18,14 +21,14 @@ namespace hogd {
 class SnapshotStorageItem;
 
 // Each of the item types has the following methods:
-// get_object_type()
-//   Return the type of the storage object, as it exists in the current view
 // get_delta()
 //   Return the storage delta that would be produced if this item view commits
 //   to the database.
 // validate()
 //   Validate the delta.  Called within set().  If validate() returns an error,
 //   the set() call in the ItemView is a no-op.
+// kItemType (static constant)
+//   The type of the item view.
 
 // Representing the internal state of a bytestring item.
 class BytestringItem {
@@ -33,8 +36,7 @@ public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
 
-  constexpr static StorageItemType kItemType =
-      StorageItemType::kItemTypeBytestring;
+  constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
 
   Bytestring bytestring_;
 };
@@ -44,8 +46,7 @@ class NNIntItem {
 public:
   StorageDelta get_delta() const;
   SyscallStatus<void> validate() const;
-  constexpr static StorageItemType kItemType =
-      StorageItemType::kItemTypeNonnegativeInt;
+  constexpr static ItemViewType kItemType = ItemViewType::kNNInt;
 
   int128_t base_value_;
   int128_t add_value_;
@@ -60,10 +61,9 @@ public:
   }
 
   constexpr static SyscallStatus<void> validate() { return {}; }
-
-  constexpr static std::optional<StorageItemType> kItemType = std::nullopt;
 };
 
+// Represent state of an item that is a retrocausal queue.
 class RetrocausalQueueItem {
 public:
   RetrocausalQueueItem(SnapshotStorageItem &base_item) : base_item_(base_item)
@@ -77,8 +77,7 @@ public:
     return delta;
   }
 
-  constexpr static StorageItemType kItemType =
-      StorageItemType::kItemTypeRetrocausalQueue;
+  constexpr static ItemViewType kItemType = ItemViewType::kRetrocausalQueue;
 
   SystemStatus<std::optional<QueueEntry>>
   get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
@@ -132,8 +131,7 @@ public:
 
   StorageDelta get_delta() const;
 
-  constexpr static StorageItemType kItemType =
-      StorageItemType::kItemTypeNonnegativeInt;
+  constexpr static ItemViewType kItemType = ItemViewType::kNativeTokenBalance;
 
   SyscallStatus<void> validate() const
   {
@@ -146,7 +144,7 @@ public:
   // This is the balance, without applying any of the nondeterministic locks.
   int128_t get_user_visible_balance() const { return native_token_balance_; }
 
-  SyscallStatus<void> add_deterministic_native_token_balance(int128_t amount);
+  void add_deterministic_native_token_balance(int128_t amount);
   // Mark the requirement that a certain amount of the native tokens be locked,
   // based on the response of the db to a try_reserve call.
   // The input should be nonnegative (the db returns the additional amount to be
@@ -171,9 +169,7 @@ public:
     return std::nullopt;
   }
 
-  // no validate() method, to ensure that set<UnmodifiedType> does not compile
-
-  std::optional<StorageItemType> get_item_type() const;
+  std::optional<ItemViewType> get_item_type() const;
 
   SnapshotStorageItem &base_item_;
 };
@@ -187,8 +183,6 @@ public:
   ItemView(SnapshotStorageItem *base_item)
     : delta_args_(UnmodifiedItem{.base_item_ = *base_item})
   {}
-
-  std::optional<StorageItemType> get_item_type() const;
 
   // Returns a pointer to the item view if it is of the given type,
   // otherwise returns nullptr.
@@ -224,21 +218,16 @@ public:
   template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
   {
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
-      auto validate_result = type.validate();
-      if (!validate_result) {
+      if (auto validate_result = type.validate(); !validate_result) {
         // Validation check asserts that the written item type is well-formed.
         return validate_result;
       }
     }
 
-    // The only item type that needs the get_item_type() method,
-    // instead of the constant, is UnmodifiedItem, which is never passed through
-    // this method anyways.
-    auto validate_type = can_accept_type(type.kItemType);
-    if (!validate_type) {
-      // no type mismatch; if you want to change an object's type,
+    if (auto type_match = can_accept_type<ItemType>(); !type_match) {
+      // no type mismatch allowed; if you want to change an object's type,
       // you must explicitly delete it first.
-      return validate_type;
+      return type_match;
     }
 
     delta_args_.emplace<ItemType>(type);
@@ -248,11 +237,52 @@ public:
   std::optional<StorageDelta> get_delta() const;
 
 private:
-  SyscallStatus<void>
-  can_accept_type(std::optional<StorageItemType> item_type) const;
+  template<typename ItemType> SyscallStatus<void> can_accept_type() const
+  {
+    static_assert(!std::same_as<ItemType, UnmodifiedItem>);
+
+    // writing a deletion is always allowed
+    if constexpr (std::same_as<ItemType, DeletedItem>) {
+      return {};
+    }
+    else {
+      // DeletedItem has no kItemType, so we need the constexpr else
+      // to make this compile.
+
+      // if item is nonexistent, any write is allowed
+      if (std::holds_alternative<DeletedItem>(delta_args_)) {
+        return {};
+      }
+      // if item is of the same type, any write is allowed
+      if (std::holds_alternative<ItemType>(delta_args_)) {
+        return {};
+      }
+
+      // if item is unmodified, writes allowed if types match
+      if (std::holds_alternative<UnmodifiedItem>(delta_args_)) {
+        auto item_type = std::get<UnmodifiedItem>(delta_args_).get_item_type();
+        if (!item_type) {
+          return {};
+        }
+
+        if (*item_type == ItemType::kItemType) {
+          return {};
+        }
+
+        // debug assertions
+        if constexpr (is_debug_build()) {
+          debug_assert_view_types(std::get<UnmodifiedItem>(delta_args_).base_item_, ItemType::kItemType);
+        }
+      }
+    }
+
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  static void debug_assert_view_types(SnapshotStorageItem const &base_item, ItemViewType item_type);
 
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
-               RetrocausalQueueItem>
+               RetrocausalQueueItem, NativeTokenBalanceItem>
       delta_args_;
 };
 

@@ -9,13 +9,49 @@
 #include <variant>
 
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
+
+std::variant<SnapshotStorageItem::BytestringEntry,
+             SnapshotStorageItem::NNIntEntry,
+             SnapshotStorageItem::RetrocausalQueueEntry,
+             SnapshotStorageItem::DeletedEntry,
+             SnapshotStorageItem::NativeTokenBalanceEntry>
+SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
+{
+  using ret_type =
+      std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
+                   DeletedEntry, NativeTokenBalanceEntry>;
+  switch (item.type()) {
+  case StorageItemType::kItemTypeBytestring:
+    return ret_type{std::in_place_type<BytestringEntry>,
+                    std::move(item.bytestring())};
+  case StorageItemType::kItemTypeNonnegativeInt:
+  {
+    if (db_key.type() ==
+        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
+      return ret_type{std::in_place_type<NativeTokenBalanceEntry>,
+                      from_xdr(item.nnint())};
+    }
+    // else regular contract data
+    assert(db_key.type() == StorageKeyType::kStorageKeyTypeContractData);
+    return ret_type{std::in_place_type<NNIntEntry>, from_xdr(item.nnint())};
+  }
+  case StorageItemType::kItemTypeRetrocausalQueue:
+    return ret_type{std::in_place_type<RetrocausalQueueEntry>};
+  case StorageItemType::kItemTypeDeleted:
+    return ret_type{std::in_place_type<DeletedEntry>};
+  }
+  assert(false);
+  std::unreachable();
+}
 
 SystemStatus<const RetrocausalQueueBlock *>
 SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
