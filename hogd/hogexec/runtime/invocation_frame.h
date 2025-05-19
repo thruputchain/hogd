@@ -60,10 +60,6 @@ public:
   // current call frame.
   void log(std::span<const std::byte> message);
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
-  std::unordered_map<AddressAndKey, ItemView> extract_modified_items()
-  {
-    return std::move(modified_items_);
-  }
 
   bool is_try_invoke() const
   {
