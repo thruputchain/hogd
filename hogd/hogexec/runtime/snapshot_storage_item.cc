@@ -19,38 +19,49 @@
 
 namespace hogd {
 
-std::variant<SnapshotStorageItem::BytestringEntry,
-             SnapshotStorageItem::NNIntEntry,
-             SnapshotStorageItem::RetrocausalQueueEntry,
-             SnapshotStorageItem::DeletedEntry,
-             SnapshotStorageItem::NativeTokenBalanceEntry>
-SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
+SnapshotStorageItem::variant_type
+SnapshotStorageItem::make_contract_key_variant(StorageItem item)
 {
-  using ret_type =
-      std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
-                   DeletedEntry, NativeTokenBalanceEntry>;
   switch (item.type()) {
   case StorageItemType::kItemTypeBytestring:
-    return ret_type{std::in_place_type<BytestringEntry>,
+    return variant_type{std::in_place_type<BytestringEntry>,
                     std::move(item.bytestring())};
   case StorageItemType::kItemTypeNonnegativeInt:
   {
-    if (db_key.type() ==
-        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
-      return ret_type{std::in_place_type<NativeTokenBalanceEntry>,
-                      from_xdr(item.nnint())};
-    }
-    // else regular contract data
-    assert(db_key.type() == StorageKeyType::kStorageKeyTypeContractData);
-    return ret_type{std::in_place_type<NNIntEntry>, from_xdr(item.nnint())};
+    return variant_type{std::in_place_type<NNIntEntry>, from_xdr(item.nnint())};
   }
   case StorageItemType::kItemTypeRetrocausalQueue:
-    return ret_type{std::in_place_type<RetrocausalQueueEntry>};
+    return variant_type{std::in_place_type<RetrocausalQueueEntry>};
   case StorageItemType::kItemTypeDeleted:
-    return ret_type{std::in_place_type<DeletedEntry>};
+    return variant_type{std::in_place_type<DeletedEntry>};
   }
   assert(false);
   std::unreachable();
+}
+
+SnapshotStorageItem::variant_type
+SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
+{
+  // handle different key types differently
+  switch (db_key.type()) {
+  case StorageKeyType::kStorageKeyTypeContractData:
+    return make_contract_key_variant(item);
+  case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+    switch (item.type()) {
+    case StorageItemType::kItemTypeNonnegativeInt:
+      return variant_type{std::in_place_type<NativeTokenBalanceEntry>,
+                      from_xdr(item.nnint())};
+    case StorageItemType::kItemTypeDeleted:
+      return variant_type{std::in_place_type<NativeTokenBalanceEntry>,
+                      0};
+    default:
+      assert(false);
+      std::unreachable();
+    }
+  default:
+    assert(false);
+    std::unreachable();
+  }
 }
 
 SystemStatus<const RetrocausalQueueBlock *>

@@ -21,7 +21,7 @@ namespace hogd {
 
 class RCQTest : public ::testing::Test, public NativeContractTestFramework {
 protected:
-  RCQTest() : NativeContractTestFramework(false) {}
+  RCQTest() : NativeContractTestFramework(true) {}
 
   void SetUp() override
   {

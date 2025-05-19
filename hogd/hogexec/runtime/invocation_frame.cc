@@ -171,7 +171,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
       if (cost.has_value()) {
         auto map = additional_storage_costs.take();
         assert(cost.value().get() >= 0);
-        // TODO(geoff): Concievably skippable if cost.value().get() == 0.
+        // TODO(geoff): Conceivably skippable if cost.value().get() == 0.
         // See note on NativeTokenBalanceItem::get_delta.
         (*map)[addrkey.address].get() += cost.value().get();
       }
@@ -213,6 +213,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
       co_return view_status.error();
     }
     auto *view = view_status.value();
+    assert(view);
     auto token_view = [&] {
       if (auto *unmodified_view = view->get<UnmodifiedItem>()) {
         return NativeTokenBalanceItem(
@@ -223,6 +224,8 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
       return *token_view;
     }();
     token_view.add_nondeterministic_native_token_lock(cost);
+    [[maybe_unused]] auto r = view->set(token_view);
+    assert(r);
   }
 
   // now try to reserve the storage costs in the database
@@ -428,9 +431,10 @@ InvocationFrame::get_or_add_item_view(AddressAndKey const &addrkey,
   }
 
   auto snapshot_item = snapshot_cache.try_get_snapshot_item(addrkey);
-  if (!snapshot_item) {
+  if (!snapshot_item.has_value()) {
     return snapshot_item.error();
   }
+  assert(snapshot_item.value());
 
   return add_item_view(addrkey, ItemView(snapshot_item.value()));
 }

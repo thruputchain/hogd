@@ -34,7 +34,9 @@ public:
     : addrkey_(std::move(addrkey)),
       entry_(make_variant(std::move(item), addrkey_.key)), block_id_(block_id),
       db_proxy_(db_proxy)
-  {}
+  {
+    assert(&db_proxy_);
+  }
 
   // Delete copy and move
   SnapshotStorageItem(const SnapshotStorageItem &) = delete;
@@ -135,14 +137,12 @@ private:
     std::optional<uint64_t> block_number_upper_bound_ = std::nullopt;
   };
 
-  static std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
-                      DeletedEntry, NativeTokenBalanceEntry>
-  make_variant(StorageItem item, StorageKey const &db_key);
+  using variant_type = std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry, DeletedEntry, NativeTokenBalanceEntry>;
+  static variant_type make_variant(StorageItem item, StorageKey const &db_key);
+  static variant_type make_contract_key_variant(StorageItem item);
 
   const AddressAndKey addrkey_;
-  std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry, DeletedEntry,
-               NativeTokenBalanceEntry>
-      entry_;
+  variant_type entry_;
 
   const BlockID block_id_;
   DatabaseProxy &db_proxy_;
