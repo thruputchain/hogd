@@ -1034,7 +1034,7 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
             StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), half_write_cost);
 
-  // Check that key0 and key1 exist and have value "abc"
+  // Check that key0 and key1 exist and have value "abc" and "def" respectively
   auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
   auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
   ASSERT_TRUE(data_item0_opt.has_value());

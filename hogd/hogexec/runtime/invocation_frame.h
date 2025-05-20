@@ -99,7 +99,7 @@ private:
                        std::vector<InvocationFrame> const &parent_frames,
                        StorageSnapshotCache &snapshot_cache);
 
-  Invocation active_invocation_;
+  const Invocation active_invocation_;
 
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
