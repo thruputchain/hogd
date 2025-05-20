@@ -244,15 +244,14 @@ TEST_F(DatabaseTest, Snapshot)
   insert_many(kInsertions, kThreads);
   remove_every_n(3);
 
-  DBStatus<uint64_t> lsn = db_->sync();
+  std::string path = "test-snapshot.snap";
+
+  auto [lsn, snapshot_future] = db_->sync_and_snapshot(path, 0);
   EXPECT_TRUE(lsn);
   if (lsn.has_value()) {
     EXPECT_EQ(*lsn, 1);
   }
-
-  std::string path = "test-snapshot.snap";
-
-  DBStatus<void> ret = db_->snapshot(path, 0, lsn.value());
+  DBStatus<void> ret = snapshot_future.get();
   EXPECT_TRUE(ret);
 
   using namespace std::chrono_literals;
@@ -283,16 +282,16 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
   insert_many(kInsertions, kThreads);
   remove_every_n(3);
 
-  DBStatus<uint64_t> lsn = db_->sync();
-  EXPECT_TRUE(lsn);
-  if (lsn.has_value()) {
-    EXPECT_EQ(*lsn, 1);
-  }
-
   std::string path = "test-snapshot-0-1.snap";
-
-  DBStatus<void> ret = db_->snapshot(path, 0, lsn.value());
-  EXPECT_TRUE(ret);
+  {
+    auto [lsn, snapshot_future] = db_->sync_and_snapshot(path, 0);
+    EXPECT_TRUE(lsn);
+    if (lsn.has_value()) {
+      EXPECT_EQ(*lsn, 1);
+    }
+    DBStatus<void> ret = snapshot_future.get();
+    EXPECT_TRUE(ret);
+  }
 
   using namespace std::chrono_literals;
   std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
@@ -306,16 +305,16 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
   remove_every_n(1);
   insert_many(kInsertions, kThreads);
 
-  DBStatus<uint64_t> lsn2 = db_->sync();
-  EXPECT_TRUE(lsn2);
-  if (lsn2.has_value()) {
-    EXPECT_EQ(*lsn2, 2);
-  }
-
   path = "test-snapshot-0-2.snap";
-
-  ret = db_->snapshot(path, 0, lsn2.value());
-  EXPECT_TRUE(ret);
+  {
+    auto [lsn, snapshot_future] = db_->sync_and_snapshot(path, 0);
+    EXPECT_TRUE(lsn);
+    if (lsn.has_value()) {
+      EXPECT_EQ(*lsn, 2);
+    }
+    DBStatus<void> ret = snapshot_future.get();
+    EXPECT_TRUE(ret);
+  }
 
   using namespace std::chrono_literals;
   std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
@@ -327,7 +326,7 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
   ASSERT_TRUE(static_cast<bool>(r));
 
   // the DB should succeed when we restore from disk.
-  ret = open_db();
+  auto ret = open_db();
   EXPECT_TRUE(static_cast<bool>(ret));
 
   check_integrity();
@@ -340,14 +339,15 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   insert_many(kInsertions, kThreads);
   remove_every_n(3);
 
-  DBStatus<uint64_t> lsn = db_->sync();
-  ASSERT_TRUE(lsn);
-  if (lsn.has_value()) {
-    ASSERT_EQ(*lsn, 1);
+  {
+    auto [lsn, snapshot_future] = db_->sync_and_snapshot(path0, 0);
+    EXPECT_TRUE(lsn);
+    if (lsn.has_value()) {
+      EXPECT_EQ(*lsn, 1);
+    }
+    DBStatus<void> ret = snapshot_future.get();
+    EXPECT_TRUE(ret);
   }
-
-  DBStatus<void> ret = db_->snapshot(path0, 0, lsn.value());
-  ASSERT_TRUE(ret);
 
   using namespace std::chrono_literals;
   std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
@@ -362,14 +362,15 @@ TEST_F(DatabaseTest, SnapshotIncremental)
 
   insert_many(kInsertions / 2, kThreads);
 
-  DBStatus<uint64_t> lsn2 = db_->sync();
-  ASSERT_TRUE(lsn2);
-  if (lsn2.has_value()) {
-    ASSERT_EQ(*lsn2, 2);
+  {
+    auto [lsn, snapshot_future] = db_->sync_and_snapshot(path1, 1);
+    EXPECT_TRUE(lsn);
+    if (lsn.has_value()) {
+      EXPECT_EQ(*lsn, 2);
+    }
+    DBStatus<void> ret = snapshot_future.get();
+    EXPECT_TRUE(ret);
   }
-
-  ret = db_->snapshot(path1, lsn.value(), lsn2.value());
-  ASSERT_TRUE(ret);
 
   check_integrity();
 
@@ -384,7 +385,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   ASSERT_TRUE(static_cast<bool>(r));
 
   // the DB should succeed when we restore from disk.
-  ret = open_db();
+  auto ret = open_db();
   ASSERT_TRUE(static_cast<bool>(ret));
 
   check_integrity();

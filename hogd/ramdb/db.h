@@ -108,12 +108,11 @@ public:
   DBStatus<uint64_t> sync();
 
   // write all of the state changes that happened at after begin_lsn (which is 0
-  // or an lsn previously returned by sync() but before end_lsn (which is an
-  // lsn previously returned by a different call to sync()).
-  // begin_lsn must always be an lsn from an earlier call to sync() than
-  // end_lsn.
-  DBStatus<void> snapshot(const std::string &path, uint64_t begin_lsn,
-                          uint64_t end_lsn);
+  // or an lsn previously returned by sync() but before this call (with
+  // begin_lsn being an lsn previously returned by a different call to sync()
+  // or sync_and_snapshot()).
+  std::pair<DBStatus<uint64_t>, std::future<DBStatus<void>>>
+  sync_and_snapshot(const std::string &path, uint64_t begin_lsn);
 
   // set_active indicates to the database that it is in a state of activity (if
   // yes is true) or inactivity (if yes is false).  When inactive, items should

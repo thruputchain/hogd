@@ -38,20 +38,24 @@ struct SnapshotStats {
 
 class Snapshotter {
 public:
-  Snapshotter(WorkerPool &pool, DiskWriter &disk_writer, ScalableMap &map,
+  Snapshotter(WorkerPool &pool, ScalableMap &map,
               std::vector<UniqueLoglet> &&all_lls, uint64_t begin_lsn,
-              uint64_t end_lsn)
-    : pool_{pool}, disk_writer_{disk_writer}, map_{map},
-      lls_{std::move(all_lls)}, begin_lsn_{begin_lsn}, end_lsn_{end_lsn},
-      future_{promise_.get_future()}
+              uint64_t end_lsn, LogletAllocator &loglet_allocator,
+              Directory &dir, std::string path, size_t max_file_size,
+              int write_head_order)
+
+    : pool_{pool}, map_{map}, lls_{std::move(all_lls)}, begin_lsn_{begin_lsn},
+      end_lsn_{end_lsn},
+      disk_writer_{loglet_allocator, dir, path, max_file_size, write_head_order}
   {
+    disk_writer_.init(begin_lsn); // start snap writer bg thread
     info("snapshot in lsn range [{}, {}) will include {} loglets of items",
          begin_lsn_, end_lsn_, lls_.size());
   }
 
   void run(ItemAllocator &item_allocator);
 
-  DBStatus<void> get_result() { return future_.get(); }
+  std::future<DBStatus<void>> get_future() { return promise_.get_future(); }
 
 private:
   DBStatus<void> snapshot();
@@ -68,15 +72,15 @@ private:
   }
 
   WorkerPool &pool_;
-  DiskWriter &disk_writer_;
   ScalableMap &map_;
   std::vector<UniqueLoglet> lls_;
 
   uint64_t begin_lsn_;
   uint64_t end_lsn_;
 
+  DiskWriter disk_writer_;
+
   std::promise<DBStatus<void>> promise_;
-  std::future<DBStatus<void>> future_;
 
   using SnapshotStats = detail::SnapshotStats;
   DBStatus<SnapshotStats> snapshot_one(Loglet &src);

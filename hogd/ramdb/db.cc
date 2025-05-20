@@ -194,8 +194,10 @@ Database::background_worker(const std::stop_token &stoken)
         expand = true;
     }
 
-    if (snapshot)
+    if (snapshot) {
       snapshotter_->run(item_allocator_);
+      snapshotter_.reset();
+    }
 
     // run item compactor if needed.
     if (compact) {
@@ -251,46 +253,48 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   return heap_size;
 }
 
-DBStatus<void>
-Database::snapshot(const std::string &path, uint64_t begin_lsn,
-                   uint64_t end_lsn)
+std::pair<DBStatus<uint64_t>, std::future<DBStatus<void>>>
+Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
 {
+  DBStatus<uint64_t> ret = sync();
+  if (!ret) [[unlikely]]
+    return {ret.error(), {}};
+
+  uint64_t end_lsn = ret.value();
+
   info("begin snapshot from lsn {} -> lsn {} to {}", begin_lsn, end_lsn, path);
 
   if (begin_lsn > end_lsn) {
     warn("bad snapshot begin and end lsns {} to {}", begin_lsn, end_lsn);
-    return DBError{DBCode::kTooBig};
+    return {DBError{DBCode::kTooBig}, {}};
   }
 
-  constexpr bool kChunkedSnapshot = false;
-  constexpr size_t kMaxFileSize = kChunkedSnapshot
-                                      ? kDiskLogFileThreshold
-                                      : std::numeric_limits<size_t>::max();
-  DiskWriter snap_writer{*loglet_allocator_, dir_, path, kMaxFileSize,
-                         write_head_order_};
-  snap_writer.init(begin_lsn); // start snap writer bg thread
-
+  std::future<DBStatus<void>> future{};
   {
     std::scoped_lock g(lock_);
 
     if (snapshotter_) {
       warn("tried to start a snapshot while one was already ongoing");
-      return DBError{DBCode::kExists};
+      return {DBError{DBCode::kExists}, {}};
     }
 
+    constexpr bool kChunkedSnapshot = false;
+    constexpr size_t kMaxFileSize = kChunkedSnapshot
+                                        ? kDiskLogFileThreshold
+                                        : std::numeric_limits<size_t>::max();
+
     // put()s with lsn s.t. begin_lsn <= lsn <= end_lsn
-    snapshotter_.emplace(pool_, snap_writer, map_,
-                         item_allocator_.take_loglets(), begin_lsn, end_lsn);
+    snapshotter_.emplace(pool_, map_, item_allocator_.take_loglets(), begin_lsn,
+                         end_lsn, *loglet_allocator_, dir_, path, kMaxFileSize,
+                         write_head_order_);
+
+    future = snapshotter_->get_future();
 
     // trigger background worker which serializes the work with compacting
     cv_.notify_one();
   }
 
-  // wait for the snapshot to be complete
-  DBStatus<void> ret = snapshotter_->get_result();
-  snapshotter_.reset();
-
-  return ret;
+  return {{end_lsn}, std::move(future)};
 }
 
 } // namespace hogd

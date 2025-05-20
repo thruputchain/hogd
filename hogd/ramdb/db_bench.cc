@@ -72,8 +72,10 @@ public:
   void prefill();
   // closes the DB and reloads all of its contents from disk.
   void reload_db(size_t num);
-  // fills a DB and then triggers a snapshot.
-  void snapshot(uint64_t end_lsn);
+  // triggers a snapshot.
+  void snapshot();
+  // syncs and starts a snapshot, returning a future for it.
+  std::pair<uint64_t, std::future<DBStatus<void>>> sync_and_snapshot();
 
 private:
   // the number of kv-pairs to access
@@ -164,11 +166,23 @@ Benchmark::reload_db(size_t num)
 }
 
 void
-Benchmark::snapshot(uint64_t end_lsn)
+Benchmark::snapshot()
 {
-  DBStatus<void> ret = db_->snapshot("snapshot.dat", 0, end_lsn);
-  if (unlikely(!ret))
-    fail(ret.error());
+  auto ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  if (unlikely(!ret.first))
+    fail(ret.first.error());
+  DBStatus<void> r = ret.second.get();
+  if (unlikely(!r))
+    fail(r.error());
+}
+
+std::pair<uint64_t, std::future<DBStatus<void>>>
+Benchmark::sync_and_snapshot()
+{
+  auto [lsn, future] = db_->sync_and_snapshot("snapshot.dat", 0);
+  if (unlikely(!lsn))
+    fail(lsn.error());
+  return {*lsn, std::move(future)};
 }
 
 std::unique_ptr<Benchmark>
@@ -263,7 +277,7 @@ do_snapshot(int num, int cores, int value_size)
 
   uint64_t end_lsn = ret.value();
 
-  return measure([&benchmark, end_lsn] { benchmark->snapshot(end_lsn); });
+  return measure([&benchmark, end_lsn] { benchmark->snapshot(); });
 }
 
 double
@@ -271,20 +285,20 @@ do_snapshot_ongoing_puts(int num, int cores, int value_size)
 {
   std::unique_ptr<Benchmark> benchmark = make_benchmark(num, cores, value_size);
   benchmark->prefill();
-  DBStatus<uint64_t> ret = benchmark->sync();
-  if (unlikely(!ret))
-    fail(ret.error());
-
-  uint64_t end_lsn = ret.value();
 
   std::atomic<bool> done{};
 
+  auto [_, snapshot_future] = benchmark->sync_and_snapshot();
   std::thread bg{[&benchmark, &done]() {
     while (!done)
       benchmark->write_items();
   }};
 
-  double r = measure([&benchmark, end_lsn] { benchmark->snapshot(end_lsn); });
+  double r = measure([&benchmark, &snapshot_future] {
+    DBStatus<void> r = snapshot_future.get();
+    if (unlikely(!r))
+      fail(r.error());
+  });
 
   done = true;
   bg.join();
