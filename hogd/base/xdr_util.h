@@ -3,10 +3,12 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string_view>
+#include <utility>
 
 #include "hogd/base/types.h"
 #include "types.hh"
@@ -65,6 +67,8 @@ template<> struct std::hash<hogd::AddressAndKey> {
         case hogd::StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
           return std::string_view();
       }
+      assert(false);
+      std::unreachable();
     }();
 
     // This is the hash combine used in boost
