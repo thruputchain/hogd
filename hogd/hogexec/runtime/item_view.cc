@@ -309,15 +309,15 @@ NativeTokenBalanceItem::add_deterministic_native_token_balance(int128_t amount)
 }
 
 void
-NativeTokenBalanceItem::add_nondeterministic_native_token_lock(
+NativeTokenBalanceItem::set_nondeterministic_native_token_lock(
     Nondeterministic<int128_t> const &amount)
 {
-  int128_t new_sub = amount.get();
+
+  [[maybe_unused]] int128_t new_sub = amount.get();
   assert(new_sub >= 0);
   assert(new_sub <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
 
-  additional_subtract_amount_ =
-      Nondeterministic<int128_t>{new_sub + additional_subtract_amount_.get()};
+  additional_subtract_amount_ = amount;
 }
 
 StorageDelta

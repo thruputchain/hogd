@@ -30,7 +30,7 @@ namespace hogd {
 class TryInvokeTest : public ::testing::Test,
                       public NativeContractTestFramework {
 public:
-  TryInvokeTest() : NativeContractTestFramework(true) {}
+  TryInvokeTest() : NativeContractTestFramework(false) {}
 
 protected:
   void SetUp() override {}

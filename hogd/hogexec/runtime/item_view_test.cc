@@ -320,7 +320,7 @@ TEST_F(ItemViewTest, NativeTokenBalance)
 
   // the amounts returned from the db are positive;
   // these will be subtracted from the user's balance
-  write.add_nondeterministic_native_token_lock(
+  write.set_nondeterministic_native_token_lock(
       Nondeterministic<int128_t>(1000));
   EXPECT_TRUE(proxy.set(write));
 

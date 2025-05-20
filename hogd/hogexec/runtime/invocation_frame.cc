@@ -168,15 +168,10 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
 
       if (cost.has_value()) {
         assert(cost.value().get() >= 0);
-
-        auto prev_cost = item_view.get_locked_storage_cost();
-        int128_t new_cost = cost.value().get() - prev_cost.get();
-
         auto map = additional_storage_costs.take();
         // TODO(geoff): Conceivably skippable if cost.value().get() == 0.
         // See note on NativeTokenBalanceItem::get_delta.
-        (*map)[addrkey.address].get() += new_cost;
-        item_view.set_locked_storage_cost(cost.value());
+        (*map)[addrkey.address].get() += cost.value().get();
       }
 
       auto count = pending_ops.fetch_sub(1);
@@ -227,7 +222,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
       assert(token_view);
       return *token_view;
     }();
-    token_view.add_nondeterministic_native_token_lock(cost);
+    token_view.set_nondeterministic_native_token_lock(cost);
     [[maybe_unused]] auto r = view->set(token_view);
     assert(r);
   }
