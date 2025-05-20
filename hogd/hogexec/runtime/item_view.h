@@ -149,11 +149,11 @@ public:
   // based on the response of the db to a try_reserve call.
   // The input should be nonnegative (the db returns the additional amount to be
   // locked).
-  void set_nondeterministic_native_token_lock(
+  void add_nondeterministic_native_token_lock(
       Nondeterministic<int128_t> const &amount);
 
 private:
-  Nondeterministic<int128_t> additional_subtract_amount_;
+  Nondeterministic<int128_t> additional_subtract_amount_ = 0;
   int128_t native_token_balance_;
   int128_t initial_native_token_balance_;
 };
@@ -236,6 +236,16 @@ public:
 
   std::optional<StorageDelta> get_delta() const;
 
+  Nondeterministic<int128_t> get_locked_storage_cost() const
+  {
+    return locked_storage_cost_;
+  }
+
+  void set_locked_storage_cost(Nondeterministic<int128_t> cost)
+  {
+    locked_storage_cost_ = cost;
+  }
+
 private:
   template<typename ItemType> SyscallStatus<void> can_accept_type() const
   {
@@ -287,6 +297,7 @@ private:
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                RetrocausalQueueItem, NativeTokenBalanceItem>
       delta_args_;
+  Nondeterministic<int128_t> locked_storage_cost_ = 0;
 };
 
 } // namespace hogd

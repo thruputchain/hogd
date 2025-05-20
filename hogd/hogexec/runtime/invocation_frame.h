@@ -30,6 +30,13 @@ class InvocationFrame {
 public:
   InvocationFrame(Invocation invocation, InvokeFlagSet flags);
 
+  // Disable copy construction/assignment but allow move ctor
+  InvocationFrame(InvocationFrame const &) = delete;
+  InvocationFrame &operator=(InvocationFrame const &) = delete;
+
+  InvocationFrame(InvocationFrame &&) noexcept = default;
+  InvocationFrame &operator=(InvocationFrame &&) noexcept = delete;
+
   // the invocation that started this call frame
   Invocation const &active_invocation() const { return active_invocation_; }
 
@@ -68,19 +75,28 @@ public:
 
   // returned pointer is invalidated by any call to add_item_view
   // Does not create a new view if it does not exist
-  ItemView *get_item_view(AddressAndKey const &addrkey);
+  auto *get_item_view(this auto &self, AddressAndKey const &addrkey)
+  {
+    auto it = self.modified_items_.find(addrkey);
+    if (it != self.modified_items_.end()) {
+      return &(it->second);
+    }
+    return static_cast<decltype(&(it->second))>(nullptr);
+  }
   // returns pointer to the newly created view
   ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
   x23::Async<SystemStatus<bool>>
   try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
+                          std::vector<InvocationFrame> const &parent_frames,
                           StorageSnapshotCache &snapshot_cache);
 
 private:
   // creates a new view in the frame, if it does not already exist, based on
-  // the snapshot cache.
+  // parent frames and the snapshot cache.
   SystemStatus<ItemView *>
   get_or_add_item_view(AddressAndKey const &addrkey,
+                       std::vector<InvocationFrame> const &parent_frames,
                        StorageSnapshotCache &snapshot_cache);
 
   Invocation active_invocation_;

@@ -116,7 +116,7 @@ SystemCallHandler::try_commit_transaction()
   assert(last_frame_.has_value());
 
   auto r =
-      co_await last_frame_.value().try_acquire_frame_locks(db_proxy_,
+      co_await last_frame_.value().try_acquire_frame_locks(db_proxy_, {},
                                                            snapshot_cache_);
   if (!r.has_value()) {
     co_return r.error();

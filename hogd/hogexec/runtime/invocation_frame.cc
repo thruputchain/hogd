@@ -9,6 +9,7 @@
 #include <span>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -127,8 +128,10 @@ do_try_reserve_detached(AddressAndKey const &addrkey, ItemView const &item_view,
 } // namespace
 
 x23::Async<SystemStatus<bool>>
-InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
-                                         StorageSnapshotCache &snapshot_cache)
+InvocationFrame::try_acquire_frame_locks(
+    PerTransactionDatabaseProxy &db_proxy,
+    std::vector<InvocationFrame> const &parent_frames,
+    StorageSnapshotCache &snapshot_cache)
 {
   auto [async, cb] = x23::make_async<void>();
   std::atomic<uint32_t> pending_ops = modified_items_.size();
@@ -168,10 +171,20 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
 
       if (cost.has_value()) {
         assert(cost.value().get() >= 0);
+
+        // How much of the current item view's cost is already reflected in the
+        // corresponding item view of this frame
+        // Note: we don't just recompute from 0 because some items might not
+        // have been modified in this frame, but still need to be accounted for
+        // in storage costs.
+        auto prev_cost = item_view.get_locked_storage_cost();
+
+        int128_t marginal = cost.value().get() - prev_cost.get();
         auto map = additional_storage_costs.take();
         // TODO(geoff): Conceivably skippable if cost.value().get() == 0.
         // See note on NativeTokenBalanceItem::get_delta.
-        (*map)[addrkey.address].get() += cost.value().get();
+        (*map)[addrkey.address].get() += marginal;
+        item_view.set_locked_storage_cost(cost.value());
       }
 
       auto count = pending_ops.fetch_sub(1);
@@ -206,7 +219,8 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
         .address = addr,
         .key =
             StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
-    auto view_status = get_or_add_item_view(addrkey, snapshot_cache);
+    auto view_status =
+        get_or_add_item_view(addrkey, parent_frames, snapshot_cache);
 
     if (!view_status.has_value()) {
       co_return view_status.error();
@@ -222,7 +236,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
       assert(token_view);
       return *token_view;
     }();
-    token_view.set_nondeterministic_native_token_lock(cost);
+    token_view.add_nondeterministic_native_token_lock(cost);
     [[maybe_unused]] auto r = view->set(token_view);
     assert(r);
   }
@@ -309,7 +323,7 @@ InvocationFrameStack::finish_frame(InvokeResult result,
       // If we're in proposal mode, we need to acquire the frame locks.
       if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         auto acq_res =
-            frame_stack_.back().try_acquire_frame_locks(db_proxy_,
+            frame_stack_.back().try_acquire_frame_locks(db_proxy_, frame_stack_,
                                                         snapshot_cache_)();
         if (!acq_res.has_value()) {
           return acq_res.error();
@@ -412,16 +426,6 @@ InvocationFrameStack::lookup_locally_deployed_contract(
 }
 
 ItemView *
-InvocationFrame::get_item_view(AddressAndKey const &addrkey)
-{
-  auto it = modified_items_.find(addrkey);
-  if (it != modified_items_.end()) {
-    return &(it->second);
-  }
-  return nullptr;
-}
-
-ItemView *
 InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
 {
   assert(!modified_items_.contains(addrkey));
@@ -430,13 +434,23 @@ InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
 }
 
 SystemStatus<ItemView *>
-InvocationFrame::get_or_add_item_view(AddressAndKey const &addrkey,
-                                      StorageSnapshotCache &snapshot_cache)
+InvocationFrame::get_or_add_item_view(
+    AddressAndKey const &addrkey,
+    std::vector<InvocationFrame> const &parent_frames,
+    StorageSnapshotCache &snapshot_cache)
 {
+  assert(parent_frames.empty() || &parent_frames.back() == this);
+
   if (auto *view = get_item_view(addrkey)) {
     return view;
   }
 
+  for (int32_t i = parent_frames.size() - 2; i >= 0; --i) {
+    auto const &parent_frame = parent_frames[i];
+    if (auto const *view = parent_frame.get_item_view(addrkey)) {
+      return add_item_view(addrkey, *view);
+    }
+  }
   auto snapshot_item = snapshot_cache.try_get_snapshot_item(addrkey);
   if (!snapshot_item.has_value()) {
     return snapshot_item.error();
