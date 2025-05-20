@@ -12,7 +12,6 @@
 
 #include "hogd/base/types.h"
 #include "types.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
