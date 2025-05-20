@@ -50,28 +50,6 @@ ItemView::get_delta() const
       delta_args_);
 }
 
-/*
-SyscallStatus<void>
-ItemView::can_accept_type(std::optional<StorageItemType> item_type) const
-{
-  if (!item_type) {
-    // Writing a deletion; this is always allowed
-    return {};
-  }
-
-  auto current_type = get_item_type();
-  if (!current_type) {
-    // Item is in deleted state; therefore it is allowed to write anything
-    return {};
-  }
-
-  if (*current_type != *item_type) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
-  return {};
-} */
-
 StorageDelta
 BytestringItem::get_delta() const
 {
