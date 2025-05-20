@@ -745,6 +745,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   advance_block();
 }
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(TryInvokeTest, StorageCostAccounting)
 {
   // Test that checks that storage costs are accounted for correctly in try
@@ -1050,5 +1051,6 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
   auto data_item2_opt = lookup_storage_item_from_db(data_addrkey2);
   ASSERT_FALSE(data_item2_opt.has_value());
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

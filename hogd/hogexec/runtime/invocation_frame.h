@@ -34,6 +34,7 @@ public:
   InvocationFrame(InvocationFrame const &) = delete;
   InvocationFrame &operator=(InvocationFrame const &) = delete;
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   InvocationFrame(InvocationFrame &&) noexcept = default;
   InvocationFrame &operator=(InvocationFrame &&) noexcept = delete;
 
