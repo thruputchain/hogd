@@ -70,6 +70,9 @@ int setup_create_contract(void *context, void *db,
 int setup_deploy_contract(void *db, const uint8_t *deployment_addr,
                           const uint8_t *contract_hash);
 
+void setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
+                                        int64_t tokens);
+
 void *open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
                            unsigned int signed_tx_len);
 void close_syscall_handler(void *syscall_handler);

@@ -52,12 +52,12 @@ operator""_GiB(unsigned long long int gib)
 // This should make auditing for nondeterminism easier.
 template<typename T> class Nondeterministic {
 public:
-  template<typename... Args>
+  template<typename... Args> requires std::is_constructible_v<T, Args...>
   Nondeterministic(Args &&...args)
     : nondeterministic_value_(std::forward<Args>(args)...)
   {}
 
-  T const &get() { return nondeterministic_value_; }
+  auto &get(this auto &self) { return self.nondeterministic_value_; }
 
 private:
   T nondeterministic_value_;

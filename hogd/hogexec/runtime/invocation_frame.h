@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -28,6 +29,14 @@ class StorageSnapshotCache;
 class InvocationFrame {
 public:
   InvocationFrame(Invocation invocation, InvokeFlagSet flags);
+
+  // Disable copy construction/assignment but allow move ctor
+  InvocationFrame(InvocationFrame const &) = delete;
+  InvocationFrame &operator=(InvocationFrame const &) = delete;
+
+  // NOLINTNEXTLINE(bugprone-exception-escape)
+  InvocationFrame(InvocationFrame &&) noexcept = default;
+  InvocationFrame &operator=(InvocationFrame &&) noexcept = delete;
 
   // the invocation that started this call frame
   Invocation const &active_invocation() const { return active_invocation_; }
@@ -59,10 +68,6 @@ public:
   // current call frame.
   void log(std::span<const std::byte> message);
   std::vector<LogEntry> extract_logs() { return std::move(logs_); }
-  std::unordered_map<AddressAndKey, ItemView> extract_modified_items()
-  {
-    return std::move(modified_items_);
-  }
 
   bool is_try_invoke() const
   {
@@ -70,15 +75,32 @@ public:
   }
 
   // returned pointer is invalidated by any call to add_item_view
-  ItemView *get_item_view(AddressAndKey const &addrkey);
+  // Does not create a new view if it does not exist
+  auto *get_item_view(this auto &self, AddressAndKey const &addrkey)
+  {
+    auto it = self.modified_items_.find(addrkey);
+    if (it != self.modified_items_.end()) {
+      return &(it->second);
+    }
+    return static_cast<decltype(&(it->second))>(nullptr);
+  }
   // returns pointer to the newly created view
   ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
   x23::Async<SystemStatus<bool>>
-  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
+  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
+                          std::vector<InvocationFrame> const &parent_frames,
+                          StorageSnapshotCache &snapshot_cache);
 
 private:
-  Invocation active_invocation_;
+  // creates a new view in the frame, if it does not already exist, based on
+  // parent frames and the snapshot cache.
+  SystemStatus<ItemView *>
+  get_or_add_item_view(AddressAndKey const &addrkey,
+                       std::vector<InvocationFrame> const &parent_frames,
+                       StorageSnapshotCache &snapshot_cache);
+
+  const Invocation active_invocation_;
 
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;

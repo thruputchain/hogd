@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/item_view.h"
+#include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -114,7 +115,9 @@ SystemCallHandler::try_commit_transaction()
   }
   assert(last_frame_.has_value());
 
-  auto r = co_await last_frame_.value().try_acquire_frame_locks(db_proxy_);
+  auto r =
+      co_await last_frame_.value().try_acquire_frame_locks(db_proxy_, {},
+                                                           snapshot_cache_);
   if (!r.has_value()) {
     co_return r.error();
   }
@@ -367,12 +370,11 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
   }
 
   if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    if (unmodified_item->base_item_.type() ==
-        StorageItemType::kItemTypeDeleted) {
+    auto type = unmodified_item->base_item_.type();
+    if (!type) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_item_.type() !=
-        StorageItemType::kItemTypeBytestring) {
+    if (*type != ItemViewType::kBytestring) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     return std::as_bytes(std::span(unmodified_item->base_item_.bytestring()));
@@ -414,12 +416,11 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
   }
 
   if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    if (unmodified_item->base_item_.type() ==
-        StorageItemType::kItemTypeDeleted) {
+    auto type = unmodified_item->base_item_.type();
+    if (!type) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (unmodified_item->base_item_.type() !=
-        StorageItemType::kItemTypeNonnegativeInt) {
+    if (*type != ItemViewType::kNNInt) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     return {std::make_pair(unmodified_item->base_item_.nnint(), 0)};

@@ -5,17 +5,64 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <variant>
 
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {
+
+SnapshotStorageItem::variant_type
+SnapshotStorageItem::make_contract_key_variant(StorageItem item)
+{
+  switch (item.type()) {
+  case StorageItemType::kItemTypeBytestring:
+    return variant_type{std::in_place_type<BytestringEntry>,
+                        std::move(item.bytestring())};
+  case StorageItemType::kItemTypeNonnegativeInt:
+  {
+    return variant_type{std::in_place_type<NNIntEntry>, from_xdr(item.nnint())};
+  }
+  case StorageItemType::kItemTypeRetrocausalQueue:
+    return variant_type{std::in_place_type<RetrocausalQueueEntry>};
+  case StorageItemType::kItemTypeDeleted:
+    return variant_type{std::in_place_type<DeletedEntry>};
+  }
+  assert(false);
+  throw std::runtime_error("Impossible");
+}
+
+SnapshotStorageItem::variant_type
+SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
+{
+  // handle different key types differently
+  switch (db_key.type()) {
+  case StorageKeyType::kStorageKeyTypeContractData:
+    return make_contract_key_variant(item);
+  case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+    switch (item.type()) {
+    case StorageItemType::kItemTypeNonnegativeInt:
+      return variant_type{std::in_place_type<NativeTokenBalanceEntry>,
+                          from_xdr(item.nnint())};
+    case StorageItemType::kItemTypeDeleted:
+      return variant_type{std::in_place_type<NativeTokenBalanceEntry>, 0};
+    default:
+      assert(false);
+      throw std::runtime_error("Impossible");
+    }
+  default:
+    assert(false);
+    throw std::runtime_error("Impossible");
+  }
+}
 
 SystemStatus<const RetrocausalQueueBlock *>
 SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(

@@ -10,6 +10,7 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -18,6 +19,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -105,6 +107,30 @@ public:
     StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
     key.contract_data_key() = make_storage_key(str);
     return AddressAndKey{.address = address, .key = std::move(key)};
+  }
+
+  static Bytestring make_bytestring(std::string_view str)
+  {
+    Bytestring bytestring;
+    bytestring.resize_uninitialized(str.size());
+    std::memcpy(bytestring.data(), str.data(), str.size());
+    return bytestring;
+  }
+
+  void setup_grant_storage_token(ContractAddress const &address,
+                                 int128_t amount)
+  {
+    assert(amount >= 0);
+    assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
+
+    AddressAndKey addrkey = {
+        .address = address,
+        .key =
+            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+
+    in_memory_db_.write_item(addrkey,
+                             std::make_shared<const StorageItemWrapper>(
+                                 amount));
   }
 
 private:

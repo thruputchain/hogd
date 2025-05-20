@@ -4,14 +4,17 @@
 #include <optional>
 #include <variant>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
+#include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -37,21 +40,6 @@ make_nnint128_set_add(int128_t set, int128_t add)
 
 } // namespace
 
-std::optional<StorageItemType>
-ItemView::get_item_type() const
-{
-  return std::visit(
-      [](auto const &v) -> std::optional<StorageItemType> {
-        if constexpr (requires { v.kItemType; }) {
-          return v.kItemType;
-        }
-        else {
-          return v.get_item_type();
-        }
-      },
-      delta_args_);
-}
-
 std::optional<StorageDelta>
 ItemView::get_delta() const
 {
@@ -60,27 +48,6 @@ ItemView::get_delta() const
         return v.get_delta();
       },
       delta_args_);
-}
-
-SyscallStatus<void>
-ItemView::can_accept_type(std::optional<StorageItemType> item_type) const
-{
-  if (!item_type) {
-    // Writing a deletion; this is always allowed
-    return {};
-  }
-
-  auto current_type = get_item_type();
-  if (!current_type) {
-    // Item is in deleted state; therefore it is allowed to write anything
-    return {};
-  }
-
-  if (*current_type != *item_type) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
-  return {};
 }
 
 StorageDelta
@@ -265,7 +232,7 @@ RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
 SystemStatus<const RetrocausalQueueBlock *>
 RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 {
-  if (base_item_.type() == StorageItemType::kItemTypeRetrocausalQueue) {
+  if (base_item_.type() == ItemViewType::kRetrocausalQueue) {
     return base_item_.get_next_rcq_block(search_start_index);
   }
   return nullptr;
@@ -328,15 +295,77 @@ RetrocausalQueueItem::get_next_self_entry(uint32_t index) const
   return nullptr;
 }
 
-std::optional<StorageItemType>
+void
+NativeTokenBalanceItem::add_deterministic_native_token_balance(int128_t amount)
+{
+  assert(!integer_add_overflow<int128_t>(native_token_balance_, amount));
+  native_token_balance_ += amount;
+  // validate performs the nonnegative check
+
+  // In no sensible codepath should a user be able to get more of the native
+  // tokens in one place than exist in the entire supply.
+  assert(native_token_balance_ <=
+         int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+}
+
+void
+NativeTokenBalanceItem::add_nondeterministic_native_token_lock(
+    Nondeterministic<int128_t> const &amount)
+{
+
+  int128_t new_sub = amount.get();
+  assert(new_sub >= 0);
+  assert(new_sub <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+
+  additional_subtract_amount_.get() += new_sub;
+}
+
+StorageDelta
+NativeTokenBalanceItem::get_delta() const
+{
+  assert(additional_subtract_amount_.get() >= 0);
+  int128_t subtract_amount =
+      native_token_balance_ - initial_native_token_balance_;
+  int128_t additional_sub = additional_subtract_amount_.get();
+
+  StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+  out.nnint() =
+      NonnegativeInt128SetAddArgs{.set_value =
+                                      to_xdr(initial_native_token_balance_),
+                                  .add_value =
+                                      to_xdr(subtract_amount - additional_sub)};
+  // TODO(geoff):
+  // We could conceivably avoid this delta if out.add_value == 0.
+  // I'm skipping this optimization for now, because that condition
+  // depends on the nondeterministic data in this item,
+  // and I want to limit how that nondeterministic data is incorporated
+  // downstream until we have a full picture the rest of the system. (E.g. --
+  // one failure case would be to have a contract be deleted, which could delete
+  // the corresponding db item --- and that would be a conflict with this delta.
+  // So lets hold off on this optimization until we at least figure out contract
+  // deletion behavior).
+  return out;
+}
+
+std::optional<ItemViewType>
 UnmodifiedItem::get_item_type() const
 {
-  if (base_item_.type() == StorageItemType::kItemTypeDeleted) {
-    // no base object exists in the snapshot,
-    // so object has no type
-    return std::nullopt;
-  }
   return base_item_.type();
+}
+
+void
+ItemView::debug_assert_view_types(SnapshotStorageItem const &base_item,
+                                  ItemViewType item_type)
+{
+  auto const &addrkey = base_item.addrkey();
+  if (item_type == ItemViewType::kNativeTokenBalance) {
+    assert(addrkey.key.type() ==
+           StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  }
+  else {
+    assert(addrkey.key.type() !=
+           StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  }
 }
 
 } // namespace hogd
