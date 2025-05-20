@@ -370,10 +370,11 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
   }
 
   if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    if (!unmodified_item->base_item_.type()) {
+    auto type = unmodified_item->base_item_.type();
+    if (!type) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (*unmodified_item->base_item_.type() != ItemViewType::kBytestring) {
+    if (*type != ItemViewType::kBytestring) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     return std::as_bytes(std::span(unmodified_item->base_item_.bytestring()));
@@ -415,10 +416,11 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
   }
 
   if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    if (!unmodified_item->base_item_.type()) {
+    auto type = unmodified_item->base_item_.type();
+    if (!type) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
-    if (*unmodified_item->base_item_.type() != ItemViewType::kNNInt) {
+    if (*type != ItemViewType::kNNInt) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
     return {std::make_pair(unmodified_item->base_item_.nnint(), 0)};

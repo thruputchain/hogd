@@ -118,9 +118,8 @@ do_try_reserve_detached(AddressAndKey const &addrkey, ItemView const &item_view,
       failed = true;
       co_return std::nullopt;
     }
-    else {
-      co_return res.value().value();
-    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    co_return res.value().value();
   }
   co_return 0;
 }

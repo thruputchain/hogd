@@ -83,7 +83,6 @@ make_snapshot_item(std::optional<StorageItem> db_item,
 SystemStatus<SnapshotStorageItem *>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
-  std::println("try_get_snapshot_item: {}", x23::show(addrkey));
   {
     auto [obj, ul] = snapshot_item_cache_.find(addrkey);
     if (obj) {

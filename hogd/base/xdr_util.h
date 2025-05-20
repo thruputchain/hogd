@@ -56,16 +56,18 @@ template<std::size_t N> struct std::hash<std::array<uint8_t, N>> {
 template<> struct std::hash<hogd::AddressAndKey> {
   std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept
   {
-    auto addr_view = std::string_view(reinterpret_cast<const char *>(addrkey.address.data()),
-                                      addrkey.address.size());
+    auto addr_view =
+        std::string_view(reinterpret_cast<const char *>(addrkey.address.data()),
+                         addrkey.address.size());
     auto key_disc = addrkey.key.type();
     std::string_view key_view = [&] {
       switch (key_disc) {
-        case hogd::StorageKeyType::kStorageKeyTypeContractData:
-          return std::string_view(reinterpret_cast<const char *>(addrkey.key.contract_data_key().data()),
-                                  addrkey.key.contract_data_key().size());
-        case hogd::StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
-          return std::string_view();
+      case hogd::StorageKeyType::kStorageKeyTypeContractData:
+        return std::string_view(reinterpret_cast<const char *>(
+                                    addrkey.key.contract_data_key().data()),
+                                addrkey.key.contract_data_key().size());
+      case hogd::StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:
+        return std::string_view();
       }
       assert(false);
       std::unreachable();
@@ -73,7 +75,7 @@ template<> struct std::hash<hogd::AddressAndKey> {
 
     // This is the hash combine used in boost
     // https://www.boost.org/doc/libs/1_55_0/doc/html/hash/reference.html#boost.hash_combine
-    auto hash_combine = []<typename T> (std::size_t &seed, T view) {
+    auto hash_combine = []<typename T>(std::size_t &seed, T view) {
       std::hash<T> hasher;
       seed ^= hasher(view) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
     };
