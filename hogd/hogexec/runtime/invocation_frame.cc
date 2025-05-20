@@ -214,11 +214,9 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
       co_return view_status.error();
     }
     auto *view = view_status.value();
-    std::println("view: {}", static_cast<void *>(view));
     assert(view);
     auto token_view = [view] {
       if (auto *unmodified_view = view->get<UnmodifiedItem>()) {
-        std::println("unmodified_view");
         return NativeTokenBalanceItem(
             unmodified_view->base_item_.native_token_balance());
       }
