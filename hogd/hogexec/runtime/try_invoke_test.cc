@@ -11,6 +11,7 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -18,6 +19,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_item/storage_costs.h"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -27,6 +29,9 @@ namespace hogd {
 
 class TryInvokeTest : public ::testing::Test,
                       public NativeContractTestFramework {
+public:
+  TryInvokeTest() : NativeContractTestFramework(true) {}
+
 protected:
   void SetUp() override {}
 };
@@ -738,6 +743,146 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   }
 
   advance_block();
+}
+
+TEST_F(TryInvokeTest, StorageCostAccounting)
+{
+  // Test that checks that storage costs are accounted for correctly in try
+  // invoke. A contract has enough storage tokens for one bytestring write. The
+  // root frame invokes a try_invoke frame, which attempts to write two
+  // bytestrings. That frame fails. The root frame then invokes a try_invoke
+  // frame, which makes one bytestring write. That frame succeeds. After commit,
+  // the storage token balance should be zero and only the first key should
+  // exist.
+
+  // Contract address
+  ContractAddress contract_addr = make_contract_address(42);
+
+  // Bytestrings
+  auto str_abc = make_bytestring("abc");
+  auto str_def = make_bytestring("def");
+
+  // Cost for one bytestring write ("abc")
+  int128_t one_write_cost = kBaseItemCost + bytestring_cost(str_abc.size());
+
+  // Deploy contract with three methods:
+  // 0: Write "abc" to key0
+  // 1: Write "abc" to key0 and "def" to key1
+  // 2: Root method: try_invoke method 1 (should fail), then try_invoke method 0
+  // (should succeed)
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [str_abc](SystemCallHandler &handler,
+                     NativeRuntime &) -> InvokeStatus<int32_t> {
+             auto key0 = make_storage_key("test0");
+             auto res =
+                 handler.set_bytestring(key0,
+                                        std::as_bytes(std::span(str_abc)));
+             if (!res.has_value())
+               return res.error().to_invoke_error();
+             if (!res.value().has_value())
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return 0;
+           }},
+          {1,
+           [str_abc, str_def](SystemCallHandler &handler,
+                              NativeRuntime &) -> InvokeStatus<int32_t> {
+             auto key0 = make_storage_key("test0");
+             auto key1 = make_storage_key("test1");
+             auto res0 =
+                 handler.set_bytestring(key0,
+                                        std::as_bytes(std::span(str_abc)));
+             if (!res0.has_value() || !res0.value().has_value())
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             auto res1 =
+                 handler.set_bytestring(key1,
+                                        std::as_bytes(std::span(str_def)));
+             if (!res1.has_value() || !res1.value().has_value())
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return 0;
+           }},
+          {2,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+             // First, try_invoke method 1 (should fail)
+             auto [r1, _g1] = handler.invoke(
+                 Invocation{.invoked_address = handler.get_current_address(),
+                            .method = 1,
+                            .gas_limit = UINT64_MAX,
+                            .calldata = {}},
+                 runtime.get_available_gas(),
+                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r1.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Should fail (not enough tokens for two writes)
+             if (r1.value() == SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Then, try_invoke method 0 (should succeed)
+             auto [r0, _g0] = handler.invoke(
+                 Invocation{.invoked_address = handler.get_current_address(),
+                            .method = 0,
+                            .gas_limit = UINT64_MAX,
+                            .calldata = {}},
+                 runtime.get_available_gas(),
+                 std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r0.has_value() || r0.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return 0;
+           }}});
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  // Deploy contract and grant exactly enough storage tokens for one write
+  auto contract = make_native_contract(0);
+  in_memory_db_.write_contract(sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  setup_grant_storage_token(contract_addr, one_write_cost);
+
+  // Single transaction: invoke method 2 (root)
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .method = 2,
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.result_);
+  ASSERT_EQ(*res.result_, 0);
+  auto commit_res = handler.try_commit_transaction()();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
+
+  advance_block();
+
+  // 3. Check storage token balance is zero
+  AddressAndKey token_addrkey = {
+      .address = contract_addr,
+      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
+  // assert that the free token balance item exists and has value 0
+  ASSERT_TRUE(token_item_opt.has_value());
+  ASSERT_EQ(token_item_opt.value().type(),
+            StorageItemType::kItemTypeNonnegativeInt);
+  EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), 0);
+
+  // 4. Check that only key0 exists and has value "abc"
+  auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
+  auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
+  ASSERT_TRUE(data_item0_opt.has_value());
+  const StorageItem &data_item0 = data_item0_opt.value();
+  ASSERT_EQ(data_item0.bytestring(), str_abc);
+
+  auto data_addrkey1 = make_contract_data_addrkey(contract_addr, "test1");
+  auto data_item1_opt = lookup_storage_item_from_db(data_addrkey1);
+  ASSERT_FALSE(data_item1_opt.has_value());
 }
 
 } // namespace hogd

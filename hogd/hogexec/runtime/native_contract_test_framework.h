@@ -109,6 +109,14 @@ public:
     return AddressAndKey{.address = address, .key = std::move(key)};
   }
 
+  static Bytestring make_bytestring(std::string_view str)
+  {
+    Bytestring bytestring;
+    bytestring.resize_uninitialized(str.size());
+    std::memcpy(bytestring.data(), str.data(), str.size());
+    return bytestring;
+  }
+
   void setup_grant_storage_token(ContractAddress const &address,
                                  int128_t amount)
   {

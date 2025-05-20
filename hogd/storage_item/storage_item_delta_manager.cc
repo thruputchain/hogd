@@ -351,7 +351,6 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
             to_xdr(std::min(new_add_amount,
                             from_xdr(prev_bounds_lock.subtract_amount))),
     };
-
     assert(variant_.has_variant_arm<NNIntSetAddArgs>());
     auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
 

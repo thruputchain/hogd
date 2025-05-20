@@ -144,7 +144,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
   x23::MVar<std::map<ContractAddress, Nondeterministic<int128_t>>>
       additional_storage_costs;
 
-  for (auto const &[addrkey, item_view] : modified_items_) {
+  for (auto &[addrkey, item_view] : modified_items_) {
     if (addrkey.key.type() ==
         StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
       // don't pay storage costs for free native token balance entries
@@ -155,10 +155,9 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
       continue;
     }
 
-    [](AddressAndKey const &addrkey, ItemView const &item_view,
-       auto &pending_ops, auto &cb, PerTransactionDatabaseProxy &db_proxy,
-       auto &error, auto &failed,
-       auto &additional_storage_costs) -> x23::Detached {
+    [](AddressAndKey const &addrkey, ItemView &item_view, auto &pending_ops,
+       auto &cb, PerTransactionDatabaseProxy &db_proxy, auto &error,
+       auto &failed, auto &additional_storage_costs) -> x23::Detached {
       co_await db_proxy.coropoll().pool_.bg();
 
       assert(addrkey.key.type() !=
@@ -168,11 +167,16 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
                                                    error, failed);
 
       if (cost.has_value()) {
-        auto map = additional_storage_costs.take();
         assert(cost.value().get() >= 0);
+
+        auto prev_cost = item_view.get_locked_storage_cost();
+        int128_t new_cost = cost.value().get() - prev_cost.get();
+
+        auto map = additional_storage_costs.take();
         // TODO(geoff): Conceivably skippable if cost.value().get() == 0.
         // See note on NativeTokenBalanceItem::get_delta.
-        (*map)[addrkey.address].get() += cost.value().get();
+        (*map)[addrkey.address].get() += new_cost;
+        item_view.set_locked_storage_cost(cost.value());
       }
 
       auto count = pending_ops.fetch_sub(1);
@@ -180,7 +184,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
         cb();
       }
     }(addrkey, item_view, pending_ops, cb, db_proxy, error, failed,
-                                       additional_storage_costs);
+                                                     additional_storage_costs);
   }
   // wait for all the operations to finish
   async();

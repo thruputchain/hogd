@@ -97,10 +97,6 @@ private:
   // Should be performed only when the initial lock state is kNone.
   //
   // Returns true if reservation is successful.
-  //
-  // TODO(geoff): We can probably just remove the commit_delta() method
-  // entirely.  Will wait to remove until we
-  // have all the other StorageDelta types worked out.
   [[nodiscard]] bool try_reserve_delta(StorageDelta const &delta);
 
   void commit_delta(StorageDelta const &delta,
