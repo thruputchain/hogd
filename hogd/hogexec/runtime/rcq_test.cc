@@ -21,7 +21,7 @@ namespace hogd {
 
 class RCQTest : public ::testing::Test, public NativeContractTestFramework {
 protected:
-  RCQTest() : NativeContractTestFramework(true) {}
+  RCQTest() : NativeContractTestFramework(false) {}
 
   void SetUp() override
   {
@@ -92,6 +92,11 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
   //    If an entry is not present, it returns an error.
 
   // Test that an rcq consumes from past block:
+  
+  // Step 0: grant storage tokens to the contract
+  // This test is not focused on storage token costs, so we just grant
+  // an arbitrarily large number.
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   // Step 1: Create a transaction that invokes method 0 with calldata [5, 4, 3,
   // 2, 1], and commit that transaction.  The transaction should succeed.
