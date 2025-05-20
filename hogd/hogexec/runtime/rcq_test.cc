@@ -92,7 +92,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
   //    If an entry is not present, it returns an error.
 
   // Test that an rcq consumes from past block:
-  
+
   // Step 0: grant storage tokens to the contract
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.

@@ -134,7 +134,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
   auto contract_0 = make_native_contract(0);
   in_memory_db_.write_contract(sha256(*contract_0), contract_0);
   in_memory_db_.write_deployment(ContractAddress{}, sha256(*contract_0));
-    // This test is not focused on storage token costs, so we just grant
+  // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
 
@@ -404,7 +404,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
   // Test case 2: unwinding a frame that contains a try_invoke
   // Invoke method 3, starting with a clean contract deployment
   in_memory_db_.write_deployment(make_contract_address(2), sha256(*contract_0));
-    // This test is not focused on storage token costs, so we just grant
+  // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(make_contract_address(2), 1'000'000'000);
   {
@@ -609,7 +609,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   // Test that try invoke can acquire an exclusive lock.
   ContractAddress tc1_addr = make_contract_address(30); // Using a new address
   in_memory_db_.write_deployment(tc1_addr, sha256(*contract_template));
-    // This test is not focused on storage token costs, so we just grant
+  // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(tc1_addr, 1'000'000'000);
 

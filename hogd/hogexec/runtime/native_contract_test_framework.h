@@ -109,17 +109,20 @@ public:
     return AddressAndKey{.address = address, .key = std::move(key)};
   }
 
-  void
-  setup_grant_storage_token(ContractAddress const &address, int128_t amount) {
+  void setup_grant_storage_token(ContractAddress const &address,
+                                 int128_t amount)
+  {
     assert(amount >= 0);
     assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
 
     AddressAndKey addrkey = {
-      .address = address,
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
-    };
+        .address = address,
+        .key =
+            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
 
-    in_memory_db_.write_item(addrkey, std::make_shared<const StorageItemWrapper>(amount));
+    in_memory_db_.write_item(addrkey,
+                             std::make_shared<const StorageItemWrapper>(
+                                 amount));
   }
 
 private:
