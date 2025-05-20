@@ -56,6 +56,7 @@ template<> struct std::hash<hogd::AddressAndKey> {
   {
     auto buf = x23::serialize(addrkey);
     return std::hash<std::string_view>{}(
-        std::string_view(reinterpret_cast<const char *>(buf.data()), buf.size()));
+        std::string_view(reinterpret_cast<const char *>(buf.data()),
+                         buf.size()));
   }
 };

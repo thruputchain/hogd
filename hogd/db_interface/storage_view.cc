@@ -106,7 +106,8 @@ StorageView::try_reserve_storage_delta(AddressAndKey const &addrkey,
 
   // We would call get_snapshot_storage_item here, but all that does is check
   // for whether the item is in the modified_items_ and then check the parent --
-  // and we've already found that the item is not in the modified_items_ for the current view.
+  // and we've already found that the item is not in the modified_items_ for the
+  // current view.
   auto parent_item = get_parent_storage_item(addrkey);
   auto [item, ul] =
       modified_items_.insert(addrkey,

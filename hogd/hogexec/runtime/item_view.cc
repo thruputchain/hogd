@@ -351,18 +351,21 @@ NativeTokenBalanceItem::get_delta() const
   int128_t additional_sub = additional_subtract_amount_.get();
 
   StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-  out.nnint() = NonnegativeInt128SetAddArgs{
-      .set_value = to_xdr(initial_native_token_balance_),
-      .add_value = to_xdr(subtract_amount - additional_sub)};
+  out.nnint() =
+      NonnegativeInt128SetAddArgs{.set_value =
+                                      to_xdr(initial_native_token_balance_),
+                                  .add_value =
+                                      to_xdr(subtract_amount - additional_sub)};
   // TODO(geoff):
   // We could conceivably avoid this delta if out.add_value == 0.
   // I'm skipping this optimization for now, because that condition
   // depends on the nondeterministic data in this item,
-  // and I want to limit how that nondeterministic data is incorporated downstream
-  // until we have a full picture the rest of the system.
-  // (E.g. -- one failure case would be to have a contract be deleted, which could delete
-  // the corresponding db item --- and that would be a conflict with this delta.  So lets hold
-  // off on this optimization until we at least figure out contract deletion behavior).
+  // and I want to limit how that nondeterministic data is incorporated
+  // downstream until we have a full picture the rest of the system. (E.g. --
+  // one failure case would be to have a contract be deleted, which could delete
+  // the corresponding db item --- and that would be a conflict with this delta.
+  // So lets hold off on this optimization until we at least figure out contract
+  // deletion behavior).
   return out;
 }
 

@@ -137,7 +137,9 @@ private:
     std::optional<uint64_t> block_number_upper_bound_ = std::nullopt;
   };
 
-  using variant_type = std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry, DeletedEntry, NativeTokenBalanceEntry>;
+  using variant_type =
+      std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
+                   DeletedEntry, NativeTokenBalanceEntry>;
   static variant_type make_variant(StorageItem item, StorageKey const &db_key);
   static variant_type make_contract_key_variant(StorageItem item);
 

@@ -66,8 +66,9 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
 
 namespace {
 std::unique_ptr<SnapshotStorageItem>
-make_snapshot_item(std::optional<StorageItem> db_item, AddressAndKey const &addrkey,
-                   BlockID block_id, DatabaseProxy &db_proxy)
+make_snapshot_item(std::optional<StorageItem> db_item,
+                   AddressAndKey const &addrkey, BlockID block_id,
+                   DatabaseProxy &db_proxy)
 {
   if (!db_item) {
     return std::make_unique<SnapshotStorageItem>(
@@ -77,7 +78,7 @@ make_snapshot_item(std::optional<StorageItem> db_item, AddressAndKey const &addr
   return std::make_unique<SnapshotStorageItem>(*db_item, addrkey, block_id,
                                                db_proxy);
 }
-}
+} // namespace
 
 SystemStatus<SnapshotStorageItem *>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
