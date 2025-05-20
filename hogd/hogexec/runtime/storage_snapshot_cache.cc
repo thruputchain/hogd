@@ -64,12 +64,29 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   return out;
 }
 
+namespace {
+std::unique_ptr<SnapshotStorageItem>
+make_snapshot_item(std::optional<StorageItem> db_item, AddressAndKey const &addrkey,
+                   BlockID block_id, DatabaseProxy &db_proxy)
+{
+  if (!db_item) {
+    return std::make_unique<SnapshotStorageItem>(
+        StorageItem(StorageItemType::kItemTypeDeleted), addrkey, block_id,
+        db_proxy);
+  }
+  return std::make_unique<SnapshotStorageItem>(*db_item, addrkey, block_id,
+                                               db_proxy);
+}
+}
+
 SystemStatus<SnapshotStorageItem *>
 StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
 {
+  std::println("try_get_snapshot_item: {}", x23::show(addrkey));
   {
     auto [obj, ul] = snapshot_item_cache_.find(addrkey);
     if (obj) {
+      assert(obj->get());
       return obj->get();
     }
   }
@@ -80,21 +97,19 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
   }
 
   // cache both positive and negative lookups
-  if (!db_res.value()) {
-    auto ptr = std::make_unique<SnapshotStorageItem>(
-        StorageItem(StorageItemType::kItemTypeDeleted), addrkey, block_id_,
-        db_proxy_);
-    auto *out = ptr.get();
-    snapshot_item_cache_.insert(addrkey, std::move(ptr));
-    return out;
+  auto ptr = make_snapshot_item(db_res.value(), addrkey, block_id_, db_proxy_);
+  {
+    auto [out, ul] = snapshot_item_cache_.insert(addrkey, std::move(ptr));
+    if (out) {
+      // insertion happened; return the result
+      return out->get();
+    }
   }
-
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  auto ptr = std::make_unique<SnapshotStorageItem>(*db_res.value(), addrkey,
-                                                   block_id_, db_proxy_);
-  auto *out = ptr.get();
-  snapshot_item_cache_.insert(addrkey, std::move(ptr));
-  return out;
+  // otherwise, lookup the item in the cache again
+  auto [obj, ul] = snapshot_item_cache_.find(addrkey);
+  assert(obj);
+  assert(obj->get());
+  return obj->get();
 }
 
 } // namespace hogd

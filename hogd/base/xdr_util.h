@@ -10,6 +10,7 @@
 
 #include "hogd/base/types.h"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -53,8 +54,8 @@ template<std::size_t N> struct std::hash<std::array<uint8_t, N>> {
 template<> struct std::hash<hogd::AddressAndKey> {
   std::size_t operator()(const hogd::AddressAndKey &addrkey) const noexcept
   {
+    auto buf = x23::serialize(addrkey);
     return std::hash<std::string_view>{}(
-        {reinterpret_cast<const char *>(&addrkey),
-         sizeof(hogd::AddressAndKey)});
+        std::string_view(reinterpret_cast<const char *>(buf.data()), buf.size()));
   }
 };

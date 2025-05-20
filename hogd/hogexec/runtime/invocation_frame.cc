@@ -209,13 +209,16 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
         .key =
             StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
     auto view_status = get_or_add_item_view(addrkey, snapshot_cache);
+
     if (!view_status.has_value()) {
       co_return view_status.error();
     }
     auto *view = view_status.value();
+    std::println("view: {}", static_cast<void *>(view));
     assert(view);
-    auto token_view = [&] {
+    auto token_view = [view] {
       if (auto *unmodified_view = view->get<UnmodifiedItem>()) {
+        std::println("unmodified_view");
         return NativeTokenBalanceItem(
             unmodified_view->base_item_.native_token_balance());
       }
@@ -232,9 +235,14 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
 
   auto [async_storage, cb_storage] = x23::make_async<void>();
   pending_ops = modified_items_.size();
+  if (pending_ops == 0) {
+    cb_storage();
+  }
+
   for (auto const &[addrkey, item_view] : modified_items_) {
     if (addrkey.key.type() !=
         StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
+      // now we skip all the non-storage-cost entries
       auto count = pending_ops.fetch_sub(1);
       if (count == 1) {
         cb_storage();
@@ -353,7 +361,10 @@ InvocationFrameStack::finish_frame(InvokeResult result,
       return st.error();
     }
     frame_stack_.pop_back();
-    frame_stack_.back().commit_failed_child_frame();
+
+    if (!frame_stack_.empty()) {
+      frame_stack_.back().commit_failed_child_frame();
+    }
 
     return result;
   }
@@ -435,7 +446,6 @@ InvocationFrame::get_or_add_item_view(AddressAndKey const &addrkey,
     return snapshot_item.error();
   }
   assert(snapshot_item.value());
-
   return add_item_view(addrkey, ItemView(snapshot_item.value()));
 }
 

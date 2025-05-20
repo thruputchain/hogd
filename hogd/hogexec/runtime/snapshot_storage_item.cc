@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <variant>
 
@@ -36,7 +37,7 @@ SnapshotStorageItem::make_contract_key_variant(StorageItem item)
     return variant_type{std::in_place_type<DeletedEntry>};
   }
   assert(false);
-  std::unreachable();
+  throw std::runtime_error("Impossible");
 }
 
 SnapshotStorageItem::variant_type
@@ -56,11 +57,11 @@ SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
                       0};
     default:
       assert(false);
-      std::unreachable();
+      throw std::runtime_error("Impossible");
     }
   default:
     assert(false);
-    std::unreachable();
+    throw std::runtime_error("Impossible");
   }
 }
 
