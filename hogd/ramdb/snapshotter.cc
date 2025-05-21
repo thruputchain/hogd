@@ -18,7 +18,7 @@
 
 namespace hogd {
 
-DBStatus<void>
+void
 Snapshotter::snapshot()
 {
   ElapsedTimer timer{};
@@ -35,7 +35,8 @@ Snapshotter::snapshot()
     if (kSync) {
       DBStatus<SnapshotStats> r = completions.back().get();
       if (!r.has_value()) {
-        return r.error();
+        promise_.set_value(r.transform([](auto &_) { return; }));
+        return;
       }
       stats.value() += r.value();
     }
@@ -45,7 +46,8 @@ Snapshotter::snapshot()
     for (std::future<DBStatus<SnapshotStats>> &f : completions) {
       DBStatus<SnapshotStats> r = f.get();
       if (!r.has_value()) {
-        return r.error();
+        promise_.set_value(r.transform([](auto &_) { return; }));
+        return;
       }
       stats.value() += r.value();
     }
@@ -56,9 +58,8 @@ Snapshotter::snapshot()
 
   // Aggregate the stats from the callbacks from the map.
   std::unique_lock ul = perthread_stats_.lock_threads();
-  perthread_stats_.for_each(ul, [this, &stats](SnapshotStats &s) {
-    stats.value() += s;
-  });
+  perthread_stats_.for_each(ul,
+                            [&stats](SnapshotStats &s) { stats.value() += s; });
 
   double seconds = timer.elapsed();
   info("snapshot took {:.3f} s (not including disk sync)", seconds);
@@ -74,7 +75,20 @@ Snapshotter::snapshot()
   info("...total bytes forwarded from ongoing put() ops {}",
        print_iec_bytes(stats->forwarded_bytes, true));
 
-  return {};
+  ElapsedTimer snap_sync_timer{};
+
+  DBStatus<void> ret = sync();
+  if (!ret.has_value()) {
+    warn("sync before snapshot failed");
+    promise_.set_value(ret);
+    return;
+  }
+
+  debug("syncing snapshot file to storage took {:.3f} s",
+        snap_sync_timer.elapsed());
+
+  promise_.set_value({});
+  return;
 }
 
 DBStatus<detail::SnapshotStats>
@@ -145,29 +159,6 @@ Snapshotter::snapshot_one(UniqueLoglet src)
   item_allocator_.give_to_compactor(std::move(src));
 
   return {stats};
-}
-
-void
-Snapshotter::run()
-{
-  DBStatus<void> ret = snapshot();
-  if (!ret.has_value()) {
-    warn("snapshot failed");
-    promise_.set_value(ret);
-    return;
-  }
-
-  ElapsedTimer snap_sync_timer{};
-  ret = sync();
-  if (!ret.has_value()) {
-    warn("snapshot failed");
-    promise_.set_value(ret);
-  }
-
-  debug("syncing snapshot file to storage took {:.3f} s",
-        snap_sync_timer.elapsed());
-
-  promise_.set_value({});
 }
 
 } // namespace hogd

@@ -39,13 +39,14 @@ struct SnapshotStats {
 class Snapshotter {
 public:
   Snapshotter(WorkerPool &pool, ScalableMap &map, ItemAllocator &item_allocator,
-              uint64_t begin_lsn, uint64_t end_lsn, LogletAllocator &loglet_allocator,
-              Directory &dir, std::string path, size_t max_file_size,
-              int write_head_order)
+              uint64_t begin_lsn, uint64_t end_lsn,
+              LogletAllocator &loglet_allocator, Directory &dir,
+              std::string path, size_t max_file_size, int write_head_order)
 
-    : pool_{pool}, map_{map}, item_allocator_{item_allocator}, lls_{item_allocator.take_loglets()}, begin_lsn_{begin_lsn},
-      end_lsn_{end_lsn},
-      disk_writer_{loglet_allocator, dir, path, max_file_size, write_head_order}
+    : pool_{pool}, map_{map}, item_allocator_{item_allocator},
+      lls_{item_allocator.take_loglets()}, begin_lsn_{begin_lsn},
+      end_lsn_{end_lsn}, disk_writer_{loglet_allocator, dir, std::move(path),
+                                      max_file_size, write_head_order}
   {
     disk_writer_.init(begin_lsn); // start snap writer bg thread
     // Publish snapshot lsn so main threads are aware of the ongoing snapshot.
@@ -72,13 +73,11 @@ public:
          begin_lsn_, end_lsn_, lls_.size());
   }
 
-  void run();
-
   std::future<DBStatus<void>> get_future() { return promise_.get_future(); }
 
-private:
-  DBStatus<void> snapshot();
+  void snapshot();
 
+private:
   std::vector<UniqueLoglet> &&take_loglets() { return std::move(lls_); }
 
   DBStatus<void> sync()

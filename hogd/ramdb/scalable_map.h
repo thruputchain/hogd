@@ -171,7 +171,7 @@ private:
   // ongoing snapshot. If this is 0, then no snapshot is in progress.
   uint64_t snap_end_lsn_{};
   // A callback that adds a particular item to an ongoing snapshot.
-  std::function<void(uint64_t, ItemHeader *)> snap_add_item_cb_{};
+  std::function<void(uint64_t, ItemHeader *)> snap_add_item_cb_;
 
   // acquire_bucket uses the hash of the key to return the appropriate lock
   // (with it held), bucket, and item counter.

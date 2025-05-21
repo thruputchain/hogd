@@ -275,9 +275,7 @@ do_snapshot(int num, int cores, int value_size)
   if (unlikely(!ret))
     fail(ret.error());
 
-  uint64_t end_lsn = ret.value();
-
-  return measure([&benchmark, end_lsn] { benchmark->snapshot(); });
+  return measure([&benchmark] { benchmark->snapshot(); });
 }
 
 double
@@ -294,7 +292,7 @@ do_snapshot_ongoing_puts(int num, int cores, int value_size)
       benchmark->write_items();
   }};
 
-  double r = measure([&benchmark, &snapshot_future] {
+  double r = measure([&snapshot_future] {
     DBStatus<void> r = snapshot_future.get();
     if (unlikely(!r))
       fail(r.error());
