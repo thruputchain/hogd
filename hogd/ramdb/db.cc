@@ -195,7 +195,7 @@ Database::background_worker(const std::stop_token &stoken)
     }
 
     if (snapshot) {
-      snapshotter_->run(item_allocator_);
+      snapshotter_->run();
       snapshotter_.reset();
     }
 
@@ -284,7 +284,7 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
                                         : std::numeric_limits<size_t>::max();
 
     // put()s with lsn s.t. begin_lsn <= lsn <= end_lsn
-    snapshotter_.emplace(pool_, map_, item_allocator_.take_loglets(), begin_lsn,
+    snapshotter_.emplace(pool_, map_, item_allocator_, begin_lsn,
                          end_lsn, *loglet_allocator_, dir_, path, kMaxFileSize,
                          write_head_order_);
 

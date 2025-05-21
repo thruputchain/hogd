@@ -78,21 +78,19 @@ Snapshotter::snapshot()
 }
 
 DBStatus<detail::SnapshotStats>
-Snapshotter::snapshot_one(UniqueLoglet srcll)
+Snapshotter::snapshot_one(UniqueLoglet src)
 {
-  Loglet &src = *srcll;
-
   SnapshotStats stats{};
-  stats.bytes = src.size();
+  stats.bytes = src->size();
 
   // write out items in this loglet.
-  for (ItemHeader &h : src) {
+  for (ItemHeader &h : *src) {
     stats.items++;
     ItemHeader *src_item = std::addressof(h);
 
     // snapshotting of the loglet is finished if every live item has
     // been copied into buffers destined for the snapshot file.
-    if (src.live_size() == stats.live_bytes)
+    if (src->live_size() == stats.live_bytes)
       break;
 
     // optimization: skip dead items that can be detected without locking.
@@ -141,11 +139,16 @@ Snapshotter::snapshot_one(UniqueLoglet srcll)
            storage.load(std::memory_order_relaxed) == ItemStorage::kTombstone);
   }
 
+  // Since snapshotting is done on this loglet, let the compact have it
+  // back so that it can make some progress on cleaning while the
+  // snapshotter is running.
+  item_allocator_.give_to_compactor(std::move(src));
+
   return {stats};
 }
 
 void
-Snapshotter::run(ItemAllocator &item_allocator)
+Snapshotter::run()
 {
   DBStatus<void> ret = snapshot();
   if (!ret.has_value()) {
