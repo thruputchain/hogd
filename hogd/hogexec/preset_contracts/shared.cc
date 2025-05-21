@@ -1,6 +1,8 @@
 #include "hogd/hogexec/preset_contracts/shared.h"
 
+#include <cassert>
 #include <cstring>
+#include <regex>
 #include <string_view>
 #include <type_traits>
 
@@ -15,6 +17,8 @@ MethodID
 sdk_method_id(std::string_view identifier_name,
               std::string_view identifier_version, uint16_t method_id)
 {
+  assert(std::regex_match(identifier_version.begin(), identifier_version.end(),
+                          std::regex(R"(\d+\.\d+\.\d+)")));
   ContractInterfaceIDPreimage preimage{.name = {identifier_name.begin(),
                                                 identifier_name.end()},
                                        .vers = {identifier_version.begin(),
