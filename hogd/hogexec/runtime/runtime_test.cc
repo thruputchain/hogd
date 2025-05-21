@@ -2,6 +2,7 @@
 
 #include "hogd/init.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
