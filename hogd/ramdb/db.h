@@ -77,6 +77,9 @@ public:
   DBStatus<void> get_if_type(std::span<const std::byte> key, uint8_t type,
                              std::span<std::byte> val_out);
 
+  // get_size returns the size of the item (if it exists).
+  DBStatus<size_t> get_size(std::span<const std::byte> key);
+
   // put inserts an item.
   DBStatus<void> put(std::span<const std::byte> key, uint8_t type,
                      std::span<const std::byte> val);
@@ -153,6 +156,13 @@ Database::get_if_type(std::span<const std::byte> key, uint8_t type,
 {
   assert(active_);
   return map_.get_if_type(key, type, val_out);
+}
+
+inline DBStatus<size_t>
+Database::get_size(std::span<const std::byte> key)
+{
+  assert(active_);
+  return map_.get_size(key);
 }
 
 inline DBStatus<void>
