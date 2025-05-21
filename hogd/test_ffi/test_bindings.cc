@@ -195,11 +195,13 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
   hogd::ContractAddress addr;
   std::memcpy(addr.data(), contract_addr, addr.size());
 
-  db_cast->get_base_db().write_item(AddressAndKey{
-    .address = addr,
-    .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance),
-  }, std::make_shared<StorageItemWrapper>(
-                                              int128_t{tokens}));
+  db_cast->get_base_db().write_item(
+      AddressAndKey{
+          .address = addr,
+          .key =
+              StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance),
+      },
+      std::make_shared<StorageItemWrapper>(int128_t{tokens}));
 }
 
 } // namespace

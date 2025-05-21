@@ -1068,8 +1068,8 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
   ContractAddress contract_addr = make_contract_address(44);
 
   // Bytestrings
-  auto str_short = make_bytestring("abc");           // 3 bytes
-  auto str_medium = make_bytestring("abcdef");       // 6 bytes
+  auto str_short = make_bytestring("abc");            // 3 bytes
+  auto str_medium = make_bytestring("abcdef");        // 6 bytes
   auto str_long = make_bytestring("abcdefghijklmno"); // 15 bytes
 
   // Cost for each update
@@ -1079,8 +1079,8 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
   // Marginal cost for updating from short to medium
   int128_t marginal_medium = cost_medium - cost_short;
 
-
-  // Grant enough tokens for the first two updates (create + update), but not the third
+  // Grant enough tokens for the first two updates (create + update), but not
+  // the third
   int128_t total_tokens = cost_short + marginal_medium;
 
   // Deploy contract with four methods:
@@ -1092,9 +1092,11 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [str_short](SystemCallHandler &handler,
-                     NativeRuntime &) -> InvokeStatus<int32_t> {
+                       NativeRuntime &) -> InvokeStatus<int32_t> {
              auto key0 = make_storage_key("test0");
-             auto res = handler.set_bytestring(key0, std::as_bytes(std::span(str_short)));
+             auto res =
+                 handler.set_bytestring(key0,
+                                        std::as_bytes(std::span(str_short)));
              if (!res.has_value())
                return res.error().to_invoke_error();
              if (!res.value().has_value())
@@ -1103,9 +1105,11 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
            }},
           {1,
            [str_medium](SystemCallHandler &handler,
-                     NativeRuntime &) -> InvokeStatus<int32_t> {
+                        NativeRuntime &) -> InvokeStatus<int32_t> {
              auto key0 = make_storage_key("test0");
-             auto res = handler.set_bytestring(key0, std::as_bytes(std::span(str_medium)));
+             auto res =
+                 handler.set_bytestring(key0,
+                                        std::as_bytes(std::span(str_medium)));
              if (!res.has_value())
                return res.error().to_invoke_error();
              if (!res.value().has_value())
@@ -1114,9 +1118,11 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
            }},
           {2,
            [str_long](SystemCallHandler &handler,
-                     NativeRuntime &) -> InvokeStatus<int32_t> {
+                      NativeRuntime &) -> InvokeStatus<int32_t> {
              auto key0 = make_storage_key("test0");
-             auto res = handler.set_bytestring(key0, std::as_bytes(std::span(str_long)));
+             auto res =
+                 handler.set_bytestring(key0,
+                                        std::as_bytes(std::span(str_long)));
              if (!res.has_value())
                return res.error().to_invoke_error();
              if (!res.value().has_value())
@@ -1163,14 +1169,14 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              return 0;
-           }}
-      });
+           }}});
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
 
-  // Deploy contract and grant exactly enough storage tokens for the first two updates
+  // Deploy contract and grant exactly enough storage tokens for the first two
+  // updates
   auto contract = make_native_contract(0);
   in_memory_db_.write_contract(sha256(*contract), contract);
   in_memory_db_.write_deployment(contract_addr, sha256(*contract));
