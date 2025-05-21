@@ -156,7 +156,7 @@ public:
   method_id_from_name(std::string const &name)
   {
     try {
-      return std::stoul(name, nullptr, 16);
+      return std::stoull(name, nullptr, 16);
     } catch (std::invalid_argument &e) {
       return std::nullopt;
     }

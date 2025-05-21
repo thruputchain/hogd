@@ -48,13 +48,15 @@ protected:
                 NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
                auto const &calldata = handler.get_calldata();
 
-               if (calldata.size() != 36) {
+               if (calldata.size() !=
+                   sizeof(MethodID) + sizeof(ContractAddress)) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                MethodID invoked_id =
                    *reinterpret_cast<const MethodID *>(calldata.data());
                ContractAddress invoked_addr;
-               std::memcpy(invoked_addr.data(), calldata.data() + 4,
+               std::memcpy(invoked_addr.data(),
+                           calldata.data() + sizeof(MethodID),
                            invoked_addr.size());
 
                auto invoke_res = handler.invoke(
@@ -103,6 +105,7 @@ TEST_F(NativeContractTest, BasicInstantiate)
                             ProposalModeData{}, runtime_context_);
 
   Contract contract(ContractType::kNative);
+  contract.native_contract_id() = 0;
 
   auto runtime = runtime_context_->make_new_runtime(contract, &handler, true);
 
