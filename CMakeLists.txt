@@ -138,6 +138,10 @@ add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)
 
+# Enable bcs-cpp
+add_subdirectory(external/bcs-cpp)
+include_directories(${BCS_CPP_SOURCE_DIR})
+
 # Finally, enable hogd's own code
 include_directories(${CMAKE_SOURCE_DIR})
 add_definitions(-DCMAKE_ROOT_BINARY_DIR=\"${CMAKE_BINARY_DIR}\")
