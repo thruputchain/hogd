@@ -12,7 +12,6 @@ namespace hogd {
 MethodID
 sdk_method_id(std::string_view trait_name, std::string_view method_name)
 {
-
   ContractMethodNamePreimage preimage{
       .trait_readable_name = {trait_name.begin(), trait_name.end()},
       .method_readable_name = {method_name.begin(), method_name.end()}};
