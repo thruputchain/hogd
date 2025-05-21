@@ -16,3 +16,6 @@
 [submodule "protocol"]
 	path = protocol
 	url = git@github.com:groundhogchain/protocol.git
+[submodule "external/bcs-cpp"]
+	path = external/bcs-cpp
+	url = git@github.com:groundhogchain/bcs-cpp.git
