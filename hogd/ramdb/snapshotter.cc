@@ -21,29 +21,6 @@ namespace hogd {
 DBStatus<void>
 Snapshotter::snapshot()
 {
-  PerThread<SnapshotStats> perthread_stats{};
-  // Publish snapshot lsn so main threads are aware of the ongoing snapshot.
-  map_.register_in_progress_snapshot(
-      begin_lsn_, end_lsn_,
-      [this, &perthread_stats](uint64_t hash, ItemHeader *src_item) {
-        // If a put() operation runs into an item that is about to be
-        // overwritten that should be part of the snapshot, it triggers
-        // this callback to stuff a copy of the item in the snapshot's
-        // disk-bound loglets.
-
-        ScopedDiskWrite record = disk_writer_.write_record(hash);
-        DBStatus<uint64_t> ret = record.modify(src_item);
-        if (!ret) [[unlikely]]
-          return;
-        // ret LSN ignored; it is meaningless outside of
-        // redo log.
-
-        record.reset(); // trigger writeback
-
-        perthread_stats->forwarded_items++;
-        perthread_stats->forwarded_bytes += src_item->total_bytes();
-      });
-
   ElapsedTimer timer{};
   DBStatus<SnapshotStats> stats{SnapshotStats{}};
 
@@ -53,9 +30,8 @@ Snapshotter::snapshot()
   std::vector<std::future<DBStatus<SnapshotStats>>> completions{};
   completions.reserve(lls_.size());
   for (UniqueLoglet &ll : lls_) {
-    Loglet &l = *ll;
-    completions.emplace_back(
-        pool_.submit([this, &l] mutable { return snapshot_one(l); }));
+    completions.emplace_back(pool_.submit(
+        [this, &ll] mutable { return snapshot_one(std::move(ll)); }));
     if (kSync) {
       DBStatus<SnapshotStats> r = completions.back().get();
       if (!r.has_value()) {
@@ -79,8 +55,8 @@ Snapshotter::snapshot()
   map_.register_in_progress_snapshot(0, 0, nullptr);
 
   // Aggregate the stats from the callbacks from the map.
-  std::unique_lock ul = perthread_stats.lock_threads();
-  perthread_stats.for_each(ul, [this, &stats](SnapshotStats &s) {
+  std::unique_lock ul = perthread_stats_.lock_threads();
+  perthread_stats_.for_each(ul, [this, &stats](SnapshotStats &s) {
     stats.value() += s;
   });
 
@@ -100,9 +76,12 @@ Snapshotter::snapshot()
 
   return {};
 }
+
 DBStatus<detail::SnapshotStats>
-Snapshotter::snapshot_one(Loglet &src)
+Snapshotter::snapshot_one(UniqueLoglet srcll)
 {
+  Loglet &src = *srcll;
+
   SnapshotStats stats{};
   stats.bytes = src.size();
 
@@ -174,12 +153,6 @@ Snapshotter::run(ItemAllocator &item_allocator)
     promise_.set_value(ret);
     return;
   }
-
-  // return loglets to the compactor
-  std::vector<UniqueLoglet> lls = take_loglets();
-  for (UniqueLoglet &ll : lls)
-    item_allocator.give_to_compactor(std::move(ll));
-  debug("returned all loglets to compactor; snapshotting done");
 
   ElapsedTimer snap_sync_timer{};
   ret = sync();

@@ -49,6 +49,26 @@ public:
       disk_writer_{loglet_allocator, dir, path, max_file_size, write_head_order}
   {
     disk_writer_.init(begin_lsn); // start snap writer bg thread
+    // Publish snapshot lsn so main threads are aware of the ongoing snapshot.
+    map_.register_in_progress_snapshot(
+        begin_lsn_, end_lsn_, [this](uint64_t hash, ItemHeader *src_item) {
+          // If a put() operation runs into an item that is about to be
+          // overwritten that should be part of the snapshot, it triggers
+          // this callback to stuff a copy of the item in the snapshot's
+          // disk-bound loglets.
+
+          ScopedDiskWrite record = disk_writer_.write_record(hash);
+          DBStatus<uint64_t> ret = record.modify(src_item);
+          if (!ret) [[unlikely]]
+            return;
+          // ret LSN ignored; it is meaningless outside of
+          // redo log.
+
+          record.reset(); // trigger writeback
+
+          perthread_stats_->forwarded_items++;
+          perthread_stats_->forwarded_bytes += src_item->total_bytes();
+        });
     info("snapshot in lsn range [{}, {}) will include {} loglets of items",
          begin_lsn_, end_lsn_, lls_.size());
   }
@@ -83,7 +103,9 @@ private:
   std::promise<DBStatus<void>> promise_;
 
   using SnapshotStats = detail::SnapshotStats;
-  DBStatus<SnapshotStats> snapshot_one(Loglet &src);
+  PerThread<SnapshotStats> perthread_stats_{};
+
+  DBStatus<SnapshotStats> snapshot_one(UniqueLoglet src);
 };
 
 } // namespace hogd

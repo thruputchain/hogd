@@ -62,7 +62,7 @@ protected:
   }
 
   DBStatus<void> open_db();
-  void insert_many(size_t count, int threads = 1);
+  void insert_many(size_t count, int threads = 1, int delay_ns = 0);
   void remove_every_n(int n);
   void check_integrity();
 
@@ -76,7 +76,7 @@ DBStatus<void>
 DatabaseTest::open_db()
 {
   size_t heap_size =
-      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+      Database::estimate_heap_size(kInsertions * 1024, kKeySize, kValueSize);
   DBStatus<std::unique_ptr<Database>> ret =
       Database::open(dir_.get_path(), heap_size, kBucketOrder);
   if (!ret)
@@ -86,7 +86,7 @@ DatabaseTest::open_db()
 }
 
 void
-DatabaseTest::insert_many(size_t count, int threads)
+DatabaseTest::insert_many(size_t count, int threads, int delay_ns)
 {
   using KVPair = std::pair<std::string, std::string>;
   std::vector<std::vector<KVPair>> perthread_inserts(threads);
@@ -106,11 +106,13 @@ DatabaseTest::insert_many(size_t count, int threads)
     std::vector<std::jthread> joins;
     joins.reserve(threads);
     for (int i = 0; i < threads; ++i) {
-      joins.emplace_back([this, &inserts = perthread_inserts[i]] {
+      joins.emplace_back([this, delay_ns, &inserts = perthread_inserts[i]] {
         for (const auto &[key, value] : inserts) {
           DBStatus<void> ret = db_->put(std::as_bytes(std::span(key)), 0,
                                         std::as_bytes(std::span(value)));
           EXPECT_TRUE(ret);
+          if (delay_ns)
+            std::this_thread::sleep_for(std::chrono::nanoseconds{delay_ns});
         }
       });
     }
@@ -331,6 +333,7 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
 
   check_integrity();
 }
+
 TEST_F(DatabaseTest, SnapshotIncremental)
 {
   std::string path0 = "test-snapshot-0-1.snap";
@@ -387,6 +390,38 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   // the DB should succeed when we restore from disk.
   auto ret = open_db();
   ASSERT_TRUE(static_cast<bool>(ret));
+
+  check_integrity();
+}
+
+TEST_F(DatabaseTest, SnapshotOngoingPuts)
+{
+  auto rand = rand_; // snapshot rng state.
+  insert_many(kInsertions);
+  check_integrity();
+
+  std::atomic<bool> done{};
+
+  rand_ = rand; // restore rng state to try to get overwrites.
+  auto [_, snapshot_future] = db_->sync_and_snapshot("snapshot.dat", 0);
+  std::thread bg{[this, &done]() {
+    while (!done)
+      insert_many(kInsertions, kThreads, 100000); // overwrite a bit slowly
+  }};
+
+  DBStatus<void> r = snapshot_future.get();
+  ASSERT_TRUE(r);
+
+  done = true;
+  bg.join();
+
+  check_integrity();
+
+  ErrnoStatus<void> rr = dir_.rename("snapshot.dat", "0.log");
+  ASSERT_TRUE(static_cast<bool>(rr));
+
+  auto ret = open_db();
+  EXPECT_TRUE(static_cast<bool>(ret));
 
   check_integrity();
 }
