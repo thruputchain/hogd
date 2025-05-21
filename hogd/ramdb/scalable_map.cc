@@ -401,9 +401,9 @@ ScalableMap::register_in_progress_snapshot(
   snap_begin_lsn_ = begin_lsn;
   snap_end_lsn_ = end_lsn;
 
-  snap_add_item_cb_ = add_item_cb;
-  debug("Registered snapshot range as {} to {} with cb {}", snap_begin_lsn_,
-        snap_end_lsn_, (bool)snap_add_item_cb_);
+  snap_add_item_cb_ = std::move(add_item_cb);
+  debug("Registered snapshot range as {} to {}", snap_begin_lsn_,
+        snap_end_lsn_);
 }
 
 } // namespace hogd

@@ -4,6 +4,7 @@
 #include <cassert>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -35,7 +36,7 @@ Snapshotter::snapshot()
     if (kSync) {
       DBStatus<SnapshotStats> r = completions.back().get();
       if (!r.has_value()) {
-        promise_.set_value(r.transform([](auto &_) { return; }));
+        promise_.set_value(r.transform([](auto &) { return; }));
         return;
       }
       stats.value() += r.value();
@@ -46,7 +47,7 @@ Snapshotter::snapshot()
     for (std::future<DBStatus<SnapshotStats>> &f : completions) {
       DBStatus<SnapshotStats> r = f.get();
       if (!r.has_value()) {
-        promise_.set_value(r.transform([](auto &_) { return; }));
+        promise_.set_value(r.transform([](auto &) { return; }));
         return;
       }
       stats.value() += r.value();
@@ -88,7 +89,6 @@ Snapshotter::snapshot()
         snap_sync_timer.elapsed());
 
   promise_.set_value({});
-  return;
 }
 
 DBStatus<detail::SnapshotStats>

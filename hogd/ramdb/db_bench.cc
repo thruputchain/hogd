@@ -1,8 +1,10 @@
 // db_bench.cc - benchmarks for the database subsystem
 
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstddef>
+#include <future>
 #include <memory>
 #include <print>
 #include <span>

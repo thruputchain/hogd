@@ -4,6 +4,7 @@
 #include <bit>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
+#include <future>
 #include <limits>
 #include <memory>
 #include <mutex>

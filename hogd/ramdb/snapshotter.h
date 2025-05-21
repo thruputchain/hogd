@@ -102,7 +102,7 @@ private:
   std::promise<DBStatus<void>> promise_;
 
   using SnapshotStats = detail::SnapshotStats;
-  PerThread<SnapshotStats> perthread_stats_{};
+  PerThread<SnapshotStats> perthread_stats_;
 
   DBStatus<SnapshotStats> snapshot_one(UniqueLoglet src);
 };
