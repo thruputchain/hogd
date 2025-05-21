@@ -48,13 +48,15 @@ protected:
                 NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
                auto const &calldata = handler.get_calldata();
 
-               if (calldata.size() != sizeof(MethodID) + sizeof(ContractAddress)) {
+               if (calldata.size() !=
+                   sizeof(MethodID) + sizeof(ContractAddress)) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
                MethodID invoked_id =
                    *reinterpret_cast<const MethodID *>(calldata.data());
                ContractAddress invoked_addr;
-               std::memcpy(invoked_addr.data(), calldata.data() + sizeof(MethodID),
+               std::memcpy(invoked_addr.data(),
+                           calldata.data() + sizeof(MethodID),
                            invoked_addr.size());
 
                auto invoke_res = handler.invoke(
