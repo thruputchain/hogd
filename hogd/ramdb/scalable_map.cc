@@ -139,6 +139,19 @@ ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type,
   return DBError(DBCode::kNotFound);
 }
 
+DBStatus<size_t>
+ScalableMap::get_size(std::span<const std::byte> key)
+{
+  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  for (; *bu != nullptr; bu = &(*bu)->next) {
+    if ((*bu)->get_key() != key)
+      continue;
+
+    return (*bu)->get_value().size();
+  }
+  return DBError(DBCode::kNotFound);
+}
+
 DBStatus<void>
 ScalableMap::put(std::span<const std::byte> key, uint8_t type,
                  std::span<const std::byte> val)
