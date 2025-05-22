@@ -126,11 +126,13 @@ class SharedLock : public TestLock {
 public:
   const unsigned nshared_;
 
+  // NOLINTBEGIN(bugprone-unhandled-exception-at-new)
   explicit SharedLock(unsigned nshared = 1) noexcept
     : nshared_(nshared), inhibitors_(new Inhibitor[nshared_])
   {
     assert(nshared);
   }
+  // NOLINTEND(bugprone-unhandled-exception-at-new)
   ~SharedLock() { delete[] inhibitors_; }
 
   void block_while_inhibited() noexcept

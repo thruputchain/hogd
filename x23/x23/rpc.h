@@ -305,13 +305,14 @@ struct RpcDispatcher : RpcService {
   RpcDispatcher(Impl impl, ExtraArgs... ea) : impl_(impl), ea_(std::move(ea)...)
   {}
   RpcDispatcher(Impl impl, Logger log, ExtraArgs... ea)
-    : impl_(std::move(impl)), logger_(log), ea_(std::move(ea)...)
+    : impl_(std::move(impl)), logger_(std::move(log)), ea_(std::move(ea)...)
   {}
 
   std::uint32_t program() const final { return version_meta::program; }
   std::uint32_t version() const final { return version_meta::version; }
 
-  // NOLINTNEXTLINE(google-default-arguments)
+  // NOLINTBEGIN(misc-unused-parameters)
+  // NOLINTBEGIN(google-default-arguments)
   Async<Buf> serve(const rpc_msg &msg, BufView argdata SLOC_PARM) override
   {
     using enum msg_type;
@@ -322,6 +323,8 @@ struct RpcDispatcher : RpcService {
                                                     Executor{*this, msg,
                                                              argdata});
   }
+  // NOLINTEND(google-default-arguments)
+  // NOLINTEND(misc-unused-parameters)
 
 private:
   struct Executor {
@@ -567,7 +570,7 @@ protected:
 
 public:
   using super::super;
-  RpcStream(CoroPoll &cp, UniqueFd fd, Logger logger, ConstructorKey)
+  RpcStream(CoroPoll &cp, UniqueFd fd, Logger logger, ConstructorKey /*unused*/)
     : super(cp, std::move(fd)), logger_(std::move(logger))
   {}
 };

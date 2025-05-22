@@ -49,6 +49,7 @@ struct HostPort {
   Str port;
 
   constexpr HostPort() noexcept = default;
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   HostPort(Str h, Str p) : host(std::move(h)), port(std::move(p)) {}
   HostPort(const sockaddr_storage &ss)
     : host(show_ipaddr(ss)), port(uformat("{}", get_port(ss)))

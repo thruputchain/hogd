@@ -27,6 +27,7 @@ namespace x23 {
 #pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Wunknown-warning-group"
 #pragma GCC diagnostic ignored "-Winterference-size"
+// NOLINTNEXTLINE(readability-identifier-naming)
 constexpr size_t hardware_destructive_interference_size =
     std::hardware_destructive_interference_size;
 #pragma GCC diagnostic pop
@@ -89,12 +90,15 @@ public:
   {
     struct AwaitBackground {
       ThreadPool &pool;
-      static bool await_ready() noexcept { return false; }
+      // NOLINTBEGIN(readability-convert-member-functions-to-static)
+      bool await_ready() noexcept { return false; }
+      // NOLINTNEXTLINE(bugprone-exception-escape)
       void await_suspend(std::coroutine_handle<> h) const noexcept
       {
         pool.go(h);
       }
       void await_resume() const noexcept {}
+      // NOLINTEND(readability-convert-member-functions-to-static)
     };
     return AwaitBackground(*this);
   }
@@ -206,6 +210,7 @@ public:
     SuspendCount start_ = get_suspend_count();
 
     CrashIfSuspended() noexcept = default;
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     explicit CrashIfSuspended(std::nullptr_t) noexcept : start_{} {}
     ~CrashIfSuspended() { check(); }
 

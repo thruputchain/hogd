@@ -663,11 +663,13 @@ struct Detached {
     }
 #endif // X23_CORO_TRACE
 
-    static Detached get_return_object() noexcept { return {}; }
-    static std::suspend_never initial_suspend() noexcept { return {}; }
-    static void return_void() noexcept {}
-    static void unhandled_exception() noexcept { std::terminate(); }
-    static std::suspend_never final_suspend() noexcept { return {}; }
+  // NOLINTBEGIN(readability-convert-member-functions-to-static)
+    Detached get_return_object() const noexcept { return {}; }
+    std::suspend_never initial_suspend() const noexcept { return {}; }
+    void return_void() const noexcept {}
+    void unhandled_exception() const noexcept { std::terminate(); }
+    std::suspend_never final_suspend() const noexcept { return {}; }
+  // NOLINTEND(readability-convert-member-functions-to-static)
   };
 
   Detached(Detached &&) noexcept = delete;

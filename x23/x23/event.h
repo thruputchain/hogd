@@ -159,6 +159,7 @@ private:
     std::array<std::atomic<WorkItem>, 2> callbacks{};
 
     FdState() noexcept = default;
+    // NOLINTBEGIN(bugprone-use-after-move)
     FdState(FdState &&other) noexcept : BufHolder(std::move(other))
     {
       copy_fields(other);
@@ -169,6 +170,7 @@ private:
       copy_fields(other);
       return *this;
     }
+    // NOLINTEND(bugprone-use-after-move)
 
   private:
     void copy_fields(const FdState &other)

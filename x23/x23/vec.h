@@ -383,6 +383,7 @@ public:
     append(copy_src_end, other.end());
     return *this;
   }
+  // NOLINTEND(bugprone-exception-escape)
 
   constexpr Vec &operator+=(std::ranges::range auto &&rg)
   {
@@ -601,6 +602,7 @@ public:
     return ret;
   }
 
+  // NOLINTNEXTLINE(misc-no-recursion)
   friend constexpr auto operator<=>(const Vec &a, const Vec &b)
       requires requires(const value_type v) { v <=> v; }
   {
@@ -717,10 +719,12 @@ protected:
     if (b_.begin) {
       size_t new_size = std::min(size(), n);
       newb.end = newb.begin + new_size;
+      // NOLINTBEGIN(bugprone-exception-escape)
       [&] noexcept {
         // for simplicity, use noexcept lambda to crash if move throws
         std::uninitialized_move_n(b_.begin, new_size, newb.begin);
       }();
+      // NOLINTEND(bugprone-exception-escape)
       std::destroy(b_.begin, b_.end);
       a_.deallocate(reinterpret_cast<allocator_type::value_type *>(b_.begin),
                     b_.bufend - b_.begin);
@@ -797,8 +801,9 @@ public:
   using super::super;
   using typename super::size_type;
 
-  // NOLINTNEXTLINE(readability-identifier-naming)
+  // NOLINTBEGIN(readability-identifier-naming)
   static constexpr size_type npos = std::string_view::npos;
+  // NOLINTEND(readability-identifier-naming)
 
   BoundedStr(std::nullptr_t) = delete;
   constexpr BoundedStr(const char *s) : BoundedStr(s, std::strlen(s)) {}

@@ -541,6 +541,7 @@ concept implements_rpc =
     rpc_compatible<Server, VersMeta, RetTrans, ExtraArgs...>::value;
 // NOLINTEND(readability-identifier-naming)
 
+// NOLINTBEGIN(misc-no-recursion)
 template<is_xdr_struct T>
 inline auto
 xdr_cmp(const T &a, const T &b)
@@ -551,6 +552,7 @@ xdr_cmp(const T &a, const T &b)
     return r;
   }(std::make_index_sequence<std::tuple_size_v<T>>{});
 }
+// NOLINTEND(misc-no-recursion)
 
 // This function is used to suppresses a compiler warning about a
 // switch statement on a bool in generated code.  You shouldn't need
