@@ -3,6 +3,7 @@
 #include <format>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -27,6 +28,8 @@ struct GenRs {
   vector<string> namespaces_;
   vector<string> scopes_;
 
+  bool needs_serde_imports = false;
+
   constexpr static int kIndentWidth = 4;
 
   void process(const vector<Definition> &defs);
@@ -40,10 +43,24 @@ struct GenRs {
   }
   void show_def(const ConstDef &c)
   {
-    show_comment(c.comment, true);
     string val = c.val;
     std::ranges::replace(val, '\'', '_');
-    prtop("pub const {}: u64 = {};\n", c.id, val);
+
+    string comment = c.comment;
+    string type = "u32";
+
+
+    if (optional<string> remainder = substring_removed(c.comment, kConstU32)) {
+      comment = *remainder;
+      type = "u32";
+    }
+    else if (optional<string> remainder = substring_removed(c.comment, kConstU64)) {
+      comment = *remainder;
+      type = "u64";
+    }
+
+    show_comment(comment, false);
+    prtop("pub const {} : {} = {};\n", c.id, type, val);
   }
   void show_def(const Typedef &d)
   {
@@ -188,8 +205,10 @@ struct GenRs {
       return {};
   }
 
-  static constexpr string_view RUST_NEWTYPE = R"(#[rust(newtype)])";
-  static constexpr string_view SERDE_ARRAYS = R"(#[serde(with = "serde_arrays")])";
+  static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
+  static constexpr string_view kSerdeArrays = R"(#[serde(with = "serde_arrays")])";
+  static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
+  static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
 
   optional<Definition> convert_to_newtype(const Definition &d);
 };
@@ -225,23 +244,23 @@ GenRs::convert_to_newtype(const Definition &d)
       return ds;
     }
 
-    Definition operator() (const Definition&)
+    Definition operator() (const Definition& /*unused*/)
     {
       throw std::runtime_error("newtype conversion is only implemented for XDR typedefs");
     }
   };
 
-  if (optional<string> remainder = substring_removed(d.comment, RUST_NEWTYPE)) {
+  if (optional<string> remainder = substring_removed(d.comment, kRustNewtype)) {
     string comment = *remainder;
-    // string attrs = R"(#[derive(Serialize, Deserialize)])";
-    string attrs = "";
+    string attrs;
 
-    if (optional<string> remainder = substring_removed(comment, SERDE_ARRAYS)) {
+    if (optional<string> remainder = substring_removed(comment, kSerdeArrays)) {
       comment = *remainder;
       if (!attrs.empty()) {
           attrs += "\n";
       }
-      attrs += SERDE_ARRAYS;
+      attrs += kSerdeArrays;
+      needs_serde_imports = true;
     }
 
     auto visitor = NewtypeVisitor {
@@ -250,10 +269,8 @@ GenRs::convert_to_newtype(const Definition &d)
     };
     return visit(visitor, d);
 
-  } else {
-
-    return {};
   }
+  return {};
 }
 
 void
@@ -282,9 +299,11 @@ GenRs::show_type(const StructBody &s, string t)
   }
 
   {
-    if (s.transparent)
-        // TODO: Other types will probably need Ser/Des too
+    if (s.transparent) {
+        // TODO(dbg): Other types will probably need Ser/Des too
         prtop("#[derive(PartialEq, Debug, Default, Clone, Serialize, Deserialize)]\n");
+        needs_serde_imports = true; // for Serialize, Deserialize
+    }
     else
         prtop("#[derive(PartialEq, Debug, Default, Clone)]\n");
 
@@ -699,10 +718,6 @@ gen_rs(vector<Definition> *defs)
 use crate::*;
 use core::option::Option;
 use core::ops::{Deref, DerefMut};
-use ::serde::{Serialize, Deserialize};
-use ::serde_arrays;
-
-pub use crate::byte_array::*;
 
 #[cfg(feature="std")]
 use std::io::{Read, Write};
@@ -711,7 +726,12 @@ use std::io::{Read, Write};
 
   gs.process(*defs);
 
-  return preamble + gs.top_ + R"(
+  std::string serde_imports = gs.needs_serde_imports ? R"(
+use ::serde::{Serialize, Deserialize};
+use ::serde_arrays;
+)" : "";
+
+  return preamble + serde_imports + gs.top_ + R"(
 //
 // XDR internals below this point
 //
