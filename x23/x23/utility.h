@@ -30,12 +30,14 @@ using std::size_t;
 // decltype--i.e., the type of an expression, not the type with which
 // a variable was declared.  (An expression is already its own type,
 // so you don't need std::forward in that case.)
+// NOLINTBEGIN(bugprone-reserved-identifier)
 #define __FORWARD_IGNORE(x) // causes error if invoked with 2 arguments
 #define __FORWARD_APPLY_IGNORE(x) __FORWARD_IGNORE(x)
 #define __FORWARD_PARENTHESIZED_TO_COMMA(x) ,
 #define FORWARD(arg)                                                           \
   ::std::forward<decltype(arg)>(arg)                                           \
       __FORWARD_APPLY_IGNORE(__FORWARD_PARENTHESIZED_TO_COMMA arg)
+// NOLINTEND(bugprone-reserved-identifier)
 
 // Types T and U differ only in reference and const/volatile
 // qualifiers or pointer/array.
@@ -154,30 +156,30 @@ struct FnTraits<R (*)(A...) noexcept(NE)> {
   static constexpr size_t kNumArgs = sizeof...(A);
   template<size_t N> requires (N < kNumArgs)
   using arg_type = TypeNum<N, A...>;
-  static constexpr bool is_noexcept = NE;
-  static constexpr CallableCategory category = CallableCategory::kFunction;
+  static constexpr bool kIsNoexcept = NE;
+  static constexpr CallableCategory kCategory = CallableCategory::kFunction;
 };
 template<typename R, bool NE> struct FnTraits<R (*)() noexcept(NE)> {
   using return_type = R;
   static constexpr size_t kNumArgs = 0;
-  static constexpr bool is_noexcept = NE;
-  static constexpr CallableCategory category = CallableCategory::kFunction;
+  static constexpr bool kIsNoexcept = NE;
+  static constexpr CallableCategory kCategory = CallableCategory::kFunction;
 };
 template<typename R, typename S, typename... A, bool NE>
 struct FnTraits<R (S::*)(A...) noexcept(NE)>
   : FnTraits<R (*)(A...) noexcept(NE)> {
   using object_type = S;
-  static constexpr CallableCategory category = CallableCategory::kMethod;
+  static constexpr CallableCategory kCategory = CallableCategory::kMethod;
 };
 template<typename R, typename S, typename... A, bool NE>
 struct FnTraits<R (S::*)(A...) const noexcept(NE)>
   : FnTraits<R (*)(A...) noexcept(NE)> {
   using object_type = S;
-  static constexpr CallableCategory category = CallableCategory::kMethod;
+  static constexpr CallableCategory kCategory = CallableCategory::kMethod;
 };
 template<typename Obj> requires requires { &Obj::operator(); }
 struct FnTraits<Obj> : FnTraits<decltype(&Obj::operator())> {
-  static constexpr CallableCategory category = CallableCategory::kObject;
+  static constexpr CallableCategory kCategory = CallableCategory::kObject;
 };
 template<typename F> requires (!std::same_as<F, std::decay_t<F>>)
 struct FnTraits<F> : FnTraits<std::decay_t<F>> {};
@@ -185,10 +187,10 @@ struct FnTraits<F> : FnTraits<std::decay_t<F>> {};
 template<size_t N, typename F>
 using ArgNumType = typename FnTraits<F>::template arg_type<N>;
 
-// variant_index<std::variant<T0, T1, T2>, Tn> is 0 when Tn is T0, 1
+// kVariantIndex<std::variant<T0, T1, T2>, Tn> is 0 when Tn is T0, 1
 // when Tn is T1, etc.
 template<typename U, typename T>
-constexpr size_t variant_index =
+constexpr size_t kVariantIndex =
     []<template<typename...> typename V, typename... Ts>(V<Ts...> *) {
       size_t ret = 0;
       if (((std::same_as<Ts, T> || (++ret, false)) || ...))
@@ -209,33 +211,33 @@ using merged_return_t = decltype([] {
 }());
 
 // Tag type to request that the return type of with_n be inferred.
-struct auto_t {};
+struct AutoT {};
 
 // Convert a run-time size_t n into a compile-time
 // std::integral_constant, and invoke a function object on that
 // constant.  You must supply a Max value of N (one greater than the
 // maximum n you could ask for at runtime), and may supply a Min value
 // (the lowest you would ask for).  You can optionally supply a return
-// type R, or if R is auto_t, it will infer the return type.
+// type R, or if R is AutoT, it will infer the return type.
 //
 // Make sure f takes the std::integral_constant argument by value and
 // not by reference so that it can convert to a compile-time constant.
-template<size_t Max, size_t Min = 0, typename R = auto_t, typename F>
+template<size_t Max, size_t Min = 0, typename R = AutoT, typename F>
 requires (Max >= Min)
 inline decltype(auto)
 with_n(size_t n, F &&f)
 {
   return [n, &f]<size_t... I>(std::index_sequence<I...>) -> decltype(auto) {
     using return_type =
-        std::conditional_t<std::same_as<R, auto_t>,
+        std::conditional_t<std::same_as<R, AutoT>,
                            merged_return_t<decltype(std::forward<F>(f)(
                                std::integral_constant<size_t, I + Min>{}))...>,
                            R>;
-    constexpr std::array<return_type (*)(F &&), Max - Min> invokers{
+    constexpr std::array<return_type (*)(F &&), Max - Min> kInvokers{
         +[](F &&f) -> return_type {
           return std::forward<F>(f)(std::integral_constant<size_t, I + Min>{});
         }...};
-    return invokers.at(n - Min)(std::forward<F>(f));
+    return kInvokers.at(n - Min)(std::forward<F>(f));
   }(std::make_index_sequence<Max - Min>{});
 }
 

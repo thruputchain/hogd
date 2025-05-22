@@ -135,7 +135,7 @@ xdr_size_bounds()
         ret.max_ = std::max(ret.max_, b.max_);
       }
       return ret + 4;
-    }(std::make_index_sequence<ops::union_size - 1>{});
+    }(std::make_index_sequence<ops::kUnionSize - 1>{});
   }
 }
 

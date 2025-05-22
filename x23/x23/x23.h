@@ -39,7 +39,7 @@ enum class XdrCategory {
 template<typename T> struct xdr_meta;
 
 namespace detail {
-template<char... C> constexpr char index_string_val[] = {'<', C..., '>', '\0'};
+template<char... C> constexpr char kIndexStringVal[] = {'<', C..., '>', '\0'};
 
 // crude way to turn a number into a const char * at compile time
 template<size_t I, char... C>
@@ -47,7 +47,7 @@ consteval const char *
 index_string()
 {
   if constexpr (I <= 9)
-    return index_string_val<I + '0', C...>;
+    return kIndexStringVal<I + '0', C...>;
   else
     return index_string<I / 10, I % 10 + '0', C...>();
 }
@@ -224,11 +224,11 @@ template<typename T> struct xdr_meta<Ptr<T>> {
 template<x23::is_xdr_enum E>
 struct std::formatter<E> : std::formatter<std::string> {
   using super = std::formatter<std::string>;
-  static inline const std::unordered_map<E, std::string> valmap{
+  static inline const std::unordered_map<E, std::string> valmap_{
       x23::xdr_meta<E>::tags.begin(), x23::xdr_meta<E>::tags.end()};
   auto format(E e, auto &ctx) const
   {
-    if (auto it = valmap.find(e); it != valmap.end())
+    if (auto it = valmap_.find(e); it != valmap_.end())
       return super::format(it->second, ctx);
     return super::format(std::format("{}#{}", x23::xdr_meta<E>::type_name,
                                      std::underlying_type_t<E>(e)),
@@ -245,13 +245,13 @@ template<is_xdr_union T> struct union_ops {
   using union_type = T;
   using meta = xdr_meta<union_type>;
 
-  // union_size is one more than the number of non-void arms.
+  // kUnionSize is one more than the number of non-void arms.
   // Depending on context, arm number 0 is reserved for void arms or
   // for access to the discriminant.
-  static constexpr size_t union_size = meta::field_names.size();
+  static constexpr size_t kUnionSize = meta::field_names.size();
 
 protected:
-  template<size_t I> requires (I < union_size)
+  template<size_t I> requires (I < kUnionSize)
   static constexpr auto fieldptr()
   {
     return union_type::template __xdr_union_fieldptr<I>();
@@ -283,7 +283,7 @@ public:
 
   // Get a particular field by number.  Uses a template argument U to
   // preserive const and lvalue/rvalue reference status of u.
-  template<size_t I, references<union_type> U> requires (I < union_size)
+  template<size_t I, references<union_type> U> requires (I < kUnionSize)
   static decltype(auto) get(U &&u)
   {
     int n = index(u);
@@ -301,7 +301,7 @@ public:
   }
 
   // Type of union arm I.  With I == 0, returns the discriminant type.
-  template<size_t I> requires (I < union_size)
+  template<size_t I> requires (I < kUnionSize)
   using union_element_t = std::conditional_t<
       I == 0, discriminant_type,
       std::remove_reference_t<decltype(get<I>(std::declval<union_type>()))>>;
@@ -314,7 +314,7 @@ public:
     int n = index(d);
     if (n <= 0)
       return true;
-    return with_n<union_size, 1, bool>(n, [&a, &b](auto i) {
+    return with_n<kUnionSize, 1, bool>(n, [&a, &b](auto i) {
       return a.*fieldptr<i>() == b.*fieldptr<i>();
     });
   }
@@ -323,19 +323,19 @@ public:
   {
     using return_type = decltype([]<size_t... I>(std::index_sequence<I...>) {
       return common_twc_result<union_element_t<I>...>{0 <=> 0};
-    }(std::make_index_sequence<union_size>{}));
+    }(std::make_index_sequence<kUnionSize>{}));
     discriminant_type d = get_discriminant(a);
     return_type r = d <=> get_discriminant(b);
     if (r == 0)
       if (int n = index(d); n > 0)
-        r = with_n<union_size, 1, return_type>(n, [&a, &b](auto i) {
+        r = with_n<kUnionSize, 1, return_type>(n, [&a, &b](auto i) {
           return unsafe_get<i>(a) <=> unsafe_get<i>(b);
         });
     return r;
   }
 
 private:
-  template<size_t I, references<union_type> U> requires (I < union_size)
+  template<size_t I, references<union_type> U> requires (I < kUnionSize)
   static decltype(auto) unsafe_get(U &&u)
   {
     if constexpr (I != 0)
@@ -345,7 +345,7 @@ private:
   static void destroy(union_type &u)
   {
     if (int n = index(u); n > 0)
-      with_n<union_size, 1>(n, [&u](auto n) {
+      with_n<kUnionSize, 1>(n, [&u](auto n) {
         if constexpr (n > 0)
           std::destroy_at(&unsafe_get<n>(u));
       });
@@ -364,7 +364,7 @@ private:
             n == 0 ? "void" : "invalid", d, meta::type_name);
     }
     else
-      with_n<union_size, 1>(n, [&u, &args...](auto n) {
+      with_n<kUnionSize, 1>(n, [&u, &args...](auto n) {
         if constexpr (std::constructible_from<union_element_t<n>, Args...>)
           do_construct<n>(u, std::forward<Args>(args)...);
         else
@@ -376,7 +376,7 @@ private:
   }
 
   template<int I, typename... Args>
-  requires (I < union_size) &&
+  requires (I < kUnionSize) &&
            std::constructible_from<union_element_t<I>, Args...>
   static void do_construct(union_type &u, Args &&...args)
       noexcept(sizeof...(Args) == 0 ||
@@ -391,7 +391,7 @@ private:
   {
     discriminant_type d = get_discriminant(other);
     if (int n = index(d); n > 0)
-      with_n<union_size, 1, void>(n, [&u, &other](auto n) {
+      with_n<kUnionSize, 1, void>(n, [&u, &other](auto n) {
         std::construct_at(&unsafe_get<n>(u),
                           std::forward_like<U>(unsafe_get<n>(other)));
       });
@@ -420,7 +420,7 @@ private:
     }
     u.*fieldptr<0>() = d;
     if (n > 0)
-      with_n<union_size, 1>(n, [&u, &other](auto n) {
+      with_n<kUnionSize, 1>(n, [&u, &other](auto n) {
         unsafe_get<n>(u) = std::forward_like<U>(unsafe_get<n>(other));
       });
   }
@@ -454,7 +454,7 @@ union_visit_arm(F &&f, U &&u)
 {
   using ops = union_ops<std::remove_cvref_t<U>>;
   if (int n = ops::index(u); n > 0)
-    with_n<ops::union_size, 1>(n, [&](auto i) {
+    with_n<ops::kUnionSize, 1>(n, [&](auto i) {
       f(std::forward_like<U>(get<i>(u)));
     });
 }
@@ -467,7 +467,7 @@ union_visit_arm(F &&f, U &&u, R void_result)
 {
   using ops = union_ops<std::remove_cvref_t<U>>;
   if (int n = ops::index(u); n > 0)
-    return with_n<ops::union_size, 1, R>(n, [&](auto i) -> R {
+    return with_n<ops::kUnionSize, 1, R>(n, [&](auto i) -> R {
       return f(std::forward_like<U>(get<i>(u)));
     });
   return void_result;
@@ -553,7 +553,7 @@ xdr_cmp(const T &a, const T &b)
 inline std::uint32_t
 unbool(bool b)
 {
-  return b ? 1 : 0;
+  return b;// ? 1 : 0;
 }
 template<typename T>
 requires (!std::same_as<T, bool> && (std::integral<T> || std::is_enum_v<T>))
@@ -570,7 +570,7 @@ enum EmptyEnum {};
 // Used to check version concepts
 struct VacuousSendCall {
   template<typename ProcMeta>
-  typename ProcMeta::return_type send_call(auto &&...)
+  typename ProcMeta::return_type send_call(auto &&... /*unused*/)
   {
     throw;
   }
