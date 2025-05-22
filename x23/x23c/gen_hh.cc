@@ -297,7 +297,7 @@ Gen::show_type(const EnumBody &e, string t)
   scopes_.push_back(t);
   bottom_ += std::format(R"(template<>
 struct x23::xdr_meta<enum {0}> {{
-  static constexpr x23::XdrCategory category = x23::XdrCategory::kEnum;
+  static constexpr x23::XdrCategory kCategory = x23::XdrCategory::kEnum;
   using enum_type = enum {0};
   using enum enum_type;
   static constexpr const char *type_name = "{1}";
@@ -383,7 +383,7 @@ struct std::tuple_element<I, struct {1}> {{
 }};
 template<>
 struct x23::xdr_meta<struct {1}> {{
-  static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
+  static constexpr x23::XdrCategory kCategory = x23::XdrCategory::kStruct;
   static constexpr const char *type_name = "{2}";
   static constexpr std::array<std::string_view, {0}> field_names{{
 )",
@@ -526,7 +526,7 @@ Gen::show_type(const UnionBody &b, string t)
 
   bottom_ += std::format(R"(template<>
 struct x23::xdr_meta<struct {0}> {{
-  static constexpr x23::XdrCategory category = x23::XdrCategory::kUnion;
+  static constexpr x23::XdrCategory kCategory = x23::XdrCategory::kUnion;
   static constexpr const char *type_name = "{2}";
   static constexpr int default_field = {3};
   static constexpr bool has_void = {4:s};

@@ -63,31 +63,31 @@ constexpr auto num_string_array = []<size_t... I>(std::index_sequence<I...>) {
 // Treat tuples like structures to make it easy to bundle multiple
 // arguments into a tuple.  Also, makes XdrVoid marshalabe.
 template<typename... T> struct xdr_meta<std::tuple<T...>> {
-  static constexpr XdrCategory category = XdrCategory::kStruct;
+  static constexpr XdrCategory kCategory = XdrCategory::kStruct;
   static constexpr const char *type_name = "tuple";
   static constexpr auto &field_names = detail::num_string_array<sizeof...(T)>;
 };
 
 template<typename T, size_t N> requires (!std::same_as<T, std::uint8_t>)
 struct xdr_meta<std::array<T, N>> {
-  static constexpr XdrCategory category = XdrCategory::kArray;
+  static constexpr XdrCategory kCategory = XdrCategory::kArray;
 };
 
 template<typename T, size_t N> requires (!std::same_as<T, std::uint8_t>)
 struct xdr_meta<Vec<T, N>> {
-  static constexpr XdrCategory category = XdrCategory::kVec;
+  static constexpr XdrCategory kCategory = XdrCategory::kVec;
 };
 
 template<size_t N> struct xdr_meta<BoundedStr<N>> {
-  static constexpr XdrCategory category = XdrCategory::kString;
+  static constexpr XdrCategory kCategory = XdrCategory::kString;
 };
 
 template<size_t N, typename A> struct xdr_meta<Vec<std::uint8_t, N, A>> {
-  static constexpr XdrCategory category = XdrCategory::kOpaqueVec;
+  static constexpr XdrCategory kCategory = XdrCategory::kOpaqueVec;
 };
 
 template<size_t N> struct xdr_meta<std::array<std::uint8_t, N>> {
-  static constexpr XdrCategory category = XdrCategory::kOpaqueArray;
+  static constexpr XdrCategory kCategory = XdrCategory::kOpaqueArray;
 };
 
 template<typename T>
@@ -96,9 +96,9 @@ constexpr XdrCategory category = [] {
   using std::same_as;
   using enum XdrCategory;
   if constexpr (requires {
-                  { xdr_meta<reffed_type>::category } -> decays_to<XdrCategory>;
+                  { xdr_meta<reffed_type>::kCategory } -> decays_to<XdrCategory>;
                 })
-    return xdr_meta<reffed_type>::category;
+    return xdr_meta<reffed_type>::kCategory;
   else if constexpr (same_as<reffed_type, bool> ||
                      same_as<reffed_type, std::int32_t> ||
                      same_as<reffed_type, std::uint32_t> ||
@@ -177,7 +177,7 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
 
   // Make it look a litle Vec-like to simplify marshaling code
   static constexpr size_t max_size() { return 1; }
-  size_t size() const noexcept { return bool(*this); }
+  size_t size() const noexcept { return (*this).has_value(); }
   void resize(size_t n)
   {
     switch (n) {
