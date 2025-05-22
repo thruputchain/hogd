@@ -35,13 +35,12 @@ fail(HogDBError err)
 }
 
 // measure returns the execution time of fn in seconds (as a double)
-template<typename Func>
 double
-measure(Func &&fn)
+measure(auto &&fn)
 {
   using clock = std::chrono::high_resolution_clock;
   clock::time_point start = clock::now();
-  std::forward<Func>(fn)();
+  std::forward<decltype(fn)>(fn)();
   clock::time_point end = clock::now();
   return std::chrono::duration<double>(end - start).count();
 }
@@ -56,6 +55,8 @@ class Benchmark {
 public:
   static std::unique_ptr<Benchmark>
   make_one_to_many_payments_benchmark(size_t n, int workers);
+  static std::unique_ptr<Benchmark>
+  make_many_to_one_payments_benchmark(size_t n, int workers);
   static std::unique_ptr<Benchmark>
   make_round_robin_payments_benchmark(size_t n, int workers);
 
@@ -127,6 +128,37 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
 }
 
 std::unique_ptr<Benchmark>
+Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers)
+{
+  // generate payment ops.
+  std::vector<Payment> ops;
+  ops.reserve(n - 1);
+  for (size_t i = 1; i < n; i++) {
+    ops.emplace_back(make_key(i), make_key(0), 1);
+  }
+
+  // create the benchmark.
+  auto bench =
+      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+
+  // set up initial DB state.
+  HogDBStatus<void> ret;
+  ret = bench->db_.write_nnint128(make_key(0), static_cast<int128_t>(0));
+  if (!ret)
+    fail(ret.error());
+  for (size_t i = 1; i < n; i++) {
+    ret = bench->db_.write_nnint128(make_key(i), 1);
+    if (!ret)
+      fail(ret.error());
+  }
+  HogDBStatus<uint64_t> lsn = bench->db_.commit();
+  if (!lsn)
+    fail(lsn.error());
+
+  return bench;
+}
+
+std::unique_ptr<Benchmark>
 Benchmark::make_round_robin_payments_benchmark(size_t n, int workers)
 {
   // generate payment ops.
@@ -185,6 +217,8 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
      Benchmark::make_round_robin_payments_benchmark},
     {"onetomany_payments", "one payer pays everyone else",
      Benchmark::make_one_to_many_payments_benchmark},
+    {"manytoone_payments", "everyone pays one payee",
+     Benchmark::make_many_to_one_payments_benchmark},
 };
 
 } // namespace
