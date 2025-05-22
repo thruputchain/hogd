@@ -5,6 +5,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <exception>
 #include <utility>
 #include <variant>
 

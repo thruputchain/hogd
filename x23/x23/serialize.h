@@ -168,12 +168,12 @@ xdr_size(const X &x)
   else if constexpr (is_xdr_cat<X, kString, kOpaqueVec>)
     return (x.size() + 7UZ) & ~3UZ;
   else if constexpr (is_xdr_cat<X, kPtr, kVec, kArray>) {
-    constexpr size_t sizesize = kCategory<X> == kArray ? 0UZ : 4UZ;
+    constexpr size_t kSizeSize = kCategory<X> == kArray ? 0UZ : 4UZ;
     if constexpr (detail::has_fixed_size<typename X::value_type>())
-      return sizesize +
-             x.size() * detail::size_of_fixed<typename X::value_type>();
+      return kSizeSize +
+             (x.size() * detail::size_of_fixed<typename X::value_type>());
     else {
-      size_t size = sizesize;
+      size_t size = kSizeSize;
       for (const auto &e : x)
         size += xdr_size(e);
       return size;
@@ -216,7 +216,7 @@ struct Serializer {
     }
   }
 
-  void operator()(bool b) { put32(b); }
+  void operator()(bool b) { put32(b ? 1 : 0); }
   void operator()(is_xdr_cat<XdrCategory::kPrimitive> auto x)
       requires (sizeof(x) == 4)
   {
@@ -332,6 +332,7 @@ struct Deserializer {
       if (n > PTRDIFF_MAX)
         throw XdrBadInput("x23::Deserializer: size too large");
     }
+    // NOLINTNEXTLINE(google-readability-casting)
     if (e - p < std::ptrdiff_t(n)) [[unlikely]]
       throw XdrBadInput("x23::Deserializer: input too short");
   }
@@ -355,10 +356,12 @@ struct Deserializer {
 
   template<bool Safe> void go(bool &b)
   {
+    // NOLINTBEGIN(readability-else-after-return)
     if (auto val = get32<Safe>(); val > 1)
       throw XdrBadInput("illegal bool value {} in deserialization", val);
     else
       b = val;
+    // NOLINTEND(readability-else-after-return)
   }
   template<bool Safe, is_xdr_cat<XdrCategory::kPrimitive, XdrCategory::kEnum> X>
   void go(X &x)
@@ -372,12 +375,12 @@ struct Deserializer {
 
   void check_trailing_zeros(size_t rem) const
   {
-    constexpr auto swaple = [](std::uint32_t v) consteval -> std::uint32_t {
+    constexpr auto kSwapLE = [](std::uint32_t v) consteval -> std::uint32_t {
       return std::endian::native == std::endian::little ? std::byteswap(v) : v;
     };
-    constexpr std::array masks{swaple(0), swaple(0xffffff), swaple(0xffff),
-                               swaple(0xff)};
-    if (reinterpret_cast<const std::uint32_t *>(p)[-1] & masks[rem])
+    constexpr std::array kMasks{kSwapLE(0), kSwapLE(0xffffff), kSwapLE(0xffff),
+                               kSwapLE(0xff)};
+    if (reinterpret_cast<const std::uint32_t *>(p)[-1] & kMasks[rem])
         [[unlikely]]
       throw XdrBadInput("padding bytes are not zero deserializing XDR");
   }
@@ -432,6 +435,7 @@ struct Deserializer {
 
   bool unsafe_ok(const SizeBounds &b) const
   {
+    // NOLINTNEXTLINE(google-readability-casting)
     return ee - p >= std::ptrdiff_t(b.max_);
   }
 

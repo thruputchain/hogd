@@ -255,24 +255,27 @@ public:
   struct TailCoro {
     std::coroutine_handle<> caller_;
     bool await_ready() const noexcept { return false; }
-    auto await_suspend(std::coroutine_handle<>) const noexcept
+    auto await_suspend(std::coroutine_handle<> /*unused*/) const noexcept
     {
       return caller_;
     }
     void await_resume() const noexcept { std::unreachable(); }
   };
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   TailCoro final_suspend() noexcept { return {non_null_caller()}; }
 
   //
   // Functions for use on the caller/awaiter/"future" side
   //
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   bool await_ready() noexcept
   {
     // If the test_and_set returns true, the callee already wrote
     // result_ or exception_, so use acquire semantics to access it.
     return resume_lock_.test_and_set(std::memory_order_acquire);
   }
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   void await_suspend(std::coroutine_handle<> h
 #if X23_CORO_TRACE
                      ,
@@ -294,6 +297,7 @@ public:
   {
     if (state_ == kResult) [[likely]] {
       state_ = kConsumed;
+      // NOLINTNEXTLINE(readability-identifier-naming)
       Defer _c{[this] { std::destroy_at(&result_); }};
       if constexpr (std::is_void_v<R>)
         return;
@@ -302,6 +306,7 @@ public:
     }
     assert(state_ == kException);
     state_ = kConsumed;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     Defer _c{[this] { std::destroy_at(&exception_); }};
     std::rethrow_exception(std::move(exception_));
   }
@@ -317,6 +322,7 @@ public:
     std::construct_at(&result_, std::forward<decltype(r)>(r)...);
     state_ = kResult;
   }
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   void do_set_exception(std::exception_ptr p)
   {
     assert(state_ == kPending);
@@ -507,8 +513,10 @@ template<typename R> struct callback_traits<CoroCB<R>> {
 // is continuing to access the coroutine state that gets destroyed by
 // Async's destructor.
 template<typename R> struct [[nodiscard]] Async {
+  // NOLINTNEXTLINE(readability-identifier-naming)
   struct promise_type;
   using handle_type = std::coroutine_handle<promise_type>;
+  // NOLINTNEXTLINE(readability-identifier-naming)
   struct promise_type : Awaitable<R> {
 #if X23_CORO_TRACE
     promise_type(const auto &...args)
@@ -517,6 +525,7 @@ template<typename R> struct [[nodiscard]] Async {
           std::coroutine_handle<promise_type>::from_promise(*this);
       corotrace.set_alloc(h, GetLoc{}(args...), type_name<Async>());
     }
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ~promise_type()
     {
       corotrace.clear_alloc(
@@ -542,7 +551,7 @@ template<typename R> struct [[nodiscard]] Async {
   decltype(auto) operator co_await() { return callee_.promise(); }
 
   // Run Async to completion and make a callback with the result.
-  void operator()(detail::is_callback_of<R> auto cb)
+  void operator()(detail::is_callback_of<R> auto /*unused*/)
   {
     // To defer destroying callee_, move Async into this coroutine
     Async self = std::move(*this);
@@ -571,6 +580,7 @@ template<typename R> struct [[nodiscard]] Async {
         wait.release();
       });
       wait.acquire();
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       return std::move(*res);
     }
   }
@@ -604,6 +614,7 @@ async_return(R &&r)
 // Generate an Async and matching CoroCB.  This is for use in
 // low-level non-coroutine functions that want to return an Async for
 // coroutines to co_await.
+// NOLINTBEGIN(misc-unused-parameters)
 template<typename R>
 std::pair<Async<R>, CoroCB<R>>
 make_async(SLOC_PARM0)
@@ -617,6 +628,7 @@ make_async(SLOC_PARM0)
   }(SLOC_VAR);
   return std::pair{std::move(async), cb};
 }
+// NOLINTEND(misc-unused-parameters)
 
 template<typename R>
 auto
@@ -634,6 +646,7 @@ async_map(auto f, Async<void> a) -> Async<decltype(f())>
 // A funciton that returns Detached is a detached coroutine that
 // cannot be awaited.  The coroutine destroys itself upon co_return;
 struct Detached {
+  // NOLINTNEXTLINE(readability-identifier-naming)
   struct promise_type {
 #if X23_CORO_TRACE
     template<typename... Args> promise_type(const Args &...args)
@@ -642,6 +655,7 @@ struct Detached {
           std::coroutine_handle<promise_type>::from_promise(*this);
       corotrace.set_alloc(h, GetLoc{}(args...), "Detached");
     }
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ~promise_type()
     {
       corotrace.clear_alloc(
@@ -649,11 +663,11 @@ struct Detached {
     }
 #endif // X23_CORO_TRACE
 
-    Detached get_return_object() const noexcept { return {}; }
-    std::suspend_never initial_suspend() const noexcept { return {}; }
-    void return_void() const noexcept {}
-    void unhandled_exception() const noexcept { std::terminate(); }
-    std::suspend_never final_suspend() const noexcept { return {}; }
+    static Detached get_return_object() noexcept { return {}; }
+    static std::suspend_never initial_suspend() noexcept { return {}; }
+    static void return_void() noexcept {}
+    static void unhandled_exception() noexcept { std::terminate(); }
+    static std::suspend_never final_suspend() noexcept { return {}; }
   };
 
   Detached(Detached &&) noexcept = delete;

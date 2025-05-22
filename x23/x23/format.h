@@ -56,6 +56,7 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
     else if constexpr (std::formattable<X, char>)
       uformat_to(out, "{}", x);
     else if constexpr (kCategory<X> == kStruct) {
+      // NOLINTNEXTLINE(readability-identifier-naming)
       auto _g = opengroup("{}");
       [&]<size_t... I>(std::index_sequence<I...>) {
         ((uformat_to(out, "\n{:{}}{} = ", "", 2 * indent,
@@ -65,6 +66,7 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
       }(std::make_index_sequence<std::tuple_size_v<X>>{});
     }
     else if constexpr (kCategory<X> & FlagSet{kArray, kVec}) {
+      // NOLINTNEXTLINE(readability-identifier-naming)
       auto _g = opengroup("[]");
       for (const auto &e : x) {
         uformat_to(out, "\n{:{}}", "", 2 * indent);
@@ -74,6 +76,7 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
     }
     else if constexpr (kCategory<X> == kUnion) {
       using ops = union_ops<X>;
+      // NOLINTNEXTLINE(readability-identifier-naming)
       auto _g = opengroup("{}");
       uformat_to(out, "\n{:{}}{} = {},", "", 2 * indent,
                  ops::meta::kFieldNames[0], get<0>(x));

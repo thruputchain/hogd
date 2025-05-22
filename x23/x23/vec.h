@@ -101,6 +101,7 @@ namespace detail {
 // std::allocator<T>::allocate is.  Of course, since as of this
 // writing gcc currently has slightly broken if consteval support, the
 // constexpr stuff will need to evolve anyway.
+// NOLINTNEXTLINE(readability-identifier-naming)
 template<typename T> struct merged_allocator {
   using type = std::allocator<T>;
 };
@@ -258,9 +259,11 @@ public:
   using const_reference = const T &;
   using pointer = T *;
   using const_pointer = const T *;
+  // NOLINTNEXTLINE(readability-identifier-naming)
   struct iterator : detail::PtrIterator<value_type> {
     using detail::PtrIterator<value_type>::PtrIterator;
   };
+  // NOLINTNEXTLINE(readability-identifier-naming)
   struct const_iterator : detail::PtrIterator<const value_type> {
     using detail::PtrIterator<const value_type>::PtrIterator;
   };
@@ -333,6 +336,7 @@ public:
   // NOLINTNEXTLINE(bugprone-exception-escape)
   constexpr ~Vec() { realloc(0); }
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   constexpr Vec &operator=(Vec &&other) noexcept
   {
     realloc(0);
@@ -391,7 +395,7 @@ public:
   {
     if constexpr (std::convertible_to<Self &&, Vec &&>) {
       self.append_range(rg);
-      return std::move(self);
+      return std::forward<Self>(self);
     }
     else {
       Self ret;
@@ -523,6 +527,7 @@ public:
       requires requires { value_type(*first); }
   {
     if (const difference_type num = last - first; num > 0) {
+      // NOLINTNEXTLINE(google-readability-casting)
       if (capacity() - size() < size_t(num))
         realloc(size() + num);
       if !consteval {
@@ -765,7 +770,7 @@ using Buf = Vec<std::uint8_t>;
 // variety of containers of std::uint8_t or char.
 struct BufView : std::span<const std::uint8_t> {
   using super = std::span<const std::uint8_t>;
-  BufView() noexcept : super() {}
+  BufView() noexcept = default;
   BufView(is_bytespan auto s) noexcept
     : super(reinterpret_cast<const std::uint8_t *>(s.data()), s.size())
   {}

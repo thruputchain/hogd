@@ -125,6 +125,7 @@ public:
     operator pointer *() const { return &mp_->p_; }
     operator ManagedPtr *() const { return mp_; }
   };
+  // NOLINTNEXTLINE(google-runtime-operator)
   PtrPtr operator&() noexcept { return {this}; }
 
   void swap(ManagedPtr &other) noexcept { std::swap(p_, other.p_); }
@@ -185,6 +186,7 @@ public:
       action_ = get_action(std::move(a));
   }
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Defer() { invoke(std::move(action_)); }
 
   Defer &operator=(Defer &&other) noexcept

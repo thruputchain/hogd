@@ -243,6 +243,7 @@ namespace x23 {
 // Rather than generate many copies of the same boiler-plate code for
 // each union type, we implement the guts of the operations in the
 // friend class union_ops.
+// NOLINTNEXTLINE(readability-identifier-naming)
 template<is_xdr_union T> struct union_ops {
   using union_type = T;
   using meta = xdr_meta<union_type>;

@@ -176,7 +176,7 @@ struct ProgVers {
 };
 
 struct RpcService {
-  virtual ~RpcService() {}
+  virtual ~RpcService() = default;
   virtual std::uint32_t program() const = 0;
   virtual std::uint32_t version() const = 0;
   virtual Async<Buf> serve(const rpc_msg &msg, BufView args SLOC_PARM) = 0;
@@ -187,6 +187,7 @@ struct RpcService {
 };
 
 struct RpcLogger {
+  // NOLINTNEXTLINE(readability-identifier-naming)
   static inline int default_logfd = -1;
   int logfd_ = default_logfd;
   std::string peername_;
@@ -256,14 +257,14 @@ struct RpcLogger {
 
 struct RpcNoLogger {
   RpcNoLogger() noexcept = default;
-  RpcNoLogger(const std::string &, int = RpcLogger::default_logfd) noexcept {}
-  RpcNoLogger(int, int = RpcLogger::default_logfd) noexcept {}
+  RpcNoLogger(const std::string & /*unused*/, int = RpcLogger::default_logfd) noexcept {}
+  RpcNoLogger(int /*unused*/, int /*unused*/ = RpcLogger::default_logfd) noexcept {}
   template<typename = void>
-  void log_client(const rpc_msg &msg, const is_xdr_type auto &...pl)
+  void log_client(const rpc_msg &/*unused*/, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
   {}
   template<typename = void>
-  void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
+  void log_server(const rpc_msg &/*unused*/, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
   {}
 };
@@ -328,6 +329,7 @@ private:
     const rpc_msg &callmsg_;
     const BufView argbytes_;
 
+    // NOLINTBEGIN(misc-unused-parameters)
     template<std::same_as<void>> Async<Buf> operator()(this Executor self
 						       SLOC_PARM)
     {
@@ -376,6 +378,7 @@ private:
         co_return make_record(rmsg);
       }
     }
+    // NOLINTEND(misc-unused-parameters)
   };
 };
 
@@ -500,7 +503,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   };
 
   template<typename VersMeta> requires requires { typename VersMeta::client; }
-  typename VersMeta::template client<ClientRef> client(VersMeta = {})
+  typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
   {
     return typename VersMeta::client{ClientRef{*this}};
   }
@@ -515,7 +518,7 @@ struct RpcStream : public detail::RpcStreamImpl {
                  decltype(*std::declval<Server>())>::rpc_service,
              typename... ExtraArgs>
     requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
-    Configurator &server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
+    Configurator &server(Server srvr, VersMeta /*unused*/ = {}, ExtraArgs &&...extra_args)
     {
       assert(!reader_running_);
       auto dispatch = new RpcDispatcher<VersMeta, Server, Logger,
@@ -535,7 +538,7 @@ struct RpcStream : public detail::RpcStreamImpl {
 
     template<typename VersMeta>
     requires requires { typename VersMeta::template client<RpcStream>; }
-    typename VersMeta::template client<ClientRef> client(VersMeta = {})
+    typename VersMeta::template client<ClientRef> client(VersMeta /*unused*/ = {})
     {
       go();
       return typename VersMeta::template client<ClientRef>{ClientRef{*s_}};

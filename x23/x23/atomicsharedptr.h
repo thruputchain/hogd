@@ -13,6 +13,7 @@ template<typename T> using atomic_shared_ptr = std::atomic<std::shared_ptr<T>>;
 
 #else // !HAVE_ATOMIC_SHARED_PTR
 
+// NOLINTNEXTLINE(readability-identifier-naming)
 template<typename T> struct atomic_shared_ptr : std::shared_ptr<T> {
   using super = std::shared_ptr<T>;
 

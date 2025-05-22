@@ -31,7 +31,7 @@ public:
       mv.m_.lock();
       mv_ = &mv;
     }
-    Ptr(MVar &mv, std::try_to_lock_t)
+    Ptr(MVar &mv, std::try_to_lock_t /*unused*/)
     {
       if (mv.m_.try_lock())
         mv_ = &mv;
@@ -39,7 +39,7 @@ public:
     Ptr(Ptr &&other) noexcept : mv_(std::exchange(other.mv_, nullptr)) {}
     ~Ptr() { reset(); }
     Ptr &operator=(std::nullptr_t) { reset(); }
-    Ptr &operator=(Ptr &&other)
+    Ptr &operator=(Ptr &&other) noexcept
     {
       reset();
       mv_ = std::exchange(other.mv_, nullptr);
@@ -58,6 +58,7 @@ public:
 
     void wait(std::condition_variable &c) {
       std::unique_lock ul(mv_->m_, std::adopt_lock);
+      // NOLINTNEXTLINE(readability-identifier-naming)
       Defer _rel([&ul]{ ul.release(); });
       c.wait(ul);
     }
@@ -106,6 +107,7 @@ public:
     requires std::invocable<F, T&> &&
     (!std::invocable<F, T&, std::unique_lock<std::mutex>>)
   {
+    // NOLINTNEXTLINE(readability-identifier-naming)
     std::lock_guard _g(m_);
     return std::invoke(std::forward<F>(f), t_);
   }
@@ -129,13 +131,13 @@ template<typename Lock> class MVar<void, Lock> {
 public:
   class Ptr {
   public:
-    Ptr() noexcept {}
+    Ptr() noexcept = default;
     Ptr(MVar &mv)
     {
       mv.m_.lock();
       mv_ = &mv;
     }
-    Ptr(MVar &mv, std::try_to_lock_t)
+    Ptr(MVar &mv, std::try_to_lock_t /*unused*/)
     {
       if (mv.m_.try_lock())
         mv_ = &mv;
@@ -143,7 +145,7 @@ public:
     Ptr(Ptr &&other) noexcept : mv_(std::exchange(other.mv_, nullptr)) {}
     ~Ptr() { reset(); }
     Ptr &operator=(std::nullptr_t) { reset(); }
-    Ptr &operator=(Ptr &&other)
+    Ptr &operator=(Ptr &&other) noexcept
     {
       reset();
       mv_ = std::exchange(other.mv_, nullptr);
@@ -160,6 +162,7 @@ public:
 
     void wait(std::condition_variable &c) {
       std::unique_lock ul(mv_->m_, std::adopt_lock);
+      // NOLINTNEXTLINE(readability-identifier-naming)
       Defer _rel([&ul]{ ul.release(); });
       c.wait(ul);
     }
@@ -176,6 +179,7 @@ public:
   template<typename F> decltype(auto) with(F &&f)
     requires std::invocable<F>
   {
+    // NOLINTNEXTLINE(readability-identifier-naming)
     std::lock_guard _g(m_);
     return std::invoke(std::forward<F>(f));
   }
