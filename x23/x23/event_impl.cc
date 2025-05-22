@@ -24,7 +24,7 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
   auto fdp = getfd(fd);
   assert(!fdp->callbacks[write].load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
-  fdp->ready &= ~epflags[write];
+  fdp->ready &= ~kEpFlags[write];
 }
 
 void
@@ -37,7 +37,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
     wi(EBADF);
     return;
   }
-  if ((fdp->ready & epflags[write]) && mode == kActive) {
+  if ((fdp->ready & kEpFlags[write]) && mode == kActive) {
     wi(0);
     return;
   }
@@ -185,7 +185,7 @@ CoroPollImpl::check(int timeout)
     int fd = evs[i].data.fd;
     state_[fd].ready |= evs[i].events;
     for (unsigned write = 0; write < 2; ++write)
-      if (evs[i].events & epflags[write]) {
+      if (evs[i].events & kEpFlags[write]) {
         if (WorkItem wi = state_[fd].callbacks[write].exchange(nullptr)) {
           --numcoro_;
           if (std::coroutine_handle<> h = wi.set_result_without_resuming(err))
@@ -263,7 +263,7 @@ CoroPollImpl::check(int timeout)
   {
     auto ptr = state_.take();
     pollfds.reserve(ptr->size() + 1);
-    pollfds.push_back({selfpipe_[0].get(), pollflags[0], 0});
+    pollfds.push_back({selfpipe_[0].get(), kPollFlags[0], 0});
     for (const auto &kv : *ptr) {
       const FdState &f = kv.second;
       short events;
@@ -297,7 +297,7 @@ CoroPollImpl::check(int timeout)
     if (f.poisoned)
       continue;
     for (int write = 0; write < 2; ++write)
-      if (f.callbacks[write] && (pfd->revents & pollflags[write]))
+      if (f.callbacks[write] && (pfd->revents & kPollFlags[write]))
         if (auto h = std::exchange(f.callbacks[write], nullptr)
                          .set_result_without_resuming(0))
           cbs.push_back(h);

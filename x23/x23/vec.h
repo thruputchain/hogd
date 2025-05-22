@@ -351,6 +351,7 @@ public:
     return *this;
   }
 
+  // NOLINTBEGIN(bugprone-exception-escape)
   template<size_t MS>
   constexpr Vec &operator=(Vec<T, MS, allocator_type> &&other)
       noexcept(max_size() <= Vec<T, MS, allocator_type>::max_size())

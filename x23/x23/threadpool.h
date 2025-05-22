@@ -180,8 +180,10 @@ public:
     bool valid() const { return thread_ != std::thread::id{}; }
 
   private:
+    // NOLINTBEGIN(readability-redundant-member-init)
     std::thread::id thread_{};
     size_t loop_count_{};
+    // NOLINTEND(readability-redundant-member-init)
   };
 
   static SuspendCount get_suspend_count() noexcept

@@ -110,10 +110,8 @@ struct XdrCallFailed : XdrException {
       auto stat = m.body.rbody().areply().reply_data.stat();
       return std::format("RPC call failed ({})", stat);
     }
-    else {
-      auto stat = m.body.rbody().rreply().stat();
-      return std::format("RPC call rejected ({})", stat);
-    }
+    auto stat = m.body.rbody().rreply().stat();
+    return std::format("RPC call rejected ({})", stat);
   }
 };
 
@@ -179,6 +177,7 @@ struct RpcService {
   virtual ~RpcService() = default;
   virtual std::uint32_t program() const = 0;
   virtual std::uint32_t version() const = 0;
+  // NOLINTNEXTLINE(google-default-arguments)
   virtual Async<Buf> serve(const rpc_msg &msg, BufView args SLOC_PARM) = 0;
   ProgVers getpv() const
   {
@@ -257,7 +256,7 @@ struct RpcLogger {
 
 struct RpcNoLogger {
   RpcNoLogger() noexcept = default;
-  RpcNoLogger(const std::string & /*unused*/, int = RpcLogger::default_logfd) noexcept {}
+  RpcNoLogger(const std::string & /*unused*/, int /*unused*/ = RpcLogger::default_logfd) noexcept {}
   RpcNoLogger(int /*unused*/, int /*unused*/ = RpcLogger::default_logfd) noexcept {}
   template<typename = void>
   void log_client(const rpc_msg &/*unused*/, const is_xdr_type auto &...pl)
@@ -312,6 +311,7 @@ struct RpcDispatcher : RpcService {
   std::uint32_t program() const final { return version_meta::program; }
   std::uint32_t version() const final { return version_meta::version; }
 
+  // NOLINTNEXTLINE(google-default-arguments)
   Async<Buf> serve(const rpc_msg &msg, BufView argdata SLOC_PARM) override
   {
     using enum msg_type;
@@ -559,7 +559,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   static Configurator make(CoroPoll &cp, UniqueFd fd, Logger logger = {})
   {
     return std::make_shared<RpcStream>(cp, std::move(fd), std::move(logger),
-                                       ConstructorKey{});
+                                       ConstructorKey{} /*unused*/);
   }
 
 protected:

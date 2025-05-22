@@ -51,8 +51,8 @@ BufferedReader::operator()(int fd, void *buf, size_t len)
 CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
 {
   pollthread_ = std::thread(&CoroPoll::loop, this);
-  if (ignore_sigpipe) {
-    ignore_sigpipe = false;
+  if (ignore_sigpipe_) {
+    ignore_sigpipe_ = false;
     signal(SIGPIPE, SIG_IGN);
   }
 }

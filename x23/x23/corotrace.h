@@ -48,7 +48,7 @@ get_callsite(std::string_view ignore_file,
 #else // !HAVE_STD_STACKTRACE
 
 inline std::string
-get_callsite(std::string_view ignore_file,
+get_callsite(std::string_view /*ignore_file*/,
 	     source_location sloc = source_location::current())
 {
   return to_string(sloc);
@@ -125,6 +125,7 @@ to_string(const GetLoc &gl)
 }
 
 struct CoroTrace {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TraceState {
     Str alloc_point;
     Str suspend_point;

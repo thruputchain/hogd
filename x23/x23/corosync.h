@@ -77,6 +77,7 @@ public:
     LockerState(LockerState &&) = delete;
 
   private:
+    // NOLINTNEXTLINE(readability-redundant-member-init)
     atomic_coroutine_handle next_{};
     friend CoroLock;
   };
@@ -161,7 +162,7 @@ public:
                                                            T t);
 
   // True while lock is held
-  bool busy() const { return last_.load(std::memory_order_acquire); }
+  bool busy() const { return last_.load(std::memory_order_acquire) != nullptr; }
 
 private:
   // If last_ is NULL, the lock is free.  If last_ points to a
@@ -196,7 +197,7 @@ void resume_in_another_thread(std::coroutine_handle<>);
 
 template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
   AwaitReleaseAndReturn(CoroLock &lk, LockerState *ls) : lk_(lk), ls_(ls) {}
-  bool await_ready() noexcept { return false; }
+  static bool await_ready() noexcept { return false; }
   template<typename Promise>
   auto await_suspend(std::coroutine_handle<Promise> moriturus) noexcept
   {
@@ -204,7 +205,7 @@ template<> struct [[nodiscard]] CoroLock::AwaitReleaseAndReturn<void> {
     p.return_void(); // Coroutine must return void
     return finish_suspend(moriturus);
   }
-  void await_resume() noexcept { std::unreachable(); }
+  static void await_resume() noexcept { std::unreachable(); }
 
 protected:
   // Returns NULL if there is no other coroutine to resume, otherwise
@@ -289,6 +290,7 @@ struct CoroGuard : CoroLock::LockerState {
   CoroLock *lkp_{};
 
   CoroGuard() noexcept = default;
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~CoroGuard() { reset(); }
 
   // Must be co_awaited and must be called on lvalue CoroGuard

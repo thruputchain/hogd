@@ -28,7 +28,7 @@ read(BorrowedFd fd, BufT *buf, size_t len, Read readfn = &::read)
   std::expected<ssize_t, Errno> ret;
   buf->resize_and_overwrite(old_size + len, [fd = fd.get(), len, &readfn,
                                              old_size,
-                                             &ret](auto *p, size_t count) {
+                                             &ret](auto *p, size_t /*count*/) {
     if (ssize_t n = (*readfn)(fd, p + old_size, len); n >= 0) {
       ret = n;
       return old_size + n;
@@ -85,7 +85,7 @@ readall(BorrowedFd fd, BufT *buf)
 
 template<is_bytevec BufT = Str>
 std::expected<BufT, Errno>
-readfile(std::filesystem::path p)
+readfile(std::filesystem::path const& p)
 {
   UniqueFd fd(open(p.c_str(), O_RDONLY));
   if (!fd)

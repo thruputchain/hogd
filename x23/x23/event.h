@@ -147,7 +147,7 @@ private:
   void setcb(BorrowedFd fd, bool write, WorkItem h);
 
 #if USE_EPOLL
-  static inline constexpr std::uint32_t epflags[2] = {EPOLLIN | EPOLLHUP |
+  constexpr static std::uint32_t kEpFlags[2] = {EPOLLIN | EPOLLHUP |
                                                           EPOLLERR,
                                                       EPOLLOUT | EPOLLERR};
 
@@ -182,6 +182,7 @@ private:
 
   UniqueFd epollfd_;
 
+  // NOLINTNEXTLINE(google-readability-casting)
   SharedLock resize_lock_{unsigned(pool_.nthreads_)};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
@@ -201,8 +202,8 @@ private:
   {
     using enum FdState::Mode;
     FdState::Mode mode = fdp->mode;
-    if ((fdp->ready & epflags[write]) || mode != kActive)
-      if (WorkItem wi = fdp->callbacks[write].exchange(nullptr)) {
+    if ((fdp->ready & kEpFlags[write?1:0]) || mode != kActive)
+      if (WorkItem wi = fdp->callbacks[write?1:0].exchange(nullptr)) {
         --numcoro_;
         wi(mode == kActive ? 0 : EBADF);
       }
@@ -214,7 +215,7 @@ private:
   }
 
 #else  // !USE_EPOLL
-  static inline constexpr short pollflags[2] = {POLLIN | POLLHUP | POLLERR,
+  constexpr static short kPollFlags[2] = {POLLIN | POLLHUP | POLLERR,
                                                 POLLOUT | POLLERR};
   struct FdState : BufHolder {
     bool poisoned{false};
@@ -224,7 +225,7 @@ private:
       short ret = 0;
       for (size_t write = 0; write < 2; ++write)
         if (callbacks[write])
-          ret |= pollflags[write];
+          ret |= kPollFlags[write];
       return ret;
     }
   };
@@ -239,7 +240,7 @@ private:
 
 class CoroPoll : public detail::CoroPollImpl {
 public:
-  static inline bool ignore_sigpipe = true;
+  static inline bool ignore_sigpipe_ = true;
 
   CoroPoll(ThreadPool &pool);
   ~CoroPoll();
@@ -260,6 +261,7 @@ public:
 
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
+  // NOLINTBEGIN(misc-unused-parameters)
   template<typename Addr = sockaddr>
   Async<std::expected<int, Errno>> accept(BorrowedFd lfd, Addr *addr = nullptr,
                                           socklen_t *addrlen = nullptr,
@@ -309,6 +311,7 @@ public:
   // Connect and return a file descriptor or a system error.
   Async<std::expected<int, std::system_error>>
   tcpconnect(std::string host, std::string port SLOC_PARM);
+  // NOLINTEND(misc-unused-parameters)
 
 private:
   std::thread pollthread_;

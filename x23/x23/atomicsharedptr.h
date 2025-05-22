@@ -25,8 +25,10 @@ template<typename T> struct atomic_shared_ptr : std::shared_ptr<T> {
   atomic_shared_ptr(const atomic_shared_ptr &) = delete;
 
   // Because std::atomic<std::shared_ptr<T>>::operator= also returns void
+  // NOLINTBEGIN(misc-unconventional-assign-operator)
   void operator=(std::nullptr_t) { store(nullptr); }
   void operator=(super desired) { store(std::move(desired)); }
+  // NOLINTEND(misc-unconventional-assign-operator)
 
   super load() const { return std::atomic_load(this); }
   void store(super desired) { std::atomic_store(this, std::move(desired)); }
