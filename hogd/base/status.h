@@ -2,12 +2,10 @@
 
 #pragma once
 
-extern "C" {
-#include <errno.h>
-}
-
+#include <cerrno>
+#include <concepts>
 #include <expected>
-#include <format>
+#include <limits>
 #include <system_error>
 #include <type_traits>
 #include <utility>

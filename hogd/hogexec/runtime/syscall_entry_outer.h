@@ -203,7 +203,7 @@ parse_mock(Inputs const &tuple_args)
 }
 
 constexpr static std::pair<HostFnResult, GasAmount> kFaultResult = {
-    {HostFnErrorCode::kNoneOrRecoverable,
+    {HostFnErrorCode::kHostNoneOrRecoverable,
      static_cast<int32_t>(SyscallErrorCode::kFault)},
     kGenericBadSyscallCost};
 
@@ -216,7 +216,8 @@ inline static std::pair<HostFnErrorCode, int32_t>
 convert_return_t(HostFnStatus<SyscallErrorCode> const &value)
 {
   if (value) {
-    return {HostFnErrorCode::kNoneOrRecoverable, static_cast<int32_t>(*value)};
+    return {HostFnErrorCode::kHostNoneOrRecoverable,
+            static_cast<int32_t>(*value)};
   }
   return {value.error().code(), 0};
 }
@@ -286,11 +287,11 @@ template<SyscallNo Syscall, auto InnerSyscallFunc>
 constexpr std::pair<HostFnResult, GasAmount>
 wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
            uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-           uint64_t arg5)
+           uint64_t arg5, uint64_t arg6)
 {
   auto contract_memory = runtime.get_memory();
 
-  auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5};
+  auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5, arg6};
   using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
 
   using SyscallInputType =
@@ -355,7 +356,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
     if (syscall_logfd != -1) {
       auto [host_fn_code, syscall_code] = convert_return_t(res.first);
       std::string log_string;
-      if (host_fn_code != HostFnErrorCode::kNoneOrRecoverable ||
+      if (host_fn_code != HostFnErrorCode::kHostNoneOrRecoverable ||
           syscall_code != 0) {
         log_string = std::format("Syscall Error: {} {}",
                                  HostFnErrorCategory{}.message(

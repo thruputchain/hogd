@@ -22,7 +22,7 @@ namespace {
 HostFnResult
 arity0(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kNoneOrRecoverable, 100};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 100};
 }
 
 HostFnResult
@@ -31,7 +31,7 @@ arity1(HostCallContext * /*unused*/, uint64_t arg0)
   if (arg0 != 1) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 101};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 101};
 }
 
 HostFnResult
@@ -40,7 +40,7 @@ arity2(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1)
   if (arg0 != 1 || arg1 != 2) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 102};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 102};
 }
 
 HostFnResult
@@ -50,7 +50,7 @@ arity3(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   if (arg0 != 1 || arg1 != 2 || arg2 != 3) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 103};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 103};
 }
 
 HostFnResult
@@ -60,7 +60,7 @@ arity4(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 104};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 104};
 }
 
 HostFnResult
@@ -70,7 +70,42 @@ arity5(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
   if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5) {
     throw std::runtime_error("invalid arity check");
   }
-  return {HostFnErrorCode::kNoneOrRecoverable, 105};
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 105};
+}
+
+HostFnResult
+arity6(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5)
+{
+  if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
+      arg5 != 6) {
+    throw std::runtime_error("invalid arity check");
+  }
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 106};
+}
+
+HostFnResult
+arity7(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
+       uint64_t arg6)
+{
+  if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
+      arg5 != 6 || arg6 != 7) {
+    throw std::runtime_error("invalid arity check");
+  }
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 107};
+}
+
+HostFnResult
+arity8(HostCallContext * /*unused*/, uint64_t arg0, uint64_t arg1,
+       uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
+       uint64_t arg6, uint64_t arg7)
+{
+  if (arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 ||
+      arg5 != 6 || arg6 != 7 || arg7 != 8) {
+    throw std::runtime_error("invalid arity check");
+  }
+  return {HostFnErrorCode::kHostNoneOrRecoverable, 108};
 }
 
 } // namespace
@@ -92,6 +127,9 @@ protected:
     context.link_fn("test", "arg3", &arity3);
     context.link_fn("test", "arg4", &arity4);
     context.link_fn("test", "arg5", &arity5);
+    context.link_fn("test", "arg6", &arity6);
+    context.link_fn("test", "arg7", &arity7);
+    context.link_fn("test", "arg8", &arity8);
     runtime_ = context.make_new_runtime(contract, nullptr, true);
     ASSERT_TRUE(runtime_);
   }
@@ -139,6 +177,27 @@ TEST_F(InvokeArityTests, arity5)
   auto res = runtime_->invoke("calltest5", UINT64_MAX);
   EXPECT_TRUE(res.result_);
   EXPECT_EQ(*res.result_, 105);
+}
+
+TEST_F(InvokeArityTests, arity6)
+{
+  auto res = runtime_->invoke("calltest6", UINT64_MAX);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 106);
+}
+
+TEST_F(InvokeArityTests, arity7)
+{
+  auto res = runtime_->invoke("calltest7", UINT64_MAX);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 107);
+}
+
+TEST_F(InvokeArityTests, arity8)
+{
+  auto res = runtime_->invoke("calltest8", UINT64_MAX);
+  EXPECT_TRUE(res.result_);
+  EXPECT_EQ(*res.result_, 108);
 }
 
 } // namespace hogd

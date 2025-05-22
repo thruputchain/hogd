@@ -21,12 +21,20 @@ std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
                            ContractAddress &output_sender)
 {
-  SyscallStatus<ContractAddress> status = syscall_handler.get_msg_sender();
+  auto status = syscall_handler.get_msg_sender();
   if (!status) {
     return {status.error().code(), 0};
   }
 
   output_sender = *status;
+  return {SyscallErrorCode::kNone, 0};
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
+                                ContractAddress &output_address)
+{
+  output_address = syscall_handler.get_current_address();
   return {SyscallErrorCode::kNone, 0};
 }
 
@@ -66,6 +74,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      const ContractAddress &input_address,
                      MethodID input_method, GasAmount input_gas_limit,
                      std::span<const std::byte> input_calldata,
+                     InvokeFlagSet input_flags,
                      RuntimeMemoryLength &output_return_buffer_len)
 {
   Calldata calldata;
@@ -77,7 +86,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   auto [invoke_res, gas_amount] =
       syscall_handler.invoke(Invocation(input_address, input_method,
                                         input_gas_limit, calldata),
-                             remaining_gas.gas_amount_);
+                             remaining_gas.gas_amount_, input_flags);
 
   // invocation returned successfully
   if (invoke_res) {
@@ -90,7 +99,7 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
       output_return_buffer_len = 0;
     }
 
-    return {{HostFnErrorCode::kNoneOrRecoverable,
+    return {{HostFnErrorCode::kHostNoneOrRecoverable,
              static_cast<int32_t>(*invoke_res)},
             gas_amount};
   }
@@ -104,7 +113,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_buffer)
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {HostFnError{HostFnErrorCode::kExit},
+    return {HostFnError{HostFnErrorCode::kHostExit},
             static_cast<int32_t>(SyscallErrorCode::kDeterministicWasm)};
   }
 
@@ -115,7 +124,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
               input_buffer.size());
   syscall_handler.set_return_buffer(std::move(buffer));
 
-  return {HostFnError{HostFnErrorCode::kReturn}, 0};
+  return {HostFnError{HostFnErrorCode::kHostReturn}, 0};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -138,7 +147,7 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnResult, GasAmount>
 syscall_Exit_inner(const int32_t input_code)
 {
-  return {{HostFnErrorCode::kExit, input_code}, 0};
+  return {{HostFnErrorCode::kHostExit, input_code}, 0};
 }
 
 } // namespace hogd

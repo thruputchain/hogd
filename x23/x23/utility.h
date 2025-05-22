@@ -9,6 +9,10 @@
 #include <type_traits>
 #include <utility>
 
+#if HAVE_BUILTIN_ARM_YIELD
+#include <arm_acle.h>
+#endif // HAVE_BUILTIN_ARM_YIELD
+
 namespace x23 {
 
 using std::size_t;

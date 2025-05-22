@@ -1,0 +1,85 @@
+#include "hogd/storage_item/storage_lock_util.h"
+
+#include <algorithm>
+#include <stdexcept>
+
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "rpc_types.hh"
+#include "storage_item.hh"
+#include "storage_lock.hh"
+
+namespace hogd {
+
+StorageItemTypeClass
+delta_to_typeclass(StorageDelta const &delta)
+{
+  switch (delta.type()) {
+  case StorageDeltaType::kDeltaTypeBytestringSet:
+  {
+    auto out = StorageItemTypeClass(StorageItemType::kItemTypeBytestring);
+    out.bytestring() = delta.bytestring();
+    return out;
+  }
+  case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
+  {
+    auto out = StorageItemTypeClass(StorageItemType::kItemTypeNonnegativeInt);
+    out.nnint_set() = delta.nnint().set_value;
+    return out;
+  }
+  case StorageDeltaType::kDeltaTypeDelete:
+    return StorageItemTypeClass(StorageItemType::kItemTypeDeleted);
+  case StorageDeltaType::kDeltaTypeRetrocausalQueue:
+    return StorageItemTypeClass(StorageItemType::kItemTypeRetrocausalQueue);
+  default:
+    throw std::runtime_error("unimplemented");
+  }
+  // unreachable
+}
+
+StorageLock
+delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode)
+{
+  StorageLock lock(StorageLockType::kSetItemTypeClass);
+  lock.full_typeclass_lock().typeclass = delta_to_typeclass(delta);
+  switch (delta.type()) {
+  case StorageDeltaType::kDeltaTypeBytestringSet:
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kItemTypeBytestring);
+    return lock;
+  case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kItemTypeNonnegativeInt);
+    if (mode == BlockExecutionMode::kBlockExecutionModeValidation) {
+      lock.full_typeclass_lock().extra_lock_data.nnint_bounds_lock() =
+          NNIntBoundsLock{.add_amount = to_xdr(int128_t{0}),
+                          .subtract_amount = to_xdr(int128_t{0})};
+    }
+    else {
+      lock.full_typeclass_lock().extra_lock_data.nnint_bounds_lock() =
+          NNIntBoundsLock{
+              .add_amount = to_xdr(
+                  std::max<int128_t>(0, from_xdr(delta.nnint().add_value))),
+              .subtract_amount = to_xdr(
+                  std::min<int128_t>(0, from_xdr(delta.nnint().add_value)))};
+    }
+    return lock;
+  case StorageDeltaType::kDeltaTypeRetrocausalQueue:
+  {
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kItemTypeRetrocausalQueue);
+    if (delta.retrocausal_queue().consume) {
+      lock.full_typeclass_lock().extra_lock_data.consume_lock() = 1;
+    }
+    return lock;
+  }
+  case StorageDeltaType::kDeltaTypeDelete:
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kItemTypeDeleted);
+    return lock;
+  default:
+    throw std::runtime_error("unimplemented");
+  }
+}
+
+} // namespace hogd

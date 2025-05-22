@@ -19,14 +19,15 @@ success(int32_t res)
 {
   return TrampolineResult{.result = res,
                           .panic = std::to_underlying(
-                              HostFnErrorCode::kNoneOrRecoverable)};
+                              HostFnErrorCode::kHostNoneOrRecoverable)};
 }
 
 constexpr TrampolineResult
 host_exit(int32_t res)
 {
   return TrampolineResult{.result = res,
-                          .panic = std::to_underlying(HostFnErrorCode::kExit)};
+                          .panic =
+                              std::to_underlying(HostFnErrorCode::kHostExit)};
 }
 
 constexpr TrampolineResult
@@ -38,20 +39,21 @@ error(HostFnErrorCode error_code)
 constexpr TrampolineResult
 unrecoverable()
 {
-  return error(HostFnErrorCode::kUnrecoverable);
+  return error(HostFnErrorCode::kHostUnrecoverable);
 }
 
 TrampolineResult
 handle_result(HostFnResult const &res)
 {
   switch (res.first) {
-  case HostFnErrorCode::kNoneOrRecoverable:
+  case HostFnErrorCode::kHostNoneOrRecoverable:
     return success(res.second);
-  case HostFnErrorCode::kOutOfGas:
-  case HostFnErrorCode::kReturn:
-  case HostFnErrorCode::kValidationFailure:
+  case HostFnErrorCode::kHostOutOfGas:
+  case HostFnErrorCode::kHostReturn:
+  case HostFnErrorCode::kHostValidationFailure:
+  case HostFnErrorCode::kHostAbortTransaction:
     return error(res.first);
-  case HostFnErrorCode::kExit:
+  case HostFnErrorCode::kHostExit:
     return host_exit(res.second);
   default:
     return unrecoverable();

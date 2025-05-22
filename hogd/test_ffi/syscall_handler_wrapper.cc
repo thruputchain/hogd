@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
@@ -15,7 +16,8 @@ namespace hogd {
 SyscallHandlerContext::SyscallHandlerContext(
     std::shared_ptr<MockRuntimeContext> context, SignedTransaction const &stx,
     DBContext &db)
-  : handler_(stx, db.get_snapshot(), std::move(context))
+  : handler_(stx, db.get_snapshot(), db.get_new_db_proxy(), ProposalModeData{},
+             std::move(context))
 {}
 
 ForeignRootInvokeResult
@@ -23,9 +25,10 @@ SyscallHandlerContext::root_invoke()
 {
   if (!push_context()) {
     return ForeignRootInvokeResult{
-        .result = ForeignInvokeResult{.result_code = 9,
-                                      .panic = std::to_underlying(
-                                          InvokeErrorCode::kUnrecoverable)},
+        .result =
+            ForeignInvokeResult{.result_code = 9,
+                                .panic = std::to_underlying(
+                                    InvokeErrorCode::kInvokeUnrecoverable)},
         .gas_consumed = 0};
   }
   x23::Defer _([this]() { pop_context(); });
@@ -36,7 +39,7 @@ SyscallHandlerContext::root_invoke()
     return ForeignRootInvokeResult{
         .result = ForeignInvokeResult{.result_code = *res.result_,
                                       .panic = std::to_underlying(
-                                          InvokeErrorCode::kNone)},
+                                          InvokeErrorCode::kInvokeNone)},
         .gas_consumed = res.gas_consumed_};
   }
 

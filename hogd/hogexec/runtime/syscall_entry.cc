@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <concepts>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
@@ -22,14 +21,14 @@ int syscall_logfd = -1;
 
 namespace {
 // returns gas_consumed, syscall error>
+template<std::same_as<uint64_t>... Args>
 std::pair<HostFnResult, uint64_t>
-syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
-                    uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-                    uint64_t arg6)
+syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
+                    Args... args)
 {
-  if (arg0 >= kSyscallTable.size()) {
+  if (syscall_no >= kSyscallTable.size()) {
     // invalid syscall
-    return {{HostFnErrorCode::kNoneOrRecoverable,
+    return {{HostFnErrorCode::kHostNoneOrRecoverable,
              static_cast<int32_t>(SyscallErrorCode::kNoSyscall)},
             kNoSyscallCost};
   }
@@ -37,14 +36,13 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   static_assert(kSyscallTable.size() < INT32_MAX,
                 "xdr enum overflow otherwise");
 
-  auto [syscall_expect, syscall_fn_outer] = kSyscallTable[arg0];
+  auto [syscall_expect, syscall_fn_outer] = kSyscallTable[syscall_no];
 
-  assert(syscall_expect == static_cast<SyscallNo>(arg0));
+  assert(syscall_expect == static_cast<SyscallNo>(syscall_no));
   assert(call_context->syscall_handler);
 
   return syscall_fn_outer(*call_context->syscall_handler,
-                          *call_context->runtime, arg1, arg2, arg3, arg4, arg5,
-                          arg6);
+                          *call_context->runtime, args...);
 }
 
 } // namespace
@@ -52,15 +50,15 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
 HostFnResult
 syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
               uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
-              uint64_t arg6)
+              uint64_t arg6, uint64_t arg7)
 {
   static_assert(std::same_as<std::underlying_type_t<SyscallErrorCode>, int32_t>,
                 "type mismatch");
 
   auto [err, gas_consumed] = syscall_entry_inner(call_context, arg0, arg1, arg2,
-                                                 arg3, arg4, arg5, arg6);
+                                                 arg3, arg4, arg5, arg6, arg7);
   if (!call_context->runtime->consume_gas(gas_consumed)) {
-    return {HostFnErrorCode::kOutOfGas, 0};
+    return {HostFnErrorCode::kHostOutOfGas, 0};
   }
   return err;
 }

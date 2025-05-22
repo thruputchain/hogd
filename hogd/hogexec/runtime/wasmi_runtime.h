@@ -5,12 +5,13 @@
 #include <span>
 #include <string_view>
 
-#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
+
+struct Contract;
 
 // Context shared between WasmiRuntime objects.
 // Guarantee isolation between transactions

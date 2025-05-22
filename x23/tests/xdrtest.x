@@ -102,6 +102,9 @@ enum StorageDeltaType {
 
 const kBytestringMaxLen = 4096;
 
+const kFoo = 0xABCD'EF'01;
+const kBar = 62'500'000'000;
+
 typedef opaque Bytestring<kBytestringMaxLen>;
 
 struct NonnegativeInt64SetAddArgs {
@@ -134,5 +137,14 @@ struct VoidCheckStrange {
   unsigned int y;
   void;
 };
+
+typedef opaque Data<>;
+
+program blank_rpc {
+  version blank_rpc_v1 {
+    void null(void) = 0;
+    Data echo(Data) = 1;
+  } = 1;
+} = 3123124;
 
 

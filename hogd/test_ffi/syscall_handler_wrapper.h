@@ -83,7 +83,7 @@ recoverable_error(SyscallErrorCode code)
 {
   return ForeignHostFnResult{.result_code = std::to_underlying(code),
                              .panic = std::to_underlying(
-                                 HostFnErrorCode::kNoneOrRecoverable)};
+                                 HostFnErrorCode::kHostNoneOrRecoverable)};
 }
 
 constexpr ForeignHostFnResult
@@ -91,7 +91,7 @@ unrecoverable_error()
 {
   return ForeignHostFnResult{.result_code = 0,
                              .panic = std::to_underlying(
-                                 HostFnErrorCode::kUnrecoverable)};
+                                 HostFnErrorCode::kHostUnrecoverable)};
 }
 
 // Translate various types of syscall return types into FFI-safe return type
@@ -128,9 +128,9 @@ template<SyscallNo Syscall, typename InputArg, typename OutputArg,
          auto InnerSyscallFunc>
 ForeignHostFnResult
 mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-                    uint64_t arg5, uint64_t arg6)
+                    uint64_t arg5, uint64_t arg6, uint64_t arg7)
 {
-  auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6};
+  auto input_args = std::tuple{arg1, arg2, arg3, arg4, arg5, arg6, arg7};
   using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
 
   // Again, parameter packs as structured bindings gets rid of the annoying
@@ -154,9 +154,11 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     // message.
     if (syscall_logfd != -1) {
       auto log_string =
+          "Syscall " + x23::show(Syscall) + " input: " +
           x23::show(make_syscall_input_struct<InputArg>(std::tuple{
               SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                  std::get<Is>(parsed_args))...}));
+                  std::get<Is>(parsed_args))...})) +
+          "\n";
       write(syscall_logfd, log_string.c_str(), log_string.size());
     }
 
@@ -192,18 +194,22 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     if (syscall_logfd != -1) {
       auto [host_fn_code, syscall_code] = convert_return_t(res.first);
       std::string log_string;
-      if (host_fn_code != HostFnErrorCode::kNoneOrRecoverable ||
+      if (host_fn_code != HostFnErrorCode::kHostNoneOrRecoverable ||
           syscall_code != 0) {
         log_string = std::format("Syscall Error: {} {}",
                                  HostFnErrorCategory{}.message(
                                      std::to_underlying(host_fn_code)),
-                                 x23::show(SyscallErrorCode(syscall_code)));
+                                 x23::show(SyscallErrorCode(syscall_code))) +
+                     "\n";
       }
       else {
-        log_string = x23::show(
-            make_syscall_output_struct<InputArg, OutputArg>(std::tuple{
+        log_string =
+            "Syscall " + x23::show(Syscall) + " output: " +
+            x23::show(make_syscall_output_struct<InputArg,
+                                                 OutputArg>(std::tuple{
                 SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                    std::get<Is>(parsed_args))...}));
+                    std::get<Is>(parsed_args))...})) +
+            "\n";
       }
       write(syscall_logfd, log_string.c_str(), log_string.size());
     }

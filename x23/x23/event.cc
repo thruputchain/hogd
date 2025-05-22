@@ -4,24 +4,65 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 
 #include "x23/async.h"
 #include "x23/err.h"
 #include "x23/event.h"
-#include "x23/fileio.h"
+#include "x23/sockio.h"
 #include "x23/threadpool.h"
 
 namespace x23 {
 
+namespace detail {
+
+ssize_t
+BufferedReader::operator()(int fd, void *buf, size_t len)
+{
+  if (len == 0)
+    return 0;
+  assert(len <= PTRDIFF_MAX);
+
+  if (size_t buflen = stop_ - start_) {
+    size_t n = std::min(len, buflen);
+    memcpy(buf, m_.data() + start_, n);
+    start_ += n;
+    return n;
+  }
+
+  start_ = stop_ = 0;
+
+  struct iovec iov[2];
+  iov[0].iov_base = buf;
+  iov[0].iov_len = len;
+  iov[1].iov_base = m_.data();
+  iov[1].iov_len = m_.size();
+  auto n = ::readv(fd, iov, 2);
+  if (n <= ptrdiff_t(len))
+    return n;
+  stop_ = n - len;
+  return len;
+}
+
+} // namespace detail
+
 CoroPoll::CoroPoll(ThreadPool &pool) : CoroPollImpl(pool)
 {
   pollthread_ = std::thread(&CoroPoll::loop, this);
+  if (ignore_sigpipe) {
+    ignore_sigpipe = false;
+    signal(SIGPIPE, SIG_IGN);
+  }
 }
 
 CoroPoll::~CoroPoll()
 {
   request_stop();
+  for (int i = 0, e = get_max_fd(); i < e; ++i)
+    reset(i);
+  wake();
   pollthread_.join();
   destroy_wait();
 }
@@ -34,12 +75,15 @@ CoroPoll::loop()
 }
 
 Async<std::expected<size_t, Errno>>
-CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full)
+CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full SLOC_ARG)
 {
   size_t startsize = out->size();
   while (len > 0) {
     read_clear(fd);
-    if (auto res = x23::read(fd, out, len)) {
+    auto r = get_reader(fd);
+    if (!r)
+      co_return EBADF;
+    if (auto res = r->read(fd, out, len)) {
       len -= *res;
       if (*res == 0 || !full)
         break;
@@ -55,7 +99,7 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full)
 }
 
 Async<std::expected<size_t, Errno>>
-CoroPoll::write(BorrowedFd fd, BufView data)
+CoroPoll::write(BorrowedFd fd, BufView data SLOC_ARG)
 {
   size_t len = data.size();
   while (!data.empty()) {
@@ -74,7 +118,7 @@ CoroPoll::write(BorrowedFd fd, BufView data)
 }
 
 Async<std::expected<int, Errno>>
-CoroPoll::tcpconnect(sockaddr *sa, socklen_t len)
+CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
 {
   if (stop_requested())
     co_return Errno{EBADF};
@@ -98,19 +142,8 @@ CoroPoll::tcpconnect(sockaddr *sa, socklen_t len)
   co_return fd.release();
 }
 
-decltype(auto)
-gai_category()
-{
-  struct gai_category_impl : public std::error_category {
-    const char *name() const noexcept override { return "DNS"; }
-    std::string message(int err) const override { return gai_strerror(err); }
-  };
-  static const gai_category_impl cat;
-  return (cat);
-}
-
 Async<std::expected<int, std::system_error>>
-CoroPoll::tcpconnect(std::string host, std::string port)
+CoroPoll::tcpconnect(std::string host, std::string port SLOC_ARG)
 {
   if (stop_requested())
     co_return std::unexpected{
