@@ -4,16 +4,16 @@
 //
 // Each ItemChange tracks modifications to an item. Conceptually, an ItemChange
 // has two components: a reservation and a change. The reservation defines what
-// should cause conflicts while the change modifies the item's value if
-// committed. Reservations can be combined into their most restrictive
-// intersection with narrow(). On the other hand, both reservations and changes
-// can be combined with merge().
+// should cause conflicts with other changes while the change modifies the
+// item's value if committed. Reservations can be combined into their most
+// restrictive intersection with narrow(). On the other hand, both reservations
+// and changes can be combined together with merge().
 //
 // This distinction is useful because subtransactions must contain reservations
 // that are at least as restrictive as the parent transaction for any given
-// item. Otherwise, rolling back could fail because of a lock taken by a
-// different transaction. Therefore the reservation might have to be more
-// restrictive than the change.
+// item. Otherwise, rolling back could fail because of a lock taken by another
+// transaction. Therefore the reservation might have to be more restrictive
+// than the change.
 
 #pragma once
 
@@ -41,7 +41,8 @@ concept is_item = requires(T t, HogDatabase &db, ItemKey key, const T &arg) {
   // applies the change to the ramdb.
   { t.commit(db, key) } -> std::same_as<HogDBStatus<void>>;
   // makes the change's reservation at least as restrictive as arg. However,
-  // does not merge the value change in arg. Returns true if possible.
+  // does not merge the value change in arg. Returns true if narrowing was
+  // successful.
   { t.narrow(arg) } -> std::same_as<bool>;
   // merges the change and reservation in arg (will fail if there is a
   // conflict).
