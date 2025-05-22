@@ -311,7 +311,7 @@ public:
     : Vec(std::from_range, std::ranges::subrange(first, last))
   {}
   constexpr Vec(std::initializer_list<value_type> init) { append_range(init); }
-  template<std::ranges::range R> constexpr Vec(std::from_range_t, R &&r)
+  template<std::ranges::range R> constexpr Vec(std::from_range_t /*unused*/, R &&r)
   {
     try {
       append_range(std::forward<R>(r));
@@ -800,7 +800,7 @@ public:
     std::copy_n(s, count, this->data());
   }
 
-  constexpr ~BoundedStr() {}
+  constexpr ~BoundedStr() = default;
 
   // Warning: non-const, non-reentrant
   constexpr const char *c_str(this auto &self)
@@ -944,10 +944,10 @@ Str
 hexdump(const is_range_of<std::uint8_t> auto &r)
 {
   Str out;
-  constexpr char hexbytes[] = "0123456789abcdef";
+  constexpr char kHexBytes[] = "0123456789abcdef";
   for (auto c : r) {
-    out.push_back(hexbytes[c >> 4 & 0xf]);
-    out.push_back(hexbytes[c & 0xf]);
+    out.push_back(kHexBytes[c >> 4 & 0xf]);
+    out.push_back(kHexBytes[c & 0xf]);
   }
   return out;
 }

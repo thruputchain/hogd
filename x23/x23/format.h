@@ -41,10 +41,10 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
       *out += '"';
     }
     else if constexpr (category<X> & FlagSet{kOpaqueVec, kOpaqueArray}) {
-      constexpr char hexbytes[] = "0123456789abcdef";
+      constexpr char kHexBytes[] = "0123456789abcdef";
       for (auto c : x) {
-        out->push_back(hexbytes[c >> 4 & 0xf]);
-        out->push_back(hexbytes[c & 0xf]);
+        out->push_back(kHexBytes[c >> 4 & 0xf]);
+        out->push_back(kHexBytes[c & 0xf]);
       }
     }
     else if constexpr (category<X> == kPtr) {
