@@ -23,7 +23,7 @@ struct ForeignRootInvokeResult {
 // Type of the function pointer used within a mock contract.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct ForeignInvokeResult (*ForeignEntryPoint)(void *foreign_context,
-                                                        uint32_t method_number);
+                                                        uint64_t method_number);
 
 // Translation of HostFnStatus<SyscallErrorCode> into an FFI-safe type.
 // TODO(geoff): This is identical to TrampolineResult in runtime_trampoline.
