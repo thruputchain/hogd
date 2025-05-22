@@ -95,7 +95,7 @@ struct GenRs {
   }
   void show_def(const ProgDef &prog);
 
-  void show_decl(const Declaration &d, string name_prefix)
+  void show_decl(const Declaration &d, string const& name_prefix)
   {
     if (d.qual == Declaration::kVoid) {
       return;
