@@ -334,7 +334,7 @@ GenRs::show_type(const StructBody &s, string t)
         /*
         impl From<$InnerType> for $OuterType {
             fn from(_inner: $InnerType) -> Self {
-                Self { $inner_field: _inner } // or Self(inner)
+                Self { $inner_id: _inner } // or Self(_inner)
             }
         }
         */
@@ -349,15 +349,19 @@ GenRs::show_type(const StructBody &s, string t)
 
         /*
         impl $OuterType {
-            pub fn into_inner(self) -> $InnerType {
-                self.$inner_field
-            }
             pub const fn new(_inner: $InnerType) -> Self {
                 Self { $inner_field: _inner }
+            }
+            pub const fn into_inner(self) -> $InnerType {
+                self.$inner_access
+            }
+            pub const fn as_ptr(&self) -> *const u8 {
+                self.$inner_access.as_ptr()
             }
         }
         */
         prtop("\nimpl {} {{\n", outer_id);
+
         prtop("    pub fn into_inner(self) -> {} {{\n", inner_type);
         prtop("        self.{}\n", inner_access);
         prtop("    }}\n");
@@ -367,6 +371,10 @@ GenRs::show_type(const StructBody &s, string t)
         else
             prtop("        Self {{ {}: _inner }}\n", inner.id);
         prtop("    }}\n");
+        prtop("    pub const fn as_ptr(&self) -> *const u8 {{\n");
+        prtop("        self.{}.as_ptr()\n", inner_access);
+        prtop("    }}\n");
+
         prtop("}}");
 
         /*
@@ -374,7 +382,7 @@ GenRs::show_type(const StructBody &s, string t)
             type Target = $InnerType;
 
             fn deref(&self) -> &Self::Target {
-                &self.$inner_field // or &self.0
+                &self.$inner_access
             }
         }
         */
@@ -390,7 +398,7 @@ GenRs::show_type(const StructBody &s, string t)
         /*
         impl DerefMut for $OuterType {
             fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.$inner_field // or &mut self.0
+                &mut self.$inner_access
             }
         }
         */
@@ -407,6 +415,45 @@ GenRs::show_type(const StructBody &s, string t)
         prtop("        &self.{}\n", inner_access);
         prtop("    }}\n");
         prtop("}}");
+
+        if (inner_type.starts_with("ByteArray<"s)) {
+            string array_size;
+            if (inner_type.contains("<32>")) {
+                array_size = "32";
+            }
+            if (inner_type.contains("<64>")) {
+                array_size = "64";
+            }
+
+            /*
+                impl AsRef<[u8]> for $OuterType {
+                    fn as_ref(&self) -> &[u8] {
+                        let array: &ByteArray<32> = self.as_ref();
+                        array.as_slice()
+                    }
+                }
+
+            */
+            prtop("\nimpl AsRef<[u8]> for {} {{\n", outer_id);
+            prtop("    fn as_ref(&self) -> &[u8] {{\n");
+            prtop("        let array: &ByteArray<{}> = self.as_ref();\n", array_size);
+            prtop("        array.as_slice()\n");
+            prtop("    }}\n");
+            prtop("}}");
+
+            /*
+                impl From<[u8; 32]> for $OuterType {
+                    fn from(array: [u8; 32]) -> Self {
+                        Self::new(ByteArray::from(array))
+                    }
+                }
+            */
+            prtop("\nimpl From<[u8; {}]> for {} {{\n", array_size, outer_id);
+            prtop("    fn from(array: [u8; {}]) -> Self {{\n", array_size);
+            prtop("        Self::new(ByteArray::from(array))\n");
+            prtop("    }}\n");
+            prtop("}}");
+        }
     }
   }
 }
