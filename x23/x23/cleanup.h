@@ -84,7 +84,7 @@ class ManagedPtr {
 public:
   using element_type = T;
   using pointer = element_type *;
-  static constexpr auto deleter = Destructor;
+  static constexpr auto kDeleter = Destructor;
 
   ManagedPtr(std::nullptr_t) noexcept {}
   explicit ManagedPtr(pointer p) noexcept : p_(p) {}
@@ -92,7 +92,7 @@ public:
   ~ManagedPtr()
   {
     if (p_)
-      deleter(p_);
+      kDeleter(p_);
   }
 
   ManagedPtr &operator=(std::nullptr_t) noexcept
@@ -117,7 +117,7 @@ public:
   void reset(pointer p) noexcept
   {
     if (auto old = std::exchange(p_, p))
-      deleter(old);
+      kDeleter(old);
   }
 
   struct PtrPtr {
@@ -213,8 +213,11 @@ private:
   {
     if constexpr (requires { a(); })
       return a;
-    else
+    else {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       return *std::forward<decltype(a)>(a);
+    }
+
   }
 
   static void invoke(nullable_type &&a)

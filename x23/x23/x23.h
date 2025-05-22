@@ -177,7 +177,7 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
 
   // Make it look a litle Vec-like to simplify marshaling code
   static constexpr size_t max_size() { return 1; }
-  size_t size() const noexcept { return (*this).has_value(); }
+  size_t size() const noexcept { return bool(*this); }
   void resize(size_t n)
   {
     switch (n) {
@@ -216,7 +216,7 @@ operator<=>(const Ptr<T> &a, const Ptr<T> &b)
 }
 
 template<typename T> struct xdr_meta<Ptr<T>> {
-  static constexpr XdrCategory category = XdrCategory::kPtr;
+  static constexpr XdrCategory kCategory = XdrCategory::kPtr;
 };
 
 } // namespace x23
@@ -286,12 +286,13 @@ public:
   template<size_t I, references<union_type> U> requires (I < union_size)
   static decltype(auto) get(U &&u)
   {
-    if (int n = index(u); n < 0)
+    int n = index(u);
+    if (n < 0)
       throw XdrBadUnionAccess(
           "attempt to access field {} in {} with invalid discriminant {}",
           I > 0 ? meta::field_names[I] : "void", meta::type_name,
           get_discriminant(u));
-    else if (n != I)
+    if (n != I)
       throw XdrBadUnionAccess(
           "attempt to access field {} in {} when {} is selected",
           I > 0 ? meta::field_names[I] : "void", meta::type_name,
@@ -310,12 +311,12 @@ public:
     discriminant_type d = get_discriminant(a);
     if (d != get_discriminant(b))
       return false;
-    if (int n = index(d); n <= 0)
+    int n = index(d);
+    if (n <= 0)
       return true;
-    else
-      return with_n<union_size, 1, bool>(n, [&a, &b](auto i) {
-        return a.*fieldptr<i>() == b.*fieldptr<i>();
-      });
+    return with_n<union_size, 1, bool>(n, [&a, &b](auto i) {
+      return a.*fieldptr<i>() == b.*fieldptr<i>();
+    });
   }
 
   static auto cmp(const union_type &a, const union_type &b)
@@ -552,7 +553,7 @@ xdr_cmp(const T &a, const T &b)
 inline std::uint32_t
 unbool(bool b)
 {
-  return b;
+  return b ? 1 : 0;
 }
 template<typename T>
 requires (!std::same_as<T, bool> && (std::integral<T> || std::is_enum_v<T>))

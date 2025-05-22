@@ -141,7 +141,7 @@ template<> struct Callback<void> : std::function<void()> {
 template<typename F> requires requires(F f) { f(); }
 Callback(F) -> Callback<void>;
 template<typename F> requires requires(F f) {
-  requires FnTraits<F>::num_args == 1;
+  requires FnTraits<F>::kNumArgs == 1;
   f(std::declval<typename FnTraits<F>::template arg_type<0>>());
 }
 Callback(F) -> Callback<typename FnTraits<F>::template arg_type<0>>;

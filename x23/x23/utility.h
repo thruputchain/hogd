@@ -151,15 +151,15 @@ template<typename F> struct FnTraits;
 template<typename R, typename... A, bool NE> requires (sizeof...(A) > 0)
 struct FnTraits<R (*)(A...) noexcept(NE)> {
   using return_type = R;
-  static constexpr size_t num_args = sizeof...(A);
-  template<size_t N> requires (N < num_args)
+  static constexpr size_t kNumArgs = sizeof...(A);
+  template<size_t N> requires (N < kNumArgs)
   using arg_type = TypeNum<N, A...>;
   static constexpr bool is_noexcept = NE;
   static constexpr CallableCategory category = CallableCategory::kFunction;
 };
 template<typename R, bool NE> struct FnTraits<R (*)() noexcept(NE)> {
   using return_type = R;
-  static constexpr size_t num_args = 0;
+  static constexpr size_t kNumArgs = 0;
   static constexpr bool is_noexcept = NE;
   static constexpr CallableCategory category = CallableCategory::kFunction;
 };

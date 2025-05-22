@@ -108,7 +108,7 @@ categories = Constants("x23::XdrCategory::")
 def xdr_category(val):
     try:
         return gdb.parse_and_eval(
-            f"x23::xdr_meta<{val.type.strip_typedefs().name}>::category")
+            f"x23::xdr_meta<{val.type.strip_typedefs().name}>::kCategory")
     except gdb.error:
         return None
 
