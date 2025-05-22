@@ -359,11 +359,11 @@ ItemView::debug_assert_view_types(SnapshotStorageItem const &base_item,
 {
   auto const &addrkey = base_item.addrkey();
   if (item_type == ItemViewType::kNativeTokenBalance) {
-    assert(addrkey.key.type() ==
+    assert(addrkey.key.key_type() ==
            StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
   }
   else {
-    assert(addrkey.key.type() !=
+    assert(addrkey.key.key_type() !=
            StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
   }
 }

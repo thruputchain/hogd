@@ -27,7 +27,7 @@ struct Gen {
 
   void show_def(const ConstDef &c)
   {
-    show_comment(c.comment, true);
+    show_comment(c.comment, false);
     prtop("constexpr auto {} = {};\n", c.id, c.val);
   }
   void show_def(const Typedef &d)

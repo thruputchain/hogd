@@ -148,7 +148,7 @@ InvocationFrame::try_acquire_frame_locks(
       additional_storage_costs;
 
   for (auto &[addrkey, item_view] : modified_items_) {
-    if (addrkey.key.type() ==
+    if (addrkey.key.key_type() ==
         StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
       // don't pay storage costs for free native token balance entries
       auto count = pending_ops.fetch_sub(1);
@@ -163,7 +163,7 @@ InvocationFrame::try_acquire_frame_locks(
        auto &failed, auto &additional_storage_costs) -> x23::Detached {
       co_await db_proxy.coropoll().pool_.bg();
 
-      assert(addrkey.key.type() !=
+      assert(addrkey.key.key_type() !=
              StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
 
       auto cost = co_await do_try_reserve_detached(addrkey, item_view, db_proxy,
@@ -250,7 +250,7 @@ InvocationFrame::try_acquire_frame_locks(
   }
 
   for (auto const &[addrkey, item_view] : modified_items_) {
-    if (addrkey.key.type() !=
+    if (addrkey.key.key_type() !=
         StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
       // now we skip all the non-storage-cost entries
       auto count = pending_ops.fetch_sub(1);
@@ -265,7 +265,7 @@ InvocationFrame::try_acquire_frame_locks(
        auto &error, auto &failed) -> x23::Detached {
       co_await db_proxy.coropoll().pool_.bg();
 
-      assert(addrkey.key.type() ==
+      assert(addrkey.key.key_type() ==
              StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
 
       // storage cost is not paid for these entries; so we just check if the

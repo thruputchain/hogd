@@ -44,7 +44,7 @@ SnapshotStorageItem::variant_type
 SnapshotStorageItem::make_variant(StorageItem item, StorageKey const &db_key)
 {
   // handle different key types differently
-  switch (db_key.type()) {
+  switch (db_key.key_type()) {
   case StorageKeyType::kStorageKeyTypeContractData:
     return make_contract_key_variant(item);
   case StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance:

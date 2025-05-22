@@ -58,7 +58,7 @@ template<> struct std::hash<hogd::AddressAndKey> {
     auto addr_view =
         std::string_view(reinterpret_cast<const char *>(addrkey.address.data()),
                          addrkey.address.size());
-    auto key_disc = addrkey.key.type();
+    auto key_disc = addrkey.key.key_type();
     std::string_view key_view = [&] {
       switch (key_disc) {
       case hogd::StorageKeyType::kStorageKeyTypeContractData:
