@@ -29,7 +29,7 @@ ThreadPool::~ThreadPool()
 void
 ThreadPool::drain() noexcept
 {
-  assert(ThreadPool::my_thread_pool != this);
+  assert(ThreadPool::my_thread_pool_ != this);
 
   std::binary_semaphore drainwait(0);
   spawn([&drainwait] { drainwait.release(); });
@@ -50,8 +50,8 @@ ThreadPool::drain() noexcept
 void
 ThreadPool::worker(size_t threadno)
 {
-  my_thread_pool = this;
-  my_thread_no = threadno;
+  my_thread_pool_ = this;
+  my_thread_no_ = threadno;
   size_t count = 0;
   for (;;) {
     auto qs = qstate_.take();

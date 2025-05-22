@@ -49,13 +49,13 @@ index_string()
   if constexpr (I <= 9)
     return kIndexStringVal<I + '0', C...>;
   else
-    return index_string<I / 10, I % 10 + '0', C...>();
+    return index_string<I / 10, (I % 10) + '0', C...>();
 }
 
 // An array of const char * with {"0", "1", ... "N"} to use as field
 // names in tuples.
 template<size_t N>
-constexpr auto num_string_array = []<size_t... I>(std::index_sequence<I...>) {
+constexpr auto kNumStringArray = []<size_t... I>(std::index_sequence<I...>) {
   return std::array<const char *, N>{index_string<I>()...};
 }(std::make_index_sequence<N>{});
 } // namespace detail
@@ -64,8 +64,8 @@ constexpr auto num_string_array = []<size_t... I>(std::index_sequence<I...>) {
 // arguments into a tuple.  Also, makes XdrVoid marshalabe.
 template<typename... T> struct xdr_meta<std::tuple<T...>> {
   static constexpr XdrCategory kCategory = XdrCategory::kStruct;
-  static constexpr const char *type_name = "tuple";
-  static constexpr auto &field_names = detail::num_string_array<sizeof...(T)>;
+  static constexpr const char *kTypeName = "tuple";
+  static constexpr auto &kFieldNames = detail::kNumStringArray<sizeof...(T)>;
 };
 
 template<typename T, size_t N> requires (!std::same_as<T, std::uint8_t>)
@@ -91,10 +91,11 @@ template<size_t N> struct xdr_meta<std::array<std::uint8_t, N>> {
 };
 
 template<typename T>
-constexpr XdrCategory category = [] {
+constexpr XdrCategory kCategory = [] {
   using reffed_type = std::remove_cvref_t<T>;
   using std::same_as;
   using enum XdrCategory;
+  // NOLINTBEGIN(bugprone-branch-clone)
   if constexpr (requires {
                   { xdr_meta<reffed_type>::kCategory } -> decays_to<XdrCategory>;
                 })
@@ -109,13 +110,14 @@ constexpr XdrCategory category = [] {
     return kPrimitive;
   else
     return kInvalid;
+  // NOLINTEND(bugprone-branch-clone)
 }();
 
-template<typename T> concept is_xdr_type = category<T> != XdrCategory::kInvalid;
+template<typename T> concept is_xdr_type = kCategory<T> != XdrCategory::kInvalid;
 
 // Matches XDR types that match one of the categories
 template<typename T, XdrCategory...C>
-concept is_xdr_cat = is_xdr_type<T> && ((category<T> == C) || ...);
+concept is_xdr_cat = is_xdr_type<T> && ((kCategory<T> == C) || ...);
 // redundant is_xdr_type<T> makes it more specific than is_xdr_type
 
 template<typename T> concept is_xdr_enum = is_xdr_cat<T, XdrCategory::kEnum>;
@@ -177,7 +179,7 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
 
   // Make it look a litle Vec-like to simplify marshaling code
   static constexpr size_t max_size() { return 1; }
-  size_t size() const noexcept { return bool(*this); }
+  size_t size() const noexcept { return bool(*this) ? 1 : 0; }
   void resize(size_t n)
   {
     switch (n) {
@@ -191,7 +193,7 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
       [[unlikely]] throw XdrLengthError("Attempt to resize Ptr to more than 1");
     }
   }
-  static void reserve(size_t) {}
+  static void reserve(size_t /*unused*/) {}
   auto begin(this auto &&self) noexcept { return self.get(); }
   auto end(this auto &&self) noexcept { return self.begin() + self.size(); }
   value_type &back(this auto &&self) { return *self.get(); }
@@ -230,7 +232,7 @@ struct std::formatter<E> : std::formatter<std::string> {
   {
     if (auto it = valmap_.find(e); it != valmap_.end())
       return super::format(it->second, ctx);
-    return super::format(std::format("{}#{}", x23::xdr_meta<E>::type_name,
+    return super::format(std::format("{}#{}", x23::xdr_meta<E>::kTypeName,
                                      std::underlying_type_t<E>(e)),
                          ctx);
   }
@@ -248,7 +250,7 @@ template<is_xdr_union T> struct union_ops {
   // kUnionSize is one more than the number of non-void arms.
   // Depending on context, arm number 0 is reserved for void arms or
   // for access to the discriminant.
-  static constexpr size_t kUnionSize = meta::field_names.size();
+  static constexpr size_t kUnionSize = meta::kFieldNames.size();
 
 protected:
   template<size_t I> requires (I < kUnionSize)
@@ -290,13 +292,13 @@ public:
     if (n < 0)
       throw XdrBadUnionAccess(
           "attempt to access field {} in {} with invalid discriminant {}",
-          I > 0 ? meta::field_names[I] : "void", meta::type_name,
+          I > 0 ? meta::kFieldNames[I] : "void", meta::kTypeName,
           get_discriminant(u));
     if (n != I)
       throw XdrBadUnionAccess(
           "attempt to access field {} in {} when {} is selected",
-          I > 0 ? meta::field_names[I] : "void", meta::type_name,
-          n > 0 ? meta::field_names[n] : "void");
+          I > 0 ? meta::kFieldNames[I] : "void", meta::kTypeName,
+          n > 0 ? meta::kFieldNames[n] : "void");
     return unsafe_get<I>(std::forward<U>(u));
   }
 
@@ -361,7 +363,7 @@ private:
       if constexpr (sizeof...(Args) > 0)
         throw XdrBadUnionAccess(
             "constructor arguments supplied for {} discriminant {} in {}",
-            n == 0 ? "void" : "invalid", d, meta::type_name);
+            n == 0 ? "void" : "invalid", d, meta::kTypeName);
     }
     else
       with_n<kUnionSize, 1>(n, [&u, &args...](auto n) {
@@ -370,7 +372,7 @@ private:
         else
           throw XdrBadUnionAccess(
               "{} invalid constructor arguments for field {} in {}",
-              sizeof...(Args), meta::field_names[n], meta::type_name);
+              sizeof...(Args), meta::kFieldNames[n], meta::kTypeName);
       });
     u.*fieldptr<0>() = d;
   }
@@ -492,8 +494,8 @@ xdr_type_name()
   using std::string_literals::operator""s;
   using std::same_as;
   using std::uint8_t;
-  if constexpr (requires { std::string(xdr_meta<X>::type_name); })
-    return std::string(xdr_meta<X>::type_name);
+  if constexpr (requires { std::string(xdr_meta<X>::kTypeName); })
+    return std::string(xdr_meta<X>::kTypeName);
 #define DO_SCALAR(T, NAME) else if constexpr (std::same_as<X, T>) return NAME
   DO_SCALAR(bool, "bool");
   DO_SCALAR(std::int32_t, "int");
@@ -525,6 +527,7 @@ xdr_type_name()
   }(static_cast<X *>(nullptr));
 }
 
+// NOLINTBEGIN(readability-identifier-naming)
 template<typename Server, typename VersMeta,
          template<typename> typename RetTrans = std::type_identity_t,
          typename... ExtraArgs>
@@ -535,6 +538,7 @@ template<typename Server, typename VersMeta,
          typename... ExtraArgs>
 concept implements_rpc =
     rpc_compatible<Server, VersMeta, RetTrans, ExtraArgs...>::value;
+// NOLINTEND(readability-identifier-naming)
 
 template<is_xdr_struct T>
 inline auto
@@ -553,7 +557,7 @@ xdr_cmp(const T &a, const T &b)
 inline std::uint32_t
 unbool(bool b)
 {
-  return b;// ? 1 : 0;
+  return b ? 1 : 0;
 }
 template<typename T>
 requires (!std::same_as<T, bool> && (std::integral<T> || std::is_enum_v<T>))

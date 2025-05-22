@@ -127,7 +127,7 @@ xdr_size_bounds()
   else if constexpr (is_xdr_union<X>) {
     using ops = union_ops<X>;
     return []<size_t... I>(std::index_sequence<I...>) {
-      SizeBounds ret{ops::meta::has_void ? 0 : kNoBound, 0};
+      SizeBounds ret{ops::meta::kHasVoid ? 0 : kNoBound, 0};
       for (auto b :
            {xdr_size_bounds<typename ops::template union_element_t<I + 1>,
                             Blacklist..., X>()...}) {
@@ -168,7 +168,7 @@ xdr_size(const X &x)
   else if constexpr (is_xdr_cat<X, kString, kOpaqueVec>)
     return (x.size() + 7UZ) & ~3UZ;
   else if constexpr (is_xdr_cat<X, kPtr, kVec, kArray>) {
-    constexpr size_t sizesize = category<X> == kArray ? 0UZ : 4UZ;
+    constexpr size_t sizesize = kCategory<X> == kArray ? 0UZ : 4UZ;
     if constexpr (detail::has_fixed_size<typename X::value_type>())
       return sizesize +
              x.size() * detail::size_of_fixed<typename X::value_type>();
@@ -271,7 +271,7 @@ struct Serializer {
     if (!union_valid(u)) [[unlikely]]
       throw XdrBadUnionAccess(
           "Attempt to serialize {} with invalid discrminant {}",
-          xdr_meta<X>::type_name, get<0>(u));
+          xdr_meta<X>::kTypeName, get<0>(u));
     put32(std::uint32_t(get<0>(u)));
     union_visit_arm(*this, u);
   }
@@ -383,24 +383,24 @@ struct Deserializer {
   }
   template<bool Safe, is_xdr_cat<XdrCategory::kOpaqueArray> X> void go(X &x)
   {
-    constexpr size_t size = std::tuple_size_v<X>, rem = size % 4;
-    if constexpr (rem == 0) {
+    constexpr size_t kSize = std::tuple_size_v<X>, kRem = kSize % 4;
+    if constexpr (kRem == 0) {
       if constexpr (Safe)
         need(x.size());
-      if constexpr (size > 0) {
-        memcpy(x.data(), p, size);
-        p += size;
+      if constexpr (kSize > 0) {
+        memcpy(x.data(), p, kSize);
+        p += kSize;
       }
     }
     else {
-      constexpr size_t binlen = (x.size() + 3UZ) & ~3UZ;
+      constexpr size_t kBinlen = (x.size() + 3UZ) & ~3UZ;
       if constexpr (Safe)
-        need(binlen);
-      if constexpr (binlen > 0) {
-        memcpy(x.data(), p, size);
-        p += binlen;
+        need(kBinlen);
+      if constexpr (kBinlen > 0) {
+        memcpy(x.data(), p, kSize);
+        p += kBinlen;
       }
-      check_trailing_zeros(rem);
+      check_trailing_zeros(kRem);
     }
   }
   template<bool Safe,
@@ -488,7 +488,7 @@ struct Deserializer {
     union_set_discriminant(x, d);
     if (ops::index(x) == -1) [[unlikely]]
       throw XdrBadInput("Bad discriminant {} deserializing {}", get<0>(x),
-                        ops::meta::type_name);
+                        ops::meta::kTypeName);
     union_visit_arm([this](auto &x) { this->go<Safe>(x); }, x);
   }
 };

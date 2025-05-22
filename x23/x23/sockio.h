@@ -18,7 +18,7 @@ public:
   GaiError(int err) noexcept : err_(err) {}
   int raw_code() const { return err_; }
   static const std::error_category &category() { return gai_category(); }
-  explicit operator bool() const { return err_; }
+  explicit operator bool() const { return err_ != 0; }
 
 private:
   int err_;

@@ -330,6 +330,7 @@ public:
     : a_(a), b_(b)
   {}
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   constexpr ~Vec() { realloc(0); }
 
   constexpr Vec &operator=(Vec &&other) noexcept
@@ -790,6 +791,7 @@ public:
   using super::super;
   using typename super::size_type;
 
+  // NOLINTNEXTLINE(readability-identifier-naming)
   static constexpr size_type npos = std::string_view::npos;
 
   BoundedStr(std::nullptr_t) = delete;
@@ -832,13 +834,13 @@ public:
     if constexpr (std::convertible_to<Self, BoundedStr &&>) {
       if (pos == 0) {
         self.resize(new_size);
-        return std::move(self);
+        return std::forward<Self>(self);
       }
       if constexpr (std::is_trivial_v<typename Self::value_type>) {
         memmove(self.data(), self.data() + pos,
                 new_size * sizeof(typename Self::value_type));
         self.resize(new_size);
-        return std::move(self);
+        return std::forward<Self>(self);
       }
     }
 
@@ -849,7 +851,7 @@ public:
                                                     const BoundedStr &b)
   {
     // To make this consistent with char_traits, treat as unsigned.
-    const std::uint8_t *ao = reinterpret_cast<const std::uint8_t *>(a.data()),
+    const auto *ao = reinterpret_cast<const std::uint8_t *>(a.data()),
                        *bp = reinterpret_cast<const std::uint8_t *>(b.data());
     return std::lexicographical_compare_three_way(ao, ao + a.size(), bp,
                                                   bp + b.size());
@@ -889,19 +891,19 @@ operator""_ustr(const char *s, size_t len)
 namespace detail {
 
 // Fake output iterator that counts items but does nothing else
-struct outcounter {
+struct Outcounter {
   std::size_t n{};
   using difference_type = std::ptrdiff_t;
   constexpr auto operator*() const { return std::ignore; }
-  constexpr outcounter &operator++() { return ++n, *this; }
-  constexpr outcounter operator++(int) { return outcounter{n++}; }
+  constexpr Outcounter &operator++() { return ++n, *this; }
+  constexpr Outcounter operator++(int) { return Outcounter{n++}; }
 };
-static_assert(std::output_iterator<outcounter, char>);
+static_assert(std::output_iterator<Outcounter, char>);
 
 inline size_t
 vformatted_size(std::string_view fmt, std::format_args args)
 {
-  return vformat_to(outcounter{}, fmt, args).n;
+  return vformat_to(Outcounter{}, fmt, args).n;
 }
 
 } // namespace detail
@@ -932,7 +934,7 @@ uformat_to(Out *s, std::format_string<Args...> fmt, Args &&...args)
   size_t new_size =
       old_size +
       detail::vformatted_size(fmt.get(), std::make_format_args(args...));
-  s->resize_and_overwrite(new_size, [&](auto *p0, size_t count) {
+  s->resize_and_overwrite(new_size, [&](auto *p0, size_t /*unused*/) {
     char *p = reinterpret_cast<char *>(p0);
     char *p2 = std::vformat_to(p + old_size, fmt.get(),
                                std::make_format_args(args...));

@@ -89,7 +89,7 @@ public:
   {
     struct AwaitBackground {
       ThreadPool &pool;
-      bool await_ready() const noexcept { return false; }
+      static bool await_ready() noexcept { return false; }
       void await_suspend(std::coroutine_handle<> h) const noexcept
       {
         pool.go(h);
@@ -148,12 +148,12 @@ public:
 
   // If you are executing in a thread pool, return the pool.
   // Otherwise return NULL.
-  static ThreadPool *get_thread_pool() { return my_thread_pool; }
+  static ThreadPool *get_thread_pool() { return my_thread_pool_; }
   // If you are executing in a thread pool, return a unique thread
   // identifier in [0, nthreads_].  Otherwise return -1.
   static ptrdiff_t get_thread_no()
   {
-    return my_thread_pool ? my_thread_no : -1;
+    return my_thread_pool_ ? my_thread_no_ : -1;
   }
 
   // A bucket index for the current thread.  Within a ThreadPool, if
@@ -163,11 +163,11 @@ public:
   // first_non_pool.
   static size_t bucket_index(size_t nbuckets, size_t first_non_pool = 0)
   {
-    if (my_thread_pool)
-      return my_thread_no % nbuckets;
-    constexpr std::hash<std::thread::id> hasher;
-    size_t i = hasher(std::this_thread::get_id());
-    return first_non_pool + i % (nbuckets - first_non_pool);
+    if (my_thread_pool_)
+      return my_thread_no_ % nbuckets;
+    constexpr std::hash<std::thread::id> kHasher;
+    size_t i = kHasher(std::this_thread::get_id());
+    return first_non_pool + (i % (nbuckets - first_non_pool));
   }
 
   class SuspendCount {
@@ -186,12 +186,12 @@ public:
 
   static SuspendCount get_suspend_count() noexcept
   {
-    ThreadPool *tp = my_thread_pool;
+    ThreadPool *tp = my_thread_pool_;
     // If this crashes, you called get_suspend_count in a thread that
     // wasn't part of a thread pool:
     auto qs = tp->qstate_.take();
     return SuspendCount{std::this_thread::get_id(),
-                        qs->tstate_[my_thread_no].count_};
+                        qs->tstate_[my_thread_no_].count_};
   }
 
   // A CrashIfSuspended will crash your program if the coroutine in
@@ -224,8 +224,8 @@ public:
   };
 
 private:
-  inline static thread_local ThreadPool *my_thread_pool{};
-  inline static thread_local size_t my_thread_no{};
+  inline static thread_local ThreadPool *my_thread_pool_{};
+  inline static thread_local size_t my_thread_no_{};
 
   struct alignas(hardware_destructive_interference_size) ThreadState {
     // 2*count of iterations of the loop.  Even numbers mean the

@@ -300,7 +300,7 @@ struct x23::xdr_meta<enum {0}> {{
   static constexpr x23::XdrCategory kCategory = x23::XdrCategory::kEnum;
   using enum_type = enum {0};
   using enum enum_type;
-  static constexpr const char *type_name = "{1}";
+  static constexpr const char *kTypeName = "{1}";
   static constexpr std::array tags{{
 )",
                          scope(true), t);
@@ -384,8 +384,8 @@ struct std::tuple_element<I, struct {1}> {{
 template<>
 struct x23::xdr_meta<struct {1}> {{
   static constexpr x23::XdrCategory kCategory = x23::XdrCategory::kStruct;
-  static constexpr const char *type_name = "{2}";
-  static constexpr std::array<std::string_view, {0}> field_names{{
+  static constexpr const char *kTypeName = "{2}";
+  static constexpr std::array<std::string_view, {0}> kFieldNames{{
 )",
                          nonvoid_count, scope(true), t);
   for (const auto &d : s) {
@@ -527,10 +527,10 @@ Gen::show_type(const UnionBody &b, string t)
   bottom_ += std::format(R"(template<>
 struct x23::xdr_meta<struct {0}> {{
   static constexpr x23::XdrCategory kCategory = x23::XdrCategory::kUnion;
-  static constexpr const char *type_name = "{2}";
-  static constexpr int default_field = {3};
-  static constexpr bool has_void = {4:s};
-  static constexpr std::array field_names{{
+  static constexpr const char *kTypeName = "{2}";
+  static constexpr int kDefaultField = {3};
+  static constexpr bool kHasVoid = {4:s};
+  static constexpr std::array kFieldNames{{
     "{1}", // discriminant
 )",
                          scope(true), b.switch_id, t,

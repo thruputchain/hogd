@@ -26,7 +26,7 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
     using enum XdrCategory;
     if constexpr (std::same_as<X, bool>)
       *out += x ? "TRUE" : "FALSE";
-    else if constexpr (category<X> == kString) {
+    else if constexpr (kCategory<X> == kString) {
       // GNU libstdc++ doesn't support '?' escaped string format specifier
       *out += '"';
       for (auto c : x) {
@@ -40,14 +40,14 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
       }
       *out += '"';
     }
-    else if constexpr (category<X> & FlagSet{kOpaqueVec, kOpaqueArray}) {
+    else if constexpr (kCategory<X> & FlagSet{kOpaqueVec, kOpaqueArray}) {
       constexpr char kHexBytes[] = "0123456789abcdef";
       for (auto c : x) {
         out->push_back(kHexBytes[c >> 4 & 0xf]);
         out->push_back(kHexBytes[c & 0xf]);
       }
     }
-    else if constexpr (category<X> == kPtr) {
+    else if constexpr (kCategory<X> == kPtr) {
       if (x)
         go(out, *x, indent);
       else
@@ -55,16 +55,16 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
     }
     else if constexpr (std::formattable<X, char>)
       uformat_to(out, "{}", x);
-    else if constexpr (category<X> == kStruct) {
+    else if constexpr (kCategory<X> == kStruct) {
       auto _g = opengroup("{}");
       [&]<size_t... I>(std::index_sequence<I...>) {
         ((uformat_to(out, "\n{:{}}{} = ", "", 2 * indent,
-                     x23::xdr_meta<X>::field_names[I]),
+                     x23::xdr_meta<X>::kFieldNames[I]),
           go(out, get<I>(x), indent), *out += ','),
          ...);
       }(std::make_index_sequence<std::tuple_size_v<X>>{});
     }
-    else if constexpr (category<X> & FlagSet{kArray, kVec}) {
+    else if constexpr (kCategory<X> & FlagSet{kArray, kVec}) {
       auto _g = opengroup("[]");
       for (const auto &e : x) {
         uformat_to(out, "\n{:{}}", "", 2 * indent);
@@ -72,14 +72,14 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
         *out += ',';
       }
     }
-    else if constexpr (category<X> == kUnion) {
+    else if constexpr (kCategory<X> == kUnion) {
       using ops = union_ops<X>;
       auto _g = opengroup("{}");
       uformat_to(out, "\n{:{}}{} = {},", "", 2 * indent,
-                 ops::meta::field_names[0], get<0>(x));
+                 ops::meta::kFieldNames[0], get<0>(x));
       if (int n = ops::index(x); n > 0) {
         uformat_to(out, "\n{:{}}{} = ", "", 2 * indent,
-                   ops::meta::field_names[n]);
+                   ops::meta::kFieldNames[n]);
         union_visit_arm([&go, out,
                          indent](const auto &a) { go(out, a, indent); },
                         x);
