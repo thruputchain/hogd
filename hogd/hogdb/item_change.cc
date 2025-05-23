@@ -189,4 +189,27 @@ ItemChange::storage_size() const
       type_);
 }
 
+HogDBStatus<ssize_t>
+ItemChange::storage_delta(HogDatabase &db, ItemKey key)
+{
+  // fetch the snapshot size of the object from the database if needed.
+  if (!snapshot_size_) {
+    auto snapshot_size = [&db, key] -> HogDBStatus<size_t> {
+      HogDBStatus<size_t> ret = db.get_size(key);
+      if (!ret && ret.error() == HogDBCode::kNotFound)
+        return 0UL;
+      if (!ret)
+        return ret.error();
+      return *ret;
+    }();
+    if (!snapshot_size)
+      return snapshot_size.error();
+    snapshot_size_ = *snapshot_size;
+  }
+
+  // calculate the delta between the size of the changed item and its snapshot.
+  return static_cast<ssize_t>(storage_size()) -
+         static_cast<ssize_t>(*snapshot_size_);
+}
+
 } // namespace hogd

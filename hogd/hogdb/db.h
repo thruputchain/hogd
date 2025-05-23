@@ -64,9 +64,12 @@ public:
   HogDatabase(std::unique_ptr<Database> db) : db_(std::move(db)) {}
   ~HogDatabase() = default;
 
-  // item readers (from the snapshot state)
+  // item readers (from the snapshot state).
   HogDBStatus<int128_t> read_nnint128(ItemKey key);
   HogDBStatus<OwningSpan<const std::byte>> read_bytes(ItemKey key);
+
+  // returns the size of an item (of any type).
+  HogDBStatus<size_t> get_size(ItemKey key);
 
   // item writers
   HogDBStatus<void> write_nnint128(ItemKey key, int128_t val);
@@ -97,6 +100,12 @@ HogDatabase::read_bytes(ItemKey key)
 {
   return db_->get_if_type(key.as_bytes(), kBytes)
       .transform_error(to_hogdb_error);
+}
+
+inline HogDBStatus<size_t>
+HogDatabase::get_size(ItemKey key)
+{
+  return db_->get_size(key.as_bytes()).transform_error(to_hogdb_error);
 }
 
 inline HogDBStatus<void>

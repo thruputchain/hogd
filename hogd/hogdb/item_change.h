@@ -155,6 +155,9 @@ public:
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_exclusive() const { return exclusive_; }
 
+  // setters
+  void set_snapshot_size(size_t bytes) { snapshot_size_ = bytes; }
+
   // commit applies the item's changes to the ramdb.
   HogDBStatus<void> commit(HogDatabase &db, ItemKey key) const;
 
@@ -166,12 +169,16 @@ public:
   // undo_merge reverts a change that was merged with this one.
   void undo_merge(const ItemChange &change);
 
-  // storage_size returns the bytes needed to store the item if committed.
-  size_t storage_size() const;
+  // storage_delta returns the change in bytes needed to store the item if
+  // committed (could be negative).
+  HogDBStatus<ssize_t> storage_delta(HogDatabase &db, ItemKey key);
 
 private:
   bool exclusive_{false};
+  std::optional<size_t> snapshot_size_;
   std::variant<std::monostate, NNInt128, Bytes, Deletion> type_;
+
+  size_t storage_size() const;
 };
 
 inline std::optional<int128_t>
