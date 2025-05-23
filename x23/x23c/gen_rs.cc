@@ -138,7 +138,8 @@ struct GenRs {
   static string map_case(const string &);
   static string map_bound(const string &);
   string type_name(const Declaration &d, bool generate, bool in_colon_required_setting = false);
-  static std::optional<string> get_array_size(const Declaration &d);
+  // return nullopt unless the type is an opaque array
+  static std::optional<string> get_opaque_array_size(const Declaration &d);
 
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
@@ -414,7 +415,7 @@ impl {0} {{
         prtop("    }}\n");
         prtop("}}");
 
-        if (auto array_size = get_array_size(inner)) {
+        if (auto array_size = get_opaque_array_size(inner)) {
 
             /*
                 impl AsRef<[u8]> for $OuterType {
@@ -692,9 +693,12 @@ GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
 }
 
 std::optional<string>
-GenRs::get_array_size(const Declaration &d)
+GenRs::get_opaque_array_size(const Declaration &d)
 {
-  if (d.qual == Declaration::kArray) {
+  if (!holds_alternative<string>(d.type)) {
+    return std::nullopt;
+  }
+  if (d.qual == Declaration::kArray && get<string>(d.type) == "opaque") {
     return d.bound;
   }
   return std::nullopt;

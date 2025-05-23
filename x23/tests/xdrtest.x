@@ -139,6 +139,7 @@ struct VoidCheckStrange {
 };
 
 typedef opaque Data<>;
+typedef opaque GenericArraySize<15>;
 
 program blank_rpc {
   version blank_rpc_v1 {
