@@ -1,21 +1,20 @@
 #pragma once
 
 #include <cstdio>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "contract.hh"
 
 namespace hogd ::test {
 
-[[maybe_unused]]
-static ContractBlob
-load_wasm_from_file(std::string_view filename)
+static ContractBlob load_raw_file(std::string_view filename)
 {
   std::string file = std::string(CMAKE_ROOT_BINARY_DIR) +
-                     std::string("/hogd/hogexec/runtime/") +
                      std::string(filename);
   FILE *f = std::fopen(file.c_str(), "r");
   if (f == nullptr)
@@ -36,5 +35,23 @@ load_wasm_from_file(std::string_view filename)
 
   return contents;
 }
+
+[[maybe_unused]]
+static ContractBlob
+load_wasm_from_file(std::string_view filename)
+{
+  return load_raw_file("/hogd/hogexec/runtime/" + std::string(filename));
+}
+
+[[maybe_unused]]
+static std::shared_ptr<Contract>
+load_test_contract(std::string_view filename)
+{
+  auto wasm = load_raw_file("/test_contracts/integration_test_contracts/" + std::string(filename));
+  auto out = std::make_shared<Contract>(ContractType::kWasmi);
+  out->wasmi_contract() = std::move(wasm);
+  return out;
+}
+
 
 } // namespace hogd::test

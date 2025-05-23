@@ -36,6 +36,7 @@ add_executable(
   runtime_test
   error_handling_test.cc
   execution_mode_test.cc
+  fibonacci_test.cc
   gas_api_test.cc
   instantiate_test.cc
   invoke_arity_test.cc
@@ -116,4 +117,5 @@ add_dependencies(
   test_error_handling_wasm
   test_invoke_arity_wasm
   test_set_memory_wasm
+  all_wasm_contracts
 )
