@@ -360,22 +360,19 @@ GenRs::show_type(const StructBody &s, string t)
             }
         }
         */
-        prtop("\nimpl {} {{\n", outer_id);
-
-        prtop("    pub fn into_inner(self) -> {} {{\n", inner_type);
-        prtop("        self.{}\n", inner_access);
-        prtop("    }}\n");
-        prtop("    pub const fn new(_inner: {}) -> Self {{\n", inner_type);
-        if (inner.id.empty())
-            prtop("        Self(_inner)\n");
-        else
-            prtop("        Self {{ {}: _inner }}\n", inner.id);
-        prtop("    }}\n");
-        prtop("    pub const fn as_ptr(&self) -> *const u8 {{\n");
-        prtop("        self.{}.as_ptr()\n", inner_access);
-        prtop("    }}\n");
-
-        prtop("}}");
+        prtop(R"(
+impl {0} {{
+    pub fn into_inner(self) -> {1} {{
+        self.{2}
+    }}
+    pub const fn new(_inner: {1}) -> Self {{
+        Self {{ {3} }}
+    }}
+    pub const fn as_ptr(&self) -> *const u8 {{
+        self.{2}.as_ptr()
+    }}
+}}
+)", outer_id, inner_type, inner_access, inner.id.empty() ? "_inner" : inner.id + ": _inner");
 
         /*
         impl Deref for $OuterType {
