@@ -22,6 +22,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
 
@@ -87,7 +88,8 @@ inline std::vector<UniqueLoglet>
 LogletBuffer::take_buffer()
 {
   crc_ = 0;
-  buf_.emplace_back(std::move(head_));
+  if (head_)
+    buf_.emplace_back(std::move(head_));
   return std::exchange(buf_, std::vector<UniqueLoglet>());
 }
 
@@ -125,6 +127,10 @@ struct SafeItemHeader {
   std::optional<ItemHeader> operator()() const
   {
     if (storage > std::to_underlying(ItemStorage::kCommit))
+      return std::nullopt;
+    if (key_len == 0)
+      return std::nullopt;
+    if (sizeof(ItemHeader) + key_len + value_len > kBigItemThreshold)
       return std::nullopt;
     ItemHeader hdr(static_cast<ItemStorage>(storage), type, key_len, value_len);
     hdr.lsn = lsn;
