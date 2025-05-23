@@ -138,6 +138,7 @@ struct GenRs {
   static string map_case(const string &);
   static string map_bound(const string &);
   string type_name(const Declaration &d, bool generate, bool in_colon_required_setting = false);
+  static std::optional<string> get_array_size(const Declaration &d);
 
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
@@ -413,14 +414,7 @@ impl {0} {{
         prtop("    }}\n");
         prtop("}}");
 
-        if (inner_type.starts_with("ByteArray<"s)) {
-            string array_size;
-            if (inner_type.contains("<32>")) {
-                array_size = "32";
-            }
-            if (inner_type.contains("<64>")) {
-                array_size = "64";
-            }
+        if (auto array_size = get_array_size(inner)) {
 
             /*
                 impl AsRef<[u8]> for $OuterType {
@@ -433,7 +427,7 @@ impl {0} {{
             */
             prtop("\nimpl AsRef<[u8]> for {} {{\n", outer_id);
             prtop("    fn as_ref(&self) -> &[u8] {{\n");
-            prtop("        let array: &ByteArray<{}> = self.as_ref();\n", array_size);
+            prtop("        let array: &ByteArray<{}> = self.as_ref();\n", *array_size);
             prtop("        array.as_slice()\n");
             prtop("    }}\n");
             prtop("}}");
@@ -445,8 +439,8 @@ impl {0} {{
                     }
                 }
             */
-            prtop("\nimpl From<[u8; {}]> for {} {{\n", array_size, outer_id);
-            prtop("    fn from(array: [u8; {}]) -> Self {{\n", array_size);
+            prtop("\nimpl From<[u8; {}]> for {} {{\n", *array_size, outer_id);
+            prtop("    fn from(array: [u8; {}]) -> Self {{\n", *array_size);
             prtop("        Self::new(ByteArray::from(array))\n");
             prtop("    }}\n");
             prtop("}}");
@@ -695,6 +689,15 @@ GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
   }
   show_typespec(type, name_prefix);
   top_ += "\n\n";
+}
+
+std::optional<string>
+GenRs::get_array_size(const Declaration &d)
+{
+  if (d.qual == Declaration::kArray) {
+    return d.bound;
+  }
+  return std::nullopt;
 }
 
 string
