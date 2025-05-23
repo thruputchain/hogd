@@ -138,6 +138,8 @@ struct GenRs {
   static string map_case(const string &);
   static string map_bound(const string &);
   string type_name(const Declaration &d, bool generate, bool in_colon_required_setting = false);
+  // return nullopt unless the type is an opaque array
+  static std::optional<string> get_opaque_array_size(const Declaration &d);
 
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
@@ -334,7 +336,7 @@ GenRs::show_type(const StructBody &s, string t)
         /*
         impl From<$InnerType> for $OuterType {
             fn from(_inner: $InnerType) -> Self {
-                Self { $inner_field: _inner } // or Self(inner)
+                Self { $inner_id: _inner } // or Self(_inner)
             }
         }
         */
@@ -349,15 +351,15 @@ GenRs::show_type(const StructBody &s, string t)
 
         /*
         impl $OuterType {
-            pub fn into_inner(self) -> $InnerType {
-                self.$inner_field
-            }
             pub const fn new(_inner: $InnerType) -> Self {
                 Self { $inner_field: _inner }
             }
-            pub const fn as_ptr(&self) -> *const u8 {{
-                self.$inner_field.as_ptr()
-            }}
+            pub const fn into_inner(self) -> $InnerType {
+                self.$inner_access
+            }
+            pub const fn as_ptr(&self) -> *const u8 {
+                self.$inner_access.as_ptr()
+            }
         }
         */
         prtop(R"(
@@ -379,7 +381,7 @@ impl {0} {{
             type Target = $InnerType;
 
             fn deref(&self) -> &Self::Target {
-                &self.$inner_field // or &self.0
+                &self.$inner_access
             }
         }
         */
@@ -395,7 +397,7 @@ impl {0} {{
         /*
         impl DerefMut for $OuterType {
             fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.$inner_field // or &mut self.0
+                &mut self.$inner_access
             }
         }
         */
@@ -412,6 +414,38 @@ impl {0} {{
         prtop("        &self.{}\n", inner_access);
         prtop("    }}\n");
         prtop("}}");
+
+        if (auto array_size = get_opaque_array_size(inner)) {
+
+            /*
+                impl AsRef<[u8]> for $OuterType {
+                    fn as_ref(&self) -> &[u8] {
+                        let array: &ByteArray<32> = self.as_ref();
+                        array.as_slice()
+                    }
+                }
+
+            */
+            prtop("\nimpl AsRef<[u8]> for {} {{\n", outer_id);
+            prtop("    fn as_ref(&self) -> &[u8] {{\n");
+            prtop("        let array: &ByteArray<{}> = self.as_ref();\n", *array_size);
+            prtop("        array.as_slice()\n");
+            prtop("    }}\n");
+            prtop("}}");
+
+            /*
+                impl From<[u8; 32]> for $OuterType {
+                    fn from(array: [u8; 32]) -> Self {
+                        Self::new(ByteArray::from(array))
+                    }
+                }
+            */
+            prtop("\nimpl From<[u8; {}]> for {} {{\n", *array_size, outer_id);
+            prtop("    fn from(array: [u8; {}]) -> Self {{\n", *array_size);
+            prtop("        Self::new(ByteArray::from(array))\n");
+            prtop("    }}\n");
+            prtop("}}");
+        }
     }
   }
 }
@@ -656,6 +690,18 @@ GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
   }
   show_typespec(type, name_prefix);
   top_ += "\n\n";
+}
+
+std::optional<string>
+GenRs::get_opaque_array_size(const Declaration &d)
+{
+  if (!holds_alternative<string>(d.type)) {
+    return std::nullopt;
+  }
+  if (d.qual == Declaration::kArray && get<string>(d.type) == "opaque") {
+    return d.bound;
+  }
+  return std::nullopt;
 }
 
 string
