@@ -130,8 +130,11 @@ private:
 
 // create RuntimeContext with no imported functions
 std::shared_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
-// create RuntimeContext, and initialize with hogexec's imported function(s)
-std::shared_ptr<RuntimeContext> make_hogexec_context(RuntimeEngine engine);
+// create RuntimeContext for running wasm contracts, and initialize with hogexec's imported function(s)
+std::shared_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
+
+// create the type of RuntimeContext that is used within Hogexec
+std::shared_ptr<RuntimeContext> make_hogexec_context();
 
 // Virtual class that abstracts the interface required for an invocable
 // sandbox.  Can be created by an instance of RuntimeContext.

@@ -69,7 +69,7 @@ open_runtime_context() noexcept
     return nullptr;
   }
   *out = std::make_shared<hogd::MockRuntimeContext>(
-      make_hogexec_context(RuntimeEngine::kWasmi));
+      make_hogexec_context());
   return out;
 }
 

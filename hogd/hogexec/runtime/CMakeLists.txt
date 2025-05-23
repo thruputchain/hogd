@@ -15,6 +15,7 @@ add_library(
   invocation_frame.cc
   item_view.cc
   native_runtime.cc
+  multiplexed_context.cc
   runtime.cc
   status.cc
   storage_snapshot_cache.cc

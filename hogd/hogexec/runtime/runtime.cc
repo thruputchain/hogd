@@ -4,8 +4,11 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
+#include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -25,13 +28,23 @@ make_runtime_context(RuntimeEngine engine)
 }
 
 std::shared_ptr<RuntimeContext>
-make_hogexec_context(RuntimeEngine engine)
+make_hogexec_wasm_context(RuntimeEngine engine)
 {
   std::shared_ptr<RuntimeContext> out = make_runtime_context(engine);
   if (out) {
     out->link_fn("marmot", "syscall", &syscall_entry);
   }
   return out;
+}
+
+std::shared_ptr<RuntimeContext>
+make_hogexec_context()
+{
+  return std::make_shared<MultiplexedContext>(
+      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
+          {ContractType::kWasmi, make_hogexec_wasm_context(RuntimeEngine::kWasmi)},
+          // TODO(geoff): add hogexec native contracts here
+      });
 }
 
 std::string
