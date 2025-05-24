@@ -12,10 +12,10 @@
 
 namespace hogd ::test {
 
-static ContractBlob load_raw_file(std::string_view filename)
+static ContractBlob
+load_raw_file(std::string_view filename)
 {
-  std::string file = std::string(CMAKE_ROOT_BINARY_DIR) +
-                     std::string(filename);
+  std::string file = std::string(CMAKE_ROOT_BINARY_DIR) + std::string(filename);
   FILE *f = std::fopen(file.c_str(), "r");
   if (f == nullptr)
     throw std::runtime_error("failed to load wasm file: " + file);
@@ -47,11 +47,11 @@ load_wasm_from_file(std::string_view filename)
 static std::shared_ptr<Contract>
 load_test_contract(std::string_view filename)
 {
-  auto wasm = load_raw_file("/test_contracts/integration_test_contracts/" + std::string(filename));
+  auto wasm = load_raw_file("/test_contracts/integration_test_contracts/" +
+                            std::string(filename));
   auto out = std::make_shared<Contract>(ContractType::kWasmi);
   out->wasmi_contract() = std::move(wasm);
   return out;
 }
-
 
 } // namespace hogd::test
