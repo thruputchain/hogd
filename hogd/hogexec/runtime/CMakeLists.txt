@@ -83,6 +83,7 @@ target_link_libraries(
   runtime_test
   runtime
   runtime_test_util
+  preset_contracts
   db_interface
   GTest::gtest
 )

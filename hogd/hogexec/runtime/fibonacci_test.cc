@@ -3,10 +3,12 @@
 #include <memory>
 
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/preset_contracts/shared.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "transaction.hh"
+#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 
 namespace hogd {
 
@@ -24,6 +26,12 @@ TEST_F(FibonacciTest, Fibonacci) {
     in_memory_db_.write_contract(sha256(*contract), contract);
     in_memory_db_.write_deployment(contract_addr, sha256(*contract));
     setup_grant_storage_token(contract_addr, 1000'000'000);
+
+    static_assert(ContractTraitMeta<Fibonacci>::export_index<0>() == 1);
+    static_assert(ContractTraitMeta<Fibonacci>::export_index<1>() == 0);
+    static_assert(ContractTraitMeta<Fibonacci>::export_index<2>() == 2);
+
+    auto method = ContractTraitMeta<Fibonacci>::method_id("fibonacci");
 
     auto handler = make_new_system_call_handler(
         SignedTransaction{
