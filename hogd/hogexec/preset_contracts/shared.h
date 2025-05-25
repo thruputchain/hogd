@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <stdexcept>
@@ -45,7 +46,22 @@ template<typename R, typename... Args> struct CalldataArgs<R (*&&)(Args...)> {
   using return_t = R;
 };
 
-template<typename ContractTrait> class ContractTraitMeta {
+template<typename T>
+concept is_contract_trait = requires {
+  { T::kTraitName } -> std::convertible_to<std::string_view>;
+  { T::kVersion } -> std::convertible_to<std::string_view>;
+  {
+    T::kExportNames
+  }
+  -> std::convertible_to<std::array<std::string_view, T::kExportNames.size()>>;
+  {
+    std::tuple_size_v<typename T::export_types>
+  } -> std::convertible_to<size_t>;
+} && requires {
+  std::tuple_size_v<typename T::export_types> == T::kExportNames.size();
+};
+
+template<is_contract_trait ContractTrait> class ContractTraitMeta {
 
   // the type of the i'th exported function,
   // (ordered by their listing in ContractTrait::kExportNames)
@@ -68,7 +84,8 @@ template<typename ContractTrait> class ContractTraitMeta {
       }(std::make_index_sequence<ContractTrait::kExportNames.size()>{});
 
   // map the i'th function name to the sorted index that it's actually exported
-  // at (i.e. the index of the function in the sorted list of exported functions)
+  // at (i.e. the index of the function in the sorted list of exported
+  // functions)
   template<size_t I> requires (I < ContractTrait::kExportNames.size())
   constexpr static size_t kExportIndex = [] {
     size_t out = 0;
