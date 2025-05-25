@@ -137,11 +137,13 @@ public:
   {
     using args_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
-    auto r = bcs::decode_from<args_type>(data);
-    if (!r.has_value()) {
-      return SyscallStatus<args_type>(SyscallErrorCode::kCalldataParseError);
-    }
-    return SyscallStatus<args_type>(r.value());
+    return [data] -> SyscallStatus<args_type> { 
+        auto r = bcs::decode_from<args_type>(data);
+        if (!r.has_value()) {
+            return SyscallStatus<args_type>(SyscallErrorCode::kCalldataParseError);
+        }
+        return SyscallStatus<args_type>(r.value());
+    }();
   }
 
   template<detail::StringLiteral Name>
@@ -149,11 +151,18 @@ public:
   {
     using return_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
-    auto r = bcs::decode_from<return_type>(data);
-    if (!r.has_value()) {
-      return SyscallStatus<return_type>(SyscallErrorCode::kReturnParseError);
-    }
-    return SyscallStatus<return_type>(r.value());
+    return [data] -> SyscallStatus<return_type> { 
+        auto r = bcs::decode_from<return_type>(data);
+        if (!r.has_value()) {
+            return SyscallError{SyscallErrorCode::kReturnParseError};
+        }
+        // if the return type is a single value, return it directly instead of as a tuple
+        if constexpr (requires { std::tuple_size_v<return_type> == 1; }) {
+            return std::get<0>(r.value());
+        } else {
+            return r.value();
+        }
+    }();
   }
 
 private:
