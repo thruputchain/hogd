@@ -59,20 +59,23 @@ TEST_F(FibonacciTest, Fibonacci)
   advance_block();
 
   {
-     auto handler = make_new_system_call_handler(
-          SignedTransaction{
-              .tx = Transaction{.invocation =
-                                      Invocation{.invoked_address = contract_addr,
-                                              .method = ContractTraitMeta<Fibonacci>::method_id<"fibonacci">(),
-                                              .gas_limit = UINT64_MAX,
-                                              .calldata = {5, 0, 0, 0}}}},
-          wasm_runtime_context_);
-      auto res = handler.root_invoke();
-      ASSERT_TRUE(res.result_);
-      ASSERT_EQ(*res.result_, 0);
-      auto commit_res = handler.try_commit_transaction()();
-      ASSERT_TRUE(commit_res.has_value());
-      ASSERT_TRUE(*commit_res);
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = contract_addr,
+                                   .method = ContractTraitMeta<
+                                       Fibonacci>::method_id<"fibonacci">(),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {5, 0, 0, 0}}}},
+        wasm_runtime_context_);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.result_);
+    ASSERT_EQ(*res.result_, 0);
+    auto commit_res = handler.try_commit_transaction()();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res);
   }
 }
 
