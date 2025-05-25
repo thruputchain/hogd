@@ -145,6 +145,7 @@ include(Corrosion)
 
 # Enable bcs-cpp
 add_subdirectory(external/bcs-cpp)
+set(BCS_CPP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/bcs-cpp")
 include_directories(${BCS_CPP_SOURCE_DIR})
 
 add_subdirectory(test_contracts)

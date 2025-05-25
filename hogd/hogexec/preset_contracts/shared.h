@@ -3,14 +3,18 @@
 #include <array>
 #include <concepts>
 #include <cstddef>
+#include <span>
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <utility>
 
 #include "contract.hh"
-#include "external/bcs-cpp/bcs/encode.h"
+#include "bcs/decode.h"
+#include "bcs/encode.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -24,6 +28,8 @@ MethodID sdk_method_id(std::string_view identifier_name,
                        std::string_view identifier_version, uint16_t method_id);
 MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 
+namespace detail {
+// Wrapper to make string literals work as template parameters.
 template<size_t N> struct StringLiteral {
   char value[N];
 
@@ -45,6 +51,8 @@ template<typename R, typename... Args> struct CalldataArgs<R (*&&)(Args...)> {
   using args_t = std::tuple<Args...>;
   using return_t = R;
 };
+
+} // namespace detail
 
 template<typename T>
 concept is_contract_trait = requires {
@@ -71,7 +79,7 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
 
   // the index of the function with the given name,
   // (ordered by their listing in ContractTrait::kExportNames)
-  template<StringLiteral Name>
+  template<detail::StringLiteral Name>
   constexpr static size_t kLookupIndex =
       []<size_t I, std::size_t... Is>(this auto self,
                                       std::index_sequence<I, Is...>) {
@@ -99,28 +107,53 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   }();
 
 public:
-  template<StringLiteral Name> constexpr static MethodID method_id()
+  template<detail::StringLiteral Name> constexpr static MethodID method_id()
   {
     return sdk_method_id(ContractTrait::kTraitName, ContractTrait::kVersion,
                          kExportIndex<kLookupIndex<Name>>);
   }
 
-  template<StringLiteral Name, typename... Args>
-  static Calldata make_calldata(Args... args)
-      requires (std::same_as<
-                std::tuple<Args...>,
-                typename CalldataArgs<signature<kLookupIndex<Name>>>::args_t>)
+  template<detail::StringLiteral Name, typename... Args>
+  static Calldata make_calldata(Args... args) requires (
+      std::same_as<
+          std::tuple<Args...>,
+          typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t>)
   {
     return make_encoding(std::tuple{args...});
   }
 
-  template<StringLiteral Name, typename ReturnType>
-  static Calldata make_return(ReturnType return_value)
-      requires (std::same_as<
-                ReturnType,
-                typename CalldataArgs<signature<kLookupIndex<Name>>>::return_t>)
+  template<detail::StringLiteral Name, typename ReturnType>
+  static Calldata make_return(ReturnType return_value) requires (
+      std::same_as<ReturnType, typename detail::CalldataArgs<
+                                   signature<kLookupIndex<Name>>>::return_t>)
   {
     return make_encoding(return_value);
+  }
+
+  // Native contract is responsible for handling errors related to failing to
+  // parse calldata. This behavior mirrors the behavior implemented in the SDK.
+  template<detail::StringLiteral Name>
+  static auto decode_calldata(std::span<const std::byte> data)
+  {
+    using args_type =
+        typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
+    auto r = bcs::decode_from<args_type>(data);
+    if (!r.has_value()) {
+      return SyscallStatus<args_type>(SyscallErrorCode::kCalldataParseError);
+    }
+    return SyscallStatus<args_type>(r.value());
+  }
+
+  template<detail::StringLiteral Name>
+  static auto decode_return(std::span<const std::byte> data)
+  {
+    using return_type =
+        typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
+    auto r = bcs::decode_from<return_type>(data);
+    if (!r.has_value()) {
+      return SyscallStatus<return_type>(SyscallErrorCode::kReturnParseError);
+    }
+    return SyscallStatus<return_type>(r.value());
   }
 
 private:
