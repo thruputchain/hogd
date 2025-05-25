@@ -1,7 +1,6 @@
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 
 #include <cassert>
-#include <expected>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -126,8 +125,7 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index)
       db_proxy_.get_concurrent_retrocausal_queue_entry(block_id_, addrkey_,
                                                        index)();
   if (!db_res) {
-    // the type deduction gets messed up without the explicit std::unexpected
-    return std::unexpected{db_res.error()};
+    return db_res.error();
   }
   auto entry = db_res.value();
   if (entry.has_value()) {
