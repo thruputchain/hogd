@@ -9,9 +9,9 @@
 #include <tuple>
 #include <utility>
 
-#include "contract.hh"
 #include "bcs/decode.h"
 #include "bcs/encode.h"
+#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "syscall.hh"
