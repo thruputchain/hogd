@@ -30,9 +30,6 @@ TEST_F(FibonacciTest, Fibonacci)
   in_memory_db_.write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1000'000'000);
 
-  static_assert(ContractTraitMeta<Fibonacci>::export_index<0>() == 1);
-  static_assert(ContractTraitMeta<Fibonacci>::export_index<1>() == 0);
-  static_assert(ContractTraitMeta<Fibonacci>::export_index<2>() == 2);
   auto method = ContractTraitMeta<Fibonacci>::method_id<"fibonacci">();
   ASSERT_EQ(method, 96596868703008);
 
@@ -46,7 +43,8 @@ TEST_F(FibonacciTest, Fibonacci)
                                    .method = ContractTraitMeta<
                                        Fibonacci>::method_id<"initialize">(),
                                    .gas_limit = UINT64_MAX,
-                                   .calldata = {}}}},
+                                   .calldata = ContractTraitMeta<Fibonacci>::
+                                       make_calldata<"initialize">()}}},
         wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
@@ -68,7 +66,8 @@ TEST_F(FibonacciTest, Fibonacci)
                                    .method = ContractTraitMeta<
                                        Fibonacci>::method_id<"fibonacci">(),
                                    .gas_limit = UINT64_MAX,
-                                   .calldata = {5, 0, 0, 0}}}},
+                                   .calldata = ContractTraitMeta<Fibonacci>::
+                                       make_calldata<"fibonacci">(5U)}}},
         wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
