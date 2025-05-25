@@ -57,7 +57,7 @@ SystemCallHandler::SystemCallHandler(
     snapshot_cache_(snapshot_cache)
 {
   if (!runtime_context_) {
-    runtime_context_ = make_hogexec_context(RuntimeEngine::kWasmi);
+    runtime_context_ = make_hogexec_context();
   }
 }
 

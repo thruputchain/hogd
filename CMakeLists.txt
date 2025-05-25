@@ -14,9 +14,14 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 # Enable building test ffi (default: OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
+# Enable the test contracts (default: ON)
+# Defaults to on, but disabled when building native_exec
+# crate (to guard against accidentally recursively cloning the repo)
+option(ENABLE_TEST_CONTRACTS "Enable test contracts" ON)
 
 # Print configuration options
 message(STATUS "ENABLE_TEST_FFI: ${ENABLE_TEST_FFI}")
+message(STATUS "ENABLE_TEST_CONTRACTS: ${ENABLE_TEST_CONTRACTS}")
 
 # Handle configuration options
 if(NOT CMAKE_BUILD_TYPE)
@@ -140,7 +145,10 @@ include(Corrosion)
 
 # Enable bcs-cpp
 add_subdirectory(external/bcs-cpp)
+set(BCS_CPP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/bcs-cpp")
 include_directories(${BCS_CPP_SOURCE_DIR})
+
+add_subdirectory(test_contracts)
 
 # Finally, enable hogd's own code
 include_directories(${CMAKE_SOURCE_DIR})
