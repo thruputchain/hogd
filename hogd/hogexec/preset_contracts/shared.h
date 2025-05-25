@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <concepts>
 #include <cstddef>
 #include <stdexcept>
@@ -47,10 +46,15 @@ template<typename R, typename... Args> struct CalldataArgs<R (*&&)(Args...)> {
 };
 
 template<typename ContractTrait> class ContractTraitMeta {
+
+  // the type of the i'th exported function,
+  // (ordered by their listing in ContractTrait::kExportNames)
   template<size_t I>
   using signature = decltype(std::get<I>(
       std::declval<typename ContractTrait::export_types>()));
 
+  // the index of the function with the given name,
+  // (ordered by their listing in ContractTrait::kExportNames)
   template<StringLiteral Name>
   constexpr static size_t kLookupIndex =
       []<size_t I, std::size_t... Is>(this auto self,
@@ -64,7 +68,7 @@ template<typename ContractTrait> class ContractTraitMeta {
       }(std::make_index_sequence<ContractTrait::kExportNames.size()>{});
 
   // map the i'th function name to the sorted index that it's actually exported
-  // at
+  // at (i.e. the index of the function in the sorted list of exported functions)
   template<size_t I> requires (I < ContractTrait::kExportNames.size())
   constexpr static size_t kExportIndex = [] {
     size_t out = 0;
