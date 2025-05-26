@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <concepts>
+#include <string_view>
 #include <type_traits>
 #include <typeinfo>
 
@@ -31,5 +33,18 @@ most_derived_cast(T *x)
     return static_cast<DerivedT *>(x);
   return nullptr;
 }
+
+// StringLiteral provides a string structural type that can be passed as a
+// template parameter.
+template<std::size_t N> struct StringLiteral {
+  char buf[N];
+
+  constexpr StringLiteral(const char (&str)[N]) { std::copy_n(str, N, buf); }
+  constexpr std::string_view get() const
+  {
+    return std::string_view(buf, N - 1);
+  }
+};
+template<size_t N> StringLiteral(const char (&)[N]) -> StringLiteral<N>;
 
 } // namespace hogd
