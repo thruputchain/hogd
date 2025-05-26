@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
-#include <charconv>
 #include <format>
 #include <functional>
 #include <optional>
@@ -20,6 +19,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/ramdb/constants.h"
@@ -156,14 +156,13 @@ get_log_files(Directory &dir)
     if (!has_extension(str, "log"))
       continue;
 
-    uint64_t tmp;
-    auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), tmp);
-    if (ec != std::errc()) {
+    std::optional<uint64_t> tmp = parse_integer<uint64_t>(str);
+    if (!tmp) {
       warn("invalid log file name `{}`", str);
       continue;
     }
 
-    lsns.push_back(tmp);
+    lsns.push_back(*tmp);
   }
   std::ranges::sort(lsns);
 
