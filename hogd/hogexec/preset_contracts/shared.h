@@ -12,6 +12,7 @@
 #include "bcs/decode.h"
 #include "bcs/encode.h"
 #include "contract.hh"
+#include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "syscall.hh"
@@ -29,21 +30,6 @@ MethodID sdk_method_id(std::string_view identifier_name,
 MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 
 namespace detail {
-// Wrapper to make string literals work as template parameters.
-template<size_t N> struct StringLiteral {
-  char value[N];
-
-  constexpr StringLiteral(const char (&str)[N])
-  {
-    for (size_t i = 0; i < N; ++i)
-      value[i] = str[i];
-  }
-
-  constexpr operator std::string_view() const
-  {
-    return std::string_view(value, N - 1);
-  }
-};
 
 template<typename> struct CalldataArgs;
 
@@ -79,11 +65,11 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
 
   // the index of the function with the given name,
   // (ordered by their listing in ContractTrait::kExportNames)
-  template<detail::StringLiteral Name>
+  template<StringLiteral Name>
   constexpr static size_t kLookupIndex =
       []<size_t I, std::size_t... Is>(this auto self,
                                       std::index_sequence<I, Is...>) {
-        if constexpr (ContractTrait::kExportNames[I] == Name) {
+        if constexpr (ContractTrait::kExportNames[I] == Name.get()) {
           return I;
         }
         else {
@@ -107,13 +93,13 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   }();
 
 public:
-  template<detail::StringLiteral Name> constexpr static MethodID method_id()
+  template<StringLiteral Name> constexpr static MethodID method_id()
   {
     return sdk_method_id(ContractTrait::kTraitName, ContractTrait::kVersion,
                          kExportIndex<kLookupIndex<Name>>);
   }
 
-  template<detail::StringLiteral Name, typename... Args>
+  template<StringLiteral Name, typename... Args>
   static Calldata make_calldata(Args... args) requires (
       std::same_as<
           std::tuple<Args...>,
@@ -122,7 +108,7 @@ public:
     return make_encoding(std::tuple{args...});
   }
 
-  template<detail::StringLiteral Name, typename ReturnType>
+  template<StringLiteral Name, typename ReturnType>
   static Calldata make_return(ReturnType return_value) requires (
       std::same_as<ReturnType, typename detail::CalldataArgs<
                                    signature<kLookupIndex<Name>>>::return_t>)
@@ -132,7 +118,7 @@ public:
 
   // Native contract is responsible for handling errors related to failing to
   // parse calldata. This behavior mirrors the behavior implemented in the SDK.
-  template<detail::StringLiteral Name>
+  template<StringLiteral Name>
   static auto decode_calldata(std::span<const std::byte> data)
   {
     using args_type =
@@ -146,7 +132,7 @@ public:
     }();
   }
 
-  template<detail::StringLiteral Name>
+  template<StringLiteral Name>
   static auto decode_return(std::span<const std::byte> data)
   {
     using return_type =
