@@ -8,6 +8,7 @@
 #include <string_view>
 #include <utility>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 
@@ -56,14 +57,14 @@ encode_basen(std::span<const std::byte> buf)
   constexpr uint32_t kMask = kDictionary.size() - 1;
 
   std::string out;
-  out.reserve((kDictionary.size() * 8 + kBits - 1) / kBits);
+  out.reserve((buf.size() * kBitsPerByte + kBits - 1) / kBits);
 
   int bits_left = 0;
   uint32_t tmp = 0;
   for (std::byte tbyte : buf) {
     auto byte = static_cast<uint8_t>(tbyte);
-    tmp = (tmp << 8) | byte;
-    bits_left += 8;
+    tmp = (tmp << kBitsPerByte) | byte;
+    bits_left += kBitsPerByte;
 
     while (bits_left >= kBits) {
       out += kDictionary[(tmp >> (bits_left - kBits)) & kMask];
@@ -71,7 +72,7 @@ encode_basen(std::span<const std::byte> buf)
     }
   }
 
-  if constexpr (8 % kBits != 0) {
+  if constexpr (kBitsPerByte % kBits != 0) {
     // handle any residual bits that don't divide evenly.
     if (bits_left > 0)
       out += kDictionary[(tmp << (kBits - bits_left)) & kMask];
