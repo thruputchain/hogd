@@ -429,7 +429,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   check_integrity();
 }
 
-TEST_F(DatabaseTest, DISABLED_SnapshotOngoingPuts)
+TEST_F(DatabaseTest, SnapshotOngoingPuts)
 {
   auto rand = rand_; // snapshot rng state.
   insert_many(kInsertions);

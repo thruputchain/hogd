@@ -249,7 +249,9 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   heap_size += cores * kLogletRegionSize * 2;
 
   // add disk buffering overhead.
-  heap_size += (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize;
+  // Times two because need buffering for both snapshotter and normal ops.
+  heap_size +=
+      (2 * (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize);
 
   return heap_size;
 }
