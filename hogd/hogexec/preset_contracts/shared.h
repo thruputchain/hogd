@@ -184,9 +184,10 @@ public:
   using trait_meta_t = ContractTraitMeta<ContractTrait>;
 
   template<StringLiteral Name, typename... Args>
-  Invocation make_invocation(GasAmount gas_amount, Args &...args)
+  Invocation make_invocation(GasAmount gas_amount, Args &&...args)
   {
-    auto calldata = trait_meta_t::template make_calldata<Name>(args...);
+    auto calldata =
+        trait_meta_t::template make_calldata<Name>(std::forward<Args>(args)...);
     return Invocation{.invoked_address = contract_address_,
                       .method = trait_meta_t::template method_id<Name>(),
                       .gas_limit = gas_amount,
@@ -194,12 +195,13 @@ public:
   }
 
   template<StringLiteral Name, typename... Args>
-  auto invoke(SystemCallHandler &handler, Args &...args)
+  auto invoke(SystemCallHandler &handler, Args &&...args)
       -> std::pair<HostFnStatus<SyscallStatus<
                        typename trait_meta_t::template return_t<Name>>>,
                    uint64_t>
   {
-    auto invocation = make_invocation<Name>(UINT64_MAX, args...);
+    auto invocation =
+        make_invocation<Name>(UINT64_MAX, std::forward<Args>(args)...);
     auto res = handler.invoke(invocation, UINT64_MAX, 0);
 
     HostFnStatus<SyscallErrorCode> host_fn_res = res.first;

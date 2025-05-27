@@ -4,9 +4,11 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
+#include "bcs/decode.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -73,15 +75,8 @@ TEST_F(FibonacciTest, FibonacciCalls)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = contract_addr,
-                                   .method = ContractTraitMeta<
-                                       Fibonacci>::method_id<"fibonacci">(),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = ContractTraitMeta<Fibonacci>::
-                                       make_calldata<"fibonacci">(5U)}}},
+            .tx = Transaction{.invocation = client.make_invocation<"fibonacci">(
+                                  UINT64_MAX, 5U)}},
         wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
@@ -110,18 +105,16 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
 
            [fib_contract_addr](SystemCallHandler &handler,
                                NativeRuntime &) -> InvokeStatus<int32_t> {
-             fib_client_t client(fib_contract_addr);
              // Decode the calldata as two u32s, then invoke the fibonacci
              // method with the first input.  The second is the expected output.
-             auto calldata = handler.get_calldata();
-             if (calldata.size() != sizeof(uint32_t) + sizeof(uint32_t)) {
+             auto c = bcs::decode_from<uint32_t, uint32_t>(
+                 std::as_bytes(std::span(handler.get_calldata())));
+             if (!c.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             uint32_t input;
-             std::memcpy(&input, calldata.data(), sizeof(uint32_t));
-             uint32_t expected_output;
-             std::memcpy(&expected_output, calldata.data() + sizeof(uint32_t),
-                         sizeof(uint32_t));
+             auto [input, expected_output] = c.value();
+
+             fib_client_t client(fib_contract_addr);
 
              auto [decoded, _gas] =
                  client.template invoke<"fibonacci">(handler, input);
