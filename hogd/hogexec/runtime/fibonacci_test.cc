@@ -115,7 +115,6 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
              auto [input, expected_output] = c.value();
 
              fib_client_t client(fib_contract_addr);
-
              auto [decoded, _gas] =
                  client.template invoke<"fibonacci">(handler, input);
 
@@ -149,18 +148,14 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
           {ContractType::kNative, native_runtime_context},
           {ContractType::kWasmi, wasm_runtime_context_}});
 
+  fib_client_t client(fib_contract_addr);
+
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = fib_contract_addr,
-                                   .method = ContractTraitMeta<
-                                       Fibonacci>::method_id<"initialize">(),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = ContractTraitMeta<Fibonacci>::
-                                       make_calldata<"initialize">()}}},
+                Transaction{.invocation = client.make_invocation<"initialize">(
+                                UINT64_MAX)}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
