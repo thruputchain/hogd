@@ -1,8 +1,7 @@
-
-
 add_library(
     preset_contracts
     shared.cc
+    native_token.cc
 )
 
 target_link_libraries(
