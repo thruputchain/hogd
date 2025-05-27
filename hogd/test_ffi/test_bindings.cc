@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -68,8 +67,7 @@ open_runtime_context() noexcept
     std::println("error creating runtime context: {}", e.what());
     return nullptr;
   }
-  *out = std::make_shared<hogd::MockRuntimeContext>(
-      make_hogexec_context(RuntimeEngine::kWasmi));
+  *out = std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
   return out;
 }
 

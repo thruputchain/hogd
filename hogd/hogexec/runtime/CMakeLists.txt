@@ -15,6 +15,7 @@ add_library(
   invocation_frame.cc
   item_view.cc
   native_runtime.cc
+  multiplexed_context.cc
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
@@ -36,6 +37,7 @@ add_executable(
   runtime_test
   error_handling_test.cc
   execution_mode_test.cc
+  fibonacci_test.cc
   gas_api_test.cc
   instantiate_test.cc
   invoke_arity_test.cc
@@ -81,6 +83,7 @@ target_link_libraries(
   runtime_test
   runtime
   runtime_test_util
+  preset_contracts
   db_interface
   GTest::gtest
 )
@@ -116,4 +119,5 @@ add_dependencies(
   test_error_handling_wasm
   test_invoke_arity_wasm
   test_set_memory_wasm
+  all_wasm_contracts
 )

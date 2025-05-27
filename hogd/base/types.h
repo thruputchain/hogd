@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 
 namespace hogd {
@@ -20,6 +21,7 @@ using std::uint32_t;
 using std::uint64_t;
 using std::uint8_t;
 using std::uintptr_t;
+using ssize_t = std::make_signed_t<size_t>;
 
 // 128-bit integers (this is a GNU C++ extension supported by Clang and GCC)
 using int128_t = __int128;
