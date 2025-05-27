@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "bcs/decode.h"
+#include "bcs/encode.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -20,7 +21,6 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "syscall.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -99,35 +99,25 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
 
   using fib_client_t = ContractTraitClient<Fibonacci>;
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
+  NativeContractBuilder builder;
 
-           [fib_contract_addr](SystemCallHandler &handler,
-                               NativeRuntime &) -> InvokeStatus<int32_t> {
-             // Decode the calldata as two u32s, then invoke the fibonacci
-             // method with the first input.  The second is the expected output.
-             auto c = bcs::decode_from<uint32_t, uint32_t>(
-                 std::as_bytes(std::span(handler.get_calldata())));
-             if (!c.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             auto [input, expected_output] = c.value();
+  builder.add(0,
+              [fib_contract_addr](SystemCallHandler &handler,
+                                  NativeRuntime & /*unused*/, uint32_t input,
+                                  uint32_t expect) -> InvokeStatus<void> {
+                fib_client_t client(fib_contract_addr);
+                auto [decoded, _gas] =
+                    client.template invoke<"fibonacci">(handler, input);
+                if (!decoded.has_value() || !decoded.value().has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                if (decoded.value().value() != expect) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                return {};
+              });
 
-             fib_client_t client(fib_contract_addr);
-             auto [decoded, _gas] =
-                 client.template invoke<"fibonacci">(handler, input);
-
-             // decoded is a HostFnStatus<SyscallStatus<uint32_t>>
-             if (!decoded.has_value() || !decoded.value().has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             if (decoded.value().value() != expected_output) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             return 0;
-           }},
-      });
+  auto native_contract = builder.build();
 
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
@@ -177,7 +167,10 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                         Invocation{.invoked_address = native_contract_addr,
                                    .method = 0,
                                    .gas_limit = UINT64_MAX,
-                                   .calldata = {10, 0, 0, 0, 55, 0, 0, 0}}}},
+                                   .calldata =
+                                       bcs::encode_to<Calldata, uint32_t,
+                                                      uint32_t>(10U, 55U)
+                                           .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
@@ -191,13 +184,16 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
     // fibonacci(40) = 102334155 (0x6197ECB)
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  Invocation{.invoked_address =
-                                                 native_contract_addr,
-                                             .method = 0,
-                                             .gas_limit = UINT64_MAX,
-                                             .calldata = {40, 0, 0, 0, 0xCB,
-                                                          0x7E, 0x19, 0x06}}}},
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = native_contract_addr,
+                                   .method = 0,
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata =
+                                       bcs::encode_to<Calldata, uint32_t,
+                                                      uint32_t>(40U, 102334155U)
+                                           .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);

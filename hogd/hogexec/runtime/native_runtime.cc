@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 
+#include <cassert>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -44,6 +45,14 @@ NativeContext::make_new_runtime(Contract const &contract,
   return std::make_unique<NativeRuntime>(*it->second,
                                          make_new_host_call_context(
                                              syscall_handler));
+}
+
+std::unique_ptr<NativeContract>
+NativeContractBuilder::build()
+{
+  assert(!built_);
+  built_ = true;
+  return std::make_unique<NativeContract>(std::move(functions_));
 }
 
 NativeRuntime::NativeRuntime(NativeContract &contract,
