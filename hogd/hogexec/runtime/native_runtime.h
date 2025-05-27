@@ -5,13 +5,22 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string_view>
+#include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
+#include "bcs/decode.h"
+#include "bcs/encode.h"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "syscall.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -65,6 +74,75 @@ public:
 
 private:
   std::unordered_map<MethodID, function_t> functions_;
+};
+
+namespace detail {
+template<typename T> struct NativeContractArgs;
+
+template<typename T, typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (
+    T::*)(SystemCallHandler &, NativeRuntime &, Args...) const> {
+  using return_t = R;
+  using args_t = std::tuple<Args...>;
+};
+
+} // namespace detail
+
+class NativeContractBuilder {
+public:
+  void add(MethodID id, auto lambda)
+  {
+    using fn_t = decltype(&decltype(lambda)::operator());
+    using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
+    using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
+
+    auto wrapped_f = [f = std::forward<decltype(lambda)>(lambda)](
+                         SystemCallHandler &handler,
+                         NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+      auto args = [&]<size_t... Is>(std::index_sequence<Is...>) {
+        return bcs::decode_from<std::remove_cvref_t<decltype(std::get<Is>(
+            std::declval<args_t>()))>...>(
+            std::as_bytes(std::span(handler.get_calldata())));
+      }(std::make_index_sequence<std::tuple_size_v<args_t>>());
+      if (!args.has_value()) {
+        return std::to_underlying(SyscallErrorCode::kCalldataParseError);
+      }
+
+      // invoke the lambda, and return the error if there is one
+      auto return_value =
+          [&]<size_t... Is>(
+              std::index_sequence<Is...>) -> InvokeStatus<return_t> {
+        return f(handler, runtime, std::get<Is>(args.value())...);
+      }(std::make_index_sequence<std::tuple_size_v<args_t>>());
+      if (!return_value.has_value()) {
+        return return_value.error();
+      }
+
+      // otherwise, return the received value
+      if constexpr (!std::is_same_v<return_t, void>) {
+        auto return_buffer = bcs::encode_to<return_t>(return_value.value());
+        if (!return_buffer.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        handler.set_return_buffer(std::move(*return_buffer));
+      }
+      else {
+        handler.set_return_buffer(ReturnBuffer{});
+      }
+      return 0;
+    };
+
+    auto [_, inserted] = functions_.emplace(id, std::move(wrapped_f));
+    if (!inserted) {
+      throw std::runtime_error("Method ID already exists");
+    }
+  }
+
+  std::unique_ptr<NativeContract> build();
+
+private:
+  std::unordered_map<MethodID, NativeContract::function_t> functions_;
+  bool built_ = false;
 };
 
 // Context that can instantiate native contracts from a predefined set of

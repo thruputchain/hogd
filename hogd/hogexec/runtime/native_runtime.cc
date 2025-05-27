@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 
+#include <cassert>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -22,7 +23,7 @@ NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
   // and on gcc main (so presumably it's been fixed for the next release), and
   // on clang 20.  https://godbolt.org/z/PnxhrahxP
   auto it = functions_.find(method);
-  if (functions_.end() == it)
+  if (it == functions_.end())
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   return it->second(syscall_handler, runtime);
 }
@@ -44,6 +45,14 @@ NativeContext::make_new_runtime(Contract const &contract,
   return std::make_unique<NativeRuntime>(*it->second,
                                          make_new_host_call_context(
                                              syscall_handler));
+}
+
+std::unique_ptr<NativeContract>
+NativeContractBuilder::build()
+{
+  assert(!built_);
+  built_ = true;
+  return std::make_unique<NativeContract>(std::move(functions_));
 }
 
 NativeRuntime::NativeRuntime(NativeContract &contract,
