@@ -18,8 +18,11 @@ InvokeStatus<int32_t>
 NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
                        NativeRuntime &runtime)
 {
+  // Note: this doesn't build on gcc 15.1; not clear why, but it works on <=14.3
+  // and on gcc main (so presumably it's been fixed for the next release), and
+  // on clang 20.  https://godbolt.org/z/PnxhrahxP
   auto it = functions_.find(method);
-  if (it == functions_.end())
+  if (functions_.end() == it)
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   return it->second(syscall_handler, runtime);
 }
