@@ -1,6 +1,7 @@
 #include "hogd/base/string.h"
 
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <format>
 #include <span>
@@ -61,9 +62,8 @@ encode_basen(std::span<const std::byte> buf)
 
   int bits_left = 0;
   uint32_t tmp = 0;
-  for (std::byte tbyte : buf) {
-    auto byte = static_cast<uint8_t>(tbyte);
-    tmp = (tmp << kBitsPerByte) | byte;
+  for (std::byte byte : buf) {
+    tmp = (tmp << kBitsPerByte) | static_cast<uint8_t>(byte);
     bits_left += kBitsPerByte;
 
     while (bits_left >= kBits) {
@@ -74,6 +74,7 @@ encode_basen(std::span<const std::byte> buf)
 
   if constexpr (kBitsPerByte % kBits != 0) {
     // handle any residual bits that don't divide evenly.
+    assert(bits_left < kBits);
     if (bits_left > 0)
       out += kDictionary[(tmp << (kBits - bits_left)) & kMask];
   }
