@@ -105,12 +105,15 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   in_memory_db_.write_deployment(fib_contract_addr, sha256(*contract));
   setup_grant_storage_token(fib_contract_addr, 1'000'000'000);
 
+  using fib_client_t = ContractTraitClient<Fibonacci>;
+
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
 
            [fib_contract_addr](SystemCallHandler &handler,
                                NativeRuntime &) -> InvokeStatus<int32_t> {
+             fib_client_t client(fib_contract_addr);
              // Decode the calldata as two u32s, then invoke the fibonacci
              // method with the first input.  The second is the expected output.
              auto calldata = handler.get_calldata();
@@ -123,36 +126,14 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
              std::memcpy(&expected_output, calldata.data() + sizeof(uint32_t),
                          sizeof(uint32_t));
 
-             auto res = handler.invoke(
-                 Invocation{
-                     .invoked_address = fib_contract_addr,
-                     .method =
-                         ContractTraitMeta<Fibonacci>::method_id<"fibonacci">(),
-                     .gas_limit = UINT64_MAX,
-                     .calldata = ContractTraitMeta<Fibonacci>::make_calldata<
-                         "fibonacci">(input)},
-                 UINT64_MAX, 0);
-             // Check that the invocation succeeds.
-             if (!res.first.has_value()) {
+             auto [decoded, _gas] =
+                 client.template invoke<"fibonacci">(handler, input);
+
+             // decoded is a HostFnStatus<SyscallStatus<uint32_t>>
+             if (!decoded.has_value() || !decoded.value().has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (res.first.value() != SyscallErrorCode::kNone) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // Check that the return buffer is valid.
-             auto return_buffer = handler.get_return_buffer();
-             if (!return_buffer.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             // decode the return buffer
-             auto decoded =
-                 ContractTraitMeta<Fibonacci>::decode_return<"fibonacci">(
-                     std::as_bytes(std::span(return_buffer.value()->data(),
-                                             return_buffer.value()->size())));
-             if (!decoded.has_value()) {
-               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             }
-             if (decoded.value() != expected_output) {
+             if (decoded.value().value() != expected_output) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              return 0;

@@ -22,7 +22,7 @@ NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
   // and on gcc main (so presumably it's been fixed for the next release), and
   // on clang 20.  https://godbolt.org/z/PnxhrahxP
   auto it = functions_.find(method);
-  if (functions_.end() == it)
+  if (it == functions_.end())
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
   return it->second(syscall_handler, runtime);
 }

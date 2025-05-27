@@ -1,8 +1,10 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -15,6 +17,7 @@
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -153,6 +156,13 @@ public:
     }();
   }
 
+  template<StringLiteral Name>
+  using args_t =
+      typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
+  template<StringLiteral Name>
+  using return_t =
+      typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
+
 private:
   template<typename... Args>
   static Calldata make_encoding(std::tuple<Args...> args)
@@ -163,6 +173,61 @@ private:
     }
     return out.value();
   }
+};
+
+template<is_contract_trait ContractTrait> class ContractTraitClient {
+public:
+  ContractTraitClient(ContractAddress contract_address)
+    : contract_address_(contract_address)
+  {}
+
+  using trait_meta_t = ContractTraitMeta<ContractTrait>;
+
+  template<StringLiteral Name, typename... Args>
+  Invocation make_invocation(GasAmount gas_amount, Args &...args)
+  {
+    auto calldata = trait_meta_t::template make_calldata<Name>(args...);
+    return Invocation{.invoked_address = contract_address_,
+                      .method = trait_meta_t::template method_id<Name>(),
+                      .gas_limit = gas_amount,
+                      .calldata = calldata};
+  }
+
+  template<StringLiteral Name, typename... Args>
+  auto invoke(SystemCallHandler &handler, Args &...args)
+      -> std::pair<HostFnStatus<SyscallStatus<
+                       typename trait_meta_t::template return_t<Name>>>,
+                   uint64_t>
+  {
+    auto invocation = make_invocation<Name>(UINT64_MAX, args...);
+    auto res = handler.invoke(invocation, UINT64_MAX, 0);
+
+    HostFnStatus<SyscallErrorCode> host_fn_res = res.first;
+
+    if (!host_fn_res.has_value()) {
+      return std::pair{host_fn_res.error(), res.second};
+    }
+    if (host_fn_res.value() != SyscallErrorCode::kNone) {
+      return std::pair{SyscallError{host_fn_res.value()}, res.second};
+    }
+
+    auto return_buffer = handler.get_return_buffer();
+    if (!return_buffer.has_value()) {
+      return std::pair{return_buffer.error(), res.second};
+    }
+    assert(*return_buffer);
+    std::span<const std::byte> return_span = std::as_bytes(
+        std::span((*return_buffer)->data(), (*return_buffer)->size()));
+
+    auto return_value = trait_meta_t::template decode_return<Name>(return_span);
+    if (!return_value.has_value()) {
+      return std::pair{return_value.error(), res.second};
+    }
+    return std::pair{return_value.value(), res.second};
+  }
+
+private:
+  const ContractAddress contract_address_;
 };
 
 } // namespace hogd
