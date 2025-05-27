@@ -3,12 +3,10 @@
 
 #include <cstdint>
 #include <memory>
-#include <span>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
 
-#include "bcs/decode.h"
 #include "bcs/encode.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
