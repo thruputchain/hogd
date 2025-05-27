@@ -1,4 +1,4 @@
-#include "hogd/hogexec/preset_contracts/native_token.h"
+#include "hogd/hogexec/runtime/preset_native_token.h"
 
 #include <cassert>
 #include <memory>
@@ -8,7 +8,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/preset_contracts/shared.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
