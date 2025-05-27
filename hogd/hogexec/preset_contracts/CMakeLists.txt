@@ -7,6 +7,7 @@ add_library(
 
 target_link_libraries(
   preset_contracts
+  runtime
   protocol
   hogd
 )

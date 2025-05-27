@@ -100,8 +100,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   NativeContractBuilder builder;
 
   builder.add(0,
-              [fib_contract_addr](SystemCallHandler &handler,
-                                  NativeRuntime & /*unused*/, uint32_t input,
+              [fib_contract_addr](SystemCallHandler &handler, uint32_t input,
                                   uint32_t expect) -> InvokeStatus<void> {
                 fib_client_t client(fib_contract_addr);
                 auto [decoded, _gas] =
