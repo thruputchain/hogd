@@ -50,18 +50,15 @@ TEST_F(FibonacciTest, FibonacciCalls)
   auto method = ContractTraitMeta<Fibonacci>::method_id<"fibonacci">();
   ASSERT_EQ(method, 96596868703008);
 
+  using fib_client_t = ContractTraitClient<Fibonacci>;
+  fib_client_t client(contract_addr);
+
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
-                Transaction{
-                    .invocation =
-                        Invocation{.invoked_address = contract_addr,
-                                   .method = ContractTraitMeta<
-                                       Fibonacci>::method_id<"initialize">(),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata = ContractTraitMeta<Fibonacci>::
-                                       make_calldata<"initialize">()}}},
+                Transaction{.invocation = client.make_invocation<"initialize">(
+                                UINT64_MAX)}},
         wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.result_);
