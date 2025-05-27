@@ -287,8 +287,10 @@ public:
           fcntl(fd, F_SETFD, 1);
       }
 #endif // !HAVE_ACCEPT4
-      if (fd >= 0)
+      if (fd >= 0) {
+	set_nodelay(fd);
         co_return fd;
+      }
       if (Errno err{}; err != EAGAIN)
         co_return err;
       if (auto err = co_await read_wait(lfd))

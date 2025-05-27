@@ -139,6 +139,7 @@ CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
     if (getpeername(fd.get(), reinterpret_cast<struct sockaddr *>(&ss), &len))
       co_return Errno{};
   }
+  set_nodelay(fd);
   co_return fd.release();
 }
 

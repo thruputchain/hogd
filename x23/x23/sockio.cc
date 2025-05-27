@@ -1,10 +1,10 @@
 
-#include <sys/socket.h>
 #include <system_error>
 
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 
 #include "x23/sockio.h"
@@ -20,6 +20,14 @@ gai_category()
   };
   static const gai_category_impl cat;
   return (cat);
+}
+
+void
+set_nodelay(BorrowedFd fd, bool on)
+{
+  int val = on;
+  if (setsockopt(fd.get(), IPPROTO_TCP, TCP_NODELAY, &val, sizeof(int)) == -1)
+    Errno{}.raise("TCP_NODELAY");
 }
 
 void

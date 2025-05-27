@@ -24,6 +24,9 @@ private:
   int err_;
 };
 
+// Set or clear the TCP nodelay flag
+void set_nodelay(BorrowedFd fd, bool on = true);
+
 // Set (on) or clear (!on) the O_NONBLOCK flag on a file descriptor
 void set_nonblock(BorrowedFd fd, bool on = true);
 
