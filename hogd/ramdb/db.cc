@@ -187,7 +187,7 @@ Database::background_worker(const std::stop_token &stoken)
         return;
 
       snapshot = snapshotter_.has_value();
-      compact = run_compact_;
+      compact = std::exchange(run_compact_, false);
       run_expand_ = false;
 
       // check if the buckets need to be expanded.

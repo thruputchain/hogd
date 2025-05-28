@@ -149,8 +149,9 @@ LogletAllocator::low_mem_done(bool success)
   std::unique_lock ul(lock_);
 
   // if reclamation was unsuccessful, trigger OOM failures.
-  if (free_loglets_.empty() && !success) {
-    oom_ = !success;
+  if (free_loglets_.size() <= static_cast<size_t>(reserved_count_) &&
+      !success) {
+    oom_ = true;
     alloc_cv_.notify_all();
   }
 
