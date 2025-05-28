@@ -196,8 +196,8 @@ Database::background_worker(const std::stop_token &stoken)
     }
 
     if (snapshot) {
-      snapshotter_->snapshot();
-      snapshotter_.reset();
+      if (snapshotter_->snapshot())
+        snapshotter_.reset();
     }
 
     // run item compactor if needed.
@@ -251,7 +251,7 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   // add disk buffering overhead.
   // Times two because need buffering for both snapshotter and normal ops.
   heap_size +=
-      (2 * (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize);
+      (1 * (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize);
 
   return heap_size;
 }

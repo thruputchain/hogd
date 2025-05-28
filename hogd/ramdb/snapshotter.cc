@@ -19,40 +19,64 @@
 
 namespace hogd {
 
-void
+bool
 Snapshotter::snapshot()
 {
-  ElapsedTimer timer{};
-  DBStatus<SnapshotStats> stats{SnapshotStats{}};
+  if (!timer_)
+    start();
 
-  constexpr bool kSync = false;
+  if (check_completions()) {
+    finish();
+    return true;
+  }
+
+  return false;
+}
+
+void
+Snapshotter::start()
+{
+  timer_.emplace();
 
   debug("snapshotter issuing work to pool");
-  std::vector<std::future<DBStatus<SnapshotStats>>> completions{};
-  completions.reserve(lls_.size());
+  completions_.reserve(lls_.size());
   for (UniqueLoglet &ll : lls_) {
-    completions.emplace_back(pool_.submit(
+    completions_.emplace_back(pool_.submit(
         [this, &ll] mutable { return snapshot_one(std::move(ll)); }));
-    if (kSync) {
-      DBStatus<SnapshotStats> r = completions.back().get();
-      if (!r.has_value()) {
-        promise_.set_value(r.transform([](auto &) { return; }));
-        return;
+  }
+  completions_it_.emplace(completions_.begin());
+}
+
+bool
+Snapshotter::check_completions()
+{
+  warn("Checking completion");
+  assert(completions_it_);
+  auto &it = *completions_it_;
+  
+  for (; it != completions_.end(); ++it) {
+    if (it->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+      DBStatus r = it->get();
+      if (!r) {
+        aggregated_stats_ = r;
+        it = completions_.end();
+        return true;
+      } else {
+        *aggregated_stats_ += r.value();
       }
-      stats.value() += r.value();
+    } else {
+      return false;
     }
   }
 
-  if (!kSync) {
-    for (std::future<DBStatus<SnapshotStats>> &f : completions) {
-      DBStatus<SnapshotStats> r = f.get();
-      if (!r.has_value()) {
-        promise_.set_value(r.transform([](auto &) { return; }));
-        return;
-      }
-      stats.value() += r.value();
-    }
-  }
+  return true;
+}
+
+void
+Snapshotter::finish()
+{
+  warn("Finishing snapshot");
+  SnapshotStats &stats = *aggregated_stats_;
 
   // Ensure no ongoing or later put()s see the snapshot in progress.
   map_.register_in_progress_snapshot(0, 0, nullptr);
@@ -60,21 +84,21 @@ Snapshotter::snapshot()
   // Aggregate the stats from the callbacks from the map.
   std::unique_lock ul = perthread_stats_.lock_threads();
   perthread_stats_.for_each(ul,
-                            [&stats](SnapshotStats &s) { stats.value() += s; });
+                            [&stats](SnapshotStats &s) { stats += s; });
 
-  double seconds = timer.elapsed();
+  double seconds = timer_->elapsed();
   info("snapshot took {:.3f} s (not including disk sync)", seconds);
 
   info("snapshot complete");
-  info("...live items {}", stats->live_items);
-  info("...live data {}", print_iec_bytes(stats->live_bytes, true));
-  info("...total items scanned {}", stats->items);
-  info("...total bytes scanned {}", print_iec_bytes(stats->bytes, true));
-  info("...scan rate {:.1f} MiB/s", stats->bytes / seconds / (1LU << 20));
+  info("...live items {}", stats.live_items);
+  info("...live data {}", print_iec_bytes(stats.live_bytes, true));
+  info("...total items scanned {}", stats.items);
+  info("...total bytes scanned {}", print_iec_bytes(stats.bytes, true));
+  info("...scan rate {:.1f} MiB/s", stats.bytes / seconds / (1LU << 20));
   info("...total items forwarded from ongoing put() ops {}",
-       stats->forwarded_items);
+       stats.forwarded_items);
   info("...total bytes forwarded from ongoing put() ops {}",
-       print_iec_bytes(stats->forwarded_bytes, true));
+       print_iec_bytes(stats.forwarded_bytes, true));
 
   ElapsedTimer snap_sync_timer{};
 

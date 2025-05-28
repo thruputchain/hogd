@@ -444,6 +444,9 @@ TEST_F(DatabaseTest, SnapshotOngoingPuts)
   insert_many(kInsertions);
   check_integrity();
 
+  // Take a snapshot of the oracle.
+  std::unordered_map<std::string, std::string> backup = oracle_;
+
   std::atomic<bool> done{};
 
   rand_ = rand; // restore rng state to try to get overwrites.
@@ -464,12 +467,15 @@ TEST_F(DatabaseTest, SnapshotOngoingPuts)
 
   check_integrity();
 
+
   ErrnoStatus<void> rr = dir_.rename("snapshot.dat", "0.log");
   ASSERT_TRUE(static_cast<bool>(rr));
 
   auto ret = open_db();
   EXPECT_TRUE(static_cast<bool>(ret));
 
+  // Restore oracle to the moment before the snapshot start.
+  std::exchange(oracle_, backup);
   check_integrity();
 }
 
