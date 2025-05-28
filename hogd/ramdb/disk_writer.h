@@ -145,7 +145,8 @@ private:
     return heads_[hash & (heads_.size() - 1)];
   }
 
-  // create_log_file returns the next file to use for writing the log.
+  // create_next_file returns the next file to use for writing the log or
+  // snapshot.
   DBStatus<File> create_next_file();
   // a run loop that stores items from to_disk_ to the on-disk log.
   void write_worker(const std::stop_token &stoken);
