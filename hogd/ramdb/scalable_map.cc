@@ -392,11 +392,8 @@ ScalableMap::register_in_progress_snapshot(
     uint64_t begin_lsn, uint64_t end_lsn,
     std::function<void(uint64_t, ItemHeader *)> add_item_cb)
 {
-  std::vector<std::unique_lock<std::mutex>> locks{};
-  locks.reserve(mutexes_.size());
-
-  for (auto &mu : mutexes_)
-    locks.emplace_back(mu);
+  std::vector<std::unique_lock<std::mutex>> locks{mutexes_.begin(),
+                                                  mutexes_.end()};
 
   snap_begin_lsn_ = begin_lsn;
   snap_end_lsn_ = end_lsn;
