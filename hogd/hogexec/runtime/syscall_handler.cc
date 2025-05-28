@@ -8,6 +8,7 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
@@ -531,6 +532,13 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     return value.value();
   }
   return SyscallError{SyscallErrorCode::kNoRetrocausalQueueEntry};
+}
+
+ProposalModeData const &
+SystemCallHandler::get_proposal_data() const
+{
+  assert(std::holds_alternative<ProposalModeData>(execution_mode_data_));
+  return std::get<ProposalModeData>(execution_mode_data_);
 }
 
 } // namespace hogd
