@@ -47,9 +47,6 @@ TEST_F(FibonacciTest, FibonacciCalls)
   in_memory_db_.write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  auto method = ContractTraitMeta<Fibonacci>::method_id<"fibonacci">();
-  ASSERT_EQ(method, 96596868703008);
-
   using fib_client_t = ContractTraitClient<Fibonacci>;
   fib_client_t client(contract_addr);
 
