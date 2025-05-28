@@ -158,7 +158,7 @@ Snapshotter::snapshot_one(UniqueLoglet src)
   // snapshotter is running.
   item_allocator_.give_to_compactor(std::move(src));
 
-  return {stats};
+  return stats;
 }
 
 } // namespace hogd
