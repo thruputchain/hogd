@@ -44,8 +44,12 @@ class DiskWriter {
 public:
   friend ScopedDiskWrite;
 
-  DiskWriter(LogletAllocator &allocator, Directory &dir, int write_head_order)
-    : allocator_(allocator), dir_(dir), heads_(1UL << write_head_order)
+  DiskWriter(LogletAllocator &allocator, Directory &dir,
+             std::string filename_format, size_t file_size_threshold,
+             int write_head_order)
+    : allocator_(allocator), filename_format_{std::move(filename_format)},
+      dir_(dir), file_size_threshold_{file_size_threshold},
+      heads_(1UL << write_head_order)
   {}
   ~DiskWriter() { writer_th_.request_stop(); }
 
@@ -93,8 +97,14 @@ private:
 
   // the allocator for loglets.
   LogletAllocator &allocator_;
+  // format string for how filenames should be generated.
+  // should contain exactly one {} which indicates where lsn or
+  // chunk number should be inserted into the generated filenames.
+  const std::string filename_format_;
   // the directory containing the log files.
   Directory &dir_;
+  // log file size before rolling over to a new file/lsn.
+  size_t file_size_threshold_;
 
   // protects everything in this block.
   std::mutex to_disk_lock_;
@@ -135,8 +145,9 @@ private:
     return heads_[hash & (heads_.size() - 1)];
   }
 
-  // create_log_file returns the next file to use for writing the log.
-  DBStatus<File> create_log_file();
+  // create_next_file returns the next file to use for writing the log or
+  // snapshot.
+  DBStatus<File> create_next_file();
   // a run loop that stores items from to_disk_ to the on-disk log.
   void write_worker(const std::stop_token &stoken);
   // enqueue_to_disk enqueues a loglet to be written to disk.
@@ -165,7 +176,8 @@ public:
 
   // modify appends a change to an item in the log. The change is copied from
   // src. It could either be creating a new item or modifying an existing item.
-  DBStatus<void> modify(ItemHeader *src);
+  // On success returns the lsn of the item created in the log.
+  DBStatus<uint64_t> modify(ItemHeader *src);
   // remove appends an item's deletion to the log.
   DBStatus<void> remove(std::span<const std::byte> key);
 

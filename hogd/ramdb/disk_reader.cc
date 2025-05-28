@@ -121,6 +121,7 @@ struct SafeItemHeader {
   uint16_t key_len;
   uint32_t value_len;
   uint64_t lsn;
+  uint64_t _padding_garbage_next_pointer; // Always 0 in stable copies of item.
 
   // returns an ItemHeader if it is valid.
   std::optional<ItemHeader> operator()() const
@@ -131,6 +132,10 @@ struct SafeItemHeader {
       return std::nullopt;
     if (sizeof(ItemHeader) + key_len + value_len > kBigItemThreshold)
       return std::nullopt;
+    if (_padding_garbage_next_pointer != 0) {
+      warn("padding in stored item non-zero");
+      return std::nullopt;
+    }
     ItemHeader hdr(static_cast<ItemStorage>(storage), type, key_len, value_len);
     hdr.lsn = lsn;
     return hdr;
@@ -223,6 +228,8 @@ DiskReader::load_log_file(
     if (!ret) {
       if (ret.error() == ENODATA)
         break;
+
+      debug("error reading log file");
       return to_db_error(ret.error());
     }
 
@@ -232,10 +239,14 @@ DiskReader::load_log_file(
       hdr = *ret;
     }
     else {
+      debug("error validating item header");
       return DBError(DBCode::kCorruption);
     }
-    if (hdr.lsn != cur_lsn)
+    if (hdr.lsn != cur_lsn) {
+      debug("mismatched log file lsn header lsn {}, expected lsn {}", hdr.lsn,
+            cur_lsn);
       return DBError(DBCode::kCorruption);
+    }
 
     // parse the header.
     using enum ItemStorage;

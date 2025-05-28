@@ -1,8 +1,10 @@
 // db_bench.cc - benchmarks for the database subsystem
 
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstddef>
+#include <future>
 #include <memory>
 #include <print>
 #include <span>
@@ -67,11 +69,15 @@ public:
   // delete_items deletes all the kv-pairs in the benchmark.
   void delete_items();
   // sync flushes and synchronizes all changes to disk.
-  void sync();
+  uint64_t sync();
   // initializes the database with items (initial state for benchmarks).
   void prefill();
   // closes the DB and reloads all of its contents from disk.
   void reload_db(size_t num);
+  // triggers a snapshot.
+  void snapshot();
+  // syncs and starts a snapshot, returning a future for it.
+  std::pair<uint64_t, std::future<DBStatus<void>>> sync_and_snapshot();
 
 private:
   // the number of kv-pairs to access
@@ -132,12 +138,13 @@ Benchmark::delete_items()
   });
 }
 
-void
+uint64_t
 Benchmark::sync()
 {
   DBStatus<uint64_t> ret = db_->sync();
   if (unlikely(!ret))
     fail(ret.error());
+  return ret.value();
 }
 
 void
@@ -158,6 +165,26 @@ Benchmark::reload_db(size_t num)
   if (!db)
     fail(db.error());
   db_ = std::move(*db);
+}
+
+void
+Benchmark::snapshot()
+{
+  auto ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  if (unlikely(!ret))
+    fail(ret.error());
+  DBStatus<void> r = ret->second.get();
+  if (unlikely(!r))
+    fail(r.error());
+}
+
+std::pair<uint64_t, std::future<DBStatus<void>>>
+Benchmark::sync_and_snapshot()
+{
+  auto ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  if (unlikely(!ret))
+    fail(ret.error());
+  return std::move(*ret);
 }
 
 std::unique_ptr<Benchmark>
@@ -241,6 +268,44 @@ do_reload(int num, int cores, int value_size)
   return measure([&benchmark, num] { benchmark->reload_db(num); });
 }
 
+double
+do_snapshot(int num, int cores, int value_size)
+{
+  std::unique_ptr<Benchmark> benchmark = make_benchmark(num, cores, value_size);
+  benchmark->prefill();
+  DBStatus<uint64_t> ret = benchmark->sync();
+  if (unlikely(!ret))
+    fail(ret.error());
+
+  return measure([&benchmark] { benchmark->snapshot(); });
+}
+
+double
+do_snapshot_ongoing_puts(int num, int cores, int value_size)
+{
+  std::unique_ptr<Benchmark> benchmark = make_benchmark(num, cores, value_size);
+  benchmark->prefill();
+
+  std::atomic<bool> done{};
+
+  auto [_, snapshot_future] = benchmark->sync_and_snapshot();
+  std::thread bg{[&benchmark, &done]() {
+    while (!done)
+      benchmark->write_items();
+  }};
+
+  double r = measure([&snapshot_future] {
+    DBStatus<void> r = snapshot_future.get();
+    if (unlikely(!r))
+      fail(r.error());
+  });
+
+  done = true;
+  bg.join();
+
+  return r;
+}
+
 using bench_fn = double (*)(int num, int cores, int value_size);
 
 void
@@ -259,6 +324,10 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
     {"read", "reads items", do_reads},
     {"delete", "deletes items", do_deletions},
     {"reload", "reloads items from disk", do_reload},
+    {"snapshot", "fills some, then snapshots", do_snapshot},
+    {"snapshot_ongoing_puts",
+     "fills some, then snapshots while puts are running in the background",
+     do_snapshot_ongoing_puts},
 };
 
 } // namespace
