@@ -1,7 +1,8 @@
 add_library(
   interface
-  rpc_interface.cc
+  exec_coord_server.cc
   executor_state_manager.cc
+  rpc_interface.cc
 )
 
 target_link_libraries(

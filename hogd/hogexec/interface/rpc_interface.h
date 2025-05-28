@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
+#include <utility>
 
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
@@ -19,9 +21,9 @@ public:
   using rpc_service = ExecutorCoord1;
 
   ExecutorRpcInterface(uint16_t self_executor_id, WorkerPool &main_worker_pool,
-                       DatabaseProxy &db_proxy)
+                       std::unique_ptr<DatabaseProxy> db_proxy)
     : self_executor_id_(self_executor_id), main_worker_pool_(main_worker_pool),
-      db_proxy_(db_proxy), executor_states_(db_proxy)
+      executor_states_(std::move(db_proxy))
   {}
 
   // Disable copy and move
@@ -41,11 +43,16 @@ public:
 
   x23::Async<ExecResult> executorcoord_open_proposal_block(BlockID id);
   x23::Async<ExecResult> executorcoord_open_validation_block(BlockID id);
+  // Indicates that state associated with this block can be garbage collected.
+  // Does not block.  State will not be garbage collected until all transactions
+  // on this block have been committed or aborted.
   x23::Async<void> executorcoord_finish_block(BlockID id);
 
+  // It is an error to shut down the executor while there are transactions
+  // that are still running.
   x23::Async<void> executorcoord_shutdown();
 
-  void await_shutdown();
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
   TransactionID allocate_tx_id();
@@ -54,9 +61,7 @@ private:
   const uint16_t self_executor_id_;
 
   WorkerPool &main_worker_pool_;
-  DatabaseProxy &db_proxy_;
   ExecutorStateManager executor_states_;
-
   std::atomic<bool> shutdown_flag_ = false;
 };
 

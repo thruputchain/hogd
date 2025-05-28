@@ -27,7 +27,7 @@ ExecutorRpcInterface::executorcoord_propose_transaction(
   // at this point, we have a run lease for ctx, so
   // ctx is guaranteed to be a valid pointer until release_run_lease() is called
 
-  PerTransactionDatabaseProxy proxy(db_proxy_, block_id, allocate_tx_id());
+  PerTransactionDatabaseProxy proxy(ctx->db_proxy_, block_id, allocate_tx_id());
 
   SystemCallHandler syscall_handler(signed_tx, ctx->snapshot_cache_, proxy,
                                     ProposalModeData{});
@@ -66,7 +66,7 @@ ExecutorRpcInterface::executorcoord_validate_transaction(
     co_return ExecResult::ExecResultSystemError;
   }
 
-  PerTransactionDatabaseProxy proxy(db_proxy_, block_id, allocate_tx_id());
+  PerTransactionDatabaseProxy proxy(ctx->db_proxy_, block_id, allocate_tx_id());
 
   SystemCallHandler syscall_handler(
       proposed_tx.signed_tx, ctx->snapshot_cache_, proxy,
@@ -125,7 +125,7 @@ ExecutorRpcInterface::allocate_tx_id()
 x23::Async<void>
 ExecutorRpcInterface::executorcoord_shutdown()
 {
-  executor_states_.initiate_shutdown();
+  shutdown_flag_ = true;
   co_return;
 }
 
