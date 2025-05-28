@@ -282,11 +282,10 @@ TEST_F(DatabaseTest, Snapshot)
 
   std::string path = "test-snapshot.snap";
 
-  auto [lsn, snapshot_future] = db_->sync_and_snapshot(path, 0);
-  EXPECT_TRUE(lsn);
-  if (lsn.has_value()) {
-    EXPECT_EQ(*lsn, 1);
-  }
+  auto sync_ret = db_->sync_and_snapshot(path, 0);
+  EXPECT_TRUE(sync_ret);
+  auto &[lsn, snapshot_future] = *sync_ret;
+  EXPECT_EQ(lsn, 1);
   DBStatus<void> ret = snapshot_future.get();
   EXPECT_TRUE(ret);
 
@@ -322,11 +321,10 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
 
   std::string path = "test-snapshot-0-1.snap";
   {
-    auto [lsn, snapshot_future] = db_->sync_and_snapshot(path, 0);
-    ASSERT_TRUE(lsn);
-    if (lsn.has_value()) {
-      ASSERT_EQ(*lsn, 1);
-    }
+    auto sync_ret = db_->sync_and_snapshot(path, 0);
+    ASSERT_TRUE(sync_ret);
+    auto &[lsn, snapshot_future] = *sync_ret;
+    ASSERT_EQ(lsn, 1);
     DBStatus<void> ret = snapshot_future.get();
     ASSERT_TRUE(ret);
   }
@@ -344,11 +342,10 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
 
   path = "test-snapshot-0-2.snap";
   {
-    auto [lsn, snapshot_future] = db_->sync_and_snapshot(path, 0);
-    ASSERT_TRUE(lsn);
-    if (lsn.has_value()) {
-      ASSERT_EQ(*lsn, 2);
-    }
+    auto sync_ret = db_->sync_and_snapshot(path, 0);
+    ASSERT_TRUE(sync_ret);
+    auto &[lsn, snapshot_future] = *sync_ret;
+    ASSERT_EQ(lsn, 2);
     DBStatus<void> ret = snapshot_future.get();
     ASSERT_TRUE(ret);
   }
@@ -378,11 +375,10 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   remove_every_n(3);
 
   {
-    auto [lsn, snapshot_future] = db_->sync_and_snapshot(path0, 0);
-    EXPECT_TRUE(lsn);
-    if (lsn.has_value()) {
-      EXPECT_EQ(*lsn, 1);
-    }
+    auto sync_ret = db_->sync_and_snapshot(path0, 0);
+    EXPECT_TRUE(sync_ret);
+    auto &[lsn, snapshot_future] = *sync_ret;
+    EXPECT_EQ(lsn, 1);
     DBStatus<void> ret = snapshot_future.get();
     EXPECT_TRUE(ret);
   }
@@ -401,11 +397,10 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   insert_many(kInsertions / 2, kThreads);
 
   {
-    auto [lsn, snapshot_future] = db_->sync_and_snapshot(path1, 1);
-    EXPECT_TRUE(lsn);
-    if (lsn.has_value()) {
-      EXPECT_EQ(*lsn, 2);
-    }
+    auto sync_ret = db_->sync_and_snapshot(path1, 1);
+    EXPECT_TRUE(sync_ret);
+    auto &[lsn, snapshot_future] = *sync_ret;
+    EXPECT_EQ(lsn, 2);
     DBStatus<void> ret = snapshot_future.get();
     EXPECT_TRUE(ret);
   }
@@ -438,7 +433,10 @@ TEST_F(DatabaseTest, SnapshotOngoingPuts)
   std::atomic<bool> done{};
 
   rand_ = rand; // restore rng state to try to get overwrites.
-  auto [_, snapshot_future] = db_->sync_and_snapshot("snapshot.dat", 0);
+  auto sync_ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  EXPECT_TRUE(sync_ret);
+  auto &[_, snapshot_future] = *sync_ret;
+
   std::thread bg{[this, &done]() {
     while (!done)
       insert_many(kInsertions, kThreads, 100000); // overwrite a bit slowly

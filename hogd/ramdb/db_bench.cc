@@ -171,9 +171,9 @@ void
 Benchmark::snapshot()
 {
   auto ret = db_->sync_and_snapshot("snapshot.dat", 0);
-  if (unlikely(!ret.first))
-    fail(ret.first.error());
-  DBStatus<void> r = ret.second.get();
+  if (unlikely(!ret))
+    fail(ret.error());
+  DBStatus<void> r = ret->second.get();
   if (unlikely(!r))
     fail(r.error());
 }
@@ -181,10 +181,10 @@ Benchmark::snapshot()
 std::pair<uint64_t, std::future<DBStatus<void>>>
 Benchmark::sync_and_snapshot()
 {
-  auto [lsn, future] = db_->sync_and_snapshot("snapshot.dat", 0);
-  if (unlikely(!lsn))
-    fail(lsn.error());
-  return {*lsn, std::move(future)};
+  auto ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  if (unlikely(!ret))
+    fail(ret.error());
+  return std::move(*ret);
 }
 
 std::unique_ptr<Benchmark>

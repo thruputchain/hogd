@@ -256,12 +256,12 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   return heap_size;
 }
 
-std::pair<DBStatus<uint64_t>, std::future<DBStatus<void>>>
+DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
 Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
 {
   DBStatus<uint64_t> ret = sync();
   if (!ret) [[unlikely]]
-    return {ret.error(), {}};
+    return ret.error();
 
   uint64_t end_lsn = ret.value();
 
@@ -269,7 +269,7 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
 
   if (begin_lsn > end_lsn) {
     warn("bad snapshot begin and end lsns {} to {}", begin_lsn, end_lsn);
-    return {DBError{DBCode::kTooBig}, {}};
+    return DBError{DBCode::kTooBig};
   }
 
   std::future<DBStatus<void>> future{};
@@ -278,7 +278,7 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
 
     if (snapshotter_) {
       warn("tried to start a snapshot while one was already ongoing");
-      return {DBError{DBCode::kExists}, {}};
+      return DBError{DBCode::kExists};
     }
 
     constexpr bool kChunkedSnapshot = false;
@@ -297,7 +297,7 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
     cv_.notify_one();
   }
 
-  return {{end_lsn}, std::move(future)};
+  return std::pair{end_lsn, std::move(future)};
 }
 
 } // namespace hogd

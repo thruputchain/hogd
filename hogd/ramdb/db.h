@@ -111,7 +111,7 @@ public:
   // or an lsn previously returned by sync() but before this call (with
   // begin_lsn being an lsn previously returned by a different call to sync()
   // or sync_and_snapshot()).
-  std::pair<DBStatus<uint64_t>, std::future<DBStatus<void>>>
+  DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
   sync_and_snapshot(const std::string &path, uint64_t begin_lsn);
 
   // set_active indicates to the database that it is in a state of activity (if
