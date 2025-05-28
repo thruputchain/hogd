@@ -179,6 +179,13 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
+  if (!invocation_frame_stack_.empty()) {
+    if (invocation_frame_stack_.get_active_frame().is_read_only() &&
+        (flags & std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)) == 0) {
+      return {SyscallErrorCode::kInvalidSyscallInput, 0};
+    }
+  }
+
   auto start_status = invocation_frame_stack_.start_frame(invocation, flags);
   if (!start_status.has_value()) {
     return {start_status.error().to_host_fn_error(), 0};
@@ -284,6 +291,10 @@ SystemCallHandler::log(std::span<const std::byte> message)
 {
   assert(!invocation_frame_stack_.empty());
 
+  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
   if (message.size() > kMaxLogMessageLen) {
     // log message too long, return error
     return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
@@ -308,6 +319,10 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
   assert(!invocation_frame_stack_.empty());
+
+  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
 
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
@@ -387,6 +402,11 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring)
 {
+  assert(!invocation_frame_stack_.empty());
+  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
   auto item_view = invocation_frame_stack_.get_item_view(storage_key);
   if (!item_view) {
     return item_view.error();
@@ -433,6 +453,11 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              int128_t set_value, int128_t add_value)
 {
+  assert(!invocation_frame_stack_.empty());
+  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
   auto item_view = invocation_frame_stack_.get_item_view(storage_key);
   if (!item_view) {
     return item_view.error();
@@ -446,6 +471,11 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
+  assert(!invocation_frame_stack_.empty());
+  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
   auto item_view = invocation_frame_stack_.get_item_view(storage_key);
   if (!item_view) {
     return item_view.error();
@@ -489,6 +519,11 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::retrocausal_queue_insert(
     StorageKeyContractData const &key, std::span<const std::byte> queue_entry)
 {
+  assert(!invocation_frame_stack_.empty());
+  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
   auto item_view = invocation_frame_stack_.get_item_view(key);
   if (!item_view) {
     return item_view.error();
@@ -510,6 +545,11 @@ SystemStatus<SyscallStatus<QueueEntry>>
 SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                              bool peek)
 {
+  assert(!invocation_frame_stack_.empty());
+  if (invocation_frame_stack_.get_active_frame().is_read_only() && !peek) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
   auto item_view = invocation_frame_stack_.get_item_view(key);
   if (!item_view) {
     return item_view.error();

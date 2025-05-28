@@ -74,6 +74,11 @@ public:
     return (flags_ & std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke)) != 0;
   }
 
+  bool is_read_only() const
+  {
+    return (flags_ & std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)) != 0;
+  }
+
   // returned pointer is invalidated by any call to add_item_view
   // Does not create a new view if it does not exist
   auto *get_item_view(this auto &self, AddressAndKey const &addrkey)
