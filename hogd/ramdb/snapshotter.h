@@ -78,17 +78,6 @@ public:
   void snapshot();
 
 private:
-  std::vector<UniqueLoglet> &&take_loglets() { return std::move(lls_); }
-
-  DBStatus<void> sync()
-  {
-    DBStatus<uint64_t> ret = disk_writer_.sync();
-    if (!ret) [[unlikely]] {
-      return ret.error();
-    }
-    return {};
-  }
-
   WorkerPool &pool_;
   ScalableMap &map_;
   ItemAllocator &item_allocator_;
@@ -105,6 +94,17 @@ private:
   PerThread<SnapshotStats> perthread_stats_;
 
   DBStatus<SnapshotStats> snapshot_one(UniqueLoglet src);
+
+  std::vector<UniqueLoglet> &&take_loglets() { return std::move(lls_); }
+
+  DBStatus<void> sync()
+  {
+    DBStatus<uint64_t> ret = disk_writer_.sync();
+    if (!ret) [[unlikely]] {
+      return ret.error();
+    }
+    return {};
+  }
 };
 
 } // namespace hogd
