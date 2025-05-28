@@ -132,6 +132,10 @@ struct SafeItemHeader {
       return std::nullopt;
     if (sizeof(ItemHeader) + key_len + value_len > kBigItemThreshold)
       return std::nullopt;
+    if (_padding_garbage_next_pointer != 0) {
+      warn("padding in stored item non-zero");
+      return std::nullopt;
+    }
     ItemHeader hdr(static_cast<ItemStorage>(storage), type, key_len, value_len);
     hdr.lsn = lsn;
     return hdr;
