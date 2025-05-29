@@ -9,7 +9,6 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/native_runtime.h"
 #include "types.hh"
 
 namespace hogd {
