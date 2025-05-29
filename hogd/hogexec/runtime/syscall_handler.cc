@@ -605,6 +605,11 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::modify_native_token_balance(
     ContractAddress const &contract_address, int128_t transfer_amount)
 {
+  assert(!invocation_frame_stack_.empty());
+  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
   AddressAndKey addrkey{
       .address = contract_address,
       .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
