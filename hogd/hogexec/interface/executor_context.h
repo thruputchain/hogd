@@ -1,10 +1,6 @@
 #pragma once
 
-#include <atomic>
-#include <concepts>
-
 #include "exec_coord.hh"
-#include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -15,6 +11,8 @@
 
 namespace hogd {
 
+// Context for executing transactions in a single block.
+// Maintains the block's snapshot cache and any other cached data.
 class ExecutorContext {
 public:
   ExecutorContext(ExecutionMode mode, BlockID id, DatabaseProxy &db_proxy,
