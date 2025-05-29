@@ -13,4 +13,3 @@ TEST(ContractTraitTest, MethodIDDerivation)
 }
 
 } // namespace hogd
-
