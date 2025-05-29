@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -50,22 +51,29 @@ Snapshotter::start()
 bool
 Snapshotter::check_completions()
 {
-  warn("Checking completion");
-  assert(completions_it_);
-  auto &it = *completions_it_;
-  
-  for (; it != completions_.end(); ++it) {
-    if (it->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-      DBStatus r = it->get();
-      if (!r) {
-        aggregated_stats_ = r;
-        it = completions_.end();
-        return true;
-      } else {
+  if (!completions_it_) {
+    error("called when snapshot was not in progress");
+    return true;
+  }
+
+  for (auto &it = *completions_it_; it != completions_.end(); ++it) {
+    if (it->wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+      return false;
+
+    DBStatus r = it->get();
+    // if !aggregated_stats_ then it is already set to some error, so the return
+    // value of this future can be ignored (even if it is success the overall
+    // snapshot should fail).
+    if (aggregated_stats_) {
+      if (r) {
+        // If no prior failures and this loglet snapshot didn't fail, merge
+        // stats.
         *aggregated_stats_ += r.value();
       }
-    } else {
-      return false;
+      else {
+        // Otherwise remember the error.
+        aggregated_stats_ = r;
+      }
     }
   }
 
@@ -83,10 +91,9 @@ Snapshotter::finish()
 
   // Aggregate the stats from the callbacks from the map.
   std::unique_lock ul = perthread_stats_.lock_threads();
-  perthread_stats_.for_each(ul,
-                            [&stats](SnapshotStats &s) { stats += s; });
+  perthread_stats_.for_each(ul, [&stats](SnapshotStats &s) { stats += s; });
 
-  double seconds = timer_->elapsed();
+  double seconds = timer_ ? timer_->elapsed() : 0;
   info("snapshot took {:.3f} s (not including disk sync)", seconds);
 
   info("snapshot complete");
@@ -171,13 +178,15 @@ Snapshotter::snapshot_one(UniqueLoglet src)
           stats.live_items++;
           stats.live_bytes += src_item->total_bytes();
         });
-    if (!ret) [[unlikely]]
+    if (!ret) [[unlikely]] {
+      item_allocator_.give_to_compactor(std::move(src));
       return ret.error();
+    }
     assert(found ||
            storage.load(std::memory_order_relaxed) == ItemStorage::kTombstone);
   }
 
-  // Since snapshotting is done on this loglet, let the compact have it
+  // Since snapshotting is done on this loglet, let the compactor have it
   // back so that it can make some progress on cleaning while the
   // snapshotter is running.
   item_allocator_.give_to_compactor(std::move(src));

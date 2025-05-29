@@ -184,7 +184,7 @@ Database::background_worker(const std::stop_token &stoken)
       cv_.wait_for(lock_, stoken, 1s,
                    [this] { return run_expand_ || run_compact_; });
       if (stoken.stop_requested())
-        return;
+        break;
 
       snapshot = snapshotter_.has_value();
       compact = std::exchange(run_compact_, false);
@@ -225,6 +225,12 @@ Database::background_worker(const std::stop_token &stoken)
       disk_writer_.print_stats();
     }
   }
+
+  info("Snapshot ongoing during database teardown; finishing up.");
+  while (snapshotter_) {
+    if (snapshotter_->snapshot())
+      snapshotter_.reset();
+  }
 }
 
 size_t
@@ -251,7 +257,7 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   // add disk buffering overhead.
   // Times two because need buffering for both snapshotter and normal ops.
   heap_size +=
-      (1 * (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize);
+      (2 * (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize);
 
   return heap_size;
 }

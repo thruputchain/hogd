@@ -93,10 +93,10 @@ private:
   using SnapshotStats = detail::SnapshotStats;
   PerThread<SnapshotStats> perthread_stats_;
 
-  std::optional<ElapsedTimer> timer_{};
+  std::optional<ElapsedTimer> timer_;
   using Completions = std::vector<std::future<DBStatus<SnapshotStats>>>;
-  Completions completions_{};
-  DBStatus<detail::SnapshotStats> aggregated_stats_{};
+  Completions completions_;
+  DBStatus<detail::SnapshotStats> aggregated_stats_;
   std::optional<Completions::iterator> completions_it_;
 
   void start();

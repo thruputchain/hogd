@@ -467,7 +467,6 @@ TEST_F(DatabaseTest, SnapshotOngoingPuts)
 
   check_integrity();
 
-
   ErrnoStatus<void> rr = dir_.rename("snapshot.dat", "0.log");
   ASSERT_TRUE(static_cast<bool>(rr));
 
