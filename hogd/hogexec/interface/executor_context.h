@@ -32,7 +32,8 @@ public:
   x23::Async<ExecProposeResult>
   propose_transaction(SignedTransaction const &signed_tx, TransactionID tx_id);
   x23::Async<ExecResult>
-  validate_transaction(ProposedTransaction const &proposed_tx, TransactionID tx_id);
+  validate_transaction(ProposedTransaction const &proposed_tx,
+                       TransactionID tx_id);
 
 private:
   PerTransactionDatabaseProxy make_per_tx_db_proxy(TransactionID tx_id);

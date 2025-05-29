@@ -18,8 +18,9 @@
 namespace hogd {
 
 // Server that handles RPC communication between the executor and coordinator.
-// Constructor connects to the coordinator to receive information about the database,
-// then connects to the database and begins serving RPCs to the coordinator.
+// Constructor connects to the coordinator to receive information about the
+// database, then connects to the database and begins serving RPCs to the
+// coordinator.
 class ExecCoordServer {
 public:
   ExecCoordServer(ExecCard self_card, int poll_threads,
