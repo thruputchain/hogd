@@ -158,12 +158,34 @@ bench_fibonacci(benchmark::State &state)
   for (auto _ : state) {
     std::atomic<uint32_t> remaining = numtxs;
     auto [async, cb] = x23::make_async<void>();
+    assert(numtxs == txs.size());
 
+
+    // attempt at bypassing the UAF, but it's still there
     std::println("loop start");
+    std::vector<std::function<x23::Detached()>> ds;
+    ds.reserve(numtxs);
     for (auto const& tx : txs) {
-        runner_pool.spawn([&]()-> x23::Detached {
-            std::println("proposing");
+        ds.emplace_back([&bs, tx, &remaining, &cb]()-> x23::Detached {
             auto res = co_await bs.context_->propose_transaction(tx, bs.allocate_txid());
+            if (res.result() != ExecResult::ExecResultOK) {
+                throw std::runtime_error("Failed to propose transaction");
+            }
+            if (remaining.fetch_sub(1) == 1) {
+                cb();
+            }
+            co_return;
+        });
+    }
+
+    for (auto& d : ds) {
+        runner_pool.spawn(d);
+    }
+    async();
+
+    /*    runner_pool.spawn([&bs, t, &remaining, &cb]()-> x23::Detached {
+            std::println("proposing");
+            auto res = co_await bs.context_->propose_transaction(*t, bs.allocate_txid());
             if (res.result() != ExecResult::ExecResultOK) {
                 throw std::runtime_error("Failed to propose transaction");
             }
@@ -173,8 +195,8 @@ bench_fibonacci(benchmark::State &state)
             }
             co_return;
         });
-    }
-    async();
+        async();
+    } */
   }
   std::println("overall done");
 }
