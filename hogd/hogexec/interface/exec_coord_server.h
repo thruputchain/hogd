@@ -38,11 +38,16 @@ public:
   ~ExecCoordServer() { await_shutdown_request(); }
 
 private:
+  // Get the database information from the coordinator, and then
+  // start the exec to coord RPC interface (which finishes the initialization).
   void init_from_coord(std::string const &coord_addr);
 
+  // Connects to the database and performs initialization of the executor.
+  // Then begins serving RPCs to the coordinator.
   void start_rpc_service(DatabaseIdentifier identifier,
                          uint16_t self_executor_id);
 
+  // Connect to all relevant database components.
   std::unique_ptr<DatabaseProxy>
   connect_to_database(DatabaseIdentifier identifier);
 
