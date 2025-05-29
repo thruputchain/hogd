@@ -55,6 +55,7 @@ struct BenchmarkState {
   WorkerPool& main_pool_;
 
   void initialize() {
+    x23::RpcLogger::default_logfd = 1;
     constexpr static uint32_t kPortNumber = 10000;
     db_executor_server_.start_server(kPortNumber);
 
@@ -115,6 +116,7 @@ bench_fibonacci(benchmark::State &state)
             .invocation = fib_client.make_invocation<"initialize">(UINT64_MAX)
             }
         }, bs.allocate_txid())();
+  std::println("init result {}", x23::show(init));
   if (init.result() != ExecResult::ExecResultOK) {
     throw std::runtime_error("Failed to initialize fibonacci contract");
   }
