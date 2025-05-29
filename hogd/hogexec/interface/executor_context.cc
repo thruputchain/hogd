@@ -19,7 +19,8 @@ ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id)
 }
 
 x23::Async<ExecProposeResult>
-ExecutorContext::propose_transaction(SignedTransaction const &signed_tx, TransactionID tx_id)
+ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
+                                     TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   auto proxy = make_per_tx_db_proxy(tx_id);
@@ -37,21 +38,26 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx, Transac
 
   if (!invoke_res.is_root_success()) {
     co_await proxy.abort_transaction();
-    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+    co_return ExecProposeResult(ExecResult::ExecResultTxError);
   }
 
   auto commit_res = co_await syscall_handler.try_commit_transaction();
+  if (!commit_res.has_value()) {
+    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  }
 
-  if (commit_res) {
+  if (commit_res.value()) {
+    std::println("commit successful");
     auto out = ExecProposeResult(ExecResult::ExecResultOK);
     out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
     co_return out;
   }
-  co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  co_return ExecProposeResult(ExecResult::ExecResultTxError);
 }
 
 x23::Async<ExecResult>
-ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx, TransactionID tx_id)
+ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
+                                      TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
   auto proxy = make_per_tx_db_proxy(tx_id);
@@ -75,8 +81,11 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx, Tr
   }
 
   auto commit_res = co_await syscall_handler.try_commit_transaction();
+  if (!commit_res.has_value()) {
+    co_return ExecResult::ExecResultSystemError;
+  }
 
-  if (commit_res) {
+  if (commit_res.value()) {
     co_return ExecResult::ExecResultOK;
   }
   co_return ExecResult::ExecResultTxError;
