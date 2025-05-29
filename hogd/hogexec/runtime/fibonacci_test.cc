@@ -12,7 +12,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/preset_contracts/shared.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -97,8 +97,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   NativeContractBuilder builder;
 
   builder.add(0,
-              [fib_contract_addr](SystemCallHandler &handler,
-                                  NativeRuntime & /*unused*/, uint32_t input,
+              [fib_contract_addr](SystemCallHandler &handler, uint32_t input,
                                   uint32_t expect) -> InvokeStatus<void> {
                 fib_client_t client(fib_contract_addr);
                 auto [decoded, _gas] =

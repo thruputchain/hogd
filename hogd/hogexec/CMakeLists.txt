@@ -2,7 +2,6 @@
 add_subdirectory(wasmi)
 add_subdirectory(runtime)
 add_subdirectory(runtime_trampoline)
-add_subdirectory(preset_contracts)
 add_subdirectory(interface)
 
 # Build the frontend executor (hogexec) executable

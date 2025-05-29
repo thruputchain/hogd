@@ -84,6 +84,45 @@ struct NativeContractArgs<InvokeStatus<R> (
     T::*)(SystemCallHandler &, NativeRuntime &, Args...) const> {
   using return_t = R;
   using args_t = std::tuple<Args...>;
+
+  static auto extra_args(SystemCallHandler &handler, NativeRuntime &runtime)
+  {
+    return std::tuple<SystemCallHandler &, NativeRuntime &>{handler, runtime};
+  }
+};
+
+template<typename T, typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (T::*)(SystemCallHandler &, Args...)
+                              const> {
+  using return_t = R;
+  using args_t = std::tuple<Args...>;
+  static auto extra_args(SystemCallHandler &handler, NativeRuntime & /*unused*/)
+  {
+    return std::tuple<SystemCallHandler &>{handler};
+  }
+};
+
+template<typename T, typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (T::*)(NativeRuntime &, Args...)
+                              const> {
+  using return_t = R;
+  using args_t = std::tuple<Args...>;
+  static auto extra_args(SystemCallHandler & /*unused*/, NativeRuntime &runtime)
+  {
+    return std::tuple<NativeRuntime &>{runtime};
+  }
+};
+
+template<typename T, typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (T::*)(Args...) const> {
+  using return_t = R;
+  using args_t = std::tuple<Args...>;
+
+  static auto extra_args(SystemCallHandler & /*unused*/,
+                         NativeRuntime & /*unused*/)
+  {
+    return std::tuple{};
+  }
 };
 
 } // namespace detail
@@ -112,7 +151,12 @@ public:
       auto return_value =
           [&]<size_t... Is>(
               std::index_sequence<Is...>) -> InvokeStatus<return_t> {
-        return f(handler, runtime, std::get<Is>(args.value())...);
+        auto extra_args =
+            detail::NativeContractArgs<fn_t>::extra_args(handler, runtime);
+        return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
+          return f(std::get<ExtraIs>(extra_args)...,
+                   std::get<Is>(args.value())...);
+        }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>());
       }(std::make_index_sequence<std::tuple_size_v<args_t>>());
       if (!return_value.has_value()) {
         return return_value.error();
@@ -120,7 +164,8 @@ public:
 
       // otherwise, return the received value
       if constexpr (!std::is_same_v<return_t, void>) {
-        auto return_buffer = bcs::encode_to<return_t>(return_value.value());
+        auto return_buffer =
+            bcs::encode_to<ReturnBuffer, return_t>(return_value.value());
         if (!return_buffer.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }

@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -118,6 +119,132 @@ TEST_F(NativeContractTest, BasicInstantiate)
 
   ASSERT_FALSE(res.result_);
   ASSERT_EQ(res.result_.error(), InvokeErrorCode::kInvokeDeterministic);
+}
+
+TEST_F(NativeContractTest, GasCostsAccumulate)
+{
+  NativeContractBuilder builder;
+  ContractAddress address{};
+
+  builder.add(0,
+              [](NativeRuntime &runtime,
+                 uint32_t test_amount) -> InvokeStatus<int32_t> {
+                if (!runtime.consume_gas(test_amount)) {
+                  return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                }
+                return 0;
+              });
+  builder.add(
+      1,
+      [&address](SystemCallHandler &handler,
+                 NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+        // invoke method 0 three times, with various gas costs
+        auto [r1, g1] =
+            handler.invoke(Invocation{.invoked_address = address,
+                                      .method = 0,
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = {100, 0, 0, 0}},
+                           UINT64_MAX,
+                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        if (!r1.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        if (g1 != 100) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+
+        auto [r2, g2] =
+            handler.invoke(Invocation{.invoked_address = address,
+                                      .method = 0,
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = {200, 0, 0, 0}},
+                           UINT64_MAX,
+                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        if (!r2.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        if (g2 != 200) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+
+        auto [r3, g3] =
+            handler.invoke(Invocation{.invoked_address = address,
+                                      .method = 0,
+                                      .gas_limit = UINT64_MAX,
+                                      .calldata = {150, 0, 0, 0}},
+                           UINT64_MAX,
+                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        if (!r3.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        if (g3 != 150) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+
+        if (!runtime.consume_gas(g1 + g2 + g3)) {
+          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+        }
+
+        return 0;
+      });
+
+  builder.add(2,
+              [&address](SystemCallHandler &handler,
+                         NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+                auto [r, g] =
+                    handler.invoke(Invocation{.invoked_address = address,
+                                              .method = 1,
+                                              .gas_limit = UINT64_MAX,
+                                              .calldata = {}},
+                                   UINT64_MAX,
+                                   std::to_underlying(
+                                       InvokeFlag::kInvokeFlagNone));
+                if (!r.has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                if (g != 100 + 200 + 150) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                if (!runtime.consume_gas(g)) {
+                  return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+                }
+
+                return 0;
+              });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+
+  runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() = 0;
+
+  snapshot_server_.setup_create_contract(contract);
+  snapshot_server_.setup_create_deployment(address, sha256(contract));
+
+  SystemCallHandler handler(
+      SignedTransaction{.tx =
+                            Transaction{
+                                .invocation =
+                                    {
+                                        .invoked_address = address,
+                                        .method = 2,
+                                        .gas_limit = UINT64_MAX,
+                                        .calldata = {},
+                                    },
+                            }},
+      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
+      ProposalModeData{}, runtime_context_);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.result_);
+  ASSERT_EQ(*res.result_, 0);
+  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150);
 }
 
 } // namespace hogd
