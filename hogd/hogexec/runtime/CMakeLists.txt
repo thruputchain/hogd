@@ -52,6 +52,7 @@ add_executable(
   syscall_parse_tests.cc
   try_invoke_test.cc
   userctx_test.cc
+  shared_test.cc
 )
 target_link_libraries(
   runtime
