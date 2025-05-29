@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -298,6 +299,13 @@ SystemStatus<void>
 InvocationFrameStack::start_frame(Invocation const &invocation,
                                   InvokeFlagSet flags)
 {
+  if constexpr (is_debug_build()) {
+    if (!frame_stack_.empty() && frame_stack_.back().is_read_only()) {
+      assert((flags & std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)) !=
+             0);
+    }
+  }
+
   frame_stack_.emplace_back(invocation, flags);
   if (frame_stack_.back().is_try_invoke()) {
     auto st = db_proxy_.push_new_subtransaction()();

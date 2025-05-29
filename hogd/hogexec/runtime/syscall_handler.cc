@@ -180,6 +180,7 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
+  // Make sure that the read-only flag is propagated to child frames
   if (!invocation_frame_stack_.empty()) {
     if (invocation_frame_stack_.get_active_frame().is_read_only() &&
         (flags & std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)) == 0) {
@@ -291,7 +292,6 @@ SyscallStatus<void>
 SystemCallHandler::log(std::span<const std::byte> message)
 {
   assert(!invocation_frame_stack_.empty());
-
   if (invocation_frame_stack_.get_active_frame().is_read_only()) {
     return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
@@ -320,7 +320,6 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
   assert(!invocation_frame_stack_.empty());
-
   if (invocation_frame_stack_.get_active_frame().is_read_only()) {
     return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
