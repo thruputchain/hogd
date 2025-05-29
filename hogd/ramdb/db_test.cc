@@ -67,7 +67,8 @@ protected:
 
   DBStatus<void>
   open_db(uint64_t target_lsn = std::numeric_limits<uint64_t>::max());
-  void insert_many(size_t count, int threads = 1, int delay_ns = 0);
+  size_t insert_many(size_t count, int threads = 1, int delay_ns = 0,
+                     bool ignore_failures = false);
   void remove_every_n(int n);
   void check_integrity();
 
@@ -93,8 +94,9 @@ DatabaseTest::open_db(uint64_t target_lsn)
   return {};
 }
 
-void
-DatabaseTest::insert_many(size_t count, int threads, int delay_ns)
+size_t
+DatabaseTest::insert_many(size_t count, int threads, int delay_ns,
+                          bool ignore_failures)
 {
   using KVPair = std::pair<std::string, std::string>;
   std::vector<std::vector<KVPair>> perthread_inserts(threads);
@@ -109,16 +111,20 @@ DatabaseTest::insert_many(size_t count, int threads, int delay_ns)
         std::make_pair(std::move(key), std::move(value)));
   }
 
+  std::atomic<size_t> failures{};
   // perform concurrent insertions (with multiple threads)
   {
     std::vector<std::jthread> joins;
     joins.reserve(threads);
     for (int i = 0; i < threads; ++i) {
-      joins.emplace_back([this, delay_ns, &inserts = perthread_inserts[i]] {
+      joins.emplace_back([this, delay_ns, ignore_failures, &failures,
+                          &inserts = perthread_inserts[i]] {
         for (const auto &[key, value] : inserts) {
           DBStatus<void> ret = db_->put(std::as_bytes(std::span(key)), 0,
                                         std::as_bytes(std::span(value)));
-          EXPECT_TRUE(ret);
+          if (!ret)
+            failures++;
+          EXPECT_TRUE(ignore_failures || ret);
           if (delay_ns)
             std::this_thread::sleep_for(std::chrono::nanoseconds{delay_ns});
         }
@@ -132,6 +138,8 @@ DatabaseTest::insert_many(size_t count, int threads, int delay_ns)
       oracle_.emplace(std::move(key), std::move(value));
     }
   }
+
+  return failures;
 }
 
 void
@@ -195,6 +203,12 @@ TEST_F(DatabaseTest, SimpleInsertions)
 {
   insert_many(kInsertions);
   check_integrity();
+}
+
+TEST_F(DatabaseTest, InsertTooMany)
+{
+  size_t failures = insert_many(kInsertions * 16, 1, 0, true);
+  EXPECT_GT(failures, 0);
 }
 
 TEST_F(DatabaseTest, ConcurrentInsertions)
