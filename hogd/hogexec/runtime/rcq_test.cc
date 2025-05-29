@@ -30,7 +30,7 @@ protected:
         std::unordered_map<MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto const &calldata = handler.get_calldata();
                auto key = make_storage_key("rcq0");
 
@@ -41,11 +41,11 @@ protected:
                    return res.error().to_invoke_error();
                  }
                }
-               return 0;
+               return {};
              }},
             {1,
              [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto const &calldata = handler.get_calldata();
                auto key = make_storage_key("rcq0");
 
@@ -63,7 +63,7 @@ protected:
                    return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                  }
                }
-               return 0;
+               return {};
              }}});
     std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -113,8 +113,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
                 }},
         runtime_context_);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction()();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(*r);
@@ -135,8 +134,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
                 }},
         runtime_context_);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction()();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(*r);
@@ -160,8 +158,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
                 }},
         runtime_context_);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction()();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(*r);
@@ -186,8 +183,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
                 }},
         runtime_context_);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto r = handler.try_commit_transaction()();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(*r);

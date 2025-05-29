@@ -73,10 +73,7 @@ InvokeResult::to_host_fn_result() const
     assert(false);
   }
 
-  // This converts the user-defined return value to a syscall error code.
-  // We could do a check here (i.e. reserve < 2^16 for system, everything else
-  // for users) but this doesn't particularly matter for correctness.
-  return {static_cast<SyscallErrorCode>(*result_), gas_consumed_};
+  return {SyscallErrorCode::kNone, gas_consumed_};
 }
 
 InvokeResult
@@ -84,7 +81,7 @@ InvokeResult::to_root_error() const
 {
   assert(!is_root_success());
 
-  if (result_) {
+  if (result_.has_value()) {
     return InvokeResult{.result_ =
                             InvokeError{InvokeErrorCode::kInvokeDeterministic},
                         .gas_consumed_ = gas_consumed_};

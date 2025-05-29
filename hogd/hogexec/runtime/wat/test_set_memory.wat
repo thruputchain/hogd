@@ -12,6 +12,16 @@
   (func (export "load") (result i32)
     (i32.load (i32.const 32))
   )
+  (func (export "load_expect") (result i32)
+    (i32.load (i32.const 32))
+    i32.const 0xABCDEF01
+    i32.eq
+    if
+    else
+      unreachable
+    end
+    i32.const 0
+  )
 
   (export "memory" (memory 0))
 )

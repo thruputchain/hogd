@@ -10,7 +10,6 @@ extern "C" {
 // type.
 struct TrampolineResult {
   // if HostFnErrorCode is kNoneOrRecoverable, this is the SyscallErrorCode.
-  // If HostFnErrorCode is kExit, this is the exit code.
   // Otherwise, this will be 0.
   int32_t result;
   // Corresponds to HostFnErrorCode.

@@ -21,15 +21,13 @@ int syscall_logfd = -1;
 namespace {
 // returns gas_consumed, syscall error>
 template<std::same_as<uint64_t>... Args>
-std::pair<HostFnResult, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
                     Args... args)
 {
   if (syscall_no >= kSyscallTable.size()) {
     // invalid syscall
-    return {{HostFnErrorCode::kHostNoneOrRecoverable,
-             static_cast<int32_t>(SyscallErrorCode::kNoSyscall)},
-            kNoSyscallCost};
+    return {SyscallErrorCode::kNoSyscall, kNoSyscallCost};
   }
 
   static_assert(kSyscallTable.size() < INT32_MAX,
@@ -46,7 +44,7 @@ syscall_entry_inner(HostCallContext *call_context, uint64_t syscall_no,
 
 } // namespace
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
               uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
               uint64_t arg6, uint64_t arg7)
@@ -57,7 +55,7 @@ syscall_entry(HostCallContext *call_context, uint64_t arg0, uint64_t arg1,
   auto [err, gas_consumed] = syscall_entry_inner(call_context, arg0, arg1, arg2,
                                                  arg3, arg4, arg5, arg6, arg7);
   if (!call_context->runtime->consume_gas(gas_consumed)) {
-    return {HostFnErrorCode::kHostOutOfGas, 0};
+    return {HostFnError{HostFnErrorCode::kHostOutOfGas}};
   }
   return err;
 }

@@ -21,7 +21,7 @@ MockRuntimeContext::set_trampoline(uint32_t contract,
                             MockContract(entry_point, foreign_context));
 }
 
-InvokeStatus<int32_t>
+InvokeStatus<void>
 MockRuntime::invoke_internal(std::string_view method_name)
 {
   return backing_contract_.invoke(method_name);

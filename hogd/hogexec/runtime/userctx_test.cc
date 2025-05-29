@@ -17,12 +17,12 @@ namespace {
 SystemCallHandler *ctx_check =
     reinterpret_cast<SystemCallHandler *>(0xAABBCCDD'EEFF0011);
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 foo(HostCallContext *ctx, uint64_t value)
 {
   EXPECT_TRUE(ctx->syscall_handler == ctx_check);
   EXPECT_TRUE(value == 12);
-  return {HostFnErrorCode::kHostNoneOrRecoverable, 15};
+  return SyscallErrorCode(15);
 }
 
 } // namespace
@@ -42,7 +42,6 @@ TEST(WasmRuntimeTest, CheckCtxCorrect)
 
   auto res = runtime->invoke("calltest", UINT64_MAX);
   EXPECT_TRUE(res.result_);
-  EXPECT_EQ(*res.result_, 15U);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
