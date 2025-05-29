@@ -19,11 +19,14 @@ namespace hogd {
 
 class ExecCoordServer {
 public:
-  ExecCoordServer(ExecCard self_card, int poll_threads)
+  ExecCoordServer(ExecCard self_card, int poll_threads,
+                  std::string const &coord_addr)
     : self_card_(std::move(self_card)),
       main_worker_pool_(available_parallelism()), x23_pool_(poll_threads),
       cp_(x23_pool_)
-  {}
+  {
+    init_from_coord(coord_addr);
+  }
 
   void await_shutdown_request()
   {
@@ -32,12 +35,11 @@ public:
     }
   }
 
-  void init_from_coord(std::string const &coord_address,
-                       std::string const &coord_allocate_port);
-
   ~ExecCoordServer() { await_shutdown_request(); }
 
 private:
+  void init_from_coord(std::string const &coord_addr);
+
   void start_rpc_service(DatabaseIdentifier identifier,
                          uint16_t self_executor_id);
 

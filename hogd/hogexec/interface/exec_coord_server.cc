@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -14,6 +15,7 @@
 #include "hogd/hogexec/interface/rpc_interface.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -63,10 +65,17 @@ ExecCoordServer::get_exec_result(std::string const &coord_address,
 }
 
 void
-ExecCoordServer::init_from_coord(std::string const &coord_address,
-                                 std::string const &coord_allocate_port)
+ExecCoordServer::init_from_coord(std::string const &coord_addr)
 {
-  auto exec_result = get_exec_result(coord_address, coord_allocate_port);
+  x23::HostPort host_port;
+  if (!host_port.parse(coord_addr)) {
+    throw std::runtime_error("Invalid coord address: " + coord_addr);
+  }
+
+  std::string host = {host_port.host.begin(), host_port.host.end()};
+  std::string port = {host_port.port.begin(), host_port.port.end()};
+
+  auto exec_result = get_exec_result(host, port);
   assert(exec_result.exec_id < std::numeric_limits<uint16_t>::max());
   start_rpc_service(ShardedDB(exec_result), exec_result.exec_id);
 }
