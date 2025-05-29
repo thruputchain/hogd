@@ -5,17 +5,22 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
+#include <unordered_map>
 #include <utility>
 
 #include "bcs/decode.h"
 #include "bcs/encode.h"
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"

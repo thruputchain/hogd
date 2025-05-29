@@ -11,6 +11,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -531,6 +532,74 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     return value.value();
   }
   return SyscallError{SyscallErrorCode::kNoRetrocausalQueueEntry};
+}
+
+SystemStatus<int128_t>
+SystemCallHandler::get_native_token_balance(
+    ContractAddress const &contract_address)
+{
+  AddressAndKey addrkey{
+      .address = contract_address,
+      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+
+  auto item_view = invocation_frame_stack_.get_item_view(addrkey);
+  if (!item_view.has_value()) {
+    return item_view.error();
+  }
+
+  if (auto *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
+    assert(unmodified_item->base_item_.type() == ItemViewType::kNNInt);
+    assert(unmodified_item->base_item_.nnint() >= 0);
+    return unmodified_item->base_item_.nnint();
+  }
+
+  auto const *nnint_item = (*item_view)->get<NNIntItem>();
+  assert(nnint_item);
+
+  int128_t balance = nnint_item->base_value_ + nnint_item->add_value_;
+  assert(balance >= 0);
+  return balance;
+}
+
+SystemStatus<SyscallStatus<void>>
+SystemCallHandler::modify_native_token_balance(
+    ContractAddress const &contract_address, int128_t transfer_amount)
+{
+  AddressAndKey addrkey{
+      .address = contract_address,
+      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+
+  auto item_view = invocation_frame_stack_.get_item_view(addrkey);
+  if (!item_view.has_value()) {
+    return item_view.error();
+  }
+
+  auto [current_balance, current_add] = [&]() -> std::pair<int128_t, int128_t> {
+    if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
+      assert(unmodified_item->base_item_.type() == ItemViewType::kNNInt);
+      assert(unmodified_item->base_item_.nnint() >= 0);
+      return {unmodified_item->base_item_.nnint(), 0};
+    }
+    auto const *nnint_item = (*item_view)->get<NNIntItem>();
+    assert(nnint_item);
+    return {nnint_item->base_value_, nnint_item->add_value_};
+  }();
+
+  if (integer_add_overflow(current_add, transfer_amount)) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  int128_t new_add = current_add + transfer_amount;
+  if (integer_add_overflow(current_balance, new_add)) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  if (new_add + current_balance < 0) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
+  return (*item_view)
+      ->set(NNIntItem{.base_value_ = current_balance, .add_value_ = new_add});
 }
 
 } // namespace hogd

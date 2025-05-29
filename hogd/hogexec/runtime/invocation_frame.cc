@@ -460,18 +460,12 @@ InvocationFrame::get_or_add_item_view(
 }
 
 SystemStatus<ItemView *>
-InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
+InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
 {
   const int32_t stack_depth = frame_stack_.size();
   assert(stack_depth > 0);
 
-  StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
-  key.contract_data_key() = data_key;
-
-  auto &active_frame = get_active_frame();
-  AddressAndKey addrkey{.address =
-                            active_frame.active_invocation().invoked_address,
-                        .key = key};
+  auto &active_frame = frame_stack_.back();
 
   // do we already have a frame in the top active frame
   if (auto *active_frame_view = active_frame.get_item_view(addrkey)) {
@@ -498,6 +492,19 @@ InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
   // snapshot_item might be nullptr; this is handled in ItemView
   return frame_stack_.back().add_item_view(addrkey,
                                            ItemView(snapshot_item.value()));
+}
+
+SystemStatus<ItemView *>
+InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
+{
+  StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+  key.contract_data_key() = data_key;
+
+  auto &active_frame = get_active_frame();
+  AddressAndKey addrkey{.address =
+                            active_frame.active_invocation().invoked_address,
+                        .key = key};
+  return get_item_view(addrkey);
 }
 
 } // namespace hogd
