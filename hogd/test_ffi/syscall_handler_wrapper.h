@@ -189,7 +189,7 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     // be written to if the syscall succeeds.
     if (syscall_logfd != -1) {
       std::string log_string;
-      if (!res.first.has_value()) {
+      if (!res.first.has_value() || res.first.value() != SyscallErrorCode::kNone) {
         log_string = syscall_error_message(res.first);
       }
       else {

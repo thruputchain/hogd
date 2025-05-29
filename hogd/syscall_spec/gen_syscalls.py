@@ -209,9 +209,6 @@ def gen_inner_outer(syscall, syscall_input_count):
   syscall_handler_decl = ""
   inner_return_type = "HostFnStatus<SyscallErrorCode>"
 
-  if "syscall_return_type" in syscall:
-    inner_return_type = syscall["syscall_return_type"]
-
   if syscall["inputs"] is not None:
     for arg in syscall["inputs"]:
       local_user_arg_count, inner_arg_decl = gen_validate_arg(arg, is_input = True)
