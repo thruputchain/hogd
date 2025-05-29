@@ -19,7 +19,8 @@ ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id)
 }
 
 x23::Async<ExecProposeResult>
-ExecutorContext::propose_transaction(SignedTransaction const &signed_tx, TransactionID tx_id)
+ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
+                                     TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kProposing);
   auto proxy = make_per_tx_db_proxy(tx_id);
@@ -55,7 +56,8 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx, Transac
 }
 
 x23::Async<ExecResult>
-ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx, TransactionID tx_id)
+ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
+                                      TransactionID tx_id)
 {
   assert(mode_ == ExecutionMode::kValidating);
   auto proxy = make_per_tx_db_proxy(tx_id);
