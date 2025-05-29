@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/init.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
@@ -86,6 +87,22 @@ struct BenchmarkState {
   TransactionID allocate_txid() {
     return next_tx_id_++;
   }
+
+  void setup_grant_storage_token(ContractAddress const &address,
+                                 int128_t amount)
+  {
+    assert(amount >= 0);
+    assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
+
+    AddressAndKey addrkey = {
+        .address = address,
+        .key =
+            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+
+    in_memory_db_.write_item(addrkey,
+                             std::make_shared<const StorageItemWrapper>(
+                                 amount));
+  }
 };
 
 void
@@ -105,6 +122,8 @@ bench_fibonacci(benchmark::State &state)
   bs.in_memory_db_.write_contract(sha256(*contract), contract);
   bs.in_memory_db_.write_deployment(contract_addr, sha256(*contract));
 
+  bs.setup_grant_storage_token(contract_addr, 1'000'000'000);
+
   using fib_client_t = ContractTraitClient<Fibonacci>;
 
   fib_client_t fib_client(contract_addr);
@@ -120,6 +139,8 @@ bench_fibonacci(benchmark::State &state)
   if (init.result() != ExecResult::ExecResultOK) {
     throw std::runtime_error("Failed to initialize fibonacci contract");
   }
+
+  bs.advance_block();
 
   std::vector<SignedTransaction> txs;
   txs.reserve(numtxs);
@@ -142,7 +163,7 @@ bench_fibonacci(benchmark::State &state)
     for (auto const& tx : txs) {
         runner_pool.spawn([&]()-> x23::Detached {
             std::println("proposing");
-            auto res =co_await  bs.context_->propose_transaction(tx, bs.allocate_txid());
+            auto res = co_await bs.context_->propose_transaction(tx, bs.allocate_txid());
             if (res.result() != ExecResult::ExecResultOK) {
                 throw std::runtime_error("Failed to propose transaction");
             }
