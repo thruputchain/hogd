@@ -125,6 +125,13 @@ public:
   SystemStatus<SyscallStatus<QueueEntry>>
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
+  // == Native token syscalls ==
+  SystemStatus<int128_t>
+  get_native_token_balance(ContractAddress const &contract_address);
+  SystemStatus<SyscallStatus<void>>
+  modify_native_token_balance(ContractAddress const &contract_address,
+                              int128_t transfer_amount);
+
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;
   const SignedTransaction signed_tx_;

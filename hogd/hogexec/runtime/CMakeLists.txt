@@ -10,6 +10,7 @@ add_subdirectory(test_util)
 
 add_library(
   runtime
+  contract_trait.cc
   database_proxy.cc
   execution_mode.cc
   invocation_frame.cc
@@ -83,7 +84,6 @@ target_link_libraries(
   runtime_test
   runtime
   runtime_test_util
-  preset_contracts
   db_interface
   GTest::gtest
 )

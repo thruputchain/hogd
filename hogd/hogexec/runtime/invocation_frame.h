@@ -162,6 +162,7 @@ public:
   // The returned pointer is never null
   SystemStatus<ItemView *>
   get_item_view(StorageKeyContractData const &data_key);
+  SystemStatus<ItemView *> get_item_view(AddressAndKey const &addrkey);
 
 private:
   std::vector<InvocationFrame> frame_stack_;
