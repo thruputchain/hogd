@@ -48,7 +48,7 @@ connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
 
 std::optional<DatabaseToExecutorInterfaceV1::client<
     x23::RpcStream<x23::RpcLogger>::ClientRef>>
-connect_to_db_shard(x23::CoroPoll &cp, ShardCard shard)
+connect_to_db_shard(x23::CoroPoll &cp, ShardCard const& shard)
 {
   x23::HostPort host_addr;
   if (!host_addr.parse(std::string(shard.address))) {
