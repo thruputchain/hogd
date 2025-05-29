@@ -20,14 +20,12 @@ namespace {
 
 // this doesn't exactly match a token behavior -- we're not checking calldata
 // but that doesn't strictly matter.
-InvokeStatus<void>
-always_error(NativeRuntime &runtime)
-{
+auto always_error = [](NativeRuntime &runtime) -> InvokeStatus<void> {
   if (!runtime.consume_gas(1)) {
     return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
   }
   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-}
+};
 
 StorageKeyContractData
 allowance_key(ContractAddress owner, ContractAddress spender)

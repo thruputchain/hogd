@@ -17,6 +17,7 @@ add_library(
   item_view.cc
   native_runtime.cc
   multiplexed_context.cc
+  preset_native_token.cc
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
@@ -36,6 +37,7 @@ add_library(
 
 add_executable(
   runtime_test
+  contract_trait_test.cc
   error_handling_test.cc
   execution_mode_test.cc
   fibonacci_test.cc
