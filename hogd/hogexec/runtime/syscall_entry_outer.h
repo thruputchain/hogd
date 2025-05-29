@@ -292,15 +292,15 @@ syscall_error_message(HostFnStatus<SyscallErrorCode> status)
 {
   if (!status.has_value()) {
     switch (status.error().code()) {
-      case HostFnErrorCode::kHostExit:
-        return "Host Exit (Contract Execution Panic)\n";
-        break;
-      case HostFnErrorCode::kHostReturn:
-        return "Host Return (Contract Execution Success)\n";
-        break;
-      default:
-        return std::format("Host Error ({})\n", x23::show(status.error().code()));
-      }
+    case HostFnErrorCode::kHostExit:
+      return "Host Exit (Contract Execution Panic)\n";
+      break;
+    case HostFnErrorCode::kHostReturn:
+      return "Host Return (Contract Execution Success)\n";
+      break;
+    default:
+      return std::format("Host Error ({})\n", x23::show(status.error().code()));
+    }
   }
   assert(status.value() != SyscallErrorCode::kNone);
   return std::format("Syscall Error: {}", x23::show(status.value()));
@@ -382,16 +382,17 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
     if (syscall_logfd != -1) {
       std::string log_string;
 
-      if (!res.first.has_value() || res.first.value() != SyscallErrorCode::kNone) {
+      if (!res.first.has_value() ||
+          res.first.value() != SyscallErrorCode::kNone) {
         log_string = syscall_error_message(res.first);
       }
       else {
         assert(res.first.value() == SyscallErrorCode::kNone);
-        log_string = x23::show(
-            make_syscall_output_struct<SyscallInputType, SyscallOutputType>(
-                std::tuple{
-                    SyscallArgParams<typename syscall_t::template arg_i<Is>>::
-                        deref(std::get<Is>(parsed_args))...}));
+        log_string =
+            x23::show(make_syscall_output_struct<SyscallInputType,
+                                                 SyscallOutputType>(std::tuple{
+                SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                    std::get<Is>(parsed_args))...}));
       }
       write(syscall_logfd, log_string.c_str(), log_string.size());
     }
