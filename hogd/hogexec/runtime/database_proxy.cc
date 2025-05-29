@@ -149,7 +149,7 @@ DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp,
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
-        if (sharded_db.shards_.size() != 1) {
+        if (sharded_db.shards_.size() == 1) {
           auto out = connect_to_db_shard(cp, sharded_db.shards_[0]);
           while (!out) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
