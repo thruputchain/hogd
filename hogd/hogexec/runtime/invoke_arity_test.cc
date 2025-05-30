@@ -8,7 +8,6 @@
 #include <gtest/gtest.h>
 
 #include "contract.hh"
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"

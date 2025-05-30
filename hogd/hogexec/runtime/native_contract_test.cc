@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
