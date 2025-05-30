@@ -9,7 +9,7 @@ add_xdr(
 	../../protocol/exec_coord.x
 	../../protocol/executor_to_db_rpc.x
 	../../protocol/ffi_enums.x
-	../../protocol/proposal.x
+	../../protocol/nomination.x
 	../../protocol/rpc_types.x
 	../../protocol/transaction.x
 	../../protocol/types.x 
