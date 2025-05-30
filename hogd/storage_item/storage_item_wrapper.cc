@@ -20,6 +20,9 @@ StorageItemWrapper::StorageItemWrapper(int128_t nnint_value)
 StorageItemWrapper::StorageItemWrapper(RetrocausalQueue queue)
   : storage_item_(RetrocausalQueueWrapper{.queue_ = std::move(queue)})
 {}
+StorageItemWrapper::StorageItemWrapper(ReplayCacheMetadata replay_cache_metadata)
+  : storage_item_(ReplayCacheMetadataWrapper{.replay_cache_metadata_ = std::move(replay_cache_metadata)})
+{}
 
 StorageItemType
 StorageItemWrapper::type() const
@@ -55,6 +58,14 @@ StorageItem
 StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
 {
   return StorageItem(StorageItemType::kItemTypeRetrocausalQueue);
+}
+
+StorageItem
+StorageItemWrapper::ReplayCacheMetadataWrapper::to_wire_item() const
+{
+  StorageItem item(StorageItemType::kItemTypeReplayCache);
+  item.replay_cache_metadata() = replay_cache_metadata_;
+  return item;
 }
 
 int128_t
