@@ -8,6 +8,7 @@
 #include <format>
 #include <limits>
 #include <memory>
+#include <print>
 #include <span>
 #include <string>
 #include <thread>
@@ -21,8 +22,10 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/ramdb/loglet.h"
 
 namespace hogd {
 
@@ -34,10 +37,11 @@ constexpr int kBucketOrder = 7; // 128 buckets
 constexpr size_t kKeySize = 256;
 // the size of each value to be inserted
 constexpr size_t kValueSize = 64;
+// the maximum size value that can be inserted.
+constexpr size_t kMaxValueSize =
+    kBigItemThreshold - sizeof(ItemHeader) - kKeySize;
 // the number of items to insert
 constexpr size_t kInsertions = 32'768;
-// the number of threads to use in concurrent experiments
-constexpr int kThreads = 4;
 // the number of times to force a compaction
 constexpr int kCompactionIterations = 8;
 
@@ -67,8 +71,8 @@ protected:
 
   DBStatus<void>
   open_db(uint64_t target_lsn = std::numeric_limits<uint64_t>::max());
-  size_t insert_many(size_t count, int threads = 1, int delay_ns = 0,
-                     bool ignore_failures = false);
+  void insert_n(size_t count);
+  DBError insert_until_failure();
   void remove_every_n(int n);
   void check_integrity();
 
@@ -94,12 +98,12 @@ DatabaseTest::open_db(uint64_t target_lsn)
   return {};
 }
 
-size_t
-DatabaseTest::insert_many(size_t count, int threads, int delay_ns,
-                          bool ignore_failures)
+void
+DatabaseTest::insert_n(size_t count)
 {
   using KVPair = std::pair<std::string, std::string>;
-  std::vector<std::vector<KVPair>> perthread_inserts(threads);
+  std::vector<KVPair> inserts;
+  inserts.reserve(count);
 
   // generate random data to insert
   for (size_t i = 0; i < count; ++i) {
@@ -107,39 +111,38 @@ DatabaseTest::insert_many(size_t count, int threads, int delay_ns,
     rand_(std::span(key));
     std::string value(kValueSize, '0');
     rand_(std::span(value));
-    perthread_inserts[i % threads].emplace_back(
-        std::make_pair(std::move(key), std::move(value)));
+    inserts.emplace_back(std::make_pair(std::move(key), std::move(value)));
   }
 
-  std::atomic<size_t> failures{};
-  // perform concurrent insertions (with multiple threads)
-  {
-    std::vector<std::jthread> joins;
-    joins.reserve(threads);
-    for (int i = 0; i < threads; ++i) {
-      joins.emplace_back([this, delay_ns, ignore_failures, &failures,
-                          &inserts = perthread_inserts[i]] {
-        for (const auto &[key, value] : inserts) {
-          DBStatus<void> ret = db_->put(std::as_bytes(std::span(key)), 0,
-                                        std::as_bytes(std::span(value)));
-          if (!ret)
-            failures++;
-          EXPECT_TRUE(ignore_failures || ret);
-          if (delay_ns)
-            std::this_thread::sleep_for(std::chrono::nanoseconds{delay_ns});
-        }
+  // perform concurrent insertions
+  WorkerPool::get_default_pool().for_each_parallel(
+      inserts, [this](const std::pair<const std::string, std::string> &val) {
+        DBStatus<void> ret = db_->put(std::as_bytes(std::span(val.first)), 0,
+                                      std::as_bytes(std::span(val.second)));
+        EXPECT_TRUE(ret);
       });
-    }
-  }
 
   // update the oracle
-  for (int i = 0; i < threads; ++i) {
-    for (auto &[key, value] : perthread_inserts[i]) {
-      oracle_.emplace(std::move(key), std::move(value));
-    }
+  for (auto &[key, value] : inserts) {
+    oracle_.emplace(std::move(key), std::move(value));
   }
+}
 
-  return failures;
+DBError
+DatabaseTest::insert_until_failure()
+{
+  std::string key(kKeySize, '0');
+  std::string value(kMaxValueSize, '0');
+
+  while (true) {
+    rand_(std::span(key));
+    rand_(std::span(value));
+    DBStatus<void> ret = db_->put(std::as_bytes(std::span(key)), 0,
+                                  std::as_bytes(std::span(value)));
+    if (!ret)
+      return ret.error();
+  }
+  std::unreachable();
 }
 
 void
@@ -201,25 +204,25 @@ DatabaseTest::check_integrity()
 
 TEST_F(DatabaseTest, SimpleInsertions)
 {
-  insert_many(kInsertions);
+  insert_n(kInsertions);
   check_integrity();
 }
 
-TEST_F(DatabaseTest, InsertTooMany)
+TEST_F(DatabaseTest, InsertUntilOOM)
 {
-  size_t failures = insert_many(kInsertions * 16, 1, 0, true);
-  EXPECT_GT(failures, 0);
+  DBError err = insert_until_failure();
+  EXPECT_EQ(err, DBCode::kNoMemory);
 }
 
 TEST_F(DatabaseTest, ConcurrentInsertions)
 {
-  insert_many(kInsertions, kThreads);
+  insert_n(kInsertions);
   check_integrity();
 }
 
 TEST_F(DatabaseTest, InsertionsAndRemovals)
 {
-  insert_many(kInsertions);
+  insert_n(kInsertions);
   check_integrity();
   remove_every_n(2);
   check_integrity();
@@ -228,7 +231,7 @@ TEST_F(DatabaseTest, InsertionsAndRemovals)
 TEST_F(DatabaseTest, SyncAndLoad)
 {
   // make changes to items.
-  insert_many(kInsertions, kThreads);
+  insert_n(kInsertions);
   check_integrity();
   remove_every_n(3);
   check_integrity();
@@ -267,31 +270,31 @@ TEST_F(DatabaseTest, SyncAndLoad)
 
 TEST_F(DatabaseTest, Compact)
 {
-  insert_many(kInsertions, kThreads);
+  insert_n(kInsertions);
   check_integrity();
   for (int i = 0; i < kCompactionIterations; i++) {
     remove_every_n(2);
-    insert_many(kInsertions / 2, kThreads);
+    insert_n(kInsertions / 2);
     check_integrity();
   }
 }
 
 TEST_F(DatabaseTest, Active)
 {
-  insert_many(kInsertions, kThreads);
+  insert_n(kInsertions);
   check_integrity();
   db_->set_active(false);
   using namespace std::chrono_literals;
   std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
   db_->set_active(true);
   check_integrity();
-  insert_many(kInsertions / 2, kThreads);
+  insert_n(kInsertions / 2);
   check_integrity();
 }
 
 TEST_F(DatabaseTest, Snapshot)
 {
-  insert_many(kInsertions, kThreads);
+  insert_n(kInsertions);
   remove_every_n(3);
 
   std::string path = "test-snapshot.snap";
@@ -302,10 +305,6 @@ TEST_F(DatabaseTest, Snapshot)
   EXPECT_EQ(lsn, 1);
   DBStatus<void> ret = snapshot_future.get();
   EXPECT_TRUE(ret);
-
-  using namespace std::chrono_literals;
-  std::this_thread::sleep_for(10ms); // NOLINT(misc-include-cleaner)
-
   check_integrity();
 
   // ensure the checkpoint file exists and has stuff in it
@@ -320,7 +319,6 @@ TEST_F(DatabaseTest, Snapshot)
   // the DB should succeed when we restore from disk.
   ret = open_db();
   EXPECT_TRUE(static_cast<bool>(ret));
-
   check_integrity();
 }
 
@@ -330,7 +328,7 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
   // check to make sure that if we take multiple full snapshots with
   // the last one spanning lsns that we can still recover properly.
 
-  insert_many(kInsertions, kThreads);
+  insert_n(kInsertions);
   remove_every_n(3);
 
   std::string path = "test-snapshot-0-1.snap";
@@ -342,9 +340,6 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
     DBStatus<void> ret = snapshot_future.get();
     ASSERT_TRUE(ret);
   }
-
-  std::this_thread::sleep_for(1000ms); // NOLINT(misc-include-cleaner)
-
   check_integrity();
 
   // ensure the checkpoint file exists
@@ -352,7 +347,7 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
   ASSERT_TRUE(static_cast<bool>(f));
 
   remove_every_n(1);
-  insert_many(kInsertions, kThreads);
+  insert_n(kInsertions);
 
   path = "test-snapshot-0-2.snap";
   {
@@ -363,9 +358,6 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
     DBStatus<void> ret = snapshot_future.get();
     ASSERT_TRUE(ret);
   }
-
-  std::this_thread::sleep_for(1000ms); // NOLINT(misc-include-cleaner)
-
   check_integrity();
 
   // replace the recovery log with the snapshot to see if it recovers...
@@ -376,7 +368,6 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
   // but only recover 0.log (i.e. up to but not including lsn 1)
   auto ret = open_db(1);
   ASSERT_TRUE(static_cast<bool>(ret));
-
   check_integrity();
 }
 
@@ -385,7 +376,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   std::string path0 = "test-snapshot-0-1.snap";
   std::string path1 = "test-snapshot-1-2.snap";
 
-  insert_many(kInsertions, kThreads);
+  insert_n(kInsertions);
   remove_every_n(3);
 
   {
@@ -407,9 +398,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   ASSERT_TRUE(static_cast<bool>(f0));
 
   // snapshot 0-1 okay, add more and sync, do incremental snapshot
-
-  insert_many(kInsertions / 2, kThreads);
-
+  insert_n(kInsertions / 2);
   {
     auto sync_ret = db_->sync_and_snapshot(path1, 1);
     EXPECT_TRUE(sync_ret);
@@ -418,7 +407,6 @@ TEST_F(DatabaseTest, SnapshotIncremental)
     DBStatus<void> ret = snapshot_future.get();
     EXPECT_TRUE(ret);
   }
-
   check_integrity();
 
   // ensure the checkpoint file exists
@@ -441,30 +429,22 @@ TEST_F(DatabaseTest, SnapshotIncremental)
 TEST_F(DatabaseTest, SnapshotOngoingPuts)
 {
   auto rand = rand_; // snapshot rng state.
-  insert_many(kInsertions);
+  insert_n(kInsertions);
   check_integrity();
 
   // Take a snapshot of the oracle.
-  std::unordered_map<std::string, std::string> backup = oracle_;
-
-  std::atomic<bool> done{};
-
-  rand_ = rand; // restore rng state to try to get overwrites.
+  std::unordered_map<std::string, std::string> backup(oracle_);
   auto sync_ret = db_->sync_and_snapshot("snapshot.dat", 0);
   EXPECT_TRUE(sync_ret);
   auto &[_, snapshot_future] = *sync_ret;
 
-  std::thread bg{[this, &done]() {
-    while (!done)
-      insert_many(kInsertions, kThreads, 100000); // overwrite a bit slowly
-  }};
+  rand_ = rand; // restore rng state to try to get overwrites.
+  std::jthread bg{[this] { insert_n(kInsertions); }};
 
   DBStatus<void> r = snapshot_future.get();
   ASSERT_TRUE(r);
 
-  done = true;
   bg.join();
-
   check_integrity();
 
   ErrnoStatus<void> rr = dir_.rename("snapshot.dat", "0.log");
