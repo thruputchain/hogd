@@ -20,16 +20,19 @@ ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id)
 }
 
 namespace {
-ExecResult make_exec_result(InvokeErrorCode error_code) {
+ExecResult
+make_exec_result(InvokeErrorCode error_code)
+{
   switch (error_code) {
   case InvokeErrorCode::kInvokeNone:
     return ExecResult::ExecResultOK;
   case InvokeErrorCode::kInvokeAbortTransaction:
     return ExecResult::ExecResultSystemError;
-  case InvokeErrorCode::kInvokeValidationFailure:
   case InvokeErrorCode::kInvokeDeterministic:
   case InvokeErrorCode::kInvokeOutOfGas:
     return ExecResult::ExecResultTxDeterministicError;
+  case InvokeErrorCode::kInvokeValidationFailure:
+    return ExecResult::ExecResultTxValidationFailure;
   case InvokeErrorCode::kInvokeUnrecoverable:
     return ExecResult::ExecResultUnrecoverable;
   }
@@ -37,19 +40,21 @@ ExecResult make_exec_result(InvokeErrorCode error_code) {
   return ExecResult::ExecResultUnrecoverable;
 }
 
-ExecResult make_exec_result(SystemErrorCode error_code, ExecResult validation_result_return) {
+ExecResult
+make_exec_result(SystemErrorCode error_code)
+{
   switch (error_code) {
   case SystemErrorCode::kUnrecoverable:
     return ExecResult::ExecResultUnrecoverable;
   case SystemErrorCode::kAbortTransaction:
     return ExecResult::ExecResultSystemError;
   case SystemErrorCode::kValidationFailure:
-    return validation_result_return;
+    return ExecResult::ExecResultTxValidationFailure;
   }
   assert(false);
   return ExecResult::ExecResultUnrecoverable;
 }
-}
+} // namespace
 
 x23::Async<ExecProposeResult>
 ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
@@ -72,8 +77,12 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   if (!invoke_res.is_root_success()) {
     co_await proxy.abort_transaction();
     assert(!invoke_res.result_.has_value());
-    auto out = ExecProposeResult(make_exec_result(invoke_res.result_.error().code()));
-    if (invoke_res.result_.error().code() == InvokeErrorCode::kInvokeDeterministic) {
+
+    auto out =
+        ExecProposeResult(make_exec_result(invoke_res.result_.error().code()));
+    assert(invoke_res.result_.error().code() != InvokeErrorCode::kInvokeNone);
+    if (invoke_res.result_.error().code() ==
+        InvokeErrorCode::kInvokeDeterministic) {
       out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
     }
     co_return out;
@@ -81,9 +90,10 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
 
   auto commit_res = co_await syscall_handler.try_commit_transaction();
   if (!commit_res.has_value()) {
-    // this error code should not be returned by the try_commit_transaction function
+    // this error code should not be returned by the try_commit_transaction
+    // function
     assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
-    co_return ExecProposeResult(make_exec_result(commit_res.error().code(), ExecResult::ExecResultUnrecoverable));
+    co_return ExecProposeResult(make_exec_result(commit_res.error().code()));
   }
 
   if (commit_res.value()) {
@@ -122,9 +132,10 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
 
   auto commit_res = co_await syscall_handler.try_commit_transaction();
   if (!commit_res.has_value()) {
-    // this error code should not be returned by the try_commit_transaction function
+    // this error code should not be returned by the try_commit_transaction
+    // function
     assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
-    co_return make_exec_result(commit_res.error().code(), ExecResult::ExecResultUnrecoverable);
+    co_return make_exec_result(commit_res.error().code());
   }
 
   if (commit_res.value()) {
