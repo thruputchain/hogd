@@ -72,7 +72,11 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   if (!invoke_res.is_root_success()) {
     co_await proxy.abort_transaction();
     assert(!invoke_res.result_.has_value());
-    co_return ExecProposeResult(make_exec_result(invoke_res.result_.error().code()));
+    auto out = ExecProposeResult(make_exec_result(invoke_res.result_.error().code()));
+    if (invoke_res.result_.error().code() == InvokeErrorCode::kInvokeDeterministic) {
+      out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
+    }
+    co_return out;
   }
 
   auto commit_res = co_await syscall_handler.try_commit_transaction();
