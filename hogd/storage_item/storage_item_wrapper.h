@@ -1,12 +1,11 @@
 #pragma once
 
 #include <variant>
-#include <set>
 
 #include "hogd/base/types.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "storage_item.hh"
-#include "types.hh"
 
 namespace hogd {
 
@@ -19,7 +18,7 @@ public:
   StorageItemWrapper(Bytestring bytestring);
   StorageItemWrapper(int128_t nnint_value);
   StorageItemWrapper(RetrocausalQueue queue);
-  StorageItemWrapper(ReplayCacheMetadata replay_cache_metadata);
+  StorageItemWrapper(ReplayCache replay_cache);
 
   auto &bytestring(this auto &self)
   {
@@ -36,9 +35,9 @@ public:
     return std::get<RetrocausalQueueWrapper>(self.storage_item_).queue_;
   }
 
-  auto &replay_cache_metadata(this auto &self)
+  auto &replay_cache(this auto &self)
   {
-    return std::get<ReplayCacheMetadataWrapper>(self.storage_item_).replay_cache_metadata_;
+    return std::get<ReplayCacheWrapper>(self.storage_item_).cache_;
   }
 
   StorageItemType type() const;
@@ -86,9 +85,8 @@ private:
     int128_t storage_cost() const;
   };
 
-  struct ReplayCacheMetadataWrapper {
-    ReplayCacheMetadata replay_cache_metadata_;
-    std::set<ReplayNonce> nonces_;
+  struct ReplayCacheWrapper {
+    ReplayCache cache_;
     constexpr static StorageItemType kItemType =
         StorageItemType::kItemTypeReplayCache;
     // Converts to wire format for network transmission
@@ -98,7 +96,7 @@ private:
   };
 
   std::variant<BytestringWrapper, NonnegativeIntWrapper,
-               RetrocausalQueueWrapper, ReplayCacheMetadataWrapper>
+               RetrocausalQueueWrapper, ReplayCacheWrapper>
       storage_item_;
 };
 

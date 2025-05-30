@@ -2,6 +2,7 @@ add_library(
   storage_item
   refcounted_delta_variant.cc
   retrocausal_queue.cc
+  replay_cache.cc
   storage_item_wrapper.cc
   storage_lock_util.cc
   storage_item_delta_manager.cc

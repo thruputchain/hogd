@@ -5,6 +5,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_costs.h"
 #include "storage_item.hh"
@@ -20,14 +21,13 @@ StorageItemWrapper::StorageItemWrapper(int128_t nnint_value)
 StorageItemWrapper::StorageItemWrapper(RetrocausalQueue queue)
   : storage_item_(RetrocausalQueueWrapper{.queue_ = std::move(queue)})
 {}
-StorageItemWrapper::StorageItemWrapper(ReplayCacheMetadata replay_cache_metadata)
-  : storage_item_(ReplayCacheMetadataWrapper{.replay_cache_metadata_ = std::move(replay_cache_metadata)})
+StorageItemWrapper::StorageItemWrapper(ReplayCache replay_cache)
+  : storage_item_(ReplayCacheWrapper{.cache_ = std::move(replay_cache)})
 {}
 
 StorageItemType
 StorageItemWrapper::type() const
 {
-
   return std::visit([](auto const &v) { return v.kItemType; }, storage_item_);
 }
 
@@ -61,10 +61,10 @@ StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
 }
 
 StorageItem
-StorageItemWrapper::ReplayCacheMetadataWrapper::to_wire_item() const
+StorageItemWrapper::ReplayCacheWrapper::to_wire_item() const
 {
   StorageItem item(StorageItemType::kItemTypeReplayCache);
-  item.replay_cache_metadata() = replay_cache_metadata_;
+  item.replay_cache_metadata() = cache_.metadata();
   return item;
 }
 
@@ -84,6 +84,12 @@ int128_t
 StorageItemWrapper::RetrocausalQueueWrapper::storage_cost() const
 {
   return kBaseItemCost + retrocausal_queue_cost(queue_.get_active_stats());
+}
+
+int128_t
+StorageItemWrapper::ReplayCacheWrapper::storage_cost() const
+{
+  return kBaseItemCost + replay_cache_cost(cache_.size());
 }
 
 int128_t
