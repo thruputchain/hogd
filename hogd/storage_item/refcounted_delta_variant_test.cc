@@ -7,6 +7,7 @@
 #include "hogd/base/types.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/refcounted_delta_variant.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -251,6 +252,40 @@ TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
   ASSERT_EQ(cache.nonces().count(1), 0);
   ASSERT_EQ(cache.nonces().count(2), 0);
   ASSERT_EQ(cache.nonces().count(3), 1);
+}
+
+TEST(RefcountedDeltaVariant, ReplayCacheFromNonEmpty)
+{
+  const ReplayCache base_cache(ReplayCacheMetadata{.minimum_threshold = 10},
+                               {11, 12, 14, 100, 1000});
+  RefcountedDeltaVariant variant;
+  auto *arg = variant.try_set_variant<ReplayCacheArgs>(&base_cache);
+  ASSERT_TRUE(arg);
+
+  EXPECT_FALSE(arg->try_reserve_insert(10));
+  EXPECT_FALSE(arg->try_reserve_insert(11));
+  EXPECT_FALSE(arg->try_reserve_insert(12));
+  EXPECT_TRUE(arg->try_reserve_insert(13));
+  EXPECT_FALSE(arg->try_reserve_insert(14));
+
+  EXPECT_EQ(variant.get_cost_after_commit(make_replay_cache_delta({13}, 0),
+                                          nullptr),
+            kBaseItemCost + replay_cache_cost(6));
+
+  EXPECT_EQ(variant.get_cost_after_commit(make_replay_cache_delta({13}, 13),
+                                          nullptr),
+            kBaseItemCost + replay_cache_cost(3));
+
+  arg->commit_threshold_change(12);
+
+  auto item = variant.to_item(nullptr);
+
+  ASSERT_EQ(item->type(), StorageItemType::kItemTypeReplayCache);
+  auto const &cache = item->replay_cache();
+  ASSERT_EQ(cache.metadata().minimum_threshold, 12);
+  ASSERT_EQ(cache.nonces().size(), 4);
+  std::set<ReplayNonce> expected_nonces = {13, 14, 100, 1000};
+  ASSERT_EQ(cache.nonces(), expected_nonces);
 }
 
 } // namespace hogd
