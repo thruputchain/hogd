@@ -4,12 +4,14 @@
 
 namespace hogd {
 
-bool ReplayCache::contains(ReplayNonce nonce) const
+bool
+ReplayCache::contains(ReplayNonce nonce) const
 {
   return nonces_.contains(nonce);
 }
 
-bool ReplayCache::can_accept(ReplayNonce nonce) const
+bool
+ReplayCache::can_accept(ReplayNonce nonce) const
 {
   if (nonce <= metadata_.minimum_threshold) {
     return false;

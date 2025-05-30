@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <concepts>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <set>
@@ -14,12 +15,14 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_item/invalid_state_flag.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -274,6 +277,70 @@ RetrocausalQueueArgs::get_concurrent_retrocausal_queue_entry(
   return std::nullopt;
 }
 
+bool
+ReplayCacheArgs::try_reserve_insert(ReplayNonce nonce)
+{
+  if (base_cache_ && !base_cache_->can_accept(nonce)) {
+    return false;
+  }
+  auto [_, inserted] = new_nonces_.insert(nonce);
+  return inserted;
+}
+
+void
+ReplayCacheArgs::undo_insert(ReplayNonce nonce)
+{
+  [[maybe_unused]] auto res = new_nonces_.erase(nonce);
+  assert(res == 1);
+}
+
+std::shared_ptr<const StorageItemWrapper>
+ReplayCacheArgs::to_item() const
+{
+  std::set<ReplayNonce> nonces =
+      base_cache_ ? base_cache_->nonces() : std::set<ReplayNonce>();
+  nonces.insert(new_nonces_.begin(), new_nonces_.end());
+  ReplayNonce min_nonce =
+      std::max<ReplayNonce>(metadata_.minimum_threshold,
+                            base_cache_
+                                ? base_cache_->metadata().minimum_threshold
+                                : 0);
+
+  auto it = nonces.upper_bound(min_nonce);
+  nonces.erase(nonces.begin(), it);
+  ReplayCacheMetadata new_metadata = {.minimum_threshold = min_nonce};
+
+  return std::make_shared<const StorageItemWrapper>(
+      ReplayCache{new_metadata, nonces});
+}
+
+int128_t
+ReplayCacheArgs::get_cost(ReplayCacheModifyArgs const &delta) const
+{
+  auto new_min = std::max<ReplayNonce>(
+      {metadata_.minimum_threshold, delta.minimum_threshold,
+       base_cache_ ? base_cache_->metadata().minimum_threshold : 0});
+
+  size_t prev_count = 0;
+  if (base_cache_) {
+    auto const &nonces = base_cache_->nonces();
+    auto it = nonces.upper_bound(new_min);
+    prev_count = std::distance(it, nonces.end());
+  }
+
+  auto it = new_nonces_.upper_bound(new_min);
+  size_t new_count = std::distance(it, new_nonces_.end());
+
+  return kBaseItemCost + replay_cache_cost(new_count + prev_count);
+}
+
+void
+ReplayCacheArgs::commit_threshold_change(ReplayNonce new_threshold)
+{
+  metadata_.minimum_threshold =
+      std::max<ReplayNonce>({new_threshold, metadata_.minimum_threshold});
+}
+
 int128_t
 ExclusiveLockedState::get_cost(StorageDelta const &delta,
                                const StorageItemWrapper *base_item)
@@ -338,6 +405,13 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
                      StorageItemType::kItemTypeRetrocausalQueue &&
                  args.typeclass_match();
         }
+        else if constexpr (std::same_as<args_t, ReplayCacheArgs>) {
+          // hack because the signature of the ctor has to match the
+          // typeclass_match signature in this implemebntation
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeReplayCache &&
+                 args.typeclass_match(nullptr);
+        }
         else {
           static_assert(
               std::same_as<args_t, ExclusiveLockedState> ||
@@ -399,6 +473,10 @@ RefcountedDeltaVariant::get_cost_after_commit(
         else if constexpr (std::same_as<args_t, RetrocausalQueueArgs>) {
           assert(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
           return args.get_cost(delta.retrocausal_queue(), base_item);
+        }
+        else if constexpr (std::same_as<args_t, ReplayCacheArgs>) {
+          assert(delta.type() == StorageDeltaType::kDeltaTypeReplayCacheModify);
+          return args.get_cost(delta.replay_cache_modify());
         }
         else if constexpr (std::same_as<args_t, UnmodifiedState>) {
           throw std::runtime_error("impossible: we must have refcount_ > 0");

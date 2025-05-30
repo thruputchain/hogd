@@ -12,6 +12,8 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
+#include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 namespace {
@@ -194,6 +196,61 @@ TEST(RefcountedDeltaVariant, RCQCosts)
                                                    RetrocausalQueueInsertDelta{
                                                        .added_entries = {}}),
                                     item.get()));
+}
+
+namespace {
+StorageDelta
+make_replay_cache_delta(x23::Vec<ReplayNonce> nonces,
+                        ReplayNonce minimum_threshold)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeReplayCacheModify);
+  delta.replay_cache_modify().nonces = std::move(nonces);
+  delta.replay_cache_modify().minimum_threshold = minimum_threshold;
+  return delta;
+}
+
+} // namespace
+
+TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
+{
+  RefcountedDeltaVariant variant;
+  auto *arg = variant.try_set_variant<ReplayCacheArgs>(nullptr);
+  ASSERT_TRUE(arg);
+
+  EXPECT_TRUE(arg->try_reserve_insert(1));
+  EXPECT_FALSE(arg->try_reserve_insert(1));
+
+  EXPECT_TRUE(arg->try_reserve_insert(3));
+  EXPECT_TRUE(arg->try_reserve_insert(2));
+
+  EXPECT_EQ(variant.get_cost_after_commit(make_replay_cache_delta({1, 2, 3}, 0),
+                                          nullptr),
+            kBaseItemCost + replay_cache_cost(3));
+  EXPECT_EQ(variant.get_cost_after_commit(make_replay_cache_delta({1, 2, 3}, 1),
+                                          nullptr),
+            kBaseItemCost + replay_cache_cost(2));
+  EXPECT_EQ(variant.get_cost_after_commit(make_replay_cache_delta({1, 2, 3}, 2),
+                                          nullptr),
+            kBaseItemCost + replay_cache_cost(1));
+  EXPECT_EQ(variant.get_cost_after_commit(make_replay_cache_delta({1, 2, 3}, 3),
+                                          nullptr),
+            kBaseItemCost + replay_cache_cost(0));
+
+  arg->commit_threshold_change(2);
+
+  EXPECT_EQ(variant.get_cost_after_commit(make_replay_cache_delta({1, 2, 3}, 0),
+                                          nullptr),
+            kBaseItemCost + replay_cache_cost(1));
+
+  auto item = variant.to_item(nullptr);
+
+  ASSERT_EQ(item->type(), StorageItemType::kItemTypeReplayCache);
+  auto const &cache = item->replay_cache();
+  ASSERT_EQ(cache.metadata().minimum_threshold, 2);
+  ASSERT_EQ(cache.nonces().size(), 1);
+  ASSERT_EQ(cache.nonces().count(1), 0);
+  ASSERT_EQ(cache.nonces().count(2), 0);
+  ASSERT_EQ(cache.nonces().count(3), 1);
 }
 
 } // namespace hogd

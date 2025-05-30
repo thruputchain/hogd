@@ -11,11 +11,13 @@
 #include "hogd/base/types.h"
 #include "hogd/base/wide_integral.h"
 #include "hogd/storage_item/invalid_state_flag.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -145,6 +147,30 @@ private:
       .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
 };
 
+class ReplayCacheArgs {
+public:
+  ReplayCacheArgs(const ReplayCache *base_cache) : base_cache_(base_cache) {}
+
+  static bool typeclass_match(const ReplayCache * /*unused*/) { return true; }
+
+  std::shared_ptr<const StorageItemWrapper> to_item() const;
+
+  bool try_reserve_insert(ReplayNonce nonce);
+  void undo_insert(ReplayNonce nonce);
+
+  void commit_threshold_change(ReplayNonce new_threshold);
+
+  int128_t get_cost(ReplayCacheModifyArgs const &delta) const;
+
+  ReplayCache to_new_cache() const;
+
+private:
+  const ReplayCache *base_cache_;
+
+  std::set<ReplayNonce> new_nonces_;
+  ReplayCacheMetadata metadata_ = {.minimum_threshold = 0};
+};
+
 // Exclusive locked state
 // For convenience, we maintain the invariant that the refcount is 1 whenever
 // the variant is in this state (so i.e. there's never an ExclusiveLockedState
@@ -207,9 +233,9 @@ struct UnmodifiedState {
 // - to_item(): Converts variant state into a StorageItemWrapper, to be passed
 // to the next block.
 class RefcountedDeltaVariant {
-  using variant_t =
-      std::variant<BytestringArgs, NNIntSetAddArgs, RetrocausalQueueArgs,
-                   ExclusiveLockedState, DeleteArgs, UnmodifiedState>;
+  using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs,
+                                 RetrocausalQueueArgs, ExclusiveLockedState,
+                                 DeleteArgs, UnmodifiedState, ReplayCacheArgs>;
 
 public:
   RefcountedDeltaVariant() = default;
