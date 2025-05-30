@@ -138,7 +138,7 @@ TEST_F(WasmiErrorHandlingTest, ExitHandling)
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(res.result_);
+  EXPECT_FALSE(res.is_root_success());
 }
 
 TEST_F(WasmiErrorHandlingTest, HostError)

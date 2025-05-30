@@ -32,11 +32,11 @@ TEST_F(MemoryAccessTest, ReadWrites)
 {
   // assert memory exists
   auto res = runtime_->invoke("size", UINT64_MAX);
-  EXPECT_TRUE(res.result_);
+  EXPECT_TRUE(res.is_root_success());
 
   res = runtime_->invoke("store", UINT64_MAX);
 
-  EXPECT_TRUE(res.result_);
+  EXPECT_TRUE(res.is_root_success());
 
   // This API for accessing memory directly is not particularly convenient
   // and may be bug prone (i.e. alignment errors, potentally)

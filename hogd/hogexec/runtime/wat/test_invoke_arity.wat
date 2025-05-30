@@ -10,7 +10,7 @@
   (import "test" "arg8" (func $call8 (param i64 i64 i64 i64 i64 i64 i64 i64) (result i32)))
 
 
-  (func (export "calltest0") (result i32)
+  (func (export "calltest0")
     (call $call0)
     i32.const 100
     i32.eq
@@ -18,10 +18,9 @@
     else
       unreachable
     end
-    i32.const 0
   )
 
-  (func (export "calltest1") (result i32)
+  (func (export "calltest1")
     (call $call1 (i64.const 1))
     i32.const 101
     i32.eq
@@ -29,10 +28,9 @@
     else
       unreachable
     end
-    i32.const 0
   )
 
-  (func (export "calltest2") (result i32)
+  (func (export "calltest2")
     (call $call2 (i64.const 1) (i64.const 2))
     i32.const 102
     i32.eq
@@ -40,10 +38,9 @@
     else
       unreachable
     end
-    i32.const 0
   )
 
-  (func (export "calltest3") (result i32)
+  (func (export "calltest3")
     (call $call3 (i64.const 1) (i64.const 2) (i64.const 3))
     i32.const 103
     i32.eq
@@ -51,10 +48,9 @@
     else
       unreachable
     end
-    i32.const 0
   )
 
-  (func (export "calltest4") (result i32)
+  (func (export "calltest4")
     (call $call4 (i64.const 1) (i64.const 2) (i64.const 3) (i64.const 4))
     i32.const 104
     i32.eq
@@ -62,10 +58,9 @@
     else
       unreachable
     end
-    i32.const 0
   )
 
-  (func (export "calltest5") (result i32)
+  (func (export "calltest5")
     (call $call5 (i64.const 1) (i64.const 2) (i64.const 3) (i64.const 4) (i64.const 5))
     i32.const 105
     i32.eq
@@ -73,10 +68,9 @@
     else
       unreachable
     end
-    i32.const 0
   )
 
-  (func (export "calltest6") (result i32)
+  (func (export "calltest6")
     (call $call6 (i64.const 1) (i64.const 2) (i64.const 3) (i64.const 4) (i64.const 5) (i64.const 6))
     i32.const 106
     i32.eq
@@ -84,10 +78,9 @@
     else
       unreachable
     end
-    i32.const 0
   )
 
-  (func (export "calltest7") (result i32)
+  (func (export "calltest7")
     (call $call7 (i64.const 1) (i64.const 2) (i64.const 3) (i64.const 4) (i64.const 5) (i64.const 6) (i64.const 7))
     i32.const 107
     i32.eq
@@ -95,10 +88,9 @@
     else
       unreachable
     end
-    i32.const 0
   ) 
 
-  (func (export "calltest8") (result i32)
+  (func (export "calltest8")
     (call $call8 (i64.const 1) (i64.const 2) (i64.const 3) (i64.const 4) (i64.const 5) (i64.const 6) (i64.const 7) (i64.const 8))
     i32.const 108
     i32.eq
@@ -106,7 +98,6 @@
     else
       unreachable
     end
-    i32.const 0
   )
 
   (memory 1 1)

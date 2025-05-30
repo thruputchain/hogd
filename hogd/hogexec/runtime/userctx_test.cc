@@ -28,7 +28,7 @@ foo(HostCallContext *ctx, uint64_t value)
 } // namespace
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST(WasmRuntimeTest, CheckCtxCorrect)
+TEST(UserCtxTest, CheckCtxCorrect)
 {
   Contract contract(ContractType::kWasmi);
   contract.wasmi_contract() = test::load_wasm_from_file("test_invoke.wasm");
