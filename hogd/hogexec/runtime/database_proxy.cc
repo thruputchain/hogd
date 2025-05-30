@@ -118,8 +118,6 @@ to_system_error_code(auto err, auto &&f)
       }
     case RPCError::kRPCBadBlockID:
       return SystemError{SystemErrorCode::kAbortTransaction};
-    case RPCError::kRPCValidationFailure:
-      return SystemError{SystemErrorCode::kValidationFailure};
     default:
       return SystemError{SystemErrorCode::kUnrecoverable};
     }

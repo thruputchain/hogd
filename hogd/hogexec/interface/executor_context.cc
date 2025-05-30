@@ -1,6 +1,7 @@
 #include "hogd/hogexec/interface/executor_context.h"
 
 #include "exec_coord.hh"
+#include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -17,6 +18,43 @@ ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id)
 {
   return PerTransactionDatabaseProxy(db_proxy_, block_id_, tx_id);
 }
+
+namespace {
+ExecResult
+make_exec_result(InvokeErrorCode error_code)
+{
+  switch (error_code) {
+  case InvokeErrorCode::kInvokeNone:
+    return ExecResult::ExecResultOK;
+  case InvokeErrorCode::kInvokeAbortTransaction:
+    return ExecResult::ExecResultSystemError;
+  case InvokeErrorCode::kInvokeDeterministic:
+  case InvokeErrorCode::kInvokeOutOfGas:
+    return ExecResult::ExecResultTxDeterministicError;
+  case InvokeErrorCode::kInvokeValidationFailure:
+    return ExecResult::ExecResultTxValidationFailure;
+  case InvokeErrorCode::kInvokeUnrecoverable:
+    return ExecResult::ExecResultUnrecoverable;
+  }
+  assert(false);
+  return ExecResult::ExecResultUnrecoverable;
+}
+
+ExecResult
+make_exec_result(SystemErrorCode error_code)
+{
+  switch (error_code) {
+  case SystemErrorCode::kUnrecoverable:
+    return ExecResult::ExecResultUnrecoverable;
+  case SystemErrorCode::kAbortTransaction:
+    return ExecResult::ExecResultSystemError;
+  case SystemErrorCode::kValidationFailure:
+    return ExecResult::ExecResultTxValidationFailure;
+  }
+  assert(false);
+  return ExecResult::ExecResultUnrecoverable;
+}
+} // namespace
 
 x23::Async<ExecProposeResult>
 ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
@@ -38,12 +76,24 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
 
   if (!invoke_res.is_root_success()) {
     co_await proxy.abort_transaction();
-    co_return ExecProposeResult(ExecResult::ExecResultTxError);
+    assert(!invoke_res.result_.has_value());
+
+    auto out =
+        ExecProposeResult(make_exec_result(invoke_res.result_.error().code()));
+    assert(invoke_res.result_.error().code() != InvokeErrorCode::kInvokeNone);
+    if (invoke_res.result_.error().code() ==
+        InvokeErrorCode::kInvokeDeterministic) {
+      out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
+    }
+    co_return out;
   }
 
   auto commit_res = co_await syscall_handler.try_commit_transaction();
   if (!commit_res.has_value()) {
-    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+    // this error code should not be returned by the try_commit_transaction
+    // function
+    assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
+    co_return ExecProposeResult(make_exec_result(commit_res.error().code()));
   }
 
   if (commit_res.value()) {
@@ -51,7 +101,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
     out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
     co_return out;
   }
-  co_return ExecProposeResult(ExecResult::ExecResultTxError);
+  co_return ExecProposeResult(ExecResult::ExecResultTxNonDeterministicError);
 }
 
 x23::Async<ExecResult>
@@ -76,18 +126,22 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
 
   if (!invoke_res.is_root_success()) {
     co_await proxy.abort_transaction();
-    co_return ExecResult::ExecResultTxError;
+    assert(!invoke_res.result_.has_value());
+    co_return make_exec_result(invoke_res.result_.error().code());
   }
 
   auto commit_res = co_await syscall_handler.try_commit_transaction();
   if (!commit_res.has_value()) {
-    co_return ExecResult::ExecResultSystemError;
+    // this error code should not be returned by the try_commit_transaction
+    // function
+    assert(commit_res.error().code() != SystemErrorCode::kValidationFailure);
+    co_return make_exec_result(commit_res.error().code());
   }
 
   if (commit_res.value()) {
     co_return ExecResult::ExecResultOK;
   }
-  co_return ExecResult::ExecResultTxError;
+  co_return ExecResult::ExecResultTxNonDeterministicError;
 }
 
 } // namespace hogd
