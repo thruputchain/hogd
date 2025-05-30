@@ -3,12 +3,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#include <atomic>
 #include <cstddef>
 #include <format>
 #include <limits>
 #include <memory>
-#include <print>
 #include <span>
 #include <string>
 #include <thread>
@@ -111,7 +109,7 @@ DatabaseTest::insert_n(size_t count)
     rand_(std::span(key));
     std::string value(kValueSize, '0');
     rand_(std::span(value));
-    inserts.emplace_back(std::make_pair(std::move(key), std::move(value)));
+    inserts.emplace_back(std::move(key), std::move(value));
   }
 
   // perform concurrent insertions
