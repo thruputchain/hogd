@@ -56,8 +56,8 @@ class NativeRuntime;
 // runtime pointer, as necessary.
 class NativeContract {
 public:
-  using function_t = std::function<InvokeStatus<int32_t>(SystemCallHandler &,
-                                                         NativeRuntime &)>;
+  using function_t =
+      std::function<InvokeStatus<void>(SystemCallHandler &, NativeRuntime &)>;
 
   NativeContract(std::unordered_map<MethodID, function_t> functions)
     : functions_(std::move(functions))
@@ -68,9 +68,8 @@ public:
   NativeContract(NativeContract const &) = delete;
   NativeContract &operator=(NativeContract const &) = delete;
 
-  InvokeStatus<int32_t> invoke(MethodID method,
-                               SystemCallHandler &syscall_handler,
-                               NativeRuntime &runtime);
+  InvokeStatus<void> invoke(MethodID method, SystemCallHandler &syscall_handler,
+                            NativeRuntime &runtime);
 
 private:
   std::unordered_map<MethodID, function_t> functions_;
@@ -137,14 +136,14 @@ public:
 
     auto wrapped_f = [f = std::forward<decltype(lambda)>(lambda)](
                          SystemCallHandler &handler,
-                         NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+                         NativeRuntime &runtime) -> InvokeStatus<void> {
       auto args = [&]<size_t... Is>(std::index_sequence<Is...>) {
         return bcs::decode_from<std::remove_cvref_t<decltype(std::get<Is>(
             std::declval<args_t>()))>...>(
             std::as_bytes(std::span(handler.get_calldata())));
       }(std::make_index_sequence<std::tuple_size_v<args_t>>());
       if (!args.has_value()) {
-        return std::to_underlying(SyscallErrorCode::kCalldataParseError);
+        return InvokeError{InvokeErrorCode::kInvokeDeterministic};
       }
 
       // invoke the lambda, and return the error if there is one
@@ -174,7 +173,7 @@ public:
       else {
         handler.set_return_buffer(ReturnBuffer{});
       }
-      return 0;
+      return {};
     };
 
     auto [_, inserted] = functions_.emplace(id, std::move(wrapped_f));
@@ -253,7 +252,7 @@ public:
   std::span<std::byte> get_memory() noexcept override { std::terminate(); }
 
 private:
-  InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
+  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
 
   NativeContract &contract_;
   uint64_t available_gas_ = 0;

@@ -75,7 +75,7 @@ struct SyscallArgParams<T> {
   {
     return argument.has_value();
   }
-  constexpr static T deref(std::optional<const T> &value)
+  constexpr static T deref(std::optional<const T> const &value)
   {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *value;

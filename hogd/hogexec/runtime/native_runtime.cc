@@ -8,14 +8,13 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
 
 namespace hogd {
 
-InvokeStatus<int32_t>
+InvokeStatus<void>
 NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
                        NativeRuntime &runtime)
 {
@@ -60,7 +59,7 @@ NativeRuntime::NativeRuntime(NativeContract &contract,
   : Runtime(std::move(host_call_context)), contract_(contract)
 {}
 
-InvokeStatus<int32_t>
+InvokeStatus<void>
 NativeRuntime::invoke_internal(std::string_view method_name)
 {
   auto method_id = Runtime::method_id_from_name(std::string(method_name));

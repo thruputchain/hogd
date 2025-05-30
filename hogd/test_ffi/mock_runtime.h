@@ -87,7 +87,7 @@ public:
   std::span<std::byte> get_memory() noexcept override { std::terminate(); }
 
 private:
-  InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
+  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
 
   MockContract backing_contract_;
   uint64_t gas_remaining_ = 0;

@@ -4,44 +4,44 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "syscall.hh"
 
 namespace hogd {
 
 namespace {
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 error(HostFnErrorCode const &code)
 {
-  return {code, 0};
+  return HostFnError{code};
 }
 
-HostFnResult
-success(int32_t value)
+HostFnStatus<SyscallErrorCode>
+success()
 {
-  return {HostFnErrorCode::kHostNoneOrRecoverable, value};
+  return SyscallErrorCode::kNone;
 }
 
-HostFnResult
+auto
 consume_gas_call(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(100)) {
     return error(HostFnErrorCode::kHostOutOfGas);
   }
-  return success(0);
+  return success();
 }
 
-HostFnResult
+auto
 consume_gas_call2(HostCallContext *ctxp)
 {
   if (!ctxp->runtime->consume_gas(5000)) {
     return error(HostFnErrorCode::kHostOutOfGas);
   }
-  return success(0);
+  return success();
 }
 
 } // namespace

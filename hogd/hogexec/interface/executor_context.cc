@@ -47,7 +47,6 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   }
 
   if (commit_res.value()) {
-    std::println("commit successful");
     auto out = ExecProposeResult(ExecResult::ExecResultOK);
     out.proposal_data() = syscall_handler.get_proposal_data().proposal_data();
     co_return out;

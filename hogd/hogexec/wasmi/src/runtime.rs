@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use std::slice;
-use wasmi::{Instance, Module, Store, Val};
+use wasmi::{Instance, Module, Store};
 
 use crate::context::WasmiContext;
 use crate::external_call;
@@ -93,21 +93,14 @@ impl WasmiRuntime {
             }
         };
 
-        let mut res = [Val::I32(0)];
+        let mut res = [];
 
         let func_res = func.call(&mut self.store, &[], &mut res);
 
         match func_res {
-            Ok(_) => match res[0].i32() {
-                Some(v) => {
-                    return WasmiInvokeResult::success(v as i32);
-                }
-                _ => {
-                    return WasmiInvokeResult::error(
-                        InvokeErrorCode::kInvokeDeterministic,
-                    );
-                }
-            },
+            Ok(_) => {
+                return WasmiInvokeResult::success();
+            }
             Err(err) => {
                 match err.as_trap_code() {
                     Some(trap_code) => {
@@ -134,10 +127,12 @@ impl WasmiRuntime {
                     }
                     external_call::TrampolineErrorEnum::Return => {
                         // Return no error code if successful return
-                        return WasmiInvokeResult::success(0);
+                        return WasmiInvokeResult::success();
                     }
-                    external_call::TrampolineErrorEnum::Exit { code } => {
-                        return WasmiInvokeResult::success(code);
+                    external_call::TrampolineErrorEnum::Exit => {
+                        return WasmiInvokeResult::error(
+                            InvokeErrorCode::kInvokeDeterministic,
+                        );
                     }
                     external_call::TrampolineErrorEnum::ValidationFailure => {
                         return WasmiInvokeResult::error(
