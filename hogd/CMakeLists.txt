@@ -6,6 +6,7 @@ add_subdirectory(metrics)
 add_subdirectory(mockdb)
 add_subdirectory(db_interface)
 add_subdirectory(storage_item)
+add_subdirectory(storage_cost)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
 

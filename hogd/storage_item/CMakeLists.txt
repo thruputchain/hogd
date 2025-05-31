@@ -9,6 +9,7 @@ add_library(
 
 target_link_libraries(
   storage_item
+  storage_cost
   hogd
 )
 
