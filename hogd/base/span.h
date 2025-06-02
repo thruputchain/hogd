@@ -41,17 +41,17 @@ writable_byte_view(T &t)
 }
 
 // Cast a legacy UNIX buffer to a byte span.
-inline std::span<std::byte>
-byte_view(char *buf, size_t len)
+inline std::span<const std::byte>
+byte_view(const char *buf, size_t len)
 {
-  return {reinterpret_cast<std::byte *>(buf), len};
+  return {reinterpret_cast<const std::byte *>(buf), len};
 }
 
 // Cast a legacy UNIX buffer to a mutable byte span.
-inline std::span<const std::byte>
-writable_byte_view(const char *buf, size_t len)
+inline std::span<std::byte>
+writable_byte_view(char *buf, size_t len)
 {
-  return {reinterpret_cast<const std::byte *>(buf), len};
+  return {reinterpret_cast<std::byte *>(buf), len};
 }
 
 // enable <=> comparisons between const byte spans.
