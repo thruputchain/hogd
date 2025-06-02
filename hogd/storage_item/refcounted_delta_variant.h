@@ -102,7 +102,7 @@ public:
   }
 
   int128_t
-  get_marginal_cost_upper_bound(StorageDelta const &delta,
+  get_marginal_cost_upper_bound(StorageDelta const &/*unused*/,
                                 StorageCostModel const *current_model,
                                 StorageItemWrapper const *base_item) const
   {
