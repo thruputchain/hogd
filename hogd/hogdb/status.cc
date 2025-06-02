@@ -1,7 +1,6 @@
 #include "hogd/hogdb/status.h"
 
 #include <cassert>
-#include <cerrno>
 #include <string>
 #include <utility>
 

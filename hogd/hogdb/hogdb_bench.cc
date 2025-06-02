@@ -16,6 +16,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/db.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/init.h"
@@ -79,7 +80,7 @@ private:
 constexpr ItemKey
 make_key(size_t n)
 {
-  return {n, n};
+  return make_item_key(make_address(n), n);
 }
 
 std::unique_ptr<Database>

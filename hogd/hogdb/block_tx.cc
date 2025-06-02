@@ -5,7 +5,7 @@
 #include <utility>
 
 #include "hogd/container/synchronized_map.h"
-#include "hogd/hogdb/db.h"
+#include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
 
