@@ -35,7 +35,8 @@ TEST(RetrocausalQueue, InsertThenConsume)
   RetrocausalQueue queue3(queue2,
                           {.max_fully_consumed_block_number = 0,
                            .partial_consumed_number = 3},
-                          {.entries = {make_test_queue_entry(7)}, .block_number = 2});
+                          {.entries = {make_test_queue_entry(7)},
+                           .block_number = 2});
 
   auto const *blk2 = queue3.try_get_next_block(1);
   ASSERT_TRUE(blk2);
@@ -65,7 +66,8 @@ TEST(RetrocausalQueue, ClearSeveralBlocks)
       RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number =
                                                 25,
                                             .partial_consumed_number = 1},
-      RetrocausalQueueBlock{.entries = {make_test_queue_entry(0)}, .block_number = 52});
+      RetrocausalQueueBlock{.entries = {make_test_queue_entry(0)},
+                            .block_number = 52});
 
   const auto *next_entries = queue->try_get_next_block(0);
   ASSERT_TRUE(next_entries);

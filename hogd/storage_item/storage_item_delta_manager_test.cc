@@ -84,7 +84,8 @@ protected:
 TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   StorageDelta nnint_set_add_1 = make_nnint_delta(0, 10);
@@ -140,9 +141,11 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
 
 TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
 {
-  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3}, &cost_model);
+  auto base_item =
+      std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3}, &cost_model);
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -186,9 +189,11 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
 TEST_P(StorageItemDeltaManagerTest, DeleteItem)
 {
   InvalidStateFlag invalid_state_flag;
-  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3}, &cost_model);
+  auto base_item =
+      std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3}, &cost_model);
 
-  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_,
+                               &cost_model);
   ASSERT_TRUE(item.get_snapshot_item());
 
   // committing an empty round keeps item active
@@ -222,7 +227,8 @@ TEST_P(StorageItemDeltaManagerTest, DeleteItem)
 TEST_P(StorageItemDeltaManagerTest, ExclusiveLockAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   auto lock1 =
       item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
@@ -245,7 +251,8 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockAcquire)
 TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(5, -4);
@@ -302,7 +309,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
 TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLock)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(10, -4);
@@ -332,7 +340,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLock)
 TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(-5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(-10, 4);
@@ -362,7 +371,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
 TEST_P(StorageItemDeltaManagerTest, ExclusiveBytestring)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -390,7 +400,8 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveBytestring)
 TEST_P(StorageItemDeltaManagerTest, ExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   // This is just a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -435,7 +446,8 @@ TEST_P(StorageItemDeltaManagerTest, PermanentExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag,
-                               BlockExecutionMode::kBlockExecutionModeProposal, &cost_model);
+                               BlockExecutionMode::kBlockExecutionModeProposal,
+                               &cost_model);
 
   // merely a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -473,7 +485,8 @@ TEST_P(StorageItemDeltaManagerTest, PermanentExclusiveLockMultiAcquire)
 TEST_P(StorageItemDeltaManagerTest, NNIntSimpleSetAdd)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta nnint_set_add = make_nnint_delta(5, 10);
 
@@ -497,7 +510,8 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
 
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag,
-                               BlockExecutionMode::kBlockExecutionModeProposal, &cost_model);
+                               BlockExecutionMode::kBlockExecutionModeProposal,
+                               &cost_model);
 
   auto bdelta_4 = make_bytestring_delta({0, 1, 2, 3});
   auto bdelta_6 = make_bytestring_delta({0, 1, 2, 3, 4, 5});
@@ -528,7 +542,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
     return;
   }
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   // drive invalid and then back to valid
 
@@ -576,7 +591,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
 TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   ASSERT_FALSE(item.try_reserve(make_nnint_delta(-10, -1),
                                 StorageLock(StorageLockType::kNone)));
@@ -606,7 +622,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
 TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   auto nnint_set_add_pos = make_nnint_delta(0, 10);
   auto nnint_set_add_neg = make_nnint_delta(0, -6);
@@ -650,10 +667,13 @@ TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
 }
 
 namespace {
-auto make_test_rcq_entry(uint8_t value) {
+auto
+make_test_rcq_entry(uint8_t value)
+{
   return QueueEntry{value};
 }
-auto make_rcq_delta(std::optional<RetrocausalQueueConsumeDelta> consume_delta,
+auto
+make_rcq_delta(std::optional<RetrocausalQueueConsumeDelta> consume_delta,
                RetrocausalQueueInsertDelta insert_delta)
 {
   StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
@@ -663,28 +683,43 @@ auto make_rcq_delta(std::optional<RetrocausalQueueConsumeDelta> consume_delta,
   delta.retrocausal_queue().insert = std::move(insert_delta);
   return delta;
 }
-}
+} // namespace
 
 TEST_P(StorageItemDeltaManagerTest, RCQInsertThenConsume)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
-  
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
+
   // try insert one entry
-  auto insert_delta = make_rcq_delta(std::nullopt, RetrocausalQueueInsertDelta{.added_entries = {make_test_rcq_entry(1)}});
+  auto insert_delta =
+      make_rcq_delta(std::nullopt,
+                     RetrocausalQueueInsertDelta{
+                         .added_entries = {make_test_rcq_entry(1)}});
   auto lk = item.try_reserve(insert_delta, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk);
-  EXPECT_EQ(lk->locked_tokens_, cost_model.kBaseItemCost + cost_model.get_retrocausal_queue_cost(1, 1));
+  EXPECT_EQ(lk->locked_tokens_,
+            cost_model.kBaseItemCost +
+                cost_model.get_retrocausal_queue_cost(1, 1));
   item.commit(insert_delta, *lk);
 
   // try consume one entry
-  auto consume_delta = make_rcq_delta(RetrocausalQueueConsumeDelta{.past_block_consume = RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number = 0, .partial_consumed_number = 0}, .current_block_consumed = {make_test_rcq_entry(1)}}, RetrocausalQueueInsertDelta{.added_entries = {}});
-  auto lk2 = item.try_reserve(consume_delta, StorageLock(StorageLockType::kNone));
+  auto consume_delta = make_rcq_delta(
+      RetrocausalQueueConsumeDelta{
+          .past_block_consume =
+              RetrocausalQueuePastBlockConsumeDelta{
+                  .max_fully_consumed_block_number = 0,
+                  .partial_consumed_number = 0},
+          .current_block_consumed = {make_test_rcq_entry(1)}},
+      RetrocausalQueueInsertDelta{.added_entries = {}});
+  auto lk2 =
+      item.try_reserve(consume_delta, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk2);
   EXPECT_EQ(lk2->locked_tokens_, 0);
   item.commit(consume_delta, *lk2);
 
-  expect_final(item, RetrocausalQueueStats{.active_block_count = 0, .active_size = 0});
+  expect_final(item, RetrocausalQueueStats{.active_block_count = 0,
+                                           .active_size = 0});
 }
 
 TEST_P(StorageItemDeltaManagerTest, RCQConsumeThenInsert)
@@ -695,58 +730,90 @@ TEST_P(StorageItemDeltaManagerTest, RCQConsumeThenInsert)
   }
 
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   // try consume one entry
-  auto consume_delta = make_rcq_delta(RetrocausalQueueConsumeDelta{.past_block_consume = RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number = 0, .partial_consumed_number = 0}, .current_block_consumed = {make_test_rcq_entry(1)}}, RetrocausalQueueInsertDelta{.added_entries = {}});
-  auto lk2 = item.try_reserve(consume_delta, StorageLock(StorageLockType::kNone));
+  auto consume_delta = make_rcq_delta(
+      RetrocausalQueueConsumeDelta{
+          .past_block_consume =
+              RetrocausalQueuePastBlockConsumeDelta{
+                  .max_fully_consumed_block_number = 0,
+                  .partial_consumed_number = 0},
+          .current_block_consumed = {make_test_rcq_entry(1)}},
+      RetrocausalQueueInsertDelta{.added_entries = {}});
+  auto lk2 =
+      item.try_reserve(consume_delta, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk2);
-  EXPECT_GE(lk2->locked_tokens_, cost_model.kBaseItemCost + cost_model.get_retrocausal_queue_cost(-1,0));
+  EXPECT_GE(lk2->locked_tokens_,
+            cost_model.kBaseItemCost +
+                cost_model.get_retrocausal_queue_cost(-1, 0));
   item.commit(consume_delta, *lk2);
 
-    // try insert one entry
-  auto insert_delta = make_rcq_delta(std::nullopt, RetrocausalQueueInsertDelta{.added_entries = {make_test_rcq_entry(1)}});
+  // try insert one entry
+  auto insert_delta =
+      make_rcq_delta(std::nullopt,
+                     RetrocausalQueueInsertDelta{
+                         .added_entries = {make_test_rcq_entry(1)}});
   auto lk = item.try_reserve(insert_delta, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk);
   item.commit(insert_delta, *lk);
 
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
-  expect_final(item, RetrocausalQueueStats{.active_block_count = 0, .active_size = 0});
+  expect_final(item, RetrocausalQueueStats{.active_block_count = 0,
+                                           .active_size = 0});
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 // The test case that was problematic before the switch to upper bounding costs:
 // Reserve A insert(1) -- reserve 1 block
 // Commit A -- release 0
-// Reserve B insert (1) -- on old workflow, this would reserve 0 blocks; here it reserves 1
-// Reserve C consume(1) -- reserve 0 blocks
-// Commit C -- on old workflow, has to release 1 block (B might not commit)
-// then Commit B is stuck -- it has no reservation, but it has to pay for creating a block
+// Reserve B insert (1) -- on old workflow, this would reserve 0 blocks; here it
+// reserves 1 Reserve C consume(1) -- reserve 0 blocks Commit C -- on old
+// workflow, has to release 1 block (B might not commit) then Commit B is stuck
+// -- it has no reservation, but it has to pay for creating a block
 
 TEST_P(StorageItemDeltaManagerTest, RCQAccountingEdgeCase)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_, &cost_model);
-  
-  auto insert_a = make_rcq_delta(std::nullopt, RetrocausalQueueInsertDelta{.added_entries = {make_test_rcq_entry(1)}});
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
+
+  auto insert_a =
+      make_rcq_delta(std::nullopt,
+                     RetrocausalQueueInsertDelta{
+                         .added_entries = {make_test_rcq_entry(1)}});
   auto lk_a = item.try_reserve(insert_a, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk_a);
-  EXPECT_EQ(lk_a->locked_tokens_, cost_model.kBaseItemCost + cost_model.get_retrocausal_queue_cost(1, 1));
+  EXPECT_EQ(lk_a->locked_tokens_,
+            cost_model.kBaseItemCost +
+                cost_model.get_retrocausal_queue_cost(1, 1));
   item.commit(insert_a, *lk_a);
 
-  auto insert_b = make_rcq_delta(std::nullopt, RetrocausalQueueInsertDelta{.added_entries = {make_test_rcq_entry(2)}});
+  auto insert_b =
+      make_rcq_delta(std::nullopt,
+                     RetrocausalQueueInsertDelta{
+                         .added_entries = {make_test_rcq_entry(2)}});
   auto lk_b = item.try_reserve(insert_b, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk_b);
 
-  auto consume_c = make_rcq_delta(RetrocausalQueueConsumeDelta{.past_block_consume = RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number = 0, .partial_consumed_number = 0}, .current_block_consumed = {make_test_rcq_entry(1)}}, RetrocausalQueueInsertDelta{.added_entries = {}});
+  auto consume_c = make_rcq_delta(
+      RetrocausalQueueConsumeDelta{
+          .past_block_consume =
+              RetrocausalQueuePastBlockConsumeDelta{
+                  .max_fully_consumed_block_number = 0,
+                  .partial_consumed_number = 0},
+          .current_block_consumed = {make_test_rcq_entry(1)}},
+      RetrocausalQueueInsertDelta{.added_entries = {}});
   auto lk_c = item.try_reserve(consume_c, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk_c);
   item.commit(consume_c, *lk_c);
 
   item.commit(insert_b, *lk_b);
-  
-  expect_final(item, RetrocausalQueueStats{.active_block_count = 1, .active_size = 1});
+
+  expect_final(item, RetrocausalQueueStats{.active_block_count = 1,
+                                           .active_size = 1});
 }
 
 INSTANTIATE_TEST_SUITE_P(

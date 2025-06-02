@@ -12,14 +12,20 @@
 
 namespace hogd {
 
-StorageItemWrapper::StorageItemWrapper(Bytestring bytestring, StorageCostModel const* cost_model) 
-  : storage_item_(BytestringWrapper{.bytestring_ = std::move(bytestring)}), cost_model_(cost_model)
+StorageItemWrapper::StorageItemWrapper(Bytestring bytestring,
+                                       StorageCostModel const *cost_model)
+  : storage_item_(BytestringWrapper{.bytestring_ = std::move(bytestring)}),
+    cost_model_(cost_model)
 {}
-StorageItemWrapper::StorageItemWrapper(int128_t nnint_value, StorageCostModel const* cost_model)
-  : storage_item_(NonnegativeIntWrapper{.nnint_ = nnint_value}), cost_model_(cost_model)
+StorageItemWrapper::StorageItemWrapper(int128_t nnint_value,
+                                       StorageCostModel const *cost_model)
+  : storage_item_(NonnegativeIntWrapper{.nnint_ = nnint_value}),
+    cost_model_(cost_model)
 {}
-StorageItemWrapper::StorageItemWrapper(RetrocausalQueue queue, StorageCostModel const* cost_model)
-  : storage_item_(RetrocausalQueueWrapper{.queue_ = std::move(queue)}), cost_model_(cost_model)
+StorageItemWrapper::StorageItemWrapper(RetrocausalQueue queue,
+                                       StorageCostModel const *cost_model)
+  : storage_item_(RetrocausalQueueWrapper{.queue_ = std::move(queue)}),
+    cost_model_(cost_model)
 {}
 
 StorageItemType
@@ -59,32 +65,39 @@ StorageItemWrapper::RetrocausalQueueWrapper::to_wire_item()
 }
 
 int128_t
-StorageItemWrapper::BytestringWrapper::storage_cost(StorageCostModel const* cost_model) const
+StorageItemWrapper::BytestringWrapper::storage_cost(
+    StorageCostModel const *cost_model) const
 {
-  return cost_model->kBaseItemCost + cost_model->get_bytestring_cost(bytestring_.size());
+  return cost_model->kBaseItemCost +
+         cost_model->get_bytestring_cost(bytestring_.size());
 }
 
 int128_t
-StorageItemWrapper::NonnegativeIntWrapper::storage_cost(StorageCostModel const* cost_model)
+StorageItemWrapper::NonnegativeIntWrapper::storage_cost(
+    StorageCostModel const *cost_model)
 {
   return cost_model->kBaseItemCost;
 }
 
 int128_t
-StorageItemWrapper::RetrocausalQueueWrapper::storage_cost(StorageCostModel const* cost_model) const
+StorageItemWrapper::RetrocausalQueueWrapper::storage_cost(
+    StorageCostModel const *cost_model) const
 {
   auto rcq_stats = queue_.get_active_stats();
-  return cost_model->kBaseItemCost + cost_model->get_retrocausal_queue_cost(rcq_stats.active_size, rcq_stats.active_block_count);
+  return cost_model->kBaseItemCost +
+         cost_model->get_retrocausal_queue_cost(rcq_stats.active_size,
+                                                rcq_stats.active_block_count);
 }
 
 int128_t
-StorageItemWrapper::storage_cost(StorageCostModel const* cost_model) const
+StorageItemWrapper::storage_cost(StorageCostModel const *cost_model) const
 {
   if (cost_model == nullptr) {
     cost_model = cost_model_;
   }
   assert(cost_model);
-  return std::visit([cost_model](auto const &v) { return v.storage_cost(cost_model); },
+  return std::visit([cost_model](
+                        auto const &v) { return v.storage_cost(cost_model); },
                     storage_item_);
 }
 

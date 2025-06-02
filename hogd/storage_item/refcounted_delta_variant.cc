@@ -26,14 +26,15 @@
 namespace hogd {
 
 std::shared_ptr<const StorageItemWrapper>
-BytestringArgs::to_item(StorageCostModel const* cost_model) const
+BytestringArgs::to_item(StorageCostModel const *cost_model) const
 {
   assert(committed_);
-  return std::make_shared<const StorageItemWrapper>(bytestring_set_, cost_model);
+  return std::make_shared<const StorageItemWrapper>(bytestring_set_,
+                                                    cost_model);
 }
 
 std::shared_ptr<const StorageItemWrapper>
-NNIntSetAddArgs::to_item(StorageCostModel const* cost_model) const
+NNIntSetAddArgs::to_item(StorageCostModel const *cost_model) const
 {
   assert(lower_bound_.is_in_range<int128_t>() &&
          upper_bound_.is_in_range<int128_t>());
@@ -129,7 +130,8 @@ make_block(std::multiset<QueueEntry> const &entries)
 } // namespace
 
 std::shared_ptr<const StorageItemWrapper>
-RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item, StorageCostModel const* cost_model) const
+RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item,
+                              StorageCostModel const *cost_model) const
 {
   assert(!consumer_lock_);
 
@@ -154,7 +156,8 @@ RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item, StorageCo
           RetrocausalQueue(parent, consume_delta,
                            RetrocausalQueueBlock{.entries = new_block,
                                                  .block_number =
-                                                     new_block_number}), cost_model);
+                                                     new_block_number}),
+          cost_model);
     }
     return std::make_shared<const StorageItemWrapper>(
         RetrocausalQueue(parent, consume_delta), cost_model);
@@ -172,14 +175,20 @@ RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item, StorageCo
 }
 
 int128_t
-RetrocausalQueueArgs::get_current_committed_cost(StorageCostModel const* current_model, StorageItemWrapper const* base_item) const
+RetrocausalQueueArgs::get_current_committed_cost(
+    StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
 {
   auto stats = get_current_committed_stats(base_item);
-  return current_model->kBaseItemCost + current_model->get_retrocausal_queue_cost(stats.active_size, stats.active_block_count);
+  return current_model->kBaseItemCost +
+         current_model->get_retrocausal_queue_cost(stats.active_size,
+                                                   stats.active_block_count);
 }
 
 int128_t
-RetrocausalQueueArgs::get_marginal_cost_upper_bound(StorageDelta const& delta, StorageCostModel const* current_model, StorageItemWrapper const* base_item) const
+RetrocausalQueueArgs::get_marginal_cost_upper_bound(
+    StorageDelta const &delta, StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
 {
   assert(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
 
@@ -188,46 +197,59 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(StorageDelta const& delta, S
   // This doesn't mean returning a negative cost, but rather
   // that a delta that consumes 100 entries and
   // creates 100 entries can have a net cost of 0.
-  // this requires checking over the past stats, which we have not implemented yet here.
- /*
-  auto past_stats = [&] {
-    if (base_item) {
-      assert(base_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
-      auto const &queue = base_item->queue();
+  // this requires checking over the past stats, which we have not implemented
+  // yet here.
+  /*
+   auto past_stats = [&] {
+     if (base_item) {
+       assert(base_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
+       auto const &queue = base_item->queue();
 
-      if (past_consume_delta_) {
-        assert(!delta.retrocausal_queue().consume);
-        return queue.get_stats_after_consume(*past_consume_delta_);
-      }
-      if (delta.retrocausal_queue().consume) {
-        assert(consumer_lock_);
-        return queue.get_stats_after_consume(delta.retrocausal_queue().consume->past_block_consume);
-      }
-      return queue.get_active_stats();
-    }
-    return RetrocausalQueueStats{.active_block_count = 0, .active_size = 0};
-  }(); */
+       if (past_consume_delta_) {
+         assert(!delta.retrocausal_queue().consume);
+         return queue.get_stats_after_consume(*past_consume_delta_);
+       }
+       if (delta.retrocausal_queue().consume) {
+         assert(consumer_lock_);
+         return
+   queue.get_stats_after_consume(delta.retrocausal_queue().consume->past_block_consume);
+       }
+       return queue.get_active_stats();
+     }
+     return RetrocausalQueueStats{.active_block_count = 0, .active_size = 0};
+   }(); */
 
-  int64_t new_inserted_entries = delta.retrocausal_queue().insert.added_entries.size();
+  int64_t new_inserted_entries =
+      delta.retrocausal_queue().insert.added_entries.size();
   if (delta.retrocausal_queue().consume) {
-    new_inserted_entries -= delta.retrocausal_queue().consume->current_block_consumed.size();
+    new_inserted_entries -=
+        delta.retrocausal_queue().consume->current_block_consumed.size();
   }
 
   // We can only create a new block if we insert entries
-
-  bool new_block_maybe_created = !delta.retrocausal_queue().insert.added_entries.empty();
+  bool new_block_maybe_created =
+      !delta.retrocausal_queue().insert.added_entries.empty();
+  if (past_consume_delta_.has_value() && !persistable_entries_.empty()) {
+    // if we've already done the consume for this block and still have a
+    // nonempty block to add, no need to reserve creating a new block
+    new_block_maybe_created = false;
+  }
 
   RetrocausalQueueStats new_stats = {
       .active_block_count = new_block_maybe_created ? 1U : 0U,
       .active_size = std::max<int64_t>(0, new_inserted_entries)};
 
-  int128_t base_cost = (base_item || insert_committed_ || past_consume_delta_) ? 0 : current_model->kBaseItemCost;
+  int128_t base_cost = (base_item || insert_committed_ || past_consume_delta_)
+                           ? 0
+                           : current_model->kBaseItemCost;
 
-  return base_cost + current_model->get_retrocausal_queue_cost(new_stats.active_size, new_stats.active_block_count);
+  return base_cost + current_model->get_retrocausal_queue_cost(
+                         new_stats.active_size, new_stats.active_block_count);
 }
 
 RetrocausalQueueStats
-RetrocausalQueueArgs::get_current_committed_stats(StorageItemWrapper const* base_item) const
+RetrocausalQueueArgs::get_current_committed_stats(
+    StorageItemWrapper const *base_item) const
 {
   auto past_stats = [&] {
     if (base_item) {
@@ -242,16 +264,19 @@ RetrocausalQueueArgs::get_current_committed_stats(StorageItemWrapper const* base
     return RetrocausalQueueStats{.active_block_count = 0, .active_size = 0};
   }();
 
-  int64_t current_block_size = persistable_entries_.size() - consumed_but_not_inserted_entries_.size();
+  int64_t current_block_size =
+      persistable_entries_.size() - consumed_but_not_inserted_entries_.size();
 
-  RetrocausalQueueStats new_stats = {
-      .active_block_count =
-          (persistable_entries_.empty()) ? 0U : 1U,
-      .active_size = current_block_size};
+  RetrocausalQueueStats new_stats = {.active_block_count =
+                                         (persistable_entries_.empty()) ? 0U
+                                                                        : 1U,
+                                     .active_size = current_block_size};
 
-  return RetrocausalQueueStats{
-      .active_block_count = past_stats.active_block_count + new_stats.active_block_count,
-      .active_size = past_stats.active_size + new_stats.active_size};
+  return RetrocausalQueueStats{.active_block_count =
+                                   past_stats.active_block_count +
+                                   new_stats.active_block_count,
+                               .active_size = past_stats.active_size +
+                                              new_stats.active_size};
 }
 
 /*
@@ -438,7 +463,8 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
 
 std::shared_ptr<const StorageItemWrapper>
 RefcountedDeltaVariant::to_item(
-    std::shared_ptr<const StorageItemWrapper> previous_item, StorageCostModel const* cost_model) const
+    std::shared_ptr<const StorageItemWrapper> previous_item,
+    StorageCostModel const *cost_model) const
 {
   if (refcount_ > 0) {
     return std::visit(
@@ -453,8 +479,9 @@ RefcountedDeltaVariant::to_item(
                              }) {
             return arm.to_item(previous_item.get(), cost_model);
           }
-          else if constexpr (requires(decltype(arm) &a,
-                                      std::shared_ptr<const StorageItemWrapper> b) {
+          else if constexpr (requires(
+                                 decltype(arm) &a,
+                                 std::shared_ptr<const StorageItemWrapper> b) {
                                a.to_item(b);
                              }) {
             return arm.to_item(previous_item);
@@ -469,23 +496,28 @@ RefcountedDeltaVariant::to_item(
 }
 
 int128_t
-RefcountedDeltaVariant::get_current_committed_cost(StorageCostModel const* current_model, StorageItemWrapper const* base_item) const
+RefcountedDeltaVariant::get_current_committed_cost(
+    StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
 {
   return std::visit(
-      [&](auto const &args) { return args.get_current_committed_cost(current_model, base_item); },
+      [&](auto const &args) {
+        return args.get_current_committed_cost(current_model, base_item);
+      },
       variant_);
 }
 
-
 int128_t
 RefcountedDeltaVariant::get_marginal_cost_upper_bound(
-    StorageDelta const& delta, 
-    StorageCostModel const* current_model, 
-    StorageItemWrapper const* base_item) const
+    StorageDelta const &delta, StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
 {
   assert(refcount_ > 0);
   int128_t out = std::visit(
-      [&](auto const &args) { return args.get_marginal_cost_upper_bound(delta, current_model, base_item); },
+      [&](auto const &args) {
+        return args.get_marginal_cost_upper_bound(delta, current_model,
+                                                  base_item);
+      },
       variant_);
   assert(out >= 0);
   return out;
