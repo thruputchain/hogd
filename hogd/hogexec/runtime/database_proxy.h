@@ -4,8 +4,10 @@
 #include <memory>
 #include <optional>
 #include <variant>
+#include <vector>
 
 #include "contract.hh"
+#include "coord.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -23,9 +25,17 @@ struct LocalMockDB {
   uint32_t read_port_number_;
 };
 
+struct ShardedDB {
+  ShardedDB(IntroExecResult const &coord_info)
+    : shards_(coord_info.shards.begin(), coord_info.shards.end())
+  {}
+
+  std::vector<ShardCard> shards_;
+};
+
 // Information identifying where and how to access the database.
 // LocalMockDB redirects RPC calls to a server on localhost.
-using DatabaseIdentifier = std::variant<LocalMockDB>;
+using DatabaseIdentifier = std::variant<LocalMockDB, ShardedDB>;
 
 // Abstract away database sharding from the rest of the executor.
 // Handles the RPC Error codes, changing them into restricted forms

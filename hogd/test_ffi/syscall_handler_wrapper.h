@@ -111,16 +111,12 @@ ForeignHostFnResult constexpr from_status(
   return from_status(status.first);
 }
 
-ForeignHostFnResult constexpr from_status(HostFnResult result)
+constexpr std::pair<HostFnErrorCode, SyscallErrorCode>
+convert_return_t(HostFnStatus<SyscallErrorCode> status)
 {
-  return ForeignHostFnResult{.result_code = result.second,
-                             .panic = std::to_underlying(result.first)};
-}
-
-ForeignHostFnResult constexpr from_status(
-    std::pair<HostFnResult, GasAmount> status)
-{
-  return from_status(status.first);
+  return {status.has_value() ? HostFnErrorCode::kHostNoneOrRecoverable
+                             : status.error().code(),
+          status.has_value() ? status.value() : SyscallErrorCode::kNone};
 }
 
 // Parse the arguments of a syscall and forward them to run_mock_func_inner
@@ -192,15 +188,10 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     // Print the output of the syscall.  The outputs in parsed_args should only
     // be written to if the syscall succeeds.
     if (syscall_logfd != -1) {
-      auto [host_fn_code, syscall_code] = convert_return_t(res.first);
       std::string log_string;
-      if (host_fn_code != HostFnErrorCode::kHostNoneOrRecoverable ||
-          syscall_code != 0) {
-        log_string = std::format("Syscall Error: {} {}",
-                                 HostFnErrorCategory{}.message(
-                                     std::to_underlying(host_fn_code)),
-                                 x23::show(SyscallErrorCode(syscall_code))) +
-                     "\n";
+      if (!res.first.has_value() ||
+          res.first.value() != SyscallErrorCode::kNone) {
+        log_string = syscall_error_message(res.first);
       }
       else {
         log_string =

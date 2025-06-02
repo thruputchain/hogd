@@ -48,7 +48,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto const &calldata = handler.get_calldata();
              auto key = make_storage_key("test");
              auto res =
@@ -61,11 +61,11 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             return 0;
+             return {};
            }},
           {1,
            [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              auto res = handler.get_bytestring(key);
              if (!res.has_value()) {
@@ -81,11 +81,11 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
                          res.value().value().size());
 
              handler.set_return_buffer(std::move(out));
-             return 0;
+             return {};
            }},
           {2,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              auto calldata = handler.get_calldata();
 
              auto [r0, _g0] = handler.invoke(
@@ -128,7 +128,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             return 0;
+             return {};
            }}});
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
@@ -157,8 +157,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
       runtime_context);
 
   auto res = handler.root_invoke();
-  ASSERT_TRUE(res.result_);
-  ASSERT_EQ(*res.result_, 0);
+  ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction()();
   ASSERT_TRUE(r.has_value());
@@ -173,7 +172,7 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              auto const &calldata = handler.get_calldata();
              auto [r0, _g0] = handler.invoke(
                  Invocation{.invoked_address = handler.get_current_address(),
@@ -191,11 +190,11 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             return 0;
+             return {};
            }},
           {1,
            [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              auto res =
                  handler.set_bytestring(key, std::as_bytes(std::span{"hello"}));
@@ -203,7 +202,7 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
                return res.error().to_invoke_error();
              }
 
-             return 0;
+             return {};
            }},
       });
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -233,8 +232,7 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
       runtime_context);
 
   auto res = handler.root_invoke();
-  ASSERT_TRUE(res.result_);
-  ASSERT_EQ(*res.result_, 0);
+  ASSERT_TRUE(res.is_root_success());
 
   auto r = handler.try_commit_transaction()();
   ASSERT_TRUE(r.has_value());
@@ -267,29 +265,29 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              auto res =
                  handler.set_bytestring(key, std::as_bytes(std::span{"hello"}));
              if (!res.has_value()) {
                return res.error().to_invoke_error();
              }
-             return 0;
+             return {};
            }},
           {1,
            [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
              auto res =
                  handler.set_bytestring(key, std::as_bytes(std::span{"world"}));
              if (!res.has_value()) {
                return res.error().to_invoke_error();
              }
-             return 0;
+             return {};
            }},
           {2,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              // Try invoke method 0
              auto [r0, _g0] = handler.invoke(
                  Invocation{.invoked_address = handler.get_current_address(),
@@ -312,11 +310,11 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             return 0;
+             return {};
            }},
           {3,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              // Try invoke method 0
              auto [r0, _g0] = handler.invoke(
                  Invocation{.invoked_address = handler.get_current_address(),
@@ -333,7 +331,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
            }},
           {4,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              // Regular invoke of method 3
              auto [r0, _g0] = handler.invoke(
                  Invocation{.invoked_address = handler.get_current_address(),
@@ -356,7 +354,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
              if (!r1.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             return 0;
+             return {};
            }},
       });
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -387,8 +385,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
                 }},
         runtime_context);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -456,8 +453,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
                 }},
         runtime_context);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -501,7 +497,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [](SystemCallHandler &handler,
-              NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+              NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto const &calldata = handler.get_calldata();
              if (calldata.size() != 2) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -525,11 +521,11 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             return 0; // Success
+             return {}; // Success
            }},
           {1,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              auto const &calldata = handler.get_calldata();
              if (calldata.size() != 2) { // Expecting two booleans
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -571,11 +567,11 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             return 0;
+             return {};
            }},
           {2,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              auto const &calldata = handler.get_calldata();
              if (calldata.size() != 1) { // Expecting one boolean
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -599,7 +595,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
              if (invoke_succeeded != expect_invoke_succeeds) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             return 0;
+             return {};
            }}});
 
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -632,8 +628,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
       runtime_context);
   {
     auto res = tc1_handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
   }
 
   // TC1.2: Then, in the same block, before committing the first transaction,
@@ -652,8 +647,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
       runtime_context);
   {
     auto res = tc1_handler2.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc1_handler2.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -681,8 +675,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
       runtime_context);
   {
     auto res = tc1_handler3.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc1_handler3.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -715,8 +708,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
       runtime_context);
   {
     auto res = tc2_handler1.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc2_handler1.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -735,8 +727,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
       runtime_context);
   {
     auto res = tc2_handler2.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = tc2_handler2.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -775,7 +766,7 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [str_abc](SystemCallHandler &handler,
-                     NativeRuntime &) -> InvokeStatus<int32_t> {
+                     NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
              auto res =
                  handler.set_bytestring(key0,
@@ -784,11 +775,11 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
                return res.error().to_invoke_error();
              if (!res.value().has_value())
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return 0;
+             return {};
            }},
           {1,
            [str_abc, str_def](SystemCallHandler &handler,
-                              NativeRuntime &) -> InvokeStatus<int32_t> {
+                              NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
              auto key1 = make_storage_key("test1");
              auto res0 =
@@ -801,11 +792,11 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
                                         std::as_bytes(std::span(str_def)));
              if (!res1.has_value() || !res1.value().has_value())
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return 0;
+             return {};
            }},
           {2,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              // First, try_invoke method 1 (should fail)
              auto [r1, _g1] = handler.invoke(
                  Invocation{.invoked_address = handler.get_current_address(),
@@ -832,7 +823,7 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
              if (!r0.has_value() || r0.value() != SyscallErrorCode::kNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             return 0;
+             return {};
            }}});
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -855,8 +846,7 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
                                            .calldata = {}}}},
       runtime_context);
   auto res = handler.root_invoke();
-  ASSERT_TRUE(res.result_);
-  ASSERT_EQ(*res.result_, 0);
+  ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
@@ -916,7 +906,7 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [str_abc](SystemCallHandler &handler,
-                     NativeRuntime &) -> InvokeStatus<int32_t> {
+                     NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
              auto res =
                  handler.set_bytestring(key0,
@@ -925,11 +915,11 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
                return res.error().to_invoke_error();
              if (!res.value().has_value())
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return 0;
+             return {};
            }},
           {1,
            [str_def](SystemCallHandler &handler,
-                     NativeRuntime &) -> InvokeStatus<int32_t> {
+                     NativeRuntime &) -> InvokeStatus<void> {
              auto key1 = make_storage_key("test1");
              auto res =
                  handler.set_bytestring(key1,
@@ -938,11 +928,11 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
                return res.error().to_invoke_error();
              if (!res.value().has_value())
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return 0;
+             return {};
            }},
           {2,
            [str_ghi](SystemCallHandler &handler,
-                     NativeRuntime &) -> InvokeStatus<int32_t> {
+                     NativeRuntime &) -> InvokeStatus<void> {
              auto key2 = make_storage_key("test2");
              auto res =
                  handler.set_bytestring(key2,
@@ -951,11 +941,11 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
                return res.error().to_invoke_error();
              if (!res.value().has_value())
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return 0;
+             return {};
            }},
           {3,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              // Try invoke method 0
              auto [r0, _g0] = handler.invoke(
                  Invocation{.invoked_address = handler.get_current_address(),
@@ -993,7 +983,7 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
              if (r2.value() == SyscallErrorCode::kNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             return 0;
+             return {};
            }}});
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -1017,8 +1007,7 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
                                            .calldata = {}}}},
       runtime_context);
   auto res = handler.root_invoke();
-  ASSERT_TRUE(res.result_);
-  ASSERT_EQ(*res.result_, 0);
+  ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
@@ -1092,7 +1081,7 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
            [str_short](SystemCallHandler &handler,
-                       NativeRuntime &) -> InvokeStatus<int32_t> {
+                       NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
              auto res =
                  handler.set_bytestring(key0,
@@ -1101,11 +1090,11 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
                return res.error().to_invoke_error();
              if (!res.value().has_value())
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return 0;
+             return {};
            }},
           {1,
            [str_medium](SystemCallHandler &handler,
-                        NativeRuntime &) -> InvokeStatus<int32_t> {
+                        NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
              auto res =
                  handler.set_bytestring(key0,
@@ -1114,11 +1103,11 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
                return res.error().to_invoke_error();
              if (!res.value().has_value())
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return 0;
+             return {};
            }},
           {2,
            [str_long](SystemCallHandler &handler,
-                      NativeRuntime &) -> InvokeStatus<int32_t> {
+                      NativeRuntime &) -> InvokeStatus<void> {
              auto key0 = make_storage_key("test0");
              auto res =
                  handler.set_bytestring(key0,
@@ -1127,11 +1116,11 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
                return res.error().to_invoke_error();
              if (!res.value().has_value())
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             return 0;
+             return {};
            }},
           {3,
            [](SystemCallHandler &handler,
-              NativeRuntime &runtime) -> InvokeStatus<int32_t> {
+              NativeRuntime &runtime) -> InvokeStatus<void> {
              // Try invoke method 0 (short)
              auto [r0, _g0] = handler.invoke(
                  Invocation{.invoked_address = handler.get_current_address(),
@@ -1168,7 +1157,7 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
              if (r2.value() == SyscallErrorCode::kNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             return 0;
+             return {};
            }}});
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
@@ -1192,8 +1181,7 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
                                            .calldata = {}}}},
       runtime_context);
   auto res = handler.root_invoke();
-  ASSERT_TRUE(res.result_);
-  ASSERT_EQ(*res.result_, 0);
+  ASSERT_TRUE(res.is_root_success());
   auto commit_res = handler.try_commit_transaction()();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);

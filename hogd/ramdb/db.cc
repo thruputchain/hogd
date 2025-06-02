@@ -4,6 +4,8 @@
 #include <bit>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
+#include <future>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stop_token>
@@ -173,6 +175,7 @@ Database::background_worker(const std::stop_token &stoken)
   while (true) {
     bool expand = false;
     bool compact;
+    bool snapshot;
     {
       // wait for change in status or timeout.
       std::scoped_lock g(lock_);
@@ -181,13 +184,20 @@ Database::background_worker(const std::stop_token &stoken)
       cv_.wait_for(lock_, stoken, 1s,
                    [this] { return run_expand_ || run_compact_; });
       if (stoken.stop_requested())
-        return;
-      compact = run_compact_;
+        break;
+
+      snapshot = snapshotter_.has_value();
+      compact = std::exchange(run_compact_, false);
       run_expand_ = false;
 
       // check if the buckets need to be expanded.
       if (!active_ && map_.prepare_expand())
         expand = true;
+    }
+
+    if (snapshot) {
+      if (snapshotter_->snapshot())
+        snapshotter_.reset();
     }
 
     // run item compactor if needed.
@@ -215,6 +225,12 @@ Database::background_worker(const std::stop_token &stoken)
       disk_writer_.print_stats();
     }
   }
+
+  info("Snapshot ongoing during database teardown; finishing up.");
+  while (snapshotter_) {
+    if (snapshotter_->snapshot())
+      snapshotter_.reset();
+  }
 }
 
 size_t
@@ -239,9 +255,55 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   heap_size += cores * kLogletRegionSize * 2;
 
   // add disk buffering overhead.
-  heap_size += (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize;
+  // Times two because need buffering for both snapshotter and normal ops.
+  heap_size +=
+      (2 * (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize);
 
   return heap_size;
+}
+
+DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
+Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
+{
+  DBStatus<uint64_t> ret = sync();
+  if (!ret) [[unlikely]]
+    return ret.error();
+
+  uint64_t end_lsn = ret.value();
+
+  info("begin snapshot from lsn {} -> lsn {} to {}", begin_lsn, end_lsn, path);
+
+  if (begin_lsn > end_lsn) {
+    warn("bad snapshot begin and end lsns {} to {}", begin_lsn, end_lsn);
+    return DBError{DBCode::kTooBig};
+  }
+
+  std::future<DBStatus<void>> future{};
+  {
+    std::scoped_lock g(lock_);
+
+    if (snapshotter_) {
+      warn("tried to start a snapshot while one was already ongoing");
+      return DBError{DBCode::kExists};
+    }
+
+    constexpr bool kChunkedSnapshot = false;
+    constexpr size_t kMaxFileSize = kChunkedSnapshot
+                                        ? kDiskLogFileThreshold
+                                        : std::numeric_limits<size_t>::max();
+
+    // put()s with lsn s.t. begin_lsn <= lsn <= end_lsn
+    snapshotter_.emplace(pool_, map_, item_allocator_, begin_lsn, end_lsn,
+                         *loglet_allocator_, dir_, path, kMaxFileSize,
+                         write_head_order_);
+
+    future = snapshotter_->get_future();
+
+    // trigger background worker which serializes the work with compacting
+    cv_.notify_one();
+  }
+
+  return std::pair{end_lsn, std::move(future)};
 }
 
 } // namespace hogd

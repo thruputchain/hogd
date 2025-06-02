@@ -87,7 +87,7 @@ WasmiRuntime::get_memory() noexcept
   return std::as_writable_bytes(std::span<uint8_t>(slice.mem, slice.sz));
 }
 
-InvokeStatus<int32_t>
+InvokeStatus<void>
 WasmiRuntime::invoke_internal(std::string_view method_name)
 {
   assert(wasmi_runtime_ptr_ != nullptr);
@@ -101,7 +101,7 @@ WasmiRuntime::invoke_internal(std::string_view method_name)
   if (wasmi_error != InvokeErrorCode::kInvokeNone) {
     return InvokeError{wasmi_error};
   }
-  return res.result;
+  return {};
 }
 
 uint64_t

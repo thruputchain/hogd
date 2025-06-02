@@ -65,7 +65,7 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
   uint64_t prev_gas_limit = get_available_gas();
   set_available_gas(gas_limit);
 
-  InvokeStatus<int32_t> res = invoke_internal(method_name);
+  auto res = invoke_internal(method_name);
 
   uint64_t gas_remaining = get_available_gas();
   assert(gas_remaining <= gas_limit);

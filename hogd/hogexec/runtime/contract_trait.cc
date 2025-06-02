@@ -1,4 +1,4 @@
-#include "hogd/hogexec/preset_contracts/shared.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 
 #include <cassert>
 #include <cstring>

@@ -121,6 +121,9 @@ public:
   ErrnoStatus<void> unlink(std::string_view filename) const;
   // unlink_all deletes all files in this directory.
   ErrnoStatus<void> unlink_all() const;
+  // renames old_path to new_path in this directory.
+  ErrnoStatus<void> rename(std::string_view old_path,
+                           std::string_view new_path) const;
   // sync flushes all modified directory data to the storage device.
   ErrnoStatus<void> sync() const;
 

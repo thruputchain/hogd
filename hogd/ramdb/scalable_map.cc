@@ -176,9 +176,12 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
   // Write to on-disk log first.
   size_t hash = calculate_hash(key);
   ScopedDiskWrite record = disk_writer_.write_record(hash);
-  DBStatus<void> ret = record.modify(item);
+  DBStatus<uint64_t> ret = record.modify(item);
   if (!ret) [[unlikely]]
     return ret.error();
+
+  const uint64_t new_lsn = *ret;
+  item->lsn = new_lsn;
 
   auto [ul, bu, cnt] = acquire_bucket(hash);
   record.reset();
@@ -187,9 +190,19 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
   // Check if the key already exists.
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
+      // If the item that is about to be overwritten should be included in an
+      // ongoing snapshot, make sure the snapshot gets a copy of the item.
+      uint64_t &old_lsn = (*bu)->lsn;
+      if (snap_end_lsn_ && old_lsn >= snap_begin_lsn_ &&
+          old_lsn < snap_end_lsn_)
+        snap_add_item_cb_(hash, *bu);
+
       // Is the item size unchanged? Update in place.
       if ((*bu)->get_value().size() == val.size()) {
         (*bu)->type = type;
+        // Updating the LSN for update-in-place ensures that we don't
+        // inadvertently forward this new value into an ongoing snapshot.
+        (*bu)->lsn = new_lsn;
         std::ranges::copy(val, (*bu)->get_value().begin());
         allocator_.free<true>(item);
         return {};
@@ -359,17 +372,35 @@ ScalableMap::do_expand()
 }
 
 bool
-ScalableMap::modify_locked(std::span<const std::byte> key,
-                           const std::function<void(ItemHeader **h)> &fn)
+ScalableMap::modify_locked(
+    std::span<const std::byte> key,
+    const std::function<void(ItemHeader **h, size_t hash)> &fn)
 {
-  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  size_t hash = calculate_hash(key);
+  auto [ul, bu, ignore] = acquire_bucket(hash);
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
-      fn(bu);
+      fn(bu, hash);
       return true;
     }
   }
   return false;
+}
+
+void
+ScalableMap::register_in_progress_snapshot(
+    uint64_t begin_lsn, uint64_t end_lsn,
+    std::function<void(uint64_t, ItemHeader *)> add_item_cb)
+{
+  std::vector<std::unique_lock<std::mutex>> locks{mutexes_.begin(),
+                                                  mutexes_.end()};
+
+  snap_begin_lsn_ = begin_lsn;
+  snap_end_lsn_ = end_lsn;
+
+  snap_add_item_cb_ = std::move(add_item_cb);
+  debug("Registered snapshot range as {} to {}", snap_begin_lsn_,
+        snap_end_lsn_);
 }
 
 } // namespace hogd

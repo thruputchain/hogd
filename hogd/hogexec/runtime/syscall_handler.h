@@ -97,7 +97,7 @@ public:
   SystemStatus<SyscallStatus<ContractAddress>>
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
-  bool current_runtime_is_revert_poisoned() const;
+  ProposalModeData const &get_proposal_data() const;
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
@@ -124,6 +124,13 @@ public:
                            std::span<const std::byte> queue_entry);
   SystemStatus<SyscallStatus<QueueEntry>>
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
+
+  // == Native token syscalls ==
+  SystemStatus<int128_t>
+  get_native_token_balance(ContractAddress const &contract_address);
+  SystemStatus<SyscallStatus<void>>
+  modify_native_token_balance(ContractAddress const &contract_address,
+                              int128_t transfer_amount);
 
 private:
   std::shared_ptr<RuntimeContext> runtime_context_;

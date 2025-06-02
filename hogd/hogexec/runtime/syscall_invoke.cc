@@ -68,7 +68,7 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnResult, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      WrappedGasAmount remaining_gas,
                      const ContractAddress &input_address,
@@ -99,13 +99,11 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
       output_return_buffer_len = 0;
     }
 
-    return {{HostFnErrorCode::kHostNoneOrRecoverable,
-             static_cast<int32_t>(*invoke_res)},
-            gas_amount};
+    return {SyscallErrorCode::kNone, gas_amount};
   }
   // Invocation encountered some error
   output_return_buffer_len = 0;
-  return {{invoke_res.error().code(), 0}, gas_amount};
+  return {invoke_res, gas_amount};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -144,10 +142,10 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnResult, GasAmount>
-syscall_Exit_inner(const int32_t input_code)
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_Exit_inner()
 {
-  return {{HostFnErrorCode::kHostExit, input_code}, 0};
+  return {HostFnError{HostFnErrorCode::kHostExit}, 0};
 }
 
 } // namespace hogd

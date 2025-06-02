@@ -21,16 +21,16 @@
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
 
 namespace hogd {
 
 DBStatus<File>
-DiskWriter::create_log_file()
+DiskWriter::create_next_file()
 {
-  std::string filename = std::format("{}.log", cur_lsn_);
+  std::string filename =
+      std::vformat(filename_format_, std::make_format_args(cur_lsn_));
 
   // create the new log file.
   DBStatus<File> f =
@@ -72,8 +72,9 @@ DiskWriter::write_worker(const std::stop_token &stoken)
   };
 
   // create the log file.
-  DBStatus<File> f = create_log_file();
+  DBStatus<File> f = create_next_file();
   if (!f) {
+    warn("couldn't create initial file: {}", f.error());
     signal_ioerror();
     return;
   }
@@ -110,6 +111,7 @@ DiskWriter::write_worker(const std::stop_token &stoken)
         // write the commit record and sync everything to disk.
         if (!write_full(w, std::as_writable_bytes(std::span(commit_buf)))
                  .and_then([&w] { return w.flush_and_sync(); })) [[unlikely]] {
+          warn("couldn't sync buffer to disk");
           signal_ioerror();
           return;
         }
@@ -124,11 +126,12 @@ DiskWriter::write_worker(const std::stop_token &stoken)
         }
 
         // start a new log file if the current size exceeds the threshold.
-        if (bytes_written > kDiskLogFileThreshold) {
+        if (bytes_written > file_size_threshold_) {
           assert(w.empty());
           bytes_written = 0;
-          f = create_log_file();
+          f = create_next_file();
           if (!f) {
+            warn("couldn't create next file: {}", f.error());
             signal_ioerror();
             return;
           }
@@ -141,6 +144,7 @@ DiskWriter::write_worker(const std::stop_token &stoken)
       crc = crc32c_append(crc, ll->get_bytes());
       ErrnoStatus<void> ret = write_full(w, ll->get_bytes());
       if (!ret) [[unlikely]] {
+        warn("couldn't sync buffer to disk");
         signal_ioerror();
         return;
       }
@@ -222,7 +226,7 @@ ScopedDiskWrite::get_loglet(size_t kv_len)
   return head_.ll.get();
 }
 
-DBStatus<void>
+DBStatus<uint64_t>
 ScopedDiskWrite::modify(ItemHeader *src)
 {
   assert(ul_.owns_lock());
@@ -236,8 +240,9 @@ ScopedDiskWrite::modify(ItemHeader *src)
   ItemHeader *dst = ll->clone(src);
   assert(dst != nullptr);
   dst->lsn = w_.cur_lsn_;
+  dst->next = nullptr;
   std::ranges::copy(src->get_key_and_value(), dst->get_key_and_value().begin());
-  return {};
+  return {dst->lsn};
 }
 
 DBStatus<void>
