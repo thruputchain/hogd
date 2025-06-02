@@ -31,28 +31,24 @@ RetrocausalQueue::RetrocausalQueue(
          current_round_block.block_number);
   apply_consume_delta(consume_delta);
 
-  // only do the insert if the block is actually nonempty
-  if (!current_round_block.entries.empty()) {
-    [[maybe_unused]] auto res =
-        blocks_.emplace(current_block_number_,
-                        std::make_shared<BlockState>(
-                            BlockState{.block_ = std::move(current_round_block),
-                                       .cumulative_prior_size_ =
-                                           parent.total_size_}));
-    assert(res.second);
-  }
+  // This ctor should only be called on nonempty blocks
+  assert(!current_round_block.entries.empty());
+  [[maybe_unused]] auto res =
+      blocks_.emplace(current_block_number_,
+                      std::make_shared<BlockState>(
+                          BlockState{.block_ = std::move(current_round_block),
+                                      .cumulative_prior_size_ =
+                                          parent.total_size_}));
+  assert(res.second);
   assert(current_block_number_ > parent.current_block_number_);
 }
 
 RetrocausalQueue::RetrocausalQueue(
     RetrocausalQueue const &parent,
     RetrocausalQueuePastBlockConsumeDelta const &consume_delta)
-  : current_block_number_(parent.current_block_number_),
+  : blocks_(parent.blocks_), current_block_number_(parent.current_block_number_),
     total_size_(parent.total_size_), consumed_size_(parent.consumed_size_)
 {
-  for (auto const &[block_number, block] : parent.blocks_) {
-    blocks_.emplace(block_number, block);
-  }
   apply_consume_delta(consume_delta);
 }
 

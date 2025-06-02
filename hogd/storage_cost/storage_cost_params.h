@@ -5,7 +5,7 @@
 
 namespace hogd {
 
-class StorageCostModel;
+struct StorageCostModel;
 
 // Storage cost parameters.
 // These are computed from a StorageItem.

@@ -35,7 +35,7 @@ TEST(RetrocausalQueue, InsertThenConsume)
   RetrocausalQueue queue3(queue2,
                           {.max_fully_consumed_block_number = 0,
                            .partial_consumed_number = 3},
-                          {.entries = {}, .block_number = 2});
+                          {.entries = {make_test_queue_entry(7)}, .block_number = 2});
 
   auto const *blk2 = queue3.try_get_next_block(1);
   ASSERT_TRUE(blk2);
@@ -65,7 +65,7 @@ TEST(RetrocausalQueue, ClearSeveralBlocks)
       RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number =
                                                 25,
                                             .partial_consumed_number = 1},
-      RetrocausalQueueBlock{.entries = {}, .block_number = 52});
+      RetrocausalQueueBlock{.entries = {make_test_queue_entry(0)}, .block_number = 52});
 
   const auto *next_entries = queue->try_get_next_block(0);
   ASSERT_TRUE(next_entries);
@@ -118,27 +118,6 @@ TEST(RetrocausalQueue, CostCountingBasic)
       queue3.get_stats_after_consume(RetrocausalQueuePastBlockConsumeDelta{
           .max_fully_consumed_block_number = 0, .partial_consumed_number = 2}),
       (RetrocausalQueueStats{.active_block_count = 2, .active_size = 5}));
-}
-
-TEST(RetrocausalQueue, EmptyBlockInsert)
-{
-  RetrocausalQueue queue(0);
-  RetrocausalQueue queue2(
-      queue,
-      RetrocausalQueuePastBlockConsumeDelta{.max_fully_consumed_block_number =
-                                                0,
-                                            .partial_consumed_number = 0},
-      RetrocausalQueueBlock{.entries = {}, .block_number = 1});
-  auto const *blk = queue2.try_get_next_block(0);
-  ASSERT_FALSE(blk);
-
-  EXPECT_EQ(queue2.get_current_block_number(), 1);
-
-  RetrocausalQueue queue3(queue2, RetrocausalQueuePastBlockConsumeDelta{
-                                      .max_fully_consumed_block_number = 0,
-                                      .partial_consumed_number = 0});
-
-  EXPECT_EQ(queue3.get_current_block_number(), 1);
 }
 
 } // namespace hogd

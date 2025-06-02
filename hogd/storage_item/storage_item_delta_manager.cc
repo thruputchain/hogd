@@ -9,6 +9,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/refcounted_delta_variant.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -23,10 +24,10 @@ namespace hogd {
 
 StorageItemDeltaManager::StorageItemDeltaManager(
     std::shared_ptr<const StorageItemWrapper> snapshot_state,
-    InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode)
+    InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode, StorageCostModel const* cost_model)
   : committed_item_(std::move(snapshot_state)),
-    committed_item_cost_(committed_item_ ? committed_item_->storage_cost() : 0),
-    invalid_state_flag_(invalid_state_flag), execution_mode_(execution_mode)
+    committed_item_cost_(committed_item_ ? committed_item_->storage_cost(cost_model) : 0),
+    invalid_state_flag_(invalid_state_flag), cost_model_(cost_model), execution_mode_(execution_mode)
 {}
 
 bool
@@ -96,6 +97,7 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   assert(variant_.refcount() > 0);
   switch (delta.type()) {
   case StorageDeltaType::kDeltaTypeBytestringSet:
+    variant_.get_variant_arm_unchecked<BytestringArgs>().commit_set();
     break;
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
   {
@@ -154,7 +156,7 @@ void
 StorageItemDeltaManager::produce_next_round_item()
 {
   if (!round_committed_) {
-    next_round_item_ = variant_.to_item(committed_item_);
+    next_round_item_ = variant_.to_item(committed_item_, cost_model_);
     round_committed_ = true;
   }
 }
@@ -178,14 +180,12 @@ StorageItemDeltaManager::try_acquire_exclusive_lock(
         variant_.try_set_variant<ExclusiveLockedState>();
     assert(res);
 
-    auto required_cost =
-        variant_.get_cost_after_commit(delta, committed_item_.get());
+    auto required_cost = variant_.get_marginal_cost_upper_bound(delta, cost_model_, committed_item_.get());
 
     return MeteredStorageLock{
         .lock_ = StorageLock(desired_lock_type),
         .locked_tokens_ =
-            std::max<int128_t>(0, required_cost - unreleased_storage_cost_ -
-                                      committed_item_cost_),
+            std::max<int128_t>(0, required_cost),
     };
   }
 
@@ -214,14 +214,12 @@ StorageItemDeltaManager::try_acquire_exclusive_lock(
     [[maybe_unused]] auto *r = variant_.try_set_variant<ExclusiveLockedState>();
     assert(r);
 
-    auto required_cost =
-        variant_.get_cost_after_commit(delta, committed_item_.get());
+    auto required_cost = variant_.get_marginal_cost_upper_bound(delta, cost_model_, committed_item_.get());
 
     return MeteredStorageLock{
         .lock_ = StorageLock(desired_lock_type),
         .locked_tokens_ =
-            std::max<int128_t>(0, required_cost - unreleased_storage_cost_ -
-                                      committed_item_cost_),
+            std::max<int128_t>(0, required_cost),
     };
   }
   case StorageLockType::kExclusiveLock:
@@ -230,14 +228,12 @@ StorageItemDeltaManager::try_acquire_exclusive_lock(
     // This technically seems like acquiring the lock that we already have
     // but this lets the external logic be agnostic to whether we already have
     // the lock or not.
-    auto required_cost =
-        variant_.get_cost_after_commit(delta, committed_item_.get());
+    auto required_cost = variant_.get_marginal_cost_upper_bound(delta, cost_model_, committed_item_.get());
 
     return MeteredStorageLock{
         .lock_ = StorageLock(desired_lock_type),
         .locked_tokens_ =
-            std::max<int128_t>(0, required_cost - unreleased_storage_cost_ -
-                                      committed_item_cost_),
+            std::max<int128_t>(0, required_cost),
     };
   }
 
@@ -400,8 +396,7 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
     if (try_reserve_delta(delta)) {
 
       int128_t required_storage =
-          variant_.get_cost_after_commit(delta, committed_item_.get()) -
-          unreleased_storage_cost_ - committed_item_cost_;
+          variant_.get_marginal_cost_upper_bound(delta, cost_model_, committed_item_.get());
       return MeteredStorageLock{.lock_ = delta_to_lock(delta, execution_mode_),
                                 .locked_tokens_ =
                                     std::max<int128_t>(required_storage, 0)};
@@ -416,8 +411,7 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
     }
 
     int128_t required_storage =
-        variant_.get_cost_after_commit(delta, committed_item_.get()) -
-        unreleased_storage_cost_ - committed_item_cost_;
+        variant_.get_marginal_cost_upper_bound(delta, cost_model_, committed_item_.get());
 
     return MeteredStorageLock{.lock_ = *out,
                               .locked_tokens_ =
@@ -427,9 +421,7 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
   case StorageLockType::kExclusiveLock:
   case StorageLockType::kPermanentExclusiveLock:
   {
-    auto required_cost =
-        variant_.get_cost_after_commit(delta, committed_item_.get()) -
-        unreleased_storage_cost_ - committed_item_cost_;
+    auto required_cost = variant_.get_marginal_cost_upper_bound(delta, cost_model_, committed_item_.get());
 
     return MeteredStorageLock{.lock_ = previous_lock,
                               .locked_tokens_ =
@@ -492,29 +484,17 @@ StorageItemDeltaManager::commit(StorageDelta const &delta,
   assert(!round_committed_);
   assert(lock.lock_.lock_type() != StorageLockType::kNone);
 
-  // We want to compute required_storage after releasing any intermediate locks
-  // held (which might affect costs, as in the case of kExclusiveLock)
-  // but before we actually apply the commitment, to be consistent
-  // with the try_reserve usage.
-  int128_t required_storage = 0;
-
   switch (lock.lock_.lock_type()) {
   case StorageLockType::kSetItemTypeClass:
     revert_set_typeclass_lock_to_set_typeclass(lock.lock_, delta);
-    required_storage =
-        variant_.get_cost_after_commit(delta, committed_item_.get());
     commit_delta(delta, false);
     break;
   case StorageLockType::kExclusiveLock:
     revert_exclusive_lock_to_set_typeclass(delta);
-    required_storage =
-        variant_.get_cost_after_commit(delta, committed_item_.get());
     commit_delta(delta, false);
     break;
   case StorageLockType::kPermanentExclusiveLock:
     revert_exclusive_lock_to_set_typeclass(delta);
-    required_storage =
-        variant_.get_cost_after_commit(delta, committed_item_.get());
     commit_delta(delta, true);
     break;
   case StorageLockType::kNone:
@@ -522,6 +502,10 @@ StorageItemDeltaManager::commit(StorageDelta const &delta,
   default:
     throw std::runtime_error("impossible");
   }
+
+  assert(!variant_.has_variant_arm<ExclusiveLockedState>());
+
+  int128_t required_storage = variant_.get_current_committed_cost(cost_model_, committed_item_.get());
   assert(required_storage >= 0);
 
   // want: required_storage = base_storage + unreleased_storage_cost_.

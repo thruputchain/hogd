@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "hogd/base/types.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/refcounted_delta_variant.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -31,7 +32,8 @@ class StorageItemDeltaManager {
 public:
   StorageItemDeltaManager(
       std::shared_ptr<const StorageItemWrapper> snapshot_state,
-      InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode);
+      InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode,
+      StorageCostModel const* cost_model);
 
   // Disable copy
   StorageItemDeltaManager(const StorageItemDeltaManager &) = delete;
@@ -133,6 +135,7 @@ private:
 
   RefcountedDeltaVariant variant_;
   InvalidStateFlag *invalid_state_flag_;
+  StorageCostModel const* cost_model_;
 
   BlockExecutionMode execution_mode_;
 };

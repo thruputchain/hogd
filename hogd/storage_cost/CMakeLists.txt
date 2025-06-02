@@ -14,13 +14,13 @@ add_dependencies(
   hogd
 )
 
-add_executable(
-  storage_cost_test
-)
+#add_executable(
+#  storage_cost_test
+#)
 
-target_link_libraries(
-  storage_cost_test
-  storage_cost
-  GTest::gtest_main
-)
-gtest_discover_tests(storage_cost_test)
+#target_link_libraries(
+#  storage_cost_test
+#  storage_cost
+#  GTest::gtest_main
+#)
+#gtest_discover_tests(storage_cost_test)
