@@ -98,6 +98,17 @@ SystemCallHandler::root_invoke()
 
   if (!res.is_root_success())
     return res.to_root_error();
+
+  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+    auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
+    if (!validation_data.validate()) {
+      return InvokeResult{.result_ =
+                              InvokeError{
+                                  InvokeErrorCode::kInvokeValidationFailure},
+                          .gas_consumed_ = res.gas_consumed_};
+    }
+  }
+
   root_invoked_succeeded_ = true;
   return res;
 }

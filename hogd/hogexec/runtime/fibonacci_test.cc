@@ -58,8 +58,7 @@ TEST_F(FibonacciTest, FibonacciCalls)
                                 UINT64_MAX)}},
         wasm_runtime_context_);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -74,8 +73,7 @@ TEST_F(FibonacciTest, FibonacciCalls)
                                   UINT64_MAX, 5U)}},
         wasm_runtime_context_);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -142,8 +140,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                 UINT64_MAX)}},
         multiplexed_context);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -167,8 +164,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                            .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
@@ -190,8 +186,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                            .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
-    ASSERT_TRUE(res.result_);
-    ASSERT_EQ(*res.result_, 0);
+    ASSERT_TRUE(res.is_root_success());
     auto commit_res = handler.try_commit_transaction()();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);

@@ -184,7 +184,7 @@ Database::background_worker(const std::stop_token &stoken)
       cv_.wait_for(lock_, stoken, 1s,
                    [this] { return run_expand_ || run_compact_; });
       if (stoken.stop_requested())
-        return;
+        break;
 
       snapshot = snapshotter_.has_value();
       compact = std::exchange(run_compact_, false);
@@ -196,8 +196,8 @@ Database::background_worker(const std::stop_token &stoken)
     }
 
     if (snapshot) {
-      snapshotter_->snapshot();
-      snapshotter_.reset();
+      if (snapshotter_->snapshot())
+        snapshotter_.reset();
     }
 
     // run item compactor if needed.
@@ -224,6 +224,12 @@ Database::background_worker(const std::stop_token &stoken)
       loglet_allocator_->print_stats();
       disk_writer_.print_stats();
     }
+  }
+
+  info("Snapshot ongoing during database teardown; finishing up.");
+  while (snapshotter_) {
+    if (snapshotter_->snapshot())
+      snapshotter_.reset();
   }
 }
 

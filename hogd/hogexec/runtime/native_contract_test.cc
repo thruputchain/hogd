@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
@@ -34,10 +35,10 @@ protected:
         std::unordered_map<MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler & /*unused*/, NativeRuntime & /*unused*/)
-                 -> InvokeStatus<int32_t> { return 0; }},
+                 -> InvokeStatus<void> { return {}; }},
             {1,
              [](SystemCallHandler & /*unused*/,
-                NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }}});
 
@@ -46,7 +47,7 @@ protected:
         std::unordered_map<MethodID, NativeContract::function_t>{
             {0,
              [](SystemCallHandler &handler,
-                NativeRuntime & /*unused*/) -> InvokeStatus<int32_t> {
+                NativeRuntime & /*unused*/) -> InvokeStatus<void> {
                auto const &calldata = handler.get_calldata();
 
                if (calldata.size() !=
@@ -73,7 +74,10 @@ protected:
                    std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
                if (invoke_res.first) {
-                 return std::to_underlying(*invoke_res.first);
+                 return (invoke_res.first.value() == SyscallErrorCode::kNone)
+                            ? InvokeStatus<void>{}
+                            : InvokeError{
+                                  InvokeErrorCode::kInvokeDeterministic};
                }
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }}});
@@ -113,7 +117,6 @@ TEST_F(NativeContractTest, BasicInstantiate)
   auto res = runtime->invoke(0, UINT64_MAX);
 
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(*res.result_, 0);
 
   res = runtime->invoke(1, UINT64_MAX);
 
@@ -243,7 +246,6 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(*res.result_, 0);
   ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150);
 }
 

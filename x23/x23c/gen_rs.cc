@@ -107,6 +107,16 @@ struct GenRs {
       prtop("{}\n", d.attrs);
     }
 
+    // Can only do this when we are deriving Serialize/Deserialize for the type
+    /*
+    if (get_opaque_array_size(d)) {
+        // type is a byte array
+        prtop("#[serde(with = \"serde_arrays\")]\n");
+
+        needs_serde_imports = true;
+    }
+    */
+
     auto type_name_str = (holds_alternative<string>(d.type))
       ? type_name(d, false)
       : (name_prefix + "_" + type_name(d, false));
@@ -301,9 +311,19 @@ GenRs::show_type(const StructBody &s, string t)
   }
 
   {
+    optional<string> array_size;
+    if (s.transparent) {
+        auto inner = s.front();
+        array_size = get_opaque_array_size(inner);
+    }
+
     if (s.transparent) {
         // TODO(dbg): Other types will probably need Ser/Des too
-        prtop("#[derive(PartialEq, Debug, Default, Clone, Serialize, Deserialize)]\n");
+        if (array_size && *array_size == "64")
+            // arrays with size over 32 don't implement Default, so we can't derive it here
+            prtop("#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]\n");
+        else
+            prtop("#[derive(PartialEq, Debug, Default, Clone, Serialize, Deserialize)]\n");
         needs_serde_imports = true; // for Serialize, Deserialize
     }
     else
@@ -322,6 +342,11 @@ GenRs::show_type(const StructBody &s, string t)
         auto _close = (s.size() == 1 && s.front().id.empty())
           ? open_paren() : open_brace();
         scopes_.push_back(t);
+
+        if (s.transparent && array_size) {
+            prtop("#[serde(with = \"serde_arrays\")]\n");
+        }
+
         for (const auto &d : s) {
           show_decl(d, t);
         }
@@ -357,9 +382,6 @@ GenRs::show_type(const StructBody &s, string t)
             pub const fn into_inner(self) -> $InnerType {
                 self.$inner_access
             }
-            pub const fn as_ptr(&self) -> *const u8 {
-                self.$inner_access.as_ptr()
-            }
         }
         */
         prtop(R"(
@@ -369,9 +391,6 @@ impl {0} {{
     }}
     pub const fn new(_inner: {1}) -> Self {{
         Self {{ {3} }}
-    }}
-    pub const fn as_ptr(&self) -> *const u8 {{
-        self.{2}.as_ptr()
     }}
 }}
 )", outer_id, inner_type, inner_access, inner.id.empty() ? "_inner" : inner.id + ": _inner");
@@ -385,14 +404,12 @@ impl {0} {{
             }
         }
         */
-        /*
         prtop("\nimpl Deref for {} {{\n", outer_id);
         prtop("    type Target = {};\n\n", inner_type);
         prtop("    fn deref(&self) -> &Self::Target {{\n");
         prtop("        &self.{}\n", inner_access);
         prtop("    }}\n");
         prtop("}}");
-        */
 
         /*
         impl DerefMut for $OuterType {
@@ -401,17 +418,9 @@ impl {0} {{
             }
         }
         */
-        /*
         prtop("\nimpl DerefMut for {} {{\n", outer_id);
         prtop("    fn deref_mut(&mut self) -> &mut Self::Target {{\n");
         prtop("        &mut self.{}\n", inner_access);
-        prtop("    }}\n");
-        prtop("}}");
-        */
-
-        prtop("\nimpl AsRef<{}> for {} {{\n", inner_type, outer_id);
-        prtop("    fn as_ref(&self) -> &{} {{\n", inner_type);
-        prtop("        &self.{}\n", inner_access);
         prtop("    }}\n");
         prtop("}}");
 
@@ -420,29 +429,14 @@ impl {0} {{
             /*
                 impl AsRef<[u8]> for $OuterType {
                     fn as_ref(&self) -> &[u8] {
-                        let array: &ByteArray<32> = self.as_ref();
-                        array.as_slice()
+                        self.deref().as_slice()
                     }
                 }
 
             */
             prtop("\nimpl AsRef<[u8]> for {} {{\n", outer_id);
             prtop("    fn as_ref(&self) -> &[u8] {{\n");
-            prtop("        let array: &ByteArray<{}> = self.as_ref();\n", *array_size);
-            prtop("        array.as_slice()\n");
-            prtop("    }}\n");
-            prtop("}}");
-
-            /*
-                impl From<[u8; 32]> for $OuterType {
-                    fn from(array: [u8; 32]) -> Self {
-                        Self::new(ByteArray::from(array))
-                    }
-                }
-            */
-            prtop("\nimpl From<[u8; {}]> for {} {{\n", *array_size, outer_id);
-            prtop("    fn from(array: [u8; {}]) -> Self {{\n", *array_size);
-            prtop("        Self::new(ByteArray::from(array))\n");
+            prtop("        self.deref().as_slice()\n");
             prtop("    }}\n");
             prtop("}}");
         }
@@ -734,10 +728,7 @@ GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_set
     }
     return std::format("Option<{}>", tname);
   case kArray:
-    if (tname == "u8")
-      return std::format("ByteArray<{}>", d.bound);
-    else
-      return std::format("[{}; {}]", tname, d.bound);
+    return std::format("[{}; {}]", tname, d.bound);
   case kVec:
     if (in_colon_required_setting) {
       if (tname == "string"s)

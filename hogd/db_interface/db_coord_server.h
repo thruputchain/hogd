@@ -5,7 +5,7 @@
 #include "db_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
-#include "proposal.hh"
+#include "nomination.hh"
 #include "rpc_types.hh"
 #include "x23/async.h"
 #include "x23/event.h"

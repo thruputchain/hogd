@@ -13,6 +13,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -104,7 +105,7 @@ public:
   // Wasmi unwinds the current invocation and returns a nonzero InvokeError.
   template<std::same_as<uint64_t>... Args>
   bool link_fn(std::string_view module_name, std::string_view fn_name,
-               HostFnResult (*f)(HostCallContext *, Args...))
+               HostFnStatus<SyscallErrorCode> (*f)(HostCallContext *, Args...))
   {
     if (module_name.empty() || fn_name.empty() || (f == nullptr))
       return false;
@@ -198,8 +199,7 @@ public:
   virtual ~Runtime() = default;
 
 protected:
-  virtual InvokeStatus<int32_t>
-  invoke_internal(std::string_view method_name) = 0;
+  virtual InvokeStatus<void> invoke_internal(std::string_view method_name) = 0;
 
   std::unique_ptr<HostCallContext> host_call_context_;
 };
