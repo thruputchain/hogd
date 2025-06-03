@@ -192,7 +192,10 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
     if ((*bu)->get_key() == key) {
       // If the item that is about to be overwritten should be included in an
       // ongoing snapshot, make sure the snapshot gets a copy of the item.
-      uint64_t &old_lsn = (*bu)->lsn;
+      // This must be done under the bucket lock because we must ensure the
+      // snapshotter doesn't copy an old value for this key into the snapshot.
+      uint64_t old_lsn =
+          std::atomic_ref<uint64_t>((*bu)->lsn).load(std::memory_order_relaxed);
       if (snap_end_lsn_ && old_lsn >= snap_begin_lsn_ &&
           old_lsn < snap_end_lsn_)
         snap_add_item_cb_(hash, *bu);
@@ -202,7 +205,10 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
         (*bu)->type = type;
         // Updating the LSN for update-in-place ensures that we don't
         // inadvertently forward this new value into an ongoing snapshot.
-        (*bu)->lsn = new_lsn;
+        // bucket lock release is sufficient to ensure snapshotter sees the
+        // change.
+        std::atomic_ref<uint64_t>((*bu)->lsn)
+            .store(new_lsn, std::memory_order_relaxed);
         std::ranges::copy(val, (*bu)->get_value().begin());
         allocator_.free<true>(item);
         return {};
@@ -237,6 +243,18 @@ ScalableMap::remove(std::span<const std::byte> key)
   record.reset();
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
+      // See comment in put(). Forwards the item to an ongoing snapshot
+      // that should include it before removing it.
+      uint64_t old_lsn =
+          std::atomic_ref<uint64_t>((*bu)->lsn).load(std::memory_order_relaxed);
+      if (snap_end_lsn_ && old_lsn >= snap_begin_lsn_ &&
+          old_lsn < snap_end_lsn_)
+        snap_add_item_cb_(hash, *bu);
+
+      // Don't need to update the lsn in the old record because the tombstone
+      // storage updated in unlink guarantees the snapshotter will skip the
+      // item, and one can't this copy of the item twice.
+
       unlink(bu);
       counter_dec(cnt);
       break;
