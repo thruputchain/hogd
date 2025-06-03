@@ -5,8 +5,10 @@
 namespace hogd {
 
 struct StorageCostModel {
-  StorageCostModel(int128_t base_item_cost, int128_t bytestring_cost_per_byte,
-                   int128_t rcq_cost_per_entry, int128_t rcq_cost_per_block)
+  constexpr StorageCostModel(int128_t base_item_cost,
+                             int128_t bytestring_cost_per_byte,
+                             int128_t rcq_cost_per_entry,
+                             int128_t rcq_cost_per_block)
     : kBaseItemCost(base_item_cost),
       kBytestringCostPerByte(bytestring_cost_per_byte),
       kRCQCostPerEntry(rcq_cost_per_entry), kRCQCostPerBlock(rcq_cost_per_block)

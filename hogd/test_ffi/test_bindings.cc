@@ -181,6 +181,8 @@ root_invoke(void *syscall_handler) noexcept
   return kUnrecoverableError;
 }
 
+constexpr StorageCostModel kCostModel(12000, 1, 5, 100);
+
 void
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
                                     int64_t tokens)
@@ -198,7 +200,7 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
           .key =
               StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance),
       },
-      std::make_shared<StorageItemWrapper>(int128_t{tokens}));
+      std::make_shared<StorageItemWrapper>(int128_t{tokens}, &kCostModel));
 }
 
 } // namespace
