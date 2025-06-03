@@ -2,12 +2,14 @@
 
 #pragma once
 
+#include <concepts>
 #include <coroutine>
 #include <new>
 #include <queue>
 #include <ranges>
 #include <stop_token>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include <x23/async.h>
@@ -36,6 +38,11 @@ constexpr size_t hardware_destructive_interference_size =
 // modern linux distributions, but then falls back to
 // std::thread::hardware_concurrency().
 unsigned nproc();
+
+template<typename F, typename R, typename... Args>
+concept is_captureless_lambda = requires(F f) {
+    static_cast<R(*)(Args...)>(f);
+};
 
 class ThreadPool {
 public:
@@ -103,10 +110,13 @@ public:
   // immediately.  Since the task will consume one of the tasks in the
   // ThreadPool, it should avoid performing operations that would
   // block the thread for a long time.
-  Detached spawn(std::invocable auto cb)
+  template<typename... Args>
+  Detached spawn(auto cb, Args&&... args)
   {
+    using R = std::invoke_result_t<decltype(cb), Args&&...>;
+    static_assert(is_captureless_lambda<decltype(cb), R, Args...>);
     co_await bg();
-    cb();
+    cb(std::forward<Args>(args)...);
   }
 
   // Run a potentially blocking task in a new thread that is not part

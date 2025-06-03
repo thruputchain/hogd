@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
@@ -142,15 +143,16 @@ bench_fibonacci(benchmark::State &state)
 
   bs.advance_block();
 
-  std::vector<SignedTransaction> txs;
-  txs.reserve(numtxs);
+  std::vector<SignedTransaction> txs_bench;
+  txs_bench.reserve(numtxs);
   for (size_t i = 0; i < numtxs; i++) {
-    txs.push_back(SignedTransaction {
+    txs_bench.push_back(SignedTransaction {
         .tx = Transaction {
             .invocation = fib_client.make_invocation<"fibonacci">(UINT64_MAX, nfib)
             }
         });
   }
+  auto const& txs = txs_bench;
 
   x23::ThreadPool runner_pool(nthreads);
 
@@ -160,13 +162,8 @@ bench_fibonacci(benchmark::State &state)
     auto [async, cb] = x23::make_async<void>();
     assert(numtxs == txs.size());
 
-
-    // attempt at bypassing the UAF, but it's still there
-    std::println("loop start");
-    std::vector<std::function<x23::Detached()>> ds;
-    ds.reserve(numtxs);
-    for (auto const& tx : txs) {
-        ds.emplace_back([&bs, tx, &remaining, &cb]()-> x23::Detached {
+    for (size_t i = 0; i < txs.size(); i++) {
+        runner_pool.spawn([](BenchmarkState& bs, SignedTransaction const& tx, std::atomic<uint32_t>& remaining, x23::CoroCB<void>& cb)-> x23::Detached {
             auto res = co_await bs.context_->propose_transaction(tx, bs.allocate_txid());
             if (res.result() != ExecResult::ExecResultOK) {
                 throw std::runtime_error("Failed to propose transaction");
@@ -175,28 +172,9 @@ bench_fibonacci(benchmark::State &state)
                 cb();
             }
             co_return;
-        });
-    }
-
-    for (auto& d : ds) {
-        runner_pool.spawn(d);
+        }, bs, txs[i], remaining, cb);
     }
     async();
-
-    /*    runner_pool.spawn([&bs, t, &remaining, &cb]()-> x23::Detached {
-            std::println("proposing");
-            auto res = co_await bs.context_->propose_transaction(*t, bs.allocate_txid());
-            if (res.result() != ExecResult::ExecResultOK) {
-                throw std::runtime_error("Failed to propose transaction");
-            }
-            std::println("done");
-            if (remaining.fetch_sub(1) == 1) {
-                cb();
-            }
-            co_return;
-        });
-        async();
-    } */
   }
   std::println("overall done");
 }

@@ -32,7 +32,7 @@ ThreadPool::drain() noexcept
   assert(ThreadPool::my_thread_pool != this);
 
   std::binary_semaphore drainwait(0);
-  spawn([&drainwait] { drainwait.release(); });
+  spawn([](auto& drainwait) { drainwait.release(); }, drainwait);
   drainwait.acquire();
 
   auto qs = qstate_.take();
