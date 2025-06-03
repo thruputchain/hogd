@@ -57,7 +57,6 @@ struct BenchmarkState {
   WorkerPool& main_pool_;
 
   void initialize() {
-    x23::RpcLogger::default_logfd = 1;
     constexpr static uint32_t kPortNumber = 10000;
     db_executor_server_.start_server(kPortNumber);
 
@@ -109,9 +108,9 @@ struct BenchmarkState {
 void
 bench_fibonacci(benchmark::State &state)
 {
-  int nthreads = state.range(0);
-  uint32_t nfib = state.range(1);
-  int numtxs = state.range(2);
+  int nthreads = state.range(1);
+  int numtxs = state.range(0);
+  uint32_t nfib = state.range(2);
   WorkerPool main_pool = WorkerPool(nthreads);
 
   BenchmarkState bs(main_pool);
@@ -156,43 +155,33 @@ bench_fibonacci(benchmark::State &state)
 
   x23::ThreadPool runner_pool(nthreads);
 
-
   for (auto _ : state) {
     std::atomic<uint32_t> remaining = numtxs;
-    auto [async, cb] = x23::make_async<void>();
     assert(numtxs == txs.size());
 
-    /*
-    for (size_t i = 0; i < txs.size(); i++) {
-        runner_pool.spawn([](BenchmarkState& bs, SignedTransaction const& tx, std::atomic<uint32_t>& remaining, x23::CoroCB<void>& cb)-> x23::Detached {
-            auto res = co_await bs.context_->propose_transaction(tx, bs.allocate_txid());
-            if (res.result() != ExecResult::ExecResultOK) {
-                throw std::runtime_error("Failed to propose transaction");
-            }
-            if (remaining.fetch_sub(1) == 1) {
-                cb();
-            }
-            co_return;
-        }, bs, txs[i], remaining, cb);
-    } */
-    // broken version
+    auto [async, cb] = x23::make_async<void>();
     
-    for (size_t i = 0; i < txs.size(); i++) {
-        auto const* t = &txs[i];
-        runner_pool.spawn([&bs, t, &remaining, &cb]()-> x23::Detached {
-            auto res = co_await bs.context_->propose_transaction(*t, bs.allocate_txid());
+    for (auto const& t : txs) {
+        [](auto& bs, auto& t, auto& remaining, auto cb, auto& runner_pool) -> x23::Detached {
+            //std::println("start spawn coroutine");
+            co_await runner_pool.bg();
+            //std::println("after bg");
+            auto res = co_await bs.context_->propose_transaction(t, bs.allocate_txid());
             if (res.result() != ExecResult::ExecResultOK) {
                 throw std::runtime_error("Failed to propose transaction");
             }
             if (remaining.fetch_sub(1) == 1) {
                 cb();
             }
+            //std::println("after propose tx");
             co_return;
-        });
+        }(bs, t, remaining, cb, runner_pool);
     }
+    //std::println("before wait on {}", numtxs);
     async();
+    //std::println("after wait on {}", numtxs);
   }
-  std::println("overall done");
+  std::println("done loop {} {} {}", nthreads, numtxs, nfib);
 }
 
 
