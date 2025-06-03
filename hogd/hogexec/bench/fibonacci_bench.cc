@@ -163,9 +163,7 @@ bench_fibonacci(benchmark::State &state)
     
     for (auto const& t : txs) {
         [](auto& bs, auto& t, auto& remaining, auto cb, auto& runner_pool) -> x23::Detached {
-            //std::println("start spawn coroutine");
             co_await runner_pool.bg();
-            //std::println("after bg");
             auto res = co_await bs.context_->propose_transaction(t, bs.allocate_txid());
             if (res.result() != ExecResult::ExecResultOK) {
                 throw std::runtime_error("Failed to propose transaction");
@@ -173,15 +171,11 @@ bench_fibonacci(benchmark::State &state)
             if (remaining.fetch_sub(1) == 1) {
                 cb();
             }
-            //std::println("after propose tx");
             co_return;
         }(bs, t, remaining, cb, runner_pool);
     }
-    //std::println("before wait on {}", numtxs);
     async();
-    //std::println("after wait on {}", numtxs);
   }
-  std::println("done loop {} {} {}", nthreads, numtxs, nfib);
 }
 
 
