@@ -113,8 +113,8 @@ public:
   template<typename... Args>
   Detached spawn(auto cb, Args&&... args)
   {
-    using R = std::invoke_result_t<decltype(cb), Args&&...>;
-    static_assert(is_captureless_lambda<decltype(cb), R, Args...>);
+    //using R = std::invoke_result_t<decltype(cb), Args&&...>;
+    //static_assert(is_captureless_lambda<decltype(cb), R, Args...>);
     co_await bg();
     cb(std::forward<Args>(args)...);
   }

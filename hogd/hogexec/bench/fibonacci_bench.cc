@@ -162,6 +162,7 @@ bench_fibonacci(benchmark::State &state)
     auto [async, cb] = x23::make_async<void>();
     assert(numtxs == txs.size());
 
+    /*
     for (size_t i = 0; i < txs.size(); i++) {
         runner_pool.spawn([](BenchmarkState& bs, SignedTransaction const& tx, std::atomic<uint32_t>& remaining, x23::CoroCB<void>& cb)-> x23::Detached {
             auto res = co_await bs.context_->propose_transaction(tx, bs.allocate_txid());
@@ -173,6 +174,21 @@ bench_fibonacci(benchmark::State &state)
             }
             co_return;
         }, bs, txs[i], remaining, cb);
+    } */
+    // broken version
+    
+    for (size_t i = 0; i < txs.size(); i++) {
+        auto const* t = &txs[i];
+        runner_pool.spawn([&bs, t, &remaining, &cb]()-> x23::Detached {
+            auto res = co_await bs.context_->propose_transaction(*t, bs.allocate_txid());
+            if (res.result() != ExecResult::ExecResultOK) {
+                throw std::runtime_error("Failed to propose transaction");
+            }
+            if (remaining.fetch_sub(1) == 1) {
+                cb();
+            }
+            co_return;
+        });
     }
     async();
   }
