@@ -107,15 +107,12 @@ struct GenRs {
       prtop("{}\n", d.attrs);
     }
 
-    // Can only do this when we are deriving Serialize/Deserialize for the type
-    /*
     if (get_opaque_array_size(d)) {
         // type is a byte array
-        prtop("#[serde(with = \"serde_arrays\")]\n");
 
-        needs_serde_imports = true;
+        if (needs_serde_imports)
+            prtop("#[serde(with = \"serde_arrays\")]\n");
     }
-    */
 
     auto type_name_str = (holds_alternative<string>(d.type))
       ? type_name(d, false)
@@ -312,30 +309,30 @@ GenRs::show_type(const StructBody &s, string t)
 
   {
     optional<string> array_size;
+
+    string derive_traits = "PartialEq, Debug, Clone";
     if (s.transparent) {
         auto inner = s.front();
         array_size = get_opaque_array_size(inner);
-    }
 
-    if (s.transparent) {
-        // TODO(dbg): Other types will probably need Ser/Des too
-        if (array_size && *array_size == "64")
-            // arrays with size over 32 don't implement Default, so we can't derive it here
-            prtop("#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]\n");
-        else
-            prtop("#[derive(PartialEq, Debug, Default, Clone, Serialize, Deserialize)]\n");
+        if (!(array_size && *array_size == "64")) {
+            // arrays with size over 32 don't implement Default, so we can't
+            // derive it here
+            derive_traits += ", Default";
+        }
+
+        derive_traits += ", Eq, Hash, Copy";
+
+        derive_traits += ", Serialize, Deserialize";
         needs_serde_imports = true; // for Serialize, Deserialize
     }
-    else
-        prtop("#[derive(PartialEq, Debug, Default, Clone)]\n");
-
+    prtop("#[derive({})]\n", derive_traits);
     prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
 
-    if (s.transparent) {
+    if (s.transparent)
         prtop("#[repr(transparent)]\n");
-    } else {
+    else
         prtop("#[repr(C)]\n");
-    }
 
     prtop("pub struct {} ", t);
     {
@@ -343,16 +340,14 @@ GenRs::show_type(const StructBody &s, string t)
           ? open_paren() : open_brace();
         scopes_.push_back(t);
 
-        if (s.transparent && array_size) {
-            prtop("#[serde(with = \"serde_arrays\")]\n");
-        }
-
         for (const auto &d : s) {
           show_decl(d, t);
         }
     }
 
     if (s.transparent) {
+        // implement some conversion methods
+
         auto outer_id = t;
         auto inner = s.front();
         string inner_type = type_name(inner, false);
@@ -439,6 +434,15 @@ impl {0} {{
             prtop("        self.deref().as_slice()\n");
             prtop("    }}\n");
             prtop("}}");
+
+            /*
+            prtop("\nimpl AsRef<[u8; {}]> for {} {{\n", *array_size, outer_id);
+            prtop("    fn as_ref(&self) -> &[u8; {}] {{\n", *array_size);
+            prtop("        &self.{}\n", inner_access);
+            prtop("    }}\n");
+            prtop("}}");
+            */
+
         }
     }
   }
