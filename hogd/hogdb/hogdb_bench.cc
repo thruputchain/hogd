@@ -113,11 +113,11 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   HogDBStatus<void> ret;
-  ret = bench->db_.write_nnint128(make_key(0), static_cast<int128_t>(n));
+  ret = write_nnint128(bench->db_, make_key(0), static_cast<int128_t>(n));
   if (!ret)
     fail(ret.error());
   for (size_t i = 1; i < n; i++) {
-    ret = bench->db_.write_nnint128(make_key(i), 0);
+    ret = write_nnint128(bench->db_, make_key(i), 0);
     if (!ret)
       fail(ret.error());
   }
@@ -144,11 +144,11 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   HogDBStatus<void> ret;
-  ret = bench->db_.write_nnint128(make_key(0), static_cast<int128_t>(0));
+  ret = write_nnint128(bench->db_, make_key(0), static_cast<int128_t>(0));
   if (!ret)
     fail(ret.error());
   for (size_t i = 1; i < n; i++) {
-    ret = bench->db_.write_nnint128(make_key(i), 1);
+    ret = write_nnint128(bench->db_, make_key(i), 1);
     if (!ret)
       fail(ret.error());
   }
@@ -175,7 +175,8 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
-    if (HogDBStatus<void> ret = bench->db_.write_nnint128(make_key(i), 1); !ret)
+    if (HogDBStatus<void> ret = write_nnint128(bench->db_, make_key(i), 1);
+        !ret)
       fail(ret.error());
   }
   if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)

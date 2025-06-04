@@ -22,7 +22,7 @@ InvokeTX::read_nnint128(ItemKey key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
-    return block_.get_db().read_nnint128(key);
+    return hogd::read_nnint128(block_.get_db(), key);
   if (change->is_deletion())
     return HogDBError(HogDBCode::kNotFound);
   std::optional ret = change->to_nnint128();
@@ -36,7 +36,7 @@ InvokeTX::read_bytes(ItemKey key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
-    return block_.get_db().read_bytes(key);
+    return hogd::read_bytes(block_.get_db(), key);
   if (change->is_deletion())
     return HogDBError(HogDBCode::kNotFound);
   OwningSpan<const std::byte> ret = change->to_bytes();

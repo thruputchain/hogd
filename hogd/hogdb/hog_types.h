@@ -58,19 +58,28 @@ make_address(std::integral auto val)
 // ItemKey identifies an on-chain storage item for an Address.
 class ItemKey {
 public:
-  constexpr ItemKey(Address addr, RawKey key)
-    : item_key_{.addr = addr, .key = key},
+  constexpr ItemKey(Address addr, RawKey key, bool addr_balance = false)
+    : item_key_{.addr = addr, .key = key}, addr_balance_(addr_balance),
       memoized_hash_(hogd::SipHash24::get_default()(as_bytes()))
   {}
   [[nodiscard]] constexpr std::span<const std::byte> as_bytes() const
   {
+    if (addr_balance_)
+      return item_key_.addr.as_bytes();
     return byte_view(item_key_);
   }
   constexpr bool operator==(const ItemKey &key) const
   {
+    if (addr_balance_ != key.addr_balance_)
+      return false;
+    if (addr_balance_)
+      return item_key_.addr == key.item_key_.addr;
     return item_key_.addr == key.item_key_.addr &&
            item_key_.key == key.item_key_.key;
   }
+
+  constexpr bool is_address_balance() const { return addr_balance_; }
+  [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
 
 private:
   friend struct std::formatter<ItemKey>;
@@ -80,22 +89,30 @@ private:
     Address addr;
     RawKey key;
   } item_key_;
+  bool addr_balance_;
   const size_t memoized_hash_;
 };
 
 [[nodiscard]] inline ItemKey
-make_item_key(Address addr, std::string_view str)
+make_item_key(const Address &addr, std::string_view str)
 {
   return ItemKey(addr, sha256(byte_view(str.data(), str.size())));
 }
 
 [[nodiscard]] constexpr ItemKey
-make_item_key(Address addr, std::integral auto val)
+make_item_key(const Address &addr, std::integral auto val)
 {
   RawKey buf{};
   std::ranges::copy(byte_view(cpu_to_le(val)),
                     std::begin(std::as_writable_bytes(std::span(buf))));
   return ItemKey(addr, buf);
+}
+
+[[nodiscard]] constexpr ItemKey
+make_address_balance_item_key(const Address &addr)
+{
+  RawKey buf{};
+  return ItemKey(addr, buf, true);
 }
 
 } // namespace hogd
@@ -128,6 +145,8 @@ template<> struct std::formatter<hogd::ItemKey> {
   }
   static auto format(const hogd::ItemKey &key, std::format_context &ctx)
   {
+    if (key.is_address_balance())
+      return std::format_to(ctx.out(), "{}:balance", key.item_key_.addr);
     return std::format_to(ctx.out(), "{}:{}", key.item_key_.addr,
                           hogd::encode_base64_url_safe(
                               std::as_bytes(std::span(key.item_key_.key))));

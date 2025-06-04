@@ -16,9 +16,9 @@
 namespace hogd {
 
 inline HogDBStatus<void>
-NNInt128::commit(HogDatabase &db, ItemKey key) const
+NNInt128::commit(HogDatabase &db, const ItemKey &key) const
 {
-  return db.write_nnint128(key, value());
+  return write_nnint128(db, key, value());
 }
 
 inline bool
@@ -100,15 +100,15 @@ NNInt128::undo_merge(const NNInt128 &nnint)
 }
 
 inline HogDBStatus<void>
-Bytes::commit(HogDatabase &db, ItemKey key) const
+Bytes::commit(HogDatabase &db, const ItemKey &key) const
 {
-  return db.write_bytes(key, std::as_bytes(std::span(buf_)));
+  return write_bytes(db, key, std::as_bytes(std::span(buf_)));
 }
 
 inline HogDBStatus<void>
-Deletion::commit(HogDatabase &db, ItemKey key)
+Deletion::commit(HogDatabase &db, const ItemKey &key)
 {
-  return db.remove(key);
+  return remove_item(db, key);
 }
 
 namespace {
@@ -191,12 +191,12 @@ ItemChange::storage_size() const
 }
 
 HogDBStatus<ssize_t>
-ItemChange::storage_delta(HogDatabase &db, ItemKey key)
+ItemChange::storage_delta(HogDatabase &db, const ItemKey &key)
 {
   // fetch the snapshot size of the object from the database if needed.
   if (!snapshot_size_) {
     auto snapshot_size = [&db, key] -> HogDBStatus<size_t> {
-      HogDBStatus<size_t> ret = db.get_size(key);
+      HogDBStatus<size_t> ret = get_item_size(db, key);
       if (!ret && ret.error() == HogDBCode::kNotFound)
         return 0UL;
       if (!ret)

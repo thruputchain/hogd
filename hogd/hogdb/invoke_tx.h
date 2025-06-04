@@ -127,8 +127,8 @@ InvokeTX::request_nnint128(ItemKey key, int128_t base, int128_t delta)
 inline HogDBStatus<void>
 InvokeTX::request_nnint128(ItemKey key, int128_t delta)
 {
-  return block_.get_db().read_nnint128(key).and_then(
-      [this, key, delta](int128_t base) {
+  return hogd::read_nnint128(block_.get_db(), key)
+      .and_then([this, key, delta](int128_t base) {
         return request_change(key, NNInt128{base, delta});
       });
 }
