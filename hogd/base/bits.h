@@ -15,6 +15,58 @@ namespace hogd {
 
 inline constexpr size_t kBitsPerByte = 8;
 
+// NOLINTNEXTLINE(misc-redundant-expression)
+static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ ||
+              __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__);
+
+// cpu_to_le converts an integral type from the cpu's native byte order to
+// little endian.
+constexpr auto
+cpu_to_le(std::integral auto val)
+{
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  return val;
+#else
+  return std::byteswap(val);
+#endif
+}
+
+// le_to_cpu converts an integral type from little endian to the cpu's native
+// byte order.
+constexpr auto
+le_to_cpu(std::integral auto val)
+{
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  return val;
+#else
+  return std::byteswap(val);
+#endif
+}
+
+// cpu_to_be converts an integral type from the cpu's native byte order to big
+// endian.
+constexpr auto
+cpu_to_be(std::integral auto val)
+{
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  return std::byteswap(val);
+#else
+  return val;
+#endif
+}
+
+// be_to_cpu converts an integral type from big endian to the cpu's native byte
+// order.
+constexpr auto
+be_to_cpu(std::integral auto val)
+{
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  return std::byteswap(val);
+#else
+  return val;
+#endif
+}
+
 // align_up returns a value that is aligned upward to the nearest power of two.
 template<std::unsigned_integral T>
 constexpr T
