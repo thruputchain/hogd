@@ -2,6 +2,8 @@
 
 #include <memory>
 #include <optional>
+#include <stdexcept>
+#include <tuple>
 #include <utility>
 
 #include "hogd/base/types.h"
@@ -10,6 +12,9 @@
 #include "hogd/storage_item/storage_costs.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "model_checker/async.h"
+#include "model_checker/threadpool.h"
+#include "model_checker/work_queue.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -633,6 +638,192 @@ TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
   // value is 2
 
   expect_final(item, int128_t{2});
+}
+
+TEST_P(StorageItemDeltaManagerTest, NNIntInterleavings)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(nullptr,
+                                                           &invalid_state_flag,
+                                                           mode_),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            // set_add (0, 10)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(0, 10);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    throw std::runtime_error("Failed to reserve lock");
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            // set_add (0, 15)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(0, 15);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    throw std::runtime_error("Failed to reserve lock");
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
+            if (res != model::ActionResult::kOk) {
+              return false;
+            }
+
+            if (net_storage_cost != kBaseItemCost) {
+              return false;
+            }
+
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot ||
+                snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+
+            return snapshot->nnint() == 25;
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
+TEST_P(StorageItemDeltaManagerTest, NNIntConflictingInterleavings)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(nullptr,
+                                                           &invalid_state_flag,
+                                                           mode_),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            // set_add (10, 10)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(10, 10);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            // set_add (0, 15)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(0, 15);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(10, -10);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
+            if (res != model::ActionResult::kOk) {
+              return false;
+            }
+
+            if (net_storage_cost != kBaseItemCost) {
+              return false;
+            }
+
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot ||
+                snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+
+            // either both the (10, 10) and (10, -10) are committed,
+            // or only the (0, 15) is committed.
+            return snapshot->nnint() == 10 || snapshot->nnint() == 15;
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
