@@ -1084,44 +1084,6 @@ TEST_P(StorageItemDeltaManagerTest, RCQAccountingEdgeCase)
           });
 
   EXPECT_TRUE(pool.run_test(experiment));
-  /*
-    StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                                 &cost_model);
-
-    auto insert_a =
-        make_rcq_delta(std::nullopt,
-                       RetrocausalQueueInsertDelta{
-                           .added_entries = {make_test_rcq_entry(1)}});
-    auto lk_a = item.try_reserve(insert_a, StorageLock(StorageLockType::kNone));
-    ASSERT_TRUE(lk_a);
-    EXPECT_EQ(lk_a->locked_tokens_,
-              cost_model.kBaseItemCost +
-                  cost_model.get_retrocausal_queue_cost(1, 1));
-    item.commit(insert_a, *lk_a);
-
-    auto insert_b =
-        make_rcq_delta(std::nullopt,
-                       RetrocausalQueueInsertDelta{
-                           .added_entries = {make_test_rcq_entry(2)}});
-    auto lk_b = item.try_reserve(insert_b, StorageLock(StorageLockType::kNone));
-    ASSERT_TRUE(lk_b);
-
-    auto consume_c = make_rcq_delta(
-        RetrocausalQueueConsumeDelta{
-            .past_block_consume =
-                RetrocausalQueuePastBlockConsumeDelta{
-                    .max_fully_consumed_block_number = 0,
-                    .partial_consumed_number = 0},
-            .current_block_consumed = {make_test_rcq_entry(1)}},
-        RetrocausalQueueInsertDelta{.added_entries = {}});
-    auto lk_c = item.try_reserve(consume_c,
-    StorageLock(StorageLockType::kNone)); ASSERT_TRUE(lk_c);
-    item.commit(consume_c, *lk_c);
-
-    item.commit(insert_b, *lk_b);
-
-    expect_final(item, RetrocausalQueueStats{.active_block_count = 1,
-                                             .active_size = 1}); */
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
