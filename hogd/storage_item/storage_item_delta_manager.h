@@ -94,6 +94,8 @@ public:
   Nondeterministic<std::optional<QueueEntry>>
   get_concurrent_retrocausal_queue_entry(uint32_t index);
 
+  BlockExecutionMode mode() const { return execution_mode_; }
+
 private:
   // Performs a reservation of the storage item for the given delta operation.
   // Should be performed only when the initial lock state is kNone.

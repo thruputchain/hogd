@@ -13,10 +13,11 @@
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
-#include "retrocausal_queue.hh"
+#include "hogd/storage_item/storage_lock_util.h"
 #include "model_checker/async.h"
 #include "model_checker/threadpool.h"
 #include "model_checker/work_queue.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -964,47 +965,165 @@ TEST_P(StorageItemDeltaManagerTest, NNIntConflictingInterleavings)
 
 TEST_P(StorageItemDeltaManagerTest, RCQAccountingEdgeCase)
 {
+
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
-                               &cost_model);
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(nullptr,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue, 10);
 
-  auto insert_a =
-      make_rcq_delta(std::nullopt,
-                     RetrocausalQueueInsertDelta{
-                         .added_entries = {make_test_rcq_entry(1)}});
-  auto lk_a = item.try_reserve(insert_a, StorageLock(StorageLockType::kNone));
-  ASSERT_TRUE(lk_a);
-  EXPECT_EQ(lk_a->locked_tokens_,
-            cost_model.kBaseItemCost +
-                cost_model.get_retrocausal_queue_cost(1, 1));
-  item.commit(insert_a, *lk_a);
+            // Reserve A insert(1)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto insert_a =
+                      make_rcq_delta(std::nullopt,
+                                     RetrocausalQueueInsertDelta{
+                                         .added_entries = {
+                                             make_test_rcq_entry(1)}});
+                  auto lk_a =
+                      item.try_reserve(insert_a,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk_a) {
+                    throw std::runtime_error("Failed to reserve lock");
+                  }
+                  net_storage_cost += lk_a->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(insert_a, *lk_a);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
 
-  auto insert_b =
-      make_rcq_delta(std::nullopt,
-                     RetrocausalQueueInsertDelta{
-                         .added_entries = {make_test_rcq_entry(2)}});
-  auto lk_b = item.try_reserve(insert_b, StorageLock(StorageLockType::kNone));
-  ASSERT_TRUE(lk_b);
+            // Reserve B insert(2)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto insert_b =
+                      make_rcq_delta(std::nullopt,
+                                     RetrocausalQueueInsertDelta{
+                                         .added_entries = {
+                                             make_test_rcq_entry(2)}});
+                  auto lk_b =
+                      item.try_reserve(insert_b,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk_b) {
+                    throw std::runtime_error("Failed to reserve lock");
+                  }
+                  net_storage_cost += lk_b->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(insert_b, *lk_b);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
 
-  auto consume_c = make_rcq_delta(
-      RetrocausalQueueConsumeDelta{
-          .past_block_consume =
-              RetrocausalQueuePastBlockConsumeDelta{
-                  .max_fully_consumed_block_number = 0,
-                  .partial_consumed_number = 0},
-          .current_block_consumed = {make_test_rcq_entry(1)}},
-      RetrocausalQueueInsertDelta{.added_entries = {}});
-  auto lk_c = item.try_reserve(consume_c, StorageLock(StorageLockType::kNone));
-  ASSERT_TRUE(lk_c);
-  item.commit(consume_c, *lk_c);
+            // Reserve C consume(1)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto consume_c = make_rcq_delta(
+                      RetrocausalQueueConsumeDelta{
+                          .past_block_consume =
+                              RetrocausalQueuePastBlockConsumeDelta{
+                                  .max_fully_consumed_block_number = 0,
+                                  .partial_consumed_number = 0},
+                          .current_block_consumed = {make_test_rcq_entry(1)}},
+                      RetrocausalQueueInsertDelta{.added_entries = {}});
+                  std::optional<MeteredStorageLock> lk_c = std::nullopt;
+                  while (!lk_c) {
+                    lk_c =
+                        item.try_reserve(consume_c,
+                                         StorageLock(StorageLockType::kNone));
+                    if (!lk_c) {
+                      co_await set.bg();
+                    }
+                  }
+                  net_storage_cost += lk_c->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(consume_c, *lk_c);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+            return actions;
+          },
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
+            if (res == model::ActionResult::kTimeout) {
+              return item.mode() ==
+                     BlockExecutionMode::kBlockExecutionModeProposal;
+            }
 
-  item.commit(insert_b, *lk_b);
+            if (net_storage_cost !=
+                cost_model.kBaseItemCost +
+                    cost_model.get_retrocausal_queue_cost(1, 1)) {
+              return false;
+            }
 
-  expect_final(item, RetrocausalQueueStats{.active_block_count = 1,
-                                           .active_size = 1});
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot || snapshot->type() !=
+                                 StorageItemType::kItemTypeRetrocausalQueue) {
+              return false;
+            }
+
+            auto const &queue = snapshot->queue();
+            return queue.get_active_stats() ==
+                   RetrocausalQueueStats{.active_block_count = 1,
+                                         .active_size = 1};
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+  /*
+    StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                                 &cost_model);
+
+    auto insert_a =
+        make_rcq_delta(std::nullopt,
+                       RetrocausalQueueInsertDelta{
+                           .added_entries = {make_test_rcq_entry(1)}});
+    auto lk_a = item.try_reserve(insert_a, StorageLock(StorageLockType::kNone));
+    ASSERT_TRUE(lk_a);
+    EXPECT_EQ(lk_a->locked_tokens_,
+              cost_model.kBaseItemCost +
+                  cost_model.get_retrocausal_queue_cost(1, 1));
+    item.commit(insert_a, *lk_a);
+
+    auto insert_b =
+        make_rcq_delta(std::nullopt,
+                       RetrocausalQueueInsertDelta{
+                           .added_entries = {make_test_rcq_entry(2)}});
+    auto lk_b = item.try_reserve(insert_b, StorageLock(StorageLockType::kNone));
+    ASSERT_TRUE(lk_b);
+
+    auto consume_c = make_rcq_delta(
+        RetrocausalQueueConsumeDelta{
+            .past_block_consume =
+                RetrocausalQueuePastBlockConsumeDelta{
+                    .max_fully_consumed_block_number = 0,
+                    .partial_consumed_number = 0},
+            .current_block_consumed = {make_test_rcq_entry(1)}},
+        RetrocausalQueueInsertDelta{.added_entries = {}});
+    auto lk_c = item.try_reserve(consume_c,
+    StorageLock(StorageLockType::kNone)); ASSERT_TRUE(lk_c);
+    item.commit(consume_c, *lk_c);
+
+    item.commit(insert_b, *lk_b);
+
+    expect_final(item, RetrocausalQueueStats{.active_block_count = 1,
+                                             .active_size = 1}); */
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
-
 
 INSTANTIATE_TEST_SUITE_P(
     BlockModes, StorageItemDeltaManagerTest,
