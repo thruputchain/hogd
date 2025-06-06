@@ -720,7 +720,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntInterleavings)
             return snapshot->nnint() == 25;
           });
 
-  pool.run(experiment);
+  EXPECT_TRUE(pool.run_test(experiment));
 }
 
 TEST_P(StorageItemDeltaManagerTest, NNIntConflictingInterleavings)
@@ -823,7 +823,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntConflictingInterleavings)
             return snapshot->nnint() == 10 || snapshot->nnint() == 15;
           });
 
-  pool.run(experiment);
+  EXPECT_TRUE(pool.run_test(experiment));
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
