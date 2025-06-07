@@ -1179,7 +1179,7 @@ TEST_P(StorageItemDeltaManagerTest, BytestringCostUpgrade)
 
             return actions;
           },
-          [](model::ActionResult res, StorageItemDeltaManager &item,
+          [&cost_model_2](model::ActionResult res, StorageItemDeltaManager &item,
              int128_t &net_storage_cost) -> bool {
             if (res == model::ActionResult::kTimeout) {
               return false;
@@ -1196,10 +1196,7 @@ TEST_P(StorageItemDeltaManagerTest, BytestringCostUpgrade)
                 bytestring.size() != 8) {
               return false;
             }
-            // replicated the initial cost model, avoiding capturing it in the
-            // lambda.
-            StorageCostModel cost_model_2(10000, 3, 1, 1);
-
+            
             return net_storage_cost ==
                    cost_model.kBaseItemCost +
                        cost_model.get_bytestring_cost(bytestring.size()) -
@@ -1290,7 +1287,7 @@ TEST_P(StorageItemDeltaManagerTest, TypeChangeCostUpgrade)
 
             return actions;
           },
-          [](model::ActionResult res, StorageItemDeltaManager &item,
+          [&cost_model_2](model::ActionResult res, StorageItemDeltaManager &item,
              int128_t &net_storage_cost) -> bool {
             if (res == model::ActionResult::kTimeout) {
               return false;
@@ -1302,9 +1299,6 @@ TEST_P(StorageItemDeltaManagerTest, TypeChangeCostUpgrade)
                 snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
               return false;
             }
-
-            // duplicate original cost model
-            StorageCostModel cost_model_2(14000, 2, 1, 1);
 
             int128_t initial_cost = cost_model_2.kBaseItemCost +
                                     cost_model_2.get_bytestring_cost(5);
