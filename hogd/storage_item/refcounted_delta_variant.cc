@@ -330,58 +330,6 @@ RetrocausalQueueArgs::get_current_committed_stats(
                                               new_stats.active_size};
 }
 
-/*
-int128_t
-RetrocausalQueueArgs::get_cost(RetrocausalQueueDelta const &delta,
-                               const StorageItemWrapper *base_item) const
-{
-  auto consume_delta =
-      [&] -> std::optional<RetrocausalQueuePastBlockConsumeDelta> {
-    if (past_consume_delta_) {
-      assert(!delta.consume);
-      return past_consume_delta_;
-    }
-    if (delta.consume) {
-      assert(consumer_lock_);
-      return delta.consume->past_block_consume;
-    }
-    return std::nullopt;
-  }();
-
-  auto past_stats = [&] {
-    if (base_item) {
-      assert(base_item->type() == StorageItemType::kItemTypeRetrocausalQueue);
-      auto const &queue = base_item->queue();
-
-      if (consume_delta) {
-        return queue.get_stats_after_consume(*consume_delta);
-      }
-      return queue.get_active_stats();
-    }
-    return RetrocausalQueueStats{.active_block_count = 0, .active_size = 0};
-  }();
-
-  int64_t new_entry_count =
-      delta.insert.added_entries.size() + persistable_entries_.size();
-  int64_t consumed_entry_count =
-      consumed_but_not_inserted_entries_.size() +
-      (delta.consume ? delta.consume->current_block_consumed.size() : 0);
-
-  // The accounting logic is vastly simplified by the following trick:
-  // If there are new entries in a block but they're all retrocausally consumed,
-  // then, logically speaking, there isn't a new block, but we still count it
-  // for storage costs until a later consume.
-
-  RetrocausalQueueStats new_stats = {
-      .active_block_count =
-          (new_entries_.empty() && delta.insert.added_entries.empty()) ? 0U
-                                                                       : 1U,
-      .active_size = new_entry_count - consumed_entry_count};
-
-  return kBaseItemCost + retrocausal_queue_cost(past_stats) +
-         retrocausal_queue_cost(new_stats);
-} */
-
 void
 RetrocausalQueueArgs::commit_consume(
     RetrocausalQueueConsumeDelta const &consume_delta,
