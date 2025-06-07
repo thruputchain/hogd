@@ -21,6 +21,7 @@ jobs:
           ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
+          ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
