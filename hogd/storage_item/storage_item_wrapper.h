@@ -39,6 +39,7 @@ public:
   StorageItem to_wire_item() const;
 
   int128_t storage_cost(StorageCostModel const *cost_model = nullptr) const;
+  StorageCostModel const *cost_model() const { return cost_model_; }
 
 private:
   // Wrapper for bytestring storage items

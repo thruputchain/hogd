@@ -27,8 +27,7 @@ StorageItemDeltaManager::StorageItemDeltaManager(
     InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode,
     StorageCostModel const *cost_model)
   : committed_item_(std::move(snapshot_state)),
-    committed_item_cost_(
-        committed_item_ ? committed_item_->storage_cost(cost_model) : 0),
+    committed_item_cost_(committed_item_ ? committed_item_->storage_cost() : 0),
     invalid_state_flag_(invalid_state_flag), cost_model_(cost_model),
     execution_mode_(execution_mode)
 {}

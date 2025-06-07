@@ -32,7 +32,7 @@ namespace hogd {
 
 namespace {
 
-const StorageCostModel cost_model(12000, 1, 5, 100);
+const StorageCostModel cost_model(12000, 2, 5, 100);
 
 void
 expect_final(StorageItemDeltaManager &item, Bytestring const &bytestring)
@@ -965,7 +965,6 @@ TEST_P(StorageItemDeltaManagerTest, NNIntConflictingInterleavings)
 
 TEST_P(StorageItemDeltaManagerTest, RCQAccountingEdgeCase)
 {
-
   InvalidStateFlag invalid_state_flag;
   model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
   std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
@@ -1085,6 +1084,132 @@ TEST_P(StorageItemDeltaManagerTest, RCQAccountingEdgeCase)
 
   EXPECT_TRUE(pool.run_test(experiment));
 }
+
+namespace {
+auto
+make_bytestring_delta(Bytestring const &bytestring)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeBytestringSet);
+  delta.bytestring() = bytestring;
+  return delta;
+}
+} // namespace
+
+TEST_P(StorageItemDeltaManagerTest, BytestringCostUpgrade)
+{
+  InvalidStateFlag invalid_state_flag;
+
+  // higher cost per byte and lower cost per item
+  StorageCostModel cost_model_2(10000, 3, 1, 1);
+  Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
+
+  auto committed_item =
+      std::make_shared<StorageItemWrapper>(bytestring_1, &cost_model_2);
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(committed_item,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            // Insert a bytestring of varying length
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+
+                  Bytestring bstring = Bytestring{0, 1};
+                  if (set.choice(2)) {
+                    bstring = Bytestring{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+                  }
+                  auto delta = make_bytestring_delta(bstring);
+                  auto lk =
+                      item.try_reserve(delta,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(delta, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            // Insert a similarly varying length bytestring
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  Bytestring bstring = Bytestring{0, 1};
+                  if (set.choice(2)) {
+                    bstring = Bytestring{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+                  }
+                  auto delta = make_bytestring_delta(bstring);
+                  auto lk =
+                      item.try_reserve(delta,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  co_await set.bg();
+                  auto delta2 =
+                      make_bytestring_delta(Bytestring{0, 1, 2, 3, 4, 5, 6, 7});
+                  // Possibly upgrade to an exclusive lock
+                  auto lk2 = item.try_reserve(delta2, lk->lock_);
+                  if (lk2) {
+                    lk = lk2;
+                    delta = delta2;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(delta, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
+            if (res == model::ActionResult::kTimeout) {
+              return false;
+            }
+
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot ||
+                snapshot->type() != StorageItemType::kItemTypeBytestring) {
+              return false;
+            }
+
+            auto const &bytestring = snapshot->bytestring();
+            if (bytestring.size() != 10 && bytestring.size() != 2 &&
+                bytestring.size() != 8) {
+              return false;
+            }
+            // replicated the initial cost model, avoiding capturing it in the
+            // lambda.
+            StorageCostModel cost_model_2(10000, 3, 1, 1);
+
+            return net_storage_cost ==
+                   cost_model.kBaseItemCost +
+                       cost_model.get_bytestring_cost(bytestring.size()) -
+                       cost_model_2.kBaseItemCost -
+                       cost_model_2.get_bytestring_cost(5);
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(

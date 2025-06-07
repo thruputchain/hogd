@@ -23,12 +23,55 @@
 
 namespace hogd {
 
+int128_t
+get_marginal_item_creation_bound(StorageCostModel const *current_model,
+                                 StorageItemWrapper const *base_item)
+{
+  if (!base_item) {
+    return current_model->kBaseItemCost;
+  }
+  return std::max<int128_t>(0, current_model->kBaseItemCost -
+                                   base_item->cost_model()->kBaseItemCost);
+}
+
 std::shared_ptr<const StorageItemWrapper>
 BytestringArgs::to_item(StorageCostModel const *cost_model) const
 {
   assert(committed_);
   return std::make_shared<const StorageItemWrapper>(bytestring_set_,
                                                     cost_model);
+}
+
+int128_t
+BytestringArgs::get_current_committed_cost(
+    StorageCostModel const *current_model,
+    StorageItemWrapper const * /*unused*/) const
+{
+  return current_model->kBaseItemCost +
+         current_model->get_bytestring_cost(bytestring_set_.size());
+}
+
+int128_t
+BytestringArgs::get_marginal_cost_upper_bound(
+    StorageDelta const &delta, StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
+{
+  return get_marginal_cost_upper_bound_static(committed_, delta, current_model,
+                                              base_item);
+}
+int128_t
+BytestringArgs::get_marginal_cost_upper_bound_static(
+    bool is_committed, StorageDelta const &delta,
+    StorageCostModel const *current_model, StorageItemWrapper const *base_item)
+{
+  if (is_committed) {
+    return 0;
+  }
+  int128_t locked_amount = base_item ? base_item->storage_cost() : 0;
+  int128_t new_cost =
+      current_model->kBaseItemCost +
+      current_model->get_bytestring_cost(delta.bytestring().size());
+  return std::max<int128_t>(0, new_cost - locked_amount);
 }
 
 std::shared_ptr<const StorageItemWrapper>
@@ -237,9 +280,19 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
       .active_block_count = new_block_maybe_created ? 1U : 0U,
       .active_size = std::max<int64_t>(0, new_inserted_entries)};
 
-  int128_t base_cost = (base_item || insert_committed_ || past_consume_delta_)
-                           ? 0
-                           : current_model->kBaseItemCost;
+  bool exists_committed_delta =
+      insert_committed_ || past_consume_delta_.has_value();
+
+  int128_t base_cost = [&] -> int128_t {
+    if (exists_committed_delta) {
+      return 0;
+    }
+    if (base_item) {
+      return std::max<int128_t>(0, base_item->storage_cost(current_model) -
+                                       base_item->storage_cost());
+    }
+    return current_model->kBaseItemCost;
+  }();
 
   return base_cost + current_model->get_retrocausal_queue_cost(
                          new_stats.active_size, new_stats.active_block_count);

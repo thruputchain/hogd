@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <memory>
 #include <optional>
@@ -40,6 +41,9 @@ namespace hogd {
 //   - returns an upper bound on the *marginal* cost of committing the delta,
 //   conditioned on any currently committed deltas
 
+int128_t get_marginal_item_creation_bound(StorageCostModel const *current_model,
+                                          StorageItemWrapper const *base_item);
+
 // Bytestring state
 struct BytestringArgs {
   Bytestring bytestring_set_;
@@ -54,28 +58,18 @@ struct BytestringArgs {
 
   int128_t
   get_current_committed_cost(StorageCostModel const *current_model,
-                             StorageItemWrapper const * /*unused*/) const
-  {
-    return current_model->kBaseItemCost +
-           current_model->get_bytestring_cost(bytestring_set_.size());
-  }
+                             StorageItemWrapper const * /*unused*/) const;
 
   int128_t
   get_marginal_cost_upper_bound(StorageDelta const &delta,
                                 StorageCostModel const *current_model,
-                                StorageItemWrapper const *base_item) const
-  {
-    // cost for creating the item if it doesn't exist yet
-    int128_t base_cost =
-        (base_item || committed_) ? 0 : current_model->kBaseItemCost;
-    ssize_t prev_size =
-        (base_item && base_item->type() == StorageItemType::kItemTypeBytestring)
-            ? base_item->bytestring().size()
-            : 0;
+                                StorageItemWrapper const *base_item) const;
 
-    return base_cost + current_model->get_bytestring_cost(
-                           delta.bytestring().size() - prev_size);
-  }
+  static int128_t
+  get_marginal_cost_upper_bound_static(bool is_committed,
+                                       StorageDelta const &delta,
+                                       StorageCostModel const *current_model,
+                                       StorageItemWrapper const *base_item);
 
   std::shared_ptr<const StorageItemWrapper>
   to_item(StorageCostModel const *cost_model) const;
@@ -106,7 +100,19 @@ public:
                                 StorageCostModel const *current_model,
                                 StorageItemWrapper const *base_item) const
   {
-    return (committed_ || base_item) ? 0 : current_model->kBaseItemCost;
+    return get_marginal_cost_upper_bound_static(committed_, current_model,
+                                                base_item);
+  }
+
+  static int128_t
+  get_marginal_cost_upper_bound_static(bool committed,
+                                       StorageCostModel const *current_model,
+                                       StorageItemWrapper const *base_item)
+  {
+    if (committed) {
+      return 0;
+    }
+    return get_marginal_item_creation_bound(current_model, base_item);
   }
 
   std::shared_ptr<const StorageItemWrapper>
@@ -248,15 +254,13 @@ struct ExclusiveLockedState {
     // and nonstatic version
     switch (delta.type()) {
     case StorageDeltaType::kDeltaTypeBytestringSet:
-    {
-      BytestringArgs args;
-      return args.get_marginal_cost_upper_bound(delta, cost_model, base_item);
-    }
+      return BytestringArgs::get_marginal_cost_upper_bound_static(false, delta,
+                                                                  cost_model,
+                                                                  base_item);
     case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
-    {
-      NNIntSetAddArgs args(from_xdr(delta.nnint().set_value));
-      return args.get_marginal_cost_upper_bound(delta, cost_model, base_item);
-    }
+      return NNIntSetAddArgs::get_marginal_cost_upper_bound_static(false,
+                                                                   cost_model,
+                                                                   base_item);
     case StorageDeltaType::kDeltaTypeDelete:
       return DeleteArgs::get_marginal_cost_upper_bound(delta, cost_model,
                                                        base_item);
