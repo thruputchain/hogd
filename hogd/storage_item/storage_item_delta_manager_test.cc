@@ -1210,6 +1210,120 @@ TEST_P(StorageItemDeltaManagerTest, BytestringCostUpgrade)
   EXPECT_TRUE(pool.run_test(experiment));
 }
 
+namespace {
+model::Async
+commit_delta_workflow(model::RunnableActionSet &set, StorageDelta delta,
+                      StorageItemDeltaManager &item, int128_t &net_storage_cost,
+                      bool must_succeed = false)
+{
+  co_await set.bg();
+  auto lk = item.try_reserve(delta, StorageLock(StorageLockType::kNone));
+  if (!lk) {
+    if (must_succeed) {
+      throw std::runtime_error("Failed to reserve lock");
+    }
+    co_return;
+  }
+  net_storage_cost += lk->locked_tokens_;
+  co_await set.bg();
+  auto res = item.commit(delta, *lk);
+  net_storage_cost -= res;
+  co_return;
+}
+
+} // namespace
+
+TEST_P(StorageItemDeltaManagerTest, TypeChangeCostUpgrade)
+{
+  // Test changes from a bytestring to an nnint
+  InvalidStateFlag invalid_state_flag;
+
+  // higher cost per item
+
+  StorageCostModel cost_model_2(14000, 2, 1, 1);
+  Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
+
+  auto committed_item =
+      std::make_shared<StorageItemWrapper>(bytestring_1, &cost_model_2);
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(committed_item,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            // do an nnint set_add
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_delta(10, 10),
+                                               item, net_storage_cost, false);
+                },
+                item, net_storage_cost);
+
+            // do an nnint set_add
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_delta(10, -5),
+                                               item, net_storage_cost, false);
+                },
+                item, net_storage_cost);
+            // do a delete
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(
+                      set, StorageDelta(StorageDeltaType::kDeltaTypeDelete),
+                      item, net_storage_cost, false);
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
+            if (res == model::ActionResult::kTimeout) {
+              return false;
+            }
+
+            // Either the delete commits or _both_ of the nnint set_adds commit.
+            auto snapshot = item.get_post_close_block_item();
+            if (snapshot &&
+                snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+
+            // duplicate original cost model
+            StorageCostModel cost_model_2(14000, 2, 1, 1);
+
+            int128_t initial_cost = cost_model_2.kBaseItemCost +
+                                    cost_model_2.get_bytestring_cost(5);
+            if (!snapshot) {
+              return initial_cost == -net_storage_cost;
+            }
+            if (snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+            if (snapshot->nnint() != 15) {
+              return false;
+            }
+
+            return net_storage_cost == cost_model.kBaseItemCost - initial_cost;
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(

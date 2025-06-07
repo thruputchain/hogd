@@ -19,6 +19,7 @@
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -88,7 +89,7 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
     return false;
   }
   default:
-    throw std::runtime_error("unknown delta type");
+    throw std::runtime_error("unknown delta type: " + x23::show(delta));
   }
 }
 
