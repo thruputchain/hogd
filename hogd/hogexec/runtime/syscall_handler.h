@@ -97,7 +97,7 @@ public:
   SystemStatus<SyscallStatus<ContractAddress>>
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
-  bool current_runtime_is_revert_poisoned() const;
+  ProposalModeData const &get_proposal_data() const;
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.

@@ -8,6 +8,7 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
@@ -97,6 +98,17 @@ SystemCallHandler::root_invoke()
 
   if (!res.is_root_success())
     return res.to_root_error();
+
+  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+    auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
+    if (!validation_data.validate()) {
+      return InvokeResult{.result_ =
+                              InvokeError{
+                                  InvokeErrorCode::kInvokeValidationFailure},
+                          .gas_consumed_ = res.gas_consumed_};
+    }
+  }
+
   root_invoked_succeeded_ = true;
   return res;
 }
@@ -286,6 +298,13 @@ SystemCallHandler::get_calldata() const
   return invocation_frame_stack_.get_active_frame()
       .active_invocation()
       .calldata;
+}
+
+ProposalModeData const &
+SystemCallHandler::get_proposal_data() const
+{
+  assert(std::holds_alternative<ProposalModeData>(execution_mode_data_));
+  return std::get<ProposalModeData>(execution_mode_data_);
 }
 
 SyscallStatus<void>

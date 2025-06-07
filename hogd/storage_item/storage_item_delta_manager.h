@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "hogd/base/types.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/refcounted_delta_variant.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -31,7 +32,8 @@ class StorageItemDeltaManager {
 public:
   StorageItemDeltaManager(
       std::shared_ptr<const StorageItemWrapper> snapshot_state,
-      InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode);
+      InvalidStateFlag *invalid_state_flag, BlockExecutionMode execution_mode,
+      StorageCostModel const *cost_model);
 
   // Disable copy
   StorageItemDeltaManager(const StorageItemDeltaManager &) = delete;
@@ -92,6 +94,8 @@ public:
   Nondeterministic<std::optional<QueueEntry>>
   get_concurrent_retrocausal_queue_entry(uint32_t index);
 
+  BlockExecutionMode mode() const { return execution_mode_; }
+
 private:
   // Performs a reservation of the storage item for the given delta operation.
   // Should be performed only when the initial lock state is kNone.
@@ -133,6 +137,7 @@ private:
 
   RefcountedDeltaVariant variant_;
   InvalidStateFlag *invalid_state_flag_;
+  StorageCostModel const *cost_model_;
 
   BlockExecutionMode execution_mode_;
 };

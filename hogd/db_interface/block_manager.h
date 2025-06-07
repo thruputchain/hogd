@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "hogd/db_interface/block_state.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 
 // Data structures to manage a possibly-forking tree of blocks.
@@ -39,6 +40,8 @@ public:
   // Otherwise the parent id is no longer a valid block to link to.
   bool add_child(BlockID parent_id, BlockID new_id, BlockExecutionMode mode);
 
+  const StorageCostModel cost_model_;
+
 private:
   // One block.
   // Does not own a reference to children.
@@ -50,13 +53,16 @@ private:
     Block() = default;
 
     // ctor for block with a parent that has not committed to database.
-    Block(BlockState *parent_state, BlockExecutionMode mode)
-      : block_data_(std::make_shared<BlockState>(parent_state, mode))
+    Block(BlockState *parent_state, BlockExecutionMode mode,
+          StorageCostModel const *cost_model)
+      : block_data_(
+            std::make_shared<BlockState>(parent_state, mode, cost_model))
     {}
 
     // ctor for block whose parent has already committed to database.
-    Block(InMemoryDatabase *base_db, BlockExecutionMode mode)
-      : block_data_(std::make_shared<BlockState>(base_db, mode))
+    Block(InMemoryDatabase *base_db, BlockExecutionMode mode,
+          StorageCostModel const *cost_model)
+      : block_data_(std::make_shared<BlockState>(base_db, mode, cost_model))
     {}
 
     bool block_is_closed() const

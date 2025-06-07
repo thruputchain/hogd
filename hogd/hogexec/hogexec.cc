@@ -1,5 +1,8 @@
+
 #include "hogd/base/log.h"
 #include "hogd/init.h"
+
+namespace hogd {}
 
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)

@@ -38,14 +38,14 @@ inline Loglet *
 ItemHead::get(ItemAllocator &allocator, size_t kv_len)
 {
   assert(!head_ || allocator_ == &allocator);
-  assert(head_ || allocator_ == nullptr);
 
   // Try to use the current head.
   if (head_ && head_->bytes_left() >= sizeof(ItemHeader) + kv_len) [[likely]]
     return head_.get();
 
   // Otherwise the head is full or has not yet been allocated. Allocate
-  // a new one.
+  // a new one. head_ can be nullptr after this if the compactor is unable
+  // to find free space.
   roll_over(allocator);
 
   return head_.get();

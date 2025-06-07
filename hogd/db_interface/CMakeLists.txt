@@ -12,6 +12,7 @@ target_link_libraries(
   db_interface
   hogd
   storage_item
+  storage_cost
   mock_db
 )
 

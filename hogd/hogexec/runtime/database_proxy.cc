@@ -7,6 +7,7 @@
 #include <format>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -14,6 +15,7 @@
 #include <variant>
 
 #include "contract.hh"
+#include "coord.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -25,6 +27,7 @@
 #include "x23/async.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -43,6 +46,25 @@ connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
   return client_config.template client<DatabaseToExecutorInterfaceV1>();
 }
 
+std::optional<DatabaseToExecutorInterfaceV1::client<
+    x23::RpcStream<x23::RpcLogger>::ClientRef>>
+connect_to_db_shard(x23::CoroPoll &cp, ShardCard const &shard)
+{
+  x23::HostPort host_addr;
+  if (!host_addr.parse(std::string(shard.address))) {
+    throw std::runtime_error("Failed to parse shard address");
+  }
+  auto addr = host_addr.to_addr();
+  if (!addr) {
+    throw std::runtime_error("Failed to parse shard address");
+  }
+  auto fd = cp.tcpconnect(&addr.value())();
+  if (!fd) {
+    return std::nullopt;
+  }
+  auto client_config = x23::rpc_stream_logged(cp, *fd);
+  return client_config.template client<DatabaseToExecutorInterfaceV1>();
+}
 struct VoidMarker {};
 
 template<auto NullValue>
@@ -96,8 +118,6 @@ to_system_error_code(auto err, auto &&f)
       }
     case RPCError::kRPCBadBlockID:
       return SystemError{SystemErrorCode::kAbortTransaction};
-    case RPCError::kRPCValidationFailure:
-      return SystemError{SystemErrorCode::kValidationFailure};
     default:
       return SystemError{SystemErrorCode::kUnrecoverable};
     }
@@ -124,6 +144,19 @@ DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp,
           out = connect_to_local_mock_database(cp, mock_db);
         }
         return *out;
+      }
+      if (std::holds_alternative<ShardedDB>(db_identifier)) {
+        auto sharded_db = std::get<ShardedDB>(db_identifier);
+        if (sharded_db.shards_.size() == 1) {
+          auto out = connect_to_db_shard(cp, sharded_db.shards_[0]);
+          while (!out) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            out = connect_to_db_shard(cp, sharded_db.shards_[0]);
+          }
+          return *out;
+        }
+        // unimplemented shard count
+        std::terminate(); // TODO(geoff): unimplemented
       }
       // unknown database specification type
       std::terminate();

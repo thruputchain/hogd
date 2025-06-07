@@ -26,8 +26,7 @@ SyscallHandlerContext::root_invoke()
   if (!push_context()) {
     return ForeignRootInvokeResult{
         .result =
-            ForeignInvokeResult{.result_code = 9,
-                                .panic = std::to_underlying(
+            ForeignInvokeResult{.panic = std::to_underlying(
                                     InvokeErrorCode::kInvokeUnrecoverable)},
         .gas_consumed = 0};
   }
@@ -36,15 +35,14 @@ SyscallHandlerContext::root_invoke()
   auto res = handler_.root_invoke();
 
   if (res.result_) {
-    return ForeignRootInvokeResult{
-        .result = ForeignInvokeResult{.result_code = *res.result_,
-                                      .panic = std::to_underlying(
-                                          InvokeErrorCode::kInvokeNone)},
-        .gas_consumed = res.gas_consumed_};
+    return ForeignRootInvokeResult{.result =
+                                       ForeignInvokeResult{
+                                           .panic = std::to_underlying(
+                                               InvokeErrorCode::kInvokeNone)},
+                                   .gas_consumed = res.gas_consumed_};
   }
 
-  return ForeignRootInvokeResult{.result = {.result_code = 0,
-                                            .panic = std::to_underlying(
+  return ForeignRootInvokeResult{.result = {.panic = std::to_underlying(
                                                 res.result_.error().code())},
                                  .gas_consumed = res.gas_consumed_};
 }

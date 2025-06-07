@@ -75,7 +75,7 @@ public:
 
   std::future<DBStatus<void>> get_future() { return promise_.get_future(); }
 
-  void snapshot();
+  bool snapshot();
 
 private:
   WorkerPool &pool_;
@@ -92,6 +92,16 @@ private:
 
   using SnapshotStats = detail::SnapshotStats;
   PerThread<SnapshotStats> perthread_stats_;
+
+  std::optional<ElapsedTimer> timer_;
+  using Completions = std::vector<std::future<DBStatus<SnapshotStats>>>;
+  Completions completions_;
+  DBStatus<detail::SnapshotStats> aggregated_stats_;
+  std::optional<Completions::iterator> completions_it_;
+
+  void start();
+  bool check_completions();
+  void finish();
 
   DBStatus<SnapshotStats> snapshot_one(UniqueLoglet src);
 
