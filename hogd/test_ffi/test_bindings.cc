@@ -16,6 +16,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
@@ -181,6 +182,8 @@ root_invoke(void *syscall_handler) noexcept
   return kUnrecoverableError;
 }
 
+constexpr StorageCostModel kCostModel(12000, 1, 5, 100);
+
 void
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
                                     int64_t tokens)
@@ -198,7 +201,7 @@ setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
           .key =
               StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance),
       },
-      std::make_shared<StorageItemWrapper>(int128_t{tokens}));
+      std::make_shared<StorageItemWrapper>(int128_t{tokens}, &kCostModel));
 }
 
 } // namespace

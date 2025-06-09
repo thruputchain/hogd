@@ -19,7 +19,6 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
-#include "hogd/storage_item/storage_costs.h"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -754,8 +753,11 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
   auto str_abc = make_bytestring("abc");
   auto str_def = make_bytestring("def");
 
+  auto const *cost_model = get_default_cost_model();
+
   // Cost for one bytestring write ("abc")
-  int128_t one_write_cost = kBaseItemCost + bytestring_cost(str_abc.size());
+  int128_t one_write_cost = cost_model->kBaseItemCost +
+                            cost_model->get_bytestring_cost(str_abc.size());
 
   // Deploy contract with three methods:
   // 0: Write "abc" to key0
@@ -893,7 +895,10 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
   auto str_abc = make_bytestring("abc");
   auto str_def = make_bytestring("def");
   auto str_ghi = make_bytestring("ghi");
-  int128_t one_write_cost = kBaseItemCost + bytestring_cost(str_abc.size());
+
+  auto const *cost_model = get_default_cost_model();
+  int128_t one_write_cost = cost_model->kBaseItemCost +
+                            cost_model->get_bytestring_cost(str_abc.size());
   int128_t half_write_cost = one_write_cost / 2;
   int128_t total_tokens = (one_write_cost * 2) + half_write_cost;
 
@@ -1061,9 +1066,13 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
   auto str_medium = make_bytestring("abcdef");        // 6 bytes
   auto str_long = make_bytestring("abcdefghijklmno"); // 15 bytes
 
+  auto const *cost_model = get_default_cost_model();
+
   // Cost for each update
-  int128_t cost_short = kBaseItemCost + bytestring_cost(str_short.size());
-  int128_t cost_medium = kBaseItemCost + bytestring_cost(str_medium.size());
+  int128_t cost_short = cost_model->kBaseItemCost +
+                        cost_model->get_bytestring_cost(str_short.size());
+  int128_t cost_medium = cost_model->kBaseItemCost +
+                         cost_model->get_bytestring_cost(str_medium.size());
 
   // Marginal cost for updating from short to medium
   int128_t marginal_medium = cost_medium - cost_short;

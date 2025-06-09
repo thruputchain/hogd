@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -130,7 +131,12 @@ public:
 
     in_memory_db_.write_item(addrkey,
                              std::make_shared<const StorageItemWrapper>(
-                                 amount));
+                                 amount, get_default_cost_model()));
+  }
+
+  const StorageCostModel *get_default_cost_model() const
+  {
+    return &block_manager_.cost_model_;
   }
 
 private:
