@@ -182,7 +182,7 @@ root_invoke(void *syscall_handler) noexcept
   return kUnrecoverableError;
 }
 
-constexpr StorageCostModel kCostModel(12000, 1, 5, 100);
+constexpr StorageCostModel kCostModel(12000, 1, 5, 100, 5);
 
 void
 setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,

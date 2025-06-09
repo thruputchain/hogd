@@ -351,21 +351,24 @@ TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
   EXPECT_TRUE(arg->try_reserve_insert(2));
 
   // Clearing a replay cache immediately doesn't charge for storage of the cleared item.
+  // The inequalities account for the fact that we might or might not charge marginal storage cost
+  // for inserting and immediately clearing the item (this doesn't affect final storage costs,
+  // just complexity of the marginal calculation)
   EXPECT_EQ(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({1, 2, 3}, 0),
   &cost_model, nullptr),
             cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(3));
-  EXPECT_EQ(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({1, 2, 3}, 1),
+  EXPECT_GE(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({1, 2, 3}, 1),
                                           &cost_model, nullptr),
             cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(2));
-  EXPECT_EQ(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({1, 2, 3}, 2),
+  EXPECT_GE(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({1, 2, 3}, 2),
                                           &cost_model, nullptr),
             cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(1));
-  EXPECT_EQ(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({1, 2, 3}, 3),
+  EXPECT_GE(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({1, 2, 3}, 3),
                                           &cost_model, nullptr),
             cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(0));
 
-  for (ReplayNonce i = 1; i <= 4; i++) {
-    ASSERT_TRUE(arg->try_reserve_insert(i));
+  for (ReplayNonce i = 1; i <= 3; i++) {
+    arg->commit_insert(i);
   }
   arg->commit_threshold_change(2);
 
@@ -389,8 +392,10 @@ TEST(RefcountedDeltaVariant, ReplayCacheFromNonEmpty)
 {
   const ReplayCache base_cache(ReplayCacheMetadata{.minimum_threshold = 10},
                                {11, 12, 14, 100, 1000});
+  auto base_item = std::make_shared<const StorageItemWrapper>(base_cache, &cost_model);
+
   RefcountedDeltaVariant variant;
-  auto *arg = variant.try_set_variant<ReplayCacheArgs>(&base_cache);
+  auto *arg = variant.try_set_variant<ReplayCacheArgs>(&base_item->replay_cache());
   ASSERT_TRUE(arg);
 
   EXPECT_FALSE(arg->try_reserve_insert(10));
@@ -400,15 +405,16 @@ TEST(RefcountedDeltaVariant, ReplayCacheFromNonEmpty)
   EXPECT_FALSE(arg->try_reserve_insert(14));
 
   EXPECT_EQ(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({13}, 0),
-                                          &cost_model, nullptr),
+                                          &cost_model, base_item.get()),
             cost_model.get_replay_cache_cost(1));
 
   // Clearing can't reduce your marginal cost upper bound -- that's released at commit time.
   EXPECT_EQ(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({13}, 13),
-                                          &cost_model, nullptr),
+                                          &cost_model, base_item.get()),
             cost_model.get_replay_cache_cost(1));
 
   arg->commit_threshold_change(12);
+  arg->commit_insert(13);
 
   auto item = variant.to_item(nullptr, &cost_model);
 

@@ -24,6 +24,8 @@ public:
 
   auto const &nonces() const { return nonces_; }
 
+  size_t count_remaining_after_clear(ReplayNonce threshold) const;
+
 private:
   ReplayCacheMetadata metadata_;
   std::set<ReplayNonce> nonces_;

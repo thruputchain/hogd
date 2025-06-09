@@ -1,6 +1,8 @@
 #include "hogd/storage_item/replay_cache.h"
 
 #include "types.hh"
+#include <cstddef>
+#include <iterator>
 
 namespace hogd {
 
@@ -18,6 +20,12 @@ ReplayCache::can_accept(ReplayNonce nonce) const
   }
 
   return !contains(nonce);
+}
+
+size_t
+ReplayCache::count_remaining_after_clear(ReplayNonce threshold) const
+{
+  return std::distance(nonces_.upper_bound(threshold), nonces_.end());
 }
 
 } // namespace hogd

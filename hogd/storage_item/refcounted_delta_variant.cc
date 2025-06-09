@@ -6,6 +6,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <print>
 #include <set>
 #include <type_traits>
 #include <utility>
@@ -409,20 +410,60 @@ ReplayCacheArgs::to_item(StorageCostModel const *cost_model) const
 {
   std::set<ReplayNonce> nonces =
       base_cache_ ? base_cache_->nonces() : std::set<ReplayNonce>();
-  nonces.insert(new_nonces_.begin(), new_nonces_.end());
   ReplayNonce min_nonce =
       std::max<ReplayNonce>(metadata_.minimum_threshold,
                             base_cache_
                                 ? base_cache_->metadata().minimum_threshold
                                 : 0);
-
   auto it = nonces.upper_bound(min_nonce);
   nonces.erase(nonces.begin(), it);
+
+  nonces.insert(committed_nonces_.begin(), committed_nonces_.end());
+
   ReplayCacheMetadata new_metadata = {.minimum_threshold = min_nonce};
 
   return std::make_shared<const StorageItemWrapper>(
       ReplayCache{new_metadata, nonces}, cost_model);
 }
+
+int128_t
+ReplayCacheArgs::get_current_committed_cost(
+    StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
+{
+  size_t committed_size = committed_nonces_.size();
+  if (base_item) {
+    committed_size += base_item->replay_cache().count_remaining_after_clear(metadata_.minimum_threshold);
+  }
+  std::println("RCArgs:: committed_size: {}", committed_size);
+  return current_model->kBaseItemCost +
+         current_model->get_replay_cache_cost(committed_size);
+}
+
+int128_t
+ReplayCacheArgs::get_marginal_cost_upper_bound_static(
+  bool is_committed,
+    StorageDelta const &delta, StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item)
+{
+  int128_t base_cost = current_model->kBaseItemCost;
+  if (is_committed || base_item) {
+    base_cost = 0;
+  }
+
+  return base_cost + current_model->get_replay_cache_cost(delta.replay_cache_modify().nonces.size());
+}
+
+int128_t
+ReplayCacheArgs::get_marginal_cost_upper_bound(
+    StorageDelta const &delta, StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
+{
+  assert(delta.type() == StorageDeltaType::kDeltaTypeReplayCacheModify);
+  return get_marginal_cost_upper_bound_static(!committed_nonces_.empty() || has_committed_delta_, delta, current_model, base_item);
+}
+
+
 
 /*
 int128_t
@@ -450,7 +491,40 @@ ReplayCacheArgs::commit_threshold_change(ReplayNonce new_threshold)
 {
   metadata_.minimum_threshold =
       std::max<ReplayNonce>({new_threshold, metadata_.minimum_threshold});
+  auto bound = committed_nonces_.upper_bound(new_threshold);
+  committed_nonces_.erase(committed_nonces_.begin(), bound);
 }
+
+int128_t
+ExclusiveLockedState::get_marginal_cost_upper_bound(StorageDelta const &delta,
+                                StorageCostModel const *cost_model,
+                                StorageItemWrapper const *base_item)
+  {
+    // TODO(geoff): Most of these methods could be factored out into a static
+    // and nonstatic version
+    switch (delta.type()) {
+    case StorageDeltaType::kDeltaTypeBytestringSet:
+      return BytestringArgs::get_marginal_cost_upper_bound_static(false, delta,
+                                                                  cost_model,
+                                                                  base_item);
+    case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
+      return NNIntSetAddArgs::get_marginal_cost_upper_bound_static(false,
+                                                                   cost_model,
+                                                                   base_item);
+    case StorageDeltaType::kDeltaTypeDelete:
+      return DeleteArgs::get_marginal_cost_upper_bound(delta, cost_model,
+                                                       base_item);
+    case StorageDeltaType::kDeltaTypeRetrocausalQueue:
+    {
+      RetrocausalQueueArgs args;
+      return args.get_marginal_cost_upper_bound(delta, cost_model, base_item);
+    }
+    case StorageDeltaType::kDeltaTypeReplayCacheModify:
+      return ReplayCacheArgs::get_marginal_cost_upper_bound_static(false, delta, cost_model, base_item);
+    default:
+      throw std::runtime_error("Impossible state : delta is " + x23::show(delta));
+    }
+  }
 
 bool
 RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const

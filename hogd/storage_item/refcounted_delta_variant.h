@@ -20,6 +20,7 @@
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -241,6 +242,12 @@ public:
   void undo_insert(ReplayNonce nonce);
 
   void commit_threshold_change(ReplayNonce new_threshold);
+  void commit_insert(ReplayNonce nonce) {
+    [[maybe_unused]]
+    auto [_, inserted] = committed_nonces_.insert(nonce);
+    assert(inserted);
+    has_committed_delta_ = true;
+  }
 
   int128_t
   get_current_committed_cost(StorageCostModel const *current_model,
@@ -249,6 +256,11 @@ public:
   get_marginal_cost_upper_bound(StorageDelta const &delta,
                                 StorageCostModel const *current_model,
                                 StorageItemWrapper const *base_item) const;
+  static int128_t
+  get_marginal_cost_upper_bound_static(bool is_committed,
+                                       StorageDelta const &delta,
+                                       StorageCostModel const *current_model,
+                                       StorageItemWrapper const *base_item);
 
   ReplayCache to_new_cache() const;
 
@@ -256,7 +268,9 @@ private:
   const ReplayCache *base_cache_;
 
   std::set<ReplayNonce> new_nonces_;
+  std::set<ReplayNonce> committed_nonces_;
   ReplayCacheMetadata metadata_ = {.minimum_threshold = 0};
+  bool has_committed_delta_ = false;
 };
 
 // Exclusive locked state
@@ -279,31 +293,7 @@ struct ExclusiveLockedState {
   static int128_t
   get_marginal_cost_upper_bound(StorageDelta const &delta,
                                 StorageCostModel const *cost_model,
-                                StorageItemWrapper const *base_item)
-  {
-    // TODO(geoff): Most of these methods could be factored out into a static
-    // and nonstatic version
-    switch (delta.type()) {
-    case StorageDeltaType::kDeltaTypeBytestringSet:
-      return BytestringArgs::get_marginal_cost_upper_bound_static(false, delta,
-                                                                  cost_model,
-                                                                  base_item);
-    case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
-      return NNIntSetAddArgs::get_marginal_cost_upper_bound_static(false,
-                                                                   cost_model,
-                                                                   base_item);
-    case StorageDeltaType::kDeltaTypeDelete:
-      return DeleteArgs::get_marginal_cost_upper_bound(delta, cost_model,
-                                                       base_item);
-    case StorageDeltaType::kDeltaTypeRetrocausalQueue:
-    {
-      RetrocausalQueueArgs args;
-      return args.get_marginal_cost_upper_bound(delta, cost_model, base_item);
-    }
-    default:
-      throw std::runtime_error("Impossible state");
-    }
-  }
+                                StorageItemWrapper const *base_item);
 };
 
 // Unmodified state -- the variant is in this state if and only if refcount is

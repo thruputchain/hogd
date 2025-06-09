@@ -166,6 +166,9 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   {
     auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
     args.commit_threshold_change(delta.replay_cache_modify().minimum_threshold);
+    for (auto nonce : delta.replay_cache_modify().nonces) {
+      args.commit_insert(nonce);
+    }
   } break;
   default:
     throw std::runtime_error("unimplemented commit_delta");
