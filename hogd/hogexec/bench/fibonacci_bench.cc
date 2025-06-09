@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 
-#include <cassert>
 #include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -21,8 +21,8 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "hogd/mockdb/in_memory_database.h"
 #include "hogd/init.h"
+#include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
@@ -40,7 +40,8 @@ namespace {
 struct BenchmarkState {
 
   BenchmarkState(WorkerPool &main_pool) : main_pool_(main_pool) {}
-  // This pool only serves RPCs from the db, which should be zero in this test outside of setup.
+  // This pool only serves RPCs from the db, which should be zero in this test
+  // outside of setup.
   x23::ThreadPool pool_ = x23::ThreadPool(1);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
@@ -55,11 +56,12 @@ struct BenchmarkState {
 
   std::unique_ptr<ExecutorContext> context_;
 
-  WorkerPool& main_pool_;
+  WorkerPool &main_pool_;
 
   const StorageCostModel cost_model_ = StorageCostModel(12000, 1, 5, 100);
 
-  void initialize() {
+  void initialize()
+  {
     constexpr static uint32_t kPortNumber = 10000;
     db_executor_server_.start_server(kPortNumber);
 
@@ -67,29 +69,34 @@ struct BenchmarkState {
         std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
                                                              kPortNumber});
 
-    [[maybe_unused]] auto res = block_manager_.add_child(0, 1, BlockExecutionMode::kBlockExecutionModeProposal);
+    [[maybe_unused]] auto res = block_manager_.add_child(
+        0, 1, BlockExecutionMode::kBlockExecutionModeProposal);
     assert(res);
     block_number_++;
 
-    context_ = std::make_unique<ExecutorContext>(ExecutionMode::kProposing, block_number_, *db_proxy_, main_pool_);
+    context_ = std::make_unique<ExecutorContext>(ExecutionMode::kProposing,
+                                                 block_number_, *db_proxy_,
+                                                 main_pool_);
   }
 
-  void advance_block() {
-     auto r = block_manager_.get_block_data(block_number_);
+  void advance_block()
+  {
+    auto r = block_manager_.get_block_data(block_number_);
     assert(r);
     r->close_block();
 
-    [[maybe_unused]] auto r2 =
-        block_manager_.add_child(block_number_, block_number_ + 1, BlockExecutionMode::kBlockExecutionModeProposal);
+    [[maybe_unused]] auto r2 = block_manager_.add_child(
+        block_number_, block_number_ + 1,
+        BlockExecutionMode::kBlockExecutionModeProposal);
     assert(r2);
     block_number_++;
 
-    context_ = std::make_unique<ExecutorContext>(ExecutionMode::kProposing, block_number_, *db_proxy_, main_pool_);
+    context_ = std::make_unique<ExecutorContext>(ExecutionMode::kProposing,
+                                                 block_number_, *db_proxy_,
+                                                 main_pool_);
   }
 
-  TransactionID allocate_txid() {
-    return next_tx_id_++;
-  }
+  TransactionID allocate_txid() { return next_tx_id_++; }
 
   void setup_grant_storage_token(ContractAddress const &address,
                                  int128_t amount)
@@ -102,9 +109,9 @@ struct BenchmarkState {
         .key =
             StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
 
-    in_memory_db_.write_item(addrkey,
-                             std::make_shared<const StorageItemWrapper>(
-                                 amount, &cost_model_));
+    in_memory_db_.write_item(
+        addrkey,
+        std::make_shared<const StorageItemWrapper>(amount, &cost_model_));
   }
 };
 
@@ -133,11 +140,11 @@ bench_fibonacci(benchmark::State &state)
 
   assert(bs.context_);
   auto init = bs.context_->propose_transaction(
-    SignedTransaction {
-        .tx = Transaction {
-            .invocation = fib_client.make_invocation<"initialize">(UINT64_MAX)
-            }
-        }, bs.allocate_txid())();
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                fib_client.make_invocation<"initialize">(
+                                    UINT64_MAX)}},
+      bs.allocate_txid())();
   if (init.result() != ExecResult::ExecResultOK) {
     throw std::runtime_error("Failed to initialize fibonacci contract");
   }
@@ -147,13 +154,12 @@ bench_fibonacci(benchmark::State &state)
   std::vector<SignedTransaction> txs_bench;
   txs_bench.reserve(numtxs);
   for (size_t i = 0; i < numtxs; i++) {
-    txs_bench.push_back(SignedTransaction {
-        .tx = Transaction {
-            .invocation = fib_client.make_invocation<"fibonacci">(UINT64_MAX, nfib)
-            }
-        });
+    txs_bench.push_back(SignedTransaction{
+        .tx = Transaction{
+            .invocation =
+                fib_client.make_invocation<"fibonacci">(UINT64_MAX, nfib)}});
   }
-  auto const& txs = txs_bench;
+  auto const &txs = txs_bench;
 
   x23::ThreadPool runner_pool(nthreads);
 
@@ -162,30 +168,32 @@ bench_fibonacci(benchmark::State &state)
     assert(numtxs == txs.size());
 
     auto [async, cb] = x23::make_async<void>();
-    
-    for (auto const& t : txs) {
-        [](auto& bs, auto& t, auto& remaining, auto cb, auto& runner_pool) -> x23::Detached {
-            co_await runner_pool.bg();
-            auto res = co_await bs.context_->propose_transaction(t, bs.allocate_txid());
-            if (res.result() != ExecResult::ExecResultOK) {
-                throw std::runtime_error("Failed to propose transaction");
-            }
-            if (remaining.fetch_sub(1) == 1) {
-                cb();
-            }
-            co_return;
-        }(bs, t, remaining, cb, runner_pool);
+
+    for (auto const &t : txs) {
+      [](auto &bs, auto &t, auto &remaining, auto cb,
+         auto &runner_pool) -> x23::Detached {
+        co_await runner_pool.bg();
+        auto res =
+            co_await bs.context_->propose_transaction(t, bs.allocate_txid());
+        if (res.result() != ExecResult::ExecResultOK) {
+          throw std::runtime_error("Failed to propose transaction");
+        }
+        if (remaining.fetch_sub(1) == 1) {
+          cb();
+        }
+        co_return;
+      }(bs, t, remaining, cb, runner_pool);
     }
     async();
   }
 }
 
-
 BENCHMARK(bench_fibonacci)
-  ->RangeMultiplier(2)
-  ->Ranges({{1, 8},     // threads: 1, 2, 4, 8
-            {50, 200},   // num txs: 50, 100, 200  
-            {5, 20}});    // fib(n): 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
+    ->RangeMultiplier(2)
+    ->Ranges({{1, 8},    // threads: 1, 2, 4, 8
+              {50, 200}, // num txs: 50, 100, 200
+              {5, 20}}); // fib(n): 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+                         // 17, 18, 19, 20
 
 /*
 void
