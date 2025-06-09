@@ -18,7 +18,7 @@
 namespace hogd {
 
 HogDBStatus<int128_t>
-InvokeTX::read_nnint128(ItemKey key)
+InvokeTX::read_nnint128(const ItemKey &key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
@@ -32,7 +32,7 @@ InvokeTX::read_nnint128(ItemKey key)
 }
 
 HogDBStatus<OwningSpan<const std::byte>>
-InvokeTX::read_bytes(ItemKey key)
+InvokeTX::read_bytes(const ItemKey &key)
 {
   const ItemChange *change = read_change(key);
   if (!change)
@@ -59,7 +59,7 @@ InvokeTX::abort()
 {
   assert_is_valid();
 
-  for (const auto &[key, vec] : changes_) {
+  for (auto &[key, vec] : changes_) {
     if (!vec.empty())
       block_.unlock(key, vec.back().change);
   }
@@ -119,7 +119,7 @@ InvokeTX::release_savepoint(int depth)
 }
 
 HogDBStatus<void>
-InvokeTX::request_change(ItemKey key, ItemChange &&change)
+InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 {
   std::vector<ItemVersion> &v = changes_[key];
 

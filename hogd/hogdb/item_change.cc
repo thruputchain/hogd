@@ -191,26 +191,26 @@ ItemChange::storage_size() const
 }
 
 HogDBStatus<ssize_t>
-ItemChange::storage_delta(HogDatabase &db, const ItemKey &key)
+ItemChange::storage_cost_delta(HogDatabase &db, const ItemKey &key)
 {
   // fetch the snapshot size of the object from the database if needed.
-  if (!snapshot_size_) {
-    auto snapshot_size = [&db, key] -> HogDBStatus<size_t> {
+  if (!snapshot_cost_) {
+    auto snapshot_cost = [&db, key] -> HogDBStatus<size_t> {
       HogDBStatus<size_t> ret = get_item_size(db, key);
       if (!ret && ret.error() == HogDBCode::kNotFound)
         return 0UL;
       if (!ret)
         return ret.error();
-      return *ret;
+      return storage_cost(*ret);
     }();
-    if (!snapshot_size)
-      return snapshot_size.error();
-    snapshot_size_ = *snapshot_size;
+    if (!snapshot_cost)
+      return snapshot_cost.error();
+    snapshot_cost_ = *snapshot_cost;
   }
 
   // calculate the delta between the size of the changed item and its snapshot.
-  return static_cast<ssize_t>(storage_size()) -
-         static_cast<ssize_t>(*snapshot_size_);
+  ssize_t cost = is_deletion() ? 0 : storage_cost(storage_size());
+  return cost - static_cast<ssize_t>(*snapshot_cost_);
 }
 
 } // namespace hogd

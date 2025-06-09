@@ -16,6 +16,17 @@
 
 namespace hogd {
 
+// storage_cost returns the cost in hogs for storage.
+//
+// WARNING: This does not necessarily reflect the real storage cost. It can't
+// easily change because it is part of the blockchain model.
+constexpr size_t
+storage_cost(size_t bytes)
+{
+  constexpr size_t kFixedCost = 128; // for the key and metadata
+  return kFixedCost + bytes;
+}
+
 inline constexpr size_t kAddressSize = 32;
 inline constexpr size_t kItemKeySize = 32;
 

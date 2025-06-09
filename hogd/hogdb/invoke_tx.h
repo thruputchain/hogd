@@ -46,8 +46,8 @@ public:
   // kNotFound if the item does not exist.
   //
 
-  HogDBStatus<int128_t> read_nnint128(ItemKey key);
-  HogDBStatus<OwningSpan<const std::byte>> read_bytes(ItemKey key);
+  HogDBStatus<int128_t> read_nnint128(const ItemKey &key);
+  HogDBStatus<OwningSpan<const std::byte>> read_bytes(const ItemKey &key);
 
   //
   // All of the request_* methods below are different operations that can be
@@ -57,17 +57,18 @@ public:
   //
 
   // request_nnint128 requests to perform set_add(base, delta).
-  HogDBStatus<void> request_nnint128(ItemKey key, int128_t base,
+  HogDBStatus<void> request_nnint128(const ItemKey &key, int128_t base,
                                      int128_t delta);
 
   // request_nnint128 requests to perform set_add(SNAPSHOT.base, delta).
-  HogDBStatus<void> request_nnint128(ItemKey key, int128_t delta);
+  HogDBStatus<void> request_nnint128(const ItemKey &key, int128_t delta);
 
   // request_bytes requests to insert buf.
-  HogDBStatus<void> request_bytes(ItemKey key, std::span<const std::byte> buf);
+  HogDBStatus<void> request_bytes(const ItemKey &key,
+                                  std::span<const std::byte> buf);
 
   // request_deletion requests to delete the key.
-  HogDBStatus<void> request_deletion(ItemKey key);
+  HogDBStatus<void> request_deletion(const ItemKey &key);
 
 private:
   struct ItemVersion {
@@ -81,9 +82,9 @@ private:
 
   // read_change returns the most recent version of a change, or nullptr if
   // there is no change.
-  const ItemChange *read_change(ItemKey key) const;
+  const ItemChange *read_change(const ItemKey &key) const;
   // request_change tries to apply a change to the transaction.
-  HogDBStatus<void> request_change(ItemKey key, ItemChange &&change);
+  HogDBStatus<void> request_change(const ItemKey &key, ItemChange &&change);
 
   void assert_is_valid() const
   {
@@ -108,7 +109,7 @@ InvokeTX::create_savepoint()
 }
 
 inline const ItemChange *
-InvokeTX::read_change(ItemKey key) const
+InvokeTX::read_change(const ItemKey &key) const
 {
   auto it = changes_.find(key);
   if (it == changes_.end())
@@ -119,13 +120,13 @@ InvokeTX::read_change(ItemKey key) const
 }
 
 inline HogDBStatus<void>
-InvokeTX::request_nnint128(ItemKey key, int128_t base, int128_t delta)
+InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
 {
   return request_change(key, NNInt128{base, delta});
 }
 
 inline HogDBStatus<void>
-InvokeTX::request_nnint128(ItemKey key, int128_t delta)
+InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
 {
   return hogd::read_nnint128(block_.get_db(), key)
       .and_then([this, key, delta](int128_t base) {
@@ -134,13 +135,13 @@ InvokeTX::request_nnint128(ItemKey key, int128_t delta)
 }
 
 inline HogDBStatus<void>
-InvokeTX::request_bytes(ItemKey key, std::span<const std::byte> buf)
+InvokeTX::request_bytes(const ItemKey &key, std::span<const std::byte> buf)
 {
   return request_change(key, Bytes{buf});
 }
 
 inline HogDBStatus<void>
-InvokeTX::request_deletion(ItemKey key)
+InvokeTX::request_deletion(const ItemKey &key)
 {
   return request_change(key, Deletion{});
 }

@@ -73,8 +73,9 @@ public:
   HogDBStatus<void> merge(const NNInt128 &nnint);
   void undo_merge(const NNInt128 &nnint);
 
-  static size_t storage_size() { return sizeof(ItemKey) + sizeof(int128_t); }
+  static size_t storage_size() { return sizeof(int128_t); }
   int128_t value() const { return base_ + delta_; }
+  int128_t base() const { return base_; }
 
 private:
   int128_t base_;
@@ -115,7 +116,7 @@ public:
   }
   static void undo_merge(const Bytes &bytes) {}
 
-  size_t storage_size() const { return sizeof(ItemKey) + buf_.size(); }
+  size_t storage_size() const { return buf_.size(); }
   OwningSpan<const std::byte> value() const
   {
     std::vector<std::byte> buf(buf_);
@@ -156,9 +157,10 @@ public:
   OwningSpan<const std::byte> to_bytes() const;
   bool is_deletion() const { return std::holds_alternative<Deletion>(type_); }
   bool is_exclusive() const { return exclusive_; }
+  std::optional<NNInt128> get_raw_nnint128() const;
 
   // setters
-  void set_snapshot_size(size_t bytes) { snapshot_size_ = bytes; }
+  void set_snapshot_cost(size_t val) { snapshot_cost_ = val; }
 
   // commit applies the item's changes to the ramdb.
   HogDBStatus<void> commit(HogDatabase &db, ItemKey key) const;
@@ -171,13 +173,13 @@ public:
   // undo_merge reverts a change that was merged with this one.
   void undo_merge(const ItemChange &change);
 
-  // storage_delta returns the change in bytes needed to store the item if
-  // committed (could be negative).
-  HogDBStatus<ssize_t> storage_delta(HogDatabase &db, const ItemKey &key);
+  // storage_cost_delta returns the change in storage cost (in native tokens)
+  // needed to store the item if committed (could be negative).
+  HogDBStatus<ssize_t> storage_cost_delta(HogDatabase &db, const ItemKey &key);
 
 private:
   bool exclusive_{false};
-  std::optional<size_t> snapshot_size_;
+  std::optional<size_t> snapshot_cost_;
   std::variant<std::monostate, NNInt128, Bytes, Deletion> type_;
 
   size_t storage_size() const;
@@ -197,6 +199,21 @@ ItemChange::to_bytes() const
   if (const auto *tmp = std::get_if<Bytes>(&type_); tmp)
     return tmp->value();
   return {};
+}
+
+inline std::optional<NNInt128>
+ItemChange::get_raw_nnint128() const
+{
+  if (const auto *tmp = std::get_if<NNInt128>(&type_); tmp)
+    return *tmp;
+  return std::nullopt;
+}
+
+inline HogDBStatus<ItemChange>
+make_balance_change(HogDatabase &db, const Address &addr, int128_t delta)
+{
+  return read_address_balance(db, addr).transform(
+      [delta](int128_t base) { return ItemChange(NNInt128(base, delta)); });
 }
 
 } // namespace hogd

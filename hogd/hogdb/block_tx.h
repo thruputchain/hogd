@@ -24,19 +24,24 @@ public:
   // getters
   HogDatabase &get_db() const { return db_; }
 
-  // commit applies all changes to the database.
+  // commit applies all changes to the database. If this fails, nothing will be
+  // written to disk, but the database may be left in an inconsistent state.
   HogDBStatus<void> commit();
   // abort drops all changes.
-  void abort() { locks_.clear(); }
+  void abort()
+  {
+    addr_balance_locks_.clear();
+    item_locks_.clear();
+  }
 
   // lock reserves the right to apply change to an item.
-  HogDBStatus<void> lock(ItemKey key, const ItemChange &change);
+  HogDBStatus<void> lock(const ItemKey &key, ItemChange &change);
   // modify_lock modifies an existing change to an item that was reserved with
   // lock(). It could still fail if new_change has a conflict.
-  HogDBStatus<void> modify_lock(ItemKey key, const ItemChange &old_change,
-                                const ItemChange &new_change);
+  HogDBStatus<void> modify_lock(const ItemKey &key, ItemChange &old_change,
+                                ItemChange &new_change);
   // unlock unreserves the right to apply change to an item and reverts it.
-  void unlock(ItemKey key, const ItemChange &change);
+  void unlock(const ItemKey &key, ItemChange &change);
 
 private:
   struct ItemLock {
@@ -45,36 +50,28 @@ private:
   };
 
   HogDatabase &db_;
-  SynchronizedMap<ItemKey, ItemLock> locks_;
+  SynchronizedMap<Address, ItemLock> addr_balance_locks_;
+  SynchronizedMap<ItemKey, ItemLock> item_locks_;
+
+  // raw locking operations.
+  static inline HogDBStatus<void>
+  do_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
+          const ItemChange &change);
+  static inline HogDBStatus<void>
+  do_modify_lock(const std::unique_lock<std::mutex> &ul, ItemLock &lock,
+                 const ItemChange &old_change, const ItemChange &new_change);
+  void inline do_unlock_item(const std::unique_lock<std::mutex> &ul,
+                             const ItemKey &key, ItemLock &lock,
+                             const ItemChange &change);
+  void inline do_unlock_addr_balance(const std::unique_lock<std::mutex> &ul,
+                                     const Address &addr, ItemLock &lock,
+                                     const ItemChange &change);
+
+  // balance operations for charging for storage.
+  HogDBStatus<void> lock_balance(const Address &addr, int128_t delta);
+  HogDBStatus<void> modify_balance(const Address &addr, int128_t old_delta,
+                                   int128_t new_delta);
+  void unlock_balance(const Address &addr, int128_t delta);
 };
-
-inline HogDBStatus<void>
-BlockTX::lock(ItemKey key, const ItemChange &change)
-{
-  auto [val, ul] = locks_[key];
-  if (++val.ref == 1) {
-    val.change = change;
-    return {};
-  }
-
-  if (HogDBStatus<void> ret = val.change.merge(change); !ret) {
-    val.ref--;
-    return ret.error();
-  }
-
-  return {};
-}
-
-inline void
-BlockTX::unlock(ItemKey key, const ItemChange &change)
-{
-  auto [val, ul] = locks_[key];
-  assert(val.ref > 0);
-  if (--val.ref == 0) {
-    locks_.remove(key, ul);
-    return;
-  }
-  val.change.undo_merge(change);
-}
 
 } // namespace hogd
