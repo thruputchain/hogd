@@ -34,6 +34,8 @@ SnapshotStorageItem::make_contract_key_variant(StorageItem item)
     return variant_type{std::in_place_type<RetrocausalQueueEntry>};
   case StorageItemType::kItemTypeDeleted:
     return variant_type{std::in_place_type<DeletedEntry>};
+  case StorageItemType::kItemTypeReplayCache:
+    return variant_type{std::in_place_type<ReplayCacheEntry>, item.replay_cache_metadata()};
   }
   assert(false);
   throw std::runtime_error("Impossible");

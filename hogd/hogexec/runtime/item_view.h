@@ -1,10 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <limits>
 #include <optional>
 #include <variant>
+#include <set>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
@@ -158,6 +160,43 @@ private:
   int128_t initial_native_token_balance_;
 };
 
+class ReplayCacheItem {
+public:
+  ReplayCacheItem(ReplayCacheMetadata metadata) : metadata_(metadata)
+  {}
+
+  StorageDelta get_delta() const;
+  constexpr static SyscallStatus<void> validate() { return {}; }
+
+  SyscallStatus<void> try_insert(ReplayNonce nonce)
+  {
+    if (nonce <= metadata_.minimum_threshold) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    }
+    if (inserted_nonces_.contains(nonce)) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    }
+    [[maybe_unused]] auto [_, inserted] = inserted_nonces_.insert(nonce);
+    assert(inserted);
+
+    return {};
+  }
+
+  SyscallStatus<void> raise_minimum_threshold(ReplayNonce new_threshold)
+  {
+    if (new_threshold < metadata_.minimum_threshold) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    }
+    metadata_.minimum_threshold = new_threshold;
+    return {};
+  }
+
+  constexpr static ItemViewType kItemType = ItemViewType::kReplayCache;
+private:
+  ReplayCacheMetadata metadata_;
+  std::set<ReplayNonce> inserted_nonces_;
+};
+
 // Represent state of an ItemView that has not been modified during
 // the current transaction.
 // Should never be created outside of ItemView, but might be
@@ -295,7 +334,7 @@ private:
                                       ItemViewType item_type);
 
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
-               RetrocausalQueueItem, NativeTokenBalanceItem>
+               RetrocausalQueueItem, NativeTokenBalanceItem, ReplayCacheItem>
       delta_args_;
   Nondeterministic<int128_t> locked_storage_cost_ = 0;
 };
