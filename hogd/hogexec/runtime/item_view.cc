@@ -357,6 +357,7 @@ void
 ItemView::debug_assert_view_types(SnapshotStorageItem const &base_item,
                                   ItemViewType item_type)
 {
+  [[maybe_unused]]
   auto const &addrkey = base_item.addrkey();
   if (item_type == ItemViewType::kNativeTokenBalance) {
     assert(addrkey.key.key_type() ==

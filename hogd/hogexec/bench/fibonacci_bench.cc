@@ -111,8 +111,8 @@ struct BenchmarkState {
 void
 bench_fibonacci(benchmark::State &state)
 {
-  int nthreads = state.range(1);
-  int numtxs = state.range(0);
+  int nthreads = state.range(0);
+  int numtxs = state.range(1);
   uint32_t nfib = state.range(2);
   WorkerPool main_pool = WorkerPool(nthreads);
 
@@ -138,7 +138,6 @@ bench_fibonacci(benchmark::State &state)
             .invocation = fib_client.make_invocation<"initialize">(UINT64_MAX)
             }
         }, bs.allocate_txid())();
-  std::println("init result {}", x23::show(init));
   if (init.result() != ExecResult::ExecResultOK) {
     throw std::runtime_error("Failed to initialize fibonacci contract");
   }
@@ -186,7 +185,7 @@ BENCHMARK(bench_fibonacci)
   ->RangeMultiplier(2)
   ->Ranges({{1, 8},     // threads: 1, 2, 4, 8
             {50, 200},   // num txs: 50, 100, 200  
-            {3, 7}});    // fib(n): 3, 4, 5, 6, 7
+            {5, 20}});    // fib(n): 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
 
 /*
 void
