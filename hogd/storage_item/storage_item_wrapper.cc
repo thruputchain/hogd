@@ -6,8 +6,8 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "storage_item.hh"
 

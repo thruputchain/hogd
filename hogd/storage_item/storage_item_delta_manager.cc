@@ -305,9 +305,11 @@ StorageItemDeltaManager::revert_exclusive_lock_to_set_typeclass(
   assert(variant_.refcount() == 1);
 
   // handle type-specific lock data
-  // This has to release the bounds lock for nnints, because case moves from kExclusiveLock
-  // to a committed kSetItemTypeClass lock (and nnint is retrocausal, so try_reserve_delta above
-  // acquires the lock, which is normally released during commit() -- not in commit_delta() after this is called).
+  // This has to release the bounds lock for nnints, because case moves from
+  // kExclusiveLock to a committed kSetItemTypeClass lock (and nnint is
+  // retrocausal, so try_reserve_delta above acquires the lock, which is
+  // normally released during commit() -- not in commit_delta() after this is
+  // called).
   if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
     if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
       auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
@@ -439,7 +441,9 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   {
     assert(variant_.has_variant_arm<ReplayCacheArgs>());
     auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
-    std::set<ReplayNonce> marginal_new_nonces = {delta.replay_cache_modify().nonces.begin(), delta.replay_cache_modify().nonces.end()};
+    std::set<ReplayNonce> marginal_new_nonces = {
+        delta.replay_cache_modify().nonces.begin(),
+        delta.replay_cache_modify().nonces.end()};
     for (auto nonce : prev_typeclass_lock.extra_lock_data.nonces()) {
       marginal_new_nonces.erase(nonce);
     }
@@ -464,7 +468,8 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   case StorageItemType::kItemTypeDeleted:
     return prev_lock;
   default:
-    throw std::runtime_error("unimplemented handle_try_reserve_from_set_typeclass_lock");
+    throw std::runtime_error(
+        "unimplemented handle_try_reserve_from_set_typeclass_lock");
   }
 }
 
@@ -575,7 +580,8 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     break;
   }
   default:
-    throw std::runtime_error("unimplemented revert_set_typeclass_lock_to_set_typeclass");
+    throw std::runtime_error(
+        "unimplemented revert_set_typeclass_lock_to_set_typeclass");
   }
 }
 

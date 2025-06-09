@@ -5,7 +5,8 @@
 
 namespace hogd {
 
-TEST(ReplayCache, Basic) {
+TEST(ReplayCache, Basic)
+{
   ReplayCache cache(ReplayCacheMetadata{.minimum_threshold = 10}, {11, 12, 14});
 
   EXPECT_FALSE(cache.can_accept(9));
@@ -25,8 +26,10 @@ TEST(ReplayCache, Basic) {
   EXPECT_EQ(cache.size(), 3);
 }
 
-TEST(ReplayCache, CountRemainingAfterClear) {
-  ReplayCache cache(ReplayCacheMetadata{.minimum_threshold = 10}, {11, 12, 14, 15});
+TEST(ReplayCache, CountRemainingAfterClear)
+{
+  ReplayCache cache(ReplayCacheMetadata{.minimum_threshold = 10},
+                    {11, 12, 14, 15});
 
   EXPECT_EQ(cache.count_remaining_after_clear(10), 4);
   EXPECT_EQ(cache.count_remaining_after_clear(11), 3);

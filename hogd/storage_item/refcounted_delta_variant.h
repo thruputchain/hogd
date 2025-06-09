@@ -235,15 +235,16 @@ public:
 
   static bool typeclass_match(const ReplayCache * /*unused*/) { return true; }
 
-  std::shared_ptr<const StorageItemWrapper> to_item(StorageCostModel const *cost_model) const;
+  std::shared_ptr<const StorageItemWrapper>
+  to_item(StorageCostModel const *cost_model) const;
 
   bool try_reserve_insert(ReplayNonce nonce);
   void undo_insert(ReplayNonce nonce);
 
   void commit_threshold_change(ReplayNonce new_threshold);
-  void commit_insert(ReplayNonce nonce) {
-    [[maybe_unused]]
-    auto [_, inserted] = committed_nonces_.insert(nonce);
+  void commit_insert(ReplayNonce nonce)
+  {
+    [[maybe_unused]] auto [_, inserted] = committed_nonces_.insert(nonce);
     assert(inserted);
     has_committed_delta_ = true;
   }

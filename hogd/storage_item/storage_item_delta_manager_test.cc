@@ -82,8 +82,8 @@ make_replay_delta(x23::Vec<ReplayNonce> nonces, ReplayNonce minimum_threshold)
 {
   StorageDelta delta(StorageDeltaType::kDeltaTypeReplayCacheModify);
   delta.replay_cache_modify() = {
-    .minimum_threshold = minimum_threshold,
-    .nonces = std::move(nonces),
+      .minimum_threshold = minimum_threshold,
+      .nonces = std::move(nonces),
   };
   return delta;
 };
@@ -685,7 +685,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
   expect_final(item, int128_t{2});
 }
 
-TEST_P(StorageItemDeltaManagerTest, ReplayCacheInsertFromEmpty) {
+TEST_P(StorageItemDeltaManagerTest, ReplayCacheInsertFromEmpty)
+{
   StorageItemDeltaManager item(nullptr, &flag_, mode_, &cost_model);
 
   auto delta1 = make_replay_delta({1, 2, 3}, 0);
@@ -693,7 +694,13 @@ TEST_P(StorageItemDeltaManagerTest, ReplayCacheInsertFromEmpty) {
   // conflicts with delta1 and delta2
   auto delta3 = make_replay_delta({1, 4, 7}, 5);
 
-  auto delta4 = make_replay_delta({8, 9, 10, }, 7);
+  auto delta4 = make_replay_delta(
+      {
+          8,
+          9,
+          10,
+      },
+      7);
 
   auto lock1 = item.try_reserve(delta1, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lock1);

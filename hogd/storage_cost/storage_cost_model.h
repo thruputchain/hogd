@@ -12,7 +12,8 @@ struct StorageCostModel {
                              int128_t replay_cache_cost_per_entry)
     : kBaseItemCost(base_item_cost),
       kBytestringCostPerByte(bytestring_cost_per_byte),
-      kRCQCostPerEntry(rcq_cost_per_entry), kRCQCostPerBlock(rcq_cost_per_block),
+      kRCQCostPerEntry(rcq_cost_per_entry),
+      kRCQCostPerBlock(rcq_cost_per_block),
       kReplayCacheCostPerEntry(replay_cache_cost_per_entry)
   {}
 

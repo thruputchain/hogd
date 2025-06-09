@@ -5,8 +5,8 @@
 #include <concepts>
 #include <limits>
 #include <optional>
-#include <variant>
 #include <set>
+#include <variant>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
@@ -162,8 +162,7 @@ private:
 
 class ReplayCacheItem {
 public:
-  ReplayCacheItem(ReplayCacheMetadata metadata) : metadata_(metadata)
-  {}
+  ReplayCacheItem(ReplayCacheMetadata metadata) : metadata_(metadata) {}
 
   StorageDelta get_delta() const;
   constexpr static SyscallStatus<void> validate() { return {}; }
@@ -192,6 +191,7 @@ public:
   }
 
   constexpr static ItemViewType kItemType = ItemViewType::kReplayCache;
+
 private:
   ReplayCacheMetadata metadata_;
   std::set<ReplayNonce> inserted_nonces_;
