@@ -3,11 +3,10 @@
 #include <algorithm>
 #include <cassert>
 #include <concepts>
-#include <iterator>
 #include <memory>
 #include <optional>
-#include <print>
 #include <set>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -23,6 +22,7 @@
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
+#include "x23/format.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -435,7 +435,6 @@ ReplayCacheArgs::get_current_committed_cost(
   if (base_item) {
     committed_size += base_item->replay_cache().count_remaining_after_clear(metadata_.minimum_threshold);
   }
-  std::println("RCArgs:: committed_size: {}", committed_size);
   return current_model->kBaseItemCost +
          current_model->get_replay_cache_cost(committed_size);
 }

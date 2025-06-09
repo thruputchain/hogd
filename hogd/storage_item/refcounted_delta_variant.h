@@ -20,7 +20,6 @@
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"
-#include "x23/format.h"
 
 namespace hogd {
 

@@ -715,8 +715,8 @@ TEST_P(StorageItemDeltaManagerTest, ReplayCacheInsertFromEmpty) {
   auto r = item.get_post_close_block_item();
   ASSERT_TRUE(r);
   EXPECT_EQ(r->type(), StorageItemType::kItemTypeReplayCache);
-  EXPECT_EQ(r->replay_cache().metadata().minimum_threshold, 5);
-  EXPECT_EQ(r->replay_cache().nonces(), (std::set<ReplayNonce>{6, 7}));
+  EXPECT_EQ(r->replay_cache().metadata().minimum_threshold, 4);
+  EXPECT_EQ(r->replay_cache().nonces(), (std::set<ReplayNonce>{4, 5, 6}));
 }
 
 namespace {

@@ -4,7 +4,6 @@
 #include <cassert>
 #include <memory>
 #include <optional>
-#include <print>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -614,10 +613,6 @@ StorageItemDeltaManager::commit(StorageDelta const &delta,
 
   // want: required_storage = base_storage + unreleased_storage_cost_.
   int128_t locked_storage = lock.locked_tokens_;
-  std::println("locked_storage: {}", locked_storage);
-  std::println("committed_item_cost_: {}", committed_item_cost_);
-  std::println("unreleased_storage_cost_: {}", unreleased_storage_cost_);
-  std::println("required_storage: {}", required_storage);
   assert(committed_item_cost_ + unreleased_storage_cost_ + locked_storage >=
          required_storage);
 
