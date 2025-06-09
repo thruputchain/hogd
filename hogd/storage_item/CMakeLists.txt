@@ -10,6 +10,7 @@ add_library(
 
 target_link_libraries(
   storage_item
+  storage_cost
   hogd
 )
 
@@ -28,6 +29,7 @@ add_executable(
 target_link_libraries(
   storage_item_test
   storage_item
+  model_checker
   GTest::gtest_main
 )
 gtest_discover_tests(storage_item_test)

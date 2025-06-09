@@ -11,6 +11,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -60,17 +61,22 @@ protected:
   get_parent_storage_item(AddressAndKey const &addrkey);
 
   SnapshotStorageView(InMemoryDatabase *root_db,
-                      BlockExecutionMode execution_mode)
-    : execution_mode_(execution_mode), parent_view_(root_db)
+                      BlockExecutionMode execution_mode,
+                      StorageCostModel const *cost_model)
+    : execution_mode_(execution_mode), cost_model_(cost_model),
+      parent_view_(root_db)
   {}
   SnapshotStorageView(ParentBlockView *parent_view,
-                      BlockExecutionMode execution_mode)
-    : execution_mode_(execution_mode), parent_view_(parent_view)
+                      BlockExecutionMode execution_mode,
+                      StorageCostModel const *cost_model)
+    : execution_mode_(execution_mode), cost_model_(cost_model),
+      parent_view_(parent_view)
   {}
 
   SynchronizedMap<AddressAndKey, StorageItemDeltaManager> modified_items_;
   InvalidStateFlag invalid_state_flag_;
   BlockExecutionMode execution_mode_;
+  StorageCostModel const *cost_model_;
 
   // simple impl, for now
   x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>>

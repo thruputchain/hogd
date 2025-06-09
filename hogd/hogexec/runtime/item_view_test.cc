@@ -13,6 +13,7 @@
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -147,18 +148,18 @@ TEST_F(ItemViewTest, RCQRead)
   auto rcq_item = RetrocausalQueueItem(*item);
 
   // set up data in db to read
-  auto queue = make_queue({{make_test_queue_entry(1)},
-                           {make_test_queue_entry(2), make_test_queue_entry(3)},
-                           {},
-                           {make_test_queue_entry(4), make_test_queue_entry(5)},
-                           {},
-                           {},
-                           {make_test_queue_entry(6)},
-                           {},
-                           {}});
+  auto queue = make_queue({
+      {make_test_queue_entry(1)},
+      {make_test_queue_entry(2), make_test_queue_entry(3)},
 
+      {make_test_queue_entry(4), make_test_queue_entry(5)},
+
+      {make_test_queue_entry(6)},
+  });
+
+  StorageCostModel cost_model(12000, 1, 5, 100);
   server_.setup_create_item(AddressAndKey{},
-                            StorageItemWrapper(std::move(queue)));
+                            StorageItemWrapper(std::move(queue), &cost_model));
   ExecutionModeData execution_mode_data = ProposalModeData();
 
   auto check_item = [&](std::optional<uint8_t> const &expected_entry,
