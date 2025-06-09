@@ -23,6 +23,7 @@
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/init.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
@@ -55,6 +56,8 @@ struct BenchmarkState {
   std::unique_ptr<ExecutorContext> context_;
 
   WorkerPool& main_pool_;
+
+  const StorageCostModel cost_model_ = StorageCostModel(12000, 1, 5, 100);
 
   void initialize() {
     constexpr static uint32_t kPortNumber = 10000;
@@ -101,7 +104,7 @@ struct BenchmarkState {
 
     in_memory_db_.write_item(addrkey,
                              std::make_shared<const StorageItemWrapper>(
-                                 amount));
+                                 amount, &cost_model_));
   }
 };
 
