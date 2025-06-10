@@ -157,7 +157,7 @@ bench_fibonacci(benchmark::State &state)
     txs_bench.push_back(SignedTransaction{
         .tx = Transaction{
             .invocation =
-                fib_client.make_invocation<"fibonacci">(UINT64_MAX, nfib)}});
+                fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX, nfib)}});
   }
   auto const &txs = txs_bench;
 
