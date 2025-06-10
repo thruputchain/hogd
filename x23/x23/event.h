@@ -31,6 +31,36 @@ namespace x23 {
 
 namespace detail {
 
+template<std::constructible_from T> class OnDemandSharedPtr {
+public:
+  constexpr OnDemandSharedPtr() noexcept = default;
+  OnDemandSharedPtr(OnDemandSharedPtr &&other) noexcept
+  {
+    t_.store(other.t_.exchange(nullptr));
+  }
+  OnDemandSharedPtr &operator=(OnDemandSharedPtr &&other) noexcept
+  {
+    if (this != &other)
+      t_.store(other.t_.exchange(nullptr));
+    return *this;
+  }
+
+  std::shared_ptr<T> get()
+  {
+    auto ret = t_.load();
+    if (!ret) {
+      auto buf = std::make_shared<T>();
+      if (t_.compare_exchange_strong(ret, buf))
+        return buf;
+    }
+    return ret;
+  }
+  void reset() { t_.store(nullptr); }
+
+private:
+  atomic_shared_ptr<T> t_;
+};
+
 struct BufferedReader {
   using Super = std::enable_shared_from_this<BufferedReader>;
   using Mem = std::array<char, 4092 - sizeof(Super)>;
@@ -51,31 +81,10 @@ struct BufferedReader {
 };
 
 struct BufHolder {
-  atomic_shared_ptr<BufferedReader> reader_;
+  OnDemandSharedPtr<BufferedReader> reader_;
 
-  BufHolder() noexcept = default;
-  BufHolder(BufHolder &&other) noexcept
-  {
-    reader_.store(other.reader_.exchange(nullptr));
-  }
-  BufHolder &operator=(BufHolder &&other) noexcept
-  {
-    if (this != &other)
-      reader_.store(other.reader_.exchange(nullptr));
-    return *this;
-  }
-
-  std::shared_ptr<BufferedReader> reader()
-  {
-    auto ret = reader_.load();
-    if (!ret) {
-      auto buf = std::make_shared<BufferedReader>();
-      if (reader_.compare_exchange_strong(ret, buf))
-        return buf;
-    }
-    return ret;
-  }
-  void buf_clear() { reader_.store(nullptr); }
+  auto reader() { return reader_.get(); }
+  auto buf_clear() { reader_.reset(); }
 };
 
 class CoroPollImpl : public DestroyInhibit {
