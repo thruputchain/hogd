@@ -4,6 +4,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "storage_item.hh"
 
@@ -19,6 +20,8 @@ public:
   StorageItemWrapper(int128_t nnint_value, StorageCostModel const *cost_model);
   StorageItemWrapper(RetrocausalQueue queue,
                      StorageCostModel const *cost_model);
+  StorageItemWrapper(ReplayCache replay_cache,
+                     StorageCostModel const *cost_model);
 
   auto &bytestring(this auto &self)
   {
@@ -33,6 +36,11 @@ public:
   auto &queue(this auto &self)
   {
     return std::get<RetrocausalQueueWrapper>(self.storage_item_).queue_;
+  }
+
+  auto &replay_cache(this auto &self)
+  {
+    return std::get<ReplayCacheWrapper>(self.storage_item_).cache_;
   }
 
   StorageItemType type() const;
@@ -81,8 +89,18 @@ private:
     int128_t storage_cost(StorageCostModel const *cost_model) const;
   };
 
+  struct ReplayCacheWrapper {
+    ReplayCache cache_;
+    constexpr static StorageItemType kItemType =
+        StorageItemType::kItemTypeReplayCache;
+    // Converts to wire format for network transmission
+    StorageItem to_wire_item() const;
+    // Returns storage cost based on replay cache metadata
+    int128_t storage_cost(StorageCostModel const *cost_model) const;
+  };
+
   std::variant<BytestringWrapper, NonnegativeIntWrapper,
-               RetrocausalQueueWrapper>
+               RetrocausalQueueWrapper, ReplayCacheWrapper>
       storage_item_;
   const StorageCostModel *cost_model_;
 };

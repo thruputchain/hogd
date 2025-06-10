@@ -157,7 +157,7 @@ TEST_F(ItemViewTest, RCQRead)
       {make_test_queue_entry(6)},
   });
 
-  StorageCostModel cost_model(12000, 1, 5, 100);
+  StorageCostModel cost_model(12000, 1, 5, 100, 5);
   server_.setup_create_item(AddressAndKey{},
                             StorageItemWrapper(std::move(queue), &cost_model));
   ExecutionModeData execution_mode_data = ProposalModeData();

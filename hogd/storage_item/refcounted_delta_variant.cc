@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -14,11 +15,14 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "types.hh"
+#include "x23/format.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -384,43 +388,146 @@ RetrocausalQueueArgs::get_concurrent_retrocausal_queue_entry(
   return std::nullopt;
 }
 
+bool
+ReplayCacheArgs::try_reserve_insert(ReplayNonce nonce)
+{
+  if (base_cache_ && !base_cache_->can_accept(nonce)) {
+    return false;
+  }
+  auto [_, inserted] = new_nonces_.insert(nonce);
+  return inserted;
+}
+
+void
+ReplayCacheArgs::undo_insert(ReplayNonce nonce)
+{
+  [[maybe_unused]] auto res = new_nonces_.erase(nonce);
+  assert(res == 1);
+}
+
+std::shared_ptr<const StorageItemWrapper>
+ReplayCacheArgs::to_item(StorageCostModel const *cost_model) const
+{
+  std::set<ReplayNonce> nonces =
+      base_cache_ ? base_cache_->nonces() : std::set<ReplayNonce>();
+  ReplayNonce min_nonce =
+      std::max<ReplayNonce>(metadata_.minimum_threshold,
+                            base_cache_
+                                ? base_cache_->metadata().minimum_threshold
+                                : 0);
+  auto it = nonces.upper_bound(min_nonce);
+  nonces.erase(nonces.begin(), it);
+
+  nonces.insert(committed_nonces_.begin(), committed_nonces_.end());
+
+  ReplayCacheMetadata new_metadata = {.minimum_threshold = min_nonce};
+
+  return std::make_shared<const StorageItemWrapper>(ReplayCache{new_metadata,
+                                                                nonces},
+                                                    cost_model);
+}
+
+int128_t
+ReplayCacheArgs::get_current_committed_cost(
+    StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
+{
+  size_t committed_size = committed_nonces_.size();
+  if (base_item) {
+    committed_size += base_item->replay_cache().count_remaining_after_clear(
+        metadata_.minimum_threshold);
+  }
+  return current_model->kBaseItemCost +
+         current_model->get_replay_cache_cost(committed_size);
+}
+
+int128_t
+ReplayCacheArgs::get_marginal_cost_upper_bound_static(
+    bool is_committed, StorageDelta const &delta,
+    StorageCostModel const *current_model, StorageItemWrapper const *base_item)
+{
+  int128_t base_cost = current_model->kBaseItemCost;
+  if (is_committed || base_item) {
+    base_cost = 0;
+  }
+
+  return base_cost + current_model->get_replay_cache_cost(
+                         delta.replay_cache_modify().nonces.size());
+}
+
+int128_t
+ReplayCacheArgs::get_marginal_cost_upper_bound(
+    StorageDelta const &delta, StorageCostModel const *current_model,
+    StorageItemWrapper const *base_item) const
+{
+  assert(delta.type() == StorageDeltaType::kDeltaTypeReplayCacheModify);
+  return get_marginal_cost_upper_bound_static(!committed_nonces_.empty() ||
+                                                  has_committed_delta_,
+                                              delta, current_model, base_item);
+}
+
 /*
 int128_t
-ExclusiveLockedState::get_cost_after_commit(StorageDelta const &delta,
-                               const StorageItemWrapper *base_item)
+ReplayCacheArgs::get_cost(ReplayCacheModifyArgs const &delta) const
 {
+  auto new_min = std::max<ReplayNonce>(
+      {metadata_.minimum_threshold, delta.minimum_threshold,
+       base_cache_ ? base_cache_->metadata().minimum_threshold : 0});
+
+  size_t prev_count = 0;
+  if (base_cache_) {
+    auto const &nonces = base_cache_->nonces();
+    auto it = nonces.upper_bound(new_min);
+    prev_count = std::distance(it, nonces.end());
+  }
+
+  auto it = new_nonces_.upper_bound(new_min);
+  size_t new_count = std::distance(it, new_nonces_.end());
+
+  return kBaseItemCost + replay_cache_cost(new_count + prev_count);
+} */
+
+void
+ReplayCacheArgs::commit_threshold_change(ReplayNonce new_threshold)
+{
+  metadata_.minimum_threshold =
+      std::max<ReplayNonce>({new_threshold, metadata_.minimum_threshold});
+  auto bound = committed_nonces_.upper_bound(new_threshold);
+  committed_nonces_.erase(committed_nonces_.begin(), bound);
+}
+
+int128_t
+ExclusiveLockedState::get_marginal_cost_upper_bound(
+    StorageDelta const &delta, StorageCostModel const *cost_model,
+    StorageItemWrapper const *base_item)
+{
+  // TODO(geoff): Most of these methods could be factored out into a static
+  // and nonstatic version
   switch (delta.type()) {
   case StorageDeltaType::kDeltaTypeBytestringSet:
-    return kBaseItemCost + bytestring_cost(delta.bytestring().size());
+    return BytestringArgs::get_marginal_cost_upper_bound_static(false, delta,
+                                                                cost_model,
+                                                                base_item);
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
-    return kBaseItemCost;
+    return NNIntSetAddArgs::get_marginal_cost_upper_bound_static(false,
+                                                                 cost_model,
+                                                                 base_item);
   case StorageDeltaType::kDeltaTypeDelete:
-    return 0;
+    return DeleteArgs::get_marginal_cost_upper_bound(delta, cost_model,
+                                                     base_item);
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
   {
-    auto past_stats = [&] {
-      if (delta.retrocausal_queue().consume) {
-        return base_item->queue().get_stats_after_consume(
-            delta.retrocausal_queue().consume->past_block_consume);
-      }
-      return base_item->queue().get_active_stats();
-    }();
-
-    int64_t new_count = delta.retrocausal_queue().insert.added_entries.size();
-    int64_t consumed_count =
-        (delta.retrocausal_queue().consume
-             ? delta.retrocausal_queue().consume->current_block_consumed.size()
-             : 0);
-    auto current_block_stats =
-        RetrocausalQueueStats{.active_block_count = (new_count > 0) ? 1U : 0U,
-                              .active_size = new_count - consumed_count};
-    return retrocausal_queue_cost(past_stats) +
-           retrocausal_queue_cost(current_block_stats) + kBaseItemCost;
+    RetrocausalQueueArgs args;
+    return args.get_marginal_cost_upper_bound(delta, cost_model, base_item);
   }
+  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+    return ReplayCacheArgs::get_marginal_cost_upper_bound_static(false, delta,
+                                                                 cost_model,
+                                                                 base_item);
   default:
-    assert(false);
+    throw std::runtime_error("Impossible state : delta is " + x23::show(delta));
   }
-} */
+}
 
 bool
 RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
@@ -448,6 +555,13 @@ RefcountedDeltaVariant::matches_typeclass(StorageItemTypeClass typeclass) const
           return typeclass.item_type() ==
                      StorageItemType::kItemTypeRetrocausalQueue &&
                  args.typeclass_match();
+        }
+        else if constexpr (std::same_as<args_t, ReplayCacheArgs>) {
+          // hack because the signature of the ctor has to match the
+          // typeclass_match signature in this implemebntation
+          return typeclass.item_type() ==
+                     StorageItemType::kItemTypeReplayCache &&
+                 args.typeclass_match(nullptr);
         }
         else {
           static_assert(

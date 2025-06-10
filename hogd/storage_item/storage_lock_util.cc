@@ -31,6 +31,8 @@ delta_to_typeclass(StorageDelta const &delta)
     return StorageItemTypeClass(StorageItemType::kItemTypeDeleted);
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
     return StorageItemTypeClass(StorageItemType::kItemTypeRetrocausalQueue);
+  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+    return StorageItemTypeClass(StorageItemType::kItemTypeReplayCache);
   default:
     throw std::runtime_error("unimplemented");
   }
@@ -76,6 +78,12 @@ delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode)
   case StorageDeltaType::kDeltaTypeDelete:
     lock.full_typeclass_lock().extra_lock_data.item_type(
         StorageItemType::kItemTypeDeleted);
+    return lock;
+  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+    lock.full_typeclass_lock().extra_lock_data.item_type(
+        StorageItemType::kItemTypeReplayCache);
+    lock.full_typeclass_lock().extra_lock_data.nonces() =
+        delta.replay_cache_modify().nonces;
     return lock;
   default:
     throw std::runtime_error("unimplemented");

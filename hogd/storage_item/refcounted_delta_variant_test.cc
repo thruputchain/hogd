@@ -2,16 +2,20 @@
 
 #include <memory>
 #include <optional>
+#include <set>
 #include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/refcounted_delta_variant.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
+#include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 namespace {
@@ -21,7 +25,7 @@ make_test_queue_entry(uint8_t value)
   return {value};
 }
 
-const StorageCostModel cost_model(12000, 1, 5, 100);
+const StorageCostModel cost_model(12000, 1, 5, 100, 5);
 
 } // namespace
 
@@ -319,6 +323,115 @@ TEST(RefcountedDeltaVariant, RCQCostsBlockCountUpperBound)
   auto stats2 = item3->queue().get_active_stats();
   EXPECT_EQ(stats2.active_block_count, 2);
   EXPECT_EQ(stats2.active_size, 5);
+}
+
+namespace {
+StorageDelta
+make_replay_cache_delta(x23::Vec<ReplayNonce> nonces,
+                        ReplayNonce minimum_threshold)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeReplayCacheModify);
+  delta.replay_cache_modify().nonces = std::move(nonces);
+  delta.replay_cache_modify().minimum_threshold = minimum_threshold;
+  return delta;
+}
+
+} // namespace
+
+TEST(RefcountedDeltaVariant, ReplayCacheFromEmpty)
+{
+  RefcountedDeltaVariant variant;
+  auto *arg = variant.try_set_variant<ReplayCacheArgs>(nullptr);
+  ASSERT_TRUE(arg);
+
+  EXPECT_TRUE(arg->try_reserve_insert(1));
+  EXPECT_FALSE(arg->try_reserve_insert(1));
+
+  EXPECT_TRUE(arg->try_reserve_insert(3));
+  EXPECT_TRUE(arg->try_reserve_insert(2));
+
+  // Clearing a replay cache immediately doesn't charge for storage of the
+  // cleared item. The inequalities account for the fact that we might or might
+  // not charge marginal storage cost for inserting and immediately clearing the
+  // item (this doesn't affect final storage costs, just complexity of the
+  // marginal calculation)
+  EXPECT_EQ(variant.get_marginal_cost_upper_bound(
+                make_replay_cache_delta({1, 2, 3}, 0), &cost_model, nullptr),
+            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(3));
+  EXPECT_GE(variant.get_marginal_cost_upper_bound(
+                make_replay_cache_delta({1, 2, 3}, 1), &cost_model, nullptr),
+            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(2));
+  EXPECT_GE(variant.get_marginal_cost_upper_bound(
+                make_replay_cache_delta({1, 2, 3}, 2), &cost_model, nullptr),
+            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(1));
+  EXPECT_GE(variant.get_marginal_cost_upper_bound(
+                make_replay_cache_delta({1, 2, 3}, 3), &cost_model, nullptr),
+            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(0));
+
+  for (ReplayNonce i = 1; i <= 3; i++) {
+    arg->commit_insert(i);
+  }
+  arg->commit_threshold_change(2);
+
+  EXPECT_EQ(variant.get_current_committed_cost(&cost_model, nullptr),
+            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(1));
+
+  auto item = variant.to_item(nullptr, &cost_model);
+
+  ASSERT_EQ(item->type(), StorageItemType::kItemTypeReplayCache);
+  auto const &cache = item->replay_cache();
+  ASSERT_EQ(cache.metadata().minimum_threshold, 2);
+  ASSERT_EQ(cache.nonces().size(), 1);
+  ASSERT_EQ(cache.nonces().count(1), 0);
+  ASSERT_EQ(cache.nonces().count(2), 0);
+  ASSERT_EQ(cache.nonces().count(3), 1);
+  EXPECT_EQ(item->storage_cost(),
+            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(1));
+}
+
+TEST(RefcountedDeltaVariant, ReplayCacheFromNonEmpty)
+{
+  const ReplayCache base_cache(ReplayCacheMetadata{.minimum_threshold = 10},
+                               {11, 12, 14, 100, 1000});
+  auto base_item =
+      std::make_shared<const StorageItemWrapper>(base_cache, &cost_model);
+
+  RefcountedDeltaVariant variant;
+  auto *arg =
+      variant.try_set_variant<ReplayCacheArgs>(&base_item->replay_cache());
+  ASSERT_TRUE(arg);
+
+  EXPECT_FALSE(arg->try_reserve_insert(10));
+  EXPECT_FALSE(arg->try_reserve_insert(11));
+  EXPECT_FALSE(arg->try_reserve_insert(12));
+  EXPECT_TRUE(arg->try_reserve_insert(13));
+  EXPECT_FALSE(arg->try_reserve_insert(14));
+
+  EXPECT_EQ(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({13},
+                                                                          0),
+                                                  &cost_model, base_item.get()),
+            cost_model.get_replay_cache_cost(1));
+
+  // Clearing can't reduce your marginal cost upper bound -- that's released at
+  // commit time.
+  EXPECT_EQ(variant.get_marginal_cost_upper_bound(make_replay_cache_delta({13},
+                                                                          13),
+                                                  &cost_model, base_item.get()),
+            cost_model.get_replay_cache_cost(1));
+
+  arg->commit_threshold_change(12);
+  arg->commit_insert(13);
+
+  auto item = variant.to_item(nullptr, &cost_model);
+
+  ASSERT_EQ(item->type(), StorageItemType::kItemTypeReplayCache);
+  auto const &cache = item->replay_cache();
+  ASSERT_EQ(cache.metadata().minimum_threshold, 12);
+  ASSERT_EQ(cache.nonces().size(), 4);
+  std::set<ReplayNonce> expected_nonces = {13, 14, 100, 1000};
+  ASSERT_EQ(cache.nonces(), expected_nonces);
+  EXPECT_EQ(item->storage_cost(),
+            cost_model.kBaseItemCost + cost_model.get_replay_cache_cost(4));
 }
 
 } // namespace hogd

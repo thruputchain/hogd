@@ -20,7 +20,7 @@ namespace hogd {
 // principle, at the cost of much more code complexity. This edge case
 // should disappear by the next block.
 BlockManager::BlockManager(BlockID root_id, InMemoryDatabase *base_database)
-  : cost_model_(12000, 1, 5, 100), last_committed_id_(root_id),
+  : cost_model_(12000, 1, 5, 100, 5), last_committed_id_(root_id),
     base_database_(base_database)
 {
   block_cache_.emplace(last_committed_id_, Block());

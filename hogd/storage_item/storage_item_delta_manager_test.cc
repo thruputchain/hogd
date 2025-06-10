@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -32,7 +33,7 @@ namespace hogd {
 
 namespace {
 
-const StorageCostModel cost_model(12000, 2, 5, 100);
+const StorageCostModel cost_model(12000, 2, 5, 100, 5);
 
 void
 expect_final(StorageItemDeltaManager &item, Bytestring const &bytestring)
@@ -76,6 +77,17 @@ make_nnint_delta(int128_t set, int128_t add)
   return delta;
 };
 
+auto
+make_replay_delta(x23::Vec<ReplayNonce> nonces, ReplayNonce minimum_threshold)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeReplayCacheModify);
+  delta.replay_cache_modify() = {
+      .minimum_threshold = minimum_threshold,
+      .nonces = std::move(nonces),
+  };
+  return delta;
+};
+
 } // namespace
 
 class StorageItemDeltaManagerTest
@@ -84,6 +96,7 @@ protected:
   void SetUp() override { mode_ = GetParam(); }
 
   BlockExecutionMode mode_;
+  InvalidStateFlag flag_;
 };
 
 // Change the typeclass of a storage item during execution
@@ -672,6 +685,47 @@ TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
   expect_final(item, int128_t{2});
 }
 
+TEST_P(StorageItemDeltaManagerTest, ReplayCacheInsertFromEmpty)
+{
+  StorageItemDeltaManager item(nullptr, &flag_, mode_, &cost_model);
+
+  auto delta1 = make_replay_delta({1, 2, 3}, 0);
+  auto delta2 = make_replay_delta({4, 5, 6}, 4);
+  // conflicts with delta1 and delta2
+  auto delta3 = make_replay_delta({1, 4, 7}, 5);
+
+  auto delta4 = make_replay_delta(
+      {
+          8,
+          9,
+          10,
+      },
+      7);
+
+  auto lock1 = item.try_reserve(delta1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock1);
+
+  EXPECT_FALSE(item.try_reserve(delta3, StorageLock(StorageLockType::kNone)));
+
+  auto lock2 = item.try_reserve(delta2, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock2);
+
+  item.commit(delta1, *lock1);
+  item.commit(delta2, *lock2);
+
+  EXPECT_FALSE(item.try_reserve(delta3, StorageLock(StorageLockType::kNone)));
+
+  auto lock4 = item.try_reserve(delta4, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock4);
+  item.revert(lock4->lock_);
+
+  auto r = item.get_post_close_block_item();
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->type(), StorageItemType::kItemTypeReplayCache);
+  EXPECT_EQ(r->replay_cache().metadata().minimum_threshold, 4);
+  EXPECT_EQ(r->replay_cache().nonces(), (std::set<ReplayNonce>{4, 5, 6}));
+}
+
 namespace {
 auto
 make_test_rcq_entry(uint8_t value)
@@ -1100,7 +1154,7 @@ TEST_P(StorageItemDeltaManagerTest, BytestringCostUpgrade)
   InvalidStateFlag invalid_state_flag;
 
   // higher cost per byte and lower cost per item
-  StorageCostModel cost_model_2(10000, 3, 1, 1);
+  StorageCostModel cost_model_2(10000, 3, 1, 1, 5);
   Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
 
   auto committed_item =
@@ -1238,7 +1292,7 @@ TEST_P(StorageItemDeltaManagerTest, TypeChangeCostUpgrade)
 
   // higher cost per item
 
-  StorageCostModel cost_model_2(14000, 2, 1, 1);
+  StorageCostModel cost_model_2(14000, 2, 1, 1, 5);
   Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
 
   auto committed_item =
