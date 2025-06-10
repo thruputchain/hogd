@@ -26,6 +26,8 @@ namespace hogd {
 
 namespace {
 
+constexpr int128_t kDefaultBalance = 100;
+
 // config parameter: location to store ramdb.
 std::string db_path;
 
@@ -60,6 +62,8 @@ public:
   make_many_to_one_payments_benchmark(size_t n, int workers);
   static std::unique_ptr<Benchmark>
   make_round_robin_payments_benchmark(size_t n, int workers);
+  static std::unique_ptr<Benchmark> make_new_storage_benchmark(size_t n,
+                                                               int workers);
 
   Benchmark(std::unique_ptr<Database> db, int workers,
             std::vector<Payment> &&ops)
@@ -77,10 +81,12 @@ private:
   std::vector<Payment> ops_;
 };
 
+namespace {
+
 constexpr ItemKey
-make_key(size_t n)
+make_key(size_t addr, size_t item)
 {
-  return make_item_key(make_address(n), n);
+  return make_item_key(make_address(addr), item);
 }
 
 std::unique_ptr<Database>
@@ -97,6 +103,18 @@ open_ramdb(size_t n)
   return std::move(*db);
 }
 
+void
+populate_account_balances(HogDatabase &db, size_t n,
+                          int128_t val = kDefaultBalance)
+{
+  for (size_t i = 0; i < n; i++) {
+    if (HogDBStatus ret = write_address_balance(db, make_address(i), val); !ret)
+      fail(ret.error());
+  }
+}
+
+} // namespace
+
 std::unique_ptr<Benchmark>
 Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
 {
@@ -104,7 +122,7 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
   std::vector<Payment> ops;
   ops.reserve(n - 1);
   for (size_t i = 1; i < n; i++) {
-    ops.emplace_back(make_key(0), make_key(i), 1);
+    ops.emplace_back(make_key(0, 0), make_key(0, i), 1);
   }
 
   // create the benchmark.
@@ -113,14 +131,15 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   HogDBStatus<void> ret;
-  ret = write_nnint128(bench->db_, make_key(0), static_cast<int128_t>(n));
+  ret = write_nnint128(bench->db_, make_key(0, 0), static_cast<int128_t>(n));
   if (!ret)
     fail(ret.error());
   for (size_t i = 1; i < n; i++) {
-    ret = write_nnint128(bench->db_, make_key(i), 0);
+    ret = write_nnint128(bench->db_, make_key(0, i), 0);
     if (!ret)
       fail(ret.error());
   }
+  populate_account_balances(bench->db_, n);
   HogDBStatus<uint64_t> lsn = bench->db_.commit();
   if (!lsn)
     fail(lsn.error());
@@ -135,7 +154,7 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers)
   std::vector<Payment> ops;
   ops.reserve(n - 1);
   for (size_t i = 1; i < n; i++) {
-    ops.emplace_back(make_key(i), make_key(0), 1);
+    ops.emplace_back(make_key(0, i), make_key(0, 0), 1);
   }
 
   // create the benchmark.
@@ -144,14 +163,15 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   HogDBStatus<void> ret;
-  ret = write_nnint128(bench->db_, make_key(0), static_cast<int128_t>(0));
+  ret = write_nnint128(bench->db_, make_key(0, 0), static_cast<int128_t>(0));
   if (!ret)
     fail(ret.error());
   for (size_t i = 1; i < n; i++) {
-    ret = write_nnint128(bench->db_, make_key(i), 1);
+    ret = write_nnint128(bench->db_, make_key(0, i), 1);
     if (!ret)
       fail(ret.error());
   }
+  populate_account_balances(bench->db_, n);
   HogDBStatus<uint64_t> lsn = bench->db_.commit();
   if (!lsn)
     fail(lsn.error());
@@ -166,7 +186,7 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers)
   std::vector<Payment> ops;
   ops.reserve(n);
   for (size_t i = 0; i < n; i++) {
-    ops.emplace_back(make_key(i), make_key((i + 1) % n), 1);
+    ops.emplace_back(make_key(0, i), make_key(0, (i + 1) % n), 1);
   }
 
   // create the benchmark.
@@ -175,10 +195,38 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers)
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
-    if (HogDBStatus<void> ret = write_nnint128(bench->db_, make_key(i), 1);
+    if (HogDBStatus<void> ret = write_nnint128(bench->db_, make_key(0, i), 1);
         !ret)
       fail(ret.error());
   }
+  populate_account_balances(bench->db_, n);
+  if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)
+    fail(lsn.error());
+
+  return bench;
+}
+
+std::unique_ptr<Benchmark>
+Benchmark::make_new_storage_benchmark(size_t n, int workers)
+{
+  // generate payment ops.
+  std::vector<Payment> ops;
+  ops.reserve(n);
+  for (size_t i = 0; i < n; i++) {
+    ops.emplace_back(make_key(i, 0), make_key(i, 1), 1);
+  }
+
+  // create the benchmark.
+  auto bench =
+      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+
+  // set up initial DB state.
+  for (size_t i = 0; i < n; i++) {
+    if (HogDBStatus<void> ret = write_nnint128(bench->db_, make_key(i, 0), 1);
+        !ret)
+      fail(ret.error());
+  }
+  populate_account_balances(bench->db_, n);
   if (HogDBStatus<uint64_t> lsn = bench->db_.commit(); !lsn)
     fail(lsn.error());
 
@@ -221,6 +269,9 @@ const std::tuple<std::string, std::string, bench_fn> benchmarks[] = {
      Benchmark::make_one_to_many_payments_benchmark},
     {"manytoone_payments", "everyone pays one payee",
      Benchmark::make_many_to_one_payments_benchmark},
+    {"new_storage", "new nnint128's are stored on the ledger",
+     Benchmark::make_new_storage_benchmark},
+
 };
 
 } // namespace
