@@ -424,11 +424,9 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   check_integrity();
 }
 
-TEST_F(DatabaseTest, SnapshotOngoingPuts)
+// TODO(abelay): disable this test until we can fix OOM.
+TEST_F(DatabaseTest, DISABLED_SnapshotOngoingPuts)
 {
-  // TODO(abelay): disable this test until we can fix OOM.y
-  return;
-
   auto rand = rand_; // snapshot rng state.
   insert_n(kInsertions);
   check_integrity();
@@ -441,6 +439,36 @@ TEST_F(DatabaseTest, SnapshotOngoingPuts)
 
   rand_ = rand; // restore rng state to try to get overwrites.
   std::jthread bg{[this] { insert_n(kInsertions); }};
+
+  DBStatus<void> r = snapshot_future.get();
+  ASSERT_TRUE(r);
+
+  bg.join();
+  check_integrity();
+
+  ErrnoStatus<void> rr = dir_.rename("snapshot.dat", "0.log");
+  ASSERT_TRUE(static_cast<bool>(rr));
+
+  auto ret = open_db();
+  EXPECT_TRUE(static_cast<bool>(ret));
+
+  // Restore oracle to the moment before the snapshot start.
+  std::exchange(oracle_, backup);
+  check_integrity();
+}
+
+TEST_F(DatabaseTest, SnapshotOngoingRemoves)
+{
+  insert_n(kInsertions);
+  check_integrity();
+
+  // Take a snapshot of the oracle.
+  std::unordered_map<std::string, std::string> backup{oracle_};
+  auto sync_ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  EXPECT_TRUE(sync_ret);
+  auto &[_, snapshot_future] = *sync_ret;
+
+  std::jthread bg{[this] { remove_every_n(1); }};
 
   DBStatus<void> r = snapshot_future.get();
   ASSERT_TRUE(r);

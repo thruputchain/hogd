@@ -133,11 +133,6 @@ Snapshotter::snapshot_one(UniqueLoglet src)
     stats.items++;
     ItemHeader *src_item = std::addressof(h);
 
-    // snapshotting of the loglet is finished if every live item has
-    // been copied into buffers destined for the snapshot file.
-    if (src->live_size() == stats.live_bytes)
-      break;
-
     // optimization: skip dead items that can be detected without locking.
     auto storage = std::atomic_ref<ItemStorage>(src_item->storage);
     if (storage.load(std::memory_order_acquire) == ItemStorage::kTombstone)
@@ -147,7 +142,13 @@ Snapshotter::snapshot_one(UniqueLoglet src)
     // Note that DB if sync() returns an lsn, all items covered by that
     // sync() call have lsns *less than* the returned lsn.
     // Which is end_lsn_ is non-inclusive.
-    if (src_item->lsn < begin_lsn_ || src_item->lsn >= end_lsn_)
+    // relaxed here is sufficient. It doesn't matter if we see a stale lsn here,
+    // since an item can only go from included to excluded from the snapshot lsn
+    // range. If we read a stale lsn, the double check in the modify_locked
+    // block will correct it.
+    auto src_lsn = std::atomic_ref<uint64_t>(src_item->lsn)
+                       .load(std::memory_order_relaxed);
+    if (src_lsn < begin_lsn_ || src_lsn >= end_lsn_)
       continue;
 
     // try to move the item to the new loglet.
@@ -163,6 +164,14 @@ Snapshotter::snapshot_one(UniqueLoglet src)
               ItemStorage::kTombstone) [[unlikely]] {
             return;
           }
+
+          // recheck if item lsn is still supposed to be part of the snapshot.
+          // if not, a put() operation overwrote the item (and it put the
+          // original version in the snapshot).
+          auto src_lsn = std::atomic_ref<uint64_t>(src_item->lsn)
+                             .load(std::memory_order_relaxed);
+          if (src_lsn < begin_lsn_ || src_lsn >= end_lsn_)
+            return;
 
           ScopedDiskWrite record = disk_writer_.write_record(hash);
           ret = record.modify(src_item);
