@@ -31,10 +31,22 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
     ~~~~
 
-1. Install cbindgen
+1. Install cbindgen.
 
     ~~~~ .sh
     cargo install --force cbindgen
+    ~~~~
+
+1. If you plan to use clang as your compiler, install the llvm package as well.
+
+    ~~~~ .sh
+    sudo pacman -S llvm
+    ~~~~
+
+1. Pull all of the submodules.
+
+    ~~~~ .sh
+    git submodule update --init --recursive
     ~~~~
 
 1. Configure the build system using "`cmake -B `_builddir_", setting
