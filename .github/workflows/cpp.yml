@@ -33,6 +33,10 @@ jobs:
       run: gcc --version
     - name: clang version check
       run: clang --version
+    - name: enable cargo
+      run: source $HOME/.cargo/env
+    - name: cargo version check
+      run: cargo --version
     - name: Probe Cache
       id: cache
       uses: actions/cache/restore@v4
