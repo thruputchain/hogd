@@ -165,14 +165,15 @@ public:
             prev_branch = branch;
           }
           else {
-            printf("B\n");
+            printf("B, i = %zu, offset = %zu\n", i, offset);
             // The digits do not match, so create two leaf nodes.
 
             // Shorter key's leaf node.
             Node *leaf = new Node;
             leaf->type = NodeType::kLeaf;
-            leaf->leaf_path = std::vector(shorter.begin() + i + 1, k.end());
-            // TODO: Set [leaf_path_size].
+            leaf->leaf_path = std::vector(shorter.begin() + ((i + offset) / 2),
+                                          shorter.end());
+            leaf->leaf_path_size = (shorter.size() * 2) - (i + offset);
             leaf->leaf_value = std::move(shorter_value);
             prev_branch->branch_next[std::to_integer<size_t>(shorter_digit)] =
                 leaf;
@@ -180,8 +181,9 @@ public:
             // Longer key's leaf node.
             leaf = new Node;
             leaf->type = NodeType::kLeaf;
-            leaf->leaf_path = std::vector(longer.begin() + i + 1, k.end());
-            // TODO: Set [leaf_path_size].
+            leaf->leaf_path =
+                std::vector(longer.begin() + ((i + offset) / 2), longer.end());
+            leaf->leaf_path_size = (longer.size() * 2) - (i + offset);
             leaf->leaf_value = std::move(longer_value);
             prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] =
                 leaf;
