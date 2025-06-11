@@ -72,17 +72,6 @@ public:
 
   void insert(const Key &k, T &&obj)
   {
-    if (!root_) {
-      // No root node exists, so create it.
-      root_ = new Node;
-      root_->type = NodeType::kLeaf;
-      root_->leaf_path = k;
-      root_->leaf_value = std::move(obj);
-
-      root_->hash = GetNodeHash(*root_);
-      return;
-    }
-
     // A root node already exists. If the root is a leaf node, then we need to
     // convert it to a branch node and build the trie.
     //
@@ -107,10 +96,18 @@ public:
       // from the branch node to the leaf node.
       Node *leaf = new Node;
       leaf->type = NodeType::kLeaf;
-      leaf->leaf_path = std::vector(k.begin() + idx, k.end());
+      // We are going to use the hex character at [idx] in the key to map to the
+      // leaf node from the branch node. Thus, we add 1 below as we do not want
+      // to include this character in the path that is stored in the leaf node.
+      leaf->leaf_path = std::vector(k.begin() + idx + 1, k.end());
       leaf->leaf_value = std::move(obj);
       leaf->hash = GetNodeHash(*leaf);
+
+      size_t branch_idx = std::to_integer<size_t>(k[idx]);
+      assert(!next->branch_next[branch_idx]);
+      next->branch_next[branch_idx] = leaf;
     }
+    RegenerateHashes(root_, k, /*idx=*/0);
   }
 
   void insert(const Key &k, const T &obj) { assert(false); }
@@ -159,7 +156,8 @@ private:
     SHA256Hash hash;
 
     // TODO: Optimize the variables below with a union or different node types.
-    // TODO: Optimize the vectors below--use something other than a vector.
+    // TODO: Optimize the vectors below--use something other than a vector. We
+    // know that path lengths will never exceed 65 bytes.
 
     // Branches.
     std::array<Node *, 16> branch_next;
