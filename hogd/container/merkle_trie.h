@@ -36,13 +36,7 @@ public:
   using Key = std::vector<std::byte>;
   using T = std::string;
 
-  MerkleTrie() {
-    memset(&root_hash_, 0, sizeof(root_hash_));
-    printf("sizeof(root_hash_) = %zu\n", sizeof(root_hash_));
-    for (size_t i = 0; i < sizeof(root_hash_); i++) {
-      printf("root_hash_[%zu] = %x\n", i, root_hash_[i]);
-    }
-  }
+  MerkleTrie() {}
   ~MerkleTrie() = default;
 
   // disable copy and support move.
@@ -70,20 +64,28 @@ public:
     return &kEmpty;
   }
 
-  std::string *insert(const Key &k, T &&obj)
+  void insert(const Key &k, T &&obj)
   {
-    static std::string kEmpty = "";
+    if (!root_) {
+      // No root node exists, so create it.
+      root_ = new Node;
+      root_->type = NodeType::kLeaf;
+      root_->leaf_path = k;
+      root_->leaf_value = std::move(obj);
 
-    assert(false);
-    return &kEmpty;
+      root_->hash = GetNodeHash(*root_);
+      return;
+    }
+
+    // A root node already exists. If the root is a leaf node, then we need to
+    // convert it to a branch node and build the trie.
+    //
+    // TODO: Optimize with extension nodes.
   }
 
-  std::string *insert(const Key &k, const T &obj)
+  void insert(const Key &k, const T &obj)
   {
-    static std::string kEmpty = "";
-
     assert(false);
-    return &kEmpty;
   }
 
   std::string &insert_or_assign(const Key &k, T &&obj)
@@ -131,6 +133,7 @@ private:
 
   struct Node {
     NodeType type;
+    SHA256Hash hash;
 
     // TODO: Optimize the variables below with a union or different node types.
     // TODO: Optimize the vectors below--use something other than a vector.
@@ -148,7 +151,12 @@ private:
     std::string leaf_value;
   };
 
-  SHA256Hash root_hash_;
+  SHA256Hash GetNodeHash(const Node& node) {
+    // TODO: Implement.
+    static std::array<unsigned char, 32> tmp = {0};
+    return tmp;
+  }
+
   Node *root_ = nullptr;
 };
 
