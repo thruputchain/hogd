@@ -116,7 +116,8 @@ to_system_error_code(auto err, auto &&f)
     case RPCError::kRPCStorageWriteFailed:
       if constexpr (kHasReturnType) {
         return NullValue;
-      } else if constexpr (!std::same_as<decltype(f()), void>) {
+      }
+      else if constexpr (!std::same_as<decltype(f()), void>) {
         return NullValue;
       }
       else {

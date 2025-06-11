@@ -49,7 +49,6 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
   assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
 
-  std::println("start try_reserve_storage_delta on {}", x23::show(delta));
   int128_t marginal_cost = 0;
   {
     auto lock = tx.get_lock(addrkey);
@@ -64,11 +63,11 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
     tx.add_delta(addrkey, std::move(delta), std::move(*res));
   }
 
-  if (addrkey.key.key_type() == StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
+  if (addrkey.key.key_type() ==
+      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
     // no storage cost paid for this key
     return true;
   }
-  std::println("marginal_cost: {}", marginal_cost);
 
   AddressAndKey cost_addrkey =
       AddressAndKey{.address = addrkey.address,
@@ -79,7 +78,6 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
   auto storage_lock = tx.get_lock(cost_addrkey);
   StorageDelta new_storage_delta;
   if (prev_delta) {
-    std::println("prev_delta: {}", x23::show(*prev_delta));
     assert(prev_delta->type() ==
            StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
     assert(storage_lock.lock_type() != StorageLockType::kNone);
@@ -88,7 +86,6 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
         to_xdr(from_xdr(prev_delta->nnint().add_value) - marginal_cost);
   }
   else {
-    std::println("prev_delta is null");
     assert(storage_lock.lock_type() == StorageLockType::kNone ||
            storage_lock.lock_type() == StorageLockType::kSetItemTypeClass);
     new_storage_delta =
@@ -100,8 +97,6 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
     int128_t set_value = snapshot ? snapshot->nnint() : 0;
     new_storage_delta.nnint().set_value = to_xdr(set_value);
   }
-  std::println("new_storage_delta: {}", x23::show(new_storage_delta));
-  std::println("readable add_value {}", from_xdr(new_storage_delta.nnint().add_value));
 
   auto new_lock = storage_view_.try_reserve_storage_delta(
       cost_addrkey, new_storage_delta, storage_lock,

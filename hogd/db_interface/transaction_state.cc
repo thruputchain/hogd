@@ -50,7 +50,8 @@ TransactionState::add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
              StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
     }
   }
-  subtransaction_stack_.back().deltas_[addrkey] = std::make_pair(std::move(delta), new_lock.locked_tokens_);
+  subtransaction_stack_.back().deltas_[addrkey] =
+      std::make_pair(std::move(delta), new_lock.locked_tokens_);
   held_locks_[addrkey] = std::move(new_lock.lock_);
 }
 
@@ -110,7 +111,10 @@ TransactionState::extract_results()
       auto lock = held_locks_.at(addrkey);
       auto cost = delta.second;
       result.emplace(addrkey,
-                     std::make_pair(std::move(delta.first), MeteredStorageLock{.lock_ = std::move(lock), .locked_tokens_ = cost}));
+                     std::make_pair(std::move(delta.first),
+                                    MeteredStorageLock{.lock_ = std::move(lock),
+                                                       .locked_tokens_ =
+                                                           cost}));
     }
   }
 
