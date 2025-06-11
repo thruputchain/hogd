@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <concepts>
 #include <cstdio>
 #include <exception>
 #include <format>
@@ -76,13 +77,15 @@ to_system_error_code(auto err, auto &&f)
     if constexpr (kHasReturnType) {
       return f(std::move(get<1>(err)));
     }
+    else if constexpr (std::same_as<decltype(f()), void>) {
+      return;
+    }
     else {
-      return VoidMarker{};
+      return f();
     }
   };
 
-  using ret_t =
-      std::conditional_t<kHasReturnType, decltype(type_lambda()), void>;
+  using ret_t = decltype(type_lambda());
 
   return [&] -> SystemStatus<ret_t> {
     RPCError err_code;
@@ -100,16 +103,26 @@ to_system_error_code(auto err, auto &&f)
       }
       else {
         static_assert(std::is_same_v<decltype(err), RPCError>);
-        static_assert(std::is_same_v<decltype(NullValue), VoidMarker>);
-        return {};
+        if constexpr (std::same_as<decltype(f()), void>) {
+          return {};
+        }
+        else {
+          return SystemStatus<ret_t>{f()};
+        }
       }
     case RPCError::kRPCNoStorageItem:
     case RPCError::kRPCNoContractDeployed:
     case RPCError::kRPCNoQueueEntry:
     case RPCError::kRPCStorageWriteFailed:
+      // can't directly combine these branches; f() isn't a valid expression in
+      // the first case NOLINTBEGIN(bugprone-branch-clone)
       if constexpr (kHasReturnType) {
         return NullValue;
       }
+      else if constexpr (!std::same_as<decltype(f()), void>) {
+        return NullValue;
+      }
+      // NOLINTEND(bugprone-branch-clone)
       else {
         // This should never happen -- none of the rpc errors that have a return
         // type of void should return this kind of error code.
@@ -216,21 +229,6 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(
   });
 }
 
-x23::Async<SystemStatus<std::optional<Nondeterministic<int128_t>>>>
-DatabaseProxy::try_reserve_delta(BlockID block_id, TransactionID tx_id,
-                                 AddressAndKey const &addrkey,
-                                 StorageDelta const &delta,
-                                 StorageItemRPCFlagSet flags)
-{
-  auto res = co_await read_client_.try_reserve_delta(block_id, tx_id, addrkey,
-                                                     delta, flags);
-  co_return to_system_error_code<std::nullopt>(
-      res, [](int128_xdr &&x) -> std::optional<Nondeterministic<int128_t>> {
-        return std::make_optional<Nondeterministic<int128_t>>(
-            from_xdr(std::move(x)));
-      });
-}
-
 x23::Async<SystemStatus<void>>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
 {
@@ -245,11 +243,14 @@ DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
   co_return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
-x23::Async<SystemStatus<void>>
-DatabaseProxy::push_new_subtransaction(BlockID block_id, TransactionID tx_id)
+x23::Async<SystemStatus<bool>>
+DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
+                                           TransactionID tx_id,
+                                           StorageDeltaBatch const &delta_batch)
 {
-  auto res = co_await read_client_.push_new_subtransaction(block_id, tx_id);
-  co_return to_system_error_code<VoidMarker{}>(res, [] {});
+  auto res = co_await read_client_.try_push_new_subtransaction(block_id, tx_id,
+                                                               delta_batch);
+  co_return to_system_error_code<false>(res, [] { return true; });
 }
 
 x23::Async<SystemStatus<void>>
@@ -258,6 +259,43 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
 {
   auto res = co_await read_client_.pop_subtransactions(block_id, tx_id, count);
   co_return to_system_error_code<VoidMarker{}>(res, [] {});
+}
+
+StorageDeltaBatch
+StorageDeltaBatchBuilder::build()
+{
+  StorageDeltaBatch out;
+  out.append_range(positive_storage_deltas_);
+  out.append_range(storage_deltas_);
+  out.append_range(negative_storage_deltas_);
+  return out;
+}
+
+void
+StorageDeltaBatchBuilder::add_delta(AddressAndKey const &addrkey,
+                                    StorageDelta const &delta,
+                                    StorageItemRPCFlagSet flags)
+{
+  if (addrkey.key.key_type() ==
+      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
+    assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+    if (from_xdr(delta.nnint().add_value) > 0) {
+      positive_storage_deltas_.push_back(FlaggedStorageDelta{.addrkey = addrkey,
+                                                             .delta = delta,
+                                                             .flags = flags});
+    }
+    else {
+      negative_storage_deltas_.push_back(FlaggedStorageDelta{.addrkey = addrkey,
+                                                             .delta = delta,
+                                                             .flags = flags});
+    }
+  }
+  else {
+    // TODO(geoff): prioritize deletions
+    storage_deltas_.push_back(FlaggedStorageDelta{.addrkey = addrkey,
+                                                  .delta = delta,
+                                                  .flags = flags});
+  }
 }
 
 } // namespace hogd

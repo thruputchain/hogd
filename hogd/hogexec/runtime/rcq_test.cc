@@ -5,6 +5,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -107,7 +108,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
                 Transaction{
                     .invocation =
                         Invocation{.invoked_address = contract_address_,
-                                   .method = 0,
+                                   .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {5, 4, 3, 2, 1}},
                 }},
@@ -128,7 +129,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
                 Transaction{
                     .invocation =
                         Invocation{.invoked_address = contract_address_,
-                                   .method = 1,
+                                   .entrypoint = entrypoint_from_method_id(1),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {5, 4}},
                 }},
@@ -152,7 +153,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
                 Transaction{
                     .invocation =
                         Invocation{.invoked_address = contract_address_,
-                                   .method = 0,
+                                   .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {0, 100}},
                 }},
@@ -177,7 +178,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
                 Transaction{
                     .invocation =
                         Invocation{.invoked_address = contract_address_,
-                                   .method = 1,
+                                   .entrypoint = entrypoint_from_method_id(1),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {1, 2, 3, 0, 100}},
                 }},

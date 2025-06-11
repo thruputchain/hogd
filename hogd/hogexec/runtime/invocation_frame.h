@@ -28,7 +28,8 @@ class StorageSnapshotCache;
 // Stores all relevant data structures for one Invocation in a transaction.
 class InvocationFrame {
 public:
-  InvocationFrame(Invocation invocation, InvokeFlagSet flags);
+  InvocationFrame(ContractAddress const &address, Calldata &&calldata,
+                  InvokeFlagSet flags);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -38,8 +39,8 @@ public:
   InvocationFrame(InvocationFrame &&) noexcept = default;
   InvocationFrame &operator=(InvocationFrame &&) noexcept = delete;
 
-  // the invocation that started this call frame
-  Invocation const &active_invocation() const { return active_invocation_; }
+  ContractAddress const &address() const { return address_; }
+  Calldata const &calldata() const { return calldata_; }
 
   // new deployments that were created during this (and child) call frames
   std::map<ContractAddress, SHA256Hash> new_contract_deployments_;
@@ -100,7 +101,8 @@ private:
                        std::vector<InvocationFrame> const &parent_frames,
                        StorageSnapshotCache &snapshot_cache);
 
-  const Invocation active_invocation_;
+  const ContractAddress address_;
+  const Calldata calldata_;
 
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
@@ -136,8 +138,8 @@ public:
   }
   bool empty() const { return frame_stack_.empty(); }
 
-  SystemStatus<void> start_frame(Invocation const &invocation,
-                                 InvokeFlagSet flags);
+  void start_frame(ContractAddress const &address, Calldata &&calldata,
+                   InvokeFlagSet flags);
   SystemStatus<InvokeResult>
   finish_frame(InvokeResult result, ExecutionModeData &execution_mode_data);
 

@@ -5,19 +5,15 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
-#include <type_traits>
-#include <unordered_map>
 #include <utility>
 
 #include "bcs/decode.h"
 #include "bcs/encode.h"
 #include "contract.hh"
-#include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -35,7 +31,12 @@ namespace hogd {
 // at which contracts using the SDK will expect to find it.
 MethodID sdk_method_id(std::string_view identifier_name,
                        std::string_view identifier_version, uint16_t method_id);
+ContractEntrypointID
+sdk_entrypoint_derivation(std::string_view identifier_name,
+                          std::string_view identifier_version,
+                          uint16_t method_id);
 MethodID sdk_method_id(ContractEntrypointID entry_point_id);
+ContractEntrypointID entrypoint_from_method_id(MethodID method_id);
 
 namespace detail {
 
@@ -101,10 +102,12 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   }();
 
 public:
-  template<StringLiteral Name> constexpr static MethodID method_id()
+  template<StringLiteral Name>
+  constexpr static ContractEntrypointID entrypoint()
   {
-    return sdk_method_id(ContractTrait::kTraitName, ContractTrait::kVersion,
-                         kExportIndex<kLookupIndex<Name>>);
+    return sdk_entrypoint_derivation(ContractTrait::kTraitName,
+                                     ContractTrait::kVersion,
+                                     kExportIndex<kLookupIndex<Name>>);
   }
 
   template<StringLiteral Name, typename... Args>
@@ -194,7 +197,7 @@ public:
     auto calldata =
         trait_meta_t::template make_calldata<Name>(std::forward<Args>(args)...);
     return Invocation{.invoked_address = contract_address_,
-                      .method = trait_meta_t::template method_id<Name>(),
+                      .entrypoint = trait_meta_t::template entrypoint<Name>(),
                       .gas_limit = gas_amount,
                       .calldata = calldata};
   }
@@ -205,9 +208,12 @@ public:
                        typename trait_meta_t::template return_t<Name>>>,
                    uint64_t>
   {
-    auto invocation =
-        make_invocation<Name>(UINT64_MAX, std::forward<Args>(args)...);
-    auto res = handler.invoke(invocation, UINT64_MAX, 0);
+    auto calldata =
+        trait_meta_t::template make_calldata<Name>(std::forward<Args>(args)...);
+    auto res =
+        handler.invoke(contract_address_,
+                       sdk_method_id(trait_meta_t::template entrypoint<Name>()),
+                       UINT64_MAX, calldata, 0);
 
     HostFnStatus<SyscallErrorCode> host_fn_res = res.first;
 

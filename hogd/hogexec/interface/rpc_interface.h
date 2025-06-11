@@ -12,6 +12,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -40,6 +41,12 @@ public:
   x23::Async<ExecResult>
   executorcoord_validate_transaction(BlockID block_id,
                                      ProposedTransaction const &proposed_tx);
+
+  x23::Async<ExecProposeBatchResult>
+  executorcoord_propose_batch(BlockID block_id,
+                              x23::Vec<SignedTransaction> const &signed_txs);
+  x23::Async<ExecValidateBatchResult> executorcoord_validate_batch(
+      BlockID block_id, x23::Vec<ProposedTransaction> const &proposed_txs);
 
   x23::Async<ExecResult> executorcoord_open_proposal_block(BlockID id);
   x23::Async<ExecResult> executorcoord_open_validation_block(BlockID id);

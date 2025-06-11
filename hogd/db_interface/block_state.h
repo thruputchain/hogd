@@ -62,9 +62,11 @@ public:
   // ending the block.
   // Requirement: A transaction cannot try to reserve multiple deltas for the
   // same addrkey at the same time.  This is not enforced by the interface.
-  std::optional<int128_t>
-  try_reserve_storage_delta(TransactionID txid, AddressAndKey const &addrkey,
-                            StorageDelta delta, StorageItemRPCFlagSet flags);
+  bool try_reserve_storage_delta(TransactionID txid,
+                                 AddressAndKey const &addrkey,
+                                 StorageDelta delta,
+                                 StorageItemRPCFlagSet flags);
+
   void commit_transaction(TransactionID txid);
   void abort_transaction(TransactionID txid);
 

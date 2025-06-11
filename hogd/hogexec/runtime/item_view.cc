@@ -4,7 +4,6 @@
 #include <optional>
 #include <variant>
 
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -293,58 +292,6 @@ RetrocausalQueueItem::get_next_self_entry(uint32_t index) const
     return &queue_delta_.insert.added_entries[index];
   }
   return nullptr;
-}
-
-void
-NativeTokenBalanceItem::add_deterministic_native_token_balance(int128_t amount)
-{
-  assert(!integer_add_overflow<int128_t>(native_token_balance_, amount));
-  native_token_balance_ += amount;
-  // validate performs the nonnegative check
-
-  // In no sensible codepath should a user be able to get more of the native
-  // tokens in one place than exist in the entire supply.
-  assert(native_token_balance_ <=
-         int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
-}
-
-void
-NativeTokenBalanceItem::add_nondeterministic_native_token_lock(
-    Nondeterministic<int128_t> const &amount)
-{
-
-  int128_t new_sub = amount.get();
-  assert(new_sub >= 0);
-  assert(new_sub <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
-
-  additional_subtract_amount_.get() += new_sub;
-}
-
-StorageDelta
-NativeTokenBalanceItem::get_delta() const
-{
-  assert(additional_subtract_amount_.get() >= 0);
-  int128_t subtract_amount =
-      native_token_balance_ - initial_native_token_balance_;
-  int128_t additional_sub = additional_subtract_amount_.get();
-
-  StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-  out.nnint() =
-      NonnegativeInt128SetAddArgs{.set_value =
-                                      to_xdr(initial_native_token_balance_),
-                                  .add_value =
-                                      to_xdr(subtract_amount - additional_sub)};
-  // TODO(geoff):
-  // We could conceivably avoid this delta if out.add_value == 0.
-  // I'm skipping this optimization for now, because that condition
-  // depends on the nondeterministic data in this item,
-  // and I want to limit how that nondeterministic data is incorporated
-  // downstream until we have a full picture the rest of the system. (E.g. --
-  // one failure case would be to have a contract be deleted, which could delete
-  // the corresponding db item --- and that would be a conflict with this delta.
-  // So lets hold off on this optimization until we at least figure out contract
-  // deletion behavior).
-  return out;
 }
 
 StorageDelta

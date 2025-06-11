@@ -6,12 +6,12 @@
 #include <vector>
 
 #include "contract.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -95,7 +95,9 @@ BlockSnapshotServer::commit_contract_deploy(BlockID block,
 }
 
 x23::Async<RPCError>
-BlockSnapshotServer::push_new_subtransaction(BlockID block, TransactionID tx)
+BlockSnapshotServer::try_push_new_subtransaction(BlockID block,
+                                                 TransactionID tx,
+                                                 StorageDeltaBatch batch)
 {
   co_return RPCError::kRPCUnimplemented;
 }
@@ -107,14 +109,6 @@ BlockSnapshotServer::pop_subtransactions(BlockID block, TransactionID tx,
   co_return RPCError::kRPCUnimplemented;
 }
 
-x23::Async<ExpectedStorageCost>
-BlockSnapshotServer::try_reserve_delta(BlockID block, TransactionID tx,
-                                       AddressAndKey addrkey,
-                                       StorageDelta delta,
-                                       StorageItemRPCFlagSet flags)
-{
-  co_return ExpectedStorageCost(RPCError::kRPCUnimplemented);
-}
 x23::Async<RPCError>
 BlockSnapshotServer::commit_transaction(BlockID block, TransactionID tx)
 {

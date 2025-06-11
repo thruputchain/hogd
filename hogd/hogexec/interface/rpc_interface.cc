@@ -9,6 +9,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -36,6 +37,48 @@ ExecutorRpcInterface::executorcoord_validate_transaction(
   }
 
   co_return co_await ctx->validate_transaction(proposed_tx, allocate_tx_id());
+}
+
+x23::Async<ExecProposeBatchResult>
+ExecutorRpcInterface::executorcoord_propose_batch(
+    BlockID block_id, x23::Vec<SignedTransaction> const &signed_txs)
+{
+  auto ctx = executor_states_.get_executor_context(block_id,
+                                                   ExecutionMode::kProposing);
+  if (!ctx) {
+    co_return ExecProposeBatchResult(signed_txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultSystemError));
+  }
+
+  x23::Vec<ExecProposeResult> results;
+  results.reserve(signed_txs.size());
+  for (auto const &signed_tx : signed_txs) {
+    results.push_back(
+        co_await ctx->propose_transaction(signed_tx, allocate_tx_id()));
+  }
+
+  co_return results;
+}
+x23::Async<ExecValidateBatchResult>
+ExecutorRpcInterface::executorcoord_validate_batch(
+    BlockID block_id, x23::Vec<ProposedTransaction> const &proposed_txs)
+{
+  auto ctx = executor_states_.get_executor_context(block_id,
+                                                   ExecutionMode::kValidating);
+  if (!ctx) {
+    co_return ExecValidateBatchResult(proposed_txs.size(),
+                                      ExecResult::ExecResultSystemError);
+  }
+
+  x23::Vec<ExecResult> results;
+  results.reserve(proposed_txs.size());
+  for (auto const &proposed_tx : proposed_txs) {
+    results.push_back(
+        co_await ctx->validate_transaction(proposed_tx, allocate_tx_id()));
+  }
+
+  co_return results;
 }
 
 x23::Async<ExecResult>

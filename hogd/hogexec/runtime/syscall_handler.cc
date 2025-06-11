@@ -15,6 +15,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
@@ -77,16 +78,13 @@ SystemCallHandler::root_invoke()
                         .gas_consumed_ = 0};
   }
 
-  auto start_status =
-      invocation_frame_stack_.start_frame(signed_tx_.tx.invocation,
-                                          std::to_underlying(
-                                              InvokeFlag::kInvokeFlagNone));
-  if (!start_status.has_value()) {
-    return InvokeResult{.result_ = start_status.error().to_invoke_error(),
-                        .gas_consumed_ = 0};
-  }
+  invocation_frame_stack_.start_frame(
+      signed_tx_.tx.invocation.invoked_address,
+      Calldata(signed_tx_.tx.invocation.calldata),
+      std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
-  auto res = runtime.value()->invoke(signed_tx_.tx.invocation.method,
+  auto res = runtime.value()->invoke(sdk_method_id(
+                                         signed_tx_.tx.invocation.entrypoint),
                                      signed_tx_.tx.invocation.gas_limit);
   auto finish_status =
       invocation_frame_stack_.finish_frame(res, execution_mode_data_);
@@ -160,9 +158,7 @@ SystemCallHandler::try_commit_transaction()
 ContractAddress
 SystemCallHandler::get_current_address() const
 {
-  return invocation_frame_stack_.get_active_frame()
-      .active_invocation()
-      .invoked_address;
+  return invocation_frame_stack_.get_active_frame().address();
 }
 
 SHA256Hash
@@ -181,10 +177,11 @@ SystemCallHandler::get_msg_sender() const
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
+SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
+                          GasAmount gas_limit, Calldata calldata,
                           InvokeFlagSet flags)
 {
-  auto runtime = resolve_runtime(invocation.invoked_address);
+  auto runtime = resolve_runtime(address);
   if (!runtime) {
     return std::pair{runtime.error().to_host_fn_error(), 0};
   }
@@ -192,11 +189,9 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  auto start_status = invocation_frame_stack_.start_frame(invocation, flags);
-  if (!start_status.has_value()) {
-    return {start_status.error().to_host_fn_error(), 0};
-  }
-  auto res = runtime.value()->invoke(invocation.method, gas_limit);
+  invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
+
+  auto res = runtime.value()->invoke(method, gas_limit);
   auto finish_status =
       invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   if (!finish_status.has_value()) {
@@ -287,9 +282,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 Calldata const &
 SystemCallHandler::get_calldata() const
 {
-  return invocation_frame_stack_.get_active_frame()
-      .active_invocation()
-      .calldata;
+  return invocation_frame_stack_.get_active_frame().calldata();
 }
 
 ProposalModeData const &

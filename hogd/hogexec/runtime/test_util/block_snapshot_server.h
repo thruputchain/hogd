@@ -33,17 +33,15 @@ public:
 
   static x23::Async<void> db_snapshot_read_null();
 
-  static x23::Async<ExpectedStorageCost>
-  try_reserve_delta(BlockID block, TransactionID tx, AddressAndKey addrkey,
-                    StorageDelta delta, StorageItemRPCFlagSet flags);
   static x23::Async<RPCError> commit_transaction(BlockID block,
                                                  TransactionID tx);
   static x23::Async<RPCError> abort_transaction(BlockID block,
                                                 TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.
-  static x23::Async<RPCError> push_new_subtransaction(BlockID block,
-                                                      TransactionID tx);
+  static x23::Async<RPCError>
+  try_push_new_subtransaction(BlockID block, TransactionID tx,
+                              StorageDeltaBatch batch);
 
   // Revert one or more subtransactions.
   static x23::Async<RPCError>
