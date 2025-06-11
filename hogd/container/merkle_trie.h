@@ -294,18 +294,10 @@ private:
       // Hash [leaf_path] and [leaf_value].
       to_hash.insert(to_hash.end(), node.leaf_path.begin(),
                      node.leaf_path.end());
-      printf("here %s\n", node.leaf_value.c_str());
-      printf("length: %zu\n", to_hash.size());
       std::transform(node.leaf_value.begin(), node.leaf_value.end(),
                      std::back_inserter(to_hash), CastCharToByte);
-      printf("length: %zu\n", to_hash.size());
       break;
     }
-    printf("to_hash: ");
-    for (std::byte b : to_hash) {
-      printf("%02x ", static_cast<unsigned char>(b));
-    }
-    printf("\n");
     return sha256(to_hash);
   }
 
@@ -335,6 +327,11 @@ private:
 
   Node *root_ = nullptr;
 
+  FRIEND_TEST(MerkleTrie, HashBranch);
+  FRIEND_TEST(MerkleTrie, HashBranchSomeNullptr);
+  FRIEND_TEST(MerkleTrie, HashBranchAllNullptr);
+  FRIEND_TEST(MerkleTrie, HashExtension);
+  FRIEND_TEST(MerkleTrie, HashExtensionNullptr);
   FRIEND_TEST(MerkleTrie, HashLeaf);
 };
 
