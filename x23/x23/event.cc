@@ -19,7 +19,7 @@ namespace x23 {
 namespace detail {
 
 ssize_t
-BufferedReader::operator()(int fd, void *buf, size_t len)
+ReadBuffer::operator()(int fd, void *buf, size_t len)
 {
   if (len == 0)
     return 0;
@@ -44,6 +44,31 @@ BufferedReader::operator()(int fd, void *buf, size_t len)
     return n;
   stop_ = n - len;
   return len;
+}
+
+Async<std::expected<void,Errno>>
+WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
+{
+  CoroGuard g;
+  co_await g(write_lock_);
+  if (co_await writer_.write_or_append(fd.get(), std::move(buf)))
+    service(cp, fd);
+  co_return expected_void;
+}
+
+Detached
+WriteBuffer::service(CoroPoll &cp, BorrowedFd fd)
+{
+  for (;;) {
+    CoroGuard g;
+    co_await g(write_lock_);
+    cp.write_clear(fd);
+    auto res = writer_.write(fd);
+    if (!res.value_or(false))
+      co_return;
+    g.reset();
+    co_await cp.write_wait(fd);
+  }
 }
 
 } // namespace detail
@@ -115,6 +140,15 @@ CoroPoll::write(BorrowedFd fd, BufView data SLOC_ARG)
       co_return Errno{};
   }
   co_return len;
+}
+
+Async<std::expected<void, Errno>>
+CoroPoll::bgwrite(BorrowedFd fd, Buf data SLOC_ARG)
+{
+  auto w = get_writer(fd);
+  if (!w)
+    co_return Errno{EBADF};
+  co_return co_await w->write(*this, fd, std::move(data));
 }
 
 Async<std::expected<int, Errno>>

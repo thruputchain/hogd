@@ -34,6 +34,12 @@ public:
   {
     other.offset_ = 0;
   }
+  VecQ &operator=(VecQ &&other) noexcept
+  {
+    super::operator=(std::move(other));
+    offset_ = std::exchange(other.offset_, 0);
+    return *this;
+  }
 
   pointer data() noexcept { return super::data() + offset_; }
   const_pointer data() const noexcept { return super::data() + offset_; }
@@ -105,25 +111,45 @@ private:
   size_type offset_{};
 };
 
+// This is a vector of buffers that can be turned into an array of
+// iovec structures for use with writev.  Let's you trim an arbitrary
+// number of bytes off the front.  Copies Bufs less than
+// kCopyThreshold, but will assume ownership of larger Bufs moved in.
 struct BufVec {
   static constexpr size_t kCopyThreshold = 4096;
 
-  VecQ<Buf> bufs_{Buf{}};
+  VecQ<Buf> bufs_;
   size_t skip_{};
 
-  void append(BufView b)
+  bool empty() const noexcept { return bufs_.empty(); }
+  void clear()
   {
-    if (backfull(b.size()))
-      bufs_.emplace_back(std::from_range, b);
+    bufs_.clear();
+    skip_ = 0;
+  }
+
+  void append(BufView b, size_t offset = 0)
+  {
+    if (offset)
+      b = b.subspan(offset);
+    if (backfull(b.size())) {
+      Buf back;
+      back.reserve(std::max(kCopyThreshold, b.size()));
+      back.append_range(b);
+      bufs_.emplace_back(std::move(back));
+    }
     else
       bufs_.back().append_range(b);
   }
-  void append(Buf &&b)
+  void append(Buf &&b, size_t offset)
   {
-    if (b.size() >= kCopyThreshold || backfull(b.size()))
+    if (b.size() >= kCopyThreshold && (offset == 0 || empty())) {
       bufs_.emplace_back(std::move(b));
+      if (offset)
+	trim(offset);
+    }
     else
-      append(BufView{b});
+      append(BufView{b}, offset);
   }
 
   void trim(size_t n)
@@ -157,24 +183,59 @@ struct BufVec {
     return ret;
   }
 
-  std::expected<void, Errno> write(BorrowedFd fd)
+  // Returns true if the buffer is not empty and you need to call
+  // write again as soon as fd is writable.
+  std::expected<bool, Errno> write(BorrowedFd fd)
   {
+    if (empty())
+      return false;
     auto iov{to_vec()};
     if (auto n = writev(fd.get(), iov.data(), iov.size()); n > 0) {
       trim(n);
-      return {};
+      return !empty();
     }
-    return Errno{};
+    if (errno == EAGAIN)
+      return true;
+    Errno ret;
+    clear();
+    return ret;
+  }
+
+  // Returns true if the buffer was empty and is no longer, so you
+  // need to call write when fd is writable.  If the buffer was
+  // already not empty, it is assumed that there was already a call to
+  // write scheduled, so does not even attempt a write and returns
+  // false.
+  template<typename Buf>
+  std::expected<bool, Errno> write_or_append(BorrowedFd fd, Buf &&buf)
+    requires requires { append(std::forward<Buf>(buf)); }
+  {
+    if (empty()) {
+      if (auto n = ::write(fd.get(), buf.data(), buf.size()); n < 0) {
+	if (errno != EAGAIN) {
+	  Errno ret;
+	  clear();
+	  return ret;
+	}
+	n = 0;
+      }
+      else if (n < buf.size()) {
+	append(std::forward<Buf>(buf), n);
+	return true;
+      }
+    }
+    else
+      append(std::forward<Buf>(buf));
+    return false;
   }
 
 private:
   bool backfull(size_t n) const
   {
-    if (bufs_.empty())
+    if (empty())
       return true;
     const auto &back = bufs_.back();
-    auto backsize = back.size();
-    return backsize >= kCopyThreshold && back.capacity() - backsize < n;
+    return back.capacity() - back.size() < n;
   }
 };
 

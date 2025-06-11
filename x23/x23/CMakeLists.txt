@@ -31,6 +31,13 @@ add_library(x23
   vec.h
   x23.h
 )
+# Mark the implementation files as headers so they're included in IDE projects
+# and distribution but not compiled separately
+set_source_files_properties(
+    event_impl_poll.cc
+    event_impl_epoll.cc
+    PROPERTIES HEADER_FILE_ONLY TRUE
+)
 
 use_x23(x23)
 

@@ -18,6 +18,7 @@
 #include <x23/sockio.h>
 #include <x23/testlock.h>
 #include <x23/threadpool.h>
+#include <x23/uiobuf.h>
 #include <x23/vec.h>
 
 #if USE_EPOLL
@@ -28,6 +29,18 @@
 #endif // !USE_EPOLL
 
 namespace x23 {
+
+// Should just fix Async<T>::return_value to take a T instead of a
+// references<T>.  This is a placeholder to deal with
+// std::Async<std::expected<void, E>> until then.
+constexpr struct {
+  template<typename E> constexpr operator std::expected<void, E>() const
+  {
+    return std::expected<void, E>{};
+  }
+} expected_void;
+
+class CoroPoll;
 
 namespace detail {
 
@@ -61,16 +74,16 @@ private:
   atomic_shared_ptr<T> t_;
 };
 
-struct BufferedReader {
-  using Super = std::enable_shared_from_this<BufferedReader>;
+struct ReadBuffer : std::enable_shared_from_this<ReadBuffer> {
+  using Super = std::enable_shared_from_this<ReadBuffer>;
   using Mem = std::array<char, 4092 - sizeof(Super)>;
 
   std::uint16_t start_{};
   std::uint16_t stop_{};
   Mem m_;
 
-  BufferedReader() noexcept = default;
-  BufferedReader(BufferedReader &&) noexcept = delete;
+  ReadBuffer() noexcept = default;
+  ReadBuffer(ReadBuffer &&) noexcept = delete;
 
   ssize_t operator()(int fd, void *buf, size_t len);
   std::expected<size_t, Errno> read(BorrowedFd fd, is_bytevec auto *buf,
@@ -80,11 +93,30 @@ struct BufferedReader {
   }
 };
 
+struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
+  CoroLock write_lock_;
+  BufVec writer_;
+
+  // Returns an error void on success or if the write action has been
+  // deferred.  May return an error if a write fails, but won't if the
+  // buffer is full and a write is already pending.
+  Async<std::expected<void, Errno>> write(CoroPoll &cp, BorrowedFd fd, Buf buf);
+
+private:
+  Detached service(CoroPoll &cp, BorrowedFd fd);
+};
+
 struct BufHolder {
-  OnDemandSharedPtr<BufferedReader> reader_;
+  OnDemandSharedPtr<ReadBuffer> reader_;
+  OnDemandSharedPtr<WriteBuffer> writer_;
 
   auto reader() { return reader_.get(); }
-  auto buf_clear() { reader_.reset(); }
+  auto writer() { return writer_.get(); }
+  auto buf_clear()
+  {
+    reader_.reset();
+    writer_.reset();
+  }
 };
 
 class CoroPollImpl : public DestroyInhibit {
@@ -148,7 +180,8 @@ protected:
   bool time_to_stop();
   int get_max_fd();
   void wake();
-  std::shared_ptr<BufferedReader> get_reader(BorrowedFd fd);
+  std::shared_ptr<ReadBuffer> get_reader(BorrowedFd fd);
+  std::shared_ptr<WriteBuffer> get_writer(BorrowedFd fd);
 
 private:
   std::stop_source ss_;
@@ -267,6 +300,13 @@ public:
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
                                             BufView data SLOC_PARM);
 
+  // Write data to fd, but return immediately.  If there is an issue
+  // with the file descriptor, it might return an error or it might
+  // return void, depending on whether the buffer is clear and it can
+  // immediately attempt the write.  If there is no problem with the
+  // file descriptor, it will always return void.
+  Async<std::expected<void, Errno>> bgwrite(BorrowedFd fd, Buf data SLOC_PARM);
+
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
   template<typename Addr = sockaddr>
@@ -297,7 +337,7 @@ public:
       }
 #endif // !HAVE_ACCEPT4
       if (fd >= 0) {
-	set_nodelay(fd);
+        set_nodelay(fd);
         co_return fd;
       }
       if (Errno err{}; err != EAGAIN)
