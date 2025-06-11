@@ -33,12 +33,6 @@ jobs:
       run: gcc --version
     - name: clang version check
       run: clang --version
-    - name: set clang-tidy
-      run: echo "CLANG_TIDY=run-clang-tidy-20" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
-    - name: install rust nightly
-      run: rustup +nightly target install wasm32-unknown-unknown && rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
-    - name: Install cbindgen
-      run: cargo install --force cbindgen
     - name: Probe Cache
       id: cache
       uses: actions/cache/restore@v4
