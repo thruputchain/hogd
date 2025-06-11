@@ -33,6 +33,8 @@ jobs:
       run: gcc --version
     - name: clang version check
       run: clang --version
+    - name: path check
+      run: echo $PATH
     - name: cargo version check
       run: cargo --version
     - name: Probe Cache
