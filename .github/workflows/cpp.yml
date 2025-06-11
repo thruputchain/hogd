@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: self-hosted
+
+    env:
+      GIT_CONFIG_GLOBAL: /home/hogci/hogci_hogd/.gitconfig
     
     steps:
     - uses: webfactory/ssh-agent@v0.9.1
