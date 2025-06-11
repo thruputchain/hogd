@@ -37,6 +37,7 @@ TEST(MerkleTrie, BasicUsage)
 {
   std::cout << "Hello world! This is the Merkle Trie test." << std::endl;
   MerkleTrie trie;
+  trie.Print();
 }
 
 // Hash a branch node. All child pointers are non-NULL.

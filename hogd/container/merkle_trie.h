@@ -9,10 +9,12 @@
 #include <cassert>
 #include <functional>
 #include <initializer_list>
+#include <iomanip>
 #include <iterator>
 #include <memory>
 #include <mutex>
 #include <ranges>
+#include <sstream>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -45,6 +47,7 @@ public:
     root_->type = NodeType::kBranch;
     memset(root_->branch_next.data(), 0,
            root_->branch_next.size() * sizeof(root_->branch_next[0]));
+    root_->hash = GetNodeHash(*root_);
   }
 
   ~MerkleTrie() { FreeAllNodes(root_); }
@@ -54,6 +57,8 @@ public:
   MerkleTrie &operator=(const MerkleTrie &) = delete;
   MerkleTrie(MerkleTrie &&) noexcept = default;
   MerkleTrie &operator=(MerkleTrie &&) noexcept = default;
+
+  void Print() { PrintHelper(root_); }
 
   // TODO: For all of the methods below, should they include a mutex as well (in
   // a pair)?
@@ -176,6 +181,55 @@ private:
     std::vector<std::byte> leaf_path;
     std::string leaf_value;
   };
+
+  std::string GetHashString(Node &node)
+  {
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0');
+    for (unsigned char ch : node.hash) {
+      oss << std::setw(2) << static_cast<int>(ch);
+    }
+    return oss.str();
+  }
+
+  void PrintHelper(Node *root)
+  {
+    if (!root) {
+      return;
+    }
+    switch (root->type) {
+    case NodeType::kBranch:
+      printf("Branch (%s)\n", GetHashString(*root).c_str());
+      printf("Value: %s\n", root->branch_value.c_str());
+      for (size_t i = 0; i < root->branch_next.size(); i++) {
+        if (root->branch_next[i]) {
+          printf("%02x: %s\n", static_cast<uint8_t>(i),
+                 GetHashString(*root->branch_next[i]).c_str());
+        }
+        else {
+          printf("%02x: null\n", static_cast<uint8_t>(i));
+        }
+      }
+      for (size_t i = 0; i < root->branch_next.size(); i++) {
+        PrintHelper(root->branch_next[i]);
+      }
+      break;
+    case NodeType::kExtension:
+      printf("Extension (%s)\n", GetHashString(*root).c_str());
+      if (root->extension_key) {
+        printf("Child: %s\n", GetHashString(*root->extension_key).c_str());
+      }
+      else {
+        printf("Child: null\n");
+      }
+      PrintHelper(root->extension_key);
+      break;
+    case NodeType::kLeaf:
+      printf("Leaf (%s)\n", GetHashString(*root).c_str());
+      printf("Value: %s\n", root->leaf_value.c_str());
+      break;
+    }
+  }
 
   Node *TraverseToBottom(Node *root, Node *prev_root,
                          const std::vector<std::byte> &path, size_t &idx)
