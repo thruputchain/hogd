@@ -79,7 +79,8 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
         to_xdr(from_xdr(prev_delta->nnint().add_value) - cost);
   }
   else {
-    assert(storage_lock.lock_type() == StorageLockType::kNone);
+    assert(storage_lock.lock_type() == StorageLockType::kNone ||
+           storage_lock.lock_type() == StorageLockType::kSetItemTypeClass);
     new_storage_delta =
         StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
     new_storage_delta.nnint().add_value = to_xdr(-cost);

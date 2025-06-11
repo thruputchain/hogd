@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <memory>
+#include <print>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -62,6 +63,7 @@ engine_to_string(RuntimeEngine engine)
 InvokeResult
 Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
+  std::println("invoke on {}", method_name);
   uint64_t prev_gas_limit = get_available_gas();
   set_available_gas(gas_limit);
 

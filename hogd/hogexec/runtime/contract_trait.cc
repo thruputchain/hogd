@@ -27,10 +27,12 @@ sdk_entrypoint_derivation(std::string_view identifier_name,
 
   auto h = sha256(preimage);
 
+  uint16_t method_id_byteswapped = std::byteswap(method_id);
+
   ContractEntrypointID out{};
   auto *out_ptr = reinterpret_cast<uint8_t *>(&out);
   std::memcpy(out_ptr, h.data(), 6);
-  std::memcpy(out_ptr + 6, &method_id, 2);
+  std::memcpy(out_ptr + 6, &method_id_byteswapped, 2);
   static_assert(sizeof(out) == 6 + 2);
   return out;
 }
