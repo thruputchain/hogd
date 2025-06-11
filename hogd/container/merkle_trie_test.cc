@@ -13,6 +13,7 @@ namespace hogd {
 TEST(MerkleTrie, BasicUsage)
 {
   std::cout << "Hello world! This is the Merkle Trie test." << std::endl;
+  MerkleTrie trie;
 }
 
 } // namespace hogd

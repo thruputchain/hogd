@@ -20,9 +20,10 @@
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "types.hh"
 
-// TODO: Support template types. For now, the keys are strings and the values
-// are [int64_t]s.
+// TODO: Support template types. For now, the keys are byte arrays and the
+// values are strings.
 namespace hogd {
 
 // TODO: Describe the class.
@@ -32,10 +33,16 @@ namespace hogd {
 class MerkleTrie {
 public:
   // type definitions
-  using Key = std::string;
-  using T = int64_t;
+  using Key = std::vector<std::byte>;
+  using T = std::string;
 
-  MerkleTrie() {}
+  MerkleTrie() {
+    memset(&root_hash_, 0, sizeof(root_hash_));
+    printf("sizeof(root_hash_) = %zu\n", sizeof(root_hash_));
+    for (size_t i = 0; i < sizeof(root_hash_); i++) {
+      printf("root_hash_[%zu] = %x\n", i, root_hash_[i]);
+    }
+  }
   ~MerkleTrie() = default;
 
   // disable copy and support move.
@@ -116,6 +123,33 @@ public:
   }
 
 private:
+  enum class NodeType {
+    kBranch,
+    kExtension,
+    kLeaf
+  };
+
+  struct Node {
+    NodeType type;
+
+    // TODO: Optimize the variables below with a union or different node types.
+    // TODO: Optimize the vectors below--use something other than a vector.
+
+    // Branches.
+    std::vector<Node*> branch_next;
+    std::string branch_value;
+
+    // Extensions.
+    std::vector<std::byte> extension_path;
+    Node* extension_key;
+
+    // Leaves.
+    std::vector<std::byte> leaf_path;
+    std::string leaf_value;
+  };
+
+  SHA256Hash root_hash_;
+  Node *root_ = nullptr;
 };
 
 } // namespace hogd
