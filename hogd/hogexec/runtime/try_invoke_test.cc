@@ -1159,6 +1159,274 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
   ASSERT_TRUE(data_item0_opt.has_value());
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_medium);
 }
+
+TEST_F(TryInvokeTest, CostChangeDecreaseSuccessCase)
+{
+  // Test to make sure that if the cost of an item decreases, the storage token
+  // balance is calculated correctly. Root invocation makes two try_invoke
+  // invocations. Both succeed. The first makes a long bytestring write. The
+  // second makes a short bytestring write. The contract has enough storage
+  // tokens for both writes. The end of the test asserts that the storage token
+  // balance was charged for the short write.
+
+  // Contract address
+  ContractAddress contract_addr = make_contract_address(45);
+
+  // Bytestrings
+  auto str_long = make_bytestring("abcdefghijklmno"); // 15 bytes
+  auto str_short = make_bytestring("abc");            // 3 bytes
+
+  auto const *cost_model = get_default_cost_model();
+
+  // Costs
+  int128_t cost_long = cost_model->kBaseItemCost +
+                       cost_model->get_bytestring_cost(str_long.size());
+  int128_t cost_short = cost_model->kBaseItemCost +
+                        cost_model->get_bytestring_cost(str_short.size());
+
+  // Grant enough tokens for the long write.
+  int128_t total_tokens = cost_long;
+
+  // Deploy contract with three methods:
+  // 0: Write long string
+  // 1: Write short string
+  // 2: Root method: try_invoke method 0, then try_invoke method 1
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [str_long](SystemCallHandler &handler,
+                      NativeRuntime &) -> InvokeStatus<void> {
+             auto key0 = make_storage_key("test0");
+             auto res =
+                 handler.set_bytestring(key0,
+                                        std::as_bytes(std::span(str_long)));
+             if (!res.has_value() || !res.value().has_value())
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return {};
+           }},
+          {1,
+           [str_short](SystemCallHandler &handler,
+                       NativeRuntime &) -> InvokeStatus<void> {
+             auto key0 = make_storage_key("test0");
+             auto res =
+                 handler.set_bytestring(key0,
+                                        std::as_bytes(std::span(str_short)));
+             if (!res.has_value() || !res.value().has_value())
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return {};
+           }},
+          {2,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<void> {
+             // Try invoke method 0 (long)
+             auto [r0, _g0] = handler.invoke(
+                 handler.get_current_address(), 0, runtime.get_available_gas(),
+                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r0.has_value() || r0.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Try invoke method 1 (short)
+             auto [r1, _g1] = handler.invoke(
+                 handler.get_current_address(), 1, runtime.get_available_gas(),
+                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r1.has_value() || r1.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  // Deploy contract and grant enough storage tokens for the long write
+  auto contract = make_native_contract(0);
+  in_memory_db_.write_contract(sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  setup_grant_storage_token(contract_addr, total_tokens);
+
+  // Single transaction: invoke method 2 (root)
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(2),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction()();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
+
+  advance_block();
+
+  // Check storage token balance
+  AddressAndKey token_addrkey = {
+      .address = contract_addr,
+      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
+  ASSERT_TRUE(token_item_opt.has_value());
+  ASSERT_EQ(token_item_opt.value().type(),
+            StorageItemType::kItemTypeNonnegativeInt);
+  // Initial tokens was cost_long. Final cost is cost_short.
+  // The balance should be total_tokens - cost_short.
+  int128_t expected_balance = total_tokens - cost_short;
+  EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), expected_balance);
+
+  // Check that key0 exists and has value from the short write.
+  auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
+  auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
+  ASSERT_TRUE(data_item0_opt.has_value());
+  ASSERT_EQ(data_item0_opt.value().bytestring(), str_short);
+}
+
+TEST_F(TryInvokeTest, CostChangeDecreaseFailCase)
+{
+  // Test to make sure that if the cost of an item decreases, the storage token
+  // balance is calculated correctly.
+  //  Root invocation first makes a try_invocation call into a method that
+  // just makes a long bytestring write.
+  // Then, it makes a regular invocation into another method.
+  // That method makes a try_invoke call into another method, which makes a
+  // short bytestring write (that should succeed). The regular invocation then
+  // returns an error. The root method should expect that error (and finish
+  // successfully).
+
+  // Contract address
+  ContractAddress contract_addr = make_contract_address(46);
+
+  // Bytestrings
+  auto str_long = make_bytestring("abcdefghijklmno"); // 15 bytes
+  auto str_short = make_bytestring("abc");            // 3 bytes
+
+  auto const *cost_model = get_default_cost_model();
+
+  // Costs
+  int128_t cost_long = cost_model->kBaseItemCost +
+                       cost_model->get_bytestring_cost(str_long.size());
+
+  // Grant enough tokens for the long write.
+  int128_t total_tokens = cost_long;
+
+  // Deploy contract with four methods:
+  // 0: Write long string
+  // 1: Write short string
+  // 2: Try-invoke method 1, then return error
+  // 3: Root method: try_invoke method 0, then try_invoke method 2
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [str_long](SystemCallHandler &handler,
+                      NativeRuntime &) -> InvokeStatus<void> {
+             auto key0 = make_storage_key("test0");
+             auto res =
+                 handler.set_bytestring(key0,
+                                        std::as_bytes(std::span(str_long)));
+             if (!res.has_value() || !res.value().has_value())
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return {};
+           }},
+          {1,
+           [str_short](SystemCallHandler &handler,
+                       NativeRuntime &) -> InvokeStatus<void> {
+             auto key0 = make_storage_key("test0");
+             auto res =
+                 handler.set_bytestring(key0,
+                                        std::as_bytes(std::span(str_short)));
+             if (!res.has_value() || !res.value().has_value())
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             return {};
+           }},
+          {2,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<void> {
+             // Try invoke method 1 (short write)
+             auto [r1, _g1] = handler.invoke(
+                 handler.get_current_address(), 1, runtime.get_available_gas(),
+                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r1.has_value() || r1.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Now, return an error. This will cause this frame's effects to
+             // be rolled back.
+             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+           }},
+          {3,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<void> {
+             // Try invoke method 0 (long write)
+             auto [r0, _g0] = handler.invoke(
+                 handler.get_current_address(), 0, runtime.get_available_gas(),
+                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r0.has_value() || r0.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Regular invoke on method 2
+             auto [r2, _g2] = handler.invoke(handler.get_current_address(), 2,
+                                             runtime.get_available_gas(), {},
+                                             std::to_underlying(
+                                                 InvokeFlag::kInvokeFlagNone));
+             if (!r2.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // We expect method 2 to fail.
+             if (r2.value() == SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  // Deploy contract and grant enough storage tokens for the long write
+  auto contract = make_native_contract(0);
+  in_memory_db_.write_contract(sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  setup_grant_storage_token(contract_addr, total_tokens);
+
+  // Single transaction: invoke method 3 (root)
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(3),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction()();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
+
+  advance_block();
+
+  // Check storage token balance
+  AddressAndKey token_addrkey = {
+      .address = contract_addr,
+      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  auto token_item_opt = lookup_storage_item_from_db(token_addrkey);
+  ASSERT_TRUE(token_item_opt.has_value());
+  ASSERT_EQ(token_item_opt.value().type(),
+            StorageItemType::kItemTypeNonnegativeInt);
+  // The cost of the short write was rolled back.
+  // Final cost is cost_long. Initial tokens was cost_long.
+  // So the balance should be 0.
+  EXPECT_EQ(from_xdr(token_item_opt.value().nnint()), 0);
+
+  // Check that key0 exists and has value from the long write.
+  auto data_addrkey0 = make_contract_data_addrkey(contract_addr, "test0");
+  auto data_item0_opt = lookup_storage_item_from_db(data_addrkey0);
+  ASSERT_TRUE(data_item0_opt.has_value());
+  ASSERT_EQ(data_item0_opt.value().bytestring(), str_long);
+}
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
