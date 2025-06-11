@@ -91,8 +91,7 @@ make_replay_delta(x23::Vec<ReplayNonce> nonces, ReplayNonce minimum_threshold)
 
 } // namespace
 
-class DeltaManagerTest
-  : public ::testing::TestWithParam<BlockExecutionMode> {
+class DeltaManagerTest : public ::testing::TestWithParam<BlockExecutionMode> {
 protected:
   void SetUp() override { mode_ = GetParam(); }
 
@@ -1383,14 +1382,15 @@ INSTANTIATE_TEST_SUITE_P(
     BlockModes, DeltaManagerTest,
     ::testing::Values(BlockExecutionMode::kBlockExecutionModeProposal,
                       BlockExecutionMode::kBlockExecutionModeValidation),
-    [](const ::testing::TestParamInfo<BlockExecutionMode> &info) -> std::string {
+    [](const ::testing::TestParamInfo<BlockExecutionMode> &info)
+        -> std::string {
       switch (info.param) {
-        case BlockExecutionMode::kBlockExecutionModeProposal:
-          return "Proposal";
-        case BlockExecutionMode::kBlockExecutionModeValidation:
-          return "Validation";
-        default:
-          return x23::show(info.param);
+      case BlockExecutionMode::kBlockExecutionModeProposal:
+        return "Proposal";
+      case BlockExecutionMode::kBlockExecutionModeValidation:
+        return "Validation";
+      default:
+        return x23::show(info.param);
       }
     });
 

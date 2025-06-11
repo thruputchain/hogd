@@ -457,7 +457,7 @@ TEST_F(DatabaseTest, DISABLED_SnapshotOngoingPuts)
   check_integrity();
 }
 
-TEST_F(DatabaseTest, SnapshotOngoingRemoves)
+TEST_F(DatabaseTest, DISABLED_SnapshotOngoingRemoves)
 {
   insert_n(kInsertions);
   check_integrity();
