@@ -33,8 +33,6 @@ jobs:
       run: gcc --version
     - name: clang version check
       run: clang --version
-    - name: path check
-      run: echo $PATH
     - name: Add Cargo to PATH
       run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
     - name: path check
@@ -51,7 +49,7 @@ jobs:
         # to invalidate the cache (or any other time you need to manually clear the cache)
         key: ${{ runner.os }}-${{ github.ref_name }}-3
     - name: check
-      run: ./scripts/check.sh
+      run: alias gcc=gcc-14 && ./scripts/check.sh
     - uses: actions/cache/save@v4
       with:
         path: ${{ env.CACHED_PATHS }}
