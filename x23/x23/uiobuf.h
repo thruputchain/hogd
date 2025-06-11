@@ -57,7 +57,7 @@ public:
 
   template<typename... Args> reference emplace_back(Args &&...args)
   {
-    ensure();
+    reserve(size() + 1);
     return super::emplace_back(std::forward<Args>(args)...);
   }
   using super::push_back;
@@ -103,8 +103,6 @@ public:
 
 private:
   size_type offset_{};
-
-  void ensure() { reserve(size() + 1); }
 };
 
 struct BufVec {
