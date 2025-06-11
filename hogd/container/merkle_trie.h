@@ -43,7 +43,7 @@ public:
     memset(root_->branch_next.data(), 0,
            root_->branch_next.size() * sizeof(root_->branch_next[0]));
   }
-  ~MerkleTrie() = default;
+  ~MerkleTrie() { FreeAllNodes(root_); }
 
   // disable copy and support move.
   MerkleTrie(const MerkleTrie &) = delete;
@@ -258,6 +258,34 @@ private:
     }
     static std::array<unsigned char, 32> tmp = {0};
     return tmp;
+  }
+
+  void FreeAllNodes(Node *root)
+  {
+    if (!root) {
+      return;
+    }
+
+    // We recurse to the bottom of the trie and then free nodes as we move back
+    // up. Keys do not exceed 65 bytes in length, so the trie will never have
+    // more than 65 * 2 = 130 levels.
+    switch (root->type) {
+    case NodeType::kBranch:
+    {
+      for (Node *child : root->branch_next) {
+        FreeAllNodes(child);
+      }
+      break;
+    }
+    case NodeType::kExtension:
+    {
+      FreeAllNodes(root->extension_key);
+      break;
+    }
+    case NodeType::kLeaf:
+      break;
+    }
+    delete root;
   }
 
   Node *root_ = nullptr;
