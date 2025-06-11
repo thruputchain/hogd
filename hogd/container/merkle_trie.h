@@ -47,6 +47,7 @@ public:
     root_->type = NodeType::kBranch;
     memset(root_->branch_next.data(), 0,
            root_->branch_next.size() * sizeof(root_->branch_next[0]));
+    // TODO: Need some way to indicate [branch_value] is empty.
     root_->hash = GetNodeHash(*root_);
   }
 
@@ -58,7 +59,11 @@ public:
   MerkleTrie(MerkleTrie &&) noexcept = default;
   MerkleTrie &operator=(MerkleTrie &&) noexcept = default;
 
-  void Print() { PrintHelper(root_); }
+  void Print()
+  {
+    PrintHelper(root_);
+    printf("----------\n\n");
+  }
 
   // TODO: For all of the methods below, should they include a mutex as well (in
   // a pair)?
@@ -89,6 +94,7 @@ public:
     assert(next);
     assert(next->type == NodeType::kBranch);
     assert(idx <= k.size() * 2);
+    printf("next: %p\n", next);
     if (idx == k.size()) {
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
@@ -97,28 +103,131 @@ public:
       next->hash = GetNodeHash(*next);
     }
     else {
-      // The key extends beyond the branch node, so we should create a leaf node
-      // for the key, add the value to the leaf node, and then add a pointer
-      // from the branch node to the leaf node.
-      Node *leaf = new Node;
-      leaf->type = NodeType::kLeaf;
-      // We are going to use the hex character at [idx] in the key to map to the
-      // leaf node from the branch node. Thus, we add 1 below as we do not want
-      // to include this character in the path that is stored in the leaf node.
-      leaf->leaf_path = std::vector(k.begin() + idx + 1, k.end());
-      leaf->leaf_value = std::move(obj);
-      leaf->hash = GetNodeHash(*leaf);
+      std::byte digit = HexDigitAtIndex(k, idx);
+      size_t branch_idx = std::to_integer<size_t>(digit);
+      printf("idx = %zu, branch_idx = %zu\n", idx, branch_idx);
+      printf("assert below\n");
+      if (next->branch_next[branch_idx]) {
+        printf("In here because there is a common prefix\n");
+        Node *to_free = next->branch_next[branch_idx];
+        // There is already a child node. [TraverseToBottom] returns the lowest
+        // branch node in the trie for [key], so the child node is either an
+        // extension node or a leaf node.
+        //
+        // 1. TODO: If the child is an extension node, ...
+        //
+        // 2. If the child is a leaf node, we should add one branch node for
+        // every remaining character in [key] that matches the path in [leaf].
+        // At some point, one of the two will happen:
+        //   a) A character will be different, at which point we can place two
+        //   leaf nodes below a branch node.
+        //
+        //   b) One of the two keys will end, at which point we can place the
+        //   shorter key in the newly-created branch node and add the longer key
+        //   to a leaf node that is a child of that branch node.
 
-      std::byte digit = k[idx];
-      if (idx % 2 == 0) {
-        digit >>= 4;
+        size_t offset = (idx % 2 == 0) ? 0 : 1;
+        Key key_a = std::vector(k.begin() + (idx / 2), k.end());
+        Key key_b = next->branch_next[branch_idx]->leaf_path;
+
+        const Key &shorter = key_a.size() <= key_b.size() ? key_a : key_b;
+        const std::string &shorter_value =
+            key_a.size() <= key_b.size()
+                ? obj
+                : next->branch_next[branch_idx]->leaf_value;
+        const Key &longer = key_a.size() <= key_b.size() ? key_b : key_a;
+        const std::string &longer_value =
+            key_a.size() <= key_b.size()
+                ? next->branch_next[branch_idx]->leaf_value
+                : obj;
+        size_t i;
+        printf("Shorter key: %s, Longer key: %s\n",
+               KeyToString(shorter).c_str(), KeyToString(longer).c_str());
+        Node *prev_branch = next;
+        for (i = 0; i < shorter.size() * 2; i++) {
+          std::byte shorter_digit = HexDigitAtIndex(shorter, i + offset);
+          std::byte longer_digit = HexDigitAtIndex(longer, i + offset);
+          printf("idx = %zu, i = %zu, offset = %zu, i + offset = %zu, Shorter "
+                 "digit: %x, Longer digit: %x\n",
+                 idx, i, offset, i + offset, shorter_digit, longer_digit);
+          if (shorter_digit == longer_digit) {
+            printf("A\n");
+            // The digits match, so add a branch node.
+            Node *branch = new Node;
+            branch->type = NodeType::kBranch;
+            // TODO: Need some way to indicate [branch_value] is empty.
+            branch->branch_value = "";
+
+            memset(branch->branch_next.data(), 0,
+                   branch->branch_next.size() * sizeof(branch->branch_next[0]));
+            prev_branch->branch_next[std::to_integer<size_t>(shorter_digit)] =
+                branch;
+            prev_branch = branch;
+          }
+          else {
+            printf("B\n");
+            // The digits do not match, so create two leaf nodes.
+
+            // Shorter key's leaf node.
+            Node *leaf = new Node;
+            leaf->type = NodeType::kLeaf;
+            leaf->leaf_path = std::vector(shorter.begin() + i + 1, k.end());
+            // TODO: Set [leaf_path_size].
+            leaf->leaf_value = std::move(shorter_value);
+            prev_branch->branch_next[std::to_integer<size_t>(shorter_digit)] =
+                leaf;
+
+            // Longer key's leaf node.
+            leaf = new Node;
+            leaf->type = NodeType::kLeaf;
+            leaf->leaf_path = std::vector(longer.begin() + i + 1, k.end());
+            // TODO: Set [leaf_path_size].
+            leaf->leaf_value = std::move(longer_value);
+            prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] =
+                leaf;
+            break;
+          }
+        }
+        if (i >= shorter.size() * 2) {
+          printf("C\n");
+          // The shorter key is entirely contained within the larger key. Thus,
+          // we should add the shorter key's value to the last branch node
+          // created, and then we should add the longer key and its value to a
+          // leaf node of that branch.
+          prev_branch->branch_value = std::move(shorter_value);
+
+          // Longer key's leaf node.
+          Node *leaf = new Node;
+          leaf->type = NodeType::kLeaf;
+          leaf->leaf_path = std::vector(longer.begin() + 1 + i, k.end());
+          leaf->leaf_value = std::move(longer_value);
+          std::byte longer_digit = HexDigitAtIndex(longer, i);
+          prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] =
+              leaf;
+        }
+        delete to_free;
       }
       else {
-        digit &= std::byte{0xF};
+        Node *leaf = new Node;
+        leaf->type = NodeType::kLeaf;
+        // We are going to use the hex character at [idx] in the key to map to
+        // the leaf node from the branch node. Thus, we add 1 below as we do not
+        // want to include this character in the path that is stored in the leaf
+        // node.
+        if (idx % 2) {
+          leaf->leaf_path = std::vector(k.begin() + idx + 1, k.end());
+          leaf->leaf_path_size = 2 * (k.size() - idx - 1);
+        }
+        else {
+          leaf->leaf_path = std::vector(k.begin() + idx, k.end());
+          // The leaf path size is odd.
+          leaf->leaf_path_size = 2 * (k.size() - idx) - 1;
+        }
+        leaf->leaf_value = std::move(obj);
+        leaf->hash = GetNodeHash(*leaf);
+
+        next->branch_next[branch_idx] = leaf;
       }
-      size_t branch_idx = std::to_integer<size_t>(digit);
-      assert(!next->branch_next[branch_idx]);
-      next->branch_next[branch_idx] = leaf;
     }
     RegenerateHashes(root_, k, /*idx=*/0);
   }
@@ -179,12 +288,36 @@ private:
 
     // Extensions.
     std::vector<std::byte> extension_path;
+    size_t extension_path_size;
     Node *extension_key;
 
     // Leaves.
     std::vector<std::byte> leaf_path;
+    size_t leaf_path_size;
     std::string leaf_value;
   };
+
+  std::string KeyToString(const Key &k)
+  {
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0');
+    for (std::byte b : k) {
+      oss << std::setw(2) << static_cast<int>(b);
+    }
+    return oss.str();
+  }
+
+  std::byte HexDigitAtIndex(const std::vector<std::byte> &vec, size_t idx)
+  {
+    std::byte digit = vec[idx / 2];
+    if (idx % 2 == 0) {
+      digit >>= 4;
+    }
+    else {
+      digit &= std::byte{0xF};
+    }
+    return digit;
+  }
 
   std::string GetHashString(Node &node)
   {
@@ -203,15 +336,16 @@ private:
     }
     switch (root->type) {
     case NodeType::kBranch:
-      printf("Branch (%s)\n", GetHashString(*root).c_str());
+      printf("Branch (%s, %p)\n", GetHashString(*root).c_str(), root);
       printf("Value: [%s]\n", root->branch_value.c_str());
       for (size_t i = 0; i < root->branch_next.size(); i++) {
         if (root->branch_next[i]) {
-          printf("%02x: %s\n", static_cast<uint8_t>(i),
-                 GetHashString(*root->branch_next[i]).c_str());
+          printf("%x: %s (%p)\n", static_cast<uint8_t>(i),
+                 GetHashString(*root->branch_next[i]).c_str(),
+                 root->branch_next[i]);
         }
         else {
-          printf("%02x: null\n", static_cast<uint8_t>(i));
+          printf("%x: null\n", static_cast<uint8_t>(i));
         }
       }
       printf("\n");
@@ -220,9 +354,12 @@ private:
       }
       break;
     case NodeType::kExtension:
-      printf("Extension (%s)\n", GetHashString(*root).c_str());
+      printf("Extension (%s, %p)\n", GetHashString(*root).c_str(), root);
+      printf("Path: %s\n", KeyToString(root->extension_path).c_str());
+      printf("Path Size: %zu\n", root->extension_path_size);
       if (root->extension_key) {
-        printf("Child: %s\n", GetHashString(*root->extension_key).c_str());
+        printf("Child: %s (%p)\n", GetHashString(*root->extension_key).c_str(),
+               root->extension_key);
       }
       else {
         printf("Child: null\n");
@@ -231,7 +368,9 @@ private:
       PrintHelper(root->extension_key);
       break;
     case NodeType::kLeaf:
-      printf("Leaf (%s)\n", GetHashString(*root).c_str());
+      printf("Leaf (%s, %p)\n", GetHashString(*root).c_str(), root);
+      printf("Path: %s\n", KeyToString(root->leaf_path).c_str());
+      printf("Path Size: %zu\n", root->leaf_path_size);
       printf("Value: [%s]\n", root->leaf_value.c_str());
       printf("\n");
       break;
@@ -251,13 +390,7 @@ private:
       return prev_root;
     }
 
-    std::byte current_hex = path[idx / 2];
-    if (idx % 2 == 0) {
-      current_hex >>= 4;
-    }
-    else {
-      current_hex &= std::byte{0xF};
-    }
+    std::byte current_hex = HexDigitAtIndex(path, idx);
     switch (root->type) {
     case NodeType::kBranch:
     {
@@ -278,6 +411,8 @@ private:
       return nullptr;
       break;
     case NodeType::kLeaf:
+      // We are going to return the parent node, so subtract 1 from [idx].
+      idx--;
       return prev_root;
       break;
     }
@@ -342,6 +477,7 @@ private:
       // Hash [extension_path] and **the hash in** [extension_key].
       to_hash.insert(to_hash.end(), node.extension_path.begin(),
                      node.extension_path.end());
+      // TODO: Include [extension_path_size] in the hash.
       if (node.extension_key) {
         std::transform(node.extension_key->hash.begin(),
                        node.extension_key->hash.end(),
@@ -353,6 +489,7 @@ private:
       break;
     case NodeType::kLeaf:
       // Hash [leaf_path] and [leaf_value].
+      // TODO: Include [leaf_path_size] in the hash.
       to_hash.insert(to_hash.end(), node.leaf_path.begin(),
                      node.leaf_path.end());
       std::transform(node.leaf_value.begin(), node.leaf_value.end(),

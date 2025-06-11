@@ -59,6 +59,11 @@ TEST(MerkleTrie, BasicUsage)
   std::string value = "hello";
   trie.insert(key, value);
   trie.Print();
+
+  key = ByteVectorFromString("1223");
+  value = "hello again";
+  trie.insert(key, value);
+  trie.Print();
 }
 
 // Hash a branch node. All child pointers are non-NULL.
