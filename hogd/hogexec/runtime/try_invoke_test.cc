@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/preset_native_token.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
@@ -1427,6 +1428,163 @@ TEST_F(TryInvokeTest, CostChangeDecreaseFailCase)
   ASSERT_TRUE(data_item0_opt.has_value());
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_long);
 }
+
+TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
+{
+  // Test to make sure that if a contract transfers storage tokens to another
+  // contract, the new storage tokens can be used at the receiver contract
+  // within the same transaction.
+
+  // Test creates two NativeContracts, and deploys them at different addresses.
+  // The first contract transfers storage tokens to the second contract.
+  // The second contract then uses the storage tokens to write a bytestring.
+
+  // This requires building two native contracts, and then deploying them at
+  // separate addresses. Transfers should be done by invoking the
+  // preset_native_token contract.
+
+  constexpr uint32_t kSenderNativeId = 0;
+  constexpr uint32_t kReceiverNativeId = 1;
+  constexpr uint32_t kTokenNativeId = 2;
+
+  ContractAddress sender_addr = make_contract_address(50);
+  ContractAddress receiver_addr = make_contract_address(51);
+  ContractAddress token_contract_addr = make_contract_address(52);
+
+  auto const *cost_model = get_default_cost_model();
+  auto str_hello = make_bytestring("hello");
+  int128_t write_cost = cost_model->kBaseItemCost +
+                        cost_model->get_bytestring_cost(str_hello.size());
+
+  // Sender contract
+  auto sender_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [token_contract_addr, receiver_addr,
+            write_cost](SystemCallHandler &handler,
+                        NativeRuntime &runtime) -> InvokeStatus<void> {
+             auto native_token_client =
+                 ContractTraitClient<NativeTokenTrait>(token_contract_addr);
+
+             auto [r_transfer, g_transfer] =
+                 native_token_client.invoke<"transfer">(handler, receiver_addr,
+                                                        write_cost);
+
+             if (!r_transfer.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Invoke receiver contract to use the tokens
+             auto [r_receive, g_receive] = handler.invoke(
+                 receiver_addr, 0, runtime.get_available_gas(), {},
+                 std::to_underlying(InvokeFlag::kInvokeFlagNone));
+
+             if (!r_receive.has_value() ||
+                 r_receive.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             auto [r_balance, g_balance] =
+                 native_token_client.invoke<"get_balance">(handler);
+             if (!r_balance.has_value() || r_balance.value() != 0) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }}});
+
+  // Receiver contract
+  auto receiver_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [str_hello](SystemCallHandler &handler,
+                       NativeRuntime &) -> InvokeStatus<void> {
+             auto key = make_storage_key("test");
+             auto res =
+                 handler.set_bytestring(key,
+                                        std::as_bytes(std::span(str_hello)));
+             if (!res.has_value() || !res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+
+  // Token contract
+  auto token_contract = make_native_token_contract();
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(kSenderNativeId, std::move(sender_contract));
+  contract_map.emplace(kReceiverNativeId, std::move(receiver_contract));
+  contract_map.emplace(kTokenNativeId, std::move(token_contract));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  // Deploy contracts
+  auto sender_contract_xdr = make_native_contract(kSenderNativeId);
+  in_memory_db_.write_contract(sha256(*sender_contract_xdr),
+                               sender_contract_xdr);
+  in_memory_db_.write_deployment(sender_addr, sha256(*sender_contract_xdr));
+
+  auto receiver_contract_xdr = make_native_contract(kReceiverNativeId);
+  in_memory_db_.write_contract(sha256(*receiver_contract_xdr),
+                               receiver_contract_xdr);
+  in_memory_db_.write_deployment(receiver_addr, sha256(*receiver_contract_xdr));
+
+  auto token_contract_xdr = make_native_contract(kTokenNativeId);
+  in_memory_db_.write_contract(sha256(*token_contract_xdr), token_contract_xdr);
+  in_memory_db_.write_deployment(token_contract_addr,
+                                 sha256(*token_contract_xdr));
+
+  // Grant initial tokens to sender
+  setup_grant_storage_token(sender_addr, write_cost);
+
+  // Invoke the sender contract
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = sender_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto commit_res = handler.try_commit_transaction()();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
+
+  advance_block();
+
+  // Check sender token balance
+  auto sender_token_addrkey =
+      AddressAndKey{.address = sender_addr,
+                    .key = StorageKey(
+                        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  auto sender_token_item_opt =
+      lookup_storage_item_from_db(sender_token_addrkey);
+  ASSERT_TRUE(sender_token_item_opt.has_value());
+  EXPECT_EQ(from_xdr(sender_token_item_opt.value().nnint()), 0);
+
+  // Check receiver token balance
+  auto receiver_token_addrkey =
+      AddressAndKey{.address = receiver_addr,
+                    .key = StorageKey(
+                        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  auto receiver_token_item_opt =
+      lookup_storage_item_from_db(receiver_token_addrkey);
+  ASSERT_TRUE(receiver_token_item_opt.has_value());
+  EXPECT_EQ(from_xdr(receiver_token_item_opt.value().nnint()), 0);
+
+  // Check receiver storage
+  auto data_addrkey = make_contract_data_addrkey(receiver_addr, "test");
+  auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
+  ASSERT_TRUE(data_item_opt.has_value());
+  ASSERT_EQ(data_item_opt.value().bytestring(), str_hello);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

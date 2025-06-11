@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "bcs/decode.h"
@@ -44,7 +45,7 @@ template<typename> struct CalldataArgs;
 
 template<typename R, typename... Args> struct CalldataArgs<R (*&&)(Args...)> {
   using args_t = std::tuple<Args...>;
-  using return_t = R;
+  using return_t = std::conditional_t<std::is_same_v<R, void>, std::tuple<>, R>;
 };
 
 } // namespace detail
