@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <bit>
 #include <cassert>
@@ -253,7 +255,7 @@ private:
     return std::byte(static_cast<unsigned char>(ch));
   }
 
-  SHA256Hash GetNodeHash(const Node &node)
+  static SHA256Hash GetNodeHash(const Node &node)
   {
     static constexpr std::array<std::byte, 32> kNullptr = {};
 
@@ -264,11 +266,11 @@ private:
     case NodeType::kBranch:
       // Hash [branch_value] and **the hashes in** [branch_next].
       std::transform(node.branch_value.begin(), node.branch_value.end(),
-                     to_hash.end(), CastCharToByte);
+                     std::back_inserter(to_hash), CastCharToByte);
       for (Node *child : node.branch_next) {
         if (child) {
-          std::transform(child->hash.begin(), child->hash.end(), to_hash.end(),
-                         CastCharToByte);
+          std::transform(child->hash.begin(), child->hash.end(),
+                         std::back_inserter(to_hash), CastCharToByte);
         }
         else {
           to_hash.insert(to_hash.end(), kNullptr.begin(), kNullptr.end());
@@ -281,8 +283,8 @@ private:
                      node.extension_path.end());
       if (node.extension_key) {
         std::transform(node.extension_key->hash.begin(),
-                       node.extension_key->hash.end(), to_hash.end(),
-                       CastCharToByte);
+                       node.extension_key->hash.end(),
+                       std::back_inserter(to_hash), CastCharToByte);
       }
       else {
         to_hash.insert(to_hash.end(), kNullptr.begin(), kNullptr.end());
@@ -292,10 +294,18 @@ private:
       // Hash [leaf_path] and [leaf_value].
       to_hash.insert(to_hash.end(), node.leaf_path.begin(),
                      node.leaf_path.end());
+      printf("here %s\n", node.leaf_value.c_str());
+      printf("length: %zu\n", to_hash.size());
       std::transform(node.leaf_value.begin(), node.leaf_value.end(),
-                     to_hash.end(), CastCharToByte);
+                     std::back_inserter(to_hash), CastCharToByte);
+      printf("length: %zu\n", to_hash.size());
       break;
     }
+    printf("to_hash: ");
+    for (std::byte b : to_hash) {
+      printf("%02x ", static_cast<unsigned char>(b));
+    }
+    printf("\n");
     return sha256(to_hash);
   }
 
@@ -324,6 +334,8 @@ private:
   }
 
   Node *root_ = nullptr;
+
+  FRIEND_TEST(MerkleTrie, HashLeaf);
 };
 
 } // namespace hogd
