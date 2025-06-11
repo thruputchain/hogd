@@ -158,12 +158,9 @@ Snapshotter::snapshot_one(UniqueLoglet src)
                                                  &storage,
                                                  &ret](ItemHeader ** /* hptr */,
                                                        size_t hash) mutable {
-          // recheck if the item became dead before the lock
-          // was held.
-          if (storage.load(std::memory_order_relaxed) ==
-              ItemStorage::kTombstone) [[unlikely]] {
-            return;
-          }
+          // no need to recheck storage field for tombstone status.
+          // if this item was already removed, modify_locked would not have
+          // triggered this callback.
 
           // recheck if item lsn is still supposed to be part of the snapshot.
           // if not, a put() operation overwrote the item (and it put the
@@ -191,8 +188,6 @@ Snapshotter::snapshot_one(UniqueLoglet src)
       item_allocator_.give_to_compactor(std::move(src));
       return ret.error();
     }
-    assert(found ||
-           storage.load(std::memory_order_relaxed) == ItemStorage::kTombstone);
   }
 
   // Since snapshotting is done on this loglet, let the compactor have it
