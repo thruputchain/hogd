@@ -1,9 +1,7 @@
 #pragma once
 
-#include <algorithm>
 #include <cassert>
 #include <concepts>
-#include <limits>
 #include <optional>
 #include <set>
 #include <variant>
@@ -52,6 +50,12 @@ public:
 
   int128_t base_value_;
   int128_t add_value_;
+};
+
+// State of an item that is a token balance
+class NativeTokenBalanceItem : public NNIntItem {
+public:
+  constexpr static ItemViewType kItemType = ItemViewType::kNativeTokenBalance;
 };
 
 // Represent state of item that has been deleted.
@@ -279,7 +283,7 @@ private:
                                       ItemViewType item_type);
 
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
-               RetrocausalQueueItem, ReplayCacheItem>
+               NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem>
       delta_args_;
   Nondeterministic<int128_t> locked_storage_cost_ = 0;
 };

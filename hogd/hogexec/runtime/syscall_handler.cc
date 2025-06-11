@@ -560,15 +560,16 @@ SystemCallHandler::get_native_token_balance(
   }
 
   if (auto *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    assert(unmodified_item->base_item_.type() == ItemViewType::kNNInt);
-    assert(unmodified_item->base_item_.nnint() >= 0);
-    return unmodified_item->base_item_.nnint();
+    assert(unmodified_item->base_item_.type() ==
+           ItemViewType::kNativeTokenBalance);
+    assert(unmodified_item->base_item_.native_token_balance() >= 0);
+    return unmodified_item->base_item_.native_token_balance();
   }
 
-  auto const *nnint_item = (*item_view)->get<NNIntItem>();
-  assert(nnint_item);
+  auto const *balance_item = (*item_view)->get<NativeTokenBalanceItem>();
+  assert(balance_item);
 
-  int128_t balance = nnint_item->base_value_ + nnint_item->add_value_;
+  int128_t balance = balance_item->base_value_ + balance_item->add_value_;
   assert(balance >= 0);
   return balance;
 }
@@ -588,13 +589,14 @@ SystemCallHandler::modify_native_token_balance(
 
   auto [current_balance, current_add] = [&]() -> std::pair<int128_t, int128_t> {
     if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-      assert(unmodified_item->base_item_.type() == ItemViewType::kNNInt);
-      assert(unmodified_item->base_item_.nnint() >= 0);
-      return {unmodified_item->base_item_.nnint(), 0};
+      assert(unmodified_item->get_item_type() ==
+             ItemViewType::kNativeTokenBalance);
+      assert(unmodified_item->base_item_.native_token_balance() >= 0);
+      return {unmodified_item->base_item_.native_token_balance(), 0};
     }
-    auto const *nnint_item = (*item_view)->get<NNIntItem>();
-    assert(nnint_item);
-    return {nnint_item->base_value_, nnint_item->add_value_};
+    auto const *balance_item = (*item_view)->get<NativeTokenBalanceItem>();
+    assert(balance_item);
+    return {balance_item->base_value_, balance_item->add_value_};
   }();
 
   if (integer_add_overflow(current_add, transfer_amount)) {
@@ -611,7 +613,8 @@ SystemCallHandler::modify_native_token_balance(
   }
 
   return (*item_view)
-      ->set(NNIntItem{.base_value_ = current_balance, .add_value_ = new_add});
+      ->set(NativeTokenBalanceItem(
+          NNIntItem{.base_value_ = current_balance, .add_value_ = new_add}));
 }
 
 } // namespace hogd
