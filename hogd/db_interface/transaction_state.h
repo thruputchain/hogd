@@ -21,7 +21,7 @@
 namespace hogd {
 
 struct SubTransactionState {
-  std::unordered_map<AddressAndKey, StorageDelta> deltas_;
+  std::unordered_map<AddressAndKey, std::pair<StorageDelta, int128_t>> deltas_;
 };
 
 // Store data relevant to the 2PC process for one transaction.
@@ -57,6 +57,8 @@ public:
 
   // Get the lock held by the current transaction for a given address+key pair.
   StorageLock get_lock(AddressAndKey const &addrkey);
+  // Get the amount of storage cost expected as locked for this addrkey pair.
+  int128_t get_cost(AddressAndKey const &addrkey) const;
 
   // Extract the results of the transaction, i.e. the set of all deltas and
   // associated locks that commit in the final view of the transaction. This
@@ -81,7 +83,7 @@ private:
   // transaction, whether we commit or revert.  This may not be _optimal_, but
   // probably good enough. It's not an error to hold a lock for too
   // long.
-  std::unordered_map<AddressAndKey, MeteredStorageLock> held_locks_;
+  std::unordered_map<AddressAndKey, StorageLock> held_locks_;
   std::vector<SubTransactionState> subtransaction_stack_;
   bool finished_ = false;
 };

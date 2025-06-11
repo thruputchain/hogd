@@ -30,7 +30,7 @@ namespace hogd {
 class TryInvokeTest : public ::testing::Test,
                       public NativeContractTestFramework {
 public:
-  TryInvokeTest() : NativeContractTestFramework(false) {}
+  TryInvokeTest() : NativeContractTestFramework(true) {}
 
 protected:
   void SetUp() override {}
@@ -758,19 +758,26 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
           {0,
            [str_abc](SystemCallHandler &handler,
                      NativeRuntime &) -> InvokeStatus<void> {
+                      std::println("start method 0");
              auto key0 = make_storage_key("test0");
              auto res =
                  handler.set_bytestring(key0,
                                         std::as_bytes(std::span(str_abc)));
-             if (!res.has_value())
+             if (!res.has_value()) {
+               std::println("res has no value");   
                return res.error().to_invoke_error();
-             if (!res.value().has_value())
+             }
+             if (!res.value().has_value()) {
+               std::println("res.value() has no value: error is {}", res.error());
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             std::println("method 0 succeeded");
              return {};
            }},
           {1,
            [str_abc, str_def](SystemCallHandler &handler,
                               NativeRuntime &) -> InvokeStatus<void> {
+             std::println("start method 1");
              auto key0 = make_storage_key("test0");
              auto key1 = make_storage_key("test1");
              auto res0 =
@@ -788,6 +795,7 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
           {2,
            [](SystemCallHandler &handler,
               NativeRuntime &runtime) -> InvokeStatus<void> {
+             std::println("start method 2");
              // First, try_invoke method 1 (should fail)
              auto [r1, _g1] = handler.invoke(
                  handler.get_current_address(),
@@ -796,10 +804,12 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
                  {},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r1.has_value()) {
+              std::println("r1 has no value");
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              // Should fail (not enough tokens for two writes)
              if (r1.value() == SyscallErrorCode::kNone) {
+              std::println("r1 has value kNone, unfortunatley");
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              // Then, try_invoke method 0 (should succeed)
@@ -810,8 +820,10 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
                  {},
                  std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value() || r0.value() != SyscallErrorCode::kNone) {
+              std::println("r0 has no value or has error");
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
+             std::println("method 2 succeeded");
              return {};
            }}});
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -970,6 +982,7 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
              }
              // Should fail (not enough tokens for third write)
              if (r2.value() == SyscallErrorCode::kNone) {
+              std::println("r2 has value kNone, should have failed");
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              return {};
@@ -985,6 +998,7 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
   in_memory_db_.write_contract(sha256(*contract), contract);
   in_memory_db_.write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, total_tokens);
+  std::println("total_tokens grant: {}", total_tokens);
 
   // Single transaction: invoke method 3 (root)
   auto handler = make_new_system_call_handler(
