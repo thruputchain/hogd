@@ -1,12 +1,12 @@
 #pragma once
 
 #include <cassert>
-#include <memory>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
+#include "hogd/db_interface/block_state.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -32,12 +32,12 @@ public:
   void start_server(uint32_t port_number);
 
   // RPC methods
-  x23::Async<ExpectedStorageCost>
-  try_reserve_delta(BlockID block, TransactionID tx, AddressAndKey addrkey,
-                    StorageDelta delta, StorageItemRPCFlagSet flags);
+
   x23::Async<RPCError> commit_transaction(BlockID block, TransactionID tx);
   x23::Async<RPCError> abort_transaction(BlockID block, TransactionID tx);
-  x23::Async<RPCError> push_new_subtransaction(BlockID block, TransactionID tx);
+  x23::Async<RPCError> try_push_new_subtransaction(BlockID block,
+                                                   TransactionID tx,
+                                                   StorageDeltaBatch batch);
   x23::Async<RPCError> pop_subtransactions(BlockID block, TransactionID tx,
                                            uint32_t popcount);
   x23::Async<ExpectedStorageItem>
@@ -63,6 +63,11 @@ private:
   BlockManager *block_manager_;
   x23::ThreadPool pool_ = x23::ThreadPool(2);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
+
+  static bool try_reserve_delta(BlockState *block_state, TransactionID tx,
+                                AddressAndKey const &addrkey,
+                                StorageDelta const &delta,
+                                StorageItemRPCFlagSet flags);
 };
 
 static_assert(is_DatabaseToExecutorInterfaceV1<DbExecutorServer *, x23::Async>);

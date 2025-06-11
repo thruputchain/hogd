@@ -53,6 +53,8 @@ public:
   void add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
                  MeteredStorageLock &&new_lock);
 
+  std::optional<StorageDelta> get_delta(AddressAndKey const &addrkey) const;
+
   // Get the lock held by the current transaction for a given address+key pair.
   StorageLock get_lock(AddressAndKey const &addrkey);
 

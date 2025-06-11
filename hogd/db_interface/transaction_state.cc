@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/storage_item/storage_lock_util.h"
 #include "rpc_types.hh"
@@ -18,6 +19,7 @@ namespace hogd {
 
 TransactionState::TransactionState()
 {
+  // TODO(geoff): updated interface doesn't need this
   subtransaction_stack_.emplace_back();
 }
 
@@ -42,8 +44,27 @@ TransactionState::add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
                             MeteredStorageLock &&new_lock)
 {
   assert(!finished_);
+  if constexpr (is_debug_build()) {
+    if (subtransaction_stack_.back().deltas_.contains(addrkey)) {
+      assert(addrkey.key.key_type() ==
+             StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+    }
+  }
   subtransaction_stack_.back().deltas_[addrkey] = std::move(delta);
   held_locks_[addrkey] = std::move(new_lock);
+}
+
+std::optional<StorageDelta>
+TransactionState::get_delta(AddressAndKey const &addrkey) const
+{
+  assert(!finished_);
+  for (auto const &subtx : subtransaction_stack_) {
+    auto it = subtx.deltas_.find(addrkey);
+    if (it != subtx.deltas_.end()) {
+      return it->second;
+    }
+  }
+  return std::nullopt;
 }
 
 StorageLock

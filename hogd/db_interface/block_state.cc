@@ -6,10 +6,12 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "storage_lock.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -37,7 +39,7 @@ BlockState::commit_to_database()
   storage_view_.commit_to_database();
 }
 
-std::optional<int128_t>
+bool
 BlockState::try_reserve_storage_delta(TransactionID txid,
                                       AddressAndKey const &addrkey,
                                       StorageDelta delta,
@@ -46,17 +48,60 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
   assert(!is_closed());
   auto [tx, tx_lock] = tx_manager_.get(txid);
 
-  auto lock = tx.get_lock(addrkey);
+  int128_t cost = 0;
+  {
+    auto lock = tx.get_lock(addrkey);
 
-  auto res =
-      storage_view_.try_reserve_storage_delta(addrkey, delta, lock, flags);
+    auto res =
+        storage_view_.try_reserve_storage_delta(addrkey, delta, lock, flags);
 
-  if (res) {
-    int128_t cost = res->locked_tokens_;
+    if (!res) {
+      return false;
+    }
+    cost = res->locked_tokens_;
     tx.add_delta(addrkey, std::move(delta), std::move(*res));
-    return cost;
   }
-  return std::nullopt;
+
+  AddressAndKey cost_addrkey =
+      AddressAndKey{.address = addrkey.address,
+                    .key = StorageKey(
+                        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+
+  auto prev_delta = tx.get_delta(cost_addrkey);
+  auto storage_lock = tx.get_lock(cost_addrkey);
+  StorageDelta new_storage_delta;
+  if (prev_delta) {
+    assert(prev_delta->type() ==
+           StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+    assert(storage_lock.lock_type() != StorageLockType::kNone);
+    new_storage_delta = *prev_delta;
+    new_storage_delta.nnint().add_value =
+        to_xdr(from_xdr(prev_delta->nnint().add_value) - cost);
+  }
+  else {
+    assert(storage_lock.lock_type() == StorageLockType::kNone);
+    new_storage_delta =
+        StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+    new_storage_delta.nnint().add_value = to_xdr(-cost);
+
+    auto const *snapshot =
+        storage_view_.get_snapshot_storage_item(cost_addrkey);
+    int128_t set_value = snapshot ? snapshot->nnint() : 0;
+    new_storage_delta.nnint().set_value = to_xdr(set_value);
+  }
+
+  auto new_lock = storage_view_.try_reserve_storage_delta(
+      cost_addrkey, new_storage_delta, storage_lock,
+      std::to_underlying(StorageItemRPCFlags::kStorageNone));
+
+  if (!new_lock) {
+    return false;
+  }
+
+  tx.add_delta(cost_addrkey, std::move(new_storage_delta),
+               std::move(*new_lock));
+
+  return true;
 }
 
 void

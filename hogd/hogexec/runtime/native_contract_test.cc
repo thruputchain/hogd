@@ -11,6 +11,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -62,15 +63,8 @@ protected:
                            invoked_addr.size());
 
                auto invoke_res = handler.invoke(
-                   Invocation{.invoked_address = invoked_addr,
-                              .method = invoked_id,
-
-                              .gas_limit =
-                                  std::numeric_limits<GasAmount>::max(),
-                              .calldata = {}
-
-                   },
-                   std::numeric_limits<GasAmount>::max(),
+                   invoked_addr, invoked_id,
+                   std::numeric_limits<GasAmount>::max(), Calldata{},
                    std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
                if (invoke_res.first) {
@@ -143,11 +137,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                  NativeRuntime &runtime) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
         auto [r1, g1] =
-            handler.invoke(Invocation{.invoked_address = address,
-                                      .method = 0,
-                                      .gas_limit = UINT64_MAX,
-                                      .calldata = {100, 0, 0, 0}},
-                           UINT64_MAX,
+            handler.invoke(address, 0, UINT64_MAX, Calldata{100, 0, 0, 0},
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -157,11 +147,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto [r2, g2] =
-            handler.invoke(Invocation{.invoked_address = address,
-                                      .method = 0,
-                                      .gas_limit = UINT64_MAX,
-                                      .calldata = {200, 0, 0, 0}},
-                           UINT64_MAX,
+            handler.invoke(address, 0, UINT64_MAX, Calldata{200, 0, 0, 0},
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -171,11 +157,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto [r3, g3] =
-            handler.invoke(Invocation{.invoked_address = address,
-                                      .method = 0,
-                                      .gas_limit = UINT64_MAX,
-                                      .calldata = {150, 0, 0, 0}},
-                           UINT64_MAX,
+            handler.invoke(address, 0, UINT64_MAX, Calldata{150, 0, 0, 0},
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r3.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -194,14 +176,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   builder.add(2,
               [&address](SystemCallHandler &handler,
                          NativeRuntime &runtime) -> InvokeStatus<int32_t> {
-                auto [r, g] =
-                    handler.invoke(Invocation{.invoked_address = address,
-                                              .method = 1,
-                                              .gas_limit = UINT64_MAX,
-                                              .calldata = {}},
-                                   UINT64_MAX,
-                                   std::to_underlying(
-                                       InvokeFlag::kInvokeFlagNone));
+                auto [r, g] = handler.invoke(address, 1, UINT64_MAX, Calldata{},
+                                             std::to_underlying(
+                                                 InvokeFlag::kInvokeFlagNone));
                 if (!r.has_value()) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
@@ -231,16 +208,17 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   snapshot_server_.setup_create_deployment(address, sha256(contract));
 
   SystemCallHandler handler(
-      SignedTransaction{.tx =
-                            Transaction{
-                                .invocation =
-                                    {
-                                        .invoked_address = address,
-                                        .method = 2,
-                                        .gas_limit = UINT64_MAX,
-                                        .calldata = {},
-                                    },
-                            }},
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      {
+                          .invoked_address = address,
+                          .entrypoint = entrypoint_from_method_id(2),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              }},
       snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
       ProposalModeData{}, runtime_context_);
 
