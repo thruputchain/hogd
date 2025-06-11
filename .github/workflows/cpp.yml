@@ -35,6 +35,10 @@ jobs:
       run: clang --version
     - name: path check
       run: echo $PATH
+    - name: Add Cargo to PATH
+      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    - name: path check
+      run: echo $PATH
     - name: cargo version check
       run: cargo --version
     - name: Probe Cache
