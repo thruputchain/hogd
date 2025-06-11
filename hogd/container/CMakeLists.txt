@@ -6,6 +6,7 @@ add_executable(
 target_link_libraries(
   merkle_trie_test
   base
+  hogd
   GTest::gtest_main
 )
 gtest_discover_tests(merkle_trie_test)

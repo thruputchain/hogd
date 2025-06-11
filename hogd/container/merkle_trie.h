@@ -20,6 +20,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 // TODO: Support template types. For now, the keys are byte arrays and the
@@ -43,6 +44,7 @@ public:
     memset(root_->branch_next.data(), 0,
            root_->branch_next.size() * sizeof(root_->branch_next[0]));
   }
+
   ~MerkleTrie() { FreeAllNodes(root_); }
 
   // disable copy and support move.
@@ -159,9 +161,10 @@ private:
     // TODO: Optimize the vectors below--use something other than a vector. We
     // know that path lengths will never exceed 65 bytes.
 
-    // Branches.
-    std::array<Node *, 16> branch_next;
     std::string branch_value;
+    // Branches. We branch on a hex value. There are 16 different hex values, so
+    // we need 16 different branch slots.
+    std::array<Node *, 16> branch_next;
 
     // Extensions.
     std::vector<std::byte> extension_path;
@@ -245,19 +248,55 @@ private:
     root->hash = GetNodeHash(*root);
   }
 
+  static std::byte CastCharToByte(unsigned char ch)
+  {
+    return std::byte(static_cast<unsigned char>(ch));
+  }
+
   SHA256Hash GetNodeHash(const Node &node)
   {
-    // TODO: Implement.
+    static constexpr std::array<std::byte, 32> kNullptr = {};
+
+    // TODO: Optimize. We know the max lengths of the values we need to hash up
+    // front.
+    std::vector<std::byte> to_hash;
     switch (node.type) {
     case NodeType::kBranch:
+      // Hash [branch_value] and **the hashes in** [branch_next].
+      std::transform(node.branch_value.begin(), node.branch_value.end(),
+                     to_hash.end(), CastCharToByte);
+      for (Node *child : node.branch_next) {
+        if (child) {
+          std::transform(child->hash.begin(), child->hash.end(), to_hash.end(),
+                         CastCharToByte);
+        }
+        else {
+          to_hash.insert(to_hash.end(), kNullptr.begin(), kNullptr.end());
+        }
+      }
       break;
     case NodeType::kExtension:
+      // Hash [extension_path] and **the hash in** [extension_key].
+      to_hash.insert(to_hash.end(), node.extension_path.begin(),
+                     node.extension_path.end());
+      if (node.extension_key) {
+        std::transform(node.extension_key->hash.begin(),
+                       node.extension_key->hash.end(), to_hash.end(),
+                       CastCharToByte);
+      }
+      else {
+        to_hash.insert(to_hash.end(), kNullptr.begin(), kNullptr.end());
+      }
       break;
     case NodeType::kLeaf:
+      // Hash [leaf_path] and [leaf_value].
+      to_hash.insert(to_hash.end(), node.leaf_path.begin(),
+                     node.leaf_path.end());
+      std::transform(node.leaf_value.begin(), node.leaf_value.end(),
+                     to_hash.end(), CastCharToByte);
       break;
     }
-    static std::array<unsigned char, 32> tmp = {0};
-    return tmp;
+    return sha256(to_hash);
   }
 
   void FreeAllNodes(Node *root)
@@ -271,17 +310,13 @@ private:
     // more than 65 * 2 = 130 levels.
     switch (root->type) {
     case NodeType::kBranch:
-    {
       for (Node *child : root->branch_next) {
         FreeAllNodes(child);
       }
       break;
-    }
     case NodeType::kExtension:
-    {
       FreeAllNodes(root->extension_key);
       break;
-    }
     case NodeType::kLeaf:
       break;
     }
