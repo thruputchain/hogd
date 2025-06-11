@@ -1,6 +1,3 @@
-#include "contract.hh"
-#include "ffi_enums.hh"
-#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <algorithm>
@@ -9,8 +6,10 @@
 #include <span>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "transaction.hh"

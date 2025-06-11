@@ -114,12 +114,15 @@ to_system_error_code(auto err, auto &&f)
     case RPCError::kRPCNoContractDeployed:
     case RPCError::kRPCNoQueueEntry:
     case RPCError::kRPCStorageWriteFailed:
+      // can't directly combine these branches; f() isn't a valid expression in
+      // the first case NOLINTBEGIN(bugprone-branch-clone)
       if constexpr (kHasReturnType) {
         return NullValue;
       }
       else if constexpr (!std::same_as<decltype(f()), void>) {
         return NullValue;
       }
+      // NOLINTEND(bugprone-branch-clone)
       else {
         // This should never happen -- none of the rpc errors that have a return
         // type of void should return this kind of error code.

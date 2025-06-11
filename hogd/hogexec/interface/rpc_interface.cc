@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <utility>
 
 #include "exec_coord.hh"
 #include "hogd/base/types.h"

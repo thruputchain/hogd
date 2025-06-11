@@ -12,7 +12,6 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"

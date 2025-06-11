@@ -7,7 +7,6 @@
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/db_interface/block_state.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
