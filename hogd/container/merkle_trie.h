@@ -81,9 +81,6 @@ public:
 
   void insert(const Key &k, T &&obj)
   {
-    // A root node already exists. If the root is a leaf node, then we need to
-    // convert it to a branch node and build the trie.
-    //
     // TODO: Optimize with extension nodes.
     // TODO: Handle insertion of a duplicate key.
     size_t idx = 0;
@@ -112,14 +109,21 @@ public:
       leaf->leaf_value = std::move(obj);
       leaf->hash = GetNodeHash(*leaf);
 
-      size_t branch_idx = std::to_integer<size_t>(k[idx]);
+      std::byte digit = k[idx];
+      if (idx % 2 == 0) {
+        digit >>= 4;
+      }
+      else {
+        digit &= std::byte{0xF};
+      }
+      size_t branch_idx = std::to_integer<size_t>(digit);
       assert(!next->branch_next[branch_idx]);
       next->branch_next[branch_idx] = leaf;
     }
     RegenerateHashes(root_, k, /*idx=*/0);
   }
 
-  void insert(const Key &k, const T &obj) { assert(false); }
+  void insert(const Key &k, const T &obj) { insert(k, T(obj)); }
 
   std::string &insert_or_assign(const Key &k, T &&obj)
   {
@@ -200,7 +204,7 @@ private:
     switch (root->type) {
     case NodeType::kBranch:
       printf("Branch (%s)\n", GetHashString(*root).c_str());
-      printf("Value: %s\n", root->branch_value.c_str());
+      printf("Value: [%s]\n", root->branch_value.c_str());
       for (size_t i = 0; i < root->branch_next.size(); i++) {
         if (root->branch_next[i]) {
           printf("%02x: %s\n", static_cast<uint8_t>(i),
@@ -210,6 +214,7 @@ private:
           printf("%02x: null\n", static_cast<uint8_t>(i));
         }
       }
+      printf("\n");
       for (size_t i = 0; i < root->branch_next.size(); i++) {
         PrintHelper(root->branch_next[i]);
       }
@@ -222,11 +227,13 @@ private:
       else {
         printf("Child: null\n");
       }
+      printf("\n");
       PrintHelper(root->extension_key);
       break;
     case NodeType::kLeaf:
       printf("Leaf (%s)\n", GetHashString(*root).c_str());
-      printf("Value: %s\n", root->leaf_value.c_str());
+      printf("Value: [%s]\n", root->leaf_value.c_str());
+      printf("\n");
       break;
     }
   }
@@ -246,10 +253,10 @@ private:
 
     std::byte current_hex = path[idx / 2];
     if (idx % 2 == 0) {
-      current_hex &= std::byte{0xF};
+      current_hex >>= 4;
     }
     else {
-      current_hex >>= 4;
+      current_hex &= std::byte{0xF};
     }
     switch (root->type) {
     case NodeType::kBranch:

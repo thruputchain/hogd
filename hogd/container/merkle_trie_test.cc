@@ -31,12 +31,33 @@ HashFromString(const std::string &str)
   return ret;
 }
 
+std::vector<std::byte>
+ByteVectorFromString(const std::string &str)
+{
+  // Each byte has two hex characters, so the string length must be even.
+  assert(str.size() % 2 == 0);
+
+  std::vector<std::byte> ret;
+  for (size_t i = 0; i < str.size(); i += 2) {
+    std::string substr = str.substr(i, 2);
+    std::byte b = static_cast<std::byte>(
+        std::stoul(substr, /*pos=*/nullptr, /*base=*/16));
+    ret.push_back(b);
+  }
+  return ret;
+}
+
 } // namespace
 
 TEST(MerkleTrie, BasicUsage)
 {
   std::cout << "Hello world! This is the Merkle Trie test." << std::endl;
   MerkleTrie trie;
+  trie.Print();
+
+  std::vector<std::byte> key = ByteVectorFromString("1234");
+  std::string value = "hello";
+  trie.insert(key, value);
   trie.Print();
 }
 
