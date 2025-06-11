@@ -19,7 +19,6 @@ jobs:
       with:
         ssh-private-key: |
           ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-          ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
           ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_BCS_RS_KEY }}
