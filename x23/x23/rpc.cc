@@ -68,11 +68,8 @@ RpcStreamImpl::write_record(Buf b SLOC_ARG)
   if (ss_.stop_requested())
     co_return;
   auto _r = shared_from_this();
-  CoroGuard g;
-  co_await g(sendlock_);
   if (!ss_.stop_requested())
-    co_await cp_->write(fd_, b);
-  co_await g.reset_and_return();
+    co_await cp_->bgwrite(fd_, b);
 }
 
 Async<std::expected<std::uint32_t, Errno>>

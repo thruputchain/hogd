@@ -296,7 +296,9 @@ public:
   // Write all of data to file descriptor fd.  The coroutine keeps
   // suspending itself until the entirety of data has been written or
   // an error occurs.  Always returns either data.size() or an Errno
-  // other than EAGAIN.
+  // other than EAGAIN.  No synchronization is performed, so calling
+  // this concurrently in two threads will likely lead to a mishmash
+  // of data.
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
                                             BufView data SLOC_PARM);
 
@@ -304,7 +306,9 @@ public:
   // with the file descriptor, it might return an error or it might
   // return void, depending on whether the buffer is clear and it can
   // immediately attempt the write.  If there is no problem with the
-  // file descriptor, it will always return void.
+  // file descriptor, it will always return void.  Unlike write, it is
+  // safe to call this function concurrently; the writes will be
+  // sequenced one after the other.
   Async<std::expected<void, Errno>> bgwrite(BorrowedFd fd, Buf data SLOC_PARM);
 
   // Accept a new connection on a listening file descriptor lfd,

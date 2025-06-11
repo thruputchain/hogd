@@ -393,7 +393,6 @@ public:
 protected:
   UniqueFd fd_;
   std::stop_source ss_;
-  CoroLock sendlock_;
   std::atomic<unsigned> nclients_{0};
   std::map<ProgVers, std::unique_ptr<RpcService>> srvmap_;
 
