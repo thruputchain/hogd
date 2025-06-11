@@ -9,10 +9,6 @@ on:
 jobs:
   build:
     runs-on: self-hosted
-
-    env:
-      CACHED_PATHS: |
-        bcheck
     
     steps:
     - uses: webfactory/ssh-agent@v0.9.1
@@ -39,20 +35,7 @@ jobs:
       run: echo $PATH
     - name: cargo version check
       run: cargo --version
-    - name: Probe Cache
-      id: cache
-      uses: actions/cache/restore@v4
-      with:
-        path: ${{ env.CACHED_PATHS }}
-        # Cmake should handle rebuilding any changed files across commits
-        # The last number is a version number.  Bump the version number whenever the compiler changes,
-        # to invalidate the cache (or any other time you need to manually clear the cache)
-        key: ${{ runner.os }}-${{ github.ref_name }}-3
     - name: set gcc-14 in check
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: check
       run: ./scripts/check.sh
-    - uses: actions/cache/save@v4
-      with:
-        path: ${{ env.CACHED_PATHS }}
-        key: ${{ steps.cache.outputs.cache-primary-key }}
