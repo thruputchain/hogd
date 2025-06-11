@@ -155,7 +155,6 @@ Snapshotter::snapshot_one(UniqueLoglet src)
     DBStatus<uint64_t> ret{};
     [[maybe_unused]] bool found =
         map_.modify_locked(src_item->get_key(), [this, src_item, &stats,
-                                                 &storage,
                                                  &ret](ItemHeader ** /* hptr */,
                                                        size_t hash) mutable {
           // no need to recheck storage field for tombstone status.

@@ -169,8 +169,8 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
     // try to move the item to the new loglet.
     [[maybe_unused]] bool found = map_->modify_locked(
         src_item->get_key(),
-        [this, alloc_loglet, src_item, &bytes_moved, &stats,
-         &storage](ItemHeader **hptr, size_t /* hash */) mutable {
+        [this, alloc_loglet, src_item, &bytes_moved,
+         &stats](ItemHeader **hptr, size_t /* hash */) mutable {
           // no need to recheck storage field for tombstone status.
           // if this item was already removed, modify_locked would not have
           // triggered this callback.
