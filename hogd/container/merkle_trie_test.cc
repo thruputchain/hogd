@@ -49,9 +49,8 @@ ByteVectorFromString(const std::string &str)
 
 } // namespace
 
-TEST(MerkleTrie, BasicUsage)
+TEST(MerkleTrie, TwoLeaves)
 {
-  std::cout << "Hello world! This is the Merkle Trie test." << std::endl;
   MerkleTrie trie;
   trie.Print();
 
@@ -62,6 +61,43 @@ TEST(MerkleTrie, BasicUsage)
 
   key = ByteVectorFromString("1223");
   value = "hello again";
+  trie.insert(key, value);
+  trie.Print();
+}
+
+TEST(MerkleTrie, BranchAndLeaf)
+{
+  MerkleTrie trie;
+  trie.Print();
+
+  std::vector<std::byte> key = ByteVectorFromString("1234");
+  std::string value = "hello";
+  trie.insert(key, value);
+  trie.Print();
+
+  key = ByteVectorFromString("123456");
+  value = "hello again";
+  trie.insert(key, value);
+  trie.Print();
+}
+
+TEST(MerkleTrie, ThreeLeaves)
+{
+  MerkleTrie trie;
+  trie.Print();
+
+  std::vector<std::byte> key = ByteVectorFromString("1234");
+  std::string value = "hello";
+  trie.insert(key, value);
+  trie.Print();
+
+  key = ByteVectorFromString("123456");
+  value = "hello again";
+  trie.insert(key, value);
+  trie.Print();
+
+  key = ByteVectorFromString("12ab");
+  value = "hello three";
   trie.insert(key, value);
   trie.Print();
 }

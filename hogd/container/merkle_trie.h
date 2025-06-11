@@ -94,8 +94,7 @@ public:
     assert(next);
     assert(next->type == NodeType::kBranch);
     assert(idx <= k.size() * 2);
-    printf("next: %p\n", next);
-    if (idx == k.size()) {
+    if (idx == k.size() * 2) {
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
       assert(next->branch_value.empty());
@@ -105,10 +104,7 @@ public:
     else {
       std::byte digit = HexDigitAtIndex(k, idx);
       size_t branch_idx = std::to_integer<size_t>(digit);
-      printf("idx = %zu, branch_idx = %zu\n", idx, branch_idx);
-      printf("assert below\n");
       if (next->branch_next[branch_idx]) {
-        printf("In here because there is a common prefix\n");
         Node *to_free = next->branch_next[branch_idx];
         // There is already a child node. [TraverseToBottom] returns the lowest
         // branch node in the trie for [key], so the child node is either an
@@ -141,17 +137,11 @@ public:
                 ? next->branch_next[branch_idx]->leaf_value
                 : obj;
         size_t i;
-        printf("Shorter key: %s, Longer key: %s\n",
-               KeyToString(shorter).c_str(), KeyToString(longer).c_str());
         Node *prev_branch = next;
         for (i = 0; i < shorter.size() * 2; i++) {
           std::byte shorter_digit = HexDigitAtIndex(shorter, i + offset);
           std::byte longer_digit = HexDigitAtIndex(longer, i + offset);
-          printf("idx = %zu, i = %zu, offset = %zu, i + offset = %zu, Shorter "
-                 "digit: %x, Longer digit: %x\n",
-                 idx, i, offset, i + offset, shorter_digit, longer_digit);
           if (shorter_digit == longer_digit) {
-            printf("A\n");
             // The digits match, so add a branch node.
             Node *branch = new Node;
             branch->type = NodeType::kBranch;
@@ -165,7 +155,6 @@ public:
             prev_branch = branch;
           }
           else {
-            printf("B, i = %zu, offset = %zu\n", i, offset);
             // The digits do not match, so create two leaf nodes.
 
             // Shorter key's leaf node.
@@ -191,7 +180,6 @@ public:
           }
         }
         if (i >= shorter.size() * 2) {
-          printf("C\n");
           // The shorter key is entirely contained within the larger key. Thus,
           // we should add the shorter key's value to the last branch node
           // created, and then we should add the longer key and its value to a
@@ -201,7 +189,9 @@ public:
           // Longer key's leaf node.
           Node *leaf = new Node;
           leaf->type = NodeType::kLeaf;
-          leaf->leaf_path = std::vector(longer.begin() + 1 + i, k.end());
+          leaf->leaf_path = std::vector(longer.begin() + ((i + offset + 1) / 2),
+                                        longer.end());
+          leaf->leaf_path_size = (longer.size() * 2) - (i + offset + 1);
           leaf->leaf_value = std::move(longer_value);
           std::byte longer_digit = HexDigitAtIndex(longer, i);
           prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] =
@@ -216,22 +206,18 @@ public:
         // the leaf node from the branch node. Thus, we add 1 below as we do not
         // want to include this character in the path that is stored in the leaf
         // node.
-        if (idx % 2) {
-          leaf->leaf_path = std::vector(k.begin() + idx + 1, k.end());
-          leaf->leaf_path_size = 2 * (k.size() - idx - 1);
-        }
-        else {
-          leaf->leaf_path = std::vector(k.begin() + idx, k.end());
-          // The leaf path size is odd.
-          leaf->leaf_path_size = 2 * (k.size() - idx) - 1;
-        }
+        leaf->leaf_path = std::vector(k.begin() + (idx + 1) / 2, k.end());
+        leaf->leaf_path_size = (2 * k.size()) - idx - 1;
         leaf->leaf_value = std::move(obj);
         leaf->hash = GetNodeHash(*leaf);
 
         next->branch_next[branch_idx] = leaf;
       }
     }
-    RegenerateHashes(root_, k, /*idx=*/0);
+    // TODO: Optimize this to only recompute the hashes on paths that were
+    // changed. Note that paths **that do not correspond to the key above**
+    // could also be changed!
+    RegenerateAllHashes(root_);
   }
 
   void insert(const Key &k, const T &obj) { insert(k, T(obj)); }
@@ -420,27 +406,22 @@ private:
     }
   }
 
-  // Regenerate the hashes in the trie nodes along [path].
-  void RegenerateHashes(Node *root, const std::vector<std::byte> &path,
-                        size_t idx)
+  // Regenerates all of the hashes in the trie.
+  void RegenerateAllHashes(Node *root)
   {
     if (!root) {
-      return;
-    }
-    if (idx >= path.size() * 2) {
       return;
     }
 
     switch (root->type) {
     case NodeType::kBranch:
       for (Node *child : root->branch_next) {
-        RegenerateHashes(child, path, idx + 1);
+        RegenerateAllHashes(child);
       }
       break;
     case NodeType::kExtension:
       assert(false);
-      // TODO: Implement.
-      // RegenerateHashes(root->extension_key, path, idx + 1);
+      RegenerateAllHashes(root->extension_key);
       break;
     case NodeType::kLeaf:
       break;
