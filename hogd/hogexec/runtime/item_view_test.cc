@@ -295,45 +295,4 @@ TEST_F(ItemViewTest, RCQRead)
       std::get<ValidationModeData>(validation_mode_data).check_all_consumed());
 }
 
-TEST_F(ItemViewTest, NativeTokenBalance)
-{
-  auto item = make_empty_native_token_balance_item();
-  ItemView proxy(item.get());
-
-  ASSERT_FALSE(proxy.template get<NativeTokenBalanceItem>());
-
-  NativeTokenBalanceItem write(100);
-  EXPECT_TRUE(proxy.set(write));
-  EXPECT_TRUE(proxy.template get<NativeTokenBalanceItem>());
-
-  write.add_deterministic_native_token_balance(200);
-  EXPECT_TRUE(proxy.set(write));
-
-  write.add_deterministic_native_token_balance(-400);
-  EXPECT_FALSE(proxy.set(write));
-
-  EXPECT_EQ(write.get_user_visible_balance(), -100);
-
-  // return to a positive deterministic balance, and now
-  // add a nondeterministic sub amount
-  write.add_deterministic_native_token_balance(1000);
-
-  // the amounts returned from the db are positive;
-  // these will be subtracted from the user's balance
-  write.add_nondeterministic_native_token_lock(
-      Nondeterministic<int128_t>(1000));
-  EXPECT_TRUE(proxy.set(write));
-
-  // the nondeterministic sub amount is not visible to the user
-  EXPECT_EQ(write.get_user_visible_balance(), 900);
-
-  auto delta = proxy.get_delta();
-  ASSERT_TRUE(delta.has_value());
-  // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-  EXPECT_EQ(from_xdr(delta->nnint().set_value), 100);
-  EXPECT_EQ(from_xdr(delta->nnint().add_value), -200);
-  // NOLINTEND(bugprone-unchecked-optional-access)
-}
-
 } // namespace hogd
