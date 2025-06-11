@@ -27,6 +27,9 @@ add_x23_test(uvec)
 add_x23_test(rpcthroughput)
 add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_namespace_test3.x)
 
+# flaky tests: prefer timeout failure over stuck CI
+set_tests_properties(event PROPERTIES TIMEOUT 10)
+
 if(GOOGLETEST_PATH)
 include_directories(${GOOGLETEST_PATH}/googletest/include)
 set(GTEST_ALL ${GOOGLETEST_PATH}/googletest/src/gtest-all.cc)
