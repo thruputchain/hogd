@@ -347,6 +347,19 @@ NativeTokenBalanceItem::get_delta() const
   return out;
 }
 
+StorageDelta
+ReplayCacheItem::get_delta() const
+{
+  auto delta = StorageDelta(StorageDeltaType::kDeltaTypeReplayCacheModify);
+  delta.replay_cache_modify() =
+      ReplayCacheModifyArgs{.minimum_threshold = metadata_.minimum_threshold};
+  delta.replay_cache_modify().nonces.reserve(inserted_nonces_.size());
+  for (auto nonce : inserted_nonces_) {
+    delta.replay_cache_modify().nonces.push_back(nonce);
+  }
+  return delta;
+}
+
 std::optional<ItemViewType>
 UnmodifiedItem::get_item_type() const
 {

@@ -10,12 +10,16 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/wide_integral.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
-#include "hogd/storage_item/storage_costs.h"
+#include "hogd/storage_item/replay_cache.h"
+#include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -29,21 +33,47 @@ namespace hogd {
 // committed deltas to a StorageItem for the next block snapshot. All
 // transactions should either revert or commit before to_item() is called.
 
+// get_current_committed_cost:
+//   - returns the storage cost of the current item, including any committed
+//   deltas.
+//   - Will be equal to to_item(cost_model).storage_cost()
+
+// get_marginal_cost_upper_bound:
+//   - returns an upper bound on the *marginal* cost of committing the delta,
+//   conditioned on any currently committed deltas
+
+int128_t get_marginal_item_creation_bound(StorageCostModel const *current_model,
+                                          StorageItemWrapper const *base_item);
+
 // Bytestring state
 struct BytestringArgs {
   Bytestring bytestring_set_;
+  bool committed_ = false;
 
   bool typeclass_match(Bytestring const &candidate_bytestring) const
   {
     return candidate_bytestring == bytestring_set_;
   }
 
-  int128_t get_cost() const
-  {
-    return kBaseItemCost + bytestring_cost(bytestring_set_.size());
-  }
+  void commit_set() { committed_ = true; }
 
-  std::shared_ptr<const StorageItemWrapper> to_item() const;
+  int128_t
+  get_current_committed_cost(StorageCostModel const *current_model,
+                             StorageItemWrapper const * /*unused*/) const;
+
+  int128_t
+  get_marginal_cost_upper_bound(StorageDelta const &delta,
+                                StorageCostModel const *current_model,
+                                StorageItemWrapper const *base_item) const;
+
+  static int128_t
+  get_marginal_cost_upper_bound_static(bool is_committed,
+                                       StorageDelta const &delta,
+                                       StorageCostModel const *current_model,
+                                       StorageItemWrapper const *base_item);
+
+  std::shared_ptr<const StorageItemWrapper>
+  to_item(StorageCostModel const *cost_model) const;
 };
 
 // NNInt state
@@ -58,8 +88,36 @@ public:
   {
     return candidate_set_value == set_value_;
   }
-  constexpr static int128_t get_cost() { return kBaseItemCost; }
-  std::shared_ptr<const StorageItemWrapper> to_item() const;
+
+  constexpr static int128_t
+  get_current_committed_cost(StorageCostModel const *current_model,
+                             StorageItemWrapper const * /*unused*/)
+  {
+    return current_model->kBaseItemCost;
+  }
+
+  int128_t
+  get_marginal_cost_upper_bound(StorageDelta const & /*unused*/,
+                                StorageCostModel const *current_model,
+                                StorageItemWrapper const *base_item) const
+  {
+    return get_marginal_cost_upper_bound_static(committed_, current_model,
+                                                base_item);
+  }
+
+  static int128_t
+  get_marginal_cost_upper_bound_static(bool committed,
+                                       StorageCostModel const *current_model,
+                                       StorageItemWrapper const *base_item)
+  {
+    if (committed) {
+      return 0;
+    }
+    return get_marginal_item_creation_bound(current_model, base_item);
+  }
+
+  std::shared_ptr<const StorageItemWrapper>
+  to_item(StorageCostModel const *cost_model) const;
 
   void release_bounds_lock(NNIntBoundsLock const &bounds_lock);
   bool try_acquire_bounds_lock(NNIntBoundsLock const &bounds_lock);
@@ -71,6 +129,7 @@ public:
 
 private:
   int128_t set_value_;
+  bool committed_ = false;
 
   using bounds_t = WideIntegral<int128_t>;
   bounds_t lower_bound_, upper_bound_, final_value_;
@@ -80,6 +139,19 @@ private:
 struct DeleteArgs {
   static bool typeclass_match() { return true; }
   static std::shared_ptr<const StorageItemWrapper> to_item() { return nullptr; }
+  constexpr static int128_t
+  get_current_committed_cost(StorageCostModel const * /*unused*/,
+                             StorageItemWrapper const * /*unused*/)
+  {
+    return 0;
+  }
+  constexpr static int128_t
+  get_marginal_cost_upper_bound(StorageDelta const & /*unused*/,
+                                StorageCostModel const * /*unused*/,
+                                StorageItemWrapper const * /*unused*/)
+  {
+    return 0;
+  }
 };
 
 // Retrocausal queue state
@@ -87,10 +159,19 @@ class RetrocausalQueueArgs {
 public:
   static bool typeclass_match() { return true; }
   std::shared_ptr<const StorageItemWrapper>
-  to_item(const StorageItemWrapper *previous_item) const;
+  to_item(const StorageItemWrapper *previous_item,
+          StorageCostModel const *cost_model) const;
 
   int128_t get_cost(RetrocausalQueueDelta const &delta,
                     const StorageItemWrapper *base_item) const;
+
+  int128_t
+  get_current_committed_cost(StorageCostModel const *current_model,
+                             StorageItemWrapper const *base_item) const;
+  int128_t
+  get_marginal_cost_upper_bound(StorageDelta const &delta,
+                                StorageCostModel const *current_model,
+                                StorageItemWrapper const *base_item) const;
 
   bool try_reserve_consume()
   {
@@ -121,6 +202,9 @@ public:
   get_concurrent_retrocausal_queue_entry(uint32_t index) const;
 
 private:
+  RetrocausalQueueStats
+  get_current_committed_stats(StorageItemWrapper const *base_item) const;
+
   // written upon commit.
   std::optional<RetrocausalQueuePastBlockConsumeDelta> past_consume_delta_;
   // Is there an active lock for the consumer position
@@ -145,6 +229,50 @@ private:
       .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
 };
 
+class ReplayCacheArgs {
+public:
+  ReplayCacheArgs(const ReplayCache *base_cache) : base_cache_(base_cache) {}
+
+  static bool typeclass_match(const ReplayCache * /*unused*/) { return true; }
+
+  std::shared_ptr<const StorageItemWrapper>
+  to_item(StorageCostModel const *cost_model) const;
+
+  bool try_reserve_insert(ReplayNonce nonce);
+  void undo_insert(ReplayNonce nonce);
+
+  void commit_threshold_change(ReplayNonce new_threshold);
+  void commit_insert(ReplayNonce nonce)
+  {
+    [[maybe_unused]] auto [_, inserted] = committed_nonces_.insert(nonce);
+    assert(inserted);
+    has_committed_delta_ = true;
+  }
+
+  int128_t
+  get_current_committed_cost(StorageCostModel const *current_model,
+                             StorageItemWrapper const *base_item) const;
+  int128_t
+  get_marginal_cost_upper_bound(StorageDelta const &delta,
+                                StorageCostModel const *current_model,
+                                StorageItemWrapper const *base_item) const;
+  static int128_t
+  get_marginal_cost_upper_bound_static(bool is_committed,
+                                       StorageDelta const &delta,
+                                       StorageCostModel const *current_model,
+                                       StorageItemWrapper const *base_item);
+
+  ReplayCache to_new_cache() const;
+
+private:
+  const ReplayCache *base_cache_;
+
+  std::set<ReplayNonce> new_nonces_;
+  std::set<ReplayNonce> committed_nonces_;
+  ReplayCacheMetadata metadata_ = {.minimum_threshold = 0};
+  bool has_committed_delta_ = false;
+};
+
 // Exclusive locked state
 // For convenience, we maintain the invariant that the refcount is 1 whenever
 // the variant is in this state (so i.e. there's never an ExclusiveLockedState
@@ -155,9 +283,17 @@ struct ExclusiveLockedState {
   {
     throw std::runtime_error("Impossible state");
   }
+  static int128_t
+  get_current_committed_cost(StorageCostModel const *cost_model,
+                             StorageItemWrapper const *base_item)
+  {
+    return base_item->storage_cost(cost_model);
+  }
 
-  static int128_t get_cost(StorageDelta const &delta,
-                           const StorageItemWrapper *base_item);
+  static int128_t
+  get_marginal_cost_upper_bound(StorageDelta const &delta,
+                                StorageCostModel const *cost_model,
+                                StorageItemWrapper const *base_item);
 };
 
 // Unmodified state -- the variant is in this state if and only if refcount is
@@ -168,6 +304,23 @@ struct UnmodifiedState {
   to_item(std::shared_ptr<const StorageItemWrapper> item)
   {
     return item;
+  }
+
+  static int128_t
+  get_current_committed_cost(StorageCostModel const * /*unused*/,
+                             StorageItemWrapper const *base_item)
+  {
+    // base item stores the cost model under which it was added to the snapshot
+    return base_item->storage_cost();
+  }
+
+  static int128_t
+  get_marginal_cost_upper_bound(StorageDelta const & /*unused*/,
+                                StorageCostModel const * /*unused*/,
+                                StorageItemWrapper const * /*unused*/)
+  {
+    // refcount must be nonzero to call get_cost_upper_bound
+    throw std::runtime_error("Impossible state");
   }
 };
 
@@ -207,9 +360,9 @@ struct UnmodifiedState {
 // - to_item(): Converts variant state into a StorageItemWrapper, to be passed
 // to the next block.
 class RefcountedDeltaVariant {
-  using variant_t =
-      std::variant<BytestringArgs, NNIntSetAddArgs, RetrocausalQueueArgs,
-                   ExclusiveLockedState, DeleteArgs, UnmodifiedState>;
+  using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs,
+                                 RetrocausalQueueArgs, ExclusiveLockedState,
+                                 DeleteArgs, UnmodifiedState, ReplayCacheArgs>;
 
 public:
   RefcountedDeltaVariant() = default;
@@ -228,12 +381,20 @@ public:
     }
   }
 
-  // Requirement: reference is acquired to apply this delta
-  //
-  // Returns the amount of storage costs that must be locked,
-  // if the delta is committed.
-  int128_t get_cost_after_commit(StorageDelta const &delta,
-                                 StorageItemWrapper const *base_item);
+  // Get the cost of storing the current state of the item,
+  // counting _only_ the currently committed deltas.
+  int128_t
+  get_current_committed_cost(StorageCostModel const *current_model,
+                             StorageItemWrapper const *base_item) const;
+
+  // Compute an upper bound on the amount of costs
+  // that must be locked, if the delta is committed.
+  // This is an upper bound, not strict equality.
+  // Accounts for potential changes in the storage cost model.
+  int128_t
+  get_marginal_cost_upper_bound(StorageDelta const &delta,
+                                StorageCostModel const *current_model,
+                                StorageItemWrapper const *base_item) const;
 
   // Acquires a reference to the variant
   // Returns nullptr if setting the variant fails.
@@ -288,7 +449,8 @@ public:
   // Converts the current state into a StorageItemWrapper, to be passed to the
   // next block.
   std::shared_ptr<const StorageItemWrapper>
-  to_item(std::shared_ptr<const StorageItemWrapper> previous_item) const;
+  to_item(std::shared_ptr<const StorageItemWrapper> previous_item,
+          StorageCostModel const *cost_model) const;
 
 private:
   variant_t variant_ = UnmodifiedState{};

@@ -148,6 +148,11 @@ add_subdirectory(external/bcs-cpp)
 set(BCS_CPP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/bcs-cpp")
 include_directories(${BCS_CPP_SOURCE_DIR})
 
+# Enable model-checker
+add_subdirectory(external/model-checker)
+set(MODEL_CHECKER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/model-checker")
+include_directories(${MODEL_CHECKER_SOURCE_DIR})
+
 add_subdirectory(test_contracts)
 
 # Finally, enable hogd's own code

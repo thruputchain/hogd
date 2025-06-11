@@ -278,32 +278,27 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
     return DBError{DBCode::kTooBig};
   }
 
-  std::future<DBStatus<void>> future{};
-  {
-    std::scoped_lock g(lock_);
+  std::scoped_lock g(lock_);
 
-    if (snapshotter_) {
-      warn("tried to start a snapshot while one was already ongoing");
-      return DBError{DBCode::kExists};
-    }
-
-    constexpr bool kChunkedSnapshot = false;
-    constexpr size_t kMaxFileSize = kChunkedSnapshot
-                                        ? kDiskLogFileThreshold
-                                        : std::numeric_limits<size_t>::max();
-
-    // put()s with lsn s.t. begin_lsn <= lsn <= end_lsn
-    snapshotter_.emplace(pool_, map_, item_allocator_, begin_lsn, end_lsn,
-                         *loglet_allocator_, dir_, path, kMaxFileSize,
-                         write_head_order_);
-
-    future = snapshotter_->get_future();
-
-    // trigger background worker which serializes the work with compacting
-    cv_.notify_one();
+  if (snapshotter_) {
+    warn("tried to start a snapshot while one was already ongoing");
+    return DBError{DBCode::kExists};
   }
 
-  return std::pair{end_lsn, std::move(future)};
+  constexpr bool kChunkedSnapshot = false;
+  constexpr size_t kMaxFileSize = kChunkedSnapshot
+                                      ? kDiskLogFileThreshold
+                                      : std::numeric_limits<size_t>::max();
+
+  // put()s with lsn s.t. begin_lsn <= lsn <= end_lsn
+  snapshotter_.emplace(pool_, map_, item_allocator_, begin_lsn, end_lsn,
+                       *loglet_allocator_, dir_, path, kMaxFileSize,
+                       write_head_order_);
+
+  // trigger background worker which serializes the work with compacting
+  cv_.notify_one();
+
+  return std::pair{end_lsn, snapshotter_->get_future()};
 }
 
 } // namespace hogd

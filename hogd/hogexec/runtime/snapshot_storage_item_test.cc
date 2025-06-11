@@ -3,6 +3,7 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -11,6 +12,7 @@
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
@@ -52,18 +54,16 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
 {
   // setup an rcq item
 
-  auto queue = make_queue({{make_test_queue_entry(1)},
-                           {make_test_queue_entry(2), make_test_queue_entry(3)},
-                           {},
-                           {make_test_queue_entry(4), make_test_queue_entry(5)},
-                           {},
-                           {},
-                           {make_test_queue_entry(6)},
-                           {},
-                           {}});
+  auto queue = make_queue({
+      {make_test_queue_entry(1)},
+      {make_test_queue_entry(2), make_test_queue_entry(3)},
+      {make_test_queue_entry(4), make_test_queue_entry(5)},
+      {make_test_queue_entry(6)},
+  });
 
+  StorageCostModel cost_model(12000, 1, 5, 100, 5);
   server_.setup_create_item(AddressAndKey{},
-                            StorageItemWrapper(std::move(queue)));
+                            StorageItemWrapper(std::move(queue), &cost_model));
 
   SnapshotStorageItem test_item(StorageItem(
                                     StorageItemType::kItemTypeRetrocausalQueue),
@@ -74,8 +74,15 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
                              x23::Vec<QueueEntry> expected_entries) {
     auto block = test_item.get_next_rcq_block(search_block_number);
     ASSERT_TRUE(block.has_value());
+    // ASSERT_TRUE doesn't work properly inside a lambda
+    if (!block.value()) {
+      throw std::runtime_error("Block is null");
+    }
     EXPECT_EQ(block.value()->block_number, expected_block_number);
     ASSERT_EQ(block.value()->entries.size(), expected_entries.size());
+    if (block.value()->entries.size() != expected_entries.size()) {
+      throw std::runtime_error("Block entries size mismatch");
+    }
     for (size_t i = 0; i < expected_entries.size(); ++i) {
       EXPECT_EQ(block.value()->entries[i], expected_entries[i]);
     }
@@ -89,8 +96,7 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
 
   check_get_block(1, 1, {make_test_queue_entry(1)});
 
-  check_get_block(4, 4, {make_test_queue_entry(4), make_test_queue_entry(5)});
-  check_get_block(3, 4, {make_test_queue_entry(4), make_test_queue_entry(5)});
+  check_get_block(3, 3, {make_test_queue_entry(4), make_test_queue_entry(5)});
 
   check_get_block_not_found(200);
   check_get_block_not_found(8);
@@ -98,7 +104,7 @@ TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
   // the storage item doesn't make an rpc for this query.
   check_get_block_not_found(9);
 
-  check_get_block(5, 7, {make_test_queue_entry(6)});
+  check_get_block(4, 4, {make_test_queue_entry(6)});
 }
 
 TEST_F(SnapshotStorageItemTest, RCQGetConcurrentEntries)

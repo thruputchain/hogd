@@ -20,7 +20,8 @@ namespace hogd {
 // principle, at the cost of much more code complexity. This edge case
 // should disappear by the next block.
 BlockManager::BlockManager(BlockID root_id, InMemoryDatabase *base_database)
-  : last_committed_id_(root_id), base_database_(base_database)
+  : cost_model_(12000, 1, 5, 100, 5), last_committed_id_(root_id),
+    base_database_(base_database)
 {
   block_cache_.emplace(last_committed_id_, Block());
 }
@@ -175,12 +176,13 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
 
   if (!parent.block_data_ || parent.block_data_->is_committed_to_database()) {
     // parent is committed to database, so we need to create a new block state
-    block_cache_.emplace(new_id, Block(base_database_, mode));
+    block_cache_.emplace(new_id, Block(base_database_, mode, &cost_model_));
   }
   else {
     // parent is not committed to database, so we can use the parent's block
     // state
-    block_cache_.emplace(new_id, Block(parent.block_data_.get(), mode));
+    block_cache_.emplace(new_id,
+                         Block(parent.block_data_.get(), mode, &cost_model_));
   }
   return true;
 }

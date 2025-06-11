@@ -91,6 +91,12 @@ public:
     return std::get<NativeTokenBalanceEntry>(entry_).base_value_;
   }
 
+  auto const &replay_cache_metadata() const
+  {
+    assert(type() == ItemViewType::kReplayCache);
+    return std::get<ReplayCacheEntry>(entry_).metadata_;
+  }
+
   auto const &addrkey() const { return addrkey_; }
 
 private:
@@ -137,9 +143,14 @@ private:
     std::optional<uint64_t> block_number_upper_bound_ = std::nullopt;
   };
 
+  struct ReplayCacheEntry {
+    ReplayCacheMetadata metadata_;
+    constexpr static ItemViewType kItemType = ItemViewType::kReplayCache;
+  };
+
   using variant_type =
       std::variant<BytestringEntry, NNIntEntry, RetrocausalQueueEntry,
-                   DeletedEntry, NativeTokenBalanceEntry>;
+                   DeletedEntry, NativeTokenBalanceEntry, ReplayCacheEntry>;
   static variant_type make_variant(StorageItem item, StorageKey const &db_key);
   static variant_type make_contract_key_variant(StorageItem item);
 

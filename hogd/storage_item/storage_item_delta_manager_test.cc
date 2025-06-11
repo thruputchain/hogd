@@ -2,14 +2,23 @@
 
 #include <memory>
 #include <optional>
+#include <set>
+#include <stdexcept>
+#include <tuple>
 #include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
-#include "hogd/storage_item/storage_costs.h"
+#include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_delta_manager.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/storage_item/storage_lock_util.h"
+#include "model_checker/async.h"
+#include "model_checker/threadpool.h"
+#include "model_checker/work_queue.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -23,6 +32,9 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 namespace {
+
+const StorageCostModel cost_model(12000, 2, 5, 100, 5);
+
 void
 expect_final(StorageItemDeltaManager &item, Bytestring const &bytestring)
 {
@@ -38,6 +50,15 @@ expect_final(StorageItemDeltaManager &item, int128_t nnint)
   ASSERT_TRUE(snapshot);
   EXPECT_EQ(snapshot->type(), StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(snapshot->nnint(), nnint);
+}
+
+void
+expect_final(StorageItemDeltaManager &item, RetrocausalQueueStats stats)
+{
+  auto snapshot = item.get_post_close_block_item();
+  ASSERT_TRUE(snapshot);
+  EXPECT_EQ(snapshot->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  EXPECT_EQ(snapshot->queue().get_active_stats(), stats);
 }
 
 auto
@@ -56,6 +77,17 @@ make_nnint_delta(int128_t set, int128_t add)
   return delta;
 };
 
+auto
+make_replay_delta(x23::Vec<ReplayNonce> nonces, ReplayNonce minimum_threshold)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeReplayCacheModify);
+  delta.replay_cache_modify() = {
+      .minimum_threshold = minimum_threshold,
+      .nonces = std::move(nonces),
+  };
+  return delta;
+};
+
 } // namespace
 
 class StorageItemDeltaManagerTest
@@ -64,13 +96,15 @@ protected:
   void SetUp() override { mode_ = GetParam(); }
 
   BlockExecutionMode mode_;
+  InvalidStateFlag flag_;
 };
 
 // Change the typeclass of a storage item during execution
 TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   StorageDelta nnint_set_add_1 = make_nnint_delta(0, 10);
@@ -126,9 +160,11 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
 
 TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
 {
-  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
+  auto base_item =
+      std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3}, &cost_model);
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -163,7 +199,7 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                                &invalid_state_flag, mode_);
+                                &invalid_state_flag, mode_, &cost_model);
   expect_final(item, bytestring_delta.bytestring());
   expect_final(item2, bytestring_delta.bytestring());
   ASSERT_FALSE(invalid_state_flag.is_invalid());
@@ -172,14 +208,16 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
 TEST_P(StorageItemDeltaManagerTest, DeleteItem)
 {
   InvalidStateFlag invalid_state_flag;
-  auto base_item = std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3});
+  auto base_item =
+      std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3}, &cost_model);
 
-  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(base_item, &invalid_state_flag, mode_,
+                               &cost_model);
   ASSERT_TRUE(item.get_snapshot_item());
 
   // committing an empty round keeps item active
   StorageItemDeltaManager item2(item.get_post_close_block_item(),
-                                &invalid_state_flag, mode_);
+                                &invalid_state_flag, mode_, &cost_model);
 
   ASSERT_TRUE(item2.get_snapshot_item());
 
@@ -199,7 +237,7 @@ TEST_P(StorageItemDeltaManagerTest, DeleteItem)
                                                    // post block
 
   StorageItemDeltaManager item3(item2.get_post_close_block_item(),
-                                &invalid_state_flag, mode_);
+                                &invalid_state_flag, mode_, &cost_model);
 
   EXPECT_FALSE(item3.get_snapshot_item());
   ASSERT_FALSE(invalid_state_flag.is_invalid());
@@ -208,7 +246,8 @@ TEST_P(StorageItemDeltaManagerTest, DeleteItem)
 TEST_P(StorageItemDeltaManagerTest, ExclusiveLockAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   auto lock1 =
       item.try_reserve(StorageDelta(StorageDeltaType::kDeltaTypeDelete),
@@ -231,7 +270,8 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockAcquire)
 TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(5, -4);
@@ -288,7 +328,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
 TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLock)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(10, -4);
@@ -318,7 +359,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLock)
 TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta nnint_set_add_1 = make_nnint_delta(-5, 10);
   StorageDelta nnint_set_add_2 = make_nnint_delta(-10, 4);
@@ -348,7 +390,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
 TEST_P(StorageItemDeltaManagerTest, ExclusiveBytestring)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
   bytestring_delta.bytestring() = {3, 2, 1, 0};
@@ -376,7 +419,8 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveBytestring)
 TEST_P(StorageItemDeltaManagerTest, ExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   // This is just a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -421,7 +465,8 @@ TEST_P(StorageItemDeltaManagerTest, PermanentExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag,
-                               BlockExecutionMode::kBlockExecutionModeProposal);
+                               BlockExecutionMode::kBlockExecutionModeProposal,
+                               &cost_model);
 
   // merely a placeholder for the test
   StorageDelta bytestring_delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -459,7 +504,8 @@ TEST_P(StorageItemDeltaManagerTest, PermanentExclusiveLockMultiAcquire)
 TEST_P(StorageItemDeltaManagerTest, NNIntSimpleSetAdd)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   StorageDelta nnint_set_add = make_nnint_delta(5, 10);
 
@@ -483,7 +529,8 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
 
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag,
-                               BlockExecutionMode::kBlockExecutionModeProposal);
+                               BlockExecutionMode::kBlockExecutionModeProposal,
+                               &cost_model);
 
   auto bdelta_4 = make_bytestring_delta({0, 1, 2, 3});
   auto bdelta_6 = make_bytestring_delta({0, 1, 2, 3, 4, 5});
@@ -504,7 +551,7 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
   ASSERT_TRUE(lk_6);
 
   ASSERT_EQ(lk_6->locked_tokens_,
-            lk_exclusive->locked_tokens_ + bytestring_cost(2));
+            lk_exclusive->locked_tokens_ + cost_model.get_bytestring_cost(2));
 }
 
 TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
@@ -514,7 +561,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
     return;
   }
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   // drive invalid and then back to valid
 
@@ -562,7 +610,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
 TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   ASSERT_FALSE(item.try_reserve(make_nnint_delta(-10, -1),
                                 StorageLock(StorageLockType::kNone)));
@@ -592,7 +641,8 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
 TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
 {
   InvalidStateFlag invalid_state_flag;
-  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_);
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
 
   auto nnint_set_add_pos = make_nnint_delta(0, 10);
   auto nnint_set_add_neg = make_nnint_delta(0, -6);
@@ -634,6 +684,696 @@ TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
 
   expect_final(item, int128_t{2});
 }
+
+TEST_P(StorageItemDeltaManagerTest, ReplayCacheInsertFromEmpty)
+{
+  StorageItemDeltaManager item(nullptr, &flag_, mode_, &cost_model);
+
+  auto delta1 = make_replay_delta({1, 2, 3}, 0);
+  auto delta2 = make_replay_delta({4, 5, 6}, 4);
+  // conflicts with delta1 and delta2
+  auto delta3 = make_replay_delta({1, 4, 7}, 5);
+
+  auto delta4 = make_replay_delta(
+      {
+          8,
+          9,
+          10,
+      },
+      7);
+
+  auto lock1 = item.try_reserve(delta1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock1);
+
+  EXPECT_FALSE(item.try_reserve(delta3, StorageLock(StorageLockType::kNone)));
+
+  auto lock2 = item.try_reserve(delta2, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock2);
+
+  item.commit(delta1, *lock1);
+  item.commit(delta2, *lock2);
+
+  EXPECT_FALSE(item.try_reserve(delta3, StorageLock(StorageLockType::kNone)));
+
+  auto lock4 = item.try_reserve(delta4, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock4);
+  item.revert(lock4->lock_);
+
+  auto r = item.get_post_close_block_item();
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->type(), StorageItemType::kItemTypeReplayCache);
+  EXPECT_EQ(r->replay_cache().metadata().minimum_threshold, 4);
+  EXPECT_EQ(r->replay_cache().nonces(), (std::set<ReplayNonce>{4, 5, 6}));
+}
+
+namespace {
+auto
+make_test_rcq_entry(uint8_t value)
+{
+  return QueueEntry{value};
+}
+auto
+make_rcq_delta(std::optional<RetrocausalQueueConsumeDelta> consume_delta,
+               RetrocausalQueueInsertDelta insert_delta)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+  if (consume_delta) {
+    delta.retrocausal_queue().consume.emplace(*consume_delta);
+  }
+  delta.retrocausal_queue().insert = std::move(insert_delta);
+  return delta;
+}
+} // namespace
+
+TEST_P(StorageItemDeltaManagerTest, RCQInsertThenConsume)
+{
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
+
+  // try insert one entry
+  auto insert_delta =
+      make_rcq_delta(std::nullopt,
+                     RetrocausalQueueInsertDelta{
+                         .added_entries = {make_test_rcq_entry(1)}});
+  auto lk = item.try_reserve(insert_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk);
+  EXPECT_EQ(lk->locked_tokens_,
+            cost_model.kBaseItemCost +
+                cost_model.get_retrocausal_queue_cost(1, 1));
+  item.commit(insert_delta, *lk);
+
+  // try consume one entry
+  auto consume_delta = make_rcq_delta(
+      RetrocausalQueueConsumeDelta{
+          .past_block_consume =
+              RetrocausalQueuePastBlockConsumeDelta{
+                  .max_fully_consumed_block_number = 0,
+                  .partial_consumed_number = 0},
+          .current_block_consumed = {make_test_rcq_entry(1)}},
+      RetrocausalQueueInsertDelta{.added_entries = {}});
+  auto lk2 =
+      item.try_reserve(consume_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk2);
+  EXPECT_EQ(lk2->locked_tokens_, 0);
+  item.commit(consume_delta, *lk2);
+
+  expect_final(item, RetrocausalQueueStats{.active_block_count = 0,
+                                           .active_size = 0});
+}
+
+TEST_P(StorageItemDeltaManagerTest, RCQConsumeThenInsert)
+{
+  if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
+    // This test is only valid for validation mode
+    return;
+  }
+
+  InvalidStateFlag invalid_state_flag;
+  StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
+                               &cost_model);
+
+  // try consume one entry
+  auto consume_delta = make_rcq_delta(
+      RetrocausalQueueConsumeDelta{
+          .past_block_consume =
+              RetrocausalQueuePastBlockConsumeDelta{
+                  .max_fully_consumed_block_number = 0,
+                  .partial_consumed_number = 0},
+          .current_block_consumed = {make_test_rcq_entry(1)}},
+      RetrocausalQueueInsertDelta{.added_entries = {}});
+  auto lk2 =
+      item.try_reserve(consume_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk2);
+  EXPECT_GE(lk2->locked_tokens_,
+            cost_model.kBaseItemCost +
+                cost_model.get_retrocausal_queue_cost(-1, 0));
+  item.commit(consume_delta, *lk2);
+
+  // try insert one entry
+  auto insert_delta =
+      make_rcq_delta(std::nullopt,
+                     RetrocausalQueueInsertDelta{
+                         .added_entries = {make_test_rcq_entry(1)}});
+  auto lk = item.try_reserve(insert_delta, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lk);
+  item.commit(insert_delta, *lk);
+
+  ASSERT_FALSE(invalid_state_flag.is_invalid());
+
+  expect_final(item, RetrocausalQueueStats{.active_block_count = 0,
+                                           .active_size = 0});
+}
+
+TEST_P(StorageItemDeltaManagerTest, NNIntInterleavings)
+{
+  InvalidStateFlag invalid_state_flag;
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(nullptr,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            // set_add (0, 10)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(0, 10);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    throw std::runtime_error("Failed to reserve lock");
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            // set_add (0, 15)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(0, 15);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    throw std::runtime_error("Failed to reserve lock");
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
+            if (res != model::ActionResult::kOk) {
+              return false;
+            }
+
+            if (net_storage_cost != cost_model.kBaseItemCost) {
+              return false;
+            }
+
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot ||
+                snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+
+            return snapshot->nnint() == 25;
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
+TEST_P(StorageItemDeltaManagerTest, NNIntConflictingInterleavings)
+{
+  InvalidStateFlag invalid_state_flag;
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(nullptr,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            // set_add (10, 10)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(10, 10);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            // set_add (0, 15)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(0, 15);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto nnint_add = make_nnint_delta(10, -10);
+                  auto lk =
+                      item.try_reserve(nnint_add,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(nnint_add, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
+            if (res != model::ActionResult::kOk) {
+              return false;
+            }
+
+            if (net_storage_cost != cost_model.kBaseItemCost) {
+              return false;
+            }
+
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot ||
+                snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+
+            // either both the (10, 10) and (10, -10) are committed,
+            // or only the (0, 15) is committed.
+            return snapshot->nnint() == 10 || snapshot->nnint() == 15;
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
+// The test case that was problematic before the switch to upper bounding costs:
+// Reserve A insert(1) -- reserve 1 block
+// Commit A -- release 0
+// Reserve B insert (1) -- on old workflow, this would reserve 0 blocks; here it
+// reserves 1 Reserve C consume(1) -- reserve 0 blocks Commit C -- on old
+// workflow, has to release 1 block (B might not commit) then Commit B is stuck
+// -- it has no reservation, but it has to pay for creating a block
+
+TEST_P(StorageItemDeltaManagerTest, RCQAccountingEdgeCase)
+{
+  InvalidStateFlag invalid_state_flag;
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(nullptr,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue, 10);
+
+            // Reserve A insert(1)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto insert_a =
+                      make_rcq_delta(std::nullopt,
+                                     RetrocausalQueueInsertDelta{
+                                         .added_entries = {
+                                             make_test_rcq_entry(1)}});
+                  auto lk_a =
+                      item.try_reserve(insert_a,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk_a) {
+                    throw std::runtime_error("Failed to reserve lock");
+                  }
+                  net_storage_cost += lk_a->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(insert_a, *lk_a);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            // Reserve B insert(2)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto insert_b =
+                      make_rcq_delta(std::nullopt,
+                                     RetrocausalQueueInsertDelta{
+                                         .added_entries = {
+                                             make_test_rcq_entry(2)}});
+                  auto lk_b =
+                      item.try_reserve(insert_b,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk_b) {
+                    throw std::runtime_error("Failed to reserve lock");
+                  }
+                  net_storage_cost += lk_b->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(insert_b, *lk_b);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            // Reserve C consume(1)
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  auto consume_c = make_rcq_delta(
+                      RetrocausalQueueConsumeDelta{
+                          .past_block_consume =
+                              RetrocausalQueuePastBlockConsumeDelta{
+                                  .max_fully_consumed_block_number = 0,
+                                  .partial_consumed_number = 0},
+                          .current_block_consumed = {make_test_rcq_entry(1)}},
+                      RetrocausalQueueInsertDelta{.added_entries = {}});
+                  std::optional<MeteredStorageLock> lk_c = std::nullopt;
+                  while (!lk_c) {
+                    lk_c =
+                        item.try_reserve(consume_c,
+                                         StorageLock(StorageLockType::kNone));
+                    if (!lk_c) {
+                      co_await set.bg();
+                    }
+                  }
+                  net_storage_cost += lk_c->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(consume_c, *lk_c);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+            return actions;
+          },
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
+            if (res == model::ActionResult::kTimeout) {
+              return item.mode() ==
+                     BlockExecutionMode::kBlockExecutionModeProposal;
+            }
+
+            if (net_storage_cost !=
+                cost_model.kBaseItemCost +
+                    cost_model.get_retrocausal_queue_cost(1, 1)) {
+              return false;
+            }
+
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot || snapshot->type() !=
+                                 StorageItemType::kItemTypeRetrocausalQueue) {
+              return false;
+            }
+
+            auto const &queue = snapshot->queue();
+            return queue.get_active_stats() ==
+                   RetrocausalQueueStats{.active_block_count = 1,
+                                         .active_size = 1};
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
+namespace {
+auto
+make_bytestring_delta(Bytestring const &bytestring)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeBytestringSet);
+  delta.bytestring() = bytestring;
+  return delta;
+}
+} // namespace
+
+TEST_P(StorageItemDeltaManagerTest, BytestringCostUpgrade)
+{
+  InvalidStateFlag invalid_state_flag;
+
+  // higher cost per byte and lower cost per item
+  StorageCostModel cost_model_2(10000, 3, 1, 1, 5);
+  Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
+
+  auto committed_item =
+      std::make_shared<StorageItemWrapper>(bytestring_1, &cost_model_2);
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(committed_item,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            // Insert a bytestring of varying length
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+
+                  Bytestring bstring = Bytestring{0, 1};
+                  if (set.choice(2)) {
+                    bstring = Bytestring{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+                  }
+                  auto delta = make_bytestring_delta(bstring);
+                  auto lk =
+                      item.try_reserve(delta,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(delta, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            // Insert a similarly varying length bytestring
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  co_await set.bg();
+                  Bytestring bstring = Bytestring{0, 1};
+                  if (set.choice(2)) {
+                    bstring = Bytestring{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+                  }
+                  auto delta = make_bytestring_delta(bstring);
+                  auto lk =
+                      item.try_reserve(delta,
+                                       StorageLock(StorageLockType::kNone));
+                  if (!lk) {
+                    co_return;
+                  }
+                  co_await set.bg();
+                  auto delta2 =
+                      make_bytestring_delta(Bytestring{0, 1, 2, 3, 4, 5, 6, 7});
+                  // Possibly upgrade to an exclusive lock
+                  auto lk2 = item.try_reserve(delta2, lk->lock_);
+                  if (lk2) {
+                    lk = lk2;
+                    delta = delta2;
+                  }
+                  net_storage_cost += lk->locked_tokens_;
+                  co_await set.bg();
+                  auto res = item.commit(delta, *lk);
+                  net_storage_cost -= res;
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [&cost_model_2](model::ActionResult res,
+                          StorageItemDeltaManager &item,
+                          int128_t &net_storage_cost) -> bool {
+            if (res == model::ActionResult::kTimeout) {
+              return false;
+            }
+
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot ||
+                snapshot->type() != StorageItemType::kItemTypeBytestring) {
+              return false;
+            }
+
+            auto const &bytestring = snapshot->bytestring();
+            if (bytestring.size() != 10 && bytestring.size() != 2 &&
+                bytestring.size() != 8) {
+              return false;
+            }
+
+            return net_storage_cost ==
+                   cost_model.kBaseItemCost +
+                       cost_model.get_bytestring_cost(bytestring.size()) -
+                       cost_model_2.kBaseItemCost -
+                       cost_model_2.get_bytestring_cost(5);
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
+namespace {
+model::Async
+commit_delta_workflow(model::RunnableActionSet &set, StorageDelta delta,
+                      StorageItemDeltaManager &item, int128_t &net_storage_cost,
+                      bool must_succeed = false)
+{
+  co_await set.bg();
+  auto lk = item.try_reserve(delta, StorageLock(StorageLockType::kNone));
+  if (!lk) {
+    if (must_succeed) {
+      throw std::runtime_error("Failed to reserve lock");
+    }
+    co_return;
+  }
+  net_storage_cost += lk->locked_tokens_;
+  co_await set.bg();
+  auto res = item.commit(delta, *lk);
+  net_storage_cost -= res;
+  co_return;
+}
+
+} // namespace
+
+TEST_P(StorageItemDeltaManagerTest, TypeChangeCostUpgrade)
+{
+  // Test changes from a bytestring to an nnint
+  InvalidStateFlag invalid_state_flag;
+
+  // higher cost per item
+
+  StorageCostModel cost_model_2(14000, 2, 1, 1, 5);
+  Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
+
+  auto committed_item =
+      std::make_shared<StorageItemWrapper>(bytestring_1, &cost_model_2);
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(committed_item,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            // do an nnint set_add
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_delta(10, 10),
+                                               item, net_storage_cost, false);
+                },
+                item, net_storage_cost);
+
+            // do an nnint set_add
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_delta(10, -5),
+                                               item, net_storage_cost, false);
+                },
+                item, net_storage_cost);
+            // do a delete
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(
+                      set, StorageDelta(StorageDeltaType::kDeltaTypeDelete),
+                      item, net_storage_cost, false);
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [&cost_model_2](model::ActionResult res,
+                          StorageItemDeltaManager &item,
+                          int128_t &net_storage_cost) -> bool {
+            if (res == model::ActionResult::kTimeout) {
+              return false;
+            }
+
+            // Either the delete commits or _both_ of the nnint set_adds commit.
+            auto snapshot = item.get_post_close_block_item();
+            if (snapshot &&
+                snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+
+            int128_t initial_cost = cost_model_2.kBaseItemCost +
+                                    cost_model_2.get_bytestring_cost(5);
+            if (!snapshot) {
+              return initial_cost == -net_storage_cost;
+            }
+            if (snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+            if (snapshot->nnint() != 15) {
+              return false;
+            }
+
+            return net_storage_cost == cost_model.kBaseItemCost - initial_cost;
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(
