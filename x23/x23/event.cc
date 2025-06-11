@@ -14,6 +14,8 @@
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
 
+//#include <print>
+
 namespace x23 {
 
 namespace detail {
@@ -59,13 +61,16 @@ WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
 Detached
 WriteBuffer::service(CoroPoll &cp, BorrowedFd fd)
 {
+  //std::println("Write buffering active on fd {}", fd.get());
   for (;;) {
     CoroGuard g;
     co_await g(write_lock_);
     cp.write_clear(fd);
     auto res = writer_.write(fd);
-    if (!res.value_or(false))
+    if (!res.value_or(false)) {
+      //std::println("Write buffering done on fd {}", fd.get());
       co_return;
+    }
     g.reset();
     co_await cp.write_wait(fd);
   }
