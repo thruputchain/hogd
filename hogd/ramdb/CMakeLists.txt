@@ -36,4 +36,6 @@ target_link_libraries(
   ramdb
   GTest::gtest_main
 )
-gtest_discover_tests(db_test)
+gtest_discover_tests(
+  db_test
+  PROPERTIES TIMEOUT 100)
