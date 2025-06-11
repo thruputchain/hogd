@@ -36,7 +36,13 @@ public:
   using Key = std::vector<std::byte>;
   using T = std::string;
 
-  MerkleTrie() {}
+  MerkleTrie()
+  {
+    root_ = new Node;
+    root_->type = NodeType::kBranch;
+    memset(root_->branch_next.data(), 0,
+           root_->branch_next.size() * sizeof(root_->branch_next[0]));
+  }
   ~MerkleTrie() = default;
 
   // disable copy and support move.
@@ -81,12 +87,33 @@ public:
     // convert it to a branch node and build the trie.
     //
     // TODO: Optimize with extension nodes.
+    // TODO: Handle insertion of a duplicate key.
+    size_t idx = 0;
+    Node *next =
+        TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k, idx);
+    assert(next);
+    assert(next->type == NodeType::kBranch);
+    assert(idx <= k.size() * 2);
+    if (idx == k.size()) {
+      // The key maps to a branch node, so we should add the value directly into
+      // the branch node.
+      assert(next->branch_value.empty());
+      next->branch_value = std::move(obj);
+      next->hash = GetNodeHash(*next);
+    }
+    else {
+      // The key extends beyond the branch node, so we should create a leaf node
+      // for the key, add the value to the leaf node, and then add a pointer
+      // from the branch node to the leaf node.
+      Node *leaf = new Node;
+      leaf->type = NodeType::kLeaf;
+      leaf->leaf_path = std::vector(k.begin() + idx, k.end());
+      leaf->leaf_value = std::move(obj);
+      leaf->hash = GetNodeHash(*leaf);
+    }
   }
 
-  void insert(const Key &k, const T &obj)
-  {
-    assert(false);
-  }
+  void insert(const Key &k, const T &obj) { assert(false); }
 
   std::string &insert_or_assign(const Key &k, T &&obj)
   {
@@ -125,11 +152,7 @@ public:
   }
 
 private:
-  enum class NodeType {
-    kBranch,
-    kExtension,
-    kLeaf
-  };
+  enum class NodeType { kBranch, kExtension, kLeaf };
 
   struct Node {
     NodeType type;
@@ -139,20 +162,102 @@ private:
     // TODO: Optimize the vectors below--use something other than a vector.
 
     // Branches.
-    std::vector<Node*> branch_next;
+    std::array<Node *, 16> branch_next;
     std::string branch_value;
 
     // Extensions.
     std::vector<std::byte> extension_path;
-    Node* extension_key;
+    Node *extension_key;
 
     // Leaves.
     std::vector<std::byte> leaf_path;
     std::string leaf_value;
   };
 
-  SHA256Hash GetNodeHash(const Node& node) {
+  Node *TraverseToBottom(Node *root, Node *prev_root,
+                         const std::vector<std::byte> &path, size_t &idx)
+  {
+    if (!root) {
+      return prev_root;
+    }
+    // There are two hex characters per byte. [idx] is the index of the current
+    // hex character we are looking at, so we reach the end of the byte array
+    // when [idx >= path.size() * 2].
+    if (idx >= path.size() * 2) {
+      return prev_root;
+    }
+
+    std::byte current_hex = path[idx / 2];
+    if (idx % 2 == 0) {
+      current_hex &= std::byte{0xF};
+    }
+    else {
+      current_hex >>= 4;
+    }
+    switch (root->type) {
+    case NodeType::kBranch:
+    {
+      Node *next = root->branch_next[std::to_integer<size_t>(current_hex)];
+      if (next) {
+        idx++;
+        return TraverseToBottom(next, root, path, idx);
+      }
+      else {
+        // There is no child, so we have reached the bottom of the trie.
+        return root;
+      }
+      break;
+    }
+    case NodeType::kExtension:
+      // TODO: Support this case.
+      assert(false);
+      return nullptr;
+      break;
+    case NodeType::kLeaf:
+      return prev_root;
+      break;
+    }
+  }
+
+  // Regenerate the hashes in the trie nodes along [path].
+  void RegenerateHashes(Node *root, const std::vector<std::byte> &path,
+                        size_t idx)
+  {
+    if (!root) {
+      return;
+    }
+    if (idx >= path.size() * 2) {
+      return;
+    }
+
+    switch (root->type) {
+    case NodeType::kBranch:
+      for (Node *child : root->branch_next) {
+        RegenerateHashes(child, path, idx + 1);
+      }
+      break;
+    case NodeType::kExtension:
+      assert(false);
+      // TODO: Implement.
+      // RegenerateHashes(root->extension_key, path, idx + 1);
+      break;
+    case NodeType::kLeaf:
+      break;
+    }
+    root->hash = GetNodeHash(*root);
+  }
+
+  SHA256Hash GetNodeHash(const Node &node)
+  {
     // TODO: Implement.
+    switch (node.type) {
+    case NodeType::kBranch:
+      break;
+    case NodeType::kExtension:
+      break;
+    case NodeType::kLeaf:
+      break;
+    }
     static std::array<unsigned char, 32> tmp = {0};
     return tmp;
   }
