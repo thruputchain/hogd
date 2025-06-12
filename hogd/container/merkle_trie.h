@@ -162,7 +162,8 @@ public:
             leaf->type = NodeType::kLeaf;
             leaf->leaf_path = std::vector(shorter.begin() + ((i + offset) / 2),
                                           shorter.end());
-            leaf->leaf_path_size = (shorter.size() * 2) - (i + offset);
+            leaf->leaf_path_size =
+                (shorter.size() * 2) + idx - 1 - (i + offset);
             leaf->leaf_value = std::move(shorter_value);
             prev_branch->branch_next[std::to_integer<size_t>(shorter_digit)] =
                 leaf;
@@ -172,7 +173,7 @@ public:
             leaf->type = NodeType::kLeaf;
             leaf->leaf_path =
                 std::vector(longer.begin() + ((i + offset) / 2), longer.end());
-            leaf->leaf_path_size = (longer.size() * 2) - (i + offset);
+            leaf->leaf_path_size = (longer.size() * 2) + idx - 1 - (i + offset);
             leaf->leaf_value = std::move(longer_value);
             prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] =
                 leaf;
@@ -191,7 +192,7 @@ public:
           leaf->type = NodeType::kLeaf;
           leaf->leaf_path = std::vector(longer.begin() + ((i + offset + 1) / 2),
                                         longer.end());
-          leaf->leaf_path_size = (longer.size() * 2) - (i + offset + 1);
+          leaf->leaf_path_size = (longer.size() * 2) + idx - (i + offset + 1);
           leaf->leaf_value = std::move(longer_value);
           std::byte longer_digit = HexDigitAtIndex(longer, i);
           prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] =
@@ -276,11 +277,26 @@ private:
 
     // Extensions.
     std::vector<std::byte> extension_path;
+    // When [extension_path_size] is odd, the first hex character in
+    // [extension_path] must still match the hex character in its corresponding
+    // position in the full key.
+    //
+    // For example, if the full key is [0xabcdef], and [extension_path_size] is
+    // 3, then [extension_path] must be [0xcdef]. We require the first hex
+    // character to still be [c], rather than some garbage value or even [0].
+    //
+    // This is important so that we consistently produce the same hash for this
+    // node. If we did not impose this requirement on the first hex character,
+    // then two nodes that are logically equivalent could produce different
+    // hashes.
     size_t extension_path_size;
     Node *extension_key;
 
     // Leaves.
     std::vector<std::byte> leaf_path;
+    // As above, when [leaf_path_size] is odd, the first hex character in
+    // [leaf_path] must still match the hex character in its corresponding
+    // position in the full key.
     size_t leaf_path_size;
     std::string leaf_value;
   };
@@ -434,6 +450,15 @@ private:
     return std::byte(static_cast<unsigned char>(ch));
   }
 
+  static std::vector<std::byte> SizeToBytes(size_t s)
+  {
+    std::vector<std::byte> ret;
+    for (size_t i = 0; i < sizeof(size_t); i++) {
+      ret.push_back(std::byte((s >> (8 * i)) & 0xFF));
+    }
+    return ret;
+  }
+
   static SHA256Hash GetNodeHash(const Node &node)
   {
     static constexpr std::array<std::byte, 32> kNullptr = {};
@@ -443,6 +468,7 @@ private:
     std::vector<std::byte> to_hash;
     switch (node.type) {
     case NodeType::kBranch:
+    {
       // Hash [branch_value] and **the hashes in** [branch_next].
       std::transform(node.branch_value.begin(), node.branch_value.end(),
                      std::back_inserter(to_hash), CastCharToByte);
@@ -456,11 +482,15 @@ private:
         }
       }
       break;
+    }
     case NodeType::kExtension:
-      // Hash [extension_path] and **the hash in** [extension_key].
+    {
+      // Hash [extension_path], [extension_path_size], and **the hash in**
+      // [extension_key].
       to_hash.insert(to_hash.end(), node.extension_path.begin(),
                      node.extension_path.end());
-      // TODO: Include [extension_path_size] in the hash.
+      std::vector<std::byte> size_bytes = SizeToBytes(node.extension_path_size);
+      to_hash.insert(to_hash.end(), size_bytes.begin(), size_bytes.end());
       if (node.extension_key) {
         std::transform(node.extension_key->hash.begin(),
                        node.extension_key->hash.end(),
@@ -470,14 +500,18 @@ private:
         to_hash.insert(to_hash.end(), kNullptr.begin(), kNullptr.end());
       }
       break;
+    }
     case NodeType::kLeaf:
-      // Hash [leaf_path] and [leaf_value].
-      // TODO: Include [leaf_path_size] in the hash.
+    {
+      // Hash [leaf_path], [leaf_path_size], and [leaf_value].
       to_hash.insert(to_hash.end(), node.leaf_path.begin(),
                      node.leaf_path.end());
+      std::vector<std::byte> size_bytes = SizeToBytes(node.leaf_path_size);
+      to_hash.insert(to_hash.end(), size_bytes.begin(), size_bytes.end());
       std::transform(node.leaf_value.begin(), node.leaf_value.end(),
                      std::back_inserter(to_hash), CastCharToByte);
       break;
+    }
     }
     return sha256(to_hash);
   }

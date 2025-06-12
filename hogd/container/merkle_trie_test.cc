@@ -81,7 +81,7 @@ TEST(MerkleTrie, BranchAndLeaf)
   trie.Print();
 }
 
-TEST(MerkleTrie, ThreeLeaves)
+TEST(MerkleTrie, TwoLeavesAndOneBranch)
 {
   MerkleTrie trie;
   trie.Print();
@@ -174,6 +174,7 @@ TEST(MerkleTrie, HashExtension)
          extension.hash.size() * sizeof(extension.hash[0]));
   extension.extension_path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
                               std::byte{0x03}};
+  extension.extension_path_size = 8;
 
   static MerkleTrie::Node extension_key{
       .hash = HashFromString(
@@ -182,7 +183,7 @@ TEST(MerkleTrie, HashExtension)
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(extension);
   SHA256Hash expected = HashFromString(
-      "32b269805483692c722bfd2dcdacd9e9545259c235ac7b7a79fa1840bfdef503");
+      "9b12e0b5041eb5015228a78c0fe2f1163d6037730d26cce2a94547ec4a793c9a");
   EXPECT_EQ(hash, expected);
 }
 
@@ -195,12 +196,13 @@ TEST(MerkleTrie, HashExtensionNullptr)
          extension.hash.size() * sizeof(extension.hash[0]));
   extension.extension_path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
                               std::byte{0x03}};
+  extension.extension_path_size = 8;
 
   extension.extension_key = nullptr;
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(extension);
   SHA256Hash expected = HashFromString(
-      "ed6cba018173f684e26017857e33379dc6d54619d34cb0e58d1d10e72c7270b7");
+      "3461077c3e728e599bd45341f5db2a3e33595dcc74a495c7d5fdfdca5e964325");
   EXPECT_EQ(hash, expected);
 }
 
@@ -212,11 +214,12 @@ TEST(MerkleTrie, HashLeaf)
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
   leaf.leaf_path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
                     std::byte{0x03}};
+  leaf.leaf_path_size = 8;
   leaf.leaf_value = "hello";
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(leaf);
   SHA256Hash expected = HashFromString(
-      "f5c843c64f025c69d3abefe86036c1288bf825ca97a52b0f0aab2e422a49a036");
+      "7224c1a06e40a068e8e904548fc399ee0c32263df98a113d5712f312789e3b36");
   EXPECT_EQ(hash, expected);
 }
 
