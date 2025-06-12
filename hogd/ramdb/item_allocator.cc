@@ -207,11 +207,4 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
   return stats;
 }
 
-void
-ItemAllocator::roll_heads()
-{
-  std::unique_lock ul = head_.lock_threads();
-  head_.for_each(ul, [this](detail::ItemHead &head) { head.roll_over(*this); });
-}
-
 } // namespace hogd
