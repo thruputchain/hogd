@@ -120,12 +120,14 @@ public:
         // branch node in the trie for [key], so the child node is either an
         // extension node or a leaf node.
         //
-        // 1. If the child is an extension node, check to see if the path and
-        // the extension node path have common hex characters. They must have at
-        // least one character in common, as otherwise we wouldn't be here.
-        // Create a new extension node with the common characters. Then place
-        // the existing extension node as a child of the new extension node, and
-        // also create a leaf node under the new extension node for the key.
+        // 1. If the child is an extension node, check to see how many hex
+        // characters the path and the extension node path have in common.
+        // They must have at least one character in common, as otherwise we
+        // wouldn't be here. Create a new extension node with the common
+        // characters. Then place a branch node node as a child of the new
+        // extension node. Then place the already-existing extension node
+        // underneath the branch node (with an updated [extension_path]), and
+        // also create and place a new leaf node for [k] under the branch node.
         //
         // 2. If the child is a leaf node, check to see what remaining hex
         // characters the key and the leaf node have in common. If there is at
@@ -136,9 +138,9 @@ public:
         //   place this shorter key's value in the branch node and the other
         //   key's value in a leaf of the branch.
         //
-        //  b) Neither of the two keys has ended yet. Place each key's value in
-        //  its own leaf node under the branch (so there will be two leaf
-        //  nodes).
+        //   b) Neither of the two keys has ended yet. Place each key's value in
+        //   its own leaf node under the branch (so there will be two leaf
+        //   nodes).
         if (next->branch_next[branch_idx]->type == NodeType::kExtension) {
           InsertHandleExtensionChild(next->branch_next[branch_idx], next, k,
                                      idx, std::move(obj));
@@ -377,28 +379,55 @@ private:
   void InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
                                   const Key &k, size_t idx, T &&obj)
   {
-    // TODO: Remove comment below.
-    // 1. If the child is an extension node, check to see if the path and
-    // the extension node path have common hex characters. They must have at
-    // least one character in common, as otherwise we wouldn't be here.
-    // Create a new extension node with the common characters. Then place
-    // the existing extension node as a child of the new extension node, and
-    // also create a leaf node under the new extension node for the key.
     size_t offset = (idx % 2 == 0) ? 0 : 1;
     Key key_a = std::vector(k.begin() + (idx / 2), k.end());
-    Key key_b = current_extension->leaf_path;
-
-    const Key &shorter = key_a.size() <= key_b.size() ? key_a : key_b;
-    const std::string &shorter_value =
-        key_a.size() <= key_b.size() ? obj : current_extension->leaf_value;
-    const Key &longer = key_a.size() <= key_b.size() ? key_b : key_a;
-    const std::string &longer_value =
-        key_a.size() <= key_b.size() ? current_extension->leaf_value : obj;
 
     size_t common_range_length =
-        GetLongestCommonRangeLength(shorter, offset + 1, longer, offset + 1);
+        GetLongestCommonRangeLength(key_a, offset + 1,
+                                    current_extension->leaf_path, offset + 1);
     assert(common_range_length);
     printf("Common Range Length: %zu, idx = %zu\n", common_range_length, idx);
+    size_t diverge_idx = offset + 1 + common_range_length;
+
+    Node *new_extension_node = new Node;
+    new_extension_node->type = NodeType::kExtension;
+    new_extension_node->extension_path =
+        std::vector(key_a.begin() + offset + 1, key_a.begin() + diverge_idx);
+    new_extension_node->extension_path_size = common_range_length;
+
+    parent_branch->branch_next[std::to_integer<size_t>(
+        HexDigitAtIndex(k, idx + offset))] = new_extension_node;
+
+    Node *new_branch_node = new Node;
+    new_branch_node->type = NodeType::kBranch;
+    // TODO: Indicate this is empty.
+    new_branch_node->branch_value = "";
+
+    // Move the already-existing extension node underneath the branch node.
+    current_extension->extension_path_size =
+        current_extension->extension_path.size() - diverge_idx;
+    current_extension->extension_path =
+        std::vector(current_extension->extension_path.begin() +
+                        (diverge_idx / 2),
+                    current_extension->extension_path.end());
+
+    std::byte current_extension_node_branch =
+        HexDigitAtIndex(current_extension->extension_path, diverge_idx);
+    new_branch_node
+        ->branch_next[std::to_integer<size_t>(current_extension_node_branch)] =
+        current_extension;
+
+    // Create new leaf node.
+    Node *new_leaf_node = new Node;
+    new_leaf_node->type = NodeType::kLeaf;
+    new_leaf_node->leaf_path =
+        std::vector(key_a.begin() + diverge_idx, key_a.end());
+    new_leaf_node->leaf_path_size = key_a.size() - diverge_idx;
+    new_leaf_node->leaf_value = std::move(obj);
+
+    std::byte leaf_branch = HexDigitAtIndex(key_a, diverge_idx);
+    new_branch_node->branch_next[std::to_integer<size_t>(leaf_branch)] =
+        new_leaf_node;
   }
 
   // See the callsite for comments on this function.
