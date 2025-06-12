@@ -1,6 +1,6 @@
 # create base module library
 add_library(
-  base
+  base_objects OBJECT
   init.cc
   io.cc
   log.cc
@@ -8,11 +8,11 @@ add_library(
   status.cc
   string.cc
 )
-
 target_link_libraries(
-  base 
+  base_objects
   protocol
 )
+add_library(base STATIC $<TARGET_OBJECTS:base_objects>)
 
 add_library(base_test_objects OBJECT
   bits_test.cc

@@ -18,15 +18,15 @@ add_library(
 add_library(hogd_interface INTERFACE)
 target_link_libraries(
   hogd_interface INTERFACE
-  base
   crypto_interface
   protocol
 )
 
 target_link_libraries(
   hogd
-  hogd_interface
+  base
   crypto
+  hogd_interface
 )
 
 # Additional libraries that are not included by default (i.e., in hogd library)
