@@ -300,16 +300,18 @@ private:
                                      const std::vector<std::byte> &b,
                                      size_t b_start)
   {
-    assert(a_start <= a.size());
-    assert(b_start <= b.size());
+    assert(a_start <= a.size() * 2);
+    assert(b_start <= b.size() * 2);
 
     size_t a_size = a.size() - a_start;
     size_t length = 0;
-    for (size_t i = 0; i < a_size; i++) {
-      if (i + b_start >= b.size()) {
+    for (size_t i = 0; i < a_size * 2; i++) {
+      if (i + b_start >= b.size() * 2) {
+        printf("break A\n");
         break;
       }
       if (HexDigitAtIndex(a, i + a_start) != HexDigitAtIndex(b, i + b_start)) {
+        printf("break B\n");
         break;
       }
       length++;
@@ -379,6 +381,7 @@ private:
   void InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
                                   const Key &k, size_t idx, T &&obj)
   {
+    printf("InsertHandleExtensionChild\n");
     size_t offset = (idx % 2 == 0) ? 0 : 1;
     Key key_a = std::vector(k.begin() + (idx / 2), k.end());
 
@@ -438,15 +441,59 @@ private:
     Key key_a = std::vector(k.begin() + (idx / 2), k.end());
     Key key_b = current_leaf->leaf_path;
 
+    Node *prev_branch = parent_branch;
+
+    size_t common_range_length =
+        GetLongestCommonRangeLength(key_a, offset + 1, key_b, offset + 1);
+    printf("Common Range Length (%s, %s, start at index %zu): %zu, idx = %zu\n",
+           KeyToString(key_a).c_str(), KeyToString(key_b).c_str(), offset + 1,
+           common_range_length, idx);
+    size_t diverge_idx = offset + 1 + common_range_length;
+    if (common_range_length == 0) {
+      printf("Cannot use extension node.\n");
+    }
+    else if (common_range_length == 1) {
+      printf(
+          "Should use branch node. There is only one character in common.\n");
+    }
+    else {
+      printf("Will use extension node.\n");
+      Node *new_extension_node = new Node;
+      new_extension_node->type = NodeType::kExtension;
+      new_extension_node->extension_path =
+          std::vector(key_a.begin() + offset + 1,
+                      key_a.begin() + diverge_idx / 2);
+      new_extension_node->extension_path_size = common_range_length;
+
+      parent_branch->branch_next[std::to_integer<size_t>(
+          HexDigitAtIndex(k, idx + offset))] = new_extension_node;
+
+      // TODO: Insert branch beneath extension node.
+      Node *new_branch_node = new Node;
+      new_branch_node->type = NodeType::kBranch;
+      // TODO: Indicate this is empty.
+      new_branch_node->branch_value = "";
+      memset(new_branch_node->branch_next.data(), 0,
+             new_branch_node->branch_next.size() *
+                 sizeof(new_branch_node->branch_next[0]));
+      new_extension_node->extension_key = new_branch_node;
+      prev_branch = new_branch_node;
+
+      // Now remove the extension path from these keys.
+      key_a = std::vector(k.begin() + ((idx + diverge_idx) / 2), k.end());
+      key_b = std::vector(current_leaf->leaf_path.begin() + diverge_idx / 2,
+                          current_leaf->leaf_path.end());
+    }
+
     const Key &shorter = key_a.size() <= key_b.size() ? key_a : key_b;
     const std::string &shorter_value =
         key_a.size() <= key_b.size() ? obj : current_leaf->leaf_value;
     const Key &longer = key_a.size() <= key_b.size() ? key_b : key_a;
     const std::string &longer_value =
         key_a.size() <= key_b.size() ? current_leaf->leaf_value : obj;
-    Node *prev_branch = parent_branch;
 
     size_t i;
+    // TODO: We probably no longer need a for loop here.
     for (i = 0; i < shorter.size() * 2; i++) {
       std::byte shorter_digit = HexDigitAtIndex(shorter, i + offset);
       std::byte longer_digit = HexDigitAtIndex(longer, i + offset);
