@@ -1,5 +1,6 @@
 #pragma once
 
+#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -10,7 +11,6 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/event.h"
@@ -76,6 +76,8 @@ public:
   void setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
                                      QueueEntry entry);
 
+  void setup_ban_item(AddressAndKey const &addrkey);
+
 private:
   BlockID block_id_;
 
@@ -87,6 +89,10 @@ private:
   x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>> deployments_;
   x23::MVar<std::unordered_map<AddressAndKey, std::vector<QueueEntry>>>
       concurrent_rcq_items_;
+
+  // For testing lazy loading:
+  // Creates a set of items that throw an error if they are accessed at all
+  x23::MVar<std::set<AddressAndKey>> blocked_items_;
 };
 
 static_assert(

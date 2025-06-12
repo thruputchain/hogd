@@ -1,12 +1,10 @@
 #pragma once
 
 #include <cassert>
-#include <concepts>
 #include <optional>
 #include <set>
 #include <variant>
 
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
