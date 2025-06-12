@@ -49,6 +49,8 @@ ByteVectorFromString(const std::string &str)
 
 } // namespace
 
+// TODO: Test for empty branch values.
+
 TEST(MerkleTrie, TwoLeaves)
 {
   MerkleTrie trie;

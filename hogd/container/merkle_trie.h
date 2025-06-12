@@ -40,6 +40,7 @@ public:
   // type definitions
   using Key = std::vector<std::byte>;
   using T = std::string;
+  using value_type = std::pair<const Key, T>;
 
   MerkleTrie() { InitRootNode(); }
 
@@ -337,6 +338,23 @@ private:
     return digit;
   }
 
+  bool HexRangesEqual(const std::vector<std::byte> &a, size_t a_start,
+                      size_t a_end, const std::vector<std::byte> &b,
+                      size_t b_start, size_t b_end)
+  {
+    size_t a_size = a_end - a_start;
+    size_t b_size = b_end - b_start;
+    if (a_size != b_size) {
+      return false;
+    }
+    for (size_t i = 0; i < a_size; i++) {
+      if (HexDigitAtIndex(a, i + a_start) != HexDigitAtIndex(b, i + b_start)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   std::string GetHashString(Node &node)
   {
     std::ostringstream oss;
@@ -429,10 +447,26 @@ private:
       break;
     }
     case NodeType::kExtension:
-      // TODO: Support this case.
-      assert(false);
-      return nullptr;
+    {
+      // Check that path[idx:idx+extension_path_size] and extension_path are
+      // equal. If extension_path_size is odd, need to actually compare with
+      // extension_path[1:1+extension_path_size].
+      size_t offset = root->extension_path_size % 2;
+      if (HexRangesEqual(path, idx, idx + root->extension_path_size,
+                         root->extension_path, offset,
+                         offset + root->extension_path_size)) {
+        assert(root->extension_key);
+        idx += root->extension_path_size;
+        return TraverseToBottom(root->extension_key, root, path, idx,
+                                existing_key);
+      }
+      else {
+        // The extension node's path does not match [key], so we can stop moving
+        // down the tree.
+        return prev_root;
+      }
       break;
+    }
     case NodeType::kLeaf:
       // We are going to return the parent node, so subtract 1 from [idx].
       idx--;
@@ -458,7 +492,6 @@ private:
       }
       break;
     case NodeType::kExtension:
-      assert(false);
       RegenerateAllHashes(root->extension_key);
       break;
     case NodeType::kLeaf:
