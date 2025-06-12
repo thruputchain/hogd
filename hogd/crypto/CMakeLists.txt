@@ -1,9 +1,20 @@
 # create crypto module library
+
+add_library(crypto_interface INTERFACE)
+add_dependencies(crypto_interface libsodium_build-configure)
+#header files for libsodium are added to global include path in toplevel CMakeLists.txt
+target_link_libraries(crypto_interface
+  INTERFACE
+  protocol
+  crc32c
+)
+
 add_library(
   crypto
   crypto.cc
 )
-add_dependencies(crypto libsodium_build-configure)
+
+add_dependencies(crypto libsodium_build)
 target_link_libraries(
   crypto
   protocol
@@ -16,7 +27,6 @@ add_executable(
   crypto_test
   crypto_test.cc
 )
-add_dependencies(crypto_test libsodium_build)
 target_link_libraries(
   crypto_test
   crypto
@@ -29,7 +39,6 @@ add_executable(
   crypto_bench
   crypto_bench.cc
 )
-add_dependencies(crypto_bench libsodium_build)
 target_link_libraries(
   crypto_bench
   crypto

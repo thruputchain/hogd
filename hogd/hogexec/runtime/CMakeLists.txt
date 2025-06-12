@@ -37,7 +37,7 @@ add_library(runtime_objects OBJECT
 target_link_libraries(
   runtime_objects
   protocol
-  hogd
+  hogd_interface
 )
 
 add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
@@ -65,7 +65,7 @@ add_library(runtime_test_objects OBJECT
 target_link_libraries(
   runtime_test_objects
   GTest::gtest
-  hogd
+  hogd_interface
 )
 
 add_executable(
