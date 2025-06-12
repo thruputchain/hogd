@@ -231,14 +231,15 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 }
 
 namespace {
-auto make_bytestring(std::string_view str)
+auto
+make_bytestring(std::string_view str)
 {
   Bytestring bytestring;
   bytestring.resize_uninitialized(str.size());
   std::memcpy(bytestring.data(), str.data(), str.size());
   return bytestring;
 }
-}
+} // namespace
 
 TEST_F(NativeContractTest, LazyLoadingBytestring)
 {
@@ -251,27 +252,27 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 
   auto bstring = make_bytestring("bad");
 
-  builder.add(0,
-              [&](SystemCallHandler &handler) -> InvokeStatus<void> {
-                // comment this set_bytestring to verify that the test framework
-                // does, in fact, throw errors if you get_bytestring from the snapshot
-                auto r = handler.set_bytestring(bad_key, std::as_bytes(std::span(bstring)));
-                if (!r.has_value() || !r.value().has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                
-                auto r2 = handler.get_bytestring(bad_key);
-                if (!r2.has_value() || !r2.value().has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                if (r2.value().value().size() != bstring.size()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                if (std::memcmp(r2.value().value().data(), bstring.data(), bstring.size()) != 0) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                return {};
-              });
+  builder.add(0, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+    // comment this set_bytestring to verify that the test framework
+    // does, in fact, throw errors if you get_bytestring from the snapshot
+    auto r = handler.set_bytestring(bad_key, std::as_bytes(std::span(bstring)));
+    if (!r.has_value() || !r.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    auto r2 = handler.get_bytestring(bad_key);
+    if (!r2.has_value() || !r2.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (r2.value().value().size() != bstring.size()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (std::memcmp(r2.value().value().data(), bstring.data(),
+                    bstring.size()) != 0) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    return {};
+  });
 
   auto native_contract = builder.build();
 
@@ -287,21 +288,24 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 
   snapshot_server_.setup_create_contract(contract);
   snapshot_server_.setup_create_deployment(address, sha256(contract));
-  snapshot_server_.setup_ban_item(AddressAndKey{.address = address, .key = bad_full_key});
+  snapshot_server_.setup_ban_item(
+      AddressAndKey{.address = address, .key = bad_full_key});
 
   SystemCallHandler handler(
       SignedTransaction{
-        .tx = Transaction{
-          .invocation = {
-            .invoked_address = address,
-            .entrypoint = entrypoint_from_method_id(0),
-            .gas_limit = UINT64_MAX,
-            .calldata = {},
-          },
-        },
-      }, snapshot,
-      PerTransactionDatabaseProxy(*db_proxy_, 0, 0), ProposalModeData{},
-      runtime_context_);
+          .tx =
+              Transaction{
+                  .invocation =
+                      {
+                          .invoked_address = address,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              },
+      },
+      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
+      ProposalModeData{}, runtime_context_);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
