@@ -183,7 +183,7 @@ public:
   // modify appends a change to an item in the log. The change is copied from
   // src. It could either be creating a new item or modifying an existing item.
   // On success returns the lsn of the item created in the log.
-  DBStatus<uint64_t> modify(ItemHeader *src);
+  DBStatus<uint64_t> modify(ItemHeader *src, bool use_src_lsn = false);
   // remove appends an item's deletion to the log.
   DBStatus<void> remove(std::span<const std::byte> key);
 

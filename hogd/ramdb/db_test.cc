@@ -73,6 +73,7 @@ protected:
   DBError insert_until_failure();
   void remove_every_n(int n);
   void check_integrity();
+  void check_file_exists(const std::string &filename);
 
   Directory dir_;
   std::unique_ptr<Database> db_;
@@ -198,6 +199,14 @@ DatabaseTest::check_integrity()
   }
 
   ASSERT_EQ(tmp, oracle_) << "db doesn't match oracle";
+}
+
+void
+DatabaseTest::check_file_exists(const std::string &filename)
+{
+  ErrnoStatus<File> f = dir_.openat(filename, O_RDONLY);
+  if (!f)
+    FAIL() << "file does not exist: " << filename;
 }
 
 TEST_F(DatabaseTest, SimpleInsertions)
@@ -329,7 +338,7 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
   insert_n(kInsertions);
   remove_every_n(3);
 
-  std::string path = "test-snapshot-0-1.snap";
+  std::string path = "0-1.snap";
   {
     auto sync_ret = db_->sync_and_snapshot(path, 0);
     ASSERT_TRUE(sync_ret);
@@ -341,13 +350,12 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
   check_integrity();
 
   // ensure the checkpoint file exists
-  ErrnoStatus<File> f = dir_.openat(path, O_RDONLY);
-  ASSERT_TRUE(static_cast<bool>(f));
+  check_file_exists(path);
 
   remove_every_n(1);
   insert_n(kInsertions);
 
-  path = "test-snapshot-0-2.snap";
+  path = "0-2.snap";
   {
     auto sync_ret = db_->sync_and_snapshot(path, 0);
     ASSERT_TRUE(sync_ret);
@@ -358,13 +366,14 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
   }
   check_integrity();
 
-  // replace the recovery log with the snapshot to see if it recovers...
-  ErrnoStatus<void> r = dir_.rename(path, "0.log");
-  ASSERT_TRUE(static_cast<bool>(r));
+  auto _ = dir_.unlink("0.log");
+  _ = dir_.unlink("1.log");
 
-  // the DB should succeed when we restore from disk,
-  // but only recover 0.log (i.e. up to but not including lsn 1)
-  auto ret = open_db(1);
+  auto ret = open_db(2);
+  ASSERT_TRUE(static_cast<bool>(ret));
+  check_integrity();
+
+  ret = open_db();
   ASSERT_TRUE(static_cast<bool>(ret));
   check_integrity();
 }
@@ -392,8 +401,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   check_integrity();
 
   // ensure the checkpoint file exists
-  ErrnoStatus<File> f0 = dir_.openat(path0, O_RDONLY);
-  ASSERT_TRUE(static_cast<bool>(f0));
+  check_file_exists(path0);
 
   // snapshot 0-1 okay, add more and sync, do incremental snapshot
   insert_n(kInsertions / 2);
@@ -408,8 +416,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   check_integrity();
 
   // ensure the checkpoint file exists
-  ErrnoStatus<File> f1 = dir_.openat(path1, O_RDONLY);
-  ASSERT_TRUE(static_cast<bool>(f1));
+  check_file_exists(path1);
 
   // replace the recovery log with the snapshot to see if it recovers...
   ErrnoStatus<void> r = dir_.rename(path0, "0.log");
@@ -483,6 +490,50 @@ TEST_F(DatabaseTest, SnapshotOngoingRemoves)
 
   // Restore oracle to the moment before the snapshot start.
   std::exchange(oracle_, backup);
+  check_integrity();
+}
+
+TEST_F(DatabaseTest, RecoverFromSnapshotAndLog)
+{
+  uint64_t lsn = 0;
+  auto sync_n = [this, &lsn](uint64_t end_lsn_exclusive) {
+    while (lsn < end_lsn_exclusive) {
+      insert_n(1);
+      DBStatus<uint64_t> r = db_->sync();
+      ASSERT_TRUE(r);
+      ASSERT_EQ(*r, lsn + 1);
+      lsn = *r;
+    }
+    check_integrity();
+  };
+
+  // wal contains 1 record with lsn 0 and 1 record with lsn 1.
+  sync_n(2);
+  check_file_exists("0.log");
+
+  // add a record in lsn 2.
+  insert_n(1);
+
+  // snapshot all three records.
+  const std::string path = "0-3.snap";
+  auto r = db_->sync_and_snapshot(path, 0);
+  ASSERT_TRUE(r);
+  auto &[rlsn, snapshot_future] = *r;
+  ASSERT_EQ(rlsn, 3);
+  DBStatus<void> ret = snapshot_future.get();
+  ASSERT_TRUE(ret);
+  lsn = rlsn;
+
+  // make sure the db wasn't affected.
+  check_integrity();
+
+  // add a new record in lsn 3 and sync it.
+  insert_n(1);
+  sync_n(4);
+
+  // record and ensure all 4 records are recovered.
+  ret = open_db();
+  ASSERT_TRUE(static_cast<bool>(ret));
   check_integrity();
 }
 

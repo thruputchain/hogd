@@ -41,13 +41,6 @@ private:
   // the map to insert items into.
   ScalableMap &map_;
 
-  // load_log_file calls func with a buffer of changes for each committed LSN in
-  // just one log file.
-  DBStatus<void> load_log_file(
-      File &f, uint64_t &cur_lsn, std::optional<uint64_t> target_lsn,
-      const std::function<DBStatus<void>(uint64_t lsn,
-                                         std::vector<UniqueLoglet> &&)> &func);
-
   // load_database calls func with a buffer of changes for each committed LSN
   // in an entire database.  It extracts these changes from the log files in
   // dir. It stops when target_lsn is reached or there is a failure.
@@ -55,12 +48,11 @@ private:
   // successfully.
   DBStatus<void> load_database(
       Directory &dir,
-      const std::function<DBStatus<void>(uint64_t lsn,
-                                         std::vector<UniqueLoglet> &&)> &func,
+      const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
       std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn = nullptr);
 
   // apply_changes loads a buffer of changes into map_.
-  DBStatus<void> apply_changes(uint64_t lsn, std::vector<UniqueLoglet> &&log);
+  DBStatus<void> apply_changes(std::vector<UniqueLoglet> &&log);
 };
 
 } // namespace hogd

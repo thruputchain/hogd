@@ -235,7 +235,7 @@ ScopedDiskWrite::get_loglet(size_t kv_len)
 }
 
 DBStatus<uint64_t>
-ScopedDiskWrite::modify(ItemHeader *src)
+ScopedDiskWrite::modify(ItemHeader *src, bool use_src_lsn)
 {
   assert(ul_.owns_lock());
 
@@ -247,7 +247,9 @@ ScopedDiskWrite::modify(ItemHeader *src)
   // append the modification record.
   ItemHeader *dst = ll->clone(src);
   assert(dst != nullptr);
-  dst->lsn = w_.cur_lsn_;
+  // use wal lsn for put()s; keep src lsn during snapshot.
+  if (!use_src_lsn)
+    dst->lsn = w_.cur_lsn_;
   dst->next = nullptr;
   std::ranges::copy(src->get_key_and_value(), dst->get_key_and_value().begin());
   return {dst->lsn};

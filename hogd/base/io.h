@@ -188,6 +188,23 @@ public:
     return read_slowpath(dst);
   }
 
+  // throw away the next n bytes, refilling as needed.
+  ErrnoStatus<void> skip(size_t n)
+  {
+    while (true) {
+      if (n < pos_.size()) {
+        pos_ = pos_.subspan(n);
+        return {};
+      }
+
+      n -= pos_.size();
+
+      ErrnoStatus<void> ret = refill();
+      if (!ret)
+        return ret.error();
+    }
+  }
+
   // read_string returns the string before delim or EOF.
   ErrnoStatus<std::string> read_string(char delim);
   // readln returns the string before a new line or EOF.

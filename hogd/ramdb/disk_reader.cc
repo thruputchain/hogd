@@ -7,10 +7,13 @@
 #include <cerrno>
 #include <format>
 #include <functional>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -145,81 +148,97 @@ struct SafeItemHeader {
 static_assert(sizeof(SafeItemHeader) == sizeof(ItemHeader));
 static_assert(std::is_trivially_copyable_v<SafeItemHeader>);
 
-// get_log_files scans the directory and returns a vector of the starting LSN
-// for each log file that was found.
-inline DBStatus<std::vector<uint64_t>>
-get_log_files(Directory &dir)
-{
-  DBStatus<std::vector<std::string>> files =
-      dir.list().transform_error(to_db_error);
-  if (!files)
-    return files.error();
+// helper class that parses log and snapshot file names
+struct FileMetadata {
+  static std::optional<FileMetadata> from_path(const std::string_view &path)
+  {
+    FileMetadata file{};
 
-  std::vector<uint64_t> lsns;
-  for (std::string_view str : *files) {
-    if (!has_extension(str, "log"))
-      continue;
+    file.path_ = path;
+    file.snapshot_file_ = has_extension(path, "snap");
 
-    std::optional<uint64_t> tmp = parse_integer<uint64_t>(str);
-    if (!tmp) {
-      warn("invalid log file name `{}`", str);
-      continue;
+    if (file.snapshot_file_) {
+      std::vector<std::string_view> parts = split(file.path_, '-');
+      if (parts.size() < 2) {
+        debug("unexpected snapshot filename {}; ignoring", file.path_);
+        return std::nullopt;
+      }
+
+      auto lsn = parse_integer<uint64_t>(parts[0]);
+      if (!lsn) {
+        debug("unexpected snapshot filename {}; ignoring", file.path_);
+        return std::nullopt;
+      }
+      file.begin_lsn_ = *lsn;
+
+      lsn = parse_integer<uint64_t>(parts[1]);
+      if (!lsn) {
+        debug("unexpected snapshot filename {}; ignoring", file.path_);
+        return std::nullopt;
+      }
+      file.end_lsn_exclusive_ = *lsn;
+
+      return file;
     }
 
-    lsns.push_back(*tmp);
+    bool log_file = has_extension(path, "log");
+    if (!log_file)
+      return std::nullopt;
+
+    std::optional<uint64_t> tmp = parse_integer<uint64_t>(file.path_);
+    if (!tmp) {
+      debug("invalid log file name `{}`", file.path_);
+      return std::nullopt;
+    }
+    file.begin_lsn_ = *tmp;
+    file.end_lsn_exclusive_ = std::numeric_limits<uint64_t>::max();
+
+    return file;
   }
-  std::ranges::sort(lsns);
 
-  return lsns;
-}
+  bool operator<(const FileMetadata &b) const
+  {
+    if (this == std::addressof(b))
+      return false;
 
-// lsn_to_filename converts a starting LSN to the corresponding log filename.
-inline std::string
-lsn_to_filename(uint64_t lsn)
-{
-  return std::format("{}.log", lsn);
-}
+    // wal files can only be recovered after any snapshot files.
+    if (snapshot_file_ && !b.snapshot_file_)
+      return true;
 
-} // namespace
+    if (!snapshot_file_ && b.snapshot_file_)
+      return false;
 
-DBStatus<uint64_t>
-DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn)
-{
-  uint64_t lsn;
-  DBStatus<void> ret = load_database(
-      dir,
-      [this](uint64_t lsn, std::vector<UniqueLoglet> &&log) {
-        return apply_changes(lsn, std::move(log));
-      },
-      target_lsn, &lsn);
-  if (!ret && (target_lsn || lsn == 0))
-    return ret.error();
-  assert(!target_lsn || *target_lsn == lsn);
-  return lsn;
-}
+    if (begin_lsn_ < b.begin_lsn_)
+      return true;
 
-DBStatus<uint64_t>
-DiskReader::verify(Directory &dir)
-{
-  uint64_t lsn;
-  DBStatus<void> ret = load_database(
-      dir,
-      [](uint64_t /*lsn*/,
-         std::vector<UniqueLoglet> && /*log*/) -> DBStatus<void> { return {}; },
-      std::nullopt, &lsn);
-  if (!ret && lsn == 0)
-    return ret.error();
-  return lsn;
-}
+    // Prioritize files that cover "longer" lsn ranges.
+    return end_lsn_exclusive_ > b.end_lsn_exclusive_;
+  }
+
+  std::string path_;
+  uint64_t begin_lsn_;
+  uint64_t end_lsn_exclusive_;
+  bool snapshot_file_;
+
+private:
+  FileMetadata() = default;
+};
 
 DBStatus<void>
-DiskReader::load_log_file(
-    File &f, uint64_t &cur_lsn, std::optional<uint64_t> target_lsn,
-    const std::function<DBStatus<void>(uint64_t lsn,
-                                       std::vector<UniqueLoglet> &&)> &func)
+load_log_file(
+    LogletAllocator &allocator, Directory &dir, const FileMetadata &file,
+    uint64_t &cur_lsn, std::optional<uint64_t> target_lsn,
+    const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func)
 {
-  BufferedReader r(f);
-  LogletBuffer buf(&allocator_);
+  DBStatus<File> f =
+      dir.openat(file.path_, O_RDONLY).transform_error(to_db_error);
+  if (!f) {
+    warn("couldn't open logfile `{}`: {}", file.path_, f.error());
+    return f.error();
+  }
+
+  BufferedReader r(*f);
+  LogletBuffer buf(&allocator);
 
   while (!target_lsn || cur_lsn < *target_lsn) {
     // read the next ItemHeader from the log file.
@@ -242,10 +261,19 @@ DiskReader::load_log_file(
       debug("error validating item header");
       return DBError(DBCode::kCorruption);
     }
-    if (hdr.lsn != cur_lsn) {
-      debug("mismatched log file lsn header lsn {}, expected lsn {}", hdr.lsn,
-            cur_lsn);
-      return DBError(DBCode::kCorruption);
+
+    bool skip =
+        // skip records if that lsn has already been recovered
+        (hdr.lsn < cur_lsn) ||
+        // snapshot files can have items of different lsn mixed up, so skip
+        // items that beyond the lsn range of what we are trying to recover.
+        (target_lsn && hdr.lsn >= *target_lsn);
+
+    if (skip) {
+      ErrnoStatus ret = r.skip(hdr.key_len + hdr.value_len);
+      if (!ret)
+        return ret.transform_error(to_db_error);
+      continue;
     }
 
     // parse the header.
@@ -274,14 +302,26 @@ DiskReader::load_log_file(
                                .transform_error(to_db_error);
       if (!ret)
         return ret.error();
-      if (!crc_valid(commit_crc, buf, &hdr))
+      if (!crc_valid(commit_crc, buf, &hdr)) {
+        info("crc check failure checking commit for lsn {}", hdr.lsn);
         return DBError(DBCode::kCorruption);
+      }
 
-      // insert the changes for this LSN into the database.
-      ret = func(cur_lsn, buf.take_buffer());
+      // insert the changes into the database.
+      // for WAL files this applies just one lsn of items. snapshot
+      // files may commit items of many lsns.
+      ret = func(buf.take_buffer());
       if (!ret)
         return ret.error();
-      cur_lsn++;
+
+      if (!file.snapshot_file_ && cur_lsn != hdr.lsn) {
+        error("replaying log file {}, saw commit for lsn {} while expecting "
+              "lsn {}",
+              file.path_, hdr.lsn, cur_lsn);
+        return DBError{DBCode::kCorruption};
+      }
+
+      cur_lsn = hdr.lsn + 1;
     }
     }
   }
@@ -289,50 +329,85 @@ DiskReader::load_log_file(
   return {};
 }
 
+} // namespace
+
+DBStatus<uint64_t>
+DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn)
+{
+  uint64_t lsn;
+  DBStatus<void> ret = load_database(
+      dir,
+      [this](std::vector<UniqueLoglet> &&log) {
+        return apply_changes(std::move(log));
+      },
+      target_lsn, &lsn);
+  if (!ret && (target_lsn || lsn == 0))
+    return ret.error();
+  assert(!target_lsn || *target_lsn == lsn);
+  return lsn;
+}
+
+DBStatus<uint64_t>
+DiskReader::verify(Directory &dir)
+{
+  uint64_t lsn;
+  DBStatus<void> ret = load_database(
+      dir,
+      [](std::vector<UniqueLoglet> && /*log*/) -> DBStatus<void> { return {}; },
+      std::nullopt, &lsn);
+  if (!ret && lsn == 0)
+    return ret.error();
+  return lsn;
+}
+
 DBStatus<void>
 DiskReader::load_database(
     Directory &dir,
-    const std::function<DBStatus<void>(uint64_t lsn,
-                                       std::vector<UniqueLoglet> &&)> &func,
+    const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
     std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn)
 {
   uint64_t cur_lsn = 0;
   DBStatus<void> ret{};
-  DBStatus<std::vector<uint64_t>> log_lsns = get_log_files(dir);
-  if (!log_lsns)
-    return log_lsns.error();
 
-  for (uint64_t log_lsn : *log_lsns) {
-    if (target_lsn && log_lsn >= *target_lsn) {
-      assert(log_lsn == *target_lsn);
+  DBStatus<std::vector<std::string>> filenames =
+      dir.list().transform_error(to_db_error);
+  if (!filenames)
+    return filenames.error();
+
+  std::vector<FileMetadata> files{};
+  for (auto &fn : *filenames) {
+    auto file = FileMetadata::from_path(fn);
+    if (file)
+      files.emplace_back(*file);
+  }
+  std::ranges::sort(files, &FileMetadata::operator<);
+
+  std::unordered_set<std::string> used_files{};
+
+  for (FileMetadata &file : files) {
+    if (target_lsn && cur_lsn == *target_lsn)
       break;
-    }
 
-    if (log_lsn != cur_lsn) {
+    if (file.snapshot_file_ && file.begin_lsn_ > cur_lsn) {
       warn("missing data detected: gap at LSN {}", cur_lsn);
       ret = DBError(DBCode::kNotFound);
       break;
     }
 
-    DBStatus<File> f = dir.openat(lsn_to_filename(log_lsn), O_RDONLY)
-                           .transform_error(to_db_error);
-    if (!f) {
-      warn("couldn't open logfile `{}`: {}", lsn_to_filename(log_lsn),
-           f.error());
-      ret = f.error();
-      break;
-    }
+    info("loading file {}", file.path_);
 
     uint64_t tmp = cur_lsn;
-    ret = load_log_file(*f, cur_lsn, target_lsn, func);
+    ret = load_log_file(allocator_, dir, file, cur_lsn, target_lsn, func);
     if (!ret) {
-      warn("couldn't load logfile {} : {}", lsn_to_filename(log_lsn),
-           ret.error());
+      warn("couldn't load logfile {} : {}", file.path_, ret.error());
       break;
     }
 
-    if (tmp == cur_lsn) // empty log file
-      break;
+    // file contained no useful records
+    if (tmp == cur_lsn)
+      continue;
+
+    used_files.emplace(file.path_);
   }
 
   // we reached the end; are we still missing data?
@@ -348,13 +423,26 @@ DiskReader::load_database(
     else
       warn("able to load up to LSN {} despite encountering error", cur_lsn);
   }
+  else {
+    info("initiating cleanup of skipped files");
+    for (auto &file : files) {
+      if (used_files.contains(file.path_))
+        continue;
+
+      info("removing unused file {}", file.path_);
+      ErrnoStatus ret = dir.unlink(file.path_);
+      if (!ret)
+        warn("couldn't remove unused file {}", file.path_);
+    }
+  }
+
   if (loaded_lsn)
     *loaded_lsn = cur_lsn;
   return ret;
 }
 
 DBStatus<void>
-DiskReader::apply_changes(uint64_t /*lsn*/, std::vector<UniqueLoglet> &&log)
+DiskReader::apply_changes(std::vector<UniqueLoglet> &&log)
 {
   // apply all the changes for this LSN.
   for (UniqueLoglet &ll : log) {
