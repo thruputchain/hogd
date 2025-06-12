@@ -12,7 +12,7 @@ target_link_libraries(
 add_library(exec_interface STATIC $<TARGET_OBJECTS:exec_interface_objects>)
 
 target_link_libraries(
-  exec_interface_objects
+  exec_interface
   hogd
   runtime
 )
