@@ -30,7 +30,6 @@ add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_nam
 # flaky tests: prefer timeout failure over stuck CI
 set_tests_properties(event PROPERTIES TIMEOUT 10)
 set_tests_properties(rpcthroughput PROPERTIES TIMEOUT 10)
-set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 
 if(GOOGLETEST_PATH)
 include_directories(${GOOGLETEST_PATH}/googletest/include)
@@ -49,6 +48,8 @@ endif()
 add_x23_gtest(shutdown)
 add_x23_gtest(xdr)
 add_x23_gtest(sync)
+
+set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 
 if(BENCHMARK_PATH)
 add_executable(bench bench.cc xdrtest.x)
