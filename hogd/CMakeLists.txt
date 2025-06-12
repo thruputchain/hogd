@@ -20,6 +20,7 @@ target_link_libraries(
   hogd_interface INTERFACE
   base
   crypto_interface
+  protocol
 )
 
 target_link_libraries(

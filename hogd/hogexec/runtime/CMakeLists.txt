@@ -36,7 +36,6 @@ add_library(runtime_objects OBJECT
 
 target_link_libraries(
   runtime_objects
-  protocol
   hogd_interface
 )
 
