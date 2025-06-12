@@ -75,7 +75,18 @@ public:
     TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k, idx,
                      existing_key);
     if (existing_key) {
-      return &existing_key->leaf_value;
+      switch (existing_key->type) {
+      case NodeType::kBranch:
+        return &existing_key->branch_value;
+        break;
+      case NodeType::kLeaf:
+        return &existing_key->leaf_value;
+        break;
+      default:
+        assert(false);
+        return nullptr;
+        break;
+      }
     }
     return nullptr;
   }
@@ -388,7 +399,6 @@ private:
                          const std::vector<std::byte> &path, size_t &idx,
                          Node *&existing_key)
   {
-    printf("Traverse\n");
     if (!root) {
       return prev_root;
     }
@@ -397,11 +407,10 @@ private:
     // when [idx >= path.size() * 2].
     if (idx >= path.size() * 2) {
       // TODO: Find a way to indicate whether [branch_value] is empty or not.
-      if (prev_root->type == NodeType::kBranch &&
-          !prev_root->branch_value.empty()) {
-        existing_key = prev_root;
+      if (root->type == NodeType::kBranch && !root->branch_value.empty()) {
+        existing_key = root;
       }
-      return prev_root;
+      return root;
     }
 
     std::byte current_hex = HexDigitAtIndex(path, idx);
