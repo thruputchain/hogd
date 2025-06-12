@@ -8,8 +8,7 @@ set_source_files_properties(
 
 add_subdirectory(test_util)
 
-add_library(
-  runtime
+add_library(runtime_objects OBJECT
   contract_trait.cc
   database_proxy.cc
   execution_mode.cc
@@ -34,6 +33,14 @@ add_library(
   syscall_rcq.cc
   wasmi_runtime.cc
 )
+
+target_link_libraries(
+  runtime_objects
+  protocol
+  hogd
+)
+
+add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
 
 add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
@@ -75,14 +82,14 @@ target_link_libraries(
 )
 
 add_dependencies(
-  runtime
+  runtime_objects
   generate_syscall_inner_h
   generate_wasmi_ffi_h
   protocol
 )
 
 target_include_directories(
-  runtime
+  runtime_objects
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
