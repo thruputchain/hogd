@@ -253,8 +253,21 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 
   builder.add(0,
               [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+                // comment this set_bytestring to verify that the test framework
+                // does, in fact, throw errors if you get_bytestring from the snapshot
                 auto r = handler.set_bytestring(bad_key, std::as_bytes(std::span(bstring)));
                 if (!r.has_value() || !r.value().has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                
+                auto r2 = handler.get_bytestring(bad_key);
+                if (!r2.has_value() || !r2.value().has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                if (r2.value().value().size() != bstring.size()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                if (std::memcmp(r2.value().value().data(), bstring.data(), bstring.size()) != 0) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
                 return {};
