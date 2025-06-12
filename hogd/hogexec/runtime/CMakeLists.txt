@@ -35,8 +35,7 @@ add_library(
   wasmi_runtime.cc
 )
 
-add_executable(
-  runtime_test
+add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
   error_handling_test.cc
   execution_mode_test.cc
@@ -55,6 +54,18 @@ add_executable(
   try_invoke_test.cc
   userctx_test.cc
 )
+
+target_link_libraries(
+  runtime_test_objects
+  GTest::gtest
+  protocol
+)
+
+add_executable(
+  runtime_test
+  $<TARGET_OBJECTS:runtime_test_objects>
+)
+
 target_link_libraries(
   runtime
   wasmi_lib
