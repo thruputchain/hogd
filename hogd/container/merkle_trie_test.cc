@@ -72,14 +72,14 @@ TEST(MerkleTrie, TwoLeavesFind)
   std::vector<std::byte> key_a = ByteVectorFromString("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
-  EXPECT_EQ(*trie.find(key_a), "hello");
+  EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
 
   std::vector<std::byte> key_b = ByteVectorFromString("1223");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
-  EXPECT_EQ(*trie.find(key_a), "hello");
-  EXPECT_EQ(*trie.find(key_b), "hello again");
+  EXPECT_EQ(*trie.find(key_a), value_a);
+  EXPECT_EQ(*trie.find(key_b), value_b);
   EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
   EXPECT_EQ(trie.find(ByteVectorFromString("123456")), nullptr);
 }
@@ -107,14 +107,14 @@ TEST(MerkleTrie, BranchAndLeafFind)
   std::vector<std::byte> key_a = ByteVectorFromString("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
-  EXPECT_EQ(*trie.find(key_a), "hello");
+  EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
 
   std::vector<std::byte> key_b = ByteVectorFromString("123456");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
-  EXPECT_EQ(*trie.find(key_a), "hello");
-  EXPECT_EQ(*trie.find(key_b), "hello again");
+  EXPECT_EQ(*trie.find(key_a), value_a);
+  EXPECT_EQ(*trie.find(key_b), value_b);
   EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
   EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
 }
@@ -138,6 +138,35 @@ TEST(MerkleTrie, TwoLeavesAndOneBranch)
   value = "hello three";
   trie.insert(key, value);
   trie.Print();
+}
+
+TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
+{
+  MerkleTrie trie;
+
+  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+  EXPECT_EQ(*trie.find(key_a), value_a);
+  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+
+  std::vector<std::byte> key_b = ByteVectorFromString("123456");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+  EXPECT_EQ(*trie.find(key_a), value_a);
+  EXPECT_EQ(*trie.find(key_b), value_b);
+  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+  EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
+
+  std::vector<std::byte> key_c = ByteVectorFromString("12ab");
+  std::string value_c = "hello three";
+  trie.insert(key_c, value_c);
+  EXPECT_EQ(*trie.find(key_a), value_a);
+  EXPECT_EQ(*trie.find(key_b), value_b);
+  EXPECT_EQ(*trie.find(key_c), value_c);
+  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+  EXPECT_EQ(trie.find(ByteVectorFromString("12abcd")), nullptr);
+  EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
 }
 
 // Hash a branch node. All child pointers are non-NULL.
