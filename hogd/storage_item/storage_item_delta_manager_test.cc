@@ -78,6 +78,12 @@ make_nnint_delta(int128_t set, int128_t add)
   return delta;
 };
 
+auto make_nnint_add_delta(int128_t add) {
+  StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+  delta.nnint_add() = to_xdr(add);
+  return delta;
+}
+
 auto
 make_replay_delta(x23::Vec<ReplayNonce> nonces, ReplayNonce minimum_threshold)
 {
@@ -1371,6 +1377,76 @@ TEST_P(DeltaManagerTest, TypeChangeCostUpgrade)
             }
 
             return net_storage_cost == cost_model.kBaseItemCost - initial_cost;
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
+TEST_P(DeltaManagerTest, NNIntAdd) {
+  // NNIntAdd should not conflict with NNIntSetAdd with the correct set base value
+
+  InvalidStateFlag invalid_state_flag;
+  auto committed_item =
+      std::make_shared<StorageItemWrapper>(int128_t{100}, &cost_model);
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(committed_item,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                                           int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_add_delta(10),
+                                               item, net_storage_cost,true);
+                },
+                item, net_storage_cost);
+
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_add_delta(-50),
+                                               item, net_storage_cost, true);
+                },
+                item, net_storage_cost);
+
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_delta(100, -10),
+                                               item, net_storage_cost, true);
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [](model::ActionResult res,
+                        StorageItemDeltaManager &item,
+                        int128_t &net_storage_cost) -> bool {
+            if (res == model::ActionResult::kTimeout) {
+              return false;
+            }
+
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot || snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+
+            if (snapshot->nnint() != 100 - 50 - 10 + 10) {
+              return false;
+            }
+
+            return net_storage_cost == 0;
           });
 
   EXPECT_TRUE(pool.run_test(experiment));
