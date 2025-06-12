@@ -19,6 +19,7 @@ CoroPollImpl::~CoroPollImpl()
 void
 CoroPollImpl::clear(BorrowedFd fd, bool write)
 {
+  // std::println("{}_clear({})", write ? "write" : "read", fd.get());
   auto fdp = getfd(fd);
   assert(!fdp->callbacks[write].load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
@@ -28,6 +29,7 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
 void
 CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
 {
+  // std::println("setcb({}, {})", fd.get(), write ? "write" : "read");
   using enum FdState::Mode;
   FdPtr fdp = getfd(fd);
   FdState::Mode mode = fdp->mode;
@@ -208,6 +210,7 @@ CoroPollImpl::check(int timeout)
 void
 CoroPollImpl::reset(BorrowedFd fd)
 {
+  // std::println("reset({})", fd.get());
   auto fdp = getfd(fd);
   fdp->buf_clear();
   setmode(fdp, FdState::Mode::kFree);

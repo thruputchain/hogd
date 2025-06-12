@@ -14,8 +14,6 @@
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
 
-//#include <print>
-
 namespace x23 {
 
 namespace detail {
@@ -156,14 +154,11 @@ CoroPoll::bgwrite(BorrowedFd fd, Buf data SLOC_ARG)
   co_return co_await w->write(*this, fd, std::move(data));
 }
 
-Async<std::expected<int, Errno>>
-CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
+Async<std::expected<void, Errno>>
+CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
 {
   if (stop_requested())
     co_return Errno{EBADF};
-  UniqueFd fd{socket(sa->sa_family, SOCK_STREAM, 0)};
-  if (!fd)
-    co_return Errno{};
   set_nonblock(fd);
   write_clear(fd);
   if (::connect(fd.get(), sa, len) == -1) {
@@ -175,11 +170,28 @@ CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
     struct sockaddr_storage ss;
     memset(&ss, 0, sizeof(ss));
     socklen_t len = sizeof(ss);
-    if (getpeername(fd.get(), reinterpret_cast<struct sockaddr *>(&ss), &len))
-      co_return Errno{};
+    if (getpeername(fd.get(), reinterpret_cast<struct sockaddr *>(&ss), &len)) {
+      Errno err;
+      co_return err;
+    }
   }
   set_nodelay(fd);
-  co_return fd.release();
+  co_return expected_void;
+}
+
+Async<std::expected<int, Errno>>
+CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
+{
+  if (stop_requested())
+    co_return Errno{EBADF};
+  UniqueFd fd{socket(sa->sa_family, SOCK_STREAM, 0)};
+  if (!fd)
+    co_return Errno{};
+  auto res = co_await connect(fd, sa, len X23_IFTRACE(, SLOC_VAR));
+  if (res)
+    co_return fd.release();
+  reset(fd);
+  co_return res.error();
 }
 
 Async<std::expected<int, std::system_error>>

@@ -352,6 +352,15 @@ public:
     co_return Errno{EBADF};
   }
 
+  Async<std::expected<void, Errno>> connect(BorrowedFd fd, const sockaddr *sa,
+                                            socklen_t len SLOC_PARM);
+  Async<std::expected<void, Errno>>
+  connect(BorrowedFd fd, const sockaddr_storage *ss SLOC_PARM)
+  {
+    return connect(fd, reinterpret_cast<const sockaddr *>(ss),
+		   sizeof(*ss) X23_IFTRACE(, sloc));
+  }
+
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,
                                               socklen_t len SLOC_PARM);
   Async<std::expected<int, Errno>>
