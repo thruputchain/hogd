@@ -16,7 +16,6 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -95,8 +94,7 @@ InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
 x23::Async<SystemStatus<bool>>
 InvocationFrame::try_acquire_frame_locks(
     PerTransactionDatabaseProxy &db_proxy,
-    std::vector<InvocationFrame> const &parent_frames,
-    StorageSnapshotCache &snapshot_cache)
+    std::vector<InvocationFrame> const &parent_frames)
 {
 
   for (auto const &[addrkey, item_view] : modified_items_) {
@@ -133,8 +131,8 @@ InvocationFrameStack::finish_frame(InvokeResult result,
       // If we're in proposal mode, we need to acquire the frame locks.
       if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         auto acq_res =
-            frame_stack_.back().try_acquire_frame_locks(db_proxy_, frame_stack_,
-                                                        snapshot_cache_)();
+            frame_stack_.back().try_acquire_frame_locks(db_proxy_,
+                                                        frame_stack_)();
         if (!acq_res.has_value()) {
           return acq_res.error();
         }
@@ -242,33 +240,7 @@ InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
   return &iter->second;
 }
 
-SystemStatus<ItemView *>
-InvocationFrame::get_or_add_item_view(
-    AddressAndKey const &addrkey,
-    std::vector<InvocationFrame> const &parent_frames,
-    StorageSnapshotCache &snapshot_cache)
-{
-  assert(parent_frames.empty() || &parent_frames.back() == this);
-
-  if (auto *view = get_item_view(addrkey)) {
-    return view;
-  }
-
-  for (int32_t i = parent_frames.size() - 2; i >= 0; --i) {
-    auto const &parent_frame = parent_frames[i];
-    if (auto const *view = parent_frame.get_item_view(addrkey)) {
-      return add_item_view(addrkey, *view);
-    }
-  }
-  auto snapshot_item = snapshot_cache.try_get_snapshot_item(addrkey);
-  if (!snapshot_item.has_value()) {
-    return snapshot_item.error();
-  }
-  assert(snapshot_item.value());
-  return add_item_view(addrkey, ItemView(snapshot_item.value()));
-}
-
-SystemStatus<ItemView *>
+ItemView *
 InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
 {
   const int32_t stack_depth = frame_stack_.size();
@@ -292,26 +264,13 @@ InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
     }
   }
 
-  // item view not yet accessed in current transaction; looking up in snapshot
-  auto snapshot_item = snapshot_cache_.try_get_snapshot_item(addrkey);
-  if (!snapshot_item) {
-    return snapshot_item.error();
-  }
-
-  // snapshot_item might be nullptr; this is handled in ItemView
-  return frame_stack_.back().add_item_view(addrkey,
-                                           ItemView(snapshot_item.value()));
+  return frame_stack_.back().add_item_view(addrkey, ItemView());
 }
 
-SystemStatus<ItemView *>
+ItemView *
 InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
 {
-  StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
-  key.contract_data_key() = data_key;
-
-  auto &active_frame = get_active_frame();
-  AddressAndKey addrkey{.address = active_frame.address(), .key = key};
-  return get_item_view(addrkey);
+  return get_item_view(get_addrkey(data_key));
 }
 
 } // namespace hogd

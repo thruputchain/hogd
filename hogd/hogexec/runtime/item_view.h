@@ -19,6 +19,7 @@
 namespace hogd {
 
 class SnapshotStorageItem;
+class StorageSnapshotCache;
 
 // Each of the item types has the following methods:
 // get_delta()
@@ -152,6 +153,9 @@ private:
 // read outside.
 class UnmodifiedItem {
 public:
+  UnmodifiedItem(SnapshotStorageItem *base_item) : base_item_(base_item) {}
+  UnmodifiedItem() : base_item_(std::nullopt) {}
+
   constexpr static std::optional<StorageDelta> get_delta()
   {
     return std::nullopt;
@@ -159,7 +163,19 @@ public:
 
   std::optional<ItemViewType> get_item_type() const;
 
-  SnapshotStorageItem &base_item_;
+  SystemStatus<void> load(StorageSnapshotCache &snapshot_cache,
+                          AddressAndKey const &addrkey) const;
+  bool is_loaded() const { return base_item_.has_value(); }
+
+  SnapshotStorageItem &base_item() const
+  {
+    assert(base_item_.has_value());
+    assert(base_item_.value());
+    return *base_item_.value();
+  }
+
+private:
+  mutable std::optional<SnapshotStorageItem *> base_item_;
 };
 
 // Maintain the modifications of one InvocationFrame to one address.
@@ -169,8 +185,9 @@ public:
 class ItemView {
 public:
   ItemView(SnapshotStorageItem *base_item)
-    : delta_args_(UnmodifiedItem{.base_item_ = *base_item})
+    : delta_args_(UnmodifiedItem(base_item))
   {}
+  ItemView() : delta_args_(UnmodifiedItem()) {}
 
   // Returns a pointer to the item view if it is of the given type,
   // otherwise returns nullptr.
@@ -212,11 +229,18 @@ public:
       }
     }
 
-    if (auto type_match = can_accept_type<ItemType>(); !type_match) {
-      // no type mismatch allowed; if you want to change an object's type,
-      // you must explicitly delete it first.
-      return type_match;
-    }
+    // We no longer check the type of the input item against the current item.
+    // That would require reading from the database, and we cannot do that
+    // if we want to allow lazy loading of items.  Implicitly, this means
+    // that we allow a write to overwrite the previous type.
+    // If the caller cares about checking the type, they should do the check
+    // explicitly (this already happens in several of the syscall handlers).
+    //
+    // We do not perform the check against types other than UnmodifiedItem,
+    // as that would create a discrepancy in behavior between the case where
+    // the item was written earlier in the transaction and when it was read from
+    // snapshot. (following the principle of "sequential contracts should look
+    // as normal as possible" when running in a try_invoke/queue loop)
 
     delta_args_.emplace<ItemType>(type);
     return {};
@@ -224,68 +248,10 @@ public:
 
   std::optional<StorageDelta> get_delta() const;
 
-  Nondeterministic<int128_t> get_locked_storage_cost() const
-  {
-    return locked_storage_cost_;
-  }
-
-  void set_locked_storage_cost(Nondeterministic<int128_t> cost)
-  {
-    locked_storage_cost_ = cost;
-  }
-
 private:
-  template<typename ItemType> SyscallStatus<void> can_accept_type() const
-  {
-    static_assert(!std::same_as<ItemType, UnmodifiedItem>);
-
-    // writing a deletion is always allowed
-    if constexpr (std::same_as<ItemType, DeletedItem>) {
-      return {};
-    }
-    else {
-      // DeletedItem has no kItemType, so we need the constexpr else
-      // to make this compile.
-
-      // if item is nonexistent, any write is allowed
-      if (std::holds_alternative<DeletedItem>(delta_args_)) {
-        return {};
-      }
-      // if item is of the same type, any write is allowed
-      if (std::holds_alternative<ItemType>(delta_args_)) {
-        return {};
-      }
-
-      // if item is unmodified, writes allowed if types match
-      if (std::holds_alternative<UnmodifiedItem>(delta_args_)) {
-        auto item_type = std::get<UnmodifiedItem>(delta_args_).get_item_type();
-        if (!item_type) {
-          return {};
-        }
-
-        if (*item_type == ItemType::kItemType) {
-          return {};
-        }
-
-        // debug assertions
-        if constexpr (is_debug_build()) {
-          debug_assert_view_types(
-              std::get<UnmodifiedItem>(delta_args_).base_item_,
-              ItemType::kItemType);
-        }
-      }
-    }
-
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
-  static void debug_assert_view_types(SnapshotStorageItem const &base_item,
-                                      ItemViewType item_type);
-
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem>
       delta_args_;
-  Nondeterministic<int128_t> locked_storage_cost_ = 0;
 };
 
 } // namespace hogd
