@@ -41,15 +41,7 @@ public:
   using Key = std::vector<std::byte>;
   using T = std::string;
 
-  MerkleTrie()
-  {
-    root_ = new Node;
-    root_->type = NodeType::kBranch;
-    memset(root_->branch_next.data(), 0,
-           root_->branch_next.size() * sizeof(root_->branch_next[0]));
-    // TODO: Need some way to indicate [branch_value] is empty.
-    root_->hash = GetNodeHash(*root_);
-  }
+  MerkleTrie() { InitRootNode(); }
 
   ~MerkleTrie() { FreeAllNodes(root_); }
 
@@ -76,21 +68,28 @@ public:
     return kEmpty;
   }
 
-  std::string *find(const Key &key)
+  std::string *find(const Key &k)
   {
-    static std::string kEmpty = "";
-
-    assert(false);
-    return &kEmpty;
+    size_t idx = 0;
+    Node *existing_key = nullptr;
+    TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k, idx,
+                     existing_key);
+    if (existing_key) {
+      return &existing_key->leaf_value;
+    }
+    return nullptr;
   }
 
-  void insert(const Key &k, T &&obj)
+  bool insert(const Key &k, T &&obj)
   {
     // TODO: Optimize with extension nodes.
-    // TODO: Handle insertion of a duplicate key.
     size_t idx = 0;
-    Node *next =
-        TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k, idx);
+    Node *existing_key = nullptr;
+    Node *next = TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k, idx,
+                                  existing_key);
+    if (existing_key) {
+      return false;
+    }
     assert(next);
     assert(next->type == NodeType::kBranch);
     assert(idx <= k.size() * 2);
@@ -219,6 +218,9 @@ public:
     // changed. Note that paths **that do not correspond to the key above**
     // could also be changed!
     RegenerateAllHashes(root_);
+    size_++;
+
+    return true;
   }
 
   void insert(const Key &k, const T &obj) { insert(k, T(obj)); }
@@ -239,13 +241,14 @@ public:
 
   // TODO: Add another [remove] function that also takes a mutex as a parameter.
 
-  size_t size()
-  {
-    assert(false);
-    return 0;
-  }
+  size_t size() { return size_; }
 
-  void clear() { assert(false); }
+  void clear()
+  {
+    FreeAllNodes(root_);
+    InitRootNode();
+    size_ = 0;
+  }
 
   // for_each executes func on each element.
   template<typename F> void for_each(F func) { assert(false); }
@@ -382,8 +385,10 @@ private:
   }
 
   Node *TraverseToBottom(Node *root, Node *prev_root,
-                         const std::vector<std::byte> &path, size_t &idx)
+                         const std::vector<std::byte> &path, size_t &idx,
+                         Node *&existing_key)
   {
+    printf("Traverse\n");
     if (!root) {
       return prev_root;
     }
@@ -391,6 +396,11 @@ private:
     // hex character we are looking at, so we reach the end of the byte array
     // when [idx >= path.size() * 2].
     if (idx >= path.size() * 2) {
+      // TODO: Find a way to indicate whether [branch_value] is empty or not.
+      if (prev_root->type == NodeType::kBranch &&
+          !prev_root->branch_value.empty()) {
+        existing_key = prev_root;
+      }
       return prev_root;
     }
 
@@ -401,7 +411,7 @@ private:
       Node *next = root->branch_next[std::to_integer<size_t>(current_hex)];
       if (next) {
         idx++;
-        return TraverseToBottom(next, root, path, idx);
+        return TraverseToBottom(next, root, path, idx, existing_key);
       }
       else {
         // There is no child, so we have reached the bottom of the trie.
@@ -417,6 +427,9 @@ private:
     case NodeType::kLeaf:
       // We are going to return the parent node, so subtract 1 from [idx].
       idx--;
+      if (std::vector(path.begin() + idx / 2, path.end()) == root->leaf_path) {
+        existing_key = root;
+      }
       return prev_root;
       break;
     }
@@ -516,6 +529,16 @@ private:
     return sha256(to_hash);
   }
 
+  void InitRootNode()
+  {
+    root_ = new Node;
+    root_->type = NodeType::kBranch;
+    memset(root_->branch_next.data(), 0,
+           root_->branch_next.size() * sizeof(root_->branch_next[0]));
+    // TODO: Need some way to indicate [branch_value] is empty.
+    root_->hash = GetNodeHash(*root_);
+  }
+
   void FreeAllNodes(Node *root)
   {
     if (!root) {
@@ -541,6 +564,7 @@ private:
   }
 
   Node *root_ = nullptr;
+  size_t size_ = 0;
 
   FRIEND_TEST(MerkleTrie, HashBranch);
   FRIEND_TEST(MerkleTrie, HashBranchSomeNullptr);

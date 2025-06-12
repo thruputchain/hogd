@@ -65,6 +65,25 @@ TEST(MerkleTrie, TwoLeaves)
   trie.Print();
 }
 
+TEST(MerkleTrie, TwoLeavesFind)
+{
+  MerkleTrie trie;
+
+  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+  EXPECT_EQ(*trie.find(key_a), "hello");
+  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+
+  std::vector<std::byte> key_b = ByteVectorFromString("1223");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+  EXPECT_EQ(*trie.find(key_a), "hello");
+  EXPECT_EQ(*trie.find(key_b), "hello again");
+  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+  EXPECT_EQ(trie.find(ByteVectorFromString("123456")), nullptr);
+}
+
 TEST(MerkleTrie, BranchAndLeaf)
 {
   MerkleTrie trie;
@@ -79,6 +98,33 @@ TEST(MerkleTrie, BranchAndLeaf)
   value = "hello again";
   trie.insert(key, value);
   trie.Print();
+}
+
+TEST(MerkleTrie, BranchAndLeafFind)
+{
+  MerkleTrie trie;
+
+  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+  EXPECT_EQ(*trie.find(key_a), "hello");
+  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+  printf("A\n");
+
+  std::vector<std::byte> key_b = ByteVectorFromString("123456");
+  std::string value_b = "hello again";
+  printf("A2\n");
+  trie.insert(key_b, value_b);
+  trie.Print();
+  printf("B\n");
+  EXPECT_EQ(*trie.find(key_a), "hello");
+  printf("C\n");
+  EXPECT_EQ(*trie.find(key_b), "hello again");
+  printf("D\n");
+  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+  printf("E\n");
+  EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
+  printf("F\n");
 }
 
 TEST(MerkleTrie, TwoLeavesAndOneBranch)
