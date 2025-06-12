@@ -116,100 +116,38 @@ public:
       std::byte digit = HexDigitAtIndex(k, idx);
       size_t branch_idx = std::to_integer<size_t>(digit);
       if (next->branch_next[branch_idx]) {
-        Node *to_free = next->branch_next[branch_idx];
         // There is already a child node. [TraverseToBottom] returns the lowest
         // branch node in the trie for [key], so the child node is either an
         // extension node or a leaf node.
         //
-        // 1. TODO: If the child is an extension node, ...
+        // 1. If the child is an extension node, check to see if the path and
+        // the extension node path have common hex characters. They must have at
+        // least one character in common, as otherwise we wouldn't be here.
+        // Create a new extension node with the common characters. Then place
+        // the existing extension node as a child of the new extension node, and
+        // also create a leaf node under the new extension node for the key.
         //
-        // 2. If the child is a leaf node, we should add one branch node for
-        // every remaining character in [key] that matches the path in [leaf].
-        // At some point, one of the two will happen:
-        //   a) A character will be different, at which point we can place two
-        //   leaf nodes below a branch node.
+        // 2. If the child is a leaf node, check to see what remaining hex
+        // characters the key and the leaf node have in common. If there is at
+        // least one common character, then we should create an extension node
+        // for the common path. Once the hex characters diverge, we should
+        // create a branch node. There are two options here:
+        //   a) One of the two keys ends on the branch, at which point we can
+        //   place this shorter key's value in the branch node and the other
+        //   key's value in a leaf of the branch.
         //
-        //   b) One of the two keys will end, at which point we can place the
-        //   shorter key in the newly-created branch node and add the longer key
-        //   to a leaf node that is a child of that branch node.
-
-        size_t offset = (idx % 2 == 0) ? 0 : 1;
-        Key key_a = std::vector(k.begin() + (idx / 2), k.end());
-        Key key_b = next->branch_next[branch_idx]->leaf_path;
-
-        const Key &shorter = key_a.size() <= key_b.size() ? key_a : key_b;
-        const std::string &shorter_value =
-            key_a.size() <= key_b.size()
-                ? obj
-                : next->branch_next[branch_idx]->leaf_value;
-        const Key &longer = key_a.size() <= key_b.size() ? key_b : key_a;
-        const std::string &longer_value =
-            key_a.size() <= key_b.size()
-                ? next->branch_next[branch_idx]->leaf_value
-                : obj;
-        size_t i;
-        Node *prev_branch = next;
-        for (i = 0; i < shorter.size() * 2; i++) {
-          std::byte shorter_digit = HexDigitAtIndex(shorter, i + offset);
-          std::byte longer_digit = HexDigitAtIndex(longer, i + offset);
-          if (shorter_digit == longer_digit) {
-            // The digits match, so add a branch node.
-            Node *branch = new Node;
-            branch->type = NodeType::kBranch;
-            // TODO: Need some way to indicate [branch_value] is empty.
-            branch->branch_value = "";
-
-            memset(branch->branch_next.data(), 0,
-                   branch->branch_next.size() * sizeof(branch->branch_next[0]));
-            prev_branch->branch_next[std::to_integer<size_t>(shorter_digit)] =
-                branch;
-            prev_branch = branch;
-          }
-          else {
-            // The digits do not match, so create two leaf nodes.
-
-            // Shorter key's leaf node.
-            Node *leaf = new Node;
-            leaf->type = NodeType::kLeaf;
-            leaf->leaf_path = std::vector(shorter.begin() + ((i + offset) / 2),
-                                          shorter.end());
-            leaf->leaf_path_size =
-                (shorter.size() * 2) + idx - 1 - (i + offset);
-            leaf->leaf_value = std::move(shorter_value);
-            prev_branch->branch_next[std::to_integer<size_t>(shorter_digit)] =
-                leaf;
-
-            // Longer key's leaf node.
-            leaf = new Node;
-            leaf->type = NodeType::kLeaf;
-            leaf->leaf_path =
-                std::vector(longer.begin() + ((i + offset) / 2), longer.end());
-            leaf->leaf_path_size = (longer.size() * 2) + idx - 1 - (i + offset);
-            leaf->leaf_value = std::move(longer_value);
-            prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] =
-                leaf;
-            break;
-          }
+        //  b) Neither of the two keys has ended yet. Place each key's value in
+        //  its own leaf node under the branch (so there will be two leaf
+        //  nodes).
+        if (next->branch_next[branch_idx]->type == NodeType::kExtension) {
+          InsertHandleExtensionChild(next->branch_next[branch_idx], next, k,
+                                     idx, std::move(obj));
         }
-        if (i >= shorter.size() * 2) {
-          // The shorter key is entirely contained within the larger key. Thus,
-          // we should add the shorter key's value to the last branch node
-          // created, and then we should add the longer key and its value to a
-          // leaf node of that branch.
-          prev_branch->branch_value = std::move(shorter_value);
-
-          // Longer key's leaf node.
-          Node *leaf = new Node;
-          leaf->type = NodeType::kLeaf;
-          leaf->leaf_path = std::vector(longer.begin() + ((i + offset + 1) / 2),
-                                        longer.end());
-          leaf->leaf_path_size = (longer.size() * 2) + idx - (i + offset + 1);
-          leaf->leaf_value = std::move(longer_value);
-          std::byte longer_digit = HexDigitAtIndex(longer, i);
-          prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] =
-              leaf;
+        else {
+          assert(next->branch_next[branch_idx]->type == NodeType::kLeaf);
+          InsertHandleLeafChild(next->branch_next[branch_idx], next, k, idx,
+                                std::move(obj));
         }
-        delete to_free;
       }
       else {
         Node *leaf = new Node;
@@ -355,6 +293,28 @@ private:
     return true;
   }
 
+  size_t GetLongestCommonRangeLength(const std::vector<std::byte> &a,
+                                     size_t a_start,
+                                     const std::vector<std::byte> &b,
+                                     size_t b_start)
+  {
+    assert(a_start <= a.size());
+    assert(b_start <= b.size());
+
+    size_t a_size = a.size() - a_start;
+    size_t length = 0;
+    for (size_t i = 0; i < a_size; i++) {
+      if (i + b_start >= b.size()) {
+        break;
+      }
+      if (HexDigitAtIndex(a, i + a_start) != HexDigitAtIndex(b, i + b_start)) {
+        break;
+      }
+      length++;
+    }
+    return length;
+  }
+
   std::string GetHashString(Node &node)
   {
     std::ostringstream oss;
@@ -411,6 +371,110 @@ private:
       printf("\n");
       break;
     }
+  }
+
+  // See the callsite for comments on this function.
+  void InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
+                                  const Key &k, size_t idx, T &&obj)
+  {
+    // TODO: Remove comment below.
+    // 1. If the child is an extension node, check to see if the path and
+    // the extension node path have common hex characters. They must have at
+    // least one character in common, as otherwise we wouldn't be here.
+    // Create a new extension node with the common characters. Then place
+    // the existing extension node as a child of the new extension node, and
+    // also create a leaf node under the new extension node for the key.
+    size_t offset = (idx % 2 == 0) ? 0 : 1;
+    Key key_a = std::vector(k.begin() + (idx / 2), k.end());
+    Key key_b = current_extension->leaf_path;
+
+    const Key &shorter = key_a.size() <= key_b.size() ? key_a : key_b;
+    const std::string &shorter_value =
+        key_a.size() <= key_b.size() ? obj : current_extension->leaf_value;
+    const Key &longer = key_a.size() <= key_b.size() ? key_b : key_a;
+    const std::string &longer_value =
+        key_a.size() <= key_b.size() ? current_extension->leaf_value : obj;
+
+    size_t common_range_length =
+        GetLongestCommonRangeLength(shorter, offset + 1, longer, offset + 1);
+    assert(common_range_length);
+    printf("Common Range Length: %zu, idx = %zu\n", common_range_length, idx);
+  }
+
+  // See the callsite for comments on this function.
+  void InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
+                             const Key &k, size_t idx, T &&obj)
+  {
+    size_t offset = (idx % 2 == 0) ? 0 : 1;
+    Key key_a = std::vector(k.begin() + (idx / 2), k.end());
+    Key key_b = current_leaf->leaf_path;
+
+    const Key &shorter = key_a.size() <= key_b.size() ? key_a : key_b;
+    const std::string &shorter_value =
+        key_a.size() <= key_b.size() ? obj : current_leaf->leaf_value;
+    const Key &longer = key_a.size() <= key_b.size() ? key_b : key_a;
+    const std::string &longer_value =
+        key_a.size() <= key_b.size() ? current_leaf->leaf_value : obj;
+    Node *prev_branch = parent_branch;
+
+    size_t i;
+    for (i = 0; i < shorter.size() * 2; i++) {
+      std::byte shorter_digit = HexDigitAtIndex(shorter, i + offset);
+      std::byte longer_digit = HexDigitAtIndex(longer, i + offset);
+      if (shorter_digit == longer_digit) {
+        // The digits match, so add a branch node.
+        Node *branch = new Node;
+        branch->type = NodeType::kBranch;
+        // TODO: Need some way to indicate [branch_value] is empty.
+        branch->branch_value = "";
+
+        memset(branch->branch_next.data(), 0,
+               branch->branch_next.size() * sizeof(branch->branch_next[0]));
+        prev_branch->branch_next[std::to_integer<size_t>(shorter_digit)] =
+            branch;
+        prev_branch = branch;
+      }
+      else {
+        // The digits do not match, so create two leaf nodes.
+
+        // Shorter key's leaf node.
+        Node *leaf = new Node;
+        leaf->type = NodeType::kLeaf;
+        leaf->leaf_path =
+            std::vector(shorter.begin() + ((i + offset) / 2), shorter.end());
+        leaf->leaf_path_size = (shorter.size() * 2) + idx - 1 - (i + offset);
+        leaf->leaf_value = std::move(shorter_value);
+        prev_branch->branch_next[std::to_integer<size_t>(shorter_digit)] = leaf;
+
+        // Longer key's leaf node.
+        leaf = new Node;
+        leaf->type = NodeType::kLeaf;
+        leaf->leaf_path =
+            std::vector(longer.begin() + ((i + offset) / 2), longer.end());
+        leaf->leaf_path_size = (longer.size() * 2) + idx - 1 - (i + offset);
+        leaf->leaf_value = std::move(longer_value);
+        prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] = leaf;
+        break;
+      }
+    }
+    if (i >= shorter.size() * 2) {
+      // The shorter key is entirely contained within the larger key. Thus,
+      // we should add the shorter key's value to the last branch node
+      // created, and then we should add the longer key and its value to a
+      // leaf node of that branch.
+      prev_branch->branch_value = std::move(shorter_value);
+
+      // Longer key's leaf node.
+      Node *leaf = new Node;
+      leaf->type = NodeType::kLeaf;
+      leaf->leaf_path =
+          std::vector(longer.begin() + ((i + offset + 1) / 2), longer.end());
+      leaf->leaf_path_size = (longer.size() * 2) + idx - (i + offset + 1);
+      leaf->leaf_value = std::move(longer_value);
+      std::byte longer_digit = HexDigitAtIndex(longer, i);
+      prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] = leaf;
+    }
+    delete current_leaf;
   }
 
   Node *TraverseToBottom(Node *root, Node *prev_root,
