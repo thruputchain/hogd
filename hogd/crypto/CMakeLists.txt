@@ -16,6 +16,7 @@ add_executable(
   crypto_test
   crypto_test.cc
 )
+add_dependencies(crypto_test libsodium_build)
 target_link_libraries(
   crypto_test
   crypto
@@ -28,6 +29,7 @@ add_executable(
   crypto_bench
   crypto_bench.cc
 )
+add_dependencies(crypto_bench libsodium_build)
 target_link_libraries(
   crypto_bench
   crypto
