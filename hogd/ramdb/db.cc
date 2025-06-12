@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -77,38 +78,6 @@ create_db(const std::string &path, size_t heap_size, int bucket_order)
 }
 
 } // namespace
-
-DBStatus<std::unique_ptr<Database>>
-Database::open_internal(const std::string &path, std::optional<uint64_t> lsn,
-                        size_t heap_size, int bucket_order)
-{
-  DBStatus<std::unique_ptr<Database>> ret =
-      create_db(path, heap_size, bucket_order);
-  if (!ret)
-    return ret.error();
-  std::unique_ptr<Database> db = std::move(ret.value());
-  db->pool_.adjust_workers(active_cores(db->pool_));
-
-  DiskReader r(*db->loglet_allocator_, db->map_);
-  // load up to a specific LSN or everything if no lsn limit given.
-  DBStatus<uint64_t> load_ret = r.load(db->dir_, lsn);
-  if (!load_ret) {
-    error("failed to load database: {}", load_ret.error());
-    return load_ret.error();
-  }
-
-  if (lsn && *load_ret != *lsn) {
-    error("failed to recovery up through specified lsn");
-    return DBError{DBCode::kCorruption};
-  }
-
-  if (*load_ret == 0)
-    debug("no existing database found; creating a new database.");
-
-  debug("loaded up to LSN {}, {} items", *lsn, db->map_.size());
-  db->disk_writer_.init(*load_ret);
-  return db;
-}
 
 DBStatus<uint64_t>
 Database::check(const std::string &path, size_t heap_size)
@@ -357,6 +326,38 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
   setup_latch.wait();
 
   return std::make_pair(end_lsn, promise->get_future());
+}
+
+DBStatus<std::unique_ptr<Database>>
+Database::open_internal(const std::string &path, std::optional<uint64_t> lsn,
+                        size_t heap_size, int bucket_order)
+{
+  DBStatus<std::unique_ptr<Database>> ret =
+      create_db(path, heap_size, bucket_order);
+  if (!ret)
+    return ret.error();
+  std::unique_ptr<Database> db = std::move(ret.value());
+  db->pool_.adjust_workers(active_cores(db->pool_));
+
+  DiskReader r(*db->loglet_allocator_, db->map_);
+  // load up to a specific LSN or everything if no lsn limit given.
+  DBStatus<uint64_t> load_ret = r.load(db->dir_, lsn);
+  if (!load_ret) {
+    error("failed to load database: {}", load_ret.error());
+    return load_ret.error();
+  }
+
+  if (lsn && *load_ret != *lsn) {
+    error("failed to recover up through specified lsn");
+    return DBError{DBCode::kCorruption};
+  }
+
+  if (*load_ret == 0)
+    info("no existing database found; creating a new database.");
+  else
+    info("loaded up to LSN {}, {} items", *load_ret, db->map_.size());
+  db->disk_writer_.init(*load_ret);
+  return db;
 }
 
 } // namespace hogd
