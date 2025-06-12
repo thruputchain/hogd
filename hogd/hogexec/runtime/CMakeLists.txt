@@ -58,7 +58,7 @@ add_library(runtime_test_objects OBJECT
 target_link_libraries(
   runtime_test_objects
   GTest::gtest
-  protocol
+  hogd
 )
 
 add_executable(
