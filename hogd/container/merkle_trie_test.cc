@@ -142,14 +142,12 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
 {
   MerkleTrie trie;
 
-  printf("A\n");
   std::vector<std::byte> key_a = ByteVectorFromString("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
   EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
 
-  printf("B\n");
   std::vector<std::byte> key_b = ByteVectorFromString("123456");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
@@ -157,20 +155,13 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
   EXPECT_EQ(*trie.find(key_b), value_b);
   EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
   EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
-  trie.Print();
 
-  printf("C\n");
   std::vector<std::byte> key_c = ByteVectorFromString("12ab");
   std::string value_c = "hello three";
   trie.insert(key_c, value_c);
-  printf("D\n");
   EXPECT_EQ(*trie.find(key_a), value_a);
-  printf("E\n");
   EXPECT_EQ(*trie.find(key_b), value_b);
-  printf("F\n");
-  trie.Print();
   EXPECT_EQ(*trie.find(key_c), value_c);
-  printf("G\n");
   EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
   EXPECT_EQ(trie.find(ByteVectorFromString("12abcd")), nullptr);
   EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);

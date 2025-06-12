@@ -416,7 +416,10 @@ private:
         ->branch_next[std::to_integer<size_t>(current_extension_node_branch)] =
         current_extension;
 
-    current_extension->extension_path_size -= common_range_length;
+    // Include 1 to account for the branch node, too. [common_range_length] is
+    // the size of the path in the extension node, and then we have 1 for the
+    // branch node.
+    current_extension->extension_path_size -= common_range_length + 1;
     current_extension->extension_path =
         std::vector(current_extension->extension_path.begin() +
                         (diverge_idx / 2),
