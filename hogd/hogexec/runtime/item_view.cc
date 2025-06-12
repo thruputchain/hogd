@@ -10,6 +10,7 @@
 #include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -310,22 +311,21 @@ ReplayCacheItem::get_delta() const
 std::optional<ItemViewType>
 UnmodifiedItem::get_item_type() const
 {
-  return base_item_.type();
+  assert(base_item_.has_value());
+  assert(base_item_.value());
+  return base_item_.value()->type();
 }
 
-void
-ItemView::debug_assert_view_types(SnapshotStorageItem const &base_item,
-                                  ItemViewType item_type)
+SystemStatus<void>
+UnmodifiedItem::load(StorageSnapshotCache &snapshot_cache,
+                     AddressAndKey const &addrkey) const
 {
-  auto const &addrkey = base_item.addrkey();
-  if (item_type == ItemViewType::kNativeTokenBalance) {
-    assert(addrkey.key.key_type() ==
-           StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  auto r = snapshot_cache.try_get_snapshot_item(addrkey);
+  if (!r.has_value()) {
+    return r.error();
   }
-  else {
-    assert(addrkey.key.key_type() !=
-           StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
-  }
+  base_item_ = r.value();
+  return {};
 }
 
 } // namespace hogd

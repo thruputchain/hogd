@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -33,6 +34,13 @@ BlockSnapshotServer::get_snapshot_item(BlockID block,
 {
   if (block != block_id_) {
     co_return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+  }
+
+  {
+    auto blocked = blocked_items_.take();
+    if (blocked->contains(addrkey)) {
+      throw std::runtime_error("Blocked item accessed");
+    }
   }
 
   auto m = items_.take();
@@ -211,6 +219,12 @@ BlockSnapshotServer::setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
   else {
     it->second.push_back(entry);
   }
+}
+
+void
+BlockSnapshotServer::setup_ban_item(AddressAndKey const &addrkey)
+{
+  blocked_items_->insert(addrkey);
 }
 
 } // namespace hogd
