@@ -245,6 +245,9 @@ private:
     size_t path_size;
 
     // Used by branches and leaves.
+    // TODO: Should we be able to place values in extension nodes, too? For
+    // example, the [TwoLeavesAndOneBranch] test would produce a more efficient
+    // tree if we could do this.
     std::optional<std::string> value;
 
     // Used by branches and extensions.
