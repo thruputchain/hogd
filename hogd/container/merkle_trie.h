@@ -59,6 +59,16 @@ public:
     printf("----------\n\n");
   }
 
+  static std::string KeyToString(const Key &k)
+  {
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0');
+    for (std::byte b : k) {
+      oss << std::setw(2) << static_cast<int>(b);
+    }
+    return oss.str();
+  }
+
   // TODO: For all of the methods below, should they include a mutex as well (in
   // a pair)?
 
@@ -205,7 +215,11 @@ public:
   }
 
   // for_each executes func on each element.
-  template<typename F> void for_each(F func) { assert(false); }
+  template<typename F> void for_each(F func)
+  {
+    std::vector<std::byte> prefix;
+    Walk(root_, prefix, /*prefix_len=*/0, func);
+  }
 
   // for_each_parallel executes func in parallel on each element using a
   // WorkerPool.
@@ -285,16 +299,6 @@ private:
     return node;
   }
 
-  std::string KeyToString(const Key &k)
-  {
-    std::ostringstream oss;
-    oss << std::hex << std::setfill('0');
-    for (std::byte b : k) {
-      oss << std::setw(2) << static_cast<int>(b);
-    }
-    return oss.str();
-  }
-
   std::byte HexDigitAtIndex(const std::vector<std::byte> &vec, size_t idx)
   {
     std::byte digit = vec[idx / 2];
@@ -354,6 +358,51 @@ private:
       oss << std::setw(2) << static_cast<int>(ch);
     }
     return oss.str();
+  }
+
+  void AppendToPath(std::vector<std::byte> &cur_path, size_t cur_path_len,
+                    const std::vector<std::byte> &to_append,
+                    size_t to_append_len)
+  {
+    size_t offset = (to_append_len % 2 == 0) ? 0 : 1;
+    for (size_t i = 0; i < to_append_len; i++) {
+      std::byte digit = static_cast<std::byte>(to_append[(i + offset) / 2]);
+      if ((i + offset) % 2 == 0) {
+        digit >>= 4;
+      }
+      else {
+        digit &= static_cast<std::byte>(0x0F);
+      }
+
+      if (cur_path_len % 2 == 0) {
+        digit <<= 4;
+        cur_path.push_back(digit);
+      }
+      else {
+        cur_path.back() |= digit;
+      }
+      cur_path_len++;
+    }
+  }
+
+  void RemoveEndFromPath(std::vector<std::byte> &cur_path, size_t cur_path_len,
+                         size_t to_remove_len)
+  {
+    if (to_remove_len >= cur_path_len) {
+      cur_path.clear();
+    }
+
+    for (size_t i = 0; i < to_remove_len; i++) {
+      // Now remove the digit.
+      if (cur_path_len % 2 == 0) {
+        cur_path.pop_back();
+      }
+      else {
+        // We could clear the 4 bits in the last element, but there is no
+        // need as [cur_path_len] tells us these 4 bits are unused.
+      }
+      cur_path_len--;
+    }
   }
 
   void PrintHelper(Node *root)
@@ -532,6 +581,48 @@ private:
       prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
     }
     delete current_leaf;
+  }
+
+  template<typename F>
+  void Walk(Node *root, std::vector<std::byte> &prefix, size_t prefix_len,
+            F func)
+  {
+    // We should never call this function with a null node.
+    assert(root);
+
+    switch (root->type) {
+    case NodeType::kBranch:
+      if (root->value) {
+        assert((prefix_len % 2) == 0);
+
+        func({prefix, *root->value});
+      }
+      for (size_t i = 0; i < root->child.size(); i++) {
+        if (root->child[i]) {
+          std::byte digit = static_cast<std::byte>(i);
+
+          AppendToPath(prefix, prefix_len, {digit}, 1);
+          Walk(root->child[i], prefix, prefix_len + 1, func);
+          RemoveEndFromPath(prefix, prefix_len + 1, 1);
+        }
+      }
+      break;
+    case NodeType::kExtension:
+      assert(root->child[0]);
+
+      AppendToPath(prefix, prefix_len, root->path, root->path_size);
+      Walk(root->child[0], prefix, prefix_len + root->path_size, func);
+      RemoveEndFromPath(prefix, prefix_len + root->path_size, root->path_size);
+      break;
+    case NodeType::kLeaf:
+      assert(root->value);
+      assert((prefix_len % 2) == 0);
+
+      AppendToPath(prefix, prefix_len, root->path, root->path_size);
+      func({prefix, *root->value});
+      RemoveEndFromPath(prefix, prefix_len + root->path_size, root->path_size);
+      break;
+    }
   }
 
   Node *TraverseToBottom(Node *root, Node *prev_root,

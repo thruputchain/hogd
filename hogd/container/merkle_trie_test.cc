@@ -190,6 +190,47 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
   EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
 }
 
+namespace {
+
+void
+ForEachFunc(std::set<std::pair<std::vector<std::byte>, std::string>> &seen,
+            const std::pair<std::vector<std::byte>, std::string> &pair)
+{
+  seen.insert(pair);
+}
+
+} // namespace
+
+TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
+{
+  MerkleTrie trie;
+  std::set<std::pair<std::vector<std::byte>, std::string>> seen;
+  auto f = [&seen](const std::pair<std::vector<std::byte>, std::string> &pair) {
+    ForEachFunc(seen, pair);
+  };
+
+  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+  trie.for_each(f);
+  std::set<std::pair<std::vector<std::byte>, std::string>> expected = {
+      {key_a, value_a}};
+  EXPECT_EQ(seen, expected);
+
+  std::vector<std::byte> key_b = ByteVectorFromString("123456");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+  seen.clear();
+  expected.insert({{key_b, value_b}});
+  trie.for_each(f);
+
+  std::vector<std::byte> key_c = ByteVectorFromString("12ab");
+  std::string value_c = "hello three";
+  seen.clear();
+  expected.insert({{key_c, value_c}});
+  trie.insert(key_c, value_c);
+}
+
 // Hash a branch node. All child pointers are non-NULL.
 TEST(MerkleTrie, HashBranch)
 {
