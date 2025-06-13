@@ -297,7 +297,9 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
     // single-threaded anyway.
     DiskWriter snap_writer{*loglet_allocator_, dir_, std::move(path),
                            kMaxFileSize, 0};
-    snap_writer.init(begin_lsn); // start snap writer bg thread
+    // start snap writer bg thread; this also configures writer so that
+    // sync() at end of snapshotting writes a commit record for end_lsn - 1.
+    snap_writer.init(end_lsn - 1);
 
     auto add_item_to_snapshot = [&snap_writer, &begin_lsn, &end_lsn,
                                  &stats = perthread_stats](ItemHeader *item) {
