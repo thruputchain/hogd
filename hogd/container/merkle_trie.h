@@ -322,6 +322,7 @@ public:
           printf("done fixing (%s)\n", KeyToString(cur_path).c_str());
         }
 
+        branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
         Node *new_child = nullptr;
         if (num_branches == 1) {
           printf("Replace branch value with leaf, leaf path = %s\n",
@@ -338,25 +339,40 @@ public:
           printf("Remove branch node and move cur_path into existing child\n");
 
           Node *other_child = nullptr;
-          for (Node *child : branch->child) {
+          std::byte other_child_hex = std::byte{0x00};
+          for (size_t i = 0; i < branch->child.size(); i++) {
+            Node *child = branch->child[i];
             if (child) {
               other_child = child;
+              other_child_hex = static_cast<std::byte>(i);
               break;
             }
           }
           assert(other_child);
 
           if (other_child->type == NodeType::kBranch) {
+            printf("Bad!\n");
             new_child = CreateExtension();
+            AppendToPath(cur_path, cur_path_len, {branch_hex}, 1);
+            cur_path_len++;
             new_child->path = cur_path;
             new_child->path_size = cur_path_len;
             new_child->child[0] = other_child;
           }
           else {
+            printf("Good! other_child = %p, cur_path = %s, cur_path_len = %zu, "
+                   "want to append %s, len = %zu\n",
+                   other_child, KeyToString(cur_path).c_str(), cur_path_len,
+                   KeyToString(other_child->path).c_str(),
+                   other_child->path_size);
             // This correctly handles the case where [other_child->path_size] is
             // odd.
+            AppendToPath(cur_path, cur_path_len, {other_child_hex}, 1);
+            cur_path_len++;
+            printf("ok... %s\n", KeyToString(cur_path).c_str());
             AppendToPath(cur_path, cur_path_len, other_child->path,
                          other_child->path_size);
+            printf("another append, %s\n", KeyToString(cur_path).c_str());
             other_child->path = cur_path;
             other_child->path_size += cur_path_len;
 
@@ -367,12 +383,6 @@ public:
           delete existing_key;
         }
 
-        /*
-        if (new_child->path_size % 2 == 1) {
-          new_child->path[0] &= std::byte{0x0F};
-          new_child->path[0] |= (branch_before_branch_hex << 4);
-        }
-        */
         branch_before_branch
             ->child[std::to_integer<size_t>(branch_before_branch_hex)] =
             new_child;
@@ -585,6 +595,7 @@ private:
                     const std::vector<std::byte> &to_append,
                     size_t to_append_len)
   {
+    size_t appended_so_far = 0;
     size_t offset = (to_append_len % 2 == 0) ? 0 : 1;
     for (size_t i = 0; i < to_append_len; i++) {
       std::byte digit = static_cast<std::byte>(to_append[(i + offset) / 2]);
@@ -595,14 +606,14 @@ private:
         digit &= static_cast<std::byte>(0x0F);
       }
 
-      if (cur_path_len % 2 == 0) {
+      if (appended_so_far % 2 == 0) {
         digit <<= 4;
         cur_path.push_back(digit);
       }
       else {
         cur_path.back() |= digit;
       }
-      cur_path_len++;
+      appended_so_far++;
     }
   }
 

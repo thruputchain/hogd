@@ -86,6 +86,22 @@ TEST(MerkleTrie, TwoLeavesFind)
   EXPECT_EQ(trie.find(ByteVectorFromString("123456")), nullptr);
 }
 
+TEST(MerkleTrie, TwoLeavesRemove)
+{
+  MerkleTrie trie;
+
+  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+
+  std::vector<std::byte> key_b = ByteVectorFromString("1223");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+  trie.Print();
+  trie.remove(key_b);
+  trie.Print();
+}
+
 TEST(MerkleTrie, BranchAndLeaf)
 {
   MerkleTrie trie;
