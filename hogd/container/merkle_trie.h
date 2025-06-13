@@ -197,7 +197,7 @@ public:
     return kEmpty;
   }
 
-  size_t remove(const Key &key)
+  size_t remove(const Key &k)
   {
     assert(false);
 
@@ -224,13 +224,50 @@ public:
     //    d) If the 1 other branch is a branch, then remove all of the nodes,
     //    replace them with an extension node that has the built-up path, and
     //    then place the "1 other branch" beneath this extension node.
+    Node *existing_key = nullptr;
+    Node *branch = TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k,
+                                    /*idx=*/0, existing_key);
+    if (!existing_key) {
+      return 0;
+    }
+    assert(branch);
+    assert(branch->type == NodeType::kBranch);
+
+    if (existing_key == branch) {
+      // The key is in a branch.
+
+      assert(branch->value);
+      branch->value = std::nullopt;
+    }
+    else {
+      size_t num_branches = 0;
+      for (Node *child : branch->child) {
+        if (child) {
+          num_branches++;
+        }
+      }
+      assert(num_branches >= 2);
+
+      if (num_branches > 2) {
+        // Just remove the leaf node from the branch.
+
+        for (size_t i = 0; i < branch->child.size(); i++) {
+          if (branch->child[i] == existing_node) {
+            branch->child[i] = nullptr;
+          }
+        }
+        delete existing_key;
+      }
+      else {
+      }
+    }
 
     size_--;
     // TODO: Optimize this to only recompute the hashes on paths that were
     // changed. Note that paths **that do not correspond to the key above**
     // could also be changed!
     RegenerateAllHashes(root_);
-    return 0;
+    return 1;
   }
 
   // TODO: Add another [remove] function that also takes a mutex as a parameter.
