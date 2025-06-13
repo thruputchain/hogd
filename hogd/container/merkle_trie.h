@@ -314,6 +314,13 @@ public:
           printf("while D\n");
         }
         printf("Reached next branch %p\n", cur);
+        if (cur_path_len % 2 == 1) {
+          printf("in here to fix (%s), branch_before_branch_hex = %02x\n",
+                 KeyToString(cur_path).c_str(), branch_before_branch_hex);
+          cur_path = FixOddLengthPath(cur_path, branch_before_branch_hex);
+          printf("ok...\n");
+          printf("done fixing (%s)\n", KeyToString(cur_path).c_str());
+        }
 
         Node *new_child = nullptr;
         if (num_branches == 1) {
@@ -346,6 +353,8 @@ public:
             new_child->child[0] = other_child;
           }
           else {
+            // This correctly handles the case where [other_child->path_size] is
+            // odd.
             AppendToPath(cur_path, cur_path_len, other_child->path,
                          other_child->path_size);
             other_child->path = cur_path;
@@ -357,16 +366,23 @@ public:
           delete branch;
           delete existing_key;
         }
+
+        /*
+        if (new_child->path_size % 2 == 1) {
+          new_child->path[0] &= std::byte{0x0F};
+          new_child->path[0] |= (branch_before_branch_hex << 4);
+        }
+        */
         branch_before_branch
             ->child[std::to_integer<size_t>(branch_before_branch_hex)] =
             new_child;
-        return 0;
       }
       else {
         // If [branch_before_branch] is a nullptr, then [branch] must be the
         // root node, because the root node does not have a parent. The root
         // node also never has a value in it.
         assert(branch == root_);
+        branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
         delete existing_key;
       }
     }
@@ -487,6 +503,20 @@ private:
     return digit;
   }
 
+  void SetHexDigitAtIndex(std::vector<std::byte> &vec, size_t idx,
+                          std::byte hex)
+  {
+    hex &= std::byte{0x0F};
+    if (idx % 2 == 0) {
+      vec[idx / 2] &= std::byte{0x0F};
+      vec[idx / 2] |= (hex << 4);
+    }
+    else {
+      vec[idx / 2] &= std::byte{0xF0};
+      vec[idx / 2] |= hex;
+    }
+  }
+
   bool HexRangesEqual(const std::vector<std::byte> &a, size_t a_start,
                       size_t a_end, const std::vector<std::byte> &b,
                       size_t b_start, size_t b_end)
@@ -536,7 +566,21 @@ private:
     return oss.str();
   }
 
-  // TODO: Fix when both have odd lengths.
+  std::vector<std::byte> FixOddLengthPath(const std::vector<std::byte> &path,
+                                          std::byte prefix)
+  {
+    std::vector<std::byte> ret(path.size(), std::byte{0});
+    SetHexDigitAtIndex(ret, 0, prefix);
+    printf("here blah %s\n", KeyToString(ret).c_str());
+
+    for (size_t i = 0; i < path.size() * 2 - 1; i++) {
+      std::byte to_copy = HexDigitAtIndex(path, i);
+      SetHexDigitAtIndex(ret, i + 1, to_copy);
+      printf("here blah %s\n", KeyToString(ret).c_str());
+    }
+    return ret;
+  }
+
   void AppendToPath(std::vector<std::byte> &cur_path, size_t cur_path_len,
                     const std::vector<std::byte> &to_append,
                     size_t to_append_len)
