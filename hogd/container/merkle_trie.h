@@ -98,7 +98,6 @@ public:
 
   bool insert(const Key &k, T &&obj)
   {
-    // TODO: Optimize with extension nodes.
     size_t idx = 0;
     Node *existing_key = nullptr;
     Node *next = TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k, idx,
@@ -465,7 +464,7 @@ private:
     size_t common_range_length =
         GetLongestCommonRangeLength(key_a, offset + 1, key_b, offset + 1);
     size_t diverge_idx = offset + 1 + common_range_length;
-    if (common_range_length > 1) {
+    if (common_range_length) {
       Node *new_extension_node = CreateExtension();
       new_extension_node->path = std::vector(key_a.begin() + (offset + 1) / 2,
                                              key_a.begin() + diverge_idx / 2);
@@ -492,52 +491,41 @@ private:
     const std::string &longer_value =
         key_a.size() <= key_b.size() ? *current_leaf->value : obj;
 
-    size_t i;
-    // TODO: We probably no longer need a for loop here.
-    for (i = 0; i < shorter.size() * 2; i++) {
-      std::byte shorter_digit = HexDigitAtIndex(shorter, i + offset);
-      std::byte longer_digit = HexDigitAtIndex(longer, i + offset);
-      if (shorter_digit == longer_digit) {
-        // The digits match, so add a branch node.
-        Node *branch = CreateBranch();
-        prev_branch->child[std::to_integer<size_t>(shorter_digit)] = branch;
-        prev_branch = branch;
-      }
-      else {
-        // The digits do not match, so create two leaf nodes.
-
-        // Shorter key's leaf node.
-        Node *leaf = CreateLeaf();
-        leaf->path =
-            std::vector(shorter.begin() + ((i + offset) / 2), shorter.end());
-        leaf->path_size = (shorter.size() * 2) + idx - 1 - (i + offset);
-        leaf->value = std::move(shorter_value);
-        prev_branch->child[std::to_integer<size_t>(shorter_digit)] = leaf;
-
-        // Longer key's leaf node.
-        leaf = CreateLeaf();
-        leaf->path =
-            std::vector(longer.begin() + ((i + offset) / 2), longer.end());
-        leaf->path_size = (longer.size() * 2) + idx - 1 - (i + offset);
-        leaf->value = std::move(longer_value);
-        prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
-        break;
-      }
-    }
-    if (i >= shorter.size() * 2) {
-      // The shorter key is entirely contained within the larger key. Thus,
-      // we should add the shorter key's value to the last branch node
-      // created, and then we should add the longer key and its value to a
-      // leaf node of that branch.
+    if (shorter.empty()) {
+      // The shorter key is entirely contained within the larger key. Thus, we
+      // should add the shorter key's value to the last branch node created, and
+      // then we should add the longer key and its value to a leaf node of that
+      // branch.
       prev_branch->value = std::move(shorter_value);
 
       // Longer key's leaf node.
       Node *leaf = CreateLeaf();
       leaf->path =
-          std::vector(longer.begin() + ((i + offset + 1) / 2), longer.end());
-      leaf->path_size = (longer.size() * 2) + idx - (i + offset + 1);
+          std::vector(longer.begin() + ((offset + 1) / 2), longer.end());
+      leaf->path_size = (longer.size() * 2) + idx - (offset + 1);
       leaf->value = std::move(longer_value);
-      std::byte longer_digit = HexDigitAtIndex(longer, i);
+      std::byte longer_digit = HexDigitAtIndex(longer, 0);
+      prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
+    }
+    else {
+      std::byte shorter_digit = HexDigitAtIndex(shorter, offset);
+      std::byte longer_digit = HexDigitAtIndex(longer, offset);
+      assert(shorter_digit != longer_digit);
+
+      // The digits do not match, so create two leaf nodes.
+
+      // Shorter key's leaf node.
+      Node *leaf = CreateLeaf();
+      leaf->path = std::vector(shorter.begin() + (offset / 2), shorter.end());
+      leaf->path_size = (shorter.size() * 2) + idx - 1 - offset;
+      leaf->value = std::move(shorter_value);
+      prev_branch->child[std::to_integer<size_t>(shorter_digit)] = leaf;
+
+      // Longer key's leaf node.
+      leaf = CreateLeaf();
+      leaf->path = std::vector(longer.begin() + (offset / 2), longer.end());
+      leaf->path_size = (longer.size() * 2) + idx - 1 - offset;
+      leaf->value = std::move(longer_value);
       prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
     }
     delete current_leaf;
@@ -554,7 +542,6 @@ private:
     // hex character we are looking at, so we reach the end of the byte array
     // when [idx >= path.size() * 2].
     if (idx >= path.size() * 2) {
-      // TODO: Find a way to indicate whether [value] is empty or not.
       if (root->type == NodeType::kBranch && !root->value->empty()) {
         existing_key = root;
       }

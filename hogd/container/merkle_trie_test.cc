@@ -119,7 +119,6 @@ TEST(MerkleTrie, BranchAndLeafFind)
   EXPECT_EQ(*trie.find(key_b), value_b);
   EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
   EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
-  trie.Print();
 }
 
 TEST(MerkleTrie, DoNotFindBranchValue)
@@ -144,18 +143,22 @@ TEST(MerkleTrie, DoNotFindBranchValue)
 TEST(MerkleTrie, TwoLeavesAndOneBranch)
 {
   MerkleTrie trie;
+  trie.Print();
 
   std::vector<std::byte> key = ByteVectorFromString("1234");
   std::string value = "hello";
   trie.insert(key, value);
+  trie.Print();
 
   key = ByteVectorFromString("123456");
   value = "hello again";
   trie.insert(key, value);
+  trie.Print();
 
   key = ByteVectorFromString("12ab");
   value = "hello three";
   trie.insert(key, value);
+  trie.Print();
 }
 
 TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
