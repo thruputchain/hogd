@@ -178,12 +178,12 @@ public:
         next->child[branch_idx] = leaf;
       }
     }
+
+    size_++;
     // TODO: Optimize this to only recompute the hashes on paths that were
     // changed. Note that paths **that do not correspond to the key above**
     // could also be changed!
     RegenerateAllHashes(root_);
-    size_++;
-
     return true;
   }
 
@@ -200,6 +200,36 @@ public:
   size_t remove(const Key &key)
   {
     assert(false);
+
+    // If removing a value from a branch, do nothing.
+    //
+    // If removing a value in a leaf node, need to look at the parent, which is
+    // always a branch node.
+    // 1. If the branch node has 2+ *other* branches, just clear the current
+    //    branch and then we are done.
+    //
+    // 2. If the branch node only has 1 *other* branch, we can optimize by
+    //    removing the branch node. This is slightly tricky.
+    //
+    //    a) Keep going up the tree until we hit another branch node. Build up
+    //    the path as we go up the tree. Specifically, the parent of the branch
+    //    may be an extension node that we can remove, too.
+    //
+    //    b) If the 1 other branch is a leaf, then remove all of the nodes and
+    //    add the built-up path to the leaf.
+    //
+    //    c) If the 1 other branch is an extension, then remove all of the nodes
+    //    and add the built-up path to the extension.
+    //
+    //    d) If the 1 other branch is a branch, then remove all of the nodes,
+    //    replace them with an extension node that has the built-up path, and
+    //    then place the "1 other branch" beneath this extension node.
+
+    size_--;
+    // TODO: Optimize this to only recompute the hashes on paths that were
+    // changed. Note that paths **that do not correspond to the key above**
+    // could also be changed!
+    RegenerateAllHashes(root_);
     return 0;
   }
 
