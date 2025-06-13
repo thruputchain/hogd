@@ -13,6 +13,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
@@ -78,11 +79,14 @@ public:
     if (existing_key) {
       switch (existing_key->type) {
       case NodeType::kBranch:
-        return &existing_key->branch_value;
-        break;
       case NodeType::kLeaf:
-        return &existing_key->leaf_value;
+      {
+        // Get the [std::string] out of the [std::optional<std::string>] with
+        // the dereference operator.
+        std::string &value = *existing_key->value;
+        return &value;
         break;
+      }
       default:
         assert(false);
         return nullptr;
@@ -108,8 +112,8 @@ public:
     if (idx == k.size() * 2) {
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
-      assert(next->branch_value.empty());
-      next->branch_value = std::move(obj);
+      assert(next->value->empty());
+      next->value = std::move(obj);
       next->hash = GetNodeHash(*next);
     }
     else {
@@ -160,7 +164,7 @@ public:
         // node.
         leaf->leaf_path = std::vector(k.begin() + (idx + 1) / 2, k.end());
         leaf->leaf_path_size = (2 * k.size()) - idx - 1;
-        leaf->leaf_value = std::move(obj);
+        leaf->value = std::move(obj);
         leaf->hash = GetNodeHash(*leaf);
 
         next->branch_next[branch_idx] = leaf;
@@ -221,11 +225,13 @@ private:
     NodeType type;
     SHA256Hash hash;
 
+    // Used by branches and leaves.
+    std::optional<std::string> value;
+
     // TODO: Optimize the variables below with a union or different node types.
     // TODO: Optimize the vectors below--use something other than a vector. We
     // know that path lengths will never exceed 65 bytes.
 
-    std::string branch_value;
     // Branches. We branch on a hex value. There are 16 different hex values, so
     // we need 16 different branch slots.
     std::array<Node *, 16> branch_next;
@@ -253,7 +259,6 @@ private:
     // [leaf_path] must still match the hex character in its corresponding
     // position in the full key.
     size_t leaf_path_size;
-    std::string leaf_value;
   };
 
   std::string KeyToString(const Key &k)
@@ -335,7 +340,7 @@ private:
     switch (root->type) {
     case NodeType::kBranch:
       printf("Branch (%s, %p)\n", GetHashString(*root).c_str(), root);
-      printf("Value: [%s]\n", root->branch_value.c_str());
+      printf("Value: [%s]\n", root->value ? root->value->c_str() : "<empty>");
       for (size_t i = 0; i < root->branch_next.size(); i++) {
         if (root->branch_next[i]) {
           printf("%x: %s (%p)\n", static_cast<uint8_t>(i),
@@ -369,7 +374,7 @@ private:
       printf("Leaf (%s, %p)\n", GetHashString(*root).c_str(), root);
       printf("Path: %s\n", KeyToString(root->leaf_path).c_str());
       printf("Path Size: %zu\n", root->leaf_path_size);
-      printf("Value: [%s]\n", root->leaf_value.c_str());
+      printf("Value: [%s]\n", root->value ? root->value->c_str() : "<empty>");
       printf("\n");
       break;
     }
@@ -402,8 +407,7 @@ private:
 
     Node *new_branch_node = new Node;
     new_branch_node->type = NodeType::kBranch;
-    // TODO: Indicate this is empty.
-    new_branch_node->branch_value = "";
+    new_branch_node->value = std::nullopt;
     memset(new_branch_node->branch_next.data(), 0,
            new_branch_node->branch_next.size() *
                sizeof(new_branch_node->branch_next[0]));
@@ -431,7 +435,7 @@ private:
     new_leaf_node->leaf_path =
         std::vector(key_a.begin() + diverge_idx / 2, key_a.end());
     new_leaf_node->leaf_path_size = key_a.size() * 2 - idx - diverge_idx - 1;
-    new_leaf_node->leaf_value = std::move(obj);
+    new_leaf_node->value = std::move(obj);
 
     std::byte leaf_branch = HexDigitAtIndex(key_a, diverge_idx);
     new_branch_node->branch_next[std::to_integer<size_t>(leaf_branch)] =
@@ -464,8 +468,7 @@ private:
 
       Node *new_branch_node = new Node;
       new_branch_node->type = NodeType::kBranch;
-      // TODO: Indicate this is empty.
-      new_branch_node->branch_value = "";
+      new_branch_node->value = std::nullopt;
       memset(new_branch_node->branch_next.data(), 0,
              new_branch_node->branch_next.size() *
                  sizeof(new_branch_node->branch_next[0]));
@@ -480,10 +483,10 @@ private:
 
     const Key &shorter = key_a.size() <= key_b.size() ? key_a : key_b;
     const std::string &shorter_value =
-        key_a.size() <= key_b.size() ? obj : current_leaf->leaf_value;
+        key_a.size() <= key_b.size() ? obj : *current_leaf->value;
     const Key &longer = key_a.size() <= key_b.size() ? key_b : key_a;
     const std::string &longer_value =
-        key_a.size() <= key_b.size() ? current_leaf->leaf_value : obj;
+        key_a.size() <= key_b.size() ? *current_leaf->value : obj;
 
     size_t i;
     // TODO: We probably no longer need a for loop here.
@@ -494,8 +497,7 @@ private:
         // The digits match, so add a branch node.
         Node *branch = new Node;
         branch->type = NodeType::kBranch;
-        // TODO: Need some way to indicate [branch_value] is empty.
-        branch->branch_value = "";
+        branch->value = std::nullopt;
 
         memset(branch->branch_next.data(), 0,
                branch->branch_next.size() * sizeof(branch->branch_next[0]));
@@ -512,7 +514,7 @@ private:
         leaf->leaf_path =
             std::vector(shorter.begin() + ((i + offset) / 2), shorter.end());
         leaf->leaf_path_size = (shorter.size() * 2) + idx - 1 - (i + offset);
-        leaf->leaf_value = std::move(shorter_value);
+        leaf->value = std::move(shorter_value);
         prev_branch->branch_next[std::to_integer<size_t>(shorter_digit)] = leaf;
 
         // Longer key's leaf node.
@@ -521,7 +523,7 @@ private:
         leaf->leaf_path =
             std::vector(longer.begin() + ((i + offset) / 2), longer.end());
         leaf->leaf_path_size = (longer.size() * 2) + idx - 1 - (i + offset);
-        leaf->leaf_value = std::move(longer_value);
+        leaf->value = std::move(longer_value);
         prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] = leaf;
         break;
       }
@@ -531,7 +533,7 @@ private:
       // we should add the shorter key's value to the last branch node
       // created, and then we should add the longer key and its value to a
       // leaf node of that branch.
-      prev_branch->branch_value = std::move(shorter_value);
+      prev_branch->value = std::move(shorter_value);
 
       // Longer key's leaf node.
       Node *leaf = new Node;
@@ -539,7 +541,7 @@ private:
       leaf->leaf_path =
           std::vector(longer.begin() + ((i + offset + 1) / 2), longer.end());
       leaf->leaf_path_size = (longer.size() * 2) + idx - (i + offset + 1);
-      leaf->leaf_value = std::move(longer_value);
+      leaf->value = std::move(longer_value);
       std::byte longer_digit = HexDigitAtIndex(longer, i);
       prev_branch->branch_next[std::to_integer<size_t>(longer_digit)] = leaf;
     }
@@ -557,8 +559,8 @@ private:
     // hex character we are looking at, so we reach the end of the byte array
     // when [idx >= path.size() * 2].
     if (idx >= path.size() * 2) {
-      // TODO: Find a way to indicate whether [branch_value] is empty or not.
-      if (root->type == NodeType::kBranch && !root->branch_value.empty()) {
+      // TODO: Find a way to indicate whether [value] is empty or not.
+      if (root->type == NodeType::kBranch && !root->value->empty()) {
         existing_key = root;
       }
       return root;
@@ -660,8 +662,8 @@ private:
     switch (node.type) {
     case NodeType::kBranch:
     {
-      // Hash [branch_value] and **the hashes in** [branch_next].
-      std::transform(node.branch_value.begin(), node.branch_value.end(),
+      // Hash [value] and **the hashes in** [branch_next].
+      std::transform(node.value->begin(), node.value->end(),
                      std::back_inserter(to_hash), CastCharToByte);
       for (Node *child : node.branch_next) {
         if (child) {
@@ -694,12 +696,12 @@ private:
     }
     case NodeType::kLeaf:
     {
-      // Hash [leaf_path], [leaf_path_size], and [leaf_value].
+      // Hash [leaf_path], [leaf_path_size], and [value].
       to_hash.insert(to_hash.end(), node.leaf_path.begin(),
                      node.leaf_path.end());
       std::vector<std::byte> size_bytes = SizeToBytes(node.leaf_path_size);
       to_hash.insert(to_hash.end(), size_bytes.begin(), size_bytes.end());
-      std::transform(node.leaf_value.begin(), node.leaf_value.end(),
+      std::transform(node.value->begin(), node.value->end(),
                      std::back_inserter(to_hash), CastCharToByte);
       break;
     }
@@ -713,7 +715,7 @@ private:
     root_->type = NodeType::kBranch;
     memset(root_->branch_next.data(), 0,
            root_->branch_next.size() * sizeof(root_->branch_next[0]));
-    // TODO: Need some way to indicate [branch_value] is empty.
+    // TODO: Need some way to indicate [value] is empty.
     root_->hash = GetNodeHash(*root_);
   }
 

@@ -119,6 +119,26 @@ TEST(MerkleTrie, BranchAndLeafFind)
   EXPECT_EQ(*trie.find(key_b), value_b);
   EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
   EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
+  trie.Print();
+}
+
+TEST(MerkleTrie, DoNotFindBranchValue)
+{
+  MerkleTrie trie;
+
+  std::vector<std::byte> key_a = ByteVectorFromString("123456");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+
+  std::vector<std::byte> key_b = ByteVectorFromString("123478");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+
+  // "1234" maps to a branch node that has no value (i.e., [node->value] is
+  // [std::nullopt]). Check that we can properly detect this and return
+  // [nullptr] rather than mistakenly return an empty string or something
+  // similar.
+  EXPECT_EQ(trie.find(ByteVectorFromString("1234")), nullptr);
 }
 
 TEST(MerkleTrie, TwoLeavesAndOneBranch)
@@ -173,7 +193,7 @@ TEST(MerkleTrie, HashBranch)
   MerkleTrie::Node branch;
   branch.type = MerkleTrie::NodeType::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
-  branch.branch_value = "hello";
+  branch.value = "hello";
   std::vector<MerkleTrie::Node> children(16, MerkleTrie::Node{});
   for (size_t i = 0; i < children.size(); i++) {
     MerkleTrie::Node &child = children[i];
@@ -194,7 +214,7 @@ TEST(MerkleTrie, HashBranchSomeNullptr)
   MerkleTrie::Node branch;
   branch.type = MerkleTrie::NodeType::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
-  branch.branch_value = "hello";
+  branch.value = "hello";
   std::vector<MerkleTrie::Node> children(16, MerkleTrie::Node{});
   for (size_t i = 0; i < children.size(); i++) {
     if (i % 2) {
@@ -220,7 +240,7 @@ TEST(MerkleTrie, HashBranchAllNullptr)
   MerkleTrie::Node branch;
   branch.type = MerkleTrie::NodeType::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
-  branch.branch_value = "hello";
+  branch.value = "hello";
   memset(branch.branch_next.data(), 0,
          branch.branch_next.size() * sizeof(branch.branch_next[0]));
 
@@ -280,7 +300,7 @@ TEST(MerkleTrie, HashLeaf)
   leaf.leaf_path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
                     std::byte{0x03}};
   leaf.leaf_path_size = 8;
-  leaf.leaf_value = "hello";
+  leaf.value = "hello";
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(leaf);
   SHA256Hash expected = HashFromString(
