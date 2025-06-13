@@ -194,21 +194,15 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
       // ongoing snapshot, make sure the snapshot gets a copy of the item.
       // This must be done under the bucket lock because we must ensure the
       // snapshotter doesn't copy an old value for this key into the snapshot.
-      uint64_t old_lsn =
-          std::atomic_ref<uint64_t>((*bu)->lsn).load(std::memory_order_relaxed);
-      if (snap_end_lsn_ && old_lsn >= snap_begin_lsn_ &&
-          old_lsn < snap_end_lsn_)
-        snap_add_item_cb_(hash, *bu);
+      if (mutation_cb_)
+        mutation_cb_(*bu);
 
       // Is the item size unchanged? Update in place.
       if ((*bu)->get_value().size() == val.size()) {
         (*bu)->type = type;
         // Updating the LSN for update-in-place ensures that we don't
         // inadvertently forward this new value into an ongoing snapshot.
-        // bucket lock release is sufficient to ensure snapshotter sees the
-        // change.
-        std::atomic_ref<uint64_t>((*bu)->lsn)
-            .store(new_lsn, std::memory_order_relaxed);
+        (*bu)->lsn = new_lsn;
         std::ranges::copy(val, (*bu)->get_value().begin());
         allocator_.free<true>(item);
         return {};
@@ -245,15 +239,8 @@ ScalableMap::remove(std::span<const std::byte> key)
     if ((*bu)->get_key() == key) {
       // See comment in put(). Forwards the item to an ongoing snapshot
       // that should include it before removing it.
-      uint64_t old_lsn =
-          std::atomic_ref<uint64_t>((*bu)->lsn).load(std::memory_order_relaxed);
-      if (snap_end_lsn_ && old_lsn >= snap_begin_lsn_ &&
-          old_lsn < snap_end_lsn_)
-        snap_add_item_cb_(hash, *bu);
-
-      // Don't need to update the lsn in the old record because the tombstone
-      // storage updated in unlink guarantees the snapshotter will skip the
-      // item, and one can't this copy of the item twice.
+      if (mutation_cb_)
+        mutation_cb_(*bu);
 
       unlink(bu);
       counter_dec(cnt);
@@ -406,19 +393,11 @@ ScalableMap::modify_locked(
 }
 
 void
-ScalableMap::register_in_progress_snapshot(
-    uint64_t begin_lsn, uint64_t end_lsn,
-    std::function<void(uint64_t, ItemHeader *)> add_item_cb)
+ScalableMap::register_mutation_cb(std::function<void(ItemHeader *)> cb)
 {
   std::vector<std::unique_lock<std::mutex>> locks{mutexes_.begin(),
                                                   mutexes_.end()};
-
-  snap_begin_lsn_ = begin_lsn;
-  snap_end_lsn_ = end_lsn;
-
-  snap_add_item_cb_ = std::move(add_item_cb);
-  debug("Registered snapshot range as {} to {}", snap_begin_lsn_,
-        snap_end_lsn_);
+  mutation_cb_ = std::move(cb);
 }
 
 } // namespace hogd

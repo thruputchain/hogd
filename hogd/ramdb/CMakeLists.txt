@@ -7,7 +7,6 @@ add_library(
   disk_writer.cc
   item_allocator.cc
   loglet.cc
-  snapshotter.cc
   scalable_map.cc
 )
 target_link_libraries(
