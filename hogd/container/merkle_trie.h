@@ -225,6 +225,10 @@ private:
     NodeType type;
     SHA256Hash hash;
 
+    // TODO: Optimize the variables below with a union or different node types.
+    // TODO: Optimize the vectors below--use something other than a vector. We
+    // know that path lengths will never exceed 65 bytes.
+
     // Used by extensions and leaves.
     std::vector<std::byte> path;
     // Used by extensions and leaves.
@@ -244,10 +248,6 @@ private:
 
     // Used by branches and leaves.
     std::optional<std::string> value;
-
-    // TODO: Optimize the variables below with a union or different node types.
-    // TODO: Optimize the vectors below--use something other than a vector. We
-    // know that path lengths will never exceed 65 bytes.
 
     // Used by branches and extensions.
     //
