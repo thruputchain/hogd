@@ -278,8 +278,18 @@ StorageDeltaBatchBuilder::add_delta(AddressAndKey const &addrkey,
 {
   if (addrkey.key.key_type() ==
       StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
-    assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-    if (from_xdr(delta.nnint().add_value) > 0) {
+    assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd ||
+           delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+
+    int128_t add_value = [&] {
+      if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
+        return from_xdr(delta.nnint().add_value);
+      }
+      assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+      return from_xdr(delta.nnint_add());
+    }();
+
+    if (add_value > 0) {
       positive_storage_deltas_.push_back(FlaggedStorageDelta{.addrkey = addrkey,
                                                              .delta = delta,
                                                              .flags = flags});

@@ -78,7 +78,9 @@ make_nnint_delta(int128_t set, int128_t add)
   return delta;
 };
 
-auto make_nnint_add_delta(int128_t add) {
+auto
+make_nnint_add_delta(int128_t add)
+{
   StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
   delta.nnint_add() = to_xdr(add);
   return delta;
@@ -1382,8 +1384,10 @@ TEST_P(DeltaManagerTest, TypeChangeCostUpgrade)
   EXPECT_TRUE(pool.run_test(experiment));
 }
 
-TEST_P(DeltaManagerTest, NNIntAdd) {
-  // NNIntAdd should not conflict with NNIntSetAdd with the correct set base value
+TEST_P(DeltaManagerTest, NNIntAdd)
+{
+  // NNIntAdd should not conflict with NNIntSetAdd with the correct set base
+  // value
 
   InvalidStateFlag invalid_state_flag;
   auto committed_item =
@@ -1397,7 +1401,7 @@ TEST_P(DeltaManagerTest, NNIntAdd) {
             return std::make_tuple(StorageItemDeltaManager(committed_item,
                                                            &invalid_state_flag,
                                                            mode_, &cost_model),
-                                                           int128_t{0});
+                                   int128_t{0});
           },
           [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
              int128_t &net_storage_cost) {
@@ -1408,7 +1412,7 @@ TEST_P(DeltaManagerTest, NNIntAdd) {
                 [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
                    int128_t &net_storage_cost) -> model::Async {
                   return commit_delta_workflow(set, make_nnint_add_delta(10),
-                                               item, net_storage_cost,true);
+                                               item, net_storage_cost, true);
                 },
                 item, net_storage_cost);
 
@@ -1430,15 +1434,15 @@ TEST_P(DeltaManagerTest, NNIntAdd) {
 
             return actions;
           },
-          [](model::ActionResult res,
-                        StorageItemDeltaManager &item,
-                        int128_t &net_storage_cost) -> bool {
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
             if (res == model::ActionResult::kTimeout) {
               return false;
             }
 
             auto snapshot = item.get_post_close_block_item();
-            if (!snapshot || snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+            if (!snapshot ||
+                snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
               return false;
             }
 

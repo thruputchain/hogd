@@ -47,7 +47,7 @@ public:
   SyscallStatus<void> validate() const;
   constexpr static ItemViewType kItemType = ItemViewType::kNNInt;
 
-  int128_t base_value_;
+  std::optional<int128_t> base_value_;
   int128_t add_value_;
 };
 

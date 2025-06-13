@@ -113,6 +113,8 @@ public:
   SystemStatus<SyscallStatus<void>>
   set_nnint(StorageKeyContractData const &storage_key, int128_t set_value,
             int128_t add_value);
+  SystemStatus<SyscallStatus<void>>
+  add_nnint(StorageKeyContractData const &storage_key, int128_t add_value);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
@@ -126,7 +128,7 @@ public:
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
-  SystemStatus<int128_t>
+  SystemStatus<SyscallStatus<int128_t>>
   get_native_token_balance(ContractAddress const &contract_address);
   SystemStatus<SyscallStatus<void>>
   modify_native_token_balance(ContractAddress const &contract_address,

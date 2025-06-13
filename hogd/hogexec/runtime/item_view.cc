@@ -38,6 +38,14 @@ make_nnint128_set_add(int128_t set, int128_t add)
   return out;
 }
 
+StorageDelta
+make_nnint128_add(int128_t add)
+{
+  StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+  out.nnint_add() = to_xdr(add);
+  return out;
+}
+
 } // namespace
 
 std::optional<StorageDelta>
@@ -59,7 +67,10 @@ BytestringItem::get_delta() const
 StorageDelta
 NNIntItem::get_delta() const
 {
-  return make_nnint128_set_add(base_value_, add_value_);
+  if (base_value_.has_value()) {
+    return make_nnint128_set_add(base_value_.value(), add_value_);
+  }
+  return make_nnint128_add(add_value_);
 }
 
 SyscallStatus<void>
@@ -79,19 +90,21 @@ NNIntItem::validate() const
     // by this item is always valid.
     return {};
   }
+  if (!base_value_.has_value()) {
+    return {};
+  }
 
-  if (base_value_ < 0) {
+  if (base_value_.value() < 0) {
     // cannot subtract from a value that is already negative
     return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
 
-  if (base_value_ >= 0) {
+  if (base_value_.value() >= 0) {
     // base_value_ + add_value_ cannot overflow here,
     // because base_value_ and add_value_ have opposite signs
-    if (base_value_ + add_value_ < 0) {
+    if (*base_value_ + add_value_ < 0) {
       // This would be always rejected by the delta handling logic
-      // in the storage server.  Putting this check here
-      // may simplify some downstream logic.
+      // in the storage server.
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
   }

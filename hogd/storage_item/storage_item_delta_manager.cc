@@ -88,8 +88,7 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
       return committed_item->nnint();
     }(committed_item_.get());
 
-    return try_reserve_nnint_set_add(base_value,
-                                     from_xdr(delta.nnint_add()));
+    return try_reserve_nnint_set_add(base_value, from_xdr(delta.nnint_add()));
   }
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     return try_reserve_nnint_set_add(from_xdr(delta.nnint().set_value),
@@ -424,7 +423,14 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
     // trying to upgrade one reservation lock to another
     auto const &prev_bounds_lock =
         prev_typeclass_lock.extra_lock_data.nnint_bounds_lock();
-    int128_t new_add_amount = from_xdr(delta.nnint().add_value);
+    int128_t new_add_amount = [&] {
+      if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
+        return from_xdr(delta.nnint().add_value);
+      }
+      assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+      return from_xdr(delta.nnint_add());
+    }();
+
     NNIntBoundsLock req_bounds_lock{
         .add_amount = to_xdr(
             std::max(new_add_amount, from_xdr(prev_bounds_lock.add_amount))),
