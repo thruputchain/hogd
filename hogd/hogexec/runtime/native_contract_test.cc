@@ -311,4 +311,63 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   ASSERT_TRUE(res.result_);
 }
 
+TEST_F(NativeContractTest, LazyLoadingNNInt)
+{
+  // Test to verify that items are loaded lazily
+  NativeContractBuilder builder;
+  ContractAddress address{};
+  StorageKeyContractData bad_key{};
+  StorageKey bad_full_key(StorageKeyType::kStorageKeyTypeContractData);
+  bad_full_key.contract_data_key() = bad_key;
+
+  builder.add(0, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+    auto r = handler.add_nnint(bad_key, 100);
+    if (!r.has_value() || !r.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    auto r2 = handler.add_nnint(bad_key, -200);
+    if (!r2.has_value() || !r2.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    return {};
+  });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+
+  runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() = 0;
+
+  snapshot_server_.setup_create_contract(contract);
+  snapshot_server_.setup_create_deployment(address, sha256(contract));
+  snapshot_server_.setup_ban_item(
+      AddressAndKey{.address = address, .key = bad_full_key});
+
+  SystemCallHandler handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      {
+                          .invoked_address = address,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              },
+      },
+      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
+      ProposalModeData{}, runtime_context_);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.result_);
+}
+
 } // namespace hogd
