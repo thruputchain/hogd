@@ -79,7 +79,8 @@ create_db(const std::string &path, size_t heap_size, int bucket_order)
 } // namespace
 
 DBStatus<std::unique_ptr<Database>>
-Database::open(const std::string &path, size_t heap_size, int bucket_order)
+Database::open_internal(const std::string &path, std::optional<uint64_t> lsn,
+                        size_t heap_size, int bucket_order)
 {
   DBStatus<std::unique_ptr<Database>> ret =
       create_db(path, heap_size, bucket_order);
@@ -88,41 +89,24 @@ Database::open(const std::string &path, size_t heap_size, int bucket_order)
   std::unique_ptr<Database> db = std::move(ret.value());
   db->pool_.adjust_workers(active_cores(db->pool_));
 
-  // load all the LSNs that are available and valid.
   DiskReader r(*db->loglet_allocator_, db->map_);
-  DBStatus<uint64_t> lsn = r.load(db->dir_);
-  if (!lsn) {
-    error("failed to load database: {}", lsn.error());
-    return lsn.error();
-  }
-  if (*lsn == 0)
-    debug("no existing database found; creating a new database.");
-  else
-    debug("loaded up to LSN {}, {} items", *lsn, db->map_.size());
-  db->disk_writer_.init(*lsn);
-  return db;
-}
-
-DBStatus<std::unique_ptr<Database>>
-Database::open_lsn(const std::string &path, uint64_t lsn, size_t heap_size,
-                   int bucket_order)
-{
-  DBStatus<std::unique_ptr<Database>> ret =
-      create_db(path, heap_size, bucket_order);
-  if (!ret)
-    return ret.error();
-  std::unique_ptr<Database> db = std::move(ret.value());
-  db->pool_.adjust_workers(active_cores(db->pool_));
-
-  // load up to a specific LSN.
-  DiskReader r(*db->loglet_allocator_, db->map_);
+  // load up to a specific LSN or everything if no lsn limit given.
   DBStatus<uint64_t> load_ret = r.load(db->dir_, lsn);
   if (!load_ret) {
     error("failed to load database: {}", load_ret.error());
     return load_ret.error();
   }
-  assert(*load_ret == lsn);
-  db->disk_writer_.init(lsn);
+
+  if (lsn && *load_ret != *lsn) {
+    error("failed to recovery up through specified lsn");
+    return DBError{DBCode::kCorruption};
+  }
+
+  if (*load_ret == 0)
+    debug("no existing database found; creating a new database.");
+
+  debug("loaded up to LSN {}, {} items", *lsn, db->map_.size());
+  db->disk_writer_.init(*load_ret);
   return db;
 }
 

@@ -155,7 +155,25 @@ private:
 
   // background_worker performs periodic background work.
   void background_worker(const std::stop_token &stoken);
+
+  static DBStatus<std::unique_ptr<Database>>
+  open_internal(const std::string &path, std::optional<uint64_t> lsn,
+                size_t heap_size, int bucket_order);
 };
+
+inline DBStatus<std::unique_ptr<Database>>
+Database::open(const std::string &path, size_t heap_size, int bucket_order)
+{
+  return open_internal(path, std::nullopt, heap_size, bucket_order);
+}
+
+// open_lsn opens a database at path and loads only up to a specific LSN.
+inline DBStatus<std::unique_ptr<Database>>
+Database::open_lsn(const std::string &path, uint64_t lsn, size_t heap_size,
+                   int bucket_order)
+{
+  return open_internal(path, {lsn}, heap_size, bucket_order);
+}
 
 inline DBStatus<DBItem>
 Database::get(std::span<const std::byte> key)
