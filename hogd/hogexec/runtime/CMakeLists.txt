@@ -105,6 +105,7 @@ target_link_libraries(
   runtime_test_util
   db_interface
   storage_cost
+  model_checker
   GTest::gtest
 )
 gtest_discover_tests(runtime_test)

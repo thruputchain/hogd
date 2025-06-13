@@ -333,6 +333,14 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     return {};
   });
 
+  builder.add(1, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+    auto r = handler.set_nnint(bad_key, 100, 200);
+    if (!r.has_value() || !r.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    return {};
+  });
+
   auto native_contract = builder.build();
 
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -350,24 +358,46 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   snapshot_server_.setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
-  SystemCallHandler handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      {
-                          .invoked_address = address,
-                          .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
-                          .calldata = {},
-                      },
-              },
-      },
-      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
-      ProposalModeData{}, runtime_context_);
+  {
+    SystemCallHandler handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        {
+                            .invoked_address = address,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = {},
+                        },
+                },
+        },
+        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
+        ProposalModeData{}, runtime_context_);
 
-  auto res = handler.root_invoke();
-  ASSERT_TRUE(res.result_);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.result_);
+  }
+  {
+    SystemCallHandler handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        {
+                            .invoked_address = address,
+                            .entrypoint = entrypoint_from_method_id(1),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = {},
+                        },
+                },
+        },
+        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 1),
+        ProposalModeData{}, runtime_context_);
+
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.result_);
+  }
 }
 
 } // namespace hogd
