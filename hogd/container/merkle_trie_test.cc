@@ -199,7 +199,7 @@ TEST(MerkleTrie, HashBranch)
     MerkleTrie::Node &child = children[i];
     size_t digit = i % 10;
     child.hash = HashFromString(std::string(64, '0' + digit));
-    branch.branch_next[i] = &child;
+    branch.child[i] = &child;
   }
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
@@ -221,10 +221,10 @@ TEST(MerkleTrie, HashBranchSomeNullptr)
       MerkleTrie::Node &child = children[i];
       size_t digit = i % 10;
       child.hash = HashFromString(std::string(64, '0' + digit));
-      branch.branch_next[i] = &child;
+      branch.child[i] = &child;
     }
     else {
-      branch.branch_next[i] = nullptr;
+      branch.child[i] = nullptr;
     }
   }
 
@@ -241,8 +241,7 @@ TEST(MerkleTrie, HashBranchAllNullptr)
   branch.type = MerkleTrie::NodeType::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  memset(branch.branch_next.data(), 0,
-         branch.branch_next.size() * sizeof(branch.branch_next[0]));
+  memset(branch.child.data(), 0, branch.child.size() * sizeof(branch.child[0]));
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
   SHA256Hash expected = HashFromString(
@@ -257,14 +256,14 @@ TEST(MerkleTrie, HashExtension)
   extension.type = MerkleTrie::NodeType::kExtension;
   memset(extension.hash.data(), 0,
          extension.hash.size() * sizeof(extension.hash[0]));
-  extension.extension_path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
-                              std::byte{0x03}};
-  extension.extension_path_size = 8;
+  extension.path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
+                    std::byte{0x03}};
+  extension.path_size = 8;
 
-  static MerkleTrie::Node extension_key{
+  static MerkleTrie::Node child{
       .hash = HashFromString(
           "1111111111111111111111111111111111111111111111111111111111111111")};
-  extension.extension_key = &extension_key;
+  extension.child[0] = &child;
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(extension);
   SHA256Hash expected = HashFromString(
@@ -279,11 +278,11 @@ TEST(MerkleTrie, HashExtensionNullptr)
   extension.type = MerkleTrie::NodeType::kExtension;
   memset(extension.hash.data(), 0,
          extension.hash.size() * sizeof(extension.hash[0]));
-  extension.extension_path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
-                              std::byte{0x03}};
-  extension.extension_path_size = 8;
+  extension.path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
+                    std::byte{0x03}};
+  extension.path_size = 8;
 
-  extension.extension_key = nullptr;
+  extension.child[0] = nullptr;
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(extension);
   SHA256Hash expected = HashFromString(
@@ -297,9 +296,9 @@ TEST(MerkleTrie, HashLeaf)
   MerkleTrie::Node leaf;
   leaf.type = MerkleTrie::NodeType::kLeaf;
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
-  leaf.leaf_path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
-                    std::byte{0x03}};
-  leaf.leaf_path_size = 8;
+  leaf.path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
+               std::byte{0x03}};
+  leaf.path_size = 8;
   leaf.value = "hello";
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(leaf);
