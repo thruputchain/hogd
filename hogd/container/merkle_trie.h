@@ -83,9 +83,14 @@ public:
   std::string *find(const Key &k)
   {
     size_t idx = 0;
+    std::byte branch_hex = std::byte(0x00);
     Node *existing_key = nullptr;
-    TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k, idx,
-                     existing_key);
+    Node *branch_before_branch = nullptr;
+    std::byte branch_before_branch_hex = std::byte(0x00);
+    TraverseToBottom(root_, /*prev_root=*/nullptr, /*last_branch_seen=*/nullptr,
+                     /*last_branch_hex_seen=*/std::byte(0x00),
+                     /*path=*/k, idx, branch_hex, existing_key,
+                     branch_before_branch, branch_before_branch_hex);
     if (existing_key) {
       switch (existing_key->type) {
       case NodeType::kBranch:
@@ -109,9 +114,16 @@ public:
   bool insert(const Key &k, T &&obj)
   {
     size_t idx = 0;
+    std::byte branch_hex = std::byte(0x00);
     Node *existing_key = nullptr;
-    Node *next = TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k, idx,
-                                  existing_key);
+    Node *branch_before_branch = nullptr;
+    std::byte branch_before_branch_hex = std::byte(0x00);
+    Node *next =
+        TraverseToBottom(root_, /*prev_root=*/nullptr,
+                         /*last_branch_seen=*/nullptr,
+                         /*last_branch_hex_seen=*/std::byte(0x00), /*path=*/k,
+                         idx, branch_hex, existing_key, branch_before_branch,
+                         branch_before_branch_hex);
     if (existing_key) {
       return false;
     }
@@ -208,15 +220,17 @@ public:
     // 1. If the branch node has 2+ *other* branches, just clear the current
     //    branch and then we are done.
     //
-    // 2. If the branch node only has 1 *other* branch, we can optimize by
+    // 2. If the branch node only has 1 *other* branch, or if the branch node
+    //    has no *other* branches but does have a value, we can optimize by
     //    removing the branch node. This is slightly tricky.
     //
     //    a) Keep going up the tree until we hit another branch node. Build up
     //    the path as we go up the tree. Specifically, the parent of the branch
     //    may be an extension node that we can remove, too.
     //
-    //    b) If the 1 other branch is a leaf, then remove all of the nodes and
-    //    add the built-up path to the leaf.
+    //    b) If the 1 other branch is a leaf, or if there are no other branches
+    //    as there is just a value, then remove all of the nodes and add the
+    //    built-up path to the leaf.
     //
     //    c) If the 1 other branch is an extension, then remove all of the nodes
     //    and add the built-up path to the extension.
@@ -224,9 +238,25 @@ public:
     //    d) If the 1 other branch is a branch, then remove all of the nodes,
     //    replace them with an extension node that has the built-up path, and
     //    then place the "1 other branch" beneath this extension node.
+    //
+    // 3. If the branch node has no *other* branches, then it must have a value.
+    size_t idx = 0;
+    std::byte branch_hex = std::byte(0x00);
     Node *existing_key = nullptr;
-    Node *branch = TraverseToBottom(root_, /*prev_root=*/nullptr, /*path=*/k,
-                                    /*idx=*/0, existing_key);
+    Node *branch_before_branch = nullptr;
+    std::byte branch_before_branch_hex = std::byte(0x00);
+    Node *branch =
+        TraverseToBottom(root_, /*prev_root=*/nullptr,
+                         /*last_branch_seen=*/nullptr,
+                         /*last_branch_hex_seen=*/std::byte(0x00), /*path=*/k,
+                         idx, branch_hex, existing_key, branch_before_branch,
+                         branch_before_branch_hex);
+    printf("existing_key = %p, branch = %p, branch_hex = %02x, "
+           "branch_before_branch = %p, "
+           "branch_before_branch_hex = %02x\n",
+           existing_key, branch, branch_hex, branch_before_branch,
+           branch_before_branch_hex);
+
     if (!existing_key) {
       return 0;
     }
@@ -238,6 +268,7 @@ public:
 
       assert(branch->value);
       branch->value = std::nullopt;
+      printf("A\n");
     }
     else {
       size_t num_branches = 0;
@@ -246,19 +277,97 @@ public:
           num_branches++;
         }
       }
-      assert(num_branches >= 2);
+      assert(num_branches);
 
+      printf("B, num_branches = %zu\n", num_branches);
       if (num_branches > 2) {
         // Just remove the leaf node from the branch.
 
-        for (size_t i = 0; i < branch->child.size(); i++) {
-          if (branch->child[i] == existing_node) {
-            branch->child[i] = nullptr;
-          }
-        }
+        branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
         delete existing_key;
       }
+      else if (branch_before_branch) {
+        printf("Should start looking at node %p and go down branch %02x.\n",
+               branch_before_branch, branch_before_branch_hex);
+
+        Node *cur =
+            branch_before_branch
+                ->child[std::to_integer<size_t>(branch_before_branch_hex)];
+        std::vector<std::byte> cur_path;
+        size_t cur_path_len = 0;
+        printf("Start while loop\n");
+        while (true) {
+          printf("top of while loop, cur is %p\n", cur);
+          if (cur->type == NodeType::kBranch) {
+            break;
+          }
+          printf("while A\n");
+          assert(cur->type == NodeType::kExtension);
+          AppendToPath(cur_path, cur_path_len, cur->path, cur->path_size);
+          cur_path_len += cur->path_size;
+          printf("while B\n");
+
+          Node *next_cur = cur->child[0];
+          delete cur;
+          printf("while C\n");
+          cur = next_cur;
+          printf("while D\n");
+        }
+        printf("Reached next branch %p\n", cur);
+
+        Node *new_child = nullptr;
+        if (num_branches == 1) {
+          printf("Replace branch value with leaf, leaf path = %s\n",
+                 KeyToString(cur_path).c_str());
+
+          new_child = CreateLeaf();
+          new_child->path = cur_path;
+          new_child->path_size = cur_path_len;
+          new_child->value = std::move(branch->value);
+          delete branch;
+        }
+        else {
+          assert(num_branches == 2);
+          printf("Remove branch node and move cur_path into existing child\n");
+
+          Node *other_child = nullptr;
+          for (Node *child : branch->child) {
+            if (child) {
+              other_child = child;
+              break;
+            }
+          }
+          assert(other_child);
+
+          if (other_child->type == NodeType::kBranch) {
+            new_child = CreateExtension();
+            new_child->path = cur_path;
+            new_child->path_size = cur_path_len;
+            new_child->child[0] = other_child;
+          }
+          else {
+            AppendToPath(cur_path, cur_path_len, other_child->path,
+                         other_child->path_size);
+            other_child->path = cur_path;
+            other_child->path_size += cur_path_len;
+
+            new_child = other_child;
+          }
+
+          delete branch;
+          delete existing_key;
+        }
+        branch_before_branch
+            ->child[std::to_integer<size_t>(branch_before_branch_hex)] =
+            new_child;
+        return 0;
+      }
       else {
+        // If [branch_before_branch] is a nullptr, then [branch] must be the
+        // root node, because the root node does not have a parent. The root
+        // node also never has a value in it.
+        assert(branch == root_);
+        delete existing_key;
       }
     }
 
@@ -427,6 +536,7 @@ private:
     return oss.str();
   }
 
+  // TODO: Fix when both have odd lengths.
   void AppendToPath(std::vector<std::byte> &cur_path, size_t cur_path_len,
                     const std::vector<std::byte> &to_append,
                     size_t to_append_len)
@@ -692,9 +802,12 @@ private:
     }
   }
 
-  Node *TraverseToBottom(Node *root, Node *prev_root,
+  Node *TraverseToBottom(Node *root, Node *prev_root, Node *last_branch_seen,
+                         std::byte last_branch_hex_seen,
                          const std::vector<std::byte> &path, size_t &idx,
-                         Node *&existing_key)
+                         std::byte &branch_hex, Node *&existing_key,
+                         Node *&branch_before_branch,
+                         std::byte &branch_before_branch_hex)
   {
     if (!root) {
       return prev_root;
@@ -708,6 +821,13 @@ private:
       }
       return root;
     }
+    else if (prev_root && prev_root->type == NodeType::kBranch) {
+      branch_before_branch = last_branch_seen;
+      last_branch_seen = prev_root;
+
+      branch_before_branch_hex = last_branch_hex_seen;
+      last_branch_hex_seen = HexDigitAtIndex(path, idx - 1);
+    }
 
     std::byte current_hex = HexDigitAtIndex(path, idx);
     switch (root->type) {
@@ -716,7 +836,11 @@ private:
       Node *next = root->child[std::to_integer<size_t>(current_hex)];
       if (next) {
         idx++;
-        return TraverseToBottom(next, root, path, idx, existing_key);
+        branch_hex = current_hex;
+        return TraverseToBottom(next, root, last_branch_seen,
+                                last_branch_hex_seen, path, idx, branch_hex,
+                                existing_key, branch_before_branch,
+                                branch_before_branch_hex);
       }
       else {
         // There is no child, so we have reached the bottom of the trie.
@@ -734,7 +858,10 @@ private:
                          offset + root->path_size)) {
         assert(root->child[0]);
         idx += root->path_size;
-        return TraverseToBottom(root->child[0], root, path, idx, existing_key);
+        return TraverseToBottom(root->child[0], root, last_branch_seen,
+                                last_branch_hex_seen, path, idx, branch_hex,
+                                existing_key, branch_before_branch,
+                                branch_before_branch_hex);
       }
       else {
         // The extension node's path does not match [key], so we can stop moving

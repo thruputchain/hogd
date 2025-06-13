@@ -223,12 +223,36 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
   seen.clear();
   expected.insert({{key_b, value_b}});
   trie.for_each(f);
+  EXPECT_EQ(seen, expected);
 
   std::vector<std::byte> key_c = ByteVectorFromString("12ab");
   std::string value_c = "hello three";
+  trie.insert(key_c, value_c);
   seen.clear();
   expected.insert({{key_c, value_c}});
+  trie.for_each(f);
+  EXPECT_EQ(seen, expected);
+}
+
+TEST(MerkleTrie, TwoLeavesAndOneBranchForRemove)
+{
+  MerkleTrie trie;
+
+  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+
+  std::vector<std::byte> key_b = ByteVectorFromString("123456");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+
+  std::vector<std::byte> key_c = ByteVectorFromString("12ab");
+  std::string value_c = "hello three";
   trie.insert(key_c, value_c);
+
+  trie.Print();
+  trie.remove(key_b);
+  trie.Print();
 }
 
 // Hash a branch node. All child pointers are non-NULL.
