@@ -58,7 +58,7 @@ struct BenchmarkState {
 
   WorkerPool &main_pool_;
 
-  const StorageCostModel cost_model_ = StorageCostModel(12000, 1, 5, 100);
+  const StorageCostModel cost_model_ = StorageCostModel(12000, 1, 5, 100, 5);
 
   void initialize()
   {
