@@ -19,6 +19,14 @@ TEST(HexArray, Basic)
   EXPECT_TRUE(h.empty());
 }
 
+TEST(HexArray, EmptyString)
+{
+  HexArray h("");
+  EXPECT_EQ(h.str(), "");
+  EXPECT_EQ(h.size(), 0);
+  EXPECT_TRUE(h.empty());
+}
+
 TEST(HexArray, CreateFromString)
 {
   std::string init = "0123456789abcdef";
@@ -250,6 +258,48 @@ TEST(HexArray, GetSubarrayClipEnd)
   EXPECT_EQ(subarray, expected);
   EXPECT_EQ(subarray.size(), expected.size());
   EXPECT_FALSE(subarray.empty());
+}
+
+TEST(HexArray, ToByteVector)
+{
+  HexArray a("0123456789abcdef");
+  std::vector<std::byte> bytes = a.ToByteVector();
+  std::vector<std::byte> expected = {std::byte{0x01}, std::byte{0x23},
+                                     std::byte{0x45}, std::byte{0x67},
+                                     std::byte{0x89}, std::byte{0xab},
+                                     std::byte{0xcd}, std::byte{0xef}};
+
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(HexArray, ToByteVectorEmpty)
+{
+  HexArray a;
+  std::vector<std::byte> bytes = a.ToByteVector();
+  std::vector<std::byte> expected = {};
+
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(HexArray, ToByteVectorSingleDigit)
+{
+  HexArray a("a");
+  std::vector<std::byte> bytes = a.ToByteVector();
+  std::vector<std::byte> expected = {std::byte{0xa0}};
+
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(HexArray, ToByteVectorOddLength)
+{
+  HexArray a("0123456789abcde");
+  std::vector<std::byte> bytes = a.ToByteVector();
+  std::vector<std::byte> expected = {std::byte{0x01}, std::byte{0x23},
+                                     std::byte{0x45}, std::byte{0x67},
+                                     std::byte{0x89}, std::byte{0xab},
+                                     std::byte{0xcd}, std::byte{0xe0}};
+
+  EXPECT_EQ(bytes, expected);
 }
 
 } // namespace hogd
