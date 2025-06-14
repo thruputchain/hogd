@@ -65,7 +65,10 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode)
   if ((mode == kActive && old_mode == kPoisoned) ||
       !fdp->mode_.compare_exchange_strong(old_mode, kLocked))
     return;
-  Defer unlock([&fdp] { fdp->mode_ = kPoisoned; });
+  Defer unlock([&fdp] {
+    fdp->mode_ = kPoisoned;
+    fdp->mode_.notify_all();
+  });
 
   int fd = fdp.get() - state_;
 
@@ -76,14 +79,16 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode)
     if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev) == -1)
       Errno{}.raise("EPOLL_CTL_ADD fd {} failed", fd);
     fdp->mode_ = mode;
+    fdp->mode_.notify_all();
     unlock.release();
   }
   else {
     if (old_mode == kActive &&
-        epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1
-	&& errno != EBADF)
+        epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1 &&
+        errno != EBADF)
       Errno{}.raise("EPOLL_CTL_DEL fd {} failed", fd);
     fdp->mode_ = mode;
+    fdp->mode_.notify_all();
     unlock.release();
     docbs(fdp);
   }
