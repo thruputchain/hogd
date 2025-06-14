@@ -32,7 +32,8 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   // std::println("setcb({}, {})", fd.get(), write ? "write" : "read");
   using enum FdState::Mode;
   FdPtr fdp = getfd(fd);
-  FdState::Mode mode = fdp->mode;
+  FdState::Mode mode = fdp->mode();
+  assert(mode != kFree);
   if (stop_requested() || mode == kPoisoned) {
     wi(EBADF);
     return;
@@ -49,7 +50,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   assert(!oldwi);
 
   setmode(fdp, kActive);
-  // have to re-check in case write edge occured after we published wi
+  // have to re-check in case write edge occured before we published wi
   docb(fdp, write);
 }
 
@@ -57,26 +58,33 @@ void
 CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode)
 {
   using enum FdState::Mode;
-  FdState::Mode old_mode = fdp->mode;
-  if (mode == old_mode || (mode == kActive && old_mode == kPoisoned) ||
-      !fdp->mode.compare_exchange_strong(old_mode, mode))
+  FdState::Mode old_mode = fdp->mode_;
+  if (mode == old_mode)
     return;
 
+  if ((mode == kActive && old_mode == kPoisoned) ||
+      !fdp->mode_.compare_exchange_strong(old_mode, kLocked))
+    return;
+  Defer unlock([&fdp] { fdp->mode_ = kPoisoned; });
+
   int fd = fdp.get() - state_;
+
   if (mode == kActive) {
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
     ev.data.fd = fd;
     if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev) == -1)
-      Errno{}.raise("EPOLL_CTL_ADD failed");
-    // Might have missed an edge, before epoll_ctl, so set all flags
-    fdp->ready = EPOLLIN | EPOLLOUT;
+      Errno{}.raise("EPOLL_CTL_ADD fd {} failed", fd);
+    fdp->mode_ = mode;
+    unlock.release();
   }
   else {
     if (old_mode == kActive &&
-        epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1 &&
-	errno != EBADF && errno != ENOENT)
-      Errno{}.raise("EPOLL_CTL_DEL failed");
+        epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1
+	&& errno != EBADF)
+      Errno{}.raise("EPOLL_CTL_DEL fd {} failed", fd);
+    fdp->mode_ = mode;
+    unlock.release();
     docbs(fdp);
   }
 }
@@ -162,7 +170,7 @@ std::shared_ptr<ReadBuffer>
 CoroPollImpl::get_reader(BorrowedFd fd)
 {
   auto fdp = getfd(fd);
-  if (fdp->mode == FdState::kPoisoned)
+  if (fdp->mode() == FdState::kPoisoned)
     return nullptr;
   return getfd(fd)->reader();
 }
@@ -171,7 +179,7 @@ std::shared_ptr<WriteBuffer>
 CoroPollImpl::get_writer(BorrowedFd fd)
 {
   auto fdp = getfd(fd);
-  if (fdp->mode == FdState::kPoisoned)
+  if (fdp->mode() == FdState::kPoisoned)
     return nullptr;
   return getfd(fd)->writer();
 }

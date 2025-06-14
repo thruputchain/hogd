@@ -86,7 +86,7 @@ local_addr(BorrowedFd s)
   sockaddr_storage ss;
   socklen_t len{sizeof(ss)};
   if (getsockname(s.get(), reinterpret_cast<sockaddr *>(&ss), &len) == -1)
-    Errno{}.raise("getsockname");
+    Errno{}.raise("getsockname({})", s.get());
   return ss;
 }
 
@@ -96,7 +96,7 @@ remote_addr(BorrowedFd s)
   sockaddr_storage ss;
   socklen_t len{sizeof(ss)};
   if (getpeername(s.get(), reinterpret_cast<sockaddr *>(&ss), &len) == -1)
-    Errno{}.raise("getsockname");
+    Errno{}.raise("getpeername({})", s.get());
   return ss;
 }
 

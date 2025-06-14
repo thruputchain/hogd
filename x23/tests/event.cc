@@ -2,9 +2,8 @@
 #include <print>
 #include <thread>
 
-#include <unistd.h>
-
 #include <sys/socket.h>
+#include <unistd.h>
 
 #include "x23/event.h"
 #include "x23/sockio.h"
@@ -36,7 +35,7 @@ main()
   cp.read(fds[1], &b, 6)([&b](auto res) {
     if (res)
       std::println("Got {} bytes: \"{}\"", *res,
-		   std::move(b).reinterpret<Str>());
+                   std::move(b).reinterpret<Str>());
     else
       std::println("Got error: {}", res.error());
   });

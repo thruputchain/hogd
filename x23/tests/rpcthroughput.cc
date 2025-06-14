@@ -140,6 +140,19 @@ do_server(int port, bool quiet)
   exit(0);
 }
 
+// Format an int with commas, because {:L} doesn't seem to work yet.
+std::string
+formatL(uint64_t v)
+{
+  std::string ret, in = std::format("{}", v);
+  for (size_t i = 0, e = in.size(); i != e; ++i) {
+    if ((e - i) % 3 == 0 && i != 0)
+      ret += ',';
+    ret += in[i];
+  }
+  return ret;
+}
+
 void
 do_client(int port, const char *server)
 {
@@ -159,7 +172,7 @@ do_client(int port, const char *server)
       co_return;
     }
     if (auto res = co_await cps.get(fd).connect(fd, &server_addr); !res) {
-      std::println(stderr, "connect: {} {}", fd.get(), res.error());
+      std::println(stderr, "connect(fd {}): {}", fd.get(), res.error());
       co_return;
     }
 
@@ -221,11 +234,11 @@ do_client(int port, const char *server)
   else
     std::println(
         "{}: {}, {} pool{}, {} threads, {} connections, {} coros/connection\n"
-        "    {} RPCs / {} = {:.0f} RPCs/sec",
+        "    {} RPCs / {} = {} RPCs/sec",
         server ? server : "INTERNAL",
         opt_data ? std::format("{} bytes", *opt_data) : std::string("no data"),
         opt_pools, opt_pools == 1 ? "" : "s", opt_threads, opt_connections,
-        opt_async_rpcs_per_thread, final_count, elapsed, rate);
+        opt_async_rpcs_per_thread, final_count, elapsed, formatL(rate));
   delete &cps;
   inh.destroy_wait();
 }

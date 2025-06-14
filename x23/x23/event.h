@@ -193,9 +193,10 @@ private:
                                                           EPOLLERR,
                                                       EPOLLOUT | EPOLLERR};
 
+  struct FdPtr;
   struct FdState : BufHolder {
-    enum Mode { kFree, kActive, kPoisoned };
-    std::atomic<Mode> mode{kFree};
+    enum Mode { kFree, kActive, kPoisoned, kLocked };
+    std::atomic<Mode> mode_{kFree};
     std::atomic<std::uint32_t> ready{0};
     // callbacks: [0] = reader, [1] = writer
     std::array<std::atomic<WorkItem>, 2> callbacks{};
@@ -211,11 +212,18 @@ private:
       copy_fields(other);
       return *this;
     }
+    Mode mode() const
+    {
+      for (;;) {
+	if (Mode m = mode_; m != kLocked)
+	  return m;
+	mode_.wait(kLocked, std::memory_order_relaxed);
+      }
+    }
 
-  private:
     void copy_fields(const FdState &other)
     {
-      mode = other.mode.load();
+      mode_ = other.mode_.load();
       ready = other.ready.load();
       for (size_t i = 0; i < callbacks.size(); ++i)
         callbacks[i] = other.callbacks[i].load();
@@ -242,7 +250,7 @@ private:
   void docb(const FdPtr &fdp, bool write)
   {
     using enum FdState::Mode;
-    FdState::Mode mode = fdp->mode;
+    FdState::Mode mode = fdp->mode();
     if ((fdp->ready & epflags[write]) || mode != kActive)
       if (WorkItem wi = fdp->callbacks[write].exchange(nullptr)) {
         --numcoro_;

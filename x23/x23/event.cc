@@ -14,6 +14,8 @@
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
 
+#include <print>
+
 namespace x23 {
 
 namespace detail {
@@ -46,7 +48,7 @@ ReadBuffer::operator()(int fd, void *buf, size_t len)
   return len;
 }
 
-Async<std::expected<void,Errno>>
+Async<std::expected<void, Errno>>
 WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
 {
   CoroGuard g;
@@ -59,14 +61,14 @@ WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
 Detached
 WriteBuffer::service(CoroPoll &cp, BorrowedFd fd)
 {
-  //std::println("Write buffering active on fd {}", fd.get());
+  // std::println("Write buffering active on fd {}", fd.get());
   for (;;) {
     CoroGuard g;
     co_await g(write_lock_);
     cp.write_clear(fd);
     auto res = writer_.write(fd);
     if (!res.value_or(false)) {
-      //std::println("Write buffering done on fd {}", fd.get());
+      // std::println("Write buffering done on fd {}", fd.get());
       co_return;
     }
     g.reset();
@@ -160,23 +162,37 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
   if (stop_requested())
     co_return Errno{EBADF};
   set_nonblock(fd);
-  write_clear(fd);
-  if (::connect(fd.get(), sa, len) == -1) {
-    Errno err{};
-    if (err != EINPROGRESS)
-      co_return err;
-    if ((err = co_await write_wait(fd.get())))
-      co_return err;
-    struct sockaddr_storage ss;
-    memset(&ss, 0, sizeof(ss));
-    socklen_t len = sizeof(ss);
-    if (getpeername(fd.get(), reinterpret_cast<struct sockaddr *>(&ss), &len)) {
-      Errno err;
-      co_return err;
-    }
-  }
   set_nodelay(fd);
-  co_return expected_void;
+
+  int err = 0;
+  write_clear(fd);
+  if (::connect(fd.get(), sa, len) == -1)
+    err = errno;
+
+  for (;;) {
+    if (err == 0)
+      co_return expected_void;
+    if (err != EINPROGRESS)
+      co_return Errno{err};
+
+    co_await write_wait(fd);
+    write_clear(fd);
+
+    len = sizeof(err);
+    if (getsockopt(fd.get(), SOL_SOCKET, SO_ERROR, &err, &len) == -1)
+      Errno{}.raise("SO_ERROR");
+    if (!err) {
+      struct sockaddr peer;
+      len = sizeof(peer);
+      if (getpeername(fd.get(), &peer, &len) == -1) {
+	if (errno != ENOTCONN)
+	  Errno{}.raise("getpeername({}) after SO_ERROR 0", fd.get());
+	err = EINPROGRESS;
+      }
+    }
+    else
+      std::println("SO_ERROR: fd {}, err {}", fd.get(), Errno{err});
+  }
 }
 
 Async<std::expected<int, Errno>>
