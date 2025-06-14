@@ -148,10 +148,26 @@ TEST(HexArray, Equal)
   EXPECT_TRUE(a == b);
 }
 
+TEST(HexArray, EqualOdd)
+{
+  HexArray a("0123456789abcde");
+  HexArray b("0123456789abcde");
+
+  EXPECT_TRUE(a == b);
+}
+
 TEST(HexArray, NotEqual)
 {
   HexArray a("0123456789abcdef");
   HexArray b("0123456789abcde");
+
+  EXPECT_FALSE(a == b);
+}
+
+TEST(HexArray, NotEqualOddLastDigitIsDifferent)
+{
+  HexArray a("0123456789abcde");
+  HexArray b("0123456789abcdf");
 
   EXPECT_FALSE(a == b);
 }

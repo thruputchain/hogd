@@ -541,15 +541,17 @@ private:
   void InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
                                   const Key &k, size_t idx, T &&obj)
   {
-    Key key_a = k.GetSubarray(idx, k.size());
+    // We add 1 since one of the digits will be included in the [parent_branch]
+    // node.
+    Key key_a = k.GetSubarray(idx + 1, k.size());
 
     size_t common_range_length =
-        GetLongestCommonRangeLength(key_a, 1, current_extension->path, 1);
+        GetLongestCommonRangeLength(key_a, 0, current_extension->path, 0);
     assert(common_range_length);
-    size_t diverge_idx = 1 + common_range_length;
+    size_t diverge_idx = common_range_length;
 
     Node *new_extension_node = CreateExtension();
-    new_extension_node->path = key_a.GetSubarray(1, diverge_idx);
+    new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
 
     parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
         new_extension_node;
@@ -568,12 +570,12 @@ private:
     // the size of the path in the extension node, and then we have 1 for the
     // branch node.
     current_extension->path =
-        current_extension->path.GetSubarray(diverge_idx,
+        current_extension->path.GetSubarray(diverge_idx + 1,
                                             current_extension->path.size());
 
     // Create new leaf node.
     Node *new_leaf_node = CreateLeaf();
-    new_leaf_node->path = key_a.GetSubarray(diverge_idx, key_a.size());
+    new_leaf_node->path = key_a.GetSubarray(diverge_idx + 1, key_a.size());
     new_leaf_node->value = std::move(obj);
 
     std::byte leaf_branch = key_a.Get(diverge_idx);
@@ -662,8 +664,6 @@ private:
     switch (root->type) {
     case NodeType::kBranch:
       if (root->value) {
-        assert((prefix_len % 2) == 0);
-
         func({prefix, *root->value});
       }
       for (size_t i = 0; i < root->child.size(); i++) {

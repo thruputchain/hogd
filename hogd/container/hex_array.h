@@ -56,9 +56,18 @@ public:
 
   bool operator==(const HexArray &a) const
   {
-    return size_ == a.size() &&
-           std::equal(backing_store_.begin(), backing_store_.begin() + size_,
-                      a.backing_store_.begin());
+    if (size_ != a.size()) {
+      return false;
+    }
+    bool backing_store_equal =
+        std::equal(backing_store_.begin(), backing_store_.begin() + (size_ / 2),
+                   a.backing_store_.begin());
+    if (size_ % 2) {
+      // Check the last hex digit.
+      backing_store_equal =
+          backing_store_equal && (Get(size_ - 1) == a.Get(size_ - 1));
+    }
+    return backing_store_equal;
   }
 
   bool operator<(const HexArray &a) const
