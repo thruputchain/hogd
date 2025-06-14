@@ -173,16 +173,15 @@ TEST_F(InterleavingTest, NNIntAddInterleavings)
         };
 
     bool action_1 = true;
-    add_set_add_action.template operator()<100, 100>(actions, action_1);
+    add_set_add_action.template operator()<100, 10>(actions, action_1);
     bool action_2 = true;
-    add_set_add_action.template operator()<100, -100>(actions, action_2);
+    add_set_add_action.template operator()<100, -70>(actions, action_2);
     bool action_3 = true;
-    add_set_add_action.template operator()<100, -70>(actions, action_3);
-    bool action_4 = true;
-    add_set_add_action.template operator()<100, -90>(actions, action_4);
+    add_set_add_action.template operator()<100, -90>(actions, action_3);
     ASSERT_EQ(actions.run(), model::ActionResult::kOk);
 
     EXPECT_TRUE(action_1);
+    EXPECT_FALSE(action_1 && action_2 && action_3);
 
     advance_block();
 
@@ -201,23 +200,18 @@ TEST_F(InterleavingTest, NNIntAddInterleavings)
 
       bool action_1_validation = action_1;
       if (action_1) {
-        add_set_add_action.template operator()<100, 100>(actions_validation,
+        add_set_add_action.template operator()<100, 10>(actions_validation,
                                                          action_1_validation);
       }
       bool action_2_validation = action_2;
       if (action_2) {
-        add_set_add_action.template operator()<100, -100>(actions_validation,
-                                                          action_2_validation);
+        add_set_add_action.template operator()<100, -70>(actions_validation,
+                                                        action_2_validation);
       }
       bool action_3_validation = action_3;
       if (action_3) {
-        add_set_add_action.template operator()<100, -70>(actions_validation,
-                                                        action_3_validation);
-      }
-      bool action_4_validation = action_4;
-      if (action_4) {
         add_set_add_action.template operator()<100, -90>(actions_validation,
-                                                         action_4_validation);
+                                                         action_3_validation);
       }
 
       // for all the actions that are added during the validation round,
@@ -226,7 +220,6 @@ TEST_F(InterleavingTest, NNIntAddInterleavings)
       EXPECT_EQ(action_1_validation, action_1);
       EXPECT_EQ(action_2_validation, action_2);
       EXPECT_EQ(action_3_validation, action_3);
-      EXPECT_EQ(action_4_validation, action_4);
       advance_block();
 
       auto res_validation = lookup_storage_item_from_db(
