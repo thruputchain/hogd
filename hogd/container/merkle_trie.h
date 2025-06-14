@@ -585,17 +585,18 @@ private:
   void InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
                              const Key &k, size_t idx, T &&obj)
   {
-    Key key_a = k.GetSubarray(idx, k.size());
+    // We add 1 since one of the digits will be included in the [parent_branch]
+    // node.
+    Key key_a = k.GetSubarray(idx + 1, k.size());
     Key key_b = current_leaf->path;
-
     Node *prev_branch = parent_branch;
 
     size_t common_range_length =
-        GetLongestCommonRangeLength(key_a, 1, key_b, 1);
-    size_t diverge_idx = 1 + common_range_length;
+        GetLongestCommonRangeLength(key_a, 0, key_b, 0);
     if (common_range_length) {
+      size_t diverge_idx = common_range_length;
       Node *new_extension_node = CreateExtension();
-      new_extension_node->path = key_a.GetSubarray(1, diverge_idx);
+      new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
 
       parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
           new_extension_node;
@@ -605,7 +606,7 @@ private:
       prev_branch = new_branch_node;
 
       // Now remove the extension path from these keys.
-      key_a = k.GetSubarray(idx + diverge_idx, k.size());
+      key_a = key_a.GetSubarray(diverge_idx, key_a.size());
       key_b = current_leaf->path.GetSubarray(diverge_idx,
                                              current_leaf->path.size());
     }
@@ -640,13 +641,13 @@ private:
 
       // Shorter key's leaf node.
       Node *leaf = CreateLeaf();
-      leaf->path = shorter;
+      leaf->path = shorter.GetSubarray(1, shorter.size());
       leaf->value = std::move(shorter_value);
       prev_branch->child[std::to_integer<size_t>(shorter_digit)] = leaf;
 
       // Longer key's leaf node.
       leaf = CreateLeaf();
-      leaf->path = longer;
+      leaf->path = longer.GetSubarray(1, longer.size());
       leaf->value = std::move(longer_value);
       prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
     }
@@ -759,11 +760,11 @@ private:
       break;
     }
     case NodeType::kLeaf:
-      // We are going to return the parent node, so subtract 1 from [idx].
-      idx--;
       if (path.GetSubarray(idx, path.size()) == root->path) {
         existing_key = root;
       }
+      // We are going to return the parent node, so subtract 1 from [idx].
+      idx--;
       return prev_root;
       break;
     }
