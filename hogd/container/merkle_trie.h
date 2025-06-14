@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "hex_array.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
@@ -39,7 +40,7 @@ namespace hogd {
 class MerkleTrie {
 public:
   // type definitions
-  using Key = std::vector<std::byte>;
+  using Key = HexArray;
   using T = std::string;
   using value_type = std::pair<const Key, T>;
 
@@ -57,16 +58,6 @@ public:
   {
     PrintHelper(root_);
     printf("----------\n\n");
-  }
-
-  static std::string KeyToString(const Key &k)
-  {
-    std::ostringstream oss;
-    oss << std::hex << std::setfill('0');
-    for (std::byte b : k) {
-      oss << std::setw(2) << static_cast<int>(b);
-    }
-    return oss.str();
   }
 
   // TODO: For all of the methods below, should they include a mutex as well (in
@@ -138,7 +129,7 @@ public:
       next->hash = GetNodeHash(*next);
     }
     else {
-      std::byte digit = HexDigitAtIndex(k, idx);
+      std::byte digit = k.Get(idx);
       size_t branch_idx = std::to_integer<size_t>(digit);
       if (next->child[branch_idx]) {
         // There is already a child node. [TraverseToBottom] returns the lowest
@@ -293,8 +284,7 @@ public:
         Node *cur =
             branch_before_branch
                 ->child[std::to_integer<size_t>(branch_before_branch_hex)];
-        std::vector<std::byte> cur_path;
-        size_t cur_path_len = 0;
+        HexArray cur_path;
         printf("Start while loop\n");
         while (true) {
           printf("top of while loop, cur is %p\n", cur);
@@ -303,8 +293,7 @@ public:
           }
           printf("while A\n");
           assert(cur->type == NodeType::kExtension);
-          AppendToPath(cur_path, cur_path_len, cur->path, cur->path_size);
-          cur_path_len += cur->path_size;
+          cur_path.Append(cur->path);
           printf("while B\n");
 
           Node *next_cur = cur->child[0];
@@ -314,23 +303,15 @@ public:
           printf("while D\n");
         }
         printf("Reached next branch %p\n", cur);
-        if (cur_path_len % 2 == 1) {
-          printf("in here to fix (%s), branch_before_branch_hex = %02x\n",
-                 KeyToString(cur_path).c_str(), branch_before_branch_hex);
-          cur_path = FixOddLengthPath(cur_path, branch_before_branch_hex);
-          printf("ok...\n");
-          printf("done fixing (%s)\n", KeyToString(cur_path).c_str());
-        }
 
         branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
         Node *new_child = nullptr;
         if (num_branches == 1) {
           printf("Replace branch value with leaf, leaf path = %s\n",
-                 KeyToString(cur_path).c_str());
+                 cur_path.str().c_str());
 
           new_child = CreateLeaf();
           new_child->path = cur_path;
-          new_child->path_size = cur_path_len;
           new_child->value = std::move(branch->value);
           delete branch;
         }
@@ -353,28 +334,21 @@ public:
           if (other_child->type == NodeType::kBranch) {
             printf("Bad!\n");
             new_child = CreateExtension();
-            AppendToPath(cur_path, cur_path_len, {branch_hex}, 1);
-            cur_path_len++;
+            cur_path.Append(branch_hex);
+
             new_child->path = cur_path;
-            new_child->path_size = cur_path_len;
             new_child->child[0] = other_child;
           }
           else {
             printf("Good! other_child = %p, cur_path = %s, cur_path_len = %zu, "
-                   "want to append %s, len = %zu\n",
-                   other_child, KeyToString(cur_path).c_str(), cur_path_len,
-                   KeyToString(other_child->path).c_str(),
-                   other_child->path_size);
-            // This correctly handles the case where [other_child->path_size] is
-            // odd.
-            AppendToPath(cur_path, cur_path_len, {other_child_hex}, 1);
-            cur_path_len++;
-            printf("ok... %s\n", KeyToString(cur_path).c_str());
-            AppendToPath(cur_path, cur_path_len, other_child->path,
-                         other_child->path_size);
-            printf("another append, %s\n", KeyToString(cur_path).c_str());
+                   "want to append %s\n",
+                   other_child, cur_path.str().c_str(), cur_path_len,
+                   other_child->path.str().c_str(), );
+            cur_path.Append(other_child_hex);
+            printf("ok... %s\n", cur_path.str().c_str());
+            cur_path.Append(other_child->path);
+            printf("another append, %s\n", cur_path.str().c_str());
             other_child->path = cur_path;
-            other_child->path_size += cur_path_len;
 
             new_child = other_child;
           }
@@ -419,8 +393,8 @@ public:
   // for_each executes func on each element.
   template<typename F> void for_each(F func)
   {
-    std::vector<std::byte> prefix;
-    Walk(root_, prefix, /*prefix_len=*/0, func);
+    HexArray prefix;
+    Walk(root_, prefix, func);
   }
 
   // for_each_parallel executes func in parallel on each element using a
@@ -444,7 +418,7 @@ private:
     // know that path lengths will never exceed 65 bytes.
 
     // Used by extensions and leaves.
-    std::vector<std::byte> path;
+    HexArray path;
     // Used by extensions and leaves.
     //
     // When [path_size] is odd, the first hex character in [path] must still
@@ -458,7 +432,7 @@ private:
     // node. If we did not impose this requirement on the first hex character,
     // then two nodes that are logically equivalent could produce different
     // hashes.
-    size_t path_size;
+    // size_t path_size;
 
     // Used by branches and leaves.
     // TODO: Should we be able to place values in extension nodes, too? For
@@ -501,35 +475,9 @@ private:
     return node;
   }
 
-  std::byte HexDigitAtIndex(const std::vector<std::byte> &vec, size_t idx)
-  {
-    std::byte digit = vec[idx / 2];
-    if (idx % 2 == 0) {
-      digit >>= 4;
-    }
-    else {
-      digit &= std::byte{0xF};
-    }
-    return digit;
-  }
-
-  void SetHexDigitAtIndex(std::vector<std::byte> &vec, size_t idx,
-                          std::byte hex)
-  {
-    hex &= std::byte{0x0F};
-    if (idx % 2 == 0) {
-      vec[idx / 2] &= std::byte{0x0F};
-      vec[idx / 2] |= (hex << 4);
-    }
-    else {
-      vec[idx / 2] &= std::byte{0xF0};
-      vec[idx / 2] |= hex;
-    }
-  }
-
-  bool HexRangesEqual(const std::vector<std::byte> &a, size_t a_start,
-                      size_t a_end, const std::vector<std::byte> &b,
-                      size_t b_start, size_t b_end)
+  // TODO: Move to HexArray class.
+  bool HexRangesEqual(const HexArray &a, size_t a_start, size_t a_end,
+                      const HexArray &b, size_t b_start, size_t b_end)
   {
     size_t a_size = a_end - a_start;
     size_t b_size = b_end - b_start;
@@ -537,17 +485,16 @@ private:
       return false;
     }
     for (size_t i = 0; i < a_size; i++) {
-      if (HexDigitAtIndex(a, i + a_start) != HexDigitAtIndex(b, i + b_start)) {
+      if (a.Get(i + a_start) != b.Get(i + b_start)) {
         return false;
       }
     }
     return true;
   }
 
-  size_t GetLongestCommonRangeLength(const std::vector<std::byte> &a,
-                                     size_t a_start,
-                                     const std::vector<std::byte> &b,
-                                     size_t b_start)
+  // TODO: Move to HexArray class.
+  size_t GetLongestCommonRangeLength(const HexArray &a, size_t a_start,
+                                     const HexArray &b, size_t b_start)
   {
     assert(a_start <= a.size() * 2);
     assert(b_start <= b.size() * 2);
@@ -558,7 +505,7 @@ private:
       if (i + b_start >= b.size() * 2) {
         break;
       }
-      if (HexDigitAtIndex(a, i + a_start) != HexDigitAtIndex(b, i + b_start)) {
+      if (a.Get(i + a_start) != b.Get(i + b_start)) {
         break;
       }
       length++;
@@ -574,67 +521,6 @@ private:
       oss << std::setw(2) << static_cast<int>(ch);
     }
     return oss.str();
-  }
-
-  std::vector<std::byte> FixOddLengthPath(const std::vector<std::byte> &path,
-                                          std::byte prefix)
-  {
-    std::vector<std::byte> ret(path.size(), std::byte{0});
-    SetHexDigitAtIndex(ret, 0, prefix);
-    printf("here blah %s\n", KeyToString(ret).c_str());
-
-    for (size_t i = 0; i < path.size() * 2 - 1; i++) {
-      std::byte to_copy = HexDigitAtIndex(path, i);
-      SetHexDigitAtIndex(ret, i + 1, to_copy);
-      printf("here blah %s\n", KeyToString(ret).c_str());
-    }
-    return ret;
-  }
-
-  void AppendToPath(std::vector<std::byte> &cur_path, size_t cur_path_len,
-                    const std::vector<std::byte> &to_append,
-                    size_t to_append_len)
-  {
-    size_t appended_so_far = 0;
-    size_t offset = (to_append_len % 2 == 0) ? 0 : 1;
-    for (size_t i = 0; i < to_append_len; i++) {
-      std::byte digit = static_cast<std::byte>(to_append[(i + offset) / 2]);
-      if ((i + offset) % 2 == 0) {
-        digit >>= 4;
-      }
-      else {
-        digit &= static_cast<std::byte>(0x0F);
-      }
-
-      if (appended_so_far % 2 == 0) {
-        digit <<= 4;
-        cur_path.push_back(digit);
-      }
-      else {
-        cur_path.back() |= digit;
-      }
-      appended_so_far++;
-    }
-  }
-
-  void RemoveEndFromPath(std::vector<std::byte> &cur_path, size_t cur_path_len,
-                         size_t to_remove_len)
-  {
-    if (to_remove_len >= cur_path_len) {
-      cur_path.clear();
-    }
-
-    for (size_t i = 0; i < to_remove_len; i++) {
-      // Now remove the digit.
-      if (cur_path_len % 2 == 0) {
-        cur_path.pop_back();
-      }
-      else {
-        // We could clear the 4 bits in the last element, but there is no
-        // need as [cur_path_len] tells us these 4 bits are unused.
-      }
-      cur_path_len--;
-    }
   }
 
   void PrintHelper(Node *root)
@@ -662,8 +548,8 @@ private:
       break;
     case NodeType::kExtension:
       printf("Extension (%s, %p)\n", GetHashString(*root).c_str(), root);
-      printf("Path: %s\n", KeyToString(root->path).c_str());
-      printf("Path Size: %zu\n", root->path_size);
+      printf("Path: %s\n", root->path.str().c_str());
+      printf("Path Size: %zu\n", root->path.size());
       if (root->child[0]) {
         printf("Child: %s (%p)\n", GetHashString(*root->child[0]).c_str(),
                root->child[0]);
@@ -676,8 +562,8 @@ private:
       break;
     case NodeType::kLeaf:
       printf("Leaf (%s, %p)\n", GetHashString(*root).c_str(), root);
-      printf("Path: %s\n", KeyToString(root->path).c_str());
-      printf("Path Size: %zu\n", root->path_size);
+      printf("Path: %s\n", root->path.str().c_str());
+      printf("Path Size: %zu\n", root->path.size());
       printf("Value: [%s]\n", root->value ? root->value->c_str() : "<empty>");
       printf("\n");
       break;
@@ -702,7 +588,7 @@ private:
                                            key_a.begin() + diverge_idx / 2);
     new_extension_node->path_size = common_range_length;
 
-    parent_branch->child[std::to_integer<size_t>(HexDigitAtIndex(k, idx))] =
+    parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
         new_extension_node;
 
     Node *new_branch_node = CreateBranch();
@@ -710,7 +596,7 @@ private:
 
     // Move the already-existing extension node underneath the branch node.
     std::byte current_extension_node_branch =
-        HexDigitAtIndex(current_extension->path, diverge_idx);
+        current_extension->path.Get(diverge_idx);
     new_branch_node
         ->child[std::to_integer<size_t>(current_extension_node_branch)] =
         current_extension;
@@ -730,7 +616,7 @@ private:
     new_leaf_node->path_size = key_a.size() * 2 - idx - diverge_idx - 1;
     new_leaf_node->value = std::move(obj);
 
-    std::byte leaf_branch = HexDigitAtIndex(key_a, diverge_idx);
+    std::byte leaf_branch = key_a.Get(diverge_idx);
     new_branch_node->child[std::to_integer<size_t>(leaf_branch)] =
         new_leaf_node;
   }
@@ -754,8 +640,7 @@ private:
                                              key_a.begin() + diverge_idx / 2);
       new_extension_node->path_size = common_range_length;
 
-      parent_branch
-          ->child[std::to_integer<size_t>(HexDigitAtIndex(k, idx + offset))] =
+      parent_branch->child[std::to_integer<size_t>(k.Get(idx + offset))] =
           new_extension_node;
 
       Node *new_branch_node = CreateBranch();
@@ -788,12 +673,12 @@ private:
           std::vector(longer.begin() + ((offset + 1) / 2), longer.end());
       leaf->path_size = (longer.size() * 2) + idx - (offset + 1);
       leaf->value = std::move(longer_value);
-      std::byte longer_digit = HexDigitAtIndex(longer, 0);
+      std::byte longer_digit = longer.Get(0);
       prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
     }
     else {
-      std::byte shorter_digit = HexDigitAtIndex(shorter, offset);
-      std::byte longer_digit = HexDigitAtIndex(longer, offset);
+      std::byte shorter_digit = shorter.Get(offset);
+      std::byte longer_digit = longer.Get(offset);
       assert(shorter_digit != longer_digit);
 
       // The digits do not match, so create two leaf nodes.
@@ -815,9 +700,7 @@ private:
     delete current_leaf;
   }
 
-  template<typename F>
-  void Walk(Node *root, std::vector<std::byte> &prefix, size_t prefix_len,
-            F func)
+  template<typename F> void Walk(Node *root, HexArray &prefix, F func)
   {
     // We should never call this function with a null node.
     assert(root);
@@ -833,35 +716,34 @@ private:
         if (root->child[i]) {
           std::byte digit = static_cast<std::byte>(i);
 
-          AppendToPath(prefix, prefix_len, {digit}, 1);
-          Walk(root->child[i], prefix, prefix_len + 1, func);
-          RemoveEndFromPath(prefix, prefix_len + 1, 1);
+          prefix.Append(digit);
+          Walk(root->child[i], prefix, func);
+          prefix.RemoveFromBack(1);
         }
       }
       break;
     case NodeType::kExtension:
       assert(root->child[0]);
 
-      AppendToPath(prefix, prefix_len, root->path, root->path_size);
-      Walk(root->child[0], prefix, prefix_len + root->path_size, func);
-      RemoveEndFromPath(prefix, prefix_len + root->path_size, root->path_size);
+      prefix.Append(root->path);
+      Walk(root->child[0], prefix, func);
+      prefix.RemoveFromBack(root->path.size());
       break;
     case NodeType::kLeaf:
       assert(root->value);
       assert((prefix_len % 2) == 0);
 
-      AppendToPath(prefix, prefix_len, root->path, root->path_size);
+      prefix.Append(root->path);
       func({prefix, *root->value});
-      RemoveEndFromPath(prefix, prefix_len + root->path_size, root->path_size);
+      prefix.RemoveFromBack(root->path.size());
       break;
     }
   }
 
   Node *TraverseToBottom(Node *root, Node *prev_root, Node *last_branch_seen,
-                         std::byte last_branch_hex_seen,
-                         const std::vector<std::byte> &path, size_t &idx,
-                         std::byte &branch_hex, Node *&existing_key,
-                         Node *&branch_before_branch,
+                         std::byte last_branch_hex_seen, const HexArray &path,
+                         size_t &idx, std::byte &branch_hex,
+                         Node *&existing_key, Node *&branch_before_branch,
                          std::byte &branch_before_branch_hex)
   {
     if (!root) {
@@ -870,7 +752,7 @@ private:
     // There are two hex characters per byte. [idx] is the index of the current
     // hex character we are looking at, so we reach the end of the byte array
     // when [idx >= path.size() * 2].
-    if (idx >= path.size() * 2) {
+    if (idx >= path.size()) {
       if (root->type == NodeType::kBranch && !root->value->empty()) {
         existing_key = root;
       }
@@ -881,10 +763,10 @@ private:
       last_branch_seen = prev_root;
 
       branch_before_branch_hex = last_branch_hex_seen;
-      last_branch_hex_seen = HexDigitAtIndex(path, idx - 1);
+      last_branch_hex_seen = path.Get(idx - 1);
     }
 
-    std::byte current_hex = HexDigitAtIndex(path, idx);
+    std::byte current_hex = path.Get(idx);
     switch (root->type) {
     case NodeType::kBranch:
     {
@@ -905,14 +787,10 @@ private:
     }
     case NodeType::kExtension:
     {
-      // Check that path[idx:idx+path_size] and path are
-      // equal. If path_size is odd, need to actually compare with
-      // path[1:1+path_size].
-      size_t offset = root->path_size % 2;
-      if (HexRangesEqual(path, idx, idx + root->path_size, root->path, offset,
-                         offset + root->path_size)) {
+      if (HexRangesEqual(path, idx, idx + root->path.size(), root->path, 0,
+                         root->path.size())) {
         assert(root->child[0]);
-        idx += root->path_size;
+        idx += root->path.size();
         return TraverseToBottom(root->child[0], root, last_branch_seen,
                                 last_branch_hex_seen, path, idx, branch_hex,
                                 existing_key, branch_before_branch,
@@ -931,7 +809,8 @@ private:
     case NodeType::kLeaf:
       // We are going to return the parent node, so subtract 1 from [idx].
       idx--;
-      if (std::vector(path.begin() + idx / 2, path.end()) == root->path) {
+      if (HexRangesEqual(path, idx, path.size(), root->path, 0,
+                         root->path.size())) {
         existing_key = root;
       }
       return prev_root;
@@ -1001,10 +880,10 @@ private:
     }
     case NodeType::kExtension:
     {
-      // Hash [path], [path_size], and **the hash in**
+      // Hash [path], [path.size()], and **the hash in**
       // [child[0]].
       to_hash.insert(to_hash.end(), node.path.begin(), node.path.end());
-      std::vector<std::byte> size_bytes = SizeToBytes(node.path_size);
+      std::vector<std::byte> size_bytes = SizeToBytes(node.path.size());
       to_hash.insert(to_hash.end(), size_bytes.begin(), size_bytes.end());
       if (node.child[0]) {
         std::transform(node.child[0]->hash.begin(), node.child[0]->hash.end(),
@@ -1017,9 +896,9 @@ private:
     }
     case NodeType::kLeaf:
     {
-      // Hash [path], [path_size], and [value].
+      // Hash [path], [path.size()], and [value].
       to_hash.insert(to_hash.end(), node.path.begin(), node.path.end());
-      std::vector<std::byte> size_bytes = SizeToBytes(node.path_size);
+      std::vector<std::byte> size_bytes = SizeToBytes(node.path.size());
       to_hash.insert(to_hash.end(), size_bytes.begin(), size_bytes.end());
       std::transform(node.value->begin(), node.value->end(),
                      std::back_inserter(to_hash), CastCharToByte);
