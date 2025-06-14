@@ -49,7 +49,6 @@ struct BenchmarkState {
   BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
 
   std::atomic<TransactionID> next_tx_id_ = 0;
-  std::unique_ptr<DatabaseProxy> db_proxy_;
   BlockID block_number_ = 0;
 
   DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
@@ -60,6 +59,7 @@ struct BenchmarkState {
   const StorageCostModel cost_model_ = StorageCostModel(12000, 1, 5, 100, 5);
 
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
+  std::unique_ptr<DatabaseProxy> db_proxy_;
 
   void initialize()
   {
