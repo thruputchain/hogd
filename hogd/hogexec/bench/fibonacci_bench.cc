@@ -155,9 +155,9 @@ bench_fibonacci(benchmark::State &state)
   txs_bench.reserve(numtxs);
   for (size_t i = 0; i < numtxs; i++) {
     txs_bench.push_back(SignedTransaction{
-        .tx = Transaction{
-            .invocation =
-                fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX, nfib)}});
+        .tx = Transaction{.invocation =
+                              fib_client.make_invocation<"slow_fibonacci">(
+                                  UINT64_MAX, nfib)}});
   }
   auto const &txs = txs_bench;
 
@@ -195,16 +195,6 @@ BENCHMARK(bench_fibonacci)
               {5, 20}}); // fib(n): 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
                          // 17, 18, 19, 20
 
-/*
-void
-bm_siphash24(benchmark::State &state)
-{
-  bench_hash(state, [](std::span<std::byte> buf) {
-    return SipHash24::get_default()(buf);
-  });
-}
-BENCHMARK(bm_siphash24)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
- */
 } // namespace
 
 } // namespace hogd

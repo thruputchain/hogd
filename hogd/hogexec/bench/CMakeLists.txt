@@ -13,3 +13,32 @@ target_link_libraries(
 )
 
 set_property(TARGET fibonacci_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  fibonacci_runner
+  fibonacci_runner.cc
+)
+target_link_libraries(
+  fibonacci_runner
+  hogd
+  protocol
+  runtime
+  exec_interface
+)
+
+set_property(TARGET fibonacci_runner PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  fibonacci_wasmonly
+  fibonacci_wasmonly.cc
+)
+target_link_libraries(
+  fibonacci_wasmonly
+  hogd
+  protocol
+  runtime
+  exec_interface
+  db_interface
+)
+
+set_property(TARGET fibonacci_wasmonly PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
