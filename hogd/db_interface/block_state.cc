@@ -76,25 +76,30 @@ BlockState::try_reserve_storage_delta(TransactionID txid,
   auto prev_delta = tx.get_delta(cost_addrkey);
   auto storage_lock = tx.get_lock(cost_addrkey);
   StorageDelta new_storage_delta;
+
+  auto get_add_value = [](auto &delta) -> auto & {
+    if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
+      return delta.nnint().add_value;
+    }
+    assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+    return delta.nnint_add();
+  };
+
   if (prev_delta) {
     assert(prev_delta->type() ==
-           StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+               StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd ||
+           prev_delta->type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
     assert(storage_lock.lock_type() != StorageLockType::kNone);
     new_storage_delta = *prev_delta;
-    new_storage_delta.nnint().add_value =
-        to_xdr(from_xdr(prev_delta->nnint().add_value) - marginal_cost);
+    get_add_value(new_storage_delta) =
+        to_xdr(from_xdr(get_add_value(new_storage_delta)) - marginal_cost);
   }
   else {
     assert(storage_lock.lock_type() == StorageLockType::kNone ||
            storage_lock.lock_type() == StorageLockType::kSetItemTypeClass);
     new_storage_delta =
-        StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-    new_storage_delta.nnint().add_value = to_xdr(-marginal_cost);
-
-    auto const *snapshot =
-        storage_view_.get_snapshot_storage_item(cost_addrkey);
-    int128_t set_value = snapshot ? snapshot->nnint() : 0;
-    new_storage_delta.nnint().set_value = to_xdr(set_value);
+        StorageDelta(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+    new_storage_delta.nnint_add() = to_xdr(-marginal_cost);
   }
 
   auto new_lock = storage_view_.try_reserve_storage_delta(

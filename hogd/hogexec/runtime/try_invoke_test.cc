@@ -6,9 +6,12 @@
 
 #include <memory>
 #include <span>
+#include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
+#include "bcs/encode.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -21,6 +24,8 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "model_checker/async.h"
+#include "model_checker/work_queue.h"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -1585,6 +1590,201 @@ TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   ASSERT_EQ(data_item_opt.value().bytestring(), str_hello);
 }
 
+TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
+{
+  NativeContractBuilder builder;
+
+  StorageKeyContractData key = make_storage_key("test");
+
+  // perform a set_add_nnint
+  builder.add(0,
+              [&](SystemCallHandler &handler, int128_t set_amount,
+                  int128_t add_amount) -> InvokeStatus<void> {
+                auto r = handler.set_nnint(key, set_amount, add_amount);
+                if (!r.has_value() || !r.value().has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                return {};
+              });
+
+  // perform a add_nnint
+  builder.add(1,
+              [&](SystemCallHandler &handler,
+                  int128_t add_amount) -> InvokeStatus<void> {
+                auto r = handler.add_nnint(key, add_amount);
+                if (!r.has_value() || !r.value().has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                return {};
+              });
+
+  builder.add(2,
+              [&](SystemCallHandler &handler,
+                  NativeRuntime &runtime) -> InvokeStatus<void> {
+                // perform an add_nnint, then perform a set_add_nnint with the
+                // same set value in a try_invoke frame
+                auto calldata0 =
+                    bcs::encode_to<Calldata>(std::tuple<int128_t>{100});
+                assert(calldata0.has_value());
+
+                auto [r0, _g0] = handler.invoke(
+                    handler.get_current_address(), 1,
+                    runtime.get_available_gas(), calldata0.value(),
+                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+                if (!r0.has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                // tolerate try_invoke failure
+
+                auto calldata1 = bcs::encode_to<Calldata>(
+                    std::tuple<int128_t, int128_t>{100, -100});
+                assert(calldata1.has_value());
+
+                auto [r1, _g1] = handler.invoke(
+                    handler.get_current_address(), 0,
+                    runtime.get_available_gas(), calldata1.value(),
+                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+                if (!r1.has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                // tolerate try_invoke failure
+
+                return {};
+              });
+  builder.add(3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+    // reset contract state
+    auto r = handler.set_nnint(key, 35, 0);
+    if (!r.has_value() || !r.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    return {};
+  });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr uint32_t kTestContractId = 0;
+  contract_map.emplace(kTestContractId, std::move(native_contract));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  // Deploy contracts
+  auto test_contract_xdr = make_native_contract(kTestContractId);
+  in_memory_db_.write_contract(sha256(*test_contract_xdr), test_contract_xdr);
+  in_memory_db_.write_deployment(ContractAddress{}, sha256(*test_contract_xdr));
+
+  // Grant initial tokens to test contract
+  setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
+
+  // write an initial int128 value
+  StorageKey wrapped_key(StorageKeyType::kStorageKeyTypeContractData);
+  wrapped_key.contract_data_key() = key;
+
+  // too much state here to parallelize the experiment
+  model::WorkQueue work_queue;
+
+  while (!work_queue.done()) {
+    model::RunnableActionSet actions(work_queue);
+
+    actions.add_action(
+        [](model::RunnableActionSet &set, auto self,
+           auto &runtime_context) -> model::Async {
+          co_await set.bg();
+
+          auto handler = self->make_new_system_call_handler(
+              SignedTransaction{
+                  .tx =
+                      Transaction{
+                          .invocation =
+                              Invocation{.invoked_address = ContractAddress{},
+                                         .entrypoint =
+                                             entrypoint_from_method_id(2),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = {}}}},
+              runtime_context);
+          auto res = handler.root_invoke();
+          if (!res.is_root_success()) {
+            throw std::runtime_error("root invoke 0 failed");
+          }
+          co_await set.bg();
+          auto commit_res = handler.try_commit_transaction()();
+          if (!commit_res.has_value()) {
+            throw std::runtime_error("try_commit_transaction error");
+          }
+          co_return;
+        },
+        this, runtime_context);
+
+    actions.add_action(
+        [](model::RunnableActionSet &set, auto self,
+           auto &runtime_context) -> model::Async {
+          co_await set.bg();
+
+          // If this one preceeds the set_add_nnint in method 2, then that will
+          // succeed.
+          auto calldata = bcs::encode_to<Calldata>(
+              std::tuple<int128_t, int128_t>{100, 100});
+          assert(calldata.has_value());
+          auto handler = self->make_new_system_call_handler(
+              SignedTransaction{
+                  .tx =
+                      Transaction{
+                          .invocation =
+                              Invocation{.invoked_address = ContractAddress{},
+                                         .entrypoint =
+                                             entrypoint_from_method_id(0),
+                                         .gas_limit = UINT64_MAX,
+                                         .calldata = calldata.value()}}},
+              runtime_context);
+          auto res = handler.root_invoke();
+          co_await set.bg();
+          if (!res.is_root_success()) {
+            co_return;
+          }
+          auto commit_res = handler.try_commit_transaction()();
+          if (!commit_res.has_value()) {
+            throw std::runtime_error("try_commit_transaction error");
+          }
+          co_return;
+        },
+        this, runtime_context);
+
+    {
+      auto handler = make_new_system_call_handler(
+          SignedTransaction{
+              .tx =
+                  Transaction{
+                      .invocation =
+                          Invocation{.invoked_address = ContractAddress{},
+                                     .entrypoint = entrypoint_from_method_id(3),
+                                     .gas_limit = UINT64_MAX,
+                                     .calldata = {}}}},
+          runtime_context);
+
+      auto res = handler.root_invoke();
+      ASSERT_TRUE(res.is_root_success());
+      auto commit_res = handler.try_commit_transaction()();
+      ASSERT_TRUE(commit_res.has_value());
+      ASSERT_TRUE(*commit_res);
+    }
+
+    advance_block();
+
+    ASSERT_EQ(actions.run(), model::ActionResult::kOk);
+
+    advance_block();
+
+    auto res = lookup_storage_item_from_db(
+        AddressAndKey{.address = ContractAddress{}, .key = wrapped_key});
+    ASSERT_TRUE(res.has_value());
+    ASSERT_EQ(res.value().type(), StorageItemType::kItemTypeNonnegativeInt);
+    int128_t value = from_xdr(res.value().nnint());
+
+    EXPECT_TRUE(value == 100 || value == 0);
+
+    work_queue.advance_cursor();
+  }
+}
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd

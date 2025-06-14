@@ -47,6 +47,7 @@ add_library(runtime_test_objects OBJECT
   execution_mode_test.cc
   fibonacci_test.cc
   gas_api_test.cc
+  interleaving_tests.cc
   instantiate_test.cc
   invoke_arity_test.cc
   item_view_test.cc
@@ -105,6 +106,7 @@ target_link_libraries(
   runtime_test_util
   db_interface
   storage_cost
+  model_checker
   GTest::gtest
 )
 gtest_discover_tests(runtime_test)

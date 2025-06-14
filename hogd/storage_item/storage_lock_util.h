@@ -7,6 +7,8 @@
 
 namespace hogd {
 
+class StorageItemWrapper;
+
 // A storage lock that tracks the number of tokens that must be locked to
 // acquire it
 struct MeteredStorageLock {
@@ -17,12 +19,8 @@ struct MeteredStorageLock {
   bool operator==(const MeteredStorageLock &) const = default;
 };
 
-// Converts a storage delta into its corresponding storage item type class
-// The typeclass is the set of all data that two StorageDeltas must agree on,
-// (in a bytewise comparison), in order to be possibly concurrent.
-StorageItemTypeClass delta_to_typeclass(StorageDelta const &delta);
-
 // Creates a kSetTypeclass lock for the given storage delta
-StorageLock delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode);
+StorageLock delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode,
+                          StorageItemWrapper const *committed_item);
 
 } // namespace hogd

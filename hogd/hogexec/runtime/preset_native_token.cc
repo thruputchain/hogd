@@ -196,7 +196,10 @@ make_native_token_contract()
                 if (!balance.has_value()) {
                   return balance.error().to_invoke_error();
                 }
-                return *balance;
+                if (!balance.value().has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                return balance.value().value();
               });
 
   // get_balance
@@ -217,7 +220,10 @@ make_native_token_contract()
                 if (!balance.has_value()) {
                   return balance.error().to_invoke_error();
                 }
-                return *balance;
+                if (!balance.value().has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                return balance.value().value();
               });
 
   // mint

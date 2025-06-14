@@ -28,11 +28,7 @@ InvocationFrame::InvocationFrame(ContractAddress const &address,
                                  Calldata &&calldata, InvokeFlagSet flags)
   : address_(address), calldata_(std::forward<Calldata>(calldata)),
     flags_(flags)
-{
-  if (is_try_invoke()) {
-    try_invoke_frame_count_ = 1;
-  }
-}
+{}
 
 void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
@@ -106,7 +102,14 @@ InvocationFrame::try_acquire_frame_locks(
     }
   }
 
-  co_return co_await db_proxy.try_push_current_subtransaction();
+  auto res = co_await db_proxy.try_push_current_subtransaction();
+  if (!res.has_value()) {
+    co_return res.error();
+  }
+  if (res.value()) {
+    try_invoke_frame_count_++;
+  }
+  co_return res.value();
 }
 
 void

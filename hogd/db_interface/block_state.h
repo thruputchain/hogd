@@ -33,6 +33,7 @@ public:
              StorageCostModel const *cost_model)
     : storage_view_(parent->storage_view_.as_parent(), mode, cost_model)
   {
+    assert(parent);
     // if parent is committed to database, then we should
     // use the other constructor
     assert(!parent->is_committed_to_database());
