@@ -66,6 +66,11 @@ public:
     if (size_ < a.size()) {
       return true;
     }
+    else if (size_ > a.size()) {
+      return false;
+    }
+
+    assert(size_ == a.size());
     // Find the hex digit where the two arrays diverge.
     for (size_t i = 0; i < size_; i++) {
       if (Get(i) < a.Get(i)) {

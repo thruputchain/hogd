@@ -16,6 +16,7 @@ TEST(HexArray, Basic)
   HexArray h;
   EXPECT_EQ(h.str(), "");
   EXPECT_EQ(h.size(), 0);
+  EXPECT_TRUE(h.empty());
 }
 
 TEST(HexArray, CreateFromString)
@@ -24,6 +25,16 @@ TEST(HexArray, CreateFromString)
   HexArray h(init);
   EXPECT_EQ(h.str(), init);
   EXPECT_EQ(h.size(), init.size());
+  EXPECT_FALSE(h.empty());
+}
+
+TEST(HexArray, CreateFromStringSingleDigit)
+{
+  std::string init = "a";
+  HexArray h(init);
+  EXPECT_EQ(h.str(), init);
+  EXPECT_EQ(h.size(), init.size());
+  EXPECT_FALSE(h.empty());
 }
 
 TEST(HexArray, CreateFromStringOddLength)
@@ -32,6 +43,7 @@ TEST(HexArray, CreateFromStringOddLength)
   HexArray h(init);
   EXPECT_EQ(h.str(), init);
   EXPECT_EQ(h.size(), init.size());
+  EXPECT_FALSE(h.empty());
 }
 
 TEST(HexArray, Get)
@@ -59,6 +71,7 @@ TEST(HexArray, AppendHexDigit)
   for (size_t i = 0; i < 16; i++) {
     h.Append(static_cast<std::byte>(i));
     EXPECT_EQ(h.size(), i + 1);
+    EXPECT_FALSE(h.empty());
   }
   EXPECT_EQ(h.str(), "0123456789abcdef");
 }
@@ -71,6 +84,7 @@ TEST(HexArray, AppendHexArray)
     HexArray to_append(to_append_str);
     h.Append(to_append);
     EXPECT_EQ(h.size(), (i + 1) * to_append_str.size());
+    EXPECT_FALSE(h.empty());
   }
   std::string expected;
   for (size_t i = 0; i < 16; i++) {
@@ -87,6 +101,7 @@ TEST(HexArray, AppendHexArrayOddLength)
     HexArray to_append(to_append_str);
     h.Append(to_append);
     EXPECT_EQ(h.size(), (i + 1) * to_append_str.size());
+    EXPECT_FALSE(h.empty());
   }
   std::string expected;
   for (size_t i = 0; i < 3; i++) {
@@ -103,6 +118,7 @@ TEST(HexArray, RemoveFromBack)
   h.RemoveFromBack(10);
   EXPECT_EQ(h.str(), "012345");
   EXPECT_EQ(h.size(), 6);
+  EXPECT_FALSE(h.empty());
 }
 
 TEST(HexArray, RemoveFromBackOddLength)
@@ -113,6 +129,127 @@ TEST(HexArray, RemoveFromBackOddLength)
   h.RemoveFromBack(9);
   EXPECT_EQ(h.str(), "0123456");
   EXPECT_EQ(h.size(), 7);
+  EXPECT_FALSE(h.empty());
+}
+
+TEST(HexArray, Equal)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("0123456789abcdef");
+
+  EXPECT_TRUE(a == b);
+}
+
+TEST(HexArray, NotEqual)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("0123456789abcde");
+
+  EXPECT_FALSE(a == b);
+}
+
+TEST(HexArray, LessThan)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("0123456789abcdff");
+
+  EXPECT_TRUE(a < b);
+}
+
+TEST(HexArray, LessThanShorterLength)
+{
+  HexArray a("5123456789abcde");
+  HexArray b("0123456789abcdef");
+
+  EXPECT_TRUE(a < b);
+}
+
+TEST(HexArray, NotLessThan)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("0123456789abcdef");
+
+  EXPECT_FALSE(a < b);
+}
+
+TEST(HexArray, NotLessThanBecauseBigger)
+{
+  HexArray a("0123456789abcdff");
+  HexArray b("0123456789abcdef");
+
+  EXPECT_FALSE(a < b);
+}
+
+TEST(HexArray, NotLessThanBecauseLongerLength)
+{
+  HexArray a("0123456789abcdef");
+  HexArray b("5123456789abcde");
+
+  EXPECT_FALSE(a < b);
+}
+
+TEST(HexArray, GetSubarrayEntireArray)
+{
+  HexArray a("0123456789abcdef");
+  HexArray subarray = a.GetSubarray(0, a.size());
+
+  EXPECT_EQ(subarray, a);
+  EXPECT_EQ(subarray.size(), a.size());
+  EXPECT_FALSE(subarray.empty());
+}
+TEST(HexArray, GetSubarrayEmptyArray)
+{
+  HexArray a("0123456789abcdef");
+  HexArray subarray = a.GetSubarray(5, 5);
+  HexArray expected;
+
+  EXPECT_EQ(subarray, expected);
+  EXPECT_EQ(subarray.size(), expected.size());
+  EXPECT_TRUE(subarray.empty());
+}
+
+TEST(HexArray, GetSubarraySingleDigit)
+{
+  HexArray a("0123456789abcdef");
+  HexArray subarray = a.GetSubarray(5, 6);
+  HexArray expected("5");
+
+  EXPECT_EQ(subarray, expected);
+  EXPECT_EQ(subarray.size(), expected.size());
+  EXPECT_FALSE(subarray.empty());
+}
+
+TEST(HexArray, GetSubarrayMiddle)
+{
+  HexArray a("0123456789abcdef");
+  HexArray subarray = a.GetSubarray(7, 13);
+  HexArray expected("789abc");
+
+  EXPECT_EQ(subarray, expected);
+  EXPECT_EQ(subarray.size(), expected.size());
+  EXPECT_FALSE(subarray.empty());
+}
+
+TEST(HexArray, GetSubarrayClipBeginning)
+{
+  HexArray a("0123456789abcdef");
+  HexArray subarray = a.GetSubarray(7, a.size());
+  HexArray expected("789abcdef");
+
+  EXPECT_EQ(subarray, expected);
+  EXPECT_EQ(subarray.size(), expected.size());
+  EXPECT_FALSE(subarray.empty());
+}
+
+TEST(HexArray, GetSubarrayClipEnd)
+{
+  HexArray a("0123456789abcdef");
+  HexArray subarray = a.GetSubarray(0, 13);
+  HexArray expected("0123456789abc");
+
+  EXPECT_EQ(subarray, expected);
+  EXPECT_EQ(subarray.size(), expected.size());
+  EXPECT_FALSE(subarray.empty());
 }
 
 } // namespace hogd
