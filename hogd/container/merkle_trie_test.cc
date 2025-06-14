@@ -31,22 +31,6 @@ HashFromString(const std::string &str)
   return ret;
 }
 
-std::vector<std::byte>
-ByteVectorFromString(const std::string &str)
-{
-  // Each byte has two hex characters, so the string length must be even.
-  assert(str.size() % 2 == 0);
-
-  std::vector<std::byte> ret;
-  for (size_t i = 0; i < str.size(); i += 2) {
-    std::string substr = str.substr(i, 2);
-    std::byte b = static_cast<std::byte>(
-        std::stoul(substr, /*pos=*/nullptr, /*base=*/16));
-    ret.push_back(b);
-  }
-  return ret;
-}
-
 } // namespace
 
 // TODO: Test for empty branch values.
@@ -56,12 +40,12 @@ TEST(MerkleTrie, TwoLeaves)
   MerkleTrie trie;
   trie.Print();
 
-  std::vector<std::byte> key = ByteVectorFromString("1234");
+  HexArray key("1234");
   std::string value = "hello";
   trie.insert(key, value);
   trie.Print();
 
-  key = ByteVectorFromString("1223");
+  key = HexArray("1223");
   value = "hello again";
   trie.insert(key, value);
   trie.Print();
@@ -71,30 +55,30 @@ TEST(MerkleTrie, TwoLeavesFind)
 {
   MerkleTrie trie;
 
-  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  HexArray key_a("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
   EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
 
-  std::vector<std::byte> key_b = ByteVectorFromString("1223");
+  HexArray key_b("1223");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
   EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(*trie.find(key_b), value_b);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
-  EXPECT_EQ(trie.find(ByteVectorFromString("123456")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("123456")), nullptr);
 }
 
 TEST(MerkleTrie, TwoLeavesRemove)
 {
   MerkleTrie trie;
 
-  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  HexArray key_a("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
 
-  std::vector<std::byte> key_b = ByteVectorFromString("1223");
+  HexArray key_b("1223");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
   trie.Print();
@@ -107,12 +91,12 @@ TEST(MerkleTrie, BranchAndLeaf)
   MerkleTrie trie;
   trie.Print();
 
-  std::vector<std::byte> key = ByteVectorFromString("1234");
+  HexArray key("1234");
   std::string value = "hello";
   trie.insert(key, value);
   trie.Print();
 
-  key = ByteVectorFromString("123456");
+  key = HexArray("123456");
   value = "hello again";
   trie.insert(key, value);
   trie.Print();
@@ -122,30 +106,30 @@ TEST(MerkleTrie, BranchAndLeafFind)
 {
   MerkleTrie trie;
 
-  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  HexArray key_a("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
   EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
 
-  std::vector<std::byte> key_b = ByteVectorFromString("123456");
+  HexArray key_b("123456");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
   EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(*trie.find(key_b), value_b);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12345678")), nullptr);
 }
 
 TEST(MerkleTrie, DoNotFindBranchValue)
 {
   MerkleTrie trie;
 
-  std::vector<std::byte> key_a = ByteVectorFromString("123456");
+  HexArray key_a("123456");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
 
-  std::vector<std::byte> key_b = ByteVectorFromString("123478");
+  HexArray key_b("123478");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
 
@@ -153,7 +137,7 @@ TEST(MerkleTrie, DoNotFindBranchValue)
   // [std::nullopt]). Check that we can properly detect this and return
   // [nullptr] rather than mistakenly return an empty string or something
   // similar.
-  EXPECT_EQ(trie.find(ByteVectorFromString("1234")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("1234")), nullptr);
 }
 
 TEST(MerkleTrie, TwoLeavesAndOneBranch)
@@ -161,17 +145,17 @@ TEST(MerkleTrie, TwoLeavesAndOneBranch)
   MerkleTrie trie;
   trie.Print();
 
-  std::vector<std::byte> key = ByteVectorFromString("1234");
+  HexArray key("1234");
   std::string value = "hello";
   trie.insert(key, value);
   trie.Print();
 
-  key = ByteVectorFromString("123456");
+  key = HexArray("123456");
   value = "hello again";
   trie.insert(key, value);
   trie.Print();
 
-  key = ByteVectorFromString("12ab");
+  key = HexArray("12ab");
   value = "hello three";
   trie.insert(key, value);
   trie.Print();
@@ -181,36 +165,36 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
 {
   MerkleTrie trie;
 
-  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  HexArray key_a("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
   EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
 
-  std::vector<std::byte> key_b = ByteVectorFromString("123456");
+  HexArray key_b("123456");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
   EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(*trie.find(key_b), value_b);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12345678")), nullptr);
 
-  std::vector<std::byte> key_c = ByteVectorFromString("12ab");
+  HexArray key_c("12ab");
   std::string value_c = "hello three";
   trie.insert(key_c, value_c);
   EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(*trie.find(key_b), value_b);
   EXPECT_EQ(*trie.find(key_c), value_c);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12")), nullptr);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12abcd")), nullptr);
-  EXPECT_EQ(trie.find(ByteVectorFromString("12345678")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12abcd")), nullptr);
+  EXPECT_EQ(trie.find(HexArray("12345678")), nullptr);
 }
 
 namespace {
 
 void
-ForEachFunc(std::set<std::pair<std::vector<std::byte>, std::string>> &seen,
-            const std::pair<std::vector<std::byte>, std::string> &pair)
+ForEachFunc(std::set<std::pair<HexArray, std::string>> &seen,
+            const std::pair<HexArray, std::string> &pair)
 {
   seen.insert(pair);
 }
@@ -220,20 +204,19 @@ ForEachFunc(std::set<std::pair<std::vector<std::byte>, std::string>> &seen,
 TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
 {
   MerkleTrie trie;
-  std::set<std::pair<std::vector<std::byte>, std::string>> seen;
-  auto f = [&seen](const std::pair<std::vector<std::byte>, std::string> &pair) {
+  std::set<std::pair<HexArray, std::string>> seen;
+  auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
     ForEachFunc(seen, pair);
   };
 
-  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  HexArray key_a("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
   trie.for_each(f);
-  std::set<std::pair<std::vector<std::byte>, std::string>> expected = {
-      {key_a, value_a}};
+  std::set<std::pair<HexArray, std::string>> expected = {{key_a, value_a}};
   EXPECT_EQ(seen, expected);
 
-  std::vector<std::byte> key_b = ByteVectorFromString("123456");
+  HexArray key_b("123456");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
   seen.clear();
@@ -241,7 +224,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
   trie.for_each(f);
   EXPECT_EQ(seen, expected);
 
-  std::vector<std::byte> key_c = ByteVectorFromString("12ab");
+  HexArray key_c("12ab");
   std::string value_c = "hello three";
   trie.insert(key_c, value_c);
   seen.clear();
@@ -254,15 +237,15 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchForRemove)
 {
   MerkleTrie trie;
 
-  std::vector<std::byte> key_a = ByteVectorFromString("1234");
+  HexArray key_a("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
 
-  std::vector<std::byte> key_b = ByteVectorFromString("123456");
+  HexArray key_b("123456");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
 
-  std::vector<std::byte> key_c = ByteVectorFromString("12ab");
+  HexArray key_c("12ab");
   std::string value_c = "hello three";
   trie.insert(key_c, value_c);
 
@@ -340,9 +323,7 @@ TEST(MerkleTrie, HashExtension)
   extension.type = MerkleTrie::NodeType::kExtension;
   memset(extension.hash.data(), 0,
          extension.hash.size() * sizeof(extension.hash[0]));
-  extension.path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
-                    std::byte{0x03}};
-  extension.path_size = 8;
+  extension.path = HexArray("00010203");
 
   static MerkleTrie::Node child{
       .hash = HashFromString(
@@ -362,9 +343,7 @@ TEST(MerkleTrie, HashExtensionNullptr)
   extension.type = MerkleTrie::NodeType::kExtension;
   memset(extension.hash.data(), 0,
          extension.hash.size() * sizeof(extension.hash[0]));
-  extension.path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
-                    std::byte{0x03}};
-  extension.path_size = 8;
+  extension.path = HexArray("00010203");
 
   extension.child[0] = nullptr;
 
@@ -380,9 +359,7 @@ TEST(MerkleTrie, HashLeaf)
   MerkleTrie::Node leaf;
   leaf.type = MerkleTrie::NodeType::kLeaf;
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
-  leaf.path = {std::byte{0x00}, std::byte{0x01}, std::byte{0x02},
-               std::byte{0x03}};
-  leaf.path_size = 8;
+  leaf.path = HexArray("00010203");
   leaf.value = "hello";
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(leaf);

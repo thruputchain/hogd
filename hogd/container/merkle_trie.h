@@ -63,7 +63,7 @@ public:
   // TODO: For all of the methods below, should they include a mutex as well (in
   // a pair)?
 
-  std::string &operator[](const Key &key)
+  std::string &operator[](const Key &k)
   {
     static std::string kEmpty = "";
 
@@ -120,8 +120,8 @@ public:
     }
     assert(next);
     assert(next->type == NodeType::kBranch);
-    assert(idx <= k.size() * 2);
-    if (idx == k.size() * 2) {
+    assert(idx <= k.size());
+    if (idx == k.size()) {
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
       assert(next->value->empty());
@@ -173,8 +173,7 @@ public:
         // the leaf node from the branch node. Thus, we add 1 below as we do not
         // want to include this character in the path that is stored in the leaf
         // node.
-        leaf->path = std::vector(k.begin() + (idx + 1) / 2, k.end());
-        leaf->path_size = (2 * k.size()) - idx - 1;
+        leaf->path = k.GetSubarray(idx + 1, k.size());
         leaf->value = std::move(obj);
         leaf->hash = GetNodeHash(*leaf);
 
@@ -340,10 +339,9 @@ public:
             new_child->child[0] = other_child;
           }
           else {
-            printf("Good! other_child = %p, cur_path = %s, cur_path_len = %zu, "
-                   "want to append %s\n",
-                   other_child, cur_path.str().c_str(), cur_path_len,
-                   other_child->path.str().c_str(), );
+            printf("Good! other_child = %p, cur_path = %s, want to append %s\n",
+                   other_child, cur_path.str().c_str(),
+                   other_child->path.str().c_str());
             cur_path.Append(other_child_hex);
             printf("ok... %s\n", cur_path.str().c_str());
             cur_path.Append(other_child->path);
@@ -419,20 +417,6 @@ private:
 
     // Used by extensions and leaves.
     HexArray path;
-    // Used by extensions and leaves.
-    //
-    // When [path_size] is odd, the first hex character in [path] must still
-    // match the hex character in its corresponding position in the full key.
-    //
-    // For example, if the full key is [0xabcdef], and [path_size] is 3, then
-    // [path] must be [0xcdef]. We require the first hex character to still be
-    // [c], rather than some garbage value or even [0].
-    //
-    // This is important so that we consistently produce the same hash for this
-    // node. If we did not impose this requirement on the first hex character,
-    // then two nodes that are logically equivalent could produce different
-    // hashes.
-    // size_t path_size;
 
     // Used by branches and leaves.
     // TODO: Should we be able to place values in extension nodes, too? For
@@ -475,34 +459,17 @@ private:
     return node;
   }
 
-  // TODO: Move to HexArray class.
-  bool HexRangesEqual(const HexArray &a, size_t a_start, size_t a_end,
-                      const HexArray &b, size_t b_start, size_t b_end)
-  {
-    size_t a_size = a_end - a_start;
-    size_t b_size = b_end - b_start;
-    if (a_size != b_size) {
-      return false;
-    }
-    for (size_t i = 0; i < a_size; i++) {
-      if (a.Get(i + a_start) != b.Get(i + b_start)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // TODO: Move to HexArray class.
+  // TODO: Move to HexArray class?
   size_t GetLongestCommonRangeLength(const HexArray &a, size_t a_start,
                                      const HexArray &b, size_t b_start)
   {
-    assert(a_start <= a.size() * 2);
-    assert(b_start <= b.size() * 2);
+    assert(a_start <= a.size());
+    assert(b_start <= b.size());
 
     size_t a_size = a.size() - a_start;
     size_t length = 0;
-    for (size_t i = 0; i < a_size * 2; i++) {
-      if (i + b_start >= b.size() * 2) {
+    for (size_t i = 0; i < a_size; i++) {
+      if (i + b_start >= b.size()) {
         break;
       }
       if (a.Get(i + a_start) != b.Get(i + b_start)) {
@@ -574,19 +541,15 @@ private:
   void InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
                                   const Key &k, size_t idx, T &&obj)
   {
-    size_t offset = (idx % 2 == 0) ? 0 : 1;
-    Key key_a = std::vector(k.begin() + (idx / 2), k.end());
+    Key key_a = k.GetSubarray(idx, k.size());
 
     size_t common_range_length =
-        GetLongestCommonRangeLength(key_a, offset + 1, current_extension->path,
-                                    offset + 1);
+        GetLongestCommonRangeLength(key_a, 1, current_extension->path, 1);
     assert(common_range_length);
-    size_t diverge_idx = offset + 1 + common_range_length;
+    size_t diverge_idx = 1 + common_range_length;
 
     Node *new_extension_node = CreateExtension();
-    new_extension_node->path = std::vector(key_a.begin() + (offset + 1) / 2,
-                                           key_a.begin() + diverge_idx / 2);
-    new_extension_node->path_size = common_range_length;
+    new_extension_node->path = key_a.GetSubarray(1, diverge_idx);
 
     parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
         new_extension_node;
@@ -604,16 +567,13 @@ private:
     // Include 1 to account for the branch node, too. [common_range_length] is
     // the size of the path in the extension node, and then we have 1 for the
     // branch node.
-    current_extension->path_size -= common_range_length + 1;
     current_extension->path =
-        std::vector(current_extension->path.begin() + (diverge_idx / 2),
-                    current_extension->path.end());
+        current_extension->path.GetSubarray(diverge_idx,
+                                            current_extension->path.size());
 
     // Create new leaf node.
     Node *new_leaf_node = CreateLeaf();
-    new_leaf_node->path =
-        std::vector(key_a.begin() + diverge_idx / 2, key_a.end());
-    new_leaf_node->path_size = key_a.size() * 2 - idx - diverge_idx - 1;
+    new_leaf_node->path = key_a.GetSubarray(diverge_idx, key_a.size());
     new_leaf_node->value = std::move(obj);
 
     std::byte leaf_branch = key_a.Get(diverge_idx);
@@ -625,22 +585,19 @@ private:
   void InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
                              const Key &k, size_t idx, T &&obj)
   {
-    size_t offset = (idx % 2 == 0) ? 0 : 1;
-    Key key_a = std::vector(k.begin() + (idx / 2), k.end());
+    Key key_a = k.GetSubarray(idx, k.size());
     Key key_b = current_leaf->path;
 
     Node *prev_branch = parent_branch;
 
     size_t common_range_length =
-        GetLongestCommonRangeLength(key_a, offset + 1, key_b, offset + 1);
-    size_t diverge_idx = offset + 1 + common_range_length;
+        GetLongestCommonRangeLength(key_a, 1, key_b, 1);
+    size_t diverge_idx = 1 + common_range_length;
     if (common_range_length) {
       Node *new_extension_node = CreateExtension();
-      new_extension_node->path = std::vector(key_a.begin() + (offset + 1) / 2,
-                                             key_a.begin() + diverge_idx / 2);
-      new_extension_node->path_size = common_range_length;
+      new_extension_node->path = key_a.GetSubarray(1, diverge_idx);
 
-      parent_branch->child[std::to_integer<size_t>(k.Get(idx + offset))] =
+      parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
           new_extension_node;
 
       Node *new_branch_node = CreateBranch();
@@ -648,9 +605,9 @@ private:
       prev_branch = new_branch_node;
 
       // Now remove the extension path from these keys.
-      key_a = std::vector(k.begin() + ((idx + diverge_idx) / 2), k.end());
-      key_b = std::vector(current_leaf->path.begin() + diverge_idx / 2,
-                          current_leaf->path.end());
+      key_a = k.GetSubarray(idx + diverge_idx, k.size());
+      key_b = current_leaf->path.GetSubarray(diverge_idx,
+                                             current_leaf->path.size());
     }
 
     const Key &shorter = key_a.size() <= key_b.size() ? key_a : key_b;
@@ -669,31 +626,27 @@ private:
 
       // Longer key's leaf node.
       Node *leaf = CreateLeaf();
-      leaf->path =
-          std::vector(longer.begin() + ((offset + 1) / 2), longer.end());
-      leaf->path_size = (longer.size() * 2) + idx - (offset + 1);
+      leaf->path = longer.GetSubarray(1, longer.size());
       leaf->value = std::move(longer_value);
       std::byte longer_digit = longer.Get(0);
       prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
     }
     else {
-      std::byte shorter_digit = shorter.Get(offset);
-      std::byte longer_digit = longer.Get(offset);
+      std::byte shorter_digit = shorter.Get(0);
+      std::byte longer_digit = longer.Get(0);
       assert(shorter_digit != longer_digit);
 
       // The digits do not match, so create two leaf nodes.
 
       // Shorter key's leaf node.
       Node *leaf = CreateLeaf();
-      leaf->path = std::vector(shorter.begin() + (offset / 2), shorter.end());
-      leaf->path_size = (shorter.size() * 2) + idx - 1 - offset;
+      leaf->path = shorter;
       leaf->value = std::move(shorter_value);
       prev_branch->child[std::to_integer<size_t>(shorter_digit)] = leaf;
 
       // Longer key's leaf node.
       leaf = CreateLeaf();
-      leaf->path = std::vector(longer.begin() + (offset / 2), longer.end());
-      leaf->path_size = (longer.size() * 2) + idx - 1 - offset;
+      leaf->path = longer;
       leaf->value = std::move(longer_value);
       prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
     }
@@ -787,8 +740,7 @@ private:
     }
     case NodeType::kExtension:
     {
-      if (HexRangesEqual(path, idx, idx + root->path.size(), root->path, 0,
-                         root->path.size())) {
+      if (path.GetSubarray(idx, idx + root->path.size()) == root->path) {
         assert(root->child[0]);
         idx += root->path.size();
         return TraverseToBottom(root->child[0], root, last_branch_seen,
@@ -809,8 +761,7 @@ private:
     case NodeType::kLeaf:
       // We are going to return the parent node, so subtract 1 from [idx].
       idx--;
-      if (HexRangesEqual(path, idx, path.size(), root->path, 0,
-                         root->path.size())) {
+      if (path.GetSubarray(idx, path.size()) == root->path) {
         existing_key = root;
       }
       return prev_root;
@@ -880,9 +831,8 @@ private:
     }
     case NodeType::kExtension:
     {
-      // Hash [path], [path.size()], and **the hash in**
-      // [child[0]].
-      to_hash.insert(to_hash.end(), node.path.begin(), node.path.end());
+      // Hash [path], [path.size()], and **the hash in** [child[0]].
+      to_hash = node.path.ToByteVector();
       std::vector<std::byte> size_bytes = SizeToBytes(node.path.size());
       to_hash.insert(to_hash.end(), size_bytes.begin(), size_bytes.end());
       if (node.child[0]) {
@@ -897,7 +847,7 @@ private:
     case NodeType::kLeaf:
     {
       // Hash [path], [path.size()], and [value].
-      to_hash.insert(to_hash.end(), node.path.begin(), node.path.end());
+      to_hash = node.path.ToByteVector();
       std::vector<std::byte> size_bytes = SizeToBytes(node.path.size());
       to_hash.insert(to_hash.end(), size_bytes.begin(), size_bytes.end());
       std::transform(node.value->begin(), node.value->end(),

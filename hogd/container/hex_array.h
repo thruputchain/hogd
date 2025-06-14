@@ -54,6 +54,33 @@ public:
     size_ = s.size();
   }
 
+  bool operator==(const HexArray &a) const
+  {
+    return size_ == a.size() &&
+           std::equal(backing_store_.begin(), backing_store_.begin() + size_,
+                      a.backing_store_.begin());
+  }
+
+  bool operator<(const HexArray &a) const
+  {
+    if (size_ < a.size()) {
+      return true;
+    }
+    // Find the hex digit where the two arrays diverge.
+    for (size_t i = 0; i < size_; i++) {
+      if (Get(i) < a.Get(i)) {
+        return true;
+      }
+      else if (Get(i) > a.Get(i)) {
+        return false;
+      }
+      else {
+        // Get(i) == a.Get(i), so continue looping.
+      }
+    }
+    return false;
+  }
+
   std::string str() const
   {
     std::ostringstream oss;
@@ -110,7 +137,34 @@ public:
     size_ -= to_remove;
   }
 
+  HexArray GetSubarray(size_t start, size_t end) const
+  {
+    assert(start < size_);
+    assert(end < size_);
+    HexArray h;
+    for (size_t i = start; i < end; i++) {
+      h.Append(Get(i));
+    }
+    return h;
+  }
+
+  std::vector<std::byte> ToByteVector() const
+  {
+    std::vector<std::byte> ret;
+    std::copy_n(backing_store_.begin(), (size_ + 1) / 2,
+                std::back_inserter(ret));
+    if (size_ % 2) {
+      // If the size is odd, zero out the last 4 bits to ensure we consistently
+      // return the same array. Otherwise, we could end up returning garbage in
+      // the last 4 bits, which could vary between invocations of
+      // [ToByteArray()].
+      ret.back() &= std::byte{0xF0};
+    }
+    return ret;
+  }
+
   size_t size() const { return size_; }
+  bool empty() const { return !size_; }
 
 private:
   // [kMaxNumHexDigits] is always even (see the static_assert() above).
