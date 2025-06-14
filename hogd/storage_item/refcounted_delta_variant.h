@@ -13,11 +13,13 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
+#include "hogd/storage_item/replay_cache.h"
 #include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -227,6 +229,50 @@ private:
       .max_fully_consumed_block_number = 0, .partial_consumed_number = 0};
 };
 
+class ReplayCacheArgs {
+public:
+  ReplayCacheArgs(const ReplayCache *base_cache) : base_cache_(base_cache) {}
+
+  static bool typeclass_match(const ReplayCache * /*unused*/) { return true; }
+
+  std::shared_ptr<const StorageItemWrapper>
+  to_item(StorageCostModel const *cost_model) const;
+
+  bool try_reserve_insert(ReplayNonce nonce);
+  void undo_insert(ReplayNonce nonce);
+
+  void commit_threshold_change(ReplayNonce new_threshold);
+  void commit_insert(ReplayNonce nonce)
+  {
+    [[maybe_unused]] auto [_, inserted] = committed_nonces_.insert(nonce);
+    assert(inserted);
+    has_committed_delta_ = true;
+  }
+
+  int128_t
+  get_current_committed_cost(StorageCostModel const *current_model,
+                             StorageItemWrapper const *base_item) const;
+  int128_t
+  get_marginal_cost_upper_bound(StorageDelta const &delta,
+                                StorageCostModel const *current_model,
+                                StorageItemWrapper const *base_item) const;
+  static int128_t
+  get_marginal_cost_upper_bound_static(bool is_committed,
+                                       StorageDelta const &delta,
+                                       StorageCostModel const *current_model,
+                                       StorageItemWrapper const *base_item);
+
+  ReplayCache to_new_cache() const;
+
+private:
+  const ReplayCache *base_cache_;
+
+  std::set<ReplayNonce> new_nonces_;
+  std::set<ReplayNonce> committed_nonces_;
+  ReplayCacheMetadata metadata_ = {.minimum_threshold = 0};
+  bool has_committed_delta_ = false;
+};
+
 // Exclusive locked state
 // For convenience, we maintain the invariant that the refcount is 1 whenever
 // the variant is in this state (so i.e. there's never an ExclusiveLockedState
@@ -247,31 +293,7 @@ struct ExclusiveLockedState {
   static int128_t
   get_marginal_cost_upper_bound(StorageDelta const &delta,
                                 StorageCostModel const *cost_model,
-                                StorageItemWrapper const *base_item)
-  {
-    // TODO(geoff): Most of these methods could be factored out into a static
-    // and nonstatic version
-    switch (delta.type()) {
-    case StorageDeltaType::kDeltaTypeBytestringSet:
-      return BytestringArgs::get_marginal_cost_upper_bound_static(false, delta,
-                                                                  cost_model,
-                                                                  base_item);
-    case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
-      return NNIntSetAddArgs::get_marginal_cost_upper_bound_static(false,
-                                                                   cost_model,
-                                                                   base_item);
-    case StorageDeltaType::kDeltaTypeDelete:
-      return DeleteArgs::get_marginal_cost_upper_bound(delta, cost_model,
-                                                       base_item);
-    case StorageDeltaType::kDeltaTypeRetrocausalQueue:
-    {
-      RetrocausalQueueArgs args;
-      return args.get_marginal_cost_upper_bound(delta, cost_model, base_item);
-    }
-    default:
-      throw std::runtime_error("Impossible state");
-    }
-  }
+                                StorageItemWrapper const *base_item);
 };
 
 // Unmodified state -- the variant is in this state if and only if refcount is
@@ -338,9 +360,9 @@ struct UnmodifiedState {
 // - to_item(): Converts variant state into a StorageItemWrapper, to be passed
 // to the next block.
 class RefcountedDeltaVariant {
-  using variant_t =
-      std::variant<BytestringArgs, NNIntSetAddArgs, RetrocausalQueueArgs,
-                   ExclusiveLockedState, DeleteArgs, UnmodifiedState>;
+  using variant_t = std::variant<BytestringArgs, NNIntSetAddArgs,
+                                 RetrocausalQueueArgs, ExclusiveLockedState,
+                                 DeleteArgs, UnmodifiedState, ReplayCacheArgs>;
 
 public:
   RefcountedDeltaVariant() = default;

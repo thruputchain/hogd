@@ -7,7 +7,6 @@ add_library(
   disk_writer.cc
   item_allocator.cc
   loglet.cc
-  snapshotter.cc
   scalable_map.cc
 )
 target_link_libraries(
@@ -36,4 +35,6 @@ target_link_libraries(
   ramdb
   GTest::gtest_main
 )
-gtest_discover_tests(db_test)
+gtest_discover_tests(
+  db_test
+  PROPERTIES TIMEOUT 100)

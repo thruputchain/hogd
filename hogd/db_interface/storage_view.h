@@ -3,6 +3,7 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <print>
 #include <shared_mutex>
 #include <unordered_map>
 #include <variant>
@@ -180,6 +181,7 @@ public:
   try_reserve_storage_delta(AddressAndKey const &addrkey,
                             StorageDelta const &delta, StorageLock const &lock,
                             StorageItemRPCFlagSet flags);
+
   void revert_storage_lock(AddressAndKey const &addrkey,
                            StorageLock const &lock);
   int128_t commit_storage_delta(AddressAndKey const &addrkey,

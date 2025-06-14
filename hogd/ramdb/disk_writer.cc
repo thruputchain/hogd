@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <format>
 #include <mutex>
@@ -194,8 +195,15 @@ DiskWriter::print_stats()
   }
   out = bytes_out_.load(std::memory_order_relaxed);
 
-  info("disk stats: bytes enqueued {}, bytes written {}", print_iec_bytes(in),
-       print_iec_bytes(out));
+  time_point now = std::chrono::high_resolution_clock::now();
+  std::chrono::nanoseconds ns = now - prev_stats_time_;
+  double rate = (out - prev_bytes_out_) * 1e9 / ns.count();
+
+  info("disk stats: bytes enqueued {}, bytes written {}, write bw {}/s",
+       print_iec_bytes(in), print_iec_bytes(out), print_iec_bytes(rate));
+
+  prev_bytes_out_ = out;
+  prev_stats_time_ = now;
 }
 
 void

@@ -1,10 +1,10 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 
+#include <bit>
 #include <cassert>
 #include <cstring>
 #include <regex>
 #include <string_view>
-#include <type_traits>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -13,9 +13,10 @@
 
 namespace hogd {
 
-MethodID
-sdk_method_id(std::string_view identifier_name,
-              std::string_view identifier_version, uint16_t method_id)
+ContractEntrypointID
+sdk_entrypoint_derivation(std::string_view identifier_name,
+                          std::string_view identifier_version,
+                          uint16_t method_id)
 {
   assert(std::regex_match(identifier_version.begin(), identifier_version.end(),
                           std::regex(R"(\d+\.\d+\.\d+)")));
@@ -26,25 +27,44 @@ sdk_method_id(std::string_view identifier_name,
 
   auto h = sha256(preimage);
 
-  ContractEntrypointID out{};
-  std::memcpy(out.contract_interface_id.data(), h.data(),
-              sizeof(out.contract_interface_id));
-  std::memcpy(out.contract_method_id.data(), &method_id,
-              sizeof(out.contract_method_id));
-  static_assert(sizeof(out.contract_method_id) == sizeof(method_id));
+  uint16_t method_id_byteswapped = std::byteswap(method_id);
 
-  return sdk_method_id(out);
+  ContractEntrypointID out{};
+  auto *out_ptr = reinterpret_cast<uint8_t *>(&out);
+  std::memcpy(out_ptr, h.data(), 6);
+  std::memcpy(out_ptr + 6, &method_id_byteswapped, 2);
+  static_assert(sizeof(out) == 6 + 2);
+  return out;
+}
+
+MethodID
+sdk_method_id(std::string_view identifier_name,
+              std::string_view identifier_version, uint16_t method_id)
+{
+  return sdk_method_id(sdk_entrypoint_derivation(identifier_name,
+                                                 identifier_version,
+                                                 method_id));
 }
 
 MethodID
 sdk_method_id(ContractEntrypointID entry_point_id)
 {
-  static_assert(sizeof(ContractEntrypointID) == sizeof(MethodID));
-  static_assert(std::is_trivially_copyable_v<ContractEntrypointID>);
-  static_assert(std::is_trivially_copyable_v<MethodID>);
+  MethodID out{};
+  std::memcpy(reinterpret_cast<uint8_t *>(&out), entry_point_id.data(),
+              sizeof(entry_point_id));
+  static_assert(sizeof(out) == sizeof(entry_point_id));
+  return std::byteswap(out);
+}
 
-  MethodID out;
-  std::memcpy(&out, &entry_point_id, sizeof(MethodID));
+// inverse of sdk_method_id
+ContractEntrypointID
+entrypoint_from_method_id(MethodID method_id)
+{
+  ContractEntrypointID out{};
+  uint64_t byteswapped = std::byteswap(method_id);
+  std::memcpy(reinterpret_cast<uint8_t *>(&out), &byteswapped,
+              sizeof(byteswapped));
+  static_assert(sizeof(out) == sizeof(method_id));
   return out;
 }
 

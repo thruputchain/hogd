@@ -5,8 +5,9 @@
 #include <utility>
 
 #include "contract.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/db_interface/block_state.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -36,27 +37,14 @@ DbExecutorServer::start_server(uint32_t port_number)
   }(cp_, this, std::move(lfd));
 }
 
-x23::Async<ExpectedStorageCost>
-DbExecutorServer::try_reserve_delta(BlockID block, TransactionID tx,
-                                    AddressAndKey addrkey, StorageDelta delta,
+bool
+DbExecutorServer::try_reserve_delta(BlockState *block_state, TransactionID tx,
+                                    AddressAndKey const &addrkey,
+                                    StorageDelta const &delta,
                                     StorageItemRPCFlagSet flags)
 {
-  auto block_data = block_manager_->get_block_data(block);
-  if (!block_data) {
-    co_return ExpectedStorageCost(RPCError::kRPCBadBlockID);
-  }
 
-  auto reserve_res =
-      block_data->try_reserve_storage_delta(tx, addrkey, delta, flags);
-
-  if (!reserve_res) {
-    co_return ExpectedStorageCost(RPCError::kRPCStorageWriteFailed);
-  }
-
-  ExpectedStorageCost out;
-  out.error(RPCError::kRPCNone);
-  out.storage_cost() = to_xdr(reserve_res.value());
-  co_return out;
+  return block_state->try_reserve_storage_delta(tx, addrkey, delta, flags);
 }
 
 x23::Async<RPCError>
@@ -84,7 +72,8 @@ DbExecutorServer::abort_transaction(BlockID block, TransactionID tx)
 }
 
 x23::Async<RPCError>
-DbExecutorServer::push_new_subtransaction(BlockID block, TransactionID tx)
+DbExecutorServer::try_push_new_subtransaction(BlockID block, TransactionID tx,
+                                              StorageDeltaBatch batch)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -92,6 +81,15 @@ DbExecutorServer::push_new_subtransaction(BlockID block, TransactionID tx)
   }
 
   block_data->push_subtransaction(tx);
+
+  for (auto const &delta : batch) {
+    if (!try_reserve_delta(block_data.get(), tx, delta.addrkey, delta.delta,
+                           delta.flags)) {
+      block_data->pop_subtransactions(tx, 1);
+      co_return RPCError::kRPCStorageWriteFailed;
+    }
+  }
+
   co_return RPCError::kRPCNone;
 }
 

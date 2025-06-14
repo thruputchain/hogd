@@ -33,6 +33,7 @@ public:
              StorageCostModel const *cost_model)
     : storage_view_(parent->storage_view_.as_parent(), mode, cost_model)
   {
+    assert(parent);
     // if parent is committed to database, then we should
     // use the other constructor
     assert(!parent->is_committed_to_database());
@@ -62,9 +63,11 @@ public:
   // ending the block.
   // Requirement: A transaction cannot try to reserve multiple deltas for the
   // same addrkey at the same time.  This is not enforced by the interface.
-  std::optional<int128_t>
-  try_reserve_storage_delta(TransactionID txid, AddressAndKey const &addrkey,
-                            StorageDelta delta, StorageItemRPCFlagSet flags);
+  bool try_reserve_storage_delta(TransactionID txid,
+                                 AddressAndKey const &addrkey,
+                                 StorageDelta delta,
+                                 StorageItemRPCFlagSet flags);
+
   void commit_transaction(TransactionID txid);
   void abort_transaction(TransactionID txid);
 

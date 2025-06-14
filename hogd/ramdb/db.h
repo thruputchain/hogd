@@ -14,7 +14,6 @@
 #include "hogd/ramdb/item_allocator.h"
 #include "hogd/ramdb/loglet.h"
 #include "hogd/ramdb/scalable_map.h"
-#include "hogd/ramdb/snapshotter.h"
 
 namespace hogd {
 
@@ -141,23 +140,18 @@ private:
   int write_head_order_;
   ScalableMap map_;
 
-  // protects cv_, active_, run_expand_, run_compact_, and
-  // snapshotter_.
+  // protects cv_, active_, run_expand_, and run_compact_.
   std::mutex lock_;
   std::condition_variable_any cv_;
   bool active_{true};
   bool run_expand_{false};
   bool run_compact_{false};
-  std::optional<Snapshotter> snapshotter_;
 
   // runs background_worker().
   std::jthread bg_th_;
 
   // called when memory is low.
   void notify_low_mem();
-
-  // helper used by background worked in snapshotting.
-  DBStatus<void> snapshot_one(UniqueLoglet &src);
 
   // background_worker performs periodic background work.
   void background_worker(const std::stop_token &stoken);
@@ -225,15 +219,6 @@ Database::get_each_parallel(GetEachCallback fn, size_t width, WorkerPool &pool)
 inline DBStatus<uint64_t>
 Database::sync()
 {
-  // We assume no ongoing put() operations, etc. Rolling over the per-thread log
-  // heads here ensures that all completed modifications are part of compactable
-  // loglets and aren't sitting in the per-thread heads. This is important
-  // since the snapshotter only traverses compactable loglets.
-  // This also establishes the sensible invariant that every synced update
-  // is in compactable loglets and not part of an active log head mixed with
-  // unsynced updates.
-  item_allocator_.roll_heads();
-
   return disk_writer_.sync();
 }
 

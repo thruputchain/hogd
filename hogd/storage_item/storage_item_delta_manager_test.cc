@@ -2,7 +2,9 @@
 
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 #include <utility>
 
@@ -32,7 +34,7 @@ namespace hogd {
 
 namespace {
 
-const StorageCostModel cost_model(12000, 2, 5, 100);
+const StorageCostModel cost_model(12000, 2, 5, 100, 5);
 
 void
 expect_final(StorageItemDeltaManager &item, Bytestring const &bytestring)
@@ -76,18 +78,37 @@ make_nnint_delta(int128_t set, int128_t add)
   return delta;
 };
 
+auto
+make_nnint_add_delta(int128_t add)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+  delta.nnint_add() = to_xdr(add);
+  return delta;
+}
+
+auto
+make_replay_delta(x23::Vec<ReplayNonce> nonces, ReplayNonce minimum_threshold)
+{
+  StorageDelta delta(StorageDeltaType::kDeltaTypeReplayCacheModify);
+  delta.replay_cache_modify() = {
+      .minimum_threshold = minimum_threshold,
+      .nonces = std::move(nonces),
+  };
+  return delta;
+};
+
 } // namespace
 
-class StorageItemDeltaManagerTest
-  : public ::testing::TestWithParam<BlockExecutionMode> {
+class DeltaManagerTest : public ::testing::TestWithParam<BlockExecutionMode> {
 protected:
   void SetUp() override { mode_ = GetParam(); }
 
   BlockExecutionMode mode_;
+  InvalidStateFlag flag_;
 };
 
 // Change the typeclass of a storage item during execution
-TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
+TEST_P(DeltaManagerTest, RewriteVariantTypeNullStart)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -145,7 +166,7 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantTypeNullStart)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
+TEST_P(DeltaManagerTest, RewriteVariantFromBase)
 {
   auto base_item =
       std::make_shared<StorageItemWrapper>(Bytestring{0, 1, 2, 3}, &cost_model);
@@ -192,7 +213,7 @@ TEST_P(StorageItemDeltaManagerTest, RewriteVariantFromBase)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, DeleteItem)
+TEST_P(DeltaManagerTest, DeleteItem)
 {
   InvalidStateFlag invalid_state_flag;
   auto base_item =
@@ -230,7 +251,7 @@ TEST_P(StorageItemDeltaManagerTest, DeleteItem)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, ExclusiveLockAcquire)
+TEST_P(DeltaManagerTest, ExclusiveLockAcquire)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -254,7 +275,7 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockAcquire)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
+TEST_P(DeltaManagerTest, NNIntSharedLock2SubSecondFails)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -312,7 +333,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSharedLock2SubSecondFails)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLock)
+TEST_P(DeltaManagerTest, NNIntFromExclusiveLock)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -343,7 +364,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLock)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
+TEST_P(DeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -374,7 +395,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntFromExclusiveLockNegativeSetValue)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, ExclusiveBytestring)
+TEST_P(DeltaManagerTest, ExclusiveBytestring)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -403,7 +424,7 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveBytestring)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, ExclusiveLockMultiAcquire)
+TEST_P(DeltaManagerTest, ExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -448,7 +469,7 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockMultiAcquire)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, PermanentExclusiveLockMultiAcquire)
+TEST_P(DeltaManagerTest, PermanentExclusiveLockMultiAcquire)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag,
@@ -488,7 +509,7 @@ TEST_P(StorageItemDeltaManagerTest, PermanentExclusiveLockMultiAcquire)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, NNIntSimpleSetAdd)
+TEST_P(DeltaManagerTest, NNIntSimpleSetAdd)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -506,7 +527,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSimpleSetAdd)
   ASSERT_FALSE(invalid_state_flag.is_invalid());
 }
 
-TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
+TEST_P(DeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
 {
   auto make_bytestring_delta = [](x23::Vec<uint8_t> vec) {
     StorageDelta delta(StorageDeltaType::kDeltaTypeBytestringSet);
@@ -541,7 +562,7 @@ TEST_P(StorageItemDeltaManagerTest, ExclusiveLockCostMatchNoPriorCommit)
             lk_exclusive->locked_tokens_ + cost_model.get_bytestring_cost(2));
 }
 
-TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
+TEST_P(DeltaManagerTest, NNIntSetAddInvalidState)
 {
   if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
     // This test is only valid for validation mode
@@ -594,7 +615,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddInvalidState)
   expect_final(item, int128_t{2});
 }
 
-TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
+TEST_P(DeltaManagerTest, NNIntSetAddNegativeSet)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -625,7 +646,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntSetAddNegativeSet)
   expect_final(item, int128_t{-9});
 }
 
-TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
+TEST_P(DeltaManagerTest, NNIntRetrocausalityInProposalMode)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -672,6 +693,47 @@ TEST_P(StorageItemDeltaManagerTest, NNIntRetrocausalityInProposalMode)
   expect_final(item, int128_t{2});
 }
 
+TEST_P(DeltaManagerTest, ReplayCacheInsertFromEmpty)
+{
+  StorageItemDeltaManager item(nullptr, &flag_, mode_, &cost_model);
+
+  auto delta1 = make_replay_delta({1, 2, 3}, 0);
+  auto delta2 = make_replay_delta({4, 5, 6}, 4);
+  // conflicts with delta1 and delta2
+  auto delta3 = make_replay_delta({1, 4, 7}, 5);
+
+  auto delta4 = make_replay_delta(
+      {
+          8,
+          9,
+          10,
+      },
+      7);
+
+  auto lock1 = item.try_reserve(delta1, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock1);
+
+  EXPECT_FALSE(item.try_reserve(delta3, StorageLock(StorageLockType::kNone)));
+
+  auto lock2 = item.try_reserve(delta2, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock2);
+
+  item.commit(delta1, *lock1);
+  item.commit(delta2, *lock2);
+
+  EXPECT_FALSE(item.try_reserve(delta3, StorageLock(StorageLockType::kNone)));
+
+  auto lock4 = item.try_reserve(delta4, StorageLock(StorageLockType::kNone));
+  ASSERT_TRUE(lock4);
+  item.revert(lock4->lock_);
+
+  auto r = item.get_post_close_block_item();
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->type(), StorageItemType::kItemTypeReplayCache);
+  EXPECT_EQ(r->replay_cache().metadata().minimum_threshold, 4);
+  EXPECT_EQ(r->replay_cache().nonces(), (std::set<ReplayNonce>{4, 5, 6}));
+}
+
 namespace {
 auto
 make_test_rcq_entry(uint8_t value)
@@ -691,7 +753,7 @@ make_rcq_delta(std::optional<RetrocausalQueueConsumeDelta> consume_delta,
 }
 } // namespace
 
-TEST_P(StorageItemDeltaManagerTest, RCQInsertThenConsume)
+TEST_P(DeltaManagerTest, RCQInsertThenConsume)
 {
   InvalidStateFlag invalid_state_flag;
   StorageItemDeltaManager item(nullptr, &invalid_state_flag, mode_,
@@ -728,7 +790,7 @@ TEST_P(StorageItemDeltaManagerTest, RCQInsertThenConsume)
                                            .active_size = 0});
 }
 
-TEST_P(StorageItemDeltaManagerTest, RCQConsumeThenInsert)
+TEST_P(DeltaManagerTest, RCQConsumeThenInsert)
 {
   if (mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
     // This test is only valid for validation mode
@@ -771,7 +833,7 @@ TEST_P(StorageItemDeltaManagerTest, RCQConsumeThenInsert)
                                            .active_size = 0});
 }
 
-TEST_P(StorageItemDeltaManagerTest, NNIntInterleavings)
+TEST_P(DeltaManagerTest, NNIntInterleavings)
 {
   InvalidStateFlag invalid_state_flag;
 
@@ -853,7 +915,7 @@ TEST_P(StorageItemDeltaManagerTest, NNIntInterleavings)
   EXPECT_TRUE(pool.run_test(experiment));
 }
 
-TEST_P(StorageItemDeltaManagerTest, NNIntConflictingInterleavings)
+TEST_P(DeltaManagerTest, NNIntConflictingInterleavings)
 {
   InvalidStateFlag invalid_state_flag;
 
@@ -959,11 +1021,13 @@ TEST_P(StorageItemDeltaManagerTest, NNIntConflictingInterleavings)
 // Reserve A insert(1) -- reserve 1 block
 // Commit A -- release 0
 // Reserve B insert (1) -- on old workflow, this would reserve 0 blocks; here it
-// reserves 1 Reserve C consume(1) -- reserve 0 blocks Commit C -- on old
-// workflow, has to release 1 block (B might not commit) then Commit B is stuck
-// -- it has no reservation, but it has to pay for creating a block
+// reserves 1
+// Reserve C consume(1) -- reserve 0 blocks
+// Commit C -- on old workflow, has to release 1 block (B might not commit)
+// then Commit B is stuck -- it has no reservation, but it has to pay for
+// creating a block
 
-TEST_P(StorageItemDeltaManagerTest, RCQAccountingEdgeCase)
+TEST_P(DeltaManagerTest, RCQAccountingEdgeCase)
 {
   InvalidStateFlag invalid_state_flag;
   model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
@@ -1095,12 +1159,12 @@ make_bytestring_delta(Bytestring const &bytestring)
 }
 } // namespace
 
-TEST_P(StorageItemDeltaManagerTest, BytestringCostUpgrade)
+TEST_P(DeltaManagerTest, BytestringCostUpgrade)
 {
   InvalidStateFlag invalid_state_flag;
 
   // higher cost per byte and lower cost per item
-  StorageCostModel cost_model_2(10000, 3, 1, 1);
+  StorageCostModel cost_model_2(10000, 3, 1, 1, 5);
   Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
 
   auto committed_item =
@@ -1231,14 +1295,14 @@ commit_delta_workflow(model::RunnableActionSet &set, StorageDelta delta,
 
 } // namespace
 
-TEST_P(StorageItemDeltaManagerTest, TypeChangeCostUpgrade)
+TEST_P(DeltaManagerTest, TypeChangeCostUpgrade)
 {
   // Test changes from a bytestring to an nnint
   InvalidStateFlag invalid_state_flag;
 
   // higher cost per item
 
-  StorageCostModel cost_model_2(14000, 2, 1, 1);
+  StorageCostModel cost_model_2(14000, 2, 1, 1, 5);
   Bytestring bytestring_1 = Bytestring{0, 1, 2, 3, 4};
 
   auto committed_item =
@@ -1320,14 +1384,94 @@ TEST_P(StorageItemDeltaManagerTest, TypeChangeCostUpgrade)
   EXPECT_TRUE(pool.run_test(experiment));
 }
 
+TEST_P(DeltaManagerTest, NNIntAdd)
+{
+  // NNIntAdd should not conflict with NNIntSetAdd with the correct set base
+  // value
+
+  InvalidStateFlag invalid_state_flag;
+  auto committed_item =
+      std::make_shared<StorageItemWrapper>(int128_t{100}, &cost_model);
+
+  model::ThreadPool<StorageItemDeltaManager, int128_t> pool(4);
+  std::shared_ptr<model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>
+      experiment = std::make_shared<
+          model::ExperimentBuilder<StorageItemDeltaManager, int128_t>>(
+          [&]() {
+            return std::make_tuple(StorageItemDeltaManager(committed_item,
+                                                           &invalid_state_flag,
+                                                           mode_, &cost_model),
+                                   int128_t{0});
+          },
+          [](model::WorkQueue &work_queue, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) {
+            auto actions =
+                std::make_unique<model::RunnableActionSet>(work_queue);
+
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_add_delta(10),
+                                               item, net_storage_cost, true);
+                },
+                item, net_storage_cost);
+
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_add_delta(-50),
+                                               item, net_storage_cost, true);
+                },
+                item, net_storage_cost);
+
+            actions->add_action(
+                [](model::RunnableActionSet &set, StorageItemDeltaManager &item,
+                   int128_t &net_storage_cost) -> model::Async {
+                  return commit_delta_workflow(set, make_nnint_delta(100, -10),
+                                               item, net_storage_cost, true);
+                },
+                item, net_storage_cost);
+
+            return actions;
+          },
+          [](model::ActionResult res, StorageItemDeltaManager &item,
+             int128_t &net_storage_cost) -> bool {
+            if (res == model::ActionResult::kTimeout) {
+              return false;
+            }
+
+            auto snapshot = item.get_post_close_block_item();
+            if (!snapshot ||
+                snapshot->type() != StorageItemType::kItemTypeNonnegativeInt) {
+              return false;
+            }
+
+            if (snapshot->nnint() != 100 - 50 - 10 + 10) {
+              return false;
+            }
+
+            return net_storage_cost == 0;
+          });
+
+  EXPECT_TRUE(pool.run_test(experiment));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(
-    BlockModes, StorageItemDeltaManagerTest,
+    BlockModes, DeltaManagerTest,
     ::testing::Values(BlockExecutionMode::kBlockExecutionModeProposal,
                       BlockExecutionMode::kBlockExecutionModeValidation),
-    [](const ::testing::TestParamInfo<BlockExecutionMode> &info) {
-      return x23::show(info.param);
+    [](const ::testing::TestParamInfo<BlockExecutionMode> &info)
+        -> std::string {
+      switch (info.param) {
+      case BlockExecutionMode::kBlockExecutionModeProposal:
+        return "Proposal";
+      case BlockExecutionMode::kBlockExecutionModeValidation:
+        return "Validation";
+      default:
+        return x23::show(info.param);
+      }
     });
 
 } // namespace hogd

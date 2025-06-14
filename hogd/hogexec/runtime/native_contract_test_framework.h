@@ -50,6 +50,9 @@ public:
     auto r = block_manager_.get_block_data(block_number_);
     assert(r);
     r->close_block();
+    if (!block_manager_.commit_block(block_number_)) {
+      throw std::runtime_error("advance_block: commit failed");
+    }
 
     [[maybe_unused]] auto r2 =
         block_manager_.add_child(block_number_, block_number_ + 1, mode);

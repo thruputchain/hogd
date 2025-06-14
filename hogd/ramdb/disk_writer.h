@@ -118,6 +118,12 @@ private:
   size_t bytes_in_{0};
   // the bytes actually written to disk (not including commit records).
   std::atomic<size_t> bytes_out_{0};
+  // value of bytes_out_ last time it was printed. used for running bw stats.
+  size_t prev_bytes_out_{0};
+  // timestamp of last time disk stats was printed. used for running bw stats.
+  using time_point =
+      std::chrono::time_point<std::chrono::high_resolution_clock>;
+  time_point prev_stats_time_;
   // loglets waiting to be written to disk. An empty UniqueLoglet triggers a
   // commit and advances the LSN.
   std::vector<UniqueLoglet> to_disk_;

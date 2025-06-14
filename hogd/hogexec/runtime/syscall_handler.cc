@@ -15,6 +15,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
@@ -45,7 +46,7 @@ SystemCallHandler::SystemCallHandler(
         [this](InvocationFrame &&last_frame) {
           commit_last_call_frame_success(std::move(last_frame));
         },
-        snapshot_cache, db_proxy_),
+        db_proxy_),
     newly_created_contracts_([&] {
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
@@ -77,16 +78,13 @@ SystemCallHandler::root_invoke()
                         .gas_consumed_ = 0};
   }
 
-  auto start_status =
-      invocation_frame_stack_.start_frame(signed_tx_.tx.invocation,
-                                          std::to_underlying(
-                                              InvokeFlag::kInvokeFlagNone));
-  if (!start_status.has_value()) {
-    return InvokeResult{.result_ = start_status.error().to_invoke_error(),
-                        .gas_consumed_ = 0};
-  }
+  invocation_frame_stack_.start_frame(
+      signed_tx_.tx.invocation.invoked_address,
+      Calldata(signed_tx_.tx.invocation.calldata),
+      std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
-  auto res = runtime.value()->invoke(signed_tx_.tx.invocation.method,
+  auto res = runtime.value()->invoke(sdk_method_id(
+                                         signed_tx_.tx.invocation.entrypoint),
                                      signed_tx_.tx.invocation.gas_limit);
   auto finish_status =
       invocation_frame_stack_.finish_frame(res, execution_mode_data_);
@@ -128,9 +126,7 @@ SystemCallHandler::try_commit_transaction()
   }
   assert(last_frame_.has_value());
 
-  auto r =
-      co_await last_frame_.value().try_acquire_frame_locks(db_proxy_, {},
-                                                           snapshot_cache_);
+  auto r = co_await last_frame_.value().try_acquire_frame_locks(db_proxy_, {});
   if (!r.has_value()) {
     co_return r.error();
   }
@@ -160,9 +156,7 @@ SystemCallHandler::try_commit_transaction()
 ContractAddress
 SystemCallHandler::get_current_address() const
 {
-  return invocation_frame_stack_.get_active_frame()
-      .active_invocation()
-      .invoked_address;
+  return invocation_frame_stack_.get_active_frame().address();
 }
 
 SHA256Hash
@@ -181,10 +175,11 @@ SystemCallHandler::get_msg_sender() const
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
+SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
+                          GasAmount gas_limit, Calldata calldata,
                           InvokeFlagSet flags)
 {
-  auto runtime = resolve_runtime(invocation.invoked_address);
+  auto runtime = resolve_runtime(address);
   if (!runtime) {
     return std::pair{runtime.error().to_host_fn_error(), 0};
   }
@@ -192,11 +187,9 @@ SystemCallHandler::invoke(Invocation const &invocation, GasAmount gas_limit,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  auto start_status = invocation_frame_stack_.start_frame(invocation, flags);
-  if (!start_status.has_value()) {
-    return {start_status.error().to_host_fn_error(), 0};
-  }
-  auto res = runtime.value()->invoke(invocation.method, gas_limit);
+  invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
+
+  auto res = runtime.value()->invoke(method, gas_limit);
   auto finish_status =
       invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   if (!finish_status.has_value()) {
@@ -287,9 +280,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 Calldata const &
 SystemCallHandler::get_calldata() const
 {
-  return invocation_frame_stack_.get_active_frame()
-      .active_invocation()
-      .calldata;
+  return invocation_frame_stack_.get_active_frame().calldata();
 }
 
 ProposalModeData const &
@@ -379,25 +370,30 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
 SystemStatus<SyscallStatus<std::span<const std::byte>>>
 SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
 {
-  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
-  if (!item_view) {
-    return item_view.error();
-  }
-  assert(*item_view);
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
 
-  if (auto const *bytestring_item = (*item_view)->get<BytestringItem>()) {
+  if (auto const *bytestring_item = item_view->get<BytestringItem>()) {
     return std::as_bytes(std::span(bytestring_item->bytestring_));
   }
 
-  if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    auto type = unmodified_item->base_item_.type();
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (!unmodified_item->is_loaded()) {
+      auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
+      auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
+      if (!load_status.has_value()) {
+        return load_status.error();
+      }
+    }
+    auto const &base_item = unmodified_item->base_item();
+    auto type = base_item.type();
     if (!type) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
     if (*type != ItemViewType::kBytestring) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
-    return std::as_bytes(std::span(unmodified_item->base_item_.bytestring()));
+    return std::as_bytes(std::span(base_item.bytestring()));
   }
 
   return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
@@ -407,11 +403,8 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring)
 {
-  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
-  if (!item_view) {
-    return item_view.error();
-  }
-  assert(*item_view);
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
 
   Bytestring new_string;
   new_string.resize_uninitialized(input_bytestring.size());
@@ -419,31 +412,52 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
               reinterpret_cast<const uint8_t *>(input_bytestring.data()),
               input_bytestring.size());
 
-  return (*item_view)->set(BytestringItem(std::move(new_string)));
+  return item_view->set(BytestringItem(std::move(new_string)));
 }
 
 SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
 {
-  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
-  if (!item_view) {
-    return item_view.error();
-  }
-  assert(*item_view);
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
 
-  if (auto const *nnint_item = (*item_view)->get<NNIntItem>()) {
-    return {std::make_pair(nnint_item->base_value_, nnint_item->add_value_)};
+  if (auto const *nnint_item = item_view->get<NNIntItem>()) {
+    if (nnint_item->base_value_.has_value()) {
+      return {std::make_pair(*nnint_item->base_value_, nnint_item->add_value_)};
+    }
+    auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
+    auto snapshot_value = snapshot_cache_.try_get_snapshot_item(addrkey);
+    if (!snapshot_value.has_value()) {
+      return snapshot_value.error();
+    }
+    // defaulting to 0, instead of returning an error, because there's already
+    // an NNintItem at this storage location, even if the snapshot value is
+    // different type.
+    auto snapshot_type = snapshot_value.value()->type();
+    if (!snapshot_type || snapshot_type.value() != ItemViewType::kNNInt) {
+      return std::make_pair(0, nnint_item->add_value_);
+    }
+    return {std::make_pair(snapshot_value.value()->nnint(),
+                           nnint_item->add_value_)};
   }
 
-  if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    auto type = unmodified_item->base_item_.type();
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (!unmodified_item->is_loaded()) {
+      auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
+      auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
+      if (!load_status.has_value()) {
+        return load_status.error();
+      }
+    }
+    auto const &base_item = unmodified_item->base_item();
+    auto type = base_item.type();
     if (!type) {
       return SyscallError{SyscallErrorCode::kStorageKeyNotExist};
     }
     if (*type != ItemViewType::kNNInt) {
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
-    return {std::make_pair(unmodified_item->base_item_.nnint(), 0)};
+    return {std::make_pair(base_item.nnint(), 0)};
   }
 
   return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
@@ -453,26 +467,30 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              int128_t set_value, int128_t add_value)
 {
-  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
-  if (!item_view) {
-    return item_view.error();
-  }
-  assert(*item_view);
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
 
-  return (*item_view)
-      ->set(NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
+  return item_view->set(
+      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
 }
 
 SystemStatus<SyscallStatus<void>>
+SystemCallHandler::add_nnint(StorageKeyContractData const &storage_key,
+                             int128_t add_value)
+{
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
+
+  return item_view->set(
+      NNIntItem{.base_value_ = std::nullopt, .add_value_ = add_value});
+}
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
-  auto item_view = invocation_frame_stack_.get_item_view(storage_key);
-  if (!item_view) {
-    return item_view.error();
-  }
-  assert(*item_view);
+  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  assert(item_view);
 
-  return (*item_view)->set(DeletedItem{});
+  return item_view->set(DeletedItem{});
 }
 
 namespace {
@@ -486,14 +504,22 @@ queue_entry_from_span(std::span<const std::byte> span)
   return new_entry;
 }
 
-SyscallStatus<RetrocausalQueueItem *>
-retrocausal_queue_item_from_view(ItemView *item_view)
+SystemStatus<SyscallStatus<RetrocausalQueueItem *>>
+retrocausal_queue_item_from_view(ItemView *item_view,
+                                 AddressAndKey const &addrkey,
+                                 StorageSnapshotCache &snapshot_cache)
 {
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
     return queue_item;
   }
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
-    RetrocausalQueueItem new_item(unmodified_item->base_item_);
+    if (!unmodified_item->is_loaded()) {
+      auto load_status = unmodified_item->load(snapshot_cache, addrkey);
+      if (!load_status.has_value()) {
+        return load_status.error();
+      }
+    }
+    RetrocausalQueueItem new_item(unmodified_item->base_item());
 
     auto set_status = item_view->set(new_item);
     if (!set_status.has_value()) {
@@ -509,20 +535,22 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::retrocausal_queue_insert(
     StorageKeyContractData const &key, std::span<const std::byte> queue_entry)
 {
-  auto item_view = invocation_frame_stack_.get_item_view(key);
-  if (!item_view) {
-    return item_view.error();
-  }
-  assert(*item_view);
+  auto addrkey = invocation_frame_stack_.get_addrkey(key);
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  assert(item_view);
 
-  auto queue_item = retrocausal_queue_item_from_view(*item_view);
+  auto queue_item =
+      retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_);
   if (!queue_item.has_value()) {
     return queue_item.error();
+  }
+  if (!queue_item.value().has_value()) {
+    return queue_item.value().error();
   }
 
   // Now we have either grabbed the preexisting RCQItem, or created a new one.
   // In either case, we can now insert the new entry.
-  queue_item.value()->insert_entry(queue_entry_from_span(queue_entry));
+  queue_item.value().value()->insert_entry(queue_entry_from_span(queue_entry));
   return {};
 }
 
@@ -530,18 +558,21 @@ SystemStatus<SyscallStatus<QueueEntry>>
 SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                              bool peek)
 {
-  auto item_view = invocation_frame_stack_.get_item_view(key);
-  if (!item_view) {
-    return item_view.error();
-  }
-  assert(*item_view);
+  auto addrkey = invocation_frame_stack_.get_addrkey(key);
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  assert(item_view);
 
-  auto queue_item = retrocausal_queue_item_from_view(*item_view);
+  auto queue_item =
+      retrocausal_queue_item_from_view(item_view, addrkey, snapshot_cache_);
   if (!queue_item.has_value()) {
     return queue_item.error();
   }
+  if (!queue_item.value().has_value()) {
+    return queue_item.value().error();
+  }
 
-  auto entry = queue_item.value()->get_next_item(execution_mode_data_, !peek);
+  auto entry =
+      queue_item.value().value()->get_next_item(execution_mode_data_, !peek);
   if (!entry.has_value()) {
     return entry.error();
   }
@@ -553,7 +584,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   return SyscallError{SyscallErrorCode::kNoRetrocausalQueueEntry};
 }
 
-SystemStatus<int128_t>
+SystemStatus<SyscallStatus<int128_t>>
 SystemCallHandler::get_native_token_balance(
     ContractAddress const &contract_address)
 {
@@ -561,21 +592,49 @@ SystemCallHandler::get_native_token_balance(
       .address = contract_address,
       .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
 
-  auto item_view = invocation_frame_stack_.get_item_view(addrkey);
-  if (!item_view.has_value()) {
-    return item_view.error();
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  assert(item_view);
+
+  if (auto *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (!unmodified_item->is_loaded()) {
+      auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
+      if (!load_status.has_value()) {
+        return load_status.error();
+      }
+    }
+    auto const &base_item = unmodified_item->base_item();
+    assert(base_item.type() == ItemViewType::kNativeTokenBalance);
+    assert(base_item.native_token_balance() >= 0);
+    return base_item.native_token_balance();
   }
 
-  if (auto *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-    assert(unmodified_item->base_item_.type() == ItemViewType::kNNInt);
-    assert(unmodified_item->base_item_.nnint() >= 0);
-    return unmodified_item->base_item_.nnint();
+  auto const *balance_item = item_view->get<NativeTokenBalanceItem>();
+  assert(balance_item);
+
+  auto base = [&] -> SystemStatus<int128_t> {
+    if (balance_item->base_value_.has_value()) {
+      return *balance_item->base_value_;
+    }
+    auto snapshot_value = snapshot_cache_.try_get_snapshot_item(addrkey);
+    if (!snapshot_value.has_value()) {
+      return snapshot_value.error();
+    }
+    auto snapshot_type = snapshot_value.value()->type();
+    if (!snapshot_type.has_value()) {
+      return 0;
+    }
+    assert(snapshot_type.value() == ItemViewType::kNativeTokenBalance);
+    return snapshot_value.value()->native_token_balance();
+  }();
+
+  if (!base.has_value()) {
+    return base.error();
+  }
+  if (integer_add_overflow(*base, balance_item->add_value_)) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
 
-  auto const *nnint_item = (*item_view)->get<NNIntItem>();
-  assert(nnint_item);
-
-  int128_t balance = nnint_item->base_value_ + nnint_item->add_value_;
+  int128_t balance = *base + balance_item->add_value_;
   assert(balance >= 0);
   return balance;
 }
@@ -588,37 +647,23 @@ SystemCallHandler::modify_native_token_balance(
       .address = contract_address,
       .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
 
-  auto item_view = invocation_frame_stack_.get_item_view(addrkey);
-  if (!item_view.has_value()) {
-    return item_view.error();
-  }
+  auto *item_view = invocation_frame_stack_.get_item_view(addrkey);
+  assert(item_view);
 
-  auto [current_balance, current_add] = [&]() -> std::pair<int128_t, int128_t> {
-    if (auto const *unmodified_item = (*item_view)->get<UnmodifiedItem>()) {
-      assert(unmodified_item->base_item_.type() == ItemViewType::kNNInt);
-      assert(unmodified_item->base_item_.nnint() >= 0);
-      return {unmodified_item->base_item_.nnint(), 0};
+  if (auto const *balance_item = item_view->get<NativeTokenBalanceItem>()) {
+    auto current_add = balance_item->add_value_;
+    if (integer_add_overflow(current_add, transfer_amount)) {
+      return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
-    auto const *nnint_item = (*item_view)->get<NNIntItem>();
-    assert(nnint_item);
-    return {nnint_item->base_value_, nnint_item->add_value_};
-  }();
-
-  if (integer_add_overflow(current_add, transfer_amount)) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+    auto new_add = current_add + transfer_amount;
+    return item_view->set(NativeTokenBalanceItem(
+        NNIntItem{.base_value_ = balance_item->base_value_,
+                  .add_value_ = new_add}));
   }
 
-  int128_t new_add = current_add + transfer_amount;
-  if (integer_add_overflow(current_balance, new_add)) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
-  if (new_add + current_balance < 0) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
-
-  return (*item_view)
-      ->set(NNIntItem{.base_value_ = current_balance, .add_value_ = new_add});
+  assert(item_view->get<UnmodifiedItem>());
+  return item_view->set(NativeTokenBalanceItem(
+      NNIntItem{.base_value_ = std::nullopt, .add_value_ = transfer_amount}));
 }
 
 } // namespace hogd

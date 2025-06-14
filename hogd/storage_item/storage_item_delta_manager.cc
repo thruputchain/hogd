@@ -4,6 +4,7 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -34,6 +35,38 @@ StorageItemDeltaManager::StorageItemDeltaManager(
 {}
 
 bool
+StorageItemDeltaManager::try_reserve_nnint_set_add(int128_t set_value,
+                                                   int128_t add_value)
+{
+  if (auto *args = variant_.try_set_variant<NNIntSetAddArgs>(set_value)) {
+    if (set_value < 0 && add_value < 0) {
+      // can only add to a set_value_ < 0
+      variant_.release_reference();
+      return false;
+    }
+
+    if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeValidation) {
+      return true;
+    }
+
+    // The assumption of this method is that there is no lock acquired yet on
+    // this item. Thus, we acquire a new lock.
+
+    NNIntBoundsLock bounds_lock{
+        .add_amount = to_xdr(add_value > 0 ? add_value : 0),
+        .subtract_amount = to_xdr(add_value < 0 ? add_value : 0),
+    };
+
+    if (args->try_acquire_bounds_lock(bounds_lock)) {
+      return true;
+    }
+    variant_.release_reference();
+    return false;
+  }
+  return false;
+}
+
+bool
 StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
 {
   assert(!variant_.has_permanent_exclusive_lock());
@@ -42,39 +75,24 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
   case StorageDeltaType::kDeltaTypeBytestringSet:
     return variant_.try_set_variant<BytestringArgs>(delta.bytestring()) !=
            nullptr;
+  case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
+  {
+    int128_t base_value =
+        [](StorageItemWrapper const *committed_item) -> int128_t {
+      if (!committed_item) {
+        return 0;
+      }
+      if (committed_item->type() != StorageItemType::kItemTypeNonnegativeInt) {
+        return 0;
+      }
+      return committed_item->nnint();
+    }(committed_item_.get());
+
+    return try_reserve_nnint_set_add(base_value, from_xdr(delta.nnint_add()));
+  }
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
-    if (auto *args = variant_.try_set_variant<NNIntSetAddArgs>(
-            from_xdr(delta.nnint().set_value))) {
-
-      int128_t add_value = from_xdr(delta.nnint().add_value);
-      int128_t set_value = from_xdr(delta.nnint().set_value);
-
-      if (set_value < 0 && add_value < 0) {
-        // can only add to a set_value_ < 0
-        variant_.release_reference();
-        return false;
-      }
-
-      if (execution_mode_ ==
-          BlockExecutionMode::kBlockExecutionModeValidation) {
-        return true;
-      }
-
-      // The assumption of this method is that there is no lock acquired yet on
-      // this item. Thus, we acquire a new lock.
-
-      NNIntBoundsLock bounds_lock{
-          .add_amount = to_xdr(add_value > 0 ? add_value : 0),
-          .subtract_amount = to_xdr(add_value < 0 ? add_value : 0),
-      };
-
-      if (args->try_acquire_bounds_lock(bounds_lock)) {
-        return true;
-      }
-      variant_.release_reference();
-      return false;
-    }
-    return false;
+    return try_reserve_nnint_set_add(from_xdr(delta.nnint().set_value),
+                                     from_xdr(delta.nnint().add_value));
   case StorageDeltaType::kDeltaTypeDelete:
     return variant_.try_set_variant<DeleteArgs>() != nullptr;
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
@@ -85,6 +103,35 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
         return args->try_reserve_consume();
       }
       return true;
+    }
+    return false;
+  }
+  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+  {
+    auto const *prev_cache =
+        (committed_item_ &&
+         committed_item_->type() == StorageItemType::kItemTypeReplayCache)
+            ? &committed_item_->replay_cache()
+            : nullptr;
+    if (auto *args = variant_.try_set_variant<ReplayCacheArgs>(prev_cache)) {
+      bool insert_failed = false;
+      size_t insert_count = 0;
+      for (; insert_count < delta.replay_cache_modify().nonces.size();
+           insert_count++) {
+        if (!args->try_reserve_insert(
+                delta.replay_cache_modify().nonces[insert_count])) {
+          insert_failed = true;
+          break;
+        }
+      }
+      if (!insert_failed) {
+        return true;
+      }
+      for (size_t i = 0; i < insert_count; i++) {
+        args->undo_insert(delta.replay_cache_modify().nonces[i]);
+      }
+      variant_.release_reference();
+      return false;
     }
     return false;
   }
@@ -102,11 +149,18 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   case StorageDeltaType::kDeltaTypeBytestringSet:
     variant_.get_variant_arm_unchecked<BytestringArgs>().commit_set();
     break;
+  case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
   {
     auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
     bool valid_before = args.in_valid_state();
-    int128_t add_value = from_xdr(delta.nnint().add_value);
+    auto add_value = [&delta] -> int128_t {
+      if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd) {
+        return from_xdr(delta.nnint_add());
+      }
+      assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
+      return from_xdr(delta.nnint().add_value);
+    }();
     args.commit_add(add_value);
     bool valid_after = args.in_valid_state();
     if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
@@ -131,8 +185,16 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
                           *invalid_state_flag_);
     }
   } break;
+  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+  {
+    auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
+    args.commit_threshold_change(delta.replay_cache_modify().minimum_threshold);
+    for (auto nonce : delta.replay_cache_modify().nonces) {
+      args.commit_insert(nonce);
+    }
+  } break;
   default:
-    throw std::runtime_error("unimpl");
+    throw std::runtime_error("unimplemented commit_delta");
   }
 
   if (maintain_permanent_exclusive_lock) {
@@ -267,6 +329,11 @@ StorageItemDeltaManager::revert_exclusive_lock_to_set_typeclass(
   assert(variant_.refcount() == 1);
 
   // handle type-specific lock data
+  // This has to release the bounds lock for nnints, because case moves from
+  // kExclusiveLock to a committed kSetItemTypeClass lock (and nnint is
+  // retrocausal, so try_reserve_delta above acquires the lock, which is
+  // normally released during commit() -- not in commit_delta() after this is
+  // called).
   if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeProposal) {
     if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
       auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
@@ -301,8 +368,19 @@ StorageItemDeltaManager::revert_set_typeclass_lock(
     }
     break;
   }
-  default:
+  case StorageItemType::kItemTypeReplayCache:
+  {
+    auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
+    for (auto nonce : type_specific_lock.nonces()) {
+      args.undo_insert(nonce);
+    }
     break;
+  }
+  case StorageItemType::kItemTypeBytestring:
+  case StorageItemType::kItemTypeDeleted:
+    break;
+  default:
+    throw std::runtime_error("unimplemented revert_set_typeclass_lock");
   }
 
   variant_.release_reference();
@@ -317,7 +395,7 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
   assert(variant_.refcount() > 0);
   assert(!variant_.has_permanent_exclusive_lock());
 
-  auto req_lock = delta_to_lock(delta, execution_mode_);
+  auto req_lock = delta_to_lock(delta, execution_mode_, committed_item_.get());
   assert(req_lock.lock_type() == StorageLockType::kSetItemTypeClass);
 
   if (req_lock.full_typeclass_lock().typeclass !=
@@ -345,7 +423,14 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
     // trying to upgrade one reservation lock to another
     auto const &prev_bounds_lock =
         prev_typeclass_lock.extra_lock_data.nnint_bounds_lock();
-    int128_t new_add_amount = from_xdr(delta.nnint().add_value);
+    int128_t new_add_amount = [&] {
+      if (delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd) {
+        return from_xdr(delta.nnint().add_value);
+      }
+      assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+      return from_xdr(delta.nnint_add());
+    }();
+
     NNIntBoundsLock req_bounds_lock{
         .add_amount = to_xdr(
             std::max(new_add_amount, from_xdr(prev_bounds_lock.add_amount))),
@@ -383,8 +468,39 @@ StorageItemDeltaManager::handle_try_reserve_from_set_typeclass_lock(
     assert(req_lock.full_typeclass_lock() == prev_typeclass_lock);
     return req_lock;
   }
-  default:
+  case StorageItemType::kItemTypeReplayCache:
+  {
+    assert(variant_.has_variant_arm<ReplayCacheArgs>());
+    auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
+    std::set<ReplayNonce> marginal_new_nonces = {
+        delta.replay_cache_modify().nonces.begin(),
+        delta.replay_cache_modify().nonces.end()};
+    for (auto nonce : prev_typeclass_lock.extra_lock_data.nonces()) {
+      marginal_new_nonces.erase(nonce);
+    }
+
+    bool insert_failed = false;
+    auto it = marginal_new_nonces.begin();
+    for (; it != marginal_new_nonces.end(); it++) {
+      if (!args.try_reserve_insert(*it)) {
+        insert_failed = true;
+        break;
+      }
+    }
+    if (insert_failed) {
+      for (auto it2 = marginal_new_nonces.begin(); it2 != it; it2++) {
+        args.undo_insert(*it2);
+      }
+      return std::nullopt;
+    }
+    return req_lock;
+  }
+  case StorageItemType::kItemTypeBytestring:
+  case StorageItemType::kItemTypeDeleted:
     return prev_lock;
+  default:
+    throw std::runtime_error(
+        "unimplemented handle_try_reserve_from_set_typeclass_lock");
   }
 }
 
@@ -404,7 +520,8 @@ StorageItemDeltaManager::try_reserve(StorageDelta const &delta,
       int128_t required_storage =
           variant_.get_marginal_cost_upper_bound(delta, cost_model_,
                                                  committed_item_.get());
-      return MeteredStorageLock{.lock_ = delta_to_lock(delta, execution_mode_),
+      return MeteredStorageLock{.lock_ = delta_to_lock(delta, execution_mode_,
+                                                       committed_item_.get()),
                                 .locked_tokens_ =
                                     std::max<int128_t>(required_storage, 0)};
     }
@@ -451,6 +568,7 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
   case StorageDeltaType::kDeltaTypeBytestringSet:
     // nothing to do
     break;
+  case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
   {
     if (execution_mode_ == BlockExecutionMode::kBlockExecutionModeValidation) {
@@ -459,7 +577,6 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     }
     assert(lock.full_typeclass_lock().extra_lock_data.item_type() ==
            StorageItemType::kItemTypeNonnegativeInt);
-    assert(delta.type() == StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
 
     auto &args = variant_.get_variant_arm_unchecked<NNIntSetAddArgs>();
 
@@ -482,8 +599,21 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
     }
     break;
   }
+  case StorageDeltaType::kDeltaTypeReplayCacheModify:
+  {
+    auto &args = variant_.get_variant_arm_unchecked<ReplayCacheArgs>();
+    for (auto nonce : lock.full_typeclass_lock().extra_lock_data.nonces()) {
+      args.undo_insert(nonce);
+    }
+    for (auto nonce : delta.replay_cache_modify().nonces) {
+      [[maybe_unused]] auto r = args.try_reserve_insert(nonce);
+      assert(r);
+    }
+    break;
+  }
   default:
-    throw std::runtime_error("unimplemented");
+    throw std::runtime_error(
+        "unimplemented revert_set_typeclass_lock_to_set_typeclass");
   }
 }
 
