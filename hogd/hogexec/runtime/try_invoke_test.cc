@@ -1592,7 +1592,6 @@ TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
 TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 {
-
   NativeContractBuilder builder;
 
   StorageKeyContractData key = make_storage_key("test");
@@ -1786,7 +1785,6 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
     work_queue.advance_cursor();
   }
 }
-
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
