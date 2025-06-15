@@ -71,25 +71,75 @@ public:
     return kEmpty;
   }
 
+  std::vector<SHA256Hash> GetProofHashesFor(const Key &k)
+  {
+    Node *node = FindNode(k);
+    if (!node) {
+      return {};
+    }
+
+    std::vector<SHA256Hash> ret;
+    while (true) {
+      if (!node) {
+        break;
+      }
+
+      if (node->type == NodeType::kBranch) {
+        for (Node *child : node->child) {
+          if (child) {
+            ret.push_back(child->hash);
+          }
+        }
+      }
+      ret.push_back(node->hash);
+    }
+    return ret;
+  }
+
+  bool Prove(const std::vector<SHA256Hash> &hashes, const Key &k,
+             const std::string &value)
+  {
+    Node *node = FindNode(k);
+    if (!node) {
+      return false;
+    }
+
+    int64_t i = hashes.size();
+    while (true) {
+      if (!node) {
+        break;
+      }
+
+      if (node->type == NodeType::kBranch) {
+        for (Node *child : node->child) {
+          if (child) {
+            if (i < 0 || child->hash != hashes[i--]) {
+              return false;
+            }
+          }
+        }
+      }
+
+      if (i < 0 || node->hash != hashes[i--]) {
+        return false;
+      }
+      node = node->parent;
+    }
+    // Check that we verified all of the hashes in [hashes].
+    return (i == -1);
+  }
+
   std::string *find(const Key &k)
   {
-    size_t idx = 0;
-    std::byte branch_hex = std::byte(0x00);
-    Node *existing_key = nullptr;
-    Node *branch_before_branch = nullptr;
-    std::byte branch_before_branch_hex = std::byte(0x00);
-    TraverseToBottom(root_, /*prev_root=*/nullptr, /*last_branch_seen=*/nullptr,
-                     /*last_branch_hex_seen=*/std::byte(0x00),
-                     /*path=*/k, idx, branch_hex, existing_key,
-                     branch_before_branch, branch_before_branch_hex);
-    if (existing_key) {
-      switch (existing_key->type) {
+    Node *node = FindNode(k);
+    if (node) {
+      switch (node->type) {
       case NodeType::kBranch:
       case NodeType::kLeaf:
       {
         // Get the [std::string] out of the [std::optional<std::string>] with
         // the dereference operator.
-        std::string &value = *existing_key->value;
+        std::string &value = *node->value;
         return &value;
         break;
       }
@@ -516,6 +566,20 @@ private:
       printf("\n");
       break;
     }
+  }
+
+  Node *FindNode(const Key &k)
+  {
+    size_t idx = 0;
+    std::byte branch_hex = std::byte(0x00);
+    Node *existing_key = nullptr;
+    Node *branch_before_branch = nullptr;
+    std::byte branch_before_branch_hex = std::byte(0x00);
+    TraverseToBottom(root_, /*prev_root=*/nullptr, /*last_branch_seen=*/nullptr,
+                     /*last_branch_hex_seen=*/std::byte(0x00),
+                     /*path=*/k, idx, branch_hex, existing_key,
+                     branch_before_branch, branch_before_branch_hex);
+    return existing_key;
   }
 
   // See the callsite for comments on this function.
