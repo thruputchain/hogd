@@ -123,7 +123,7 @@ read_bytes(BufferedReader &r, size_t n)
 RPCClient::~RPCClient()
 {
   if (ErrnoStatus<void> ret = sys_shutdown(socket_.get_fd(), SHUT_RDWR); !ret)
-    warn("could not shutdown socket: {}", ret.error());
+    error("could not shutdown socket: {}", ret.error());
 }
 
 ErrnoStatus<std::unique_ptr<RPCClient>>
@@ -187,10 +187,14 @@ RPCClient::send_worker(const std::stop_token &stoken)
       Request req = requests.front();
       requests.pop();
       size_t req_bytes = req.size();
-      if (ErrnoStatus<void> ret = write_full(w, byte_view(req_bytes)); !ret)
+      if (ErrnoStatus<void> ret = write_full(w, byte_view(req_bytes)); !ret) {
         error("client write size failed: {}", ret.error());
-      if (ErrnoStatus<void> ret = write_full(w, req); !ret)
+        return;
+      }
+      if (ErrnoStatus<void> ret = write_full(w, req); !ret) {
         error("client write bytes failed: {}", ret.error());
+        return;
+      }
     }
 
     w.flush();
@@ -225,6 +229,7 @@ RPCClient::receive_worker(const std::stop_token &stoken)
     if (!bytes) {
       if (bytes.error() != ENODATA)
         warn("client read bytes failed: {}", bytes.error());
+      return;
     }
     take_completion().set_value(std::move(*bytes));
   }
@@ -279,7 +284,7 @@ RPCServer::connection_worker(File &&socket)
   while (true) {
     // read available requests.
     // GOAL: fetch as many requests as possible without blocking by peaking at
-    // the amount buffered.
+    // how many are currently buffered.
     size_t next_n = 0;
     while (r.size() >= next_n || requests.empty()) {
       if (!n) {
