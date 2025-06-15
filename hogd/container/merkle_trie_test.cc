@@ -102,6 +102,23 @@ TEST(MerkleTrie, BranchAndLeaf)
   trie.Print();
 }
 
+TEST(MerkleTrie, BranchAndLeafRemove)
+{
+  MerkleTrie trie;
+
+  HexArray key_a("1234");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+
+  HexArray key_b = HexArray("123456");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+
+  trie.Print();
+  trie.remove(key_b);
+  trie.Print();
+}
+
 TEST(MerkleTrie, BranchAndLeafFind)
 {
   MerkleTrie trie;

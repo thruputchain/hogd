@@ -241,12 +241,6 @@ public:
                          /*last_branch_hex_seen=*/std::byte(0x00), /*path=*/k,
                          idx, branch_hex, existing_key, branch_before_branch,
                          branch_before_branch_hex);
-    printf("existing_key = %p, branch = %p, branch_hex = %02x, "
-           "branch_before_branch = %p, "
-           "branch_before_branch_hex = %02x\n",
-           existing_key, branch, branch_hex, branch_before_branch,
-           branch_before_branch_hex);
-
     if (!existing_key) {
       return 0;
     }
@@ -258,7 +252,6 @@ public:
 
       assert(branch->value);
       branch->value = std::nullopt;
-      printf("A\n");
     }
     else {
       size_t num_branches = 0;
@@ -269,7 +262,6 @@ public:
       }
       assert(num_branches);
 
-      printf("B, num_branches = %zu\n", num_branches);
       if (num_branches > 2) {
         // Just remove the leaf node from the branch.
 
@@ -277,38 +269,25 @@ public:
         delete existing_key;
       }
       else if (branch_before_branch) {
-        printf("Should start looking at node %p and go down branch %02x.\n",
-               branch_before_branch, branch_before_branch_hex);
-
         Node *cur =
             branch_before_branch
                 ->child[std::to_integer<size_t>(branch_before_branch_hex)];
         HexArray cur_path;
-        printf("Start while loop\n");
         while (true) {
-          printf("top of while loop, cur is %p\n", cur);
           if (cur->type == NodeType::kBranch) {
             break;
           }
-          printf("while A\n");
           assert(cur->type == NodeType::kExtension);
           cur_path.Append(cur->path);
-          printf("while B\n");
 
           Node *next_cur = cur->child[0];
           delete cur;
-          printf("while C\n");
           cur = next_cur;
-          printf("while D\n");
         }
-        printf("Reached next branch %p\n", cur);
 
         branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
         Node *new_child = nullptr;
         if (num_branches == 1) {
-          printf("Replace branch value with leaf, leaf path = %s\n",
-                 cur_path.str().c_str());
-
           new_child = CreateLeaf();
           new_child->path = cur_path;
           new_child->value = std::move(branch->value);
@@ -316,7 +295,6 @@ public:
         }
         else {
           assert(num_branches == 2);
-          printf("Remove branch node and move cur_path into existing child\n");
 
           Node *other_child = nullptr;
           std::byte other_child_hex = std::byte{0x00};
@@ -331,7 +309,6 @@ public:
           assert(other_child);
 
           if (other_child->type == NodeType::kBranch) {
-            printf("Bad!\n");
             new_child = CreateExtension();
             cur_path.Append(branch_hex);
 
@@ -339,13 +316,8 @@ public:
             new_child->child[0] = other_child;
           }
           else {
-            printf("Good! other_child = %p, cur_path = %s, want to append %s\n",
-                   other_child, cur_path.str().c_str(),
-                   other_child->path.str().c_str());
             cur_path.Append(other_child_hex);
-            printf("ok... %s\n", cur_path.str().c_str());
             cur_path.Append(other_child->path);
-            printf("another append, %s\n", cur_path.str().c_str());
             other_child->path = cur_path;
 
             new_child = other_child;
