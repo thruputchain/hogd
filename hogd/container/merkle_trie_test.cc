@@ -13,6 +13,8 @@ namespace hogd {
 
 namespace {
 
+// TODO: This functionality should be replaced with HexArray.
+
 // Converts a human-readable hex string (e.g., "0x1234") to a [SHA256Hex].
 SHA256Hash
 HashFromString(const std::string &str)
@@ -29,6 +31,17 @@ HashFromString(const std::string &str)
     ret[i / 2] = byte;
   }
   return ret;
+}
+
+std::string
+StringFromHash(const SHA256Hash &hash)
+{
+  std::ostringstream oss;
+  oss << std::hex << std::setfill('0');
+  for (size_t i = 0; i < 32; i++) {
+    oss << std::setw(1) << static_cast<int>(hash[i]);
+  }
+  return oss.str();
 }
 
 } // namespace
@@ -269,6 +282,30 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
   trie.Print();
   trie.remove(key_b);
   trie.Print();
+}
+
+TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
+{
+  MerkleTrie trie;
+
+  HexArray key_a("1234");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+
+  HexArray key_b("123456");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+
+  HexArray key_c("12ab");
+  std::string value_c = "hello three";
+  trie.insert(key_c, value_c);
+
+  trie.Print();
+  std::vector<SHA256Hash> hashes = trie.GetProofHashesFor(key_b);
+  for (size_t i = 0; i < hashes.size(); i++) {
+    printf("%s\n", StringFromHash(hashes[i]).c_str());
+  }
+  printf("done.\n");
 }
 
 // Hash a branch node. All child pointers are non-NULL.

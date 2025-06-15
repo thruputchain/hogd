@@ -97,6 +97,7 @@ public:
       }
       ret.push_back(node->hash);
       prev_node = node;
+      node = node->parent;
     }
     return ret;
   }
@@ -131,8 +132,8 @@ public:
       if (i < 0 || node->hash != hashes[i--]) {
         return false;
       }
-      node = node->parent;
       prev_node = node;
+      node = node->parent;
     }
     // Check that we verified all of the hashes in [hashes].
     return i == -1;
@@ -326,7 +327,8 @@ public:
         // Just remove the leaf node from the branch.
 
         branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
-        delete existing_key;
+        // TODO: Fix all frees.
+        // delete existing_key;
         to_hash = branch;
       }
       else if (branch_before_branch) {
@@ -342,7 +344,7 @@ public:
           cur_path.Append(cur->path);
 
           Node *next_cur = cur->child[0];
-          delete cur;
+          // delete cur;
           cur = next_cur;
         }
 
@@ -352,7 +354,7 @@ public:
           new_child = CreateLeaf(/*parent=*/branch_before_branch);
           new_child->path = cur_path;
           new_child->value = std::move(branch->value);
-          delete branch;
+          // delete branch;
         }
         else {
           assert(num_branches == 2);
@@ -385,8 +387,8 @@ public:
             new_child = other_child;
           }
 
-          delete branch;
-          delete existing_key;
+          // delete branch;
+          // delete existing_key;
         }
 
         branch_before_branch
@@ -400,7 +402,7 @@ public:
         // node also never has a value in it.
         assert(branch == root_);
         branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
-        delete existing_key;
+        // delete existing_key;
         to_hash = branch;
       }
     }
@@ -721,7 +723,7 @@ private:
       prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
       to_hash = leaf;
     }
-    delete current_leaf;
+    // delete current_leaf;
     return to_hash;
   }
 
@@ -969,7 +971,7 @@ private:
     case NodeType::kLeaf:
       break;
     }
-    delete root;
+    // delete root;
   }
 
   Node *root_ = nullptr;
