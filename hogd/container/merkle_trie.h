@@ -1,4 +1,3 @@
-// B
 // merkle.h - provides a merkle patricia trie
 
 #pragma once
