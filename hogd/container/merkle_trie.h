@@ -1,3 +1,4 @@
+// B
 // merkle.h - provides a merkle patricia trie
 
 #pragma once
@@ -121,12 +122,15 @@ public:
     assert(next);
     assert(next->type == NodeType::kBranch);
     assert(idx <= k.size());
+
+    Node *to_hash = nullptr;
     if (idx == k.size()) {
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
       assert(next->value->empty());
       next->value = std::move(obj);
       next->hash = GetNodeHash(*next);
+      to_hash = next;
     }
     else {
       std::byte digit = k.Get(idx);
@@ -158,17 +162,17 @@ public:
         //   its own leaf node under the branch (so there will be two leaf
         //   nodes).
         if (next->child[branch_idx]->type == NodeType::kExtension) {
-          InsertHandleExtensionChild(next->child[branch_idx], next, k, idx,
-                                     std::move(obj));
+          to_hash = InsertHandleExtensionChild(next->child[branch_idx], next, k,
+                                               idx, std::move(obj));
         }
         else {
           assert(next->child[branch_idx]->type == NodeType::kLeaf);
-          InsertHandleLeafChild(next->child[branch_idx], next, k, idx,
-                                std::move(obj));
+          to_hash = InsertHandleLeafChild(next->child[branch_idx], next, k, idx,
+                                          std::move(obj));
         }
       }
       else {
-        Node *leaf = CreateLeaf();
+        Node *leaf = CreateLeaf(/*parent=*/next);
         // We are going to use the hex character at [idx] in the key to map to
         // the leaf node from the branch node. Thus, we add 1 below as we do not
         // want to include this character in the path that is stored in the leaf
@@ -178,14 +182,12 @@ public:
         leaf->hash = GetNodeHash(*leaf);
 
         next->child[branch_idx] = leaf;
+        to_hash = next;
       }
     }
 
     size_++;
-    // TODO: Optimize this to only recompute the hashes on paths that were
-    // changed. Note that paths **that do not correspond to the key above**
-    // could also be changed!
-    RegenerateAllHashes(root_);
+    GenerateHashesFrom(to_hash);
     return true;
   }
 
@@ -288,7 +290,7 @@ public:
         branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
         Node *new_child = nullptr;
         if (num_branches == 1) {
-          new_child = CreateLeaf();
+          new_child = CreateLeaf(/*parent=*/branch_before_branch);
           new_child->path = cur_path;
           new_child->value = std::move(branch->value);
           delete branch;
@@ -309,11 +311,12 @@ public:
           assert(other_child);
 
           if (other_child->type == NodeType::kBranch) {
-            new_child = CreateExtension();
+            new_child = CreateExtension(/*parent=*/branch_before_branch);
             cur_path.Append(branch_hex);
 
             new_child->path = cur_path;
             new_child->child[0] = other_child;
+            other_child->parent = new_child;
           }
           else {
             cur_path.Append(other_child_hex);
@@ -382,6 +385,7 @@ private:
   struct Node {
     NodeType type;
     SHA256Hash hash;
+    Node *parent;
 
     // TODO: Optimize the variables below with a union or different node types.
     // TODO: Optimize the vectors below--use something other than a vector. We
@@ -407,26 +411,29 @@ private:
     std::array<Node *, 16> child;
   };
 
-  Node *CreateBranch()
+  Node *CreateBranch(Node *parent)
   {
     Node *node = new Node;
     node->type = NodeType::kBranch;
+    node->parent = parent;
     node->value = std::nullopt;
     memset(node->child.data(), 0, node->child.size() * sizeof(node->child[0]));
     return node;
   }
 
-  Node *CreateExtension()
+  Node *CreateExtension(Node *parent)
   {
     Node *node = new Node;
     node->type = NodeType::kExtension;
+    node->parent = parent;
     return node;
   }
 
-  Node *CreateLeaf()
+  Node *CreateLeaf(Node *parent)
   {
     Node *node = new Node;
     node->type = NodeType::kLeaf;
+    node->parent = parent;
     node->value = std::nullopt;
     return node;
   }
@@ -470,6 +477,7 @@ private:
     switch (root->type) {
     case NodeType::kBranch:
       printf("Branch (%s, %p)\n", GetHashString(*root).c_str(), root);
+      printf("Parent: %p\n", root->parent);
       printf("Value: [%s]\n", root->value ? root->value->c_str() : "<empty>");
       for (size_t i = 0; i < root->child.size(); i++) {
         if (root->child[i]) {
@@ -487,6 +495,7 @@ private:
       break;
     case NodeType::kExtension:
       printf("Extension (%s, %p)\n", GetHashString(*root).c_str(), root);
+      printf("Parent: %p\n", root->parent);
       printf("Path: %s\n", root->path.str().c_str());
       printf("Path Size: %zu\n", root->path.size());
       if (root->child[0]) {
@@ -501,6 +510,7 @@ private:
       break;
     case NodeType::kLeaf:
       printf("Leaf (%s, %p)\n", GetHashString(*root).c_str(), root);
+      printf("Parent: %p\n", root->parent);
       printf("Path: %s\n", root->path.str().c_str());
       printf("Path Size: %zu\n", root->path.size());
       printf("Value: [%s]\n", root->value ? root->value->c_str() : "<empty>");
@@ -510,8 +520,8 @@ private:
   }
 
   // See the callsite for comments on this function.
-  void InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
-                                  const Key &k, size_t idx, T &&obj)
+  Node *InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
+                                   const Key &k, size_t idx, T &&obj)
   {
     // We add 1 since one of the digits will be included in the [parent_branch]
     // node.
@@ -522,13 +532,13 @@ private:
     assert(common_range_length);
     size_t diverge_idx = common_range_length;
 
-    Node *new_extension_node = CreateExtension();
+    Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
     new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
 
     parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
         new_extension_node;
 
-    Node *new_branch_node = CreateBranch();
+    Node *new_branch_node = CreateBranch(/*parent=*/new_extension_node);
     new_extension_node->child[0] = new_branch_node;
 
     // Move the already-existing extension node underneath the branch node.
@@ -537,6 +547,7 @@ private:
     new_branch_node
         ->child[std::to_integer<size_t>(current_extension_node_branch)] =
         current_extension;
+    current_extension->parent = new_branch_node;
 
     // Include 1 to account for the branch node, too. [common_range_length] is
     // the size of the path in the extension node, and then we have 1 for the
@@ -545,19 +556,25 @@ private:
         current_extension->path.GetSubarray(diverge_idx + 1,
                                             current_extension->path.size());
 
+    // We hash this extension node here, and then in the parent function, we
+    // hash all nodes on the path from the leaf below to the root. Note that
+    // this extension node and the leaf below share the same parent.
+    current_extension->hash = GetNodeHash(*current_extension);
+
     // Create new leaf node.
-    Node *new_leaf_node = CreateLeaf();
+    Node *new_leaf_node = CreateLeaf(/*parent=*/new_branch_node);
     new_leaf_node->path = key_a.GetSubarray(diverge_idx + 1, key_a.size());
     new_leaf_node->value = std::move(obj);
 
     std::byte leaf_branch = key_a.Get(diverge_idx);
     new_branch_node->child[std::to_integer<size_t>(leaf_branch)] =
         new_leaf_node;
+    return new_leaf_node;
   }
 
   // See the callsite for comments on this function.
-  void InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
-                             const Key &k, size_t idx, T &&obj)
+  Node *InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
+                              const Key &k, size_t idx, T &&obj)
   {
     // We add 1 since one of the digits will be included in the [parent_branch]
     // node.
@@ -569,13 +586,13 @@ private:
         GetLongestCommonRangeLength(key_a, 0, key_b, 0);
     if (common_range_length) {
       size_t diverge_idx = common_range_length;
-      Node *new_extension_node = CreateExtension();
+      Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
       new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
 
       parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
           new_extension_node;
 
-      Node *new_branch_node = CreateBranch();
+      Node *new_branch_node = CreateBranch(/*parent=*/new_extension_node);
       new_extension_node->child[0] = new_branch_node;
       prev_branch = new_branch_node;
 
@@ -592,6 +609,7 @@ private:
     const std::string &longer_value =
         key_a.size() <= key_b.size() ? *current_leaf->value : obj;
 
+    Node *to_hash = nullptr;
     if (shorter.empty()) {
       // The shorter key is entirely contained within the larger key. Thus, we
       // should add the shorter key's value to the last branch node created, and
@@ -600,11 +618,12 @@ private:
       prev_branch->value = std::move(shorter_value);
 
       // Longer key's leaf node.
-      Node *leaf = CreateLeaf();
+      Node *leaf = CreateLeaf(/*parent=*/prev_branch);
       leaf->path = longer.GetSubarray(1, longer.size());
       leaf->value = std::move(longer_value);
       std::byte longer_digit = longer.Get(0);
       prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
+      to_hash = leaf;
     }
     else {
       std::byte shorter_digit = shorter.Get(0);
@@ -614,18 +633,24 @@ private:
       // The digits do not match, so create two leaf nodes.
 
       // Shorter key's leaf node.
-      Node *leaf = CreateLeaf();
+      Node *leaf = CreateLeaf(/*parent=*/prev_branch);
       leaf->path = shorter.GetSubarray(1, shorter.size());
       leaf->value = std::move(shorter_value);
       prev_branch->child[std::to_integer<size_t>(shorter_digit)] = leaf;
+      // We hash this leaf here, and then in the parent function, we hash all
+      // nodes on the path from the leaf below to the root. Note that this leaf
+      // and the leaf below share the same parent.
+      leaf->hash = GetNodeHash(*leaf);
 
       // Longer key's leaf node.
-      leaf = CreateLeaf();
+      leaf = CreateLeaf(/*parent=*/prev_branch);
       leaf->path = longer.GetSubarray(1, longer.size());
       leaf->value = std::move(longer_value);
       prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
+      to_hash = leaf;
     }
     delete current_leaf;
+    return to_hash;
   }
 
   template<typename F> void Walk(Node *root, HexArray &prefix, F func)
@@ -742,6 +767,20 @@ private:
     }
   }
 
+  // Regenerates the hashes *only* for the nodes on the path from [n] to the
+  // root of the trie.
+  void GenerateHashesFrom(Node *n)
+  {
+    while (true) {
+      if (!n) {
+        break;
+      }
+
+      n->hash = GetNodeHash(*n);
+      n = n->parent;
+    }
+  }
+
   // Regenerates all of the hashes in the trie.
   void RegenerateAllHashes(Node *root)
   {
@@ -833,8 +872,8 @@ private:
 
   void InitRootNode()
   {
-    root_ = CreateBranch();
-    root_->hash = GetNodeHash(*root_);
+    root_ = CreateBranch(/*parent=*/nullptr);
+    GenerateHashesFrom(root_);
   }
 
   void FreeAllNodes(Node *root)
