@@ -117,10 +117,10 @@ public:
 
       if (node->type == NodeType::kBranch) {
         for (Node *child : node->child) {
+          // We check that [child != prev_node] because we have already checked
+          // the previous node's hash in the vector--we do not want to check the
+          // previous node's hash twice.
           if (child && child != prev_node) {
-            // We check that [child != prev_node] because we have already
-            // checked the previous node's hash in the vector--we do not want to
-            // check the previous node's hash twice.
             if (i < 0 || child->hash != hashes[i--]) {
               return false;
             }
