@@ -101,8 +101,7 @@ public:
     return ret;
   }
 
-  bool Prove(const std::vector<SHA256Hash> &hashes, const Key &k,
-             const std::string &value)
+  bool Prove(const std::vector<SHA256Hash> &hashes, const Key &k)
   {
     Node *node = FindNode(k);
     if (!node) {
