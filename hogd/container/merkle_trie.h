@@ -79,6 +79,7 @@ public:
     }
 
     std::vector<SHA256Hash> ret;
+    Node *prev_node = nullptr;
     while (true) {
       if (!node) {
         break;
@@ -86,12 +87,16 @@ public:
 
       if (node->type == NodeType::kBranch) {
         for (Node *child : node->child) {
-          if (child) {
+          // We check that [child != prev_node] because we have already included
+          // the previous node's hash in the vector--we do not want to include
+          // the previous node's hash twice.
+          if (child && child != prev_node) {
             ret.push_back(child->hash);
           }
         }
       }
       ret.push_back(node->hash);
+      prev_node = node;
     }
     return ret;
   }
@@ -105,6 +110,7 @@ public:
     }
 
     int64_t i = hashes.size();
+    Node *prev_node = nullptr;
     while (true) {
       if (!node) {
         break;
@@ -112,7 +118,10 @@ public:
 
       if (node->type == NodeType::kBranch) {
         for (Node *child : node->child) {
-          if (child) {
+          if (child && child != prev_node) {
+            // We check that [child != prev_node] because we have already
+            // checked the previous node's hash in the vector--we do not want to
+            // check the previous node's hash twice.
             if (i < 0 || child->hash != hashes[i--]) {
               return false;
             }
@@ -124,9 +133,10 @@ public:
         return false;
       }
       node = node->parent;
+      prev_node = node;
     }
     // Check that we verified all of the hashes in [hashes].
-    return (i == -1);
+    return i == -1;
   }
 
   std::string *find(const Key &k)
