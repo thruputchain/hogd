@@ -250,7 +250,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
   EXPECT_EQ(seen, expected);
 }
 
-TEST(MerkleTrie, TwoLeavesAndOneBranchForRemove)
+TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
 {
   MerkleTrie trie;
 

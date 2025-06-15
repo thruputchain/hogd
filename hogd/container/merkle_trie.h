@@ -203,8 +203,6 @@ public:
 
   size_t remove(const Key &k)
   {
-    assert(false);
-
     // If removing a value from a branch, do nothing.
     //
     // If removing a value in a leaf node, need to look at the parent, which is
@@ -249,11 +247,13 @@ public:
     assert(branch);
     assert(branch->type == NodeType::kBranch);
 
+    Node *to_hash = nullptr;
     if (existing_key == branch) {
       // The key is in a branch.
 
       assert(branch->value);
       branch->value = std::nullopt;
+      to_hash = branch;
     }
     else {
       size_t num_branches = 0;
@@ -269,6 +269,7 @@ public:
 
         branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
         delete existing_key;
+        to_hash = branch;
       }
       else if (branch_before_branch) {
         Node *cur =
@@ -333,6 +334,7 @@ public:
         branch_before_branch
             ->child[std::to_integer<size_t>(branch_before_branch_hex)] =
             new_child;
+        to_hash = new_child;
       }
       else {
         // If [branch_before_branch] is a nullptr, then [branch] must be the
@@ -341,14 +343,12 @@ public:
         assert(branch == root_);
         branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
         delete existing_key;
+        to_hash = branch;
       }
     }
 
     size_--;
-    // TODO: Optimize this to only recompute the hashes on paths that were
-    // changed. Note that paths **that do not correspond to the key above**
-    // could also be changed!
-    RegenerateAllHashes(root_);
+    GenerateHashesFrom(to_hash);
     return 1;
   }
 
