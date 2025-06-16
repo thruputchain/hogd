@@ -303,30 +303,175 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   trie.insert(key_c, value_c);
 
   trie.Print();
-  auto [root_hash, node_encodings] = trie.GetProof(key_b);
-  for (size_t i = 0; i < node_encodings.size(); i++) {
-    printf("%02x", node_encodings[i]);
+  const auto &[root_hash, node_encodings] = trie.GetProof(key_b);
+  const auto &[root_hash_by_node, node_encodings_by_node] =
+      trie.GetProofByNode(key_b);
+  EXPECT_EQ(root_hash, root_hash_by_node);
+  std::vector<std::byte> node_encodings_by_node_flat;
+  for (const std::vector<std::byte> &node_encoding : node_encodings_by_node) {
+    node_encodings_by_node_flat.insert(node_encodings_by_node_flat.end(),
+                                       node_encoding.begin(),
+                                       node_encoding.end());
   }
-  printf("\ndone.\n");
+  EXPECT_EQ(node_encodings, node_encodings_by_node_flat);
 
-  EXPECT_TRUE(
-      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_b, value_b));
-  EXPECT_FALSE(
-      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_a, value_a));
-  EXPECT_FALSE(
-      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_b, value_c));
-  EXPECT_FALSE(
-      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_c, value_b));
+  EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, key_b, value_b));
+  EXPECT_FALSE(MerkleTrie::Prove(node_encodings, root_hash, key_a, value_a));
+  EXPECT_FALSE(MerkleTrie::Prove(node_encodings, root_hash, key_b, value_c));
+  EXPECT_FALSE(MerkleTrie::Prove(node_encodings, root_hash, key_c, value_b));
 
-  EXPECT_FALSE(MerkleTrie::Prove(node_encodings, trie.GetRootHash(), HexArray(),
-                                 value_b));
   EXPECT_FALSE(
-      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_b, ""));
-  EXPECT_FALSE(MerkleTrie::Prove(node_encodings, trie.GetRootHash(),
-                                 key_b.GetSubarray(1, key_b.size()), ""));
+      MerkleTrie::Prove(node_encodings, root_hash, HexArray(), value_b));
+  EXPECT_FALSE(MerkleTrie::Prove(node_encodings, root_hash, key_b, ""));
+  EXPECT_FALSE(MerkleTrie::Prove(node_encodings, root_hash,
+                                 key_b.GetSubarray(1, key_b.size()), value_b));
+  {
+    HexArray key_b_copy = key_b;
+    key_b_copy.Append(std::byte{0x00});
+    EXPECT_FALSE(
+        MerkleTrie::Prove(node_encodings, root_hash, key_b_copy, value_b));
+  }
 
-  // TODO: More testing. Also change [GetProof()] to return the encodings of the
-  // nodes.
+  EXPECT_FALSE(MerkleTrie::Prove({}, root_hash, key_b, value_b));
+  std::vector<std::byte> copy(node_encodings.begin() + 1, node_encodings.end());
+  EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+  copy = std::vector(node_encodings.begin(), node_encodings.end() - 1);
+  EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+
+  // Try an incorrect root hash.
+  {
+    SHA256Hash different_root_hash;
+    memset(&different_root_hash, 0, sizeof(different_root_hash));
+    EXPECT_FALSE(MerkleTrie::Prove(copy, different_root_hash, key_b, value_b));
+  }
+
+  // Try using the hash of an internal node as the root hash.
+  {
+    SHA256Hash different_root_hash = sha256(node_encodings_by_node[1]);
+    EXPECT_FALSE(MerkleTrie::Prove(copy, different_root_hash, key_b, value_b));
+  }
+
+  // Remove the leaf.
+  copy = std::vector(node_encodings.begin() + node_encodings_by_node[0].size(),
+                     node_encodings.end());
+  EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+
+  // Remove the root.
+  copy =
+      std::vector(node_encodings.begin(),
+                  node_encodings.end() - node_encodings_by_node.back().size());
+  EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+
+  // Remove an intermediate node.
+  copy = std::vector(node_encodings.begin(),
+                     node_encodings.begin() + node_encodings_by_node[0].size());
+  copy.insert(copy.end(),
+              node_encodings.begin() + node_encodings_by_node[0].size() +
+                  node_encodings_by_node[1].size(),
+              node_encodings.end());
+  EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+
+  // Change the path in the leaf node.
+  copy = node_encodings;
+  copy[1 + sizeof(size_t)] = std::byte{0x00};
+  EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+
+  // Change the path in an extension node.
+  size_t idx = 0;
+  size_t node_idx = 0;
+  bool found_extension = false;
+  for (node_idx = 0; node_idx < node_encodings_by_node.size(); node_idx++) {
+    if (static_cast<MerkleTrie::NodeType>(node_encodings[idx]) ==
+        MerkleTrie::NodeType::kExtension) {
+      found_extension = true;
+      break;
+    }
+    else {
+      idx += node_encodings_by_node[node_idx].size();
+    }
+  }
+  ASSERT_TRUE(found_extension);
+  copy = node_encodings;
+  copy[idx + 1 + sizeof(size_t)] = std::byte{0x00};
+  EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+
+  // Change the child hash in an extension node.
+  {
+    size_t end_idx = node_encodings_by_node[node_idx].size();
+    copy = node_encodings;
+    uint8_t result = static_cast<uint8_t>(copy[end_idx - 1]) + 1;
+    copy[end_idx - 1] = static_cast<std::byte>(result);
+    EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+  }
+
+  // Change the value in a leaf.
+  {
+    size_t end_idx = node_encodings_by_node[0].size();
+    copy = node_encodings;
+    uint8_t result = static_cast<uint8_t>(copy[end_idx - 1]) + 1;
+    copy[end_idx - 1] = static_cast<std::byte>(result);
+    EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+  }
+
+  // Change the matching hash in a branch.
+  idx = 0;
+  bool found_branch = false;
+  for (node_idx = 0; node_idx < node_encodings_by_node.size(); node_idx++) {
+    if (static_cast<MerkleTrie::NodeType>(node_encodings[idx]) ==
+        MerkleTrie::NodeType::kBranch) {
+      found_branch = true;
+      break;
+    }
+    else {
+      idx += node_encodings_by_node[node_idx].size();
+    }
+  }
+  ASSERT_TRUE(found_branch);
+  copy = node_encodings;
+  // Find matching branch.
+  int matching_idx = -1;
+  size_t branch_start_idx =
+      idx + node_encodings_by_node[node_idx].size() - (16 * sizeof(SHA256Hash));
+  SHA256Hash to_find = sha256(node_encodings_by_node[node_idx - 1]);
+  for (size_t i = 0; i < 16; i++) {
+    SHA256Hash *to_compare = reinterpret_cast<SHA256Hash *>(
+        &copy[branch_start_idx + (i * sizeof(SHA256Hash))]);
+    if (*to_compare == to_find) {
+      matching_idx = i;
+      break;
+    }
+  }
+  ASSERT_GE(matching_idx, 0);
+  {
+    std::byte &change =
+        copy[branch_start_idx + (matching_idx * sizeof(SHA256Hash))];
+    uint8_t result = static_cast<uint8_t>(change) + 1;
+    change = static_cast<std::byte>(result);
+    EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+  }
+
+  // Change a non-matching hash in a branch. We will just choose a different
+  // branch from above.
+  int nonmatching_idx = matching_idx + sizeof(SHA256Hash);
+  nonmatching_idx %= 16 * sizeof(SHA256Hash);
+  copy = node_encodings;
+
+  {
+    std::byte &change =
+        copy[branch_start_idx + (nonmatching_idx * sizeof(SHA256Hash))];
+    uint8_t result = static_cast<uint8_t>(change) + 1;
+    change = static_cast<std::byte>(result);
+    EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+  }
+
+  // Change the ordering of the nodes in a branch.
+  copy = node_encodings;
+  SHA256Hash &matching_hash =
+      *reinterpret_cast<SHA256Hash *>(&copy[matching_idx]);
+  SHA256Hash &nonmatching_hash =
+      *reinterpret_cast<SHA256Hash *>(&copy[nonmatching_idx]);
+  std::swap(matching_hash, nonmatching_hash);
+  EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
 }
 
 // Hash a branch node. All child pointers are non-NULL.

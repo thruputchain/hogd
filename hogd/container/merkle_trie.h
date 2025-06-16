@@ -93,6 +93,27 @@ public:
     return {GetRootHash(), ret};
   }
 
+  std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
+  GetProofByNode(const Key &k)
+  {
+    Node *node = FindNode(k);
+    if (!node) {
+      return {};
+    }
+
+    std::vector<std::vector<std::byte>> ret;
+    while (true) {
+      if (!node) {
+        break;
+      }
+      std::vector<std::byte> encoding = GetNodeEncoding(*node);
+      ret.push_back(encoding);
+
+      node = node->parent;
+    }
+    return {GetRootHash(), ret};
+  }
+
   static bool Prove(const std::vector<std::byte> &encodings,
                     const SHA256Hash &root_hash, const Key &k,
                     const std::string &value)
@@ -1194,6 +1215,7 @@ private:
   Node *root_ = nullptr;
   size_t size_ = 0;
 
+  FRIEND_TEST(MerkleTrie, TwoLeavesAndOneBranchProve);
   FRIEND_TEST(MerkleTrie, HashBranch);
   FRIEND_TEST(MerkleTrie, HashBranchSomeNullptr);
   FRIEND_TEST(MerkleTrie, HashBranchAllNullptr);
