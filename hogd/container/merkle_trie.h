@@ -920,12 +920,18 @@ private:
     // TODO: Optimize. We know the max lengths of the values we need to hash up
     // front.
     std::vector<std::byte> to_hash;
+    to_hash.push_back(static_cast<std::byte>(node.type));
     switch (node.type) {
     case NodeType::kBranch:
     {
-      // Hash [value] and **the hashes in** [child].
+      std::vector<std::byte> value_size_bytes =
+          SizeToBytes(node.value ? node.value->size() : 0);
+      to_hash.insert(to_hash.end(), value_size_bytes.begin(),
+                     value_size_bytes.end());
+
       std::transform(node.value->begin(), node.value->end(),
                      std::back_inserter(to_hash), CastCharToByte);
+
       for (Node *child : node.child) {
         if (child) {
           std::transform(child->hash.begin(), child->hash.end(),
@@ -939,10 +945,13 @@ private:
     }
     case NodeType::kExtension:
     {
-      // Hash [path], [path.size()], and **the hash in** [child[0]].
-      to_hash = node.path.ToByteVector();
-      std::vector<std::byte> size_bytes = SizeToBytes(node.path.size());
-      to_hash.insert(to_hash.end(), size_bytes.begin(), size_bytes.end());
+      std::vector<std::byte> path_size_bytes = SizeToBytes(node.path.size());
+      to_hash.insert(to_hash.end(), path_size_bytes.begin(),
+                     path_size_bytes.end());
+
+      const std::vector<std::byte> path_bytes = node.path.ToByteVector();
+      to_hash.insert(to_hash.end(), path_bytes.begin(), path_bytes.end());
+
       if (node.child[0]) {
         std::transform(node.child[0]->hash.begin(), node.child[0]->hash.end(),
                        std::back_inserter(to_hash), CastCharToByte);
@@ -954,10 +963,18 @@ private:
     }
     case NodeType::kLeaf:
     {
-      // Hash [path], [path.size()], and [value].
-      to_hash = node.path.ToByteVector();
-      std::vector<std::byte> size_bytes = SizeToBytes(node.path.size());
-      to_hash.insert(to_hash.end(), size_bytes.begin(), size_bytes.end());
+      std::vector<std::byte> path_size_bytes = SizeToBytes(node.path.size());
+      to_hash.insert(to_hash.end(), path_size_bytes.begin(),
+                     path_size_bytes.end());
+
+      const std::vector<std::byte> path_bytes = node.path.ToByteVector();
+      to_hash.insert(to_hash.end(), path_bytes.begin(), path_bytes.end());
+
+      std::vector<std::byte> value_size_bytes =
+          SizeToBytes(node.value ? node.value->size() : 0);
+      to_hash.insert(to_hash.end(), value_size_bytes.begin(),
+                     value_size_bytes.end());
+
       std::transform(node.value->begin(), node.value->end(),
                      std::back_inserter(to_hash), CastCharToByte);
       break;

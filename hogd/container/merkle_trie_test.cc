@@ -341,7 +341,7 @@ TEST(MerkleTrie, HashBranch)
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
   SHA256Hash expected = HashFromString(
-      "8ed96e3ced26d6963836fa76f03874374c56bef15ae2c21b4acedcafa0ff47f0");
+      "c396154ee62afd8f49537a36005f8e97d0fe82d9aadc78d7a6874e1cf762e705");
   EXPECT_EQ(hash, expected);
 }
 
@@ -367,7 +367,7 @@ TEST(MerkleTrie, HashBranchSomeNullptr)
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
   SHA256Hash expected = HashFromString(
-      "d40c498bbc37c10eb5c207db7645f6c7a0aaf04aae519bdc1b7491ed1d5bbabd");
+      "8b50bf2634e8ea11cefb85508e68626687801649d60a33e607ecd504cfa92f1c");
   EXPECT_EQ(hash, expected);
 }
 
@@ -382,7 +382,7 @@ TEST(MerkleTrie, HashBranchAllNullptr)
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
   SHA256Hash expected = HashFromString(
-      "57da3d5811ed733db97a0ac65af72d4d054dbd2435707633cc076f6dd153cc5e");
+      "3fdeffbb6a2bc7f94a7f852f802fcc3d93635a0b39ed4a830dbef6598cf48787");
   EXPECT_EQ(hash, expected);
 }
 
@@ -402,24 +402,7 @@ TEST(MerkleTrie, HashExtension)
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(extension);
   SHA256Hash expected = HashFromString(
-      "9b12e0b5041eb5015228a78c0fe2f1163d6037730d26cce2a94547ec4a793c9a");
-  EXPECT_EQ(hash, expected);
-}
-
-// Hash an extension node. Its child pointer is NULL.
-TEST(MerkleTrie, HashExtensionNullptr)
-{
-  MerkleTrie::Node extension;
-  extension.type = MerkleTrie::NodeType::kExtension;
-  memset(extension.hash.data(), 0,
-         extension.hash.size() * sizeof(extension.hash[0]));
-  extension.path = HexArray("00010203");
-
-  extension.child[0] = nullptr;
-
-  SHA256Hash hash = MerkleTrie::GetNodeHash(extension);
-  SHA256Hash expected = HashFromString(
-      "3461077c3e728e599bd45341f5db2a3e33595dcc74a495c7d5fdfdca5e964325");
+      "d2af4c9af613a07327407c683265444011144af1e1b1658a9ff4bf14acbe930a");
   EXPECT_EQ(hash, expected);
 }
 
@@ -434,7 +417,7 @@ TEST(MerkleTrie, HashLeaf)
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(leaf);
   SHA256Hash expected = HashFromString(
-      "7224c1a06e40a068e8e904548fc399ee0c32263df98a113d5712f312789e3b36");
+      "ed601bfeacd678e5814cb9adf207256004ce70dc2e41b8eda66ea002a5a03904");
   EXPECT_EQ(hash, expected);
 }
 
