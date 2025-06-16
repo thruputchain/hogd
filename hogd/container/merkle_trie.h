@@ -74,32 +74,21 @@ public:
   SHA256Hash GetRootHash() const { return root_->hash; }
 
   // TODO: This should probably be the node encodings instead.
-  std::vector<SHA256Hash> GetProofHashesFor(const Key &k)
+  std::vector<std::byte> GetProof(const Key &k)
   {
     Node *node = FindNode(k);
     if (!node) {
       return {};
     }
 
-    std::vector<SHA256Hash> ret;
-    Node *prev_node = nullptr;
+    std::vector<std::byte> ret;
     while (true) {
       if (!node) {
         break;
       }
+      std::vector<std::byte> encoding = GetNodeEncoding(*node);
+      ret.insert(ret.end(), encoding.begin(), encoding.end());
 
-      if (node->type == NodeType::kBranch) {
-        for (Node *child : node->child) {
-          // We check that [child != prev_node] because we have already included
-          // the previous node's hash in the vector--we do not want to include
-          // the previous node's hash twice.
-          if (child && child != prev_node) {
-            ret.push_back(child->hash);
-          }
-        }
-      }
-      ret.push_back(node->hash);
-      prev_node = node;
       node = node->parent;
     }
     return ret;
@@ -924,7 +913,7 @@ private:
     return ret;
   }
 
-  static SHA256Hash GetNodeHash(const Node &node)
+  static std::vector<std::byte> GetNodeEncoding(const Node &node)
   {
     static constexpr std::array<std::byte, 32> kNullptr = {};
 
@@ -974,7 +963,12 @@ private:
       break;
     }
     }
-    return sha256(to_hash);
+    return to_hash;
+  }
+
+  static SHA256Hash GetNodeHash(const Node &node)
+  {
+    return sha256(GetNodeEncoding(node));
   }
 
   void InitRootNode()

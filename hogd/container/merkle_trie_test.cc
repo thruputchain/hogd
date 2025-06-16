@@ -33,6 +33,7 @@ HashFromString(const std::string &str)
   return ret;
 }
 
+/*
 std::string
 StringFromHash(const SHA256Hash &hash)
 {
@@ -43,6 +44,7 @@ StringFromHash(const SHA256Hash &hash)
   }
   return oss.str();
 }
+*/
 
 } // namespace
 
@@ -301,11 +303,11 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   trie.insert(key_c, value_c);
 
   trie.Print();
-  std::vector<SHA256Hash> hashes = trie.GetProofHashesFor(key_b);
-  for (size_t i = 0; i < hashes.size(); i++) {
-    printf("%s\n", StringFromHash(hashes[i]).c_str());
+  std::vector<std::byte> proof = trie.GetProof(key_b);
+  for (size_t i = 0; i < proof.size(); i++) {
+    printf("%02x", proof[i]);
   }
-  printf("done.\n");
+  printf("\ndone.\n");
 
   EXPECT_TRUE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_b, value_b));
   EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_a, value_a));
@@ -316,10 +318,10 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
       MerkleTrie::Prove(trie, trie.GetRootHash(), HexArray(), value_b));
   EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_b, ""));
   EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(),
-                                 key_b.GetSubarray(0, key_b.size() - 1), ""));
+                                 key_b.GetSubarray(1, key_b.size()), ""));
 
-  // TODO: More testing. Also change [GetProofHashesFor()] to return the
-  // encodings of the nodes.
+  // TODO: More testing. Also change [GetProof()] to return the encodings of the
+  // nodes.
 }
 
 // Hash a branch node. All child pointers are non-NULL.
