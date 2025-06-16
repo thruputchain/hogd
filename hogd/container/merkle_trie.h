@@ -105,6 +105,7 @@ public:
     return ret;
   }
 
+  // TODO: Should probably pass node encodings and then walk through those.
   static bool Prove(const MerkleTrie &trie, const SHA256Hash &root_hash,
                     const Key &k, const std::string &value)
   {
@@ -147,8 +148,7 @@ public:
     assert(child);
     // We need to check that (1) we verified the entire key and (2) that
     // [child]'s hash matches the [root_hash]. If both conditions are true,
-    // then we verified that the specifid KV pair is in the Merkle Patricia
-    // Trie.
+    // then we verified the KV pair.
     return !key_length_to_verify && child->hash == root_hash;
   }
 
