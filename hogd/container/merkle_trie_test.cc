@@ -371,6 +371,13 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
               node_encodings.end());
   EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
 
+  // Remove a byte from an intermediate node and test that the improper encoding
+  // is detected.
+  // TODO: Do this for all node types.
+  copy = node_encodings;
+  copy.erase(copy.begin() + node_encodings_by_node[0].size());
+  EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
+
   // Change the path in the leaf node.
   copy = node_encodings;
   copy[1 + sizeof(size_t)] = std::byte{0x00};
