@@ -93,7 +93,6 @@ public:
     return {GetRootHash(), ret};
   }
 
-  // TODO: Should probably pass node encodings and then walk through those.
   static bool Prove(const std::vector<std::byte> &encodings,
                     const SHA256Hash &root_hash, const Key &k,
                     const std::string &value)
@@ -112,7 +111,6 @@ public:
     while (idx < encodings.size()) {
       NodeType type;
       size_t path_size;
-      size_t orig_idx = idx;
       SHA256Hash prev_hash = hash;
       if (!GetNodeHashFromEncoding(encodings, idx, hash, type, path_size,
                                    observed_value, child_hashes)) {
