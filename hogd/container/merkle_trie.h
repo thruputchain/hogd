@@ -94,50 +94,76 @@ public:
   }
 
   // TODO: Should probably pass node encodings and then walk through those.
-  static bool Prove(const MerkleTrie &trie, const SHA256Hash &root_hash,
-                    const Key &k, const std::string &value)
+  static bool Prove(const std::vector<std::byte> &encodings,
+                    const SHA256Hash &root_hash, const Key &k,
+                    const std::string &value)
   {
-    const Node *node = trie.FindNodeConst(k);
-    if (!node || node->type != NodeType::kLeaf) {
-      return false;
-    }
-    if (node->value != value) {
-      return false;
-    }
-
-    const Node *child = nullptr;
+    size_t idx = 0;
+    SHA256Hash hash;
+    size_t num_nodes = 0;
     // We just need to verify that we saw a path equal in length to [key]. We do
     // not need to check the path contents because the path contents are already
     // encoded in the hashes. If we reach the root node with all hashes matching
     // up, and we examined a path equal in length to [key], then we verified
     // that the KV pair is in the Merkle Patrica trie.
-    int64_t key_length_to_verify = k.size();
-    while (true) {
-      if (!node) {
-        break;
-      }
-      if (node->hash != GetNodeHash(*node)) {
+    size_t verified_key_size = 0;
+    std::string observed_value;
+    std::array<SHA256Hash, 16> child_hashes;
+    while (idx >= encodings.size()) {
+      NodeType type;
+      size_t path_size;
+      if (!GetNodeHashFromEncoding(encodings, idx, hash, type, path_size,
+                                   observed_value, child_hashes)) {
         return false;
       }
 
-      switch (node->type) {
+      bool ok;
+      switch (type) {
       case NodeType::kBranch:
-        key_length_to_verify -= 1;
-        break;
-      case NodeType::kExtension:
-      case NodeType::kLeaf:
-        key_length_to_verify -= node->path.size();
+      {
+        ok = num_nodes;
+        verified_key_size++;
+        size_t num_matches = 0;
+        for (SHA256Hash child_hash : child_hashes) {
+          if (child_hash == hash) {
+            num_matches++;
+          }
+        }
+        ok = ok && (num_matches == 1);
         break;
       }
-      child = node;
-      node = node->parent;
+      case NodeType::kExtension:
+        ok = num_nodes;
+        verified_key_size += path_size;
+        ok = ok && child_hashes[0] == hash;
+        break;
+      case NodeType::kLeaf:
+        ok = !num_nodes;
+        verified_key_size += path_size;
+        ok = ok && observed_value == value;
+        break;
+
+      default:
+        assert(false);
+        return false;
+        break;
+      }
+      if (!ok) {
+        return false;
+      }
+      num_nodes++;
     }
-    assert(!node);
-    assert(child);
-    // We need to check that (1) we verified the entire key and (2) that
-    // [child]'s hash matches the [root_hash]. If both conditions are true,
-    // then we verified the KV pair.
-    return !key_length_to_verify && child->hash == root_hash;
+    // [idx] should never be greater than [encodings.size()] if we reach this
+    // point.
+    assert(idx == encodings.size());
+    if (!num_nodes) {
+      return false;
+    }
+    // TODO: Need to check that the root node is a branch?
+
+    // Check that we verified the entire key and that the root hash matches
+    // up.
+    return verified_key_size == k.size() && hash == root_hash;
   }
 
   std::string *find(const Key &k)
@@ -173,9 +199,9 @@ public:
     Node *next =
         TraverseToBottom(root_, /*prev_root=*/nullptr,
                          /*last_branch_seen=*/nullptr,
-                         /*last_branch_hex_seen=*/std::byte(0x00), /*path=*/k,
-                         idx, branch_hex, existing_key, branch_before_branch,
-                         branch_before_branch_hex);
+                         /*last_branch_hex_seen=*/std::byte(0x00),
+                         /*path=*/k, idx, branch_hex, existing_key,
+                         branch_before_branch, branch_before_branch_hex);
     if (existing_key) {
       return false;
     }
@@ -985,6 +1011,152 @@ private:
   static SHA256Hash GetNodeHash(const Node &node)
   {
     return sha256(GetNodeEncoding(node));
+  }
+
+  static bool GetNodeHashFromEncoding(const std::vector<std::byte> &encodings,
+                                      size_t &idx, SHA256Hash &hash,
+                                      NodeType &type, size_t &path_size,
+                                      std::string &value,
+                                      std::array<SHA256Hash, 16> &child_hashes)
+  {
+    static constexpr size_t kTypeSize = 1;
+    if (idx + kTypeSize > encodings.size()) {
+      return false;
+    }
+    type = static_cast<NodeType>(encodings[idx]);
+    size_t encoding_size = 0;
+    switch (type) {
+    case NodeType::kBranch:
+      encoding_size = GetBranchEncodingSize(encodings, idx, child_hashes);
+      break;
+    case NodeType::kExtension:
+      encoding_size =
+          GetExtensionEncodingSize(encodings, idx, path_size, child_hashes);
+      break;
+    case NodeType::kLeaf:
+      encoding_size = GetLeafEncodingSize(encodings, idx, path_size, value);
+      break;
+    default:
+      // Improper node type in the encoding.
+      return false;
+      break;
+    }
+    if (!encoding_size) {
+      return false;
+    }
+    const std::vector<std::byte> encoding(encodings.begin() + idx,
+                                          encodings.begin() + idx +
+                                              encoding_size);
+    hash = sha256(encoding);
+    idx += encoding_size;
+
+    return true;
+  }
+
+  static size_t GetBranchEncodingSize(const std::vector<std::byte> &encodings,
+                                      size_t idx,
+                                      std::array<SHA256Hash, 16> &child_hashes)
+  {
+    const size_t orig_idx = idx;
+    static constexpr size_t kTypeSize = 1;
+    if (idx + kTypeSize > encodings.size()) {
+      return 0;
+    }
+    idx += kTypeSize;
+
+    if (idx + sizeof(size_t) > encodings.size()) {
+      return 0;
+    }
+    size_t value_size = static_cast<size_t>(encodings[idx]);
+    idx += sizeof(size_t);
+
+    if (idx + value_size > encodings.size()) {
+      return 0;
+    }
+    idx += value_size;
+
+    static constexpr size_t kBranchEncodingSize = (16 * sizeof(SHA256Hash));
+    if (idx + kBranchEncodingSize > encodings.size()) {
+      return 0;
+    }
+    for (size_t i = 0; i < 16; i++) {
+      size_t start = idx + (i * sizeof(SHA256Hash));
+      memcpy(&child_hashes[i], &encodings[start], sizeof(SHA256Hash));
+    }
+    idx += kBranchEncodingSize;
+
+    return idx - orig_idx;
+  }
+
+  static size_t
+  GetExtensionEncodingSize(const std::vector<std::byte> &encodings, size_t idx,
+                           size_t &path_size,
+                           std::array<SHA256Hash, 16> &child_hashes)
+  {
+    const size_t orig_idx = idx;
+    static constexpr size_t kTypeSize = 1;
+    if (idx + kTypeSize > encodings.size()) {
+      return 0;
+    }
+    idx += kTypeSize;
+
+    if (idx + sizeof(size_t) > encodings.size()) {
+      return 0;
+    }
+    path_size = static_cast<size_t>(encodings[idx]);
+    idx += sizeof(size_t);
+
+    if (idx + path_size > encodings.size()) {
+      return 0;
+    }
+    idx += path_size;
+
+    static constexpr size_t kChildHashSize = sizeof(SHA256Hash);
+    if (idx + kChildHashSize > encodings.size()) {
+      return 0;
+    }
+    memcpy(&child_hashes[0], &encodings[idx], sizeof(SHA256Hash));
+    idx += kChildHashSize;
+
+    return idx - orig_idx;
+  }
+
+  static size_t GetLeafEncodingSize(const std::vector<std::byte> &encodings,
+                                    size_t idx, size_t &path_size,
+                                    std::string &value)
+  {
+    const size_t orig_idx = idx;
+    static constexpr size_t kTypeSize = 1;
+    if (idx + kTypeSize > encodings.size()) {
+      return 0;
+    }
+    idx += kTypeSize;
+
+    if (idx + sizeof(size_t) > encodings.size()) {
+      return 0;
+    }
+    path_size = static_cast<size_t>(encodings[idx]);
+    idx += sizeof(size_t);
+
+    if (idx + path_size > encodings.size()) {
+      return 0;
+    }
+    idx += path_size;
+
+    if (idx + sizeof(size_t) > encodings.size()) {
+      return 0;
+    }
+    size_t value_size = static_cast<size_t>(encodings[idx]);
+    idx += sizeof(size_t);
+
+    if (idx + value_size > encodings.size()) {
+      return 0;
+    }
+    value = std::string(reinterpret_cast<const char *>(&encodings[idx]),
+                        value_size);
+    idx += value_size;
+
+    return idx - orig_idx;
   }
 
   void InitRootNode()

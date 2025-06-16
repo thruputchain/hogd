@@ -309,15 +309,20 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   }
   printf("\ndone.\n");
 
-  EXPECT_TRUE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_b, value_b));
-  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_a, value_a));
-  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_b, value_c));
-  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_c, value_b));
-
+  EXPECT_TRUE(
+      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_b, value_b));
   EXPECT_FALSE(
-      MerkleTrie::Prove(trie, trie.GetRootHash(), HexArray(), value_b));
-  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_b, ""));
-  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(),
+      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_a, value_a));
+  EXPECT_FALSE(
+      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_b, value_c));
+  EXPECT_FALSE(
+      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_c, value_b));
+
+  EXPECT_FALSE(MerkleTrie::Prove(node_encodings, trie.GetRootHash(), HexArray(),
+                                 value_b));
+  EXPECT_FALSE(
+      MerkleTrie::Prove(node_encodings, trie.GetRootHash(), key_b, ""));
+  EXPECT_FALSE(MerkleTrie::Prove(node_encodings, trie.GetRootHash(),
                                  key_b.GetSubarray(1, key_b.size()), ""));
 
   // TODO: More testing. Also change [GetProof()] to return the encodings of the
