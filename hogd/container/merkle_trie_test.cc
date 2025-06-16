@@ -306,6 +306,20 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
     printf("%s\n", StringFromHash(hashes[i]).c_str());
   }
   printf("done.\n");
+
+  EXPECT_TRUE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_b, value_b));
+  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_a, value_a));
+  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_b, value_c));
+  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_c, value_b));
+
+  EXPECT_FALSE(
+      MerkleTrie::Prove(trie, trie.GetRootHash(), HexArray(), value_b));
+  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(), key_b, ""));
+  EXPECT_FALSE(MerkleTrie::Prove(trie, trie.GetRootHash(),
+                                 key_b.GetSubarray(0, key_b.size() - 1), ""));
+
+  // TODO: More testing. Also change [GetProofHashesFor()] to return the
+  // encodings of the nodes.
 }
 
 // Hash a branch node. All child pointers are non-NULL.

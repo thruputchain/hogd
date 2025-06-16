@@ -71,6 +71,9 @@ public:
     return kEmpty;
   }
 
+  SHA256Hash GetRootHash() const { return root_->hash; }
+
+  // TODO: This should probably be the node encodings instead.
   std::vector<SHA256Hash> GetProofHashesFor(const Key &k)
   {
     Node *node = FindNode(k);
@@ -102,41 +105,51 @@ public:
     return ret;
   }
 
-  bool Prove(const std::vector<SHA256Hash> &hashes, const Key &k)
+  static bool Prove(const MerkleTrie &trie, const SHA256Hash &root_hash,
+                    const Key &k, const std::string &value)
   {
-    Node *node = FindNode(k);
-    if (!node) {
+    const Node *node = trie.FindNodeConst(k);
+    if (!node || node->type != NodeType::kLeaf) {
+      return false;
+    }
+    if (node->value != value) {
       return false;
     }
 
-    int64_t i = hashes.size();
-    Node *prev_node = nullptr;
+    const Node *child = nullptr;
+    // We just need to verify that we saw a path equal in length to [key]. We do
+    // not need to check the path contents because the path contents are already
+    // encoded in the hashes. If we reach the root node with all hashes matching
+    // up, and we examined a path equal in length to [key], then we verified
+    // that the KV pair is in the Merkle Patrica trie.
+    int64_t key_length_to_verify = k.size();
     while (true) {
       if (!node) {
         break;
       }
-
-      if (node->type == NodeType::kBranch) {
-        for (Node *child : node->child) {
-          // We check that [child != prev_node] because we have already checked
-          // the previous node's hash in the vector--we do not want to check the
-          // previous node's hash twice.
-          if (child && child != prev_node) {
-            if (i < 0 || child->hash != hashes[i--]) {
-              return false;
-            }
-          }
-        }
-      }
-
-      if (i < 0 || node->hash != hashes[i--]) {
+      if (node->hash != GetNodeHash(*node)) {
         return false;
       }
-      prev_node = node;
+
+      switch (node->type) {
+      case NodeType::kBranch:
+        key_length_to_verify -= 1;
+        break;
+      case NodeType::kExtension:
+      case NodeType::kLeaf:
+        key_length_to_verify -= node->path.size();
+        break;
+      }
+      child = node;
       node = node->parent;
     }
-    // Check that we verified all of the hashes in [hashes].
-    return i == -1;
+    assert(!node);
+    assert(child);
+    // We need to check that (1) we verified the entire key and (2) that
+    // [child]'s hash matches the [root_hash]. If both conditions are true,
+    // then we verified that the specifid KV pair is in the Merkle Patricia
+    // Trie.
+    return !key_length_to_verify && child->hash == root_hash;
   }
 
   std::string *find(const Key &k)
@@ -579,19 +592,22 @@ private:
     }
   }
 
-  Node *FindNode(const Key &k)
+  const Node *FindNodeConst(const Key &k) const
   {
     size_t idx = 0;
     std::byte branch_hex = std::byte(0x00);
     Node *existing_key = nullptr;
     Node *branch_before_branch = nullptr;
     std::byte branch_before_branch_hex = std::byte(0x00);
-    TraverseToBottom(root_, /*prev_root=*/nullptr, /*last_branch_seen=*/nullptr,
-                     /*last_branch_hex_seen=*/std::byte(0x00),
-                     /*path=*/k, idx, branch_hex, existing_key,
-                     branch_before_branch, branch_before_branch_hex);
+    TraverseToBottomConst(root_, /*prev_root=*/nullptr,
+                          /*last_branch_seen=*/nullptr,
+                          /*last_branch_hex_seen=*/std::byte(0x00),
+                          /*path=*/k, idx, branch_hex, existing_key,
+                          branch_before_branch, branch_before_branch_hex);
     return existing_key;
   }
+
+  Node *FindNode(const Key &k) { return const_cast<Node *>(FindNodeConst(k)); }
 
   // See the callsite for comments on this function.
   Node *InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
@@ -765,11 +781,13 @@ private:
     }
   }
 
-  Node *TraverseToBottom(Node *root, Node *prev_root, Node *last_branch_seen,
-                         std::byte last_branch_hex_seen, const HexArray &path,
-                         size_t &idx, std::byte &branch_hex,
-                         Node *&existing_key, Node *&branch_before_branch,
-                         std::byte &branch_before_branch_hex)
+  const Node *TraverseToBottomConst(Node *root, Node *prev_root,
+                                    Node *last_branch_seen,
+                                    std::byte last_branch_hex_seen,
+                                    const HexArray &path, size_t &idx,
+                                    std::byte &branch_hex, Node *&existing_key,
+                                    Node *&branch_before_branch,
+                                    std::byte &branch_before_branch_hex) const
   {
     if (!root) {
       return prev_root;
@@ -799,10 +817,11 @@ private:
       if (next) {
         idx++;
         branch_hex = current_hex;
-        return TraverseToBottom(next, root, last_branch_seen,
-                                last_branch_hex_seen, path, idx, branch_hex,
-                                existing_key, branch_before_branch,
-                                branch_before_branch_hex);
+        return TraverseToBottomConst(next, root, last_branch_seen,
+                                     last_branch_hex_seen, path, idx,
+                                     branch_hex, existing_key,
+                                     branch_before_branch,
+                                     branch_before_branch_hex);
       }
       else {
         // There is no child, so we have reached the bottom of the trie.
@@ -815,10 +834,11 @@ private:
       if (path.GetSubarray(idx, idx + root->path.size()) == root->path) {
         assert(root->child[0]);
         idx += root->path.size();
-        return TraverseToBottom(root->child[0], root, last_branch_seen,
-                                last_branch_hex_seen, path, idx, branch_hex,
-                                existing_key, branch_before_branch,
-                                branch_before_branch_hex);
+        return TraverseToBottomConst(root->child[0], root, last_branch_seen,
+                                     last_branch_hex_seen, path, idx,
+                                     branch_hex, existing_key,
+                                     branch_before_branch,
+                                     branch_before_branch_hex);
       }
       else {
         // The extension node's path does not match [key], so we can stop moving
@@ -839,6 +859,19 @@ private:
       return prev_root;
       break;
     }
+  }
+
+  Node *TraverseToBottom(Node *root, Node *prev_root, Node *last_branch_seen,
+                         std::byte last_branch_hex_seen, const HexArray &path,
+                         size_t &idx, std::byte &branch_hex,
+                         Node *&existing_key, Node *&branch_before_branch,
+                         std::byte &branch_before_branch_hex)
+  {
+    return const_cast<Node *>(
+        TraverseToBottomConst(root, prev_root, last_branch_seen,
+                              last_branch_hex_seen, path, idx, branch_hex,
+                              existing_key, branch_before_branch,
+                              branch_before_branch_hex));
   }
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
