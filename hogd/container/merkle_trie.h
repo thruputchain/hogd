@@ -109,9 +109,11 @@ public:
     size_t verified_key_size = 0;
     std::string observed_value;
     std::array<SHA256Hash, 16> child_hashes;
-    while (idx >= encodings.size()) {
+    while (idx < encodings.size()) {
       NodeType type;
       size_t path_size;
+      size_t orig_idx = idx;
+      SHA256Hash prev_hash = hash;
       if (!GetNodeHashFromEncoding(encodings, idx, hash, type, path_size,
                                    observed_value, child_hashes)) {
         return false;
@@ -125,7 +127,7 @@ public:
         verified_key_size++;
         size_t num_matches = 0;
         for (SHA256Hash child_hash : child_hashes) {
-          if (child_hash == hash) {
+          if (child_hash == prev_hash) {
             num_matches++;
           }
         }
@@ -135,7 +137,7 @@ public:
       case NodeType::kExtension:
         ok = num_nodes;
         verified_key_size += path_size;
-        ok = ok && child_hashes[0] == hash;
+        ok = ok && child_hashes[0] == prev_hash;
         break;
       case NodeType::kLeaf:
         ok = !num_nodes;
@@ -1105,11 +1107,12 @@ private:
     }
     path_size = static_cast<size_t>(encodings[idx]);
     idx += sizeof(size_t);
+    size_t path_size_in_bytes = (path_size + 1) / 2;
 
-    if (idx + path_size > encodings.size()) {
+    if (idx + path_size_in_bytes > encodings.size()) {
       return 0;
     }
-    idx += path_size;
+    idx += path_size_in_bytes;
 
     static constexpr size_t kChildHashSize = sizeof(SHA256Hash);
     if (idx + kChildHashSize > encodings.size()) {
@@ -1137,11 +1140,12 @@ private:
     }
     path_size = static_cast<size_t>(encodings[idx]);
     idx += sizeof(size_t);
+    size_t path_size_in_bytes = (path_size + 1) / 2;
 
-    if (idx + path_size > encodings.size()) {
+    if (idx + path_size_in_bytes > encodings.size()) {
       return 0;
     }
-    idx += path_size;
+    idx += path_size_in_bytes;
 
     if (idx + sizeof(size_t) > encodings.size()) {
       return 0;
