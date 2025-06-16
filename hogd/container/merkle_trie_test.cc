@@ -303,9 +303,9 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   trie.insert(key_c, value_c);
 
   trie.Print();
-  std::vector<std::byte> proof = trie.GetProof(key_b);
-  for (size_t i = 0; i < proof.size(); i++) {
-    printf("%02x", proof[i]);
+  auto [root_hash, node_encodings] = trie.GetProof(key_b);
+  for (size_t i = 0; i < node_encodings.size(); i++) {
+    printf("%02x", node_encodings[i]);
   }
   printf("\ndone.\n");
 

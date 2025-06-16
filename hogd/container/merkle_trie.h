@@ -73,8 +73,7 @@ public:
 
   SHA256Hash GetRootHash() const { return root_->hash; }
 
-  // TODO: This should probably be the node encodings instead.
-  std::vector<std::byte> GetProof(const Key &k)
+  std::pair<SHA256Hash, std::vector<std::byte>> GetProof(const Key &k)
   {
     Node *node = FindNode(k);
     if (!node) {
@@ -91,7 +90,7 @@ public:
 
       node = node->parent;
     }
-    return ret;
+    return {GetRootHash(), ret};
   }
 
   // TODO: Should probably pass node encodings and then walk through those.
