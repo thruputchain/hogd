@@ -76,8 +76,9 @@ public:
   std::pair<SHA256Hash, std::vector<std::byte>> GetProof(const Key &k)
   {
     Node *node = FindNode(k);
+    printf("FIND NODE ok: %p\n", node);
     if (!node) {
-      return {};
+      return {SHA256Hash(), {}};
     }
 
     std::vector<std::byte> ret;
@@ -97,8 +98,10 @@ public:
   GetProofByNode(const Key &k)
   {
     Node *node = FindNode(k);
+    printf("FIND NODE: %p\n", node);
     if (!node) {
-      return {};
+      printf("wow ret\n");
+      return {SHA256Hash(), {}};
     }
 
     std::vector<std::vector<std::byte>> ret;
@@ -231,7 +234,9 @@ public:
     assert(idx <= k.size());
 
     Node *to_hash = nullptr;
+    printf("ok next = %p\n", next);
     if (idx == k.size()) {
+      printf("C\n");
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
       assert(next->value->empty());
@@ -269,16 +274,19 @@ public:
         //   its own leaf node under the branch (so there will be two leaf
         //   nodes).
         if (next->child[branch_idx]->type == NodeType::kExtension) {
+          printf("A\n");
           to_hash = InsertHandleExtensionChild(next->child[branch_idx], next, k,
                                                idx, std::move(obj));
         }
         else {
+          printf("B\n");
           assert(next->child[branch_idx]->type == NodeType::kLeaf);
           to_hash = InsertHandleLeafChild(next->child[branch_idx], next, k, idx,
                                           std::move(obj));
         }
       }
       else {
+        printf("D\n");
         Node *leaf = CreateLeaf(/*parent=*/next);
         // We are going to use the hex character at [idx] in the key to map to
         // the leaf node from the branch node. Thus, we add 1 below as we do not
@@ -714,6 +722,8 @@ private:
 
     size_t common_range_length =
         GetLongestCommonRangeLength(key_a, 0, key_b, 0);
+    printf("common_range_length = %zu, parent_branch = %p\n",
+           common_range_length, parent_branch);
     if (common_range_length) {
       size_t diverge_idx = common_range_length;
       Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
@@ -831,10 +841,20 @@ private:
     // hex character we are looking at, so we reach the end of the byte array
     // when [idx >= path.size() * 2].
     if (idx >= path.size()) {
-      if (root->type == NodeType::kBranch && !root->value->empty()) {
-        existing_key = root;
+      if (root->type == NodeType::kBranch) {
+        if (!root->value->empty()) {
+          existing_key = root;
+        }
+        return root;
       }
-      return root;
+      else if (prev_root && prev_root->type == NodeType::kBranch){
+        if (root->type == NodeType::kLeaf && root->path.size() == 0) {
+          printf("yep here!!!!!!\n");
+          existing_key = root;
+        }
+        idx--;
+        return prev_root;
+      }
     }
     else if (prev_root && prev_root->type == NodeType::kBranch) {
       branch_before_branch = last_branch_seen;
@@ -891,6 +911,7 @@ private:
       }
       // We are going to return the parent node, so subtract 1 from [idx].
       idx--;
+      printf("ret leaf here\n");
       return prev_root;
       break;
     }

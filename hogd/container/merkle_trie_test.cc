@@ -142,14 +142,19 @@ TEST(MerkleTrie, BranchAndLeafFind)
   HexArray key_a("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
+  printf("1a\n");
   EXPECT_EQ(*trie.find(key_a), value_a);
+  printf("1b\n");
   EXPECT_EQ(trie.find(HexArray("12")), nullptr);
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
+  printf("1\n");
   EXPECT_EQ(*trie.find(key_a), value_a);
+  printf("2\n");
   EXPECT_EQ(*trie.find(key_b), value_b);
+  printf("3\n");
   EXPECT_EQ(trie.find(HexArray("12")), nullptr);
   EXPECT_EQ(trie.find(HexArray("12345678")), nullptr);
 }
@@ -171,6 +176,33 @@ TEST(MerkleTrie, DoNotFindBranchValue)
   // [nullptr] rather than mistakenly return an empty string or something
   // similar.
   EXPECT_EQ(trie.find(HexArray("1234")), nullptr);
+}
+
+TEST(MerkleTrie, BranchBranchLeaf)
+{
+  MerkleTrie trie;
+
+  HexArray key_a("76c772");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+  EXPECT_EQ(*trie.find(key_a), value_a);
+  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
+  trie.Print();
+
+  HexArray key_b("7ead1e640fb4854117ef3f882338ae");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+  EXPECT_EQ(*trie.find(key_a), value_a);
+  EXPECT_EQ(*trie.find(key_b), value_b);
+  trie.Print();
+
+  HexArray key_c("76");
+  std::string value_c = "hello three";
+  trie.insert(key_c, value_c);
+  EXPECT_EQ(*trie.find(key_a), value_a);
+  EXPECT_EQ(*trie.find(key_b), value_b);
+  EXPECT_EQ(*trie.find(key_c), value_c);
+  trie.Print();
 }
 
 TEST(MerkleTrie, TwoLeavesAndOneBranch)
@@ -226,10 +258,10 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
 namespace {
 
 void
-ForEachFunc(std::set<std::pair<HexArray, std::string>> &seen,
+ForEachFunc(std::map<HexArray, std::string> &seen,
             const std::pair<HexArray, std::string> &pair)
 {
-  seen.insert(pair);
+  seen[pair.first] = pair.second;
 }
 
 } // namespace
@@ -237,7 +269,7 @@ ForEachFunc(std::set<std::pair<HexArray, std::string>> &seen,
 TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
 {
   MerkleTrie trie;
-  std::set<std::pair<HexArray, std::string>> seen;
+  std::map<HexArray, std::string> seen;
   auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
     ForEachFunc(seen, pair);
   };
@@ -246,7 +278,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
   trie.for_each(f);
-  std::set<std::pair<HexArray, std::string>> expected = {{key_a, value_a}};
+  std::map<HexArray, std::string> expected = {{key_a, value_a}};
   EXPECT_EQ(seen, expected);
 
   HexArray key_b("123456");
@@ -607,26 +639,52 @@ TEST(MerkleTrie, Stress)
   static constexpr size_t kNumIterations = 10000;
   MerkleTrie trie;
 
-  std::set<std::pair<HexArray, std::string>> total;
-  std::set<std::pair<HexArray, std::string>> seen;
+  std::map<HexArray, std::string> total;
+  std::map<HexArray, std::string> seen;
   auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
     ForEachFunc(seen, pair);
   };
 
   for (size_t i = 0; i < kNumIterations; i++) {
+    printf("i = %zu\n", i);
     HexArray path = GenerateRandomPath();
     const std::string value = std::to_string(i);
+    //printf("Insert...\n");
     trie.insert(path, value);
+    //printf("Done inserting.\n");
     total.insert({path, value});
-    trie.Print();
+    //trie.Print();
 
     seen.clear();
+    //printf("For each...\n");
     trie.for_each(f);
+    //printf("Done with for each.\n");
     EXPECT_EQ(seen, total);
+    printf("seen (size %zu):\n", seen.size());
+    for (const auto &[k, v] : seen) {
+      printf("%s: %s\n", k.str().c_str(), v.c_str());
+    }
+    printf("\n");
+    printf("total (size %zu):\n", total.size());
+    for (const auto &[k, v] : total) {
+      printf("%s: %s\n", k.str().c_str(), v.c_str());
+    }
+    printf("\n");
 
+    //printf("Get encoding A.\n");
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
+    //printf("Now get encoding B.\n");
+    const auto &[_, node_by_node] = trie.GetProofByNode(path);
+    //printf("last node encoding: ");
+    for (std::byte b : node_by_node.back()) {
+      //printf("%02x", b);
+    }
+    //printf("\n");
+    //printf("Prove...\n");
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
+    //printf("Proved. Now find...\n");
     EXPECT_EQ(*trie.find(path), value);
+    //printf("Found.\n");
   }
 
   for (const auto &[path, value] : total) {
