@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sched.h>
+
 #include <functional>
 #include <future>
 #include <memory>
@@ -17,18 +19,17 @@
 
 namespace hogd {
 
-// RPCClient handles the client side of the RPC protocol.
-class RPCClient {
-public:
-  static ErrnoStatus<std::unique_ptr<RPCClient>> dial(std::string_view addr);
+namespace rpc_detail {
 
-  RPCClient(File &&socket)
+class ClientFlow {
+public:
+  ClientFlow(File &&socket)
     : socket_(std::move(socket)),
       sender_([this](const std::stop_token &stoken) { send_worker(stoken); }),
       receiver_(
           [this](const std::stop_token &stoken) { receive_worker(stoken); })
   {}
-  ~RPCClient();
+  ~ClientFlow();
 
   // call invokes an RPC on the server. A future allows the caller to wait for
   // a response.
@@ -50,6 +51,35 @@ private:
 
   void send_worker(const std::stop_token &stoken);
   void receive_worker(const std::stop_token &stoken);
+};
+
+} // namespace rpc_detail
+
+inline constexpr int kDefaultFlows = 4;
+
+// RPCClient handles the client side of the RPC protocol.
+class RPCClient {
+public:
+  static ErrnoStatus<RPCClient> dial(std::string_view addr,
+                                     int flows = kDefaultFlows);
+
+  RPCClient(std::vector<std::unique_ptr<rpc_detail::ClientFlow>> &&flows)
+    : flows_(std::move(flows))
+  {}
+
+  // call invokes an RPC on the server. A future allows the caller to wait for
+  // a response.
+  std::future<OwningSpan<const std::byte>> call(std::span<const std::byte> args)
+  {
+    // NOTE: getcpu is vDSO, so it's very fast. We use it to hopefully squeeze
+    // out a little more cache affinity while spreading load across flows.
+    unsigned int core;
+    getcpu(&core, nullptr);
+    return flows_[core % flows_.size()]->call(args);
+  }
+
+private:
+  std::vector<std::unique_ptr<rpc_detail::ClientFlow>> flows_;
 };
 
 using RPCHandler =

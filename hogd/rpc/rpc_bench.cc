@@ -1,13 +1,11 @@
 // rpc_bench.cc - benchmarks for RPC framework
 
 #include <cstddef>
-#include <memory>
 #include <print>
 #include <span>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include "hogd/base/log.h"
@@ -46,35 +44,26 @@ run_server(uint16_t port)
 }
 
 void
-run_client(std::string_view addr, int conns, int threads_per_conn, int n)
+run_client(std::string_view addr, int conns, int threads, int n)
 {
-  std::vector<std::unique_ptr<RPCClient>> clients;
-  clients.reserve(conns);
-
-  for (int i = 0; i < conns; ++i) {
-    ErrnoStatus<std::unique_ptr<RPCClient>> ret = RPCClient::dial(addr);
-    if (!ret)
-      fail(ret.error());
-    clients.emplace_back(std::move(*ret));
-  }
+  ErrnoStatus<RPCClient> client = RPCClient::dial(addr, conns);
+  if (!client)
+    fail(client.error());
 
   std::vector<std::jthread> workers;
-  workers.reserve(conns * threads_per_conn);
+  workers.reserve(threads);
   ElapsedTimer timer;
-  for (std::unique_ptr<RPCClient> &c : clients) {
-    for (int i = 0; i < threads_per_conn; ++i) {
-      workers.emplace_back([&c, n] {
-        std::vector<std::byte> args(kArgSize);
-        for (int i = 0; i < n; ++i)
-          c->call(std::span(args)).wait();
-      });
-    }
+  for (int i = 0; i < threads; ++i) {
+    workers.emplace_back([&c = *client, n] {
+      std::vector<std::byte> args(kArgSize);
+      for (int i = 0; i < n; ++i)
+        c.call(std::span(args)).wait();
+    });
   }
   for (std::jthread &th : workers)
     th.join();
 
-  int total = conns * threads_per_conn * n;
-  double tps = static_cast<double>(total) / timer.elapsed();
+  double tps = static_cast<double>(threads * n) / timer.elapsed();
   std::println("{}", tps);
 }
 
@@ -92,7 +81,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   auto print_usage = [] {
     std::println("usage:\tserver [port]");
-    std::println("\tclient [ipaddr:port] [conns] [threads_per_conn] [n]");
+    std::println("\tclient [ipaddr:port] [conns] [threads] [n]");
   };
 
   if (argc < 2) {
@@ -106,9 +95,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       return 1;
     }
     int conns = std::stoi(argv[3], nullptr, 0);
-    int threads_per_conn = std::stoi(argv[4], nullptr, 0);
+    int threads = std::stoi(argv[4], nullptr, 0);
     int n = std::stoi(argv[5], nullptr, 0);
-    hogd::run_client(argv[2], conns, threads_per_conn, n);
+    hogd::run_client(argv[2], conns, threads, n);
     return 0;
   }
 

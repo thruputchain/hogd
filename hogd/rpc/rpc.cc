@@ -10,12 +10,20 @@
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 
+#include <cassert>
+#include <cerrno>
 #include <future>
+#include <memory>
 #include <mutex>
+#include <queue>
+#include <span>
 #include <type_traits>
+#include <utility>
 
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/span.h"
+#include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 
@@ -120,44 +128,16 @@ read_bytes(BufferedReader &r, size_t n)
 
 } // namespace
 
-RPCClient::~RPCClient()
+namespace rpc_detail {
+
+ClientFlow::~ClientFlow()
 {
   if (ErrnoStatus<void> ret = sys_shutdown(socket_.get_fd(), SHUT_RDWR); !ret)
     error("could not shutdown socket: {}", ret.error());
 }
 
-ErrnoStatus<std::unique_ptr<RPCClient>>
-RPCClient::dial(std::string_view addr)
-{
-  std::vector<std::string_view> args = split(addr, ':');
-  if (args.size() != 2)
-    return Errno(EINVAL);
-  std::optional<uint16_t> port = parse_integer<uint16_t>(args[1]);
-  if (!port)
-    return Errno(EINVAL);
-
-  ErrnoStatus<int> fd = sys_socket(AF_INET, SOCK_STREAM, 0);
-  if (!fd)
-    return fd.error();
-
-  sockaddr_in saddr;
-  saddr.sin_family = AF_INET;
-  saddr.sin_addr.s_addr = inet_addr(std::string(args[0]).c_str());
-  saddr.sin_port = htons(*port);
-  ErrnoStatus<void> ret = sys_connect(*fd, saddr);
-  if (!ret)
-    return ret.error();
-
-  ret = sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, int(1));
-  if (!ret)
-    return ret.error();
-
-  info("rcp client connected to {}", addr);
-  return std::make_unique<RPCClient>(File(*fd));
-}
-
 std::future<OwningSpan<const std::byte>>
-RPCClient::call(std::span<const std::byte> args)
+ClientFlow::call(std::span<const std::byte> args)
 {
   std::promise<OwningSpan<const std::byte>> promise;
   std::future<OwningSpan<const std::byte>> future = promise.get_future();
@@ -170,7 +150,7 @@ RPCClient::call(std::span<const std::byte> args)
 }
 
 void
-RPCClient::send_worker(const std::stop_token &stoken)
+ClientFlow::send_worker(const std::stop_token &stoken)
 {
   BufferedWriter w(socket_);
   while (!stoken.stop_requested()) {
@@ -202,7 +182,7 @@ RPCClient::send_worker(const std::stop_token &stoken)
 }
 
 void
-RPCClient::receive_worker(const std::stop_token &stoken)
+ClientFlow::receive_worker(const std::stop_token &stoken)
 {
   std::queue<Completion> completions;
   auto take_completion = [this, &completions] {
@@ -233,6 +213,44 @@ RPCClient::receive_worker(const std::stop_token &stoken)
     }
     take_completion().set_value(std::move(*bytes));
   }
+}
+
+} // namespace rpc_detail
+
+ErrnoStatus<RPCClient>
+RPCClient::dial(std::string_view addr, int flows)
+{
+  std::vector<std::string_view> args = split(addr, ':');
+  if (args.size() != 2)
+    return Errno(EINVAL);
+  std::optional<uint16_t> port = parse_integer<uint16_t>(args[1]);
+  if (!port)
+    return Errno(EINVAL);
+
+  sockaddr_in saddr;
+  saddr.sin_family = AF_INET;
+  saddr.sin_addr.s_addr = inet_addr(std::string(args[0]).c_str());
+  saddr.sin_port = htons(*port);
+
+  std::vector<std::unique_ptr<rpc_detail::ClientFlow>> flow_tbl;
+  flow_tbl.reserve(flows);
+  for (int i = 0; i < flows; ++i) {
+    ErrnoStatus<int> fd = sys_socket(AF_INET, SOCK_STREAM, 0);
+    if (!fd)
+      return fd.error();
+
+    ErrnoStatus<void> ret = sys_connect(*fd, saddr);
+    if (!ret)
+      return ret.error();
+
+    ret = sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, int(1));
+    if (!ret)
+      return ret.error();
+    flow_tbl.emplace_back(std::make_unique<rpc_detail::ClientFlow>(File(*fd)));
+  }
+
+  info("rpc client connected to {} with {} flows", addr, flows);
+  return RPCClient(std::move(flow_tbl));
 }
 
 ErrnoStatus<void>
