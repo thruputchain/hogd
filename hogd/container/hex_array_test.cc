@@ -54,6 +54,19 @@ TEST(HexArray, CreateFromStringOddLength)
   EXPECT_FALSE(h.empty());
 }
 
+TEST(HexArray, CreateFromByteVector)
+{
+  std::vector<std::byte> bytes = {std::byte{0x01}, std::byte{0x23},
+                                  std::byte{0x45}, std::byte{0x67},
+                                  std::byte{0x89}, std::byte{0xab},
+                                  std::byte{0xcd}, std::byte{0xef}};
+  HexArray h(bytes);
+  EXPECT_EQ(h.str(), "0123456789abcdef");
+  EXPECT_EQ(h.ToByteVector(), bytes);
+  EXPECT_EQ(h.size(), bytes.size() * 2);
+  EXPECT_FALSE(h.empty());
+}
+
 TEST(HexArray, Get)
 {
   std::string init = "0123456789abcdef";

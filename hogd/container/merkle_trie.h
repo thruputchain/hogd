@@ -421,7 +421,7 @@ public:
 
           if (other_child->type == NodeType::kBranch) {
             new_child = CreateExtension(/*parent=*/branch_before_branch);
-            cur_path.Append(branch_hex);
+            cur_path.Append(other_child_hex);
 
             new_child->path = cur_path;
             new_child->child[0] = other_child;
@@ -442,6 +442,7 @@ public:
         branch_before_branch
             ->child[std::to_integer<size_t>(branch_before_branch_hex)] =
             new_child;
+        new_child->parent = branch_before_branch;
         to_hash = new_child;
       }
       else {
@@ -703,9 +704,13 @@ private:
   {
     // We add 1 since one of the digits will be included in the [parent_branch]
     // node.
+    std::byte parent_branch_digit = k.Get(idx);
     Key key_a = k.GetSubarray(idx + 1, k.size());
     Key key_b = current_leaf->path;
-    Node *prev_branch = parent_branch;
+
+    Node *new_branch_node = CreateBranch(/*parent=*/parent_branch);
+    parent_branch->child[std::to_integer<size_t>(parent_branch_digit)] =
+        new_branch_node;
 
     size_t common_range_length =
         GetLongestCommonRangeLength(key_a, 0, key_b, 0);
@@ -714,12 +719,10 @@ private:
       Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
       new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
 
-      parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
+      parent_branch->child[std::to_integer<size_t>(parent_branch_digit)] =
           new_extension_node;
-
-      Node *new_branch_node = CreateBranch(/*parent=*/new_extension_node);
       new_extension_node->child[0] = new_branch_node;
-      prev_branch = new_branch_node;
+      new_branch_node->parent = new_extension_node;
 
       // Now remove the extension path from these keys.
       key_a = key_a.GetSubarray(diverge_idx, key_a.size());
@@ -740,38 +743,35 @@ private:
       // should add the shorter key's value to the last branch node created, and
       // then we should add the longer key and its value to a leaf node of that
       // branch.
-      prev_branch->value = std::move(shorter_value);
+      new_branch_node->value = std::move(shorter_value);
 
       // Longer key's leaf node.
-      Node *leaf = CreateLeaf(/*parent=*/prev_branch);
+      Node *leaf = CreateLeaf(/*parent=*/new_branch_node);
       leaf->path = longer.GetSubarray(1, longer.size());
       leaf->value = std::move(longer_value);
-      std::byte longer_digit = longer.Get(0);
-      prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
+      new_branch_node->child[std::to_integer<size_t>(longer.Get(0))] = leaf;
       to_hash = leaf;
     }
     else {
-      std::byte shorter_digit = shorter.Get(0);
-      std::byte longer_digit = longer.Get(0);
-      assert(shorter_digit != longer_digit);
+      assert(shorter.Get(0) != longer.Get(0));
 
       // The digits do not match, so create two leaf nodes.
 
       // Shorter key's leaf node.
-      Node *leaf = CreateLeaf(/*parent=*/prev_branch);
+      Node *leaf = CreateLeaf(/*parent=*/new_branch_node);
       leaf->path = shorter.GetSubarray(1, shorter.size());
       leaf->value = std::move(shorter_value);
-      prev_branch->child[std::to_integer<size_t>(shorter_digit)] = leaf;
+      new_branch_node->child[std::to_integer<size_t>(shorter.Get(0))] = leaf;
       // We hash this leaf here, and then in the parent function, we hash all
       // nodes on the path from the leaf below to the root. Note that this leaf
       // and the leaf below share the same parent.
       leaf->hash = GetNodeHash(*leaf);
 
       // Longer key's leaf node.
-      leaf = CreateLeaf(/*parent=*/prev_branch);
+      leaf = CreateLeaf(/*parent=*/new_branch_node);
       leaf->path = longer.GetSubarray(1, longer.size());
       leaf->value = std::move(longer_value);
-      prev_branch->child[std::to_integer<size_t>(longer_digit)] = leaf;
+      new_branch_node->child[std::to_integer<size_t>(longer.Get(0))] = leaf;
       to_hash = leaf;
     }
     // delete current_leaf;
@@ -1222,6 +1222,7 @@ private:
   FRIEND_TEST(MerkleTrie, HashExtension);
   FRIEND_TEST(MerkleTrie, HashExtensionNullptr);
   FRIEND_TEST(MerkleTrie, HashLeaf);
+  FRIEND_TEST(MerkleTrie, Stress);
 };
 
 } // namespace hogd

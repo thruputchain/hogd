@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include <atomic>
+#include <random>
 #include <string>
 #include <thread>
 #include <utility>
@@ -40,7 +41,7 @@ StringFromHash(const SHA256Hash &hash)
   std::ostringstream oss;
   oss << std::hex << std::setfill('0');
   for (size_t i = 0; i < 32; i++) {
-    oss << std::setw(1) << static_cast<int>(hash[i]);
+    oss << std::setw(2) << static_cast<int>(hash[i]);
   }
   return oss.str();
 }
@@ -48,7 +49,7 @@ StringFromHash(const SHA256Hash &hash)
 
 } // namespace
 
-// TODO: Test for empty branch values.
+// TODO: Try to add an empty key. Try to add an empty value.
 
 TEST(MerkleTrie, TwoLeaves)
 {
@@ -576,6 +577,89 @@ TEST(MerkleTrie, HashLeaf)
   SHA256Hash expected = HashFromString(
       "ed601bfeacd678e5814cb9adf207256004ce70dc2e41b8eda66ea002a5a03904");
   EXPECT_EQ(hash, expected);
+}
+
+namespace {
+
+HexArray
+GenerateRandomPath()
+{
+  std::random_device rd;
+  std::mt19937 gen(rd());
+
+  std::uniform_int_distribution<size_t> path_size_dist(1, 20);
+  size_t path_size = path_size_dist(gen);
+
+  std::vector<std::byte> path(path_size);
+  std::uniform_int_distribution<int> path_dist(0, 0xff);
+
+  for (std::byte &b : path) {
+    b = static_cast<std::byte>(path_dist(gen));
+  }
+  printf("path: %s (size %zu)\n", HexArray(path).str().c_str(), path.size());
+  return HexArray(path);
+}
+
+} // namespace
+
+TEST(MerkleTrie, Stress)
+{
+  static constexpr size_t kNumIterations = 10000;
+  MerkleTrie trie;
+
+  std::set<std::pair<HexArray, std::string>> total;
+  std::set<std::pair<HexArray, std::string>> seen;
+  auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
+    ForEachFunc(seen, pair);
+  };
+
+  for (size_t i = 0; i < kNumIterations; i++) {
+    HexArray path = GenerateRandomPath();
+    const std::string value = std::to_string(i);
+    trie.insert(path, value);
+    total.insert({path, value});
+    trie.Print();
+
+    seen.clear();
+    trie.for_each(f);
+    EXPECT_EQ(seen, total);
+
+    const auto &[root_hash, node_encodings] = trie.GetProof(path);
+    EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
+    EXPECT_EQ(*trie.find(path), value);
+  }
+
+  for (const auto &[path, value] : total) {
+    const auto &[root_hash, node_encodings] = trie.GetProof(path);
+    EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
+
+    EXPECT_EQ(*trie.find(path), value);
+  }
+
+  for (size_t i = 0; i < kNumIterations; i++) {
+    const auto &[path, value] = *total.begin();
+    const auto &[root_hash, node_encodings] = trie.GetProof(path);
+    EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
+
+    EXPECT_EQ(trie.remove(path), 1);
+    auto it = total.erase(total.begin());
+    if (i < kNumIterations - 1) {
+      EXPECT_NE(it, total.end());
+    }
+    else {
+      EXPECT_EQ(it, total.end());
+    }
+
+    EXPECT_EQ(trie.find(path), nullptr);
+
+    seen.clear();
+    trie.for_each(f);
+    EXPECT_EQ(seen, total);
+  }
+
+  SHA256Hash root_hash = trie.GetRootHash();
+  trie.RegenerateAllHashes(trie.root_);
+  EXPECT_EQ(trie.GetRootHash(), root_hash);
 }
 
 } // namespace hogd

@@ -43,6 +43,7 @@ public:
 
   HexArray(const std::string &s)
   {
+    assert(s.size() <= kMaxNumHexDigits);
     Init();
 
     for (size_t i = 0; i < s.size(); i++) {
@@ -52,6 +53,16 @@ public:
       Set(i, b);
     }
     size_ = s.size();
+  }
+
+  HexArray(const std::vector<std::byte> &bytes)
+  {
+    assert(bytes.size() <= kArrayLength);
+
+    Init();
+
+    memcpy(backing_store_.data(), bytes.data(), bytes.size());
+    size_ = bytes.size() * 2;
   }
 
   bool operator==(const HexArray &a) const
