@@ -26,6 +26,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/node.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
@@ -88,7 +89,7 @@ public:
       if (!node) {
         break;
       }
-      std::vector<std::byte> encoding = GetNodeEncoding(*node);
+      std::vector<std::byte> encoding = node->GetNodeEncoding();
       ret.insert(ret.end(), encoding.begin(), encoding.end());
 
       node = node->parent;
@@ -109,7 +110,7 @@ public:
       if (!node) {
         break;
       }
-      std::vector<std::byte> encoding = GetNodeEncoding(*node);
+      std::vector<std::byte> encoding = node->GetNodeEncoding();
       ret.push_back(encoding);
 
       node = node->parent;
@@ -133,17 +134,17 @@ public:
     std::optional<std::string> observed_value;
     std::array<SHA256Hash, 16> child_hashes;
     while (idx < encodings.size()) {
-      NodeType type;
+      Node::Type type;
       size_t path_size;
       SHA256Hash prev_hash = hash;
-      if (!GetNodeHashFromEncoding(encodings, idx, hash, type, path_size,
-                                   observed_value, child_hashes)) {
+      if (!Node::GetNodeHashFromEncoding(encodings, idx, hash, type, path_size,
+                                         observed_value, child_hashes)) {
         return false;
       }
 
       bool ok;
       switch (type) {
-      case NodeType::kBranch:
+      case Node::Type::kBranch:
       {
         if (num_nodes) {
           ok = true;
@@ -163,12 +164,12 @@ public:
         }
         break;
       }
-      case NodeType::kExtension:
+      case Node::Type::kExtension:
         ok = num_nodes;
         verified_key_size += path_size;
         ok = ok && child_hashes[0] == prev_hash;
         break;
-      case NodeType::kLeaf:
+      case Node::Type::kLeaf:
         ok = !num_nodes;
         verified_key_size += path_size;
         ok = ok && observed_value == value;
@@ -202,7 +203,7 @@ public:
     Node *node = FindNode(k);
     if (node) {
       switch (node->type) {
-      case NodeType::kBranch:
+      case Node::Type::kBranch:
         // Check if the branch has a value.
         if (node->value) {
           // Get the [std::string] out of the [std::optional<std::string>] with
@@ -212,7 +213,7 @@ public:
         }
         return nullptr;
 
-      case NodeType::kLeaf:
+      case Node::Type::kLeaf:
       {
         // Get the [std::string] out of the [std::optional<std::string>] with
         // the dereference operator.
@@ -246,7 +247,7 @@ public:
       return false;
     }
     assert(next);
-    assert(next->type == NodeType::kBranch);
+    assert(next->type == Node::Type::kBranch);
     assert(idx <= k.size());
 
     Node *to_hash = nullptr;
@@ -255,7 +256,7 @@ public:
       // the branch node.
       assert(next->value->empty());
       next->value = std::move(obj);
-      next->hash = GetNodeHash(*next);
+      next->hash = next->GetNodeHash();
       to_hash = next;
     }
     else {
@@ -287,12 +288,12 @@ public:
         //   b) Neither of the two keys has ended yet. Place each key's value in
         //   its own leaf node under the branch (so there will be two leaf
         //   nodes).
-        if (next->child[branch_idx]->type == NodeType::kExtension) {
+        if (next->child[branch_idx]->type == Node::Type::kExtension) {
           to_hash = InsertHandleExtensionChild(next->child[branch_idx], next, k,
                                                idx, std::move(obj));
         }
         else {
-          assert(next->child[branch_idx]->type == NodeType::kLeaf);
+          assert(next->child[branch_idx]->type == Node::Type::kLeaf);
           to_hash = InsertHandleLeafChild(next->child[branch_idx], next, k, idx,
                                           std::move(obj));
         }
@@ -305,7 +306,7 @@ public:
         // node.
         leaf->path = k.GetSubarray(idx + 1, k.size());
         leaf->value = std::move(obj);
-        leaf->hash = GetNodeHash(*leaf);
+        leaf->hash = leaf->GetNodeHash();
 
         next->child[branch_idx] = leaf;
         to_hash = next;
@@ -371,7 +372,7 @@ public:
       return 0;
     }
     assert(branch);
-    assert(branch->type == NodeType::kBranch);
+    assert(branch->type == Node::Type::kBranch);
 
     Node *to_hash = nullptr;
     if (existing_key == branch) {
@@ -411,10 +412,10 @@ public:
         // TODO: There should only be one extension node at most, so we probably
         // do not need a while loop.
         while (true) {
-          if (cur->type == NodeType::kBranch) {
+          if (cur->type == Node::Type::kBranch) {
             break;
           }
-          assert(cur->type == NodeType::kExtension);
+          assert(cur->type == Node::Type::kExtension);
           cur_path.Append(cur->path);
 
           Node *next_cur = cur->child[0];
@@ -463,7 +464,7 @@ public:
         else {
           assert(num_branches == 2);
 
-          if (other_child->type == NodeType::kBranch) {
+          if (other_child->type == Node::Type::kBranch) {
             new_child = CreateExtension(/*parent=*/branch_before_branch);
             cur_path.Append(other_child_hex);
             new_child->path = cur_path;
@@ -539,37 +540,6 @@ public:
   }
 
 private:
-  enum class NodeType { kBranch, kExtension, kLeaf };
-
-  struct Node {
-    NodeType type;
-    SHA256Hash hash;
-    Node *parent;
-
-    // TODO: Optimize the variables below with a union or different node types.
-    // TODO: Optimize the vectors below--use something other than a vector. We
-    // know that path lengths will never exceed 65 bytes.
-
-    // Used by extensions and leaves.
-    HexArray path;
-
-    // Used by branches and leaves.
-    // TODO: Should we be able to place values in extension nodes, too? For
-    // example, the [TwoLeavesAndOneBranch] test would produce a more efficient
-    // tree if we could do this.
-    std::optional<std::string> value;
-
-    // Used by branches and extensions.
-    //
-    // For branches, we branch on a hex value and up to all 16 slots may be
-    // filled. There are 16 different hex values, so we need 16 different branch
-    // slots.
-    //
-    // For extensions, only the first slot is filled. The other 15 slots are
-    // unused.
-    std::array<Node *, 16> child;
-  };
-
   void CheckHelper(Node *root, Node *parent)
   {
     if (!root) {
@@ -580,7 +550,7 @@ private:
     }
 
     switch (root->type) {
-    case NodeType::kBranch:
+    case Node::Type::kBranch:
     {
       if (root->path.size()) {
         printf("Unexpected path in branch: [%s]\n", root->path.str().c_str());
@@ -604,16 +574,16 @@ private:
       }
       break;
     }
-    case NodeType::kExtension:
+    case Node::Type::kExtension:
       if (!root->path.size()) {
         printf("Unexpected empty path in extension: [%s]\n",
                root->path.str().c_str());
       }
       if (root->child[0]) {
-        if (root->child[0]->type == NodeType::kExtension) {
+        if (root->child[0]->type == Node::Type::kExtension) {
           printf("Extension node has extension node as child\n");
         }
-        else if (root->child[0]->type == NodeType::kLeaf) {
+        else if (root->child[0]->type == Node::Type::kLeaf) {
           printf("Extension node has leaf node as child\n");
         }
       }
@@ -622,7 +592,7 @@ private:
       }
       CheckHelper(root->child[0], root);
       break;
-    case NodeType::kLeaf:
+    case Node::Type::kLeaf:
       if (!root->value) {
         printf("Unexpected empty value in leaf\n");
       }
@@ -636,7 +606,7 @@ private:
   Node *CreateBranch(Node *parent)
   {
     Node *node = new Node;
-    node->type = NodeType::kBranch;
+    node->type = Node::Type::kBranch;
     node->parent = parent;
     node->value = std::nullopt;
     memset(node->child.data(), 0, node->child.size() * sizeof(node->child[0]));
@@ -646,7 +616,7 @@ private:
   Node *CreateExtension(Node *parent)
   {
     Node *node = new Node;
-    node->type = NodeType::kExtension;
+    node->type = Node::Type::kExtension;
     node->parent = parent;
     return node;
   }
@@ -654,7 +624,7 @@ private:
   Node *CreateLeaf(Node *parent)
   {
     Node *node = new Node;
-    node->type = NodeType::kLeaf;
+    node->type = Node::Type::kLeaf;
     node->parent = parent;
     node->value = std::nullopt;
     return node;
@@ -697,7 +667,7 @@ private:
       return;
     }
     switch (root->type) {
-    case NodeType::kBranch:
+    case Node::Type::kBranch:
       printf("Branch (%s, %p)\n", GetHashString(*root).c_str(), root);
       printf("Parent: %p\n", root->parent);
       printf("Value: [%s]\n", root->value ? root->value->c_str() : "<empty>");
@@ -715,7 +685,7 @@ private:
         PrintHelper(root->child[i]);
       }
       break;
-    case NodeType::kExtension:
+    case Node::Type::kExtension:
       printf("Extension (%s, %p)\n", GetHashString(*root).c_str(), root);
       printf("Parent: %p\n", root->parent);
       printf("Path: %s\n", root->path.str().c_str());
@@ -730,7 +700,7 @@ private:
       printf("\n");
       PrintHelper(root->child[0]);
       break;
-    case NodeType::kLeaf:
+    case Node::Type::kLeaf:
       printf("Leaf (%s, %p)\n", GetHashString(*root).c_str(), root);
       printf("Parent: %p\n", root->parent);
       printf("Path: %s\n", root->path.str().c_str());
@@ -741,22 +711,20 @@ private:
     }
   }
 
-  const Node *FindNodeConst(const Key &k) const
+  Node *FindNode(const Key &k)
   {
     size_t idx = 0;
     std::byte branch_hex = std::byte(0x00);
     Node *existing_key = nullptr;
     Node *branch_before_branch = nullptr;
     std::byte branch_before_branch_hex = std::byte(0x00);
-    TraverseToBottomConst(root_, /*prev_root=*/nullptr,
-                          /*last_branch_seen=*/nullptr,
-                          /*last_branch_hex_seen=*/std::byte(0x00),
-                          /*path=*/k, idx, branch_hex, existing_key,
-                          branch_before_branch, branch_before_branch_hex);
+    TraverseToBottom(root_, /*prev_root=*/nullptr,
+                     /*last_branch_seen=*/nullptr,
+                     /*last_branch_hex_seen=*/std::byte(0x00),
+                     /*path=*/k, idx, branch_hex, existing_key,
+                     branch_before_branch, branch_before_branch_hex);
     return existing_key;
   }
-
-  Node *FindNode(const Key &k) { return const_cast<Node *>(FindNodeConst(k)); }
 
   // See the callsite for comments on this function.
   Node *InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
@@ -812,7 +780,7 @@ private:
       // We hash this extension node here, and then in the parent function, we
       // hash all nodes on the path from the leaf below to the root. Note that
       // this extension node and the leaf below share the same parent.
-      current_extension->hash = GetNodeHash(*current_extension);
+      current_extension->hash = current_extension->GetNodeHash();
     }
     else {
       new_branch_node
@@ -912,7 +880,7 @@ private:
       // We hash this leaf here, and then in the parent function, we hash all
       // nodes on the path from the leaf below to the root. Note that this leaf
       // and the leaf below share the same parent.
-      leaf->hash = GetNodeHash(*leaf);
+      leaf->hash = leaf->GetNodeHash();
 
       // Longer key's leaf node.
       leaf = CreateLeaf(/*parent=*/new_branch_node);
@@ -931,7 +899,7 @@ private:
     assert(root);
 
     switch (root->type) {
-    case NodeType::kBranch:
+    case Node::Type::kBranch:
       if (root->value) {
         func({prefix, *root->value});
       }
@@ -945,14 +913,14 @@ private:
         }
       }
       break;
-    case NodeType::kExtension:
+    case Node::Type::kExtension:
       assert(root->child[0]);
 
       prefix.Append(root->path);
       Walk(root->child[0], prefix, func);
       prefix.RemoveFromBack(root->path.size());
       break;
-    case NodeType::kLeaf:
+    case Node::Type::kLeaf:
       assert(root->value);
       assert((prefix_len % 2) == 0);
 
@@ -963,13 +931,11 @@ private:
     }
   }
 
-  const Node *TraverseToBottomConst(Node *root, Node *prev_root,
-                                    Node *last_branch_seen,
-                                    std::byte last_branch_hex_seen,
-                                    const HexArray &path, size_t &idx,
-                                    std::byte &branch_hex, Node *&existing_key,
-                                    Node *&branch_before_branch,
-                                    std::byte &branch_before_branch_hex) const
+  Node *TraverseToBottom(Node *root, Node *prev_root, Node *last_branch_seen,
+                         std::byte last_branch_hex_seen, const HexArray &path,
+                         size_t &idx, std::byte &branch_hex,
+                         Node *&existing_key, Node *&branch_before_branch,
+                         std::byte &branch_before_branch_hex)
   {
     if (!root) {
       return prev_root;
@@ -978,17 +944,17 @@ private:
     // hex character we are looking at, so we reach the end of the byte array
     // when [idx >= path.size() * 2].
     if (idx >= path.size()) {
-      if (root->type == NodeType::kBranch) {
+      if (root->type == Node::Type::kBranch) {
         // printf("ret special case A\n");
         if (!root->value->empty()) {
           existing_key = root;
         }
         return root;
       }
-      else if (prev_root && prev_root->type == NodeType::kBranch) {
+      else if (prev_root && prev_root->type == Node::Type::kBranch) {
         // printf("ret special case B, root = %p, prev_root = %p\n", root,
         //    prev_root);
-        if (root->type == NodeType::kLeaf && root->path.size() == 0) {
+        if (root->type == Node::Type::kLeaf && root->path.size() == 0) {
           // printf("yep here!!!!!!\n");
           existing_key = root;
 
@@ -999,7 +965,7 @@ private:
         return prev_root;
       }
     }
-    else if (prev_root && prev_root->type == NodeType::kBranch) {
+    else if (prev_root && prev_root->type == Node::Type::kBranch) {
       branch_before_branch = last_branch_seen;
       last_branch_seen = prev_root;
 
@@ -1009,17 +975,16 @@ private:
 
     std::byte current_hex = path.Get(idx);
     switch (root->type) {
-    case NodeType::kBranch:
+    case Node::Type::kBranch:
     {
       Node *next = root->child[std::to_integer<size_t>(current_hex)];
       if (next) {
         idx++;
         branch_hex = current_hex;
-        return TraverseToBottomConst(next, root, last_branch_seen,
-                                     last_branch_hex_seen, path, idx,
-                                     branch_hex, existing_key,
-                                     branch_before_branch,
-                                     branch_before_branch_hex);
+        return TraverseToBottom(next, root, last_branch_seen,
+                                last_branch_hex_seen, path, idx, branch_hex,
+                                existing_key, branch_before_branch,
+                                branch_before_branch_hex);
       }
       else {
         // There is no child, so we have reached the bottom of the trie.
@@ -1027,16 +992,15 @@ private:
       }
       break;
     }
-    case NodeType::kExtension:
+    case Node::Type::kExtension:
     {
       if (path.GetSubarray(idx, idx + root->path.size()) == root->path) {
         assert(root->child[0]);
         idx += root->path.size();
-        return TraverseToBottomConst(root->child[0], root, last_branch_seen,
-                                     last_branch_hex_seen, path, idx,
-                                     branch_hex, existing_key,
-                                     branch_before_branch,
-                                     branch_before_branch_hex);
+        return TraverseToBottom(root->child[0], root, last_branch_seen,
+                                last_branch_hex_seen, path, idx, branch_hex,
+                                existing_key, branch_before_branch,
+                                branch_before_branch_hex);
       }
       else {
         // The extension node's path does not match [key], so we can stop moving
@@ -1048,7 +1012,7 @@ private:
       }
       break;
     }
-    case NodeType::kLeaf:
+    case Node::Type::kLeaf:
       if (path.GetSubarray(idx, path.size()) == root->path) {
         existing_key = root;
       }
@@ -1060,19 +1024,6 @@ private:
     }
   }
 
-  Node *TraverseToBottom(Node *root, Node *prev_root, Node *last_branch_seen,
-                         std::byte last_branch_hex_seen, const HexArray &path,
-                         size_t &idx, std::byte &branch_hex,
-                         Node *&existing_key, Node *&branch_before_branch,
-                         std::byte &branch_before_branch_hex)
-  {
-    return const_cast<Node *>(
-        TraverseToBottomConst(root, prev_root, last_branch_seen,
-                              last_branch_hex_seen, path, idx, branch_hex,
-                              existing_key, branch_before_branch,
-                              branch_before_branch_hex));
-  }
-
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.
   void GenerateHashesFrom(Node *n)
@@ -1082,7 +1033,7 @@ private:
         break;
       }
 
-      n->hash = GetNodeHash(*n);
+      n->hash = n->GetNodeHash();
       n = n->parent;
     }
   }
@@ -1095,289 +1046,18 @@ private:
     }
 
     switch (root->type) {
-    case NodeType::kBranch:
+    case Node::Type::kBranch:
       for (Node *child : root->child) {
         RegenerateAllHashes(child);
       }
       break;
-    case NodeType::kExtension:
+    case Node::Type::kExtension:
       RegenerateAllHashes(root->child[0]);
       break;
-    case NodeType::kLeaf:
+    case Node::Type::kLeaf:
       break;
     }
-    root->hash = GetNodeHash(*root);
-  }
-
-  static std::byte CastCharToByte(unsigned char ch)
-  {
-    return std::byte(static_cast<unsigned char>(ch));
-  }
-
-  static std::vector<std::byte> SizeToBytes(size_t s)
-  {
-    std::vector<std::byte> ret;
-    for (size_t i = 0; i < sizeof(size_t); i++) {
-      ret.push_back(std::byte((s >> (8 * i)) & 0xFF));
-    }
-    return ret;
-  }
-
-  static std::vector<std::byte> GetNodeEncoding(const Node &node)
-  {
-    static constexpr std::array<std::byte, 32> kNullptr = {};
-
-    // TODO: Optimize. We know the max lengths of the values we need to hash up
-    // front.
-    std::vector<std::byte> to_hash;
-    to_hash.push_back(static_cast<std::byte>(node.type));
-    switch (node.type) {
-    case NodeType::kBranch:
-    {
-      std::byte value_present_byte =
-          node.value ? std::byte{0x01} : std::byte{0x00};
-      to_hash.push_back(value_present_byte);
-
-      std::vector<std::byte> value_size_bytes =
-          SizeToBytes(node.value ? node.value->size() : 0);
-      to_hash.insert(to_hash.end(), value_size_bytes.begin(),
-                     value_size_bytes.end());
-      // printf("size A is now %zu (value size: %zu)\n", to_hash.size(),
-      //        node.value ? node.value->size() : 0);
-      if (node.value) {
-        const std::string &value = *node.value;
-        std::transform(value.begin(), value.end(), std::back_inserter(to_hash),
-                       CastCharToByte);
-      }
-      // printf("size B is now %zu (value size: %zu)\n", to_hash.size(),
-      //        node.value ? node.value->size() : 0);
-
-      for (Node *child : node.child) {
-        if (child) {
-          std::transform(child->hash.begin(), child->hash.end(),
-                         std::back_inserter(to_hash), CastCharToByte);
-        }
-        else {
-          to_hash.insert(to_hash.end(), kNullptr.begin(), kNullptr.end());
-        }
-      }
-      break;
-    }
-    case NodeType::kExtension:
-    {
-      std::vector<std::byte> path_size_bytes = SizeToBytes(node.path.size());
-      to_hash.insert(to_hash.end(), path_size_bytes.begin(),
-                     path_size_bytes.end());
-
-      const std::vector<std::byte> path_bytes = node.path.ToByteVector();
-      to_hash.insert(to_hash.end(), path_bytes.begin(), path_bytes.end());
-
-      if (node.child[0]) {
-        std::transform(node.child[0]->hash.begin(), node.child[0]->hash.end(),
-                       std::back_inserter(to_hash), CastCharToByte);
-      }
-      else {
-        to_hash.insert(to_hash.end(), kNullptr.begin(), kNullptr.end());
-      }
-      break;
-    }
-    case NodeType::kLeaf:
-    {
-      std::vector<std::byte> path_size_bytes = SizeToBytes(node.path.size());
-      to_hash.insert(to_hash.end(), path_size_bytes.begin(),
-                     path_size_bytes.end());
-
-      const std::vector<std::byte> path_bytes = node.path.ToByteVector();
-      to_hash.insert(to_hash.end(), path_bytes.begin(), path_bytes.end());
-
-      std::vector<std::byte> value_size_bytes =
-          SizeToBytes(node.value ? node.value->size() : 0);
-      to_hash.insert(to_hash.end(), value_size_bytes.begin(),
-                     value_size_bytes.end());
-
-      if (node.value) {
-        const std::string &value = *node.value;
-        std::transform(value.begin(), value.end(), std::back_inserter(to_hash),
-                       CastCharToByte);
-      }
-      break;
-    }
-    }
-    return to_hash;
-  }
-
-  static SHA256Hash GetNodeHash(const Node &node)
-  {
-    return sha256(GetNodeEncoding(node));
-  }
-
-  static bool GetNodeHashFromEncoding(const std::vector<std::byte> &encodings,
-                                      size_t &idx, SHA256Hash &hash,
-                                      NodeType &type, size_t &path_size,
-                                      std::optional<std::string> &value,
-                                      std::array<SHA256Hash, 16> &child_hashes)
-  {
-    static constexpr size_t kTypeSize = 1;
-    if (idx + kTypeSize > encodings.size()) {
-      return false;
-    }
-    type = static_cast<NodeType>(encodings[idx]);
-    size_t encoding_size = 0;
-    switch (type) {
-    case NodeType::kBranch:
-      // printf("saw branch\n");
-      encoding_size =
-          GetBranchEncodingSize(encodings, idx, child_hashes, value);
-      break;
-    case NodeType::kExtension:
-      // printf("saw extension\n");
-      encoding_size =
-          GetExtensionEncodingSize(encodings, idx, path_size, child_hashes);
-      break;
-    case NodeType::kLeaf:
-      // printf("saw leaf\n");
-      encoding_size = GetLeafEncodingSize(encodings, idx, path_size, value);
-      break;
-    default:
-      // Improper node type in the encoding.
-      return false;
-      break;
-    }
-    if (!encoding_size) {
-      return false;
-    }
-    const std::vector<std::byte> encoding(encodings.begin() + idx,
-                                          encodings.begin() + idx +
-                                              encoding_size);
-    hash = sha256(encoding);
-    idx += encoding_size;
-
-    return true;
-  }
-
-  static size_t GetBranchEncodingSize(const std::vector<std::byte> &encodings,
-                                      size_t idx,
-                                      std::array<SHA256Hash, 16> &child_hashes,
-                                      std::optional<std::string> &value)
-  {
-    const size_t orig_idx = idx;
-    static constexpr size_t kTypeSize = 1;
-    if (idx + kTypeSize > encodings.size()) {
-      return 0;
-    }
-    idx += kTypeSize;
-
-    if (idx + sizeof(size_t) > encodings.size()) {
-      return 0;
-    }
-    constexpr size_t kValuePresentSize = sizeof(bool);
-    if (idx + kValuePresentSize > encodings.size()) {
-      return 0;
-    }
-    bool value_present = static_cast<bool>(encodings[idx]);
-    idx += kValuePresentSize;
-
-    size_t value_size = static_cast<size_t>(encodings[idx]);
-    idx += sizeof(size_t);
-
-    if (idx + value_size > encodings.size()) {
-      return 0;
-    }
-    if (value_present) {
-      value = std::string(reinterpret_cast<const char *>(&encodings[idx]),
-                          value_size);
-    }
-    else {
-      value = std::nullopt;
-    }
-    // printf("value_size: %zu\n", value_size);
-    idx += value_size;
-    // printf("idx is now %zu, orig_idx %zu\n", idx, orig_idx);
-
-    static constexpr size_t kBranchEncodingSize = (16 * sizeof(SHA256Hash));
-    if (idx + kBranchEncodingSize > encodings.size()) {
-      return 0;
-    }
-    for (size_t i = 0; i < 16; i++) {
-      size_t start = idx + (i * sizeof(SHA256Hash));
-      memcpy(&child_hashes[i], &encodings[start], sizeof(SHA256Hash));
-    }
-    idx += kBranchEncodingSize;
-
-    return idx - orig_idx;
-  }
-
-  static size_t
-  GetExtensionEncodingSize(const std::vector<std::byte> &encodings, size_t idx,
-                           size_t &path_size,
-                           std::array<SHA256Hash, 16> &child_hashes)
-  {
-    const size_t orig_idx = idx;
-    static constexpr size_t kTypeSize = 1;
-    if (idx + kTypeSize > encodings.size()) {
-      return 0;
-    }
-    idx += kTypeSize;
-
-    if (idx + sizeof(size_t) > encodings.size()) {
-      return 0;
-    }
-    path_size = static_cast<size_t>(encodings[idx]);
-    idx += sizeof(size_t);
-    size_t path_size_in_bytes = (path_size + 1) / 2;
-
-    if (idx + path_size_in_bytes > encodings.size()) {
-      return 0;
-    }
-    idx += path_size_in_bytes;
-
-    static constexpr size_t kChildHashSize = sizeof(SHA256Hash);
-    if (idx + kChildHashSize > encodings.size()) {
-      return 0;
-    }
-    memcpy(&child_hashes[0], &encodings[idx], sizeof(SHA256Hash));
-    idx += kChildHashSize;
-
-    return idx - orig_idx;
-  }
-
-  static size_t GetLeafEncodingSize(const std::vector<std::byte> &encodings,
-                                    size_t idx, size_t &path_size,
-                                    std::optional<std::string> &value)
-  {
-    const size_t orig_idx = idx;
-    static constexpr size_t kTypeSize = 1;
-    if (idx + kTypeSize > encodings.size()) {
-      return 0;
-    }
-    idx += kTypeSize;
-
-    if (idx + sizeof(size_t) > encodings.size()) {
-      return 0;
-    }
-    path_size = static_cast<size_t>(encodings[idx]);
-    idx += sizeof(size_t);
-    size_t path_size_in_bytes = (path_size + 1) / 2;
-
-    if (idx + path_size_in_bytes > encodings.size()) {
-      return 0;
-    }
-    idx += path_size_in_bytes;
-
-    if (idx + sizeof(size_t) > encodings.size()) {
-      return 0;
-    }
-    size_t value_size = static_cast<size_t>(encodings[idx]);
-    idx += sizeof(size_t);
-
-    if (idx + value_size > encodings.size()) {
-      return 0;
-    }
-    value = std::string(reinterpret_cast<const char *>(&encodings[idx]),
-                        value_size);
-    idx += value_size;
-
-    return idx - orig_idx;
+    root->hash = root->GetNodeHash();
   }
 
   void InitRootNode()
@@ -1386,6 +1066,7 @@ private:
     GenerateHashesFrom(root_);
   }
 
+  // Frees all of the nodes starting at [root].
   void FreeAllNodes(Node *root)
   {
     if (!root) {
@@ -1396,15 +1077,15 @@ private:
     // up. Keys do not exceed 65 bytes in length, so the trie will never have
     // more than 65 * 2 = 130 levels.
     switch (root->type) {
-    case NodeType::kBranch:
+    case Node::Type::kBranch:
       for (Node *child : root->child) {
         FreeAllNodes(child);
       }
       break;
-    case NodeType::kExtension:
+    case Node::Type::kExtension:
       FreeAllNodes(root->child[0]);
       break;
-    case NodeType::kLeaf:
+    case Node::Type::kLeaf:
       break;
     }
     // delete root;

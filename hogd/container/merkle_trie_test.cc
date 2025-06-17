@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "hogd/container/merkle_trie.h"
+#include "hogd/container/node.h"
 
 namespace hogd {
 
@@ -416,8 +417,8 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   size_t node_idx = 0;
   bool found_extension = false;
   for (node_idx = 0; node_idx < node_encodings_by_node.size(); node_idx++) {
-    if (static_cast<MerkleTrie::NodeType>(node_encodings[idx]) ==
-        MerkleTrie::NodeType::kExtension) {
+    if (static_cast<Node::Type>(node_encodings[idx]) ==
+        Node::Type::kExtension) {
       found_extension = true;
       break;
     }
@@ -452,8 +453,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   idx = 0;
   bool found_branch = false;
   for (node_idx = 0; node_idx < node_encodings_by_node.size(); node_idx++) {
-    if (static_cast<MerkleTrie::NodeType>(node_encodings[idx]) ==
-        MerkleTrie::NodeType::kBranch) {
+    if (static_cast<Node::Type>(node_encodings[idx]) == Node::Type::kBranch) {
       found_branch = true;
       break;
     }
@@ -542,19 +542,19 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
 // Hash a branch node. All child pointers are non-NULL.
 TEST(MerkleTrie, HashBranch)
 {
-  MerkleTrie::Node branch;
-  branch.type = MerkleTrie::NodeType::kBranch;
+  Node branch;
+  branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  std::vector<MerkleTrie::Node> children(16, MerkleTrie::Node{});
+  std::vector<Node> children(16, Node{});
   for (size_t i = 0; i < children.size(); i++) {
-    MerkleTrie::Node &child = children[i];
+    Node &child = children[i];
     size_t digit = i % 10;
     child.hash = HashFromString(std::string(64, '0' + digit));
     branch.child[i] = &child;
   }
 
-  SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
+  SHA256Hash hash = branch.GetNodeHash();
   SHA256Hash expected = HashFromString(
       "20b58e07d23b8c60f45291cfb51f3b266ac2e21afe18f31a1dbc22e76446c137");
   EXPECT_EQ(hash, expected);
@@ -563,14 +563,14 @@ TEST(MerkleTrie, HashBranch)
 // Hash a branch node. Some child pointers are NULL and the rest are non-NULL.
 TEST(MerkleTrie, HashBranchSomeNullptr)
 {
-  MerkleTrie::Node branch;
-  branch.type = MerkleTrie::NodeType::kBranch;
+  Node branch;
+  branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  std::vector<MerkleTrie::Node> children(16, MerkleTrie::Node{});
+  std::vector<Node> children(16, Node{});
   for (size_t i = 0; i < children.size(); i++) {
     if (i % 2) {
-      MerkleTrie::Node &child = children[i];
+      Node &child = children[i];
       size_t digit = i % 10;
       child.hash = HashFromString(std::string(64, '0' + digit));
       branch.child[i] = &child;
@@ -580,7 +580,7 @@ TEST(MerkleTrie, HashBranchSomeNullptr)
     }
   }
 
-  SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
+  SHA256Hash hash = branch.GetNodeHash();
   SHA256Hash expected = HashFromString(
       "e237972b80de6f517ee566152092fef04a3d877adba234b7689420f80f2cdf46");
   EXPECT_EQ(hash, expected);
@@ -589,13 +589,13 @@ TEST(MerkleTrie, HashBranchSomeNullptr)
 // Hash a branch node. All child pointers are NULL.
 TEST(MerkleTrie, HashBranchAllNullptr)
 {
-  MerkleTrie::Node branch;
-  branch.type = MerkleTrie::NodeType::kBranch;
+  Node branch;
+  branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
   memset(branch.child.data(), 0, branch.child.size() * sizeof(branch.child[0]));
 
-  SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
+  SHA256Hash hash = branch.GetNodeHash();
   SHA256Hash expected = HashFromString(
       "e37f280ee5188cc892334bbfa5b456dc652c8d1c9b550a2fb8a9160095fe624e");
   EXPECT_EQ(hash, expected);
@@ -604,18 +604,18 @@ TEST(MerkleTrie, HashBranchAllNullptr)
 // Hash an extension node. Its child pointer is non-NULL.
 TEST(MerkleTrie, HashExtension)
 {
-  MerkleTrie::Node extension;
-  extension.type = MerkleTrie::NodeType::kExtension;
+  Node extension;
+  extension.type = Node::Type::kExtension;
   memset(extension.hash.data(), 0,
          extension.hash.size() * sizeof(extension.hash[0]));
   extension.path = HexArray("00010203");
 
-  static MerkleTrie::Node child{
+  static Node child{
       .hash = HashFromString(
           "1111111111111111111111111111111111111111111111111111111111111111")};
   extension.child[0] = &child;
 
-  SHA256Hash hash = MerkleTrie::GetNodeHash(extension);
+  SHA256Hash hash = extension.GetNodeHash();
   SHA256Hash expected = HashFromString(
       "d2af4c9af613a07327407c683265444011144af1e1b1658a9ff4bf14acbe930a");
   EXPECT_EQ(hash, expected);
@@ -624,13 +624,13 @@ TEST(MerkleTrie, HashExtension)
 // Hash a leaf node.
 TEST(MerkleTrie, HashLeaf)
 {
-  MerkleTrie::Node leaf;
-  leaf.type = MerkleTrie::NodeType::kLeaf;
+  Node leaf;
+  leaf.type = Node::Type::kLeaf;
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
   leaf.path = HexArray("00010203");
   leaf.value = "hello";
 
-  SHA256Hash hash = MerkleTrie::GetNodeHash(leaf);
+  SHA256Hash hash = leaf.GetNodeHash();
   SHA256Hash expected = HashFromString(
       "ed601bfeacd678e5814cb9adf207256004ce70dc2e41b8eda66ea002a5a03904");
   EXPECT_EQ(hash, expected);
