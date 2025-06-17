@@ -531,7 +531,7 @@ TEST(MerkleTrie, HashBranch)
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
   SHA256Hash expected = HashFromString(
-      "c396154ee62afd8f49537a36005f8e97d0fe82d9aadc78d7a6874e1cf762e705");
+      "20b58e07d23b8c60f45291cfb51f3b266ac2e21afe18f31a1dbc22e76446c137");
   EXPECT_EQ(hash, expected);
 }
 
@@ -557,7 +557,7 @@ TEST(MerkleTrie, HashBranchSomeNullptr)
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
   SHA256Hash expected = HashFromString(
-      "8b50bf2634e8ea11cefb85508e68626687801649d60a33e607ecd504cfa92f1c");
+      "e237972b80de6f517ee566152092fef04a3d877adba234b7689420f80f2cdf46");
   EXPECT_EQ(hash, expected);
 }
 
@@ -572,7 +572,7 @@ TEST(MerkleTrie, HashBranchAllNullptr)
 
   SHA256Hash hash = MerkleTrie::GetNodeHash(branch);
   SHA256Hash expected = HashFromString(
-      "3fdeffbb6a2bc7f94a7f852f802fcc3d93635a0b39ed4a830dbef6598cf48787");
+      "e37f280ee5188cc892334bbfa5b456dc652c8d1c9b550a2fb8a9160095fe624e");
   EXPECT_EQ(hash, expected);
 }
 
@@ -724,6 +724,9 @@ TEST(MerkleTrie, Stress)
   for (size_t i = 0; i < kNumIterations; i++) {
     const auto &[path, value] = *total.begin();
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
+    if (!MerkleTrie::Prove(node_encodings, root_hash, path, value)) {
+      trie.Print();
+    }
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
 
     // printf("remove %s\n", path.str().c_str());

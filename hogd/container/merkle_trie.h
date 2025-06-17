@@ -76,7 +76,7 @@ public:
   std::pair<SHA256Hash, std::vector<std::byte>> GetProof(const Key &k)
   {
     Node *node = FindNode(k);
-    // printf("FIND NODE ok: %p\n", node);
+    printf("FIND NODE ok: %p\n", node);
     if (!node) {
       return {SHA256Hash(), {}};
     }
@@ -130,9 +130,10 @@ public:
     // up, and we examined a path equal in length to [key], then we verified
     // that the KV pair is in the Merkle Patrica trie.
     size_t verified_key_size = 0;
-    std::string observed_value;
+    std::optional<std::string> observed_value;
     std::array<SHA256Hash, 16> child_hashes;
     while (idx < encodings.size()) {
+      size_t orig_idx = idx;
       NodeType type;
       size_t path_size;
       SHA256Hash prev_hash = hash;
@@ -150,21 +151,44 @@ public:
           verified_key_size++;
           size_t num_matches = 0;
           for (SHA256Hash child_hash : child_hashes) {
+            printf("child_hash: ");
+            for (size_t i = 0; i < 32; i++) {
+              printf("%02x", child_hash[i]);
+            }
+            printf("\n");
             if (child_hash == prev_hash) {
               num_matches++;
             }
           }
+          printf("check OK a, num_matches = %zu\n", num_matches);
+          for (size_t i = orig_idx; i < idx; i++) {
+            printf("%02x", encodings[i]);
+          }
+          printf("\n");
+          printf("prev_hash: ");
+          for (size_t i = 0; i < 32; i++) {
+            printf("%02x", prev_hash[i]);
+          }
+          printf("\n");
           ok = ok && (num_matches == 1);
         }
         else {
           // We could start on a branch if the value is directly inside the
           // branch.
+          printf("check OK b\n");
           ok = (observed_value == value);
         }
         if (!ok) {
           // TODO: Need to check whether branch has a value. An empty value is
           // not the same as no value!
           printf("yikes branch not ok\n");
+          if (observed_value) {
+            printf("saw observed value %s\n", observed_value->c_str());
+          }
+          else {
+            printf("no observed value\n");
+          }
+          printf("checking for value: %s\n", value.c_str());
         }
         break;
       }
@@ -1061,13 +1085,23 @@ private:
     switch (node.type) {
     case NodeType::kBranch:
     {
+      std::byte value_present_byte =
+          node.value ? std::byte{0x01} : std::byte{0x00};
+      to_hash.push_back(value_present_byte);
+
       std::vector<std::byte> value_size_bytes =
           SizeToBytes(node.value ? node.value->size() : 0);
       to_hash.insert(to_hash.end(), value_size_bytes.begin(),
                      value_size_bytes.end());
-
-      std::transform(node.value->begin(), node.value->end(),
-                     std::back_inserter(to_hash), CastCharToByte);
+      printf("size A is now %zu (value size: %zu)\n", to_hash.size(),
+             node.value ? node.value->size() : 0);
+      if (node.value) {
+        const std::string &value = *node.value;
+        std::transform(value.begin(), value.end(), std::back_inserter(to_hash),
+                       CastCharToByte);
+      }
+      printf("size B is now %zu (value size: %zu)\n", to_hash.size(),
+             node.value ? node.value->size() : 0);
 
       for (Node *child : node.child) {
         if (child) {
@@ -1112,8 +1146,11 @@ private:
       to_hash.insert(to_hash.end(), value_size_bytes.begin(),
                      value_size_bytes.end());
 
-      std::transform(node.value->begin(), node.value->end(),
-                     std::back_inserter(to_hash), CastCharToByte);
+      if (node.value) {
+        const std::string &value = *node.value;
+        std::transform(value.begin(), value.end(), std::back_inserter(to_hash),
+                       CastCharToByte);
+      }
       break;
     }
     }
@@ -1128,7 +1165,7 @@ private:
   static bool GetNodeHashFromEncoding(const std::vector<std::byte> &encodings,
                                       size_t &idx, SHA256Hash &hash,
                                       NodeType &type, size_t &path_size,
-                                      std::string &value,
+                                      std::optional<std::string> &value,
                                       std::array<SHA256Hash, 16> &child_hashes)
   {
     static constexpr size_t kTypeSize = 1;
@@ -1139,14 +1176,17 @@ private:
     size_t encoding_size = 0;
     switch (type) {
     case NodeType::kBranch:
+      printf("saw branch\n");
       encoding_size =
           GetBranchEncodingSize(encodings, idx, child_hashes, value);
       break;
     case NodeType::kExtension:
+      printf("saw extension\n");
       encoding_size =
           GetExtensionEncodingSize(encodings, idx, path_size, child_hashes);
       break;
     case NodeType::kLeaf:
+      printf("saw leaf\n");
       encoding_size = GetLeafEncodingSize(encodings, idx, path_size, value);
       break;
     default:
@@ -1169,7 +1209,7 @@ private:
   static size_t GetBranchEncodingSize(const std::vector<std::byte> &encodings,
                                       size_t idx,
                                       std::array<SHA256Hash, 16> &child_hashes,
-                                      std::string &value)
+                                      std::optional<std::string> &value)
   {
     const size_t orig_idx = idx;
     static constexpr size_t kTypeSize = 1;
@@ -1181,15 +1221,30 @@ private:
     if (idx + sizeof(size_t) > encodings.size()) {
       return 0;
     }
+    constexpr size_t kValuePresentSize = sizeof(bool);
+    if (idx + kValuePresentSize > encodings.size()) {
+      return 0;
+    }
+    bool value_present = static_cast<bool>(encodings[idx]);
+    printf("value_present: %d\n", value_present);
+    idx += kValuePresentSize;
+
     size_t value_size = static_cast<size_t>(encodings[idx]);
     idx += sizeof(size_t);
 
     if (idx + value_size > encodings.size()) {
       return 0;
     }
-    value = std::string(reinterpret_cast<const char *>(&encodings[idx]),
-                        value_size);
+    if (value_present) {
+      value = std::string(reinterpret_cast<const char *>(&encodings[idx]),
+                          value_size);
+    }
+    else {
+      value = std::nullopt;
+    }
+    printf("value_size: %zu\n", value_size);
     idx += value_size;
+    printf("idx is now %zu, orig_idx %zu\n", idx, orig_idx);
 
     static constexpr size_t kBranchEncodingSize = (16 * sizeof(SHA256Hash));
     if (idx + kBranchEncodingSize > encodings.size()) {
@@ -1240,7 +1295,7 @@ private:
 
   static size_t GetLeafEncodingSize(const std::vector<std::byte> &encodings,
                                     size_t idx, size_t &path_size,
-                                    std::string &value)
+                                    std::optional<std::string> &value)
   {
     const size_t orig_idx = idx;
     static constexpr size_t kTypeSize = 1;
