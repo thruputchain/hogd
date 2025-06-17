@@ -378,7 +378,8 @@ public:
       to_hash = branch;
 
       // TODO: Handle the case where the branch only has one child, and so now
-      // the branch is no longer needed.
+      // the branch is no longer needed. I should probably do this when I clean
+      // the rest of the code up.
     }
     else {
       size_t num_branches = 0;
