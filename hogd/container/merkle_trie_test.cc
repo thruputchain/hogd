@@ -649,16 +649,18 @@ TEST(MerkleTrie, Stress)
     printf("i = %zu\n", i);
     HexArray path = GenerateRandomPath();
     const std::string value = std::to_string(i);
-    //printf("Insert...\n");
+    // printf("Insert...\n");
     trie.insert(path, value);
-    //printf("Done inserting.\n");
+    // printf("Done inserting.\n");
     total.insert({path, value});
-    //trie.Print();
+    trie.Print();
+
+    // TODO: Should fail on duplicates!!!
 
     seen.clear();
-    //printf("For each...\n");
+    // printf("For each...\n");
     trie.for_each(f);
-    //printf("Done with for each.\n");
+    // printf("Done with for each.\n");
     EXPECT_EQ(seen, total);
     printf("seen (size %zu):\n", seen.size());
     for (const auto &[k, v] : seen) {
@@ -671,20 +673,21 @@ TEST(MerkleTrie, Stress)
     }
     printf("\n");
 
-    //printf("Get encoding A.\n");
+    // printf("Get encoding A.\n");
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
-    //printf("Now get encoding B.\n");
+    // printf("Now get encoding B.\n");
     const auto &[_, node_by_node] = trie.GetProofByNode(path);
-    //printf("last node encoding: ");
+    printf("to repeat, we are inserting %s with value %s\n", path.str().c_str(), value.c_str());
+    printf("last node encoding: ");
     for (std::byte b : node_by_node.back()) {
-      //printf("%02x", b);
+      printf("%02x", b);
     }
-    //printf("\n");
-    //printf("Prove...\n");
+    // printf("\n");
+    // printf("Prove...\n");
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
-    //printf("Proved. Now find...\n");
+    // printf("Proved. Now find...\n");
     EXPECT_EQ(*trie.find(path), value);
-    //printf("Found.\n");
+    // printf("Found.\n");
   }
 
   for (const auto &[path, value] : total) {

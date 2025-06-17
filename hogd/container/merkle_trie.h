@@ -145,15 +145,25 @@ public:
       switch (type) {
       case NodeType::kBranch:
       {
-        ok = num_nodes;
-        verified_key_size++;
-        size_t num_matches = 0;
-        for (SHA256Hash child_hash : child_hashes) {
-          if (child_hash == prev_hash) {
-            num_matches++;
+        if (num_nodes) {
+          ok = true;
+          verified_key_size++;
+          size_t num_matches = 0;
+          for (SHA256Hash child_hash : child_hashes) {
+            if (child_hash == prev_hash) {
+              num_matches++;
+            }
           }
+          ok = ok && (num_matches == 1);
         }
-        ok = ok && (num_matches == 1);
+        else {
+          // We could start on a branch if the value is directly inside the
+          // branch.
+          ok = (observed_value == value);
+        }
+        if (!ok) {
+          printf("yikes branch not ok\n");
+        }
         break;
       }
       case NodeType::kExtension:
@@ -847,7 +857,7 @@ private:
         }
         return root;
       }
-      else if (prev_root && prev_root->type == NodeType::kBranch){
+      else if (prev_root && prev_root->type == NodeType::kBranch) {
         if (root->type == NodeType::kLeaf && root->path.size() == 0) {
           printf("yep here!!!!!!\n");
           existing_key = root;
@@ -1069,7 +1079,8 @@ private:
     size_t encoding_size = 0;
     switch (type) {
     case NodeType::kBranch:
-      encoding_size = GetBranchEncodingSize(encodings, idx, child_hashes);
+      encoding_size =
+          GetBranchEncodingSize(encodings, idx, child_hashes, value);
       break;
     case NodeType::kExtension:
       encoding_size =
@@ -1097,7 +1108,8 @@ private:
 
   static size_t GetBranchEncodingSize(const std::vector<std::byte> &encodings,
                                       size_t idx,
-                                      std::array<SHA256Hash, 16> &child_hashes)
+                                      std::array<SHA256Hash, 16> &child_hashes,
+                                      std::string &value)
   {
     const size_t orig_idx = idx;
     static constexpr size_t kTypeSize = 1;
@@ -1115,6 +1127,8 @@ private:
     if (idx + value_size > encodings.size()) {
       return 0;
     }
+    value = std::string(reinterpret_cast<const char *>(&encodings[idx]),
+                        value_size);
     idx += value_size;
 
     static constexpr size_t kBranchEncodingSize = (16 * sizeof(SHA256Hash));
