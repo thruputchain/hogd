@@ -765,8 +765,7 @@ private:
     // We add 1 since one of the digits will be included in the [parent_branch]
     // node.
     Key key_a = k.GetSubarray(idx + 1, k.size());
-
-    // TODO: What if [key_a] has length 0?
+    assert(key_a.size());
 
     size_t common_range_length =
         GetLongestCommonRangeLength(key_a, 0, current_extension->path, 0);
@@ -779,10 +778,6 @@ private:
     if (diverge_idx) {
       Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
       new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
-      if (new_extension_node->path.size() == 0) {
-        printf("YIKES HERE B, current extension = %s (%p), idx = %zu\n",
-               current_extension->path.str().c_str(), current_extension, idx);
-      }
 
       parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
           new_extension_node;
@@ -791,7 +786,6 @@ private:
       new_extension_node->child[0] = new_branch_node;
     }
     else {
-      // printf("alternative 1\n");
       new_branch_node = CreateBranch(/*parent=*/parent_branch);
       parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
           new_branch_node;
@@ -815,23 +809,19 @@ private:
       current_extension->path =
           current_extension->path.GetSubarray(diverge_idx + 1,
                                               current_extension->path.size());
-      if (current_extension->path.size() == 0) {
-        printf("YIKES HERE D\n");
-      }
       // We hash this extension node here, and then in the parent function, we
       // hash all nodes on the path from the leaf below to the root. Note that
       // this extension node and the leaf below share the same parent.
       current_extension->hash = GetNodeHash(*current_extension);
     }
     else {
-      // printf("alternative 2\n");
       new_branch_node
           ->child[std::to_integer<size_t>(current_extension_node_branch)] =
           current_extension->child[0];
       current_extension->child[0]->parent = new_branch_node;
     }
     Node *new_node;
-    if (key_a.size() == 0) {
+    if (diverge_idx >= key_a.size()) {
       // Place directly into the branch.
       new_branch_node->value = std::move(obj);
       new_node = new_branch_node;

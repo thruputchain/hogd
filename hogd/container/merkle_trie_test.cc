@@ -509,6 +509,36 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   EXPECT_FALSE(MerkleTrie::Prove(copy, root_hash, key_b, value_b));
 }
 
+TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
+{
+  MerkleTrie trie;
+
+  HexArray key_a("2671291b5a3887d332b73ec01345d7");
+  std::string value_a = "hello";
+  trie.insert(key_a, value_a);
+
+  HexArray key_b("267124564f6835");
+  std::string value_b = "hello again";
+  trie.insert(key_b, value_b);
+  trie.Print();
+
+  // This needs to be placed directly into the branch under the extension node.
+  HexArray key_c("2671");
+  std::string value_c = "hello three";
+  trie.insert(key_c, value_c);
+  trie.Print();
+
+  std::map<HexArray, std::string> seen;
+  auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
+    ForEachFunc(seen, pair);
+  };
+  trie.for_each(f);
+  std::map<HexArray, std::string> expected = {{key_a, value_a},
+                                              {key_b, value_b},
+                                              {key_c, value_c}};
+  EXPECT_EQ(seen, expected);
+}
+
 // Hash a branch node. All child pointers are non-NULL.
 TEST(MerkleTrie, HashBranch)
 {
