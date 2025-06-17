@@ -634,6 +634,41 @@ GenerateRandomPath()
 
 } // namespace
 
+void
+GetDiff(std::map<HexArray, std::string> total,
+        std::map<HexArray, std::string> seen)
+{
+  HexArray diff;
+  std::string value;
+  for (const auto &[k, _] : total) {
+    if (seen.count(k) == 0 || total[k] != seen[k]) {
+      diff = k;
+      value = total[k];
+      break;
+    }
+  }
+  for (const auto &[k, _] : seen) {
+    if (total.count(k) == 0 || total[k] != seen[k]) {
+      diff = k;
+      value = seen[k];
+      break;
+    }
+  }
+  printf("Difference: %s (%s)\n", diff.str().c_str(), value.c_str());
+  if (total.count(diff) == 0) {
+    printf("not in total\n");
+  }
+  else {
+    printf("in total: %s\n", total[diff].c_str());
+  }
+  if (seen.count(diff) == 0) {
+    printf("not in seen\n");
+  }
+  else {
+    printf("in seen: %s\n", seen[diff].c_str());
+  }
+}
+
 TEST(MerkleTrie, Stress)
 {
   static constexpr size_t kNumIterations = 10000;
@@ -744,6 +779,10 @@ TEST(MerkleTrie, Stress)
 
     seen.clear();
     trie.for_each(f);
+    if (seen != total) {
+      GetDiff(total, seen);
+      trie.Print();
+    }
     EXPECT_EQ(seen, total);
   }
 
