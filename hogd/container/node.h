@@ -62,6 +62,28 @@ public:
   // unused.
   std::array<Node *, 16> child;
 
+  static Node *CreateBranch(Node *parent)
+  {
+    Node *node = Create(Type::kBranch, parent);
+    node->value = std::nullopt;
+    memset(node->child.data(), 0, node->child.size() * sizeof(node->child[0]));
+    return node;
+  }
+
+  static Node *CreateExtension(Node *parent)
+  {
+    Node *node = Create(Type::kExtension, parent);
+    memset(node->child.data(), 0, node->child.size() * sizeof(node->child[0]));
+    return node;
+  }
+
+  static Node *CreateLeaf(Node *parent)
+  {
+    Node *node = Create(Type::kLeaf, parent);
+    node->value = std::nullopt;
+    return node;
+  }
+
   std::vector<std::byte> GetNodeEncoding();
 
   SHA256Hash GetNodeHash() { return sha256(GetNodeEncoding()); }
@@ -72,7 +94,22 @@ public:
                                       std::optional<std::string> &v,
                                       std::array<SHA256Hash, 16> &child_hashes);
 
+  std::string str() const;
+
 private:
+  static Node *Create(Type type, Node *parent)
+  {
+    Node *node = new Node;
+    node->type = type;
+    node->parent = parent;
+
+    return node;
+  }
+
+  void GetBranchString(std::ostringstream &oss) const;
+  void GetExtensionString(std::ostringstream &oss) const;
+  void GetLeafString(std::ostringstream &oss) const;
+
   static size_t GetBranchEncodingSize(const std::vector<std::byte> &encodings,
                                       size_t idx,
                                       std::array<SHA256Hash, 16> &child_hashes,

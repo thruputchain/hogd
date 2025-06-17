@@ -65,6 +65,16 @@ public:
     size_ = bytes.size() * 2;
   }
 
+  HexArray(const SHA256Hash &hash)
+  {
+    assert(hash.size() <= kArrayLength);
+
+    Init();
+
+    memcpy(backing_store_.data(), &hash, hash.size() * sizeof(hash[0]));
+    size_ = hash.size() * 2;
+  }
+
   bool operator==(const HexArray &a) const
   {
     if (size_ != a.size()) {

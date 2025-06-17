@@ -47,7 +47,97 @@ SizeToBytes(size_t s)
   return ret;
 }
 
+std::string
+GetTypeString(Node::Type type)
+{
+  switch (type) {
+  case Node::Type::kBranch:
+    return "Branch";
+  case Node::Type::kExtension:
+    return "Extension";
+  case Node::Type::kLeaf:
+    return "Leaf";
+  default:
+    return "Unknown-Node-Type";
+  }
+}
+
+void
+GetValueString(std::ostringstream &oss, const std::optional<std::string> &value)
+{
+  oss << std::format("Value: [{}]\n", value ? *value : "<empty>");
+}
+
+void
+GetPathString(std::ostringstream &oss, const HexArray &path)
+{
+  oss << std::format("Path: 0x{}\n", path.str());
+  oss << std::format("Path Size: {}\n", path.size());
+}
+
+void
+GetChildString(std::ostringstream &oss, size_t child_idx,
+               const std::array<Node *, 16> children)
+{
+  oss << std::format("Child {}: ", static_cast<uint8_t>(child_idx));
+  if (children[child_idx]) {
+    oss << std::format("{} ({})\n", HexArray(children[child_idx]->hash).str(),
+                       reinterpret_cast<const void *>(children[child_idx]));
+  }
+  else {
+    oss << "null\n";
+  }
+}
+
 } // namespace
+
+void
+Node::GetBranchString(std::ostringstream &oss) const
+{
+  GetValueString(oss, value);
+  for (size_t i = 0; i < child.size(); i++) {
+    GetChildString(oss, i, child);
+  }
+}
+
+void
+Node::GetExtensionString(std::ostringstream &oss) const
+{
+  GetPathString(oss, path);
+  GetChildString(oss, /*child_idx=*/0, child);
+}
+
+void
+Node::GetLeafString(std::ostringstream &oss) const
+{
+  GetPathString(oss, path);
+  GetValueString(oss, value);
+}
+
+std::string
+Node::str() const
+{
+  std::ostringstream oss;
+
+  oss << std::format("{} ({}, {})\n", GetTypeString(type), HexArray(hash).str(),
+                     reinterpret_cast<const void *>(this));
+  oss << std::format("Parent: {}\n", reinterpret_cast<const void *>(parent));
+
+  switch (type) {
+  case Node::Type::kBranch:
+  {
+    GetBranchString(oss);
+    break;
+  }
+  case Node::Type::kExtension:
+    GetExtensionString(oss);
+    break;
+  case Node::Type::kLeaf:
+    GetLeafString(oss);
+    break;
+  }
+  return oss.str();
+}
 
 std::vector<std::byte>
 Node::GetNodeEncoding()
@@ -142,16 +232,13 @@ Node::GetNodeHashFromEncoding(const std::vector<std::byte> &encodings,
   size_t encoding_size = 0;
   switch (type) {
   case Node::Type::kBranch:
-    // printf("saw branch\n");
     encoding_size = GetBranchEncodingSize(encodings, idx, child_hashes, v);
     break;
   case Node::Type::kExtension:
-    // printf("saw extension\n");
     encoding_size =
         GetExtensionEncodingSize(encodings, idx, path_size, child_hashes);
     break;
   case Node::Type::kLeaf:
-    // printf("saw leaf\n");
     encoding_size = GetLeafEncodingSize(encodings, idx, path_size, v);
     break;
   default:
@@ -207,7 +294,6 @@ Node::GetBranchEncodingSize(const std::vector<std::byte> &encodings, size_t idx,
     v = std::nullopt;
   }
   idx += value_size;
-  // printf("idx is now %zu, orig_idx %zu\n", idx, orig_idx);
 
   static constexpr size_t kBranchEncodingSize = (16 * sizeof(SHA256Hash));
   if (idx + kBranchEncodingSize > encodings.size()) {

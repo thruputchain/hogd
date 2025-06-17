@@ -299,7 +299,7 @@ public:
         }
       }
       else {
-        Node *leaf = CreateLeaf(/*parent=*/next);
+        Node *leaf = Node::CreateLeaf(/*parent=*/next);
         // We are going to use the hex character at [idx] in the key to map to
         // the leaf node from the branch node. Thus, we add 1 below as we do not
         // want to include this character in the path that is stored in the leaf
@@ -448,14 +448,14 @@ public:
             if (branch->value.has_value()) {
               // The branch has a value, so the place the value in a leaf with
               // path size 0.
-              new_child = CreateLeaf(/*parent=*/branch_before_branch);
+              new_child = Node::CreateLeaf(/*parent=*/branch_before_branch);
               new_child->path = cur_path;
               new_child->value = std::move(branch->value);
             }
           }
           else {
             cur_path.Append(other_child_hex);
-            new_child = CreateLeaf(/*parent=*/branch_before_branch);
+            new_child = Node::CreateLeaf(/*parent=*/branch_before_branch);
             new_child->path = cur_path;
             new_child->value = std::move(branch->value);
           }
@@ -465,7 +465,7 @@ public:
           assert(num_branches == 2);
 
           if (other_child->type == Node::Type::kBranch) {
-            new_child = CreateExtension(/*parent=*/branch_before_branch);
+            new_child = Node::CreateExtension(/*parent=*/branch_before_branch);
             cur_path.Append(other_child_hex);
             new_child->path = cur_path;
             if (new_child->path.size() == 0) {
@@ -603,33 +603,6 @@ private:
     }
   }
 
-  Node *CreateBranch(Node *parent)
-  {
-    Node *node = new Node;
-    node->type = Node::Type::kBranch;
-    node->parent = parent;
-    node->value = std::nullopt;
-    memset(node->child.data(), 0, node->child.size() * sizeof(node->child[0]));
-    return node;
-  }
-
-  Node *CreateExtension(Node *parent)
-  {
-    Node *node = new Node;
-    node->type = Node::Type::kExtension;
-    node->parent = parent;
-    return node;
-  }
-
-  Node *CreateLeaf(Node *parent)
-  {
-    Node *node = new Node;
-    node->type = Node::Type::kLeaf;
-    node->parent = parent;
-    node->value = std::nullopt;
-    return node;
-  }
-
   // TODO: Move to HexArray class?
   size_t GetLongestCommonRangeLength(const HexArray &a, size_t a_start,
                                      const HexArray &b, size_t b_start)
@@ -666,47 +639,20 @@ private:
     if (!root) {
       return;
     }
+
+    std::cout << root->str() << std::endl;
+
+    // Now recursively print the children.
     switch (root->type) {
     case Node::Type::kBranch:
-      printf("Branch (%s, %p)\n", GetHashString(*root).c_str(), root);
-      printf("Parent: %p\n", root->parent);
-      printf("Value: [%s]\n", root->value ? root->value->c_str() : "<empty>");
-      for (size_t i = 0; i < root->child.size(); i++) {
-        if (root->child[i]) {
-          printf("%x: %s (%p)\n", static_cast<uint8_t>(i),
-                 GetHashString(*root->child[i]).c_str(), root->child[i]);
-        }
-        else {
-          printf("%x: null\n", static_cast<uint8_t>(i));
-        }
-      }
-      printf("\n");
       for (size_t i = 0; i < root->child.size(); i++) {
         PrintHelper(root->child[i]);
       }
       break;
     case Node::Type::kExtension:
-      printf("Extension (%s, %p)\n", GetHashString(*root).c_str(), root);
-      printf("Parent: %p\n", root->parent);
-      printf("Path: %s\n", root->path.str().c_str());
-      printf("Path Size: %zu\n", root->path.size());
-      if (root->child[0]) {
-        printf("Child: %s (%p)\n", GetHashString(*root->child[0]).c_str(),
-               root->child[0]);
-      }
-      else {
-        printf("Child: null\n");
-      }
-      printf("\n");
       PrintHelper(root->child[0]);
       break;
     case Node::Type::kLeaf:
-      printf("Leaf (%s, %p)\n", GetHashString(*root).c_str(), root);
-      printf("Parent: %p\n", root->parent);
-      printf("Path: %s\n", root->path.str().c_str());
-      printf("Path Size: %zu\n", root->path.size());
-      printf("Value: [%s]\n", root->value ? root->value->c_str() : "<empty>");
-      printf("\n");
       break;
     }
   }
@@ -744,17 +690,18 @@ private:
     // the extension node in that case.
     Node *new_branch_node;
     if (diverge_idx) {
-      Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
+      Node *new_extension_node =
+          Node::CreateExtension(/*parent=*/parent_branch);
       new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
 
       parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
           new_extension_node;
 
-      new_branch_node = CreateBranch(/*parent=*/new_extension_node);
+      new_branch_node = Node::CreateBranch(/*parent=*/new_extension_node);
       new_extension_node->child[0] = new_branch_node;
     }
     else {
-      new_branch_node = CreateBranch(/*parent=*/parent_branch);
+      new_branch_node = Node::CreateBranch(/*parent=*/parent_branch);
       parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
           new_branch_node;
     }
@@ -796,7 +743,7 @@ private:
     }
     else {
       // Create new leaf node.
-      Node *new_leaf_node = CreateLeaf(/*parent=*/new_branch_node);
+      Node *new_leaf_node = Node::CreateLeaf(/*parent=*/new_branch_node);
       new_leaf_node->path = key_a.GetSubarray(diverge_idx + 1, key_a.size());
       new_leaf_node->value = std::move(obj);
 
@@ -818,7 +765,7 @@ private:
     Key key_a = k.GetSubarray(idx + 1, k.size());
     Key key_b = current_leaf->path;
 
-    Node *new_branch_node = CreateBranch(/*parent=*/parent_branch);
+    Node *new_branch_node = Node::CreateBranch(/*parent=*/parent_branch);
     parent_branch->child[std::to_integer<size_t>(parent_branch_digit)] =
         new_branch_node;
 
@@ -828,7 +775,8 @@ private:
     // common_range_length, parent_branch);
     if (common_range_length) {
       size_t diverge_idx = common_range_length;
-      Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
+      Node *new_extension_node =
+          Node::CreateExtension(/*parent=*/parent_branch);
       new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
       if (new_extension_node->path.size() == 0) {
         printf("YIKES HERE C\n");
@@ -861,7 +809,7 @@ private:
       new_branch_node->value = std::move(shorter_value);
 
       // Longer key's leaf node.
-      Node *leaf = CreateLeaf(/*parent=*/new_branch_node);
+      Node *leaf = Node::CreateLeaf(/*parent=*/new_branch_node);
       leaf->path = longer.GetSubarray(1, longer.size());
       leaf->value = std::move(longer_value);
       new_branch_node->child[std::to_integer<size_t>(longer.Get(0))] = leaf;
@@ -873,7 +821,7 @@ private:
       // The digits do not match, so create two leaf nodes.
 
       // Shorter key's leaf node.
-      Node *leaf = CreateLeaf(/*parent=*/new_branch_node);
+      Node *leaf = Node::CreateLeaf(/*parent=*/new_branch_node);
       leaf->path = shorter.GetSubarray(1, shorter.size());
       leaf->value = std::move(shorter_value);
       new_branch_node->child[std::to_integer<size_t>(shorter.Get(0))] = leaf;
@@ -883,7 +831,7 @@ private:
       leaf->hash = leaf->GetNodeHash();
 
       // Longer key's leaf node.
-      leaf = CreateLeaf(/*parent=*/new_branch_node);
+      leaf = Node::CreateLeaf(/*parent=*/new_branch_node);
       leaf->path = longer.GetSubarray(1, longer.size());
       leaf->value = std::move(longer_value);
       new_branch_node->child[std::to_integer<size_t>(longer.Get(0))] = leaf;
@@ -1062,7 +1010,7 @@ private:
 
   void InitRootNode()
   {
-    root_ = CreateBranch(/*parent=*/nullptr);
+    root_ = Node::CreateBranch(/*parent=*/nullptr);
     GenerateHashesFrom(root_);
   }
 
