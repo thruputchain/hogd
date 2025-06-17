@@ -76,7 +76,7 @@ public:
   std::pair<SHA256Hash, std::vector<std::byte>> GetProof(const Key &k)
   {
     Node *node = FindNode(k);
-    printf("FIND NODE ok: %p\n", node);
+    // printf("FIND NODE ok: %p\n", node);
     if (!node) {
       return {SHA256Hash(), {}};
     }
@@ -98,7 +98,7 @@ public:
   GetProofByNode(const Key &k)
   {
     Node *node = FindNode(k);
-    printf("FIND NODE: %p\n", node);
+    // printf("FIND NODE: %p\n", node);
     if (!node) {
       printf("wow ret\n");
       return {SHA256Hash(), {}};
@@ -162,6 +162,8 @@ public:
           ok = (observed_value == value);
         }
         if (!ok) {
+          // TODO: Need to check whether branch has a value. An empty value is
+          // not the same as no value!
           printf("yikes branch not ok\n");
         }
         break;
@@ -203,9 +205,19 @@ public:
   std::string *find(const Key &k)
   {
     Node *node = FindNode(k);
+    printf("found node %p\n", node);
     if (node) {
       switch (node->type) {
       case NodeType::kBranch:
+        // Check if the branch has a value.
+        if (node->value) {
+          // Get the [std::string] out of the [std::optional<std::string>] with
+          // the dereference operator.
+          std::string &value = *node->value;
+          return &value;
+        }
+        return nullptr;
+
       case NodeType::kLeaf:
       {
         // Get the [std::string] out of the [std::optional<std::string>] with
@@ -244,9 +256,9 @@ public:
     assert(idx <= k.size());
 
     Node *to_hash = nullptr;
-    printf("ok next = %p\n", next);
+    // printf("ok next = %p\n", next);
     if (idx == k.size()) {
-      printf("C\n");
+      // printf("C\n");
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
       assert(next->value->empty());
@@ -284,19 +296,19 @@ public:
         //   its own leaf node under the branch (so there will be two leaf
         //   nodes).
         if (next->child[branch_idx]->type == NodeType::kExtension) {
-          printf("A\n");
+          // printf("A\n");
           to_hash = InsertHandleExtensionChild(next->child[branch_idx], next, k,
                                                idx, std::move(obj));
         }
         else {
-          printf("B\n");
+          // printf("B\n");
           assert(next->child[branch_idx]->type == NodeType::kLeaf);
           to_hash = InsertHandleLeafChild(next->child[branch_idx], next, k, idx,
                                           std::move(obj));
         }
       }
       else {
-        printf("D\n");
+        // printf("D\n");
         Node *leaf = CreateLeaf(/*parent=*/next);
         // We are going to use the hex character at [idx] in the key to map to
         // the leaf node from the branch node. Thus, we add 1 below as we do not
@@ -316,7 +328,7 @@ public:
     return true;
   }
 
-  void insert(const Key &k, const T &obj) { insert(k, T(obj)); }
+  bool insert(const Key &k, const T &obj) { return insert(k, T(obj)); }
 
   std::string &insert_or_assign(const Key &k, T &&obj)
   {
@@ -442,6 +454,9 @@ public:
             cur_path.Append(other_child_hex);
 
             new_child->path = cur_path;
+            if (new_child->path.size() == 0) {
+              printf("YIKES HERE A\n");
+            }
             new_child->child[0] = other_child;
             other_child->parent = new_child;
           }
@@ -671,49 +686,88 @@ private:
     // node.
     Key key_a = k.GetSubarray(idx + 1, k.size());
 
+    // TODO: What if [key_a] has length 0?
+
     size_t common_range_length =
         GetLongestCommonRangeLength(key_a, 0, current_extension->path, 0);
     assert(common_range_length);
     size_t diverge_idx = common_range_length;
 
-    Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
-    new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
+    // TODO: This extension node could have a path length of 0. We should omit
+    // the extension node in that case.
+    Node *new_branch_node;
+    if (diverge_idx) {
+      Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
+      new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
+      if (new_extension_node->path.size() == 0) {
+        printf("YIKES HERE B, current extension = %s (%p), idx = %zu\n",
+               current_extension->path.str().c_str(), current_extension, idx);
+      }
 
-    parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
-        new_extension_node;
+      parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
+          new_extension_node;
 
-    Node *new_branch_node = CreateBranch(/*parent=*/new_extension_node);
-    new_extension_node->child[0] = new_branch_node;
+      new_branch_node = CreateBranch(/*parent=*/new_extension_node);
+      new_extension_node->child[0] = new_branch_node;
+    }
+    else {
+      // printf("alternative 1\n");
+      new_branch_node = CreateBranch(/*parent=*/parent_branch);
+      parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
+          new_branch_node;
+    }
 
     // Move the already-existing extension node underneath the branch node.
+    // TODO: Similarly, this extension node could have a path length of 0. We
+    // should place the extension node's child directly into the branch node in
+    // this case.
     std::byte current_extension_node_branch =
         current_extension->path.Get(diverge_idx);
-    new_branch_node
-        ->child[std::to_integer<size_t>(current_extension_node_branch)] =
-        current_extension;
-    current_extension->parent = new_branch_node;
+    if (diverge_idx + 1 < current_extension->path.size()) {
+      new_branch_node
+          ->child[std::to_integer<size_t>(current_extension_node_branch)] =
+          current_extension;
+      current_extension->parent = new_branch_node;
 
-    // Include 1 to account for the branch node, too. [common_range_length] is
-    // the size of the path in the extension node, and then we have 1 for the
-    // branch node.
-    current_extension->path =
-        current_extension->path.GetSubarray(diverge_idx + 1,
-                                            current_extension->path.size());
+      // Include 1 to account for the branch node, too. [common_range_length] is
+      // the size of the path in the extension node, and then we have 1 for the
+      // branch node.
+      current_extension->path =
+          current_extension->path.GetSubarray(diverge_idx + 1,
+                                              current_extension->path.size());
+      if (current_extension->path.size() == 0) {
+        printf("YIKES HERE D\n");
+      }
+      // We hash this extension node here, and then in the parent function, we
+      // hash all nodes on the path from the leaf below to the root. Note that
+      // this extension node and the leaf below share the same parent.
+      current_extension->hash = GetNodeHash(*current_extension);
+    }
+    else {
+      // printf("alternative 2\n");
+      new_branch_node
+          ->child[std::to_integer<size_t>(current_extension_node_branch)] =
+          current_extension->child[0];
+      current_extension->child[0]->parent = new_branch_node;
+    }
+    Node *new_node;
+    if (key_a.size() == 0) {
+      // Place directly into the branch.
+      new_branch_node->value = std::move(obj);
+      new_node = new_branch_node;
+    }
+    else {
+      // Create new leaf node.
+      Node *new_leaf_node = CreateLeaf(/*parent=*/new_branch_node);
+      new_leaf_node->path = key_a.GetSubarray(diverge_idx + 1, key_a.size());
+      new_leaf_node->value = std::move(obj);
 
-    // We hash this extension node here, and then in the parent function, we
-    // hash all nodes on the path from the leaf below to the root. Note that
-    // this extension node and the leaf below share the same parent.
-    current_extension->hash = GetNodeHash(*current_extension);
-
-    // Create new leaf node.
-    Node *new_leaf_node = CreateLeaf(/*parent=*/new_branch_node);
-    new_leaf_node->path = key_a.GetSubarray(diverge_idx + 1, key_a.size());
-    new_leaf_node->value = std::move(obj);
-
-    std::byte leaf_branch = key_a.Get(diverge_idx);
-    new_branch_node->child[std::to_integer<size_t>(leaf_branch)] =
-        new_leaf_node;
-    return new_leaf_node;
+      std::byte leaf_branch = key_a.Get(diverge_idx);
+      new_branch_node->child[std::to_integer<size_t>(leaf_branch)] =
+          new_leaf_node;
+      new_node = new_leaf_node;
+    }
+    return new_node;
   }
 
   // See the callsite for comments on this function.
@@ -732,12 +786,15 @@ private:
 
     size_t common_range_length =
         GetLongestCommonRangeLength(key_a, 0, key_b, 0);
-    printf("common_range_length = %zu, parent_branch = %p\n",
-           common_range_length, parent_branch);
+    // printf("common_range_length = %zu, parent_branch = %p\n",
+    // common_range_length, parent_branch);
     if (common_range_length) {
       size_t diverge_idx = common_range_length;
       Node *new_extension_node = CreateExtension(/*parent=*/parent_branch);
       new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
+      if (new_extension_node->path.size() == 0) {
+        printf("YIKES HERE C\n");
+      }
 
       parent_branch->child[std::to_integer<size_t>(parent_branch_digit)] =
           new_extension_node;
@@ -852,14 +909,17 @@ private:
     // when [idx >= path.size() * 2].
     if (idx >= path.size()) {
       if (root->type == NodeType::kBranch) {
+        // printf("ret special case A\n");
         if (!root->value->empty()) {
           existing_key = root;
         }
         return root;
       }
       else if (prev_root && prev_root->type == NodeType::kBranch) {
+        // printf("ret special case B, root = %p, prev_root = %p\n", root,
+        //    prev_root);
         if (root->type == NodeType::kLeaf && root->path.size() == 0) {
-          printf("yep here!!!!!!\n");
+          // printf("yep here!!!!!!\n");
           existing_key = root;
         }
         idx--;
@@ -921,7 +981,7 @@ private:
       }
       // We are going to return the parent node, so subtract 1 from [idx].
       idx--;
-      printf("ret leaf here\n");
+      // printf("ret leaf here\n");
       return prev_root;
       break;
     }
