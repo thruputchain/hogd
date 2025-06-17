@@ -60,6 +60,9 @@ public:
     printf("----------\n\n");
   }
 
+  // Basic sanity checks on the tree.
+  void Check() { CheckHelper(root_, /*parent=*/nullptr); }
+
   // TODO: For all of the methods below, should they include a mutex as well (in
   // a pair)?
 
@@ -566,6 +569,69 @@ private:
     // unused.
     std::array<Node *, 16> child;
   };
+
+  void CheckHelper(Node *root, Node *parent)
+  {
+    if (!root) {
+      return;
+    }
+    if (root->parent != parent) {
+      printf("The node's parent pointer does not match its actual parent.\n");
+    }
+
+    switch (root->type) {
+    case NodeType::kBranch:
+    {
+      if (root->path.size()) {
+        printf("Unexpected path in branch: [%s]\n", root->path.str().c_str());
+      }
+      size_t num_children = 0;
+      for (Node *child : root->child) {
+        if (child) {
+          num_children++;
+        }
+        CheckHelper(child, root);
+      }
+      if (!num_children) {
+        printf("Branch node has no children\n");
+      }
+      if (!root->value && num_children == 1) {
+        // Check if this is the root node. The root node is a branch that is
+        // allowed to have no children.
+        if (root->parent) {
+          printf("Branch node has no value and only one child\n");
+        }
+      }
+      break;
+    }
+    case NodeType::kExtension:
+      if (!root->path.size()) {
+        printf("Unexpected empty path in extension: [%s]\n",
+               root->path.str().c_str());
+      }
+      if (root->child[0]) {
+        if (root->child[0]->type == NodeType::kExtension) {
+          printf("Extension node has extension node as child\n");
+        }
+        else if (root->child[0]->type == NodeType::kLeaf) {
+          printf("Extension node has leaf node as child\n");
+        }
+      }
+      else {
+        printf("Extension node has no child\n");
+      }
+      CheckHelper(root->child[0], root);
+      break;
+    case NodeType::kLeaf:
+      if (!root->value) {
+        printf("Unexpected empty value in leaf\n");
+      }
+      break;
+    default:
+      printf("Unknown node type: %d\n", static_cast<int>(root->type));
+      break;
+    }
+  }
 
   Node *CreateBranch(Node *parent)
   {

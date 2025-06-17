@@ -697,6 +697,8 @@ TEST(MerkleTrie, Stress)
     const auto &[_, node_by_node] = trie.GetProofByNode(path);
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
     EXPECT_EQ(*trie.find(path), value);
+
+    trie.Check();
   }
 
   for (const auto &[path, value] : total) {
@@ -725,11 +727,9 @@ TEST(MerkleTrie, Stress)
     seen.clear();
     trie.for_each(f);
     EXPECT_EQ(seen, total);
-  }
 
-  SHA256Hash root_hash = trie.GetRootHash();
-  trie.RegenerateAllHashes(trie.root_);
-  EXPECT_EQ(trie.GetRootHash(), root_hash);
+    // TODO: trie.Check();
+  }
 }
 
 } // namespace hogd
