@@ -371,21 +371,26 @@ public:
     assert(branch->type == NodeType::kBranch);
 
     Node *to_hash = nullptr;
+    size_t num_branches = 0;
+    for (Node *child : branch->child) {
+      if (child) {
+        num_branches++;
+      }
+    }
+    assert(num_branches);
     if (existing_key == branch) {
       // The key is in a branch.
       assert(branch->value);
       branch->value = std::nullopt;
       to_hash = branch;
+
+      if (num_branches == 1) {
+        // Handle the case where the branch only has one child, and so now the
+        // branch is no longer needed.
+        printf("Missed opportunity here...\n");
+      }
     }
     else {
-      size_t num_branches = 0;
-      for (Node *child : branch->child) {
-        if (child) {
-          num_branches++;
-        }
-      }
-      assert(num_branches);
-
       if (num_branches > 2) {
         // Just remove the leaf node from the branch.
 

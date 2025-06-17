@@ -691,31 +691,6 @@ TEST(MerkleTrie, Stress)
 
     seen.clear();
     trie.for_each(f);
-    if (seen != total) {
-      printf("seen (size %zu):\n", seen.size());
-      for (const auto &[k, v] : seen) {
-        printf("%s: %s\n", k.str().c_str(), v.c_str());
-      }
-      printf("\n");
-      printf("total (size %zu):\n", total.size());
-      for (const auto &[k, v] : total) {
-        printf("%s: %s\n", k.str().c_str(), v.c_str());
-      }
-      printf("\n");
-
-      HexArray diff;
-      for (const auto &[k, v] : total) {
-        if (seen.count(k) == 0) {
-          diff = k;
-          break;
-        }
-        if (seen[k] != v) {
-          diff = k;
-          break;
-        }
-      }
-      printf("Diff key: %s\n", diff.str().c_str());
-    }
     EXPECT_EQ(seen, total);
 
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
