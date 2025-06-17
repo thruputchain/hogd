@@ -14,6 +14,7 @@ gtest_discover_tests(hex_array_test)
 add_executable(
   merkle_trie_test
   merkle_trie_test.cc
+  node.cc
 )
 target_link_libraries(
   merkle_trie_test
