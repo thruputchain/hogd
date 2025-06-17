@@ -19,10 +19,14 @@ add_library(x23
   refcnt.h
   rpc.cc
   rpc.h
+  rpc_common.cc
+  rpc_common.h
   rpc_msg.x
   serialize.h
   sockio.h
   sockio.cc
+  srpc.h
+  srpc.cc
   testlock.h
   threadpool.cc
   threadpool.h

@@ -1,6 +1,6 @@
 // -*-C++-*-
 
-// This module implements the RPC interface.
+// This module implements the asynchronous coroutine-based RPC interface.
 //
 // To make remote procedure calls on a stream socket, you must create
 // an RpcStream with one of the two functions rpc_stream or
@@ -80,6 +80,8 @@
 
 #pragma once
 
+#include <x23/rpc_common.h>
+
 #include <map>
 #include <print>
 #include <stop_token>
@@ -88,92 +90,11 @@
 #include <x23/corosync.h>
 #include <x23/event.h>
 #include <x23/fileio.h>
-#include <x23/format.h>
 #include <x23/mvar.h>
-#include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
 #include <x23/x23.h>
 
 namespace x23 {
-
-struct XdrCallFailed : XdrException {
-  using enum msg_type;
-  const rpc_msg m_;
-  XdrCallFailed(const rpc_msg &m) : XdrException("{}", make_message(m)), m_(m)
-  {}
-
-  static std::string make_message(const rpc_msg &m)
-  {
-    using enum reply_stat;
-    assert(m.body.mtype() == REPLY);
-    if (m.body.rbody().stat() == MSG_ACCEPTED) {
-      auto stat = m.body.rbody().areply().reply_data.stat();
-      return std::format("RPC call failed ({})", stat);
-    }
-    else {
-      auto stat = m.body.rbody().rreply().stat();
-      return std::format("RPC call rejected ({})", stat);
-    }
-  }
-};
-
-inline void
-msg_set_reply_stat(rpc_msg *msg, accept_stat stat)
-{
-  using enum msg_type;
-  using enum reply_stat;
-  msg->body.mtype(REPLY);
-  msg->body.rbody().stat(MSG_ACCEPTED);
-  msg->body.rbody().areply().reply_data.stat(stat);
-}
-inline void
-msg_set_reply_stat(rpc_msg *msg, reject_stat stat)
-{
-  using enum reply_stat;
-  using enum reject_stat;
-  using enum msg_type;
-  msg->body.mtype(REPLY);
-  msg->body.rbody().stat(MSG_DENIED);
-  msg->body.rbody().rreply().stat(stat);
-  if (stat == RPC_MISMATCH)
-    msg->body.rbody().rreply().mismatch_info().low =
-        msg->body.rbody().rreply().mismatch_info().high = 2;
-}
-inline void
-msg_set_reply_stat(rpc_msg *msg, auth_stat stat)
-{
-  using enum reject_stat;
-  msg_set_reply_stat(msg, AUTH_ERROR);
-  msg->body.rbody().rreply().rj_why() = stat;
-}
-
-std::string msg_show_stat(const rpc_msg &msg);
-
-Buf
-make_record(const rpc_msg &msg, const is_xdr_type auto &...x)
-{
-  Buf ret = serialize(std::uint32_t{}, msg, x...);
-  assert(ret.size() <= 0x80000003UZ);
-  putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
-  return ret;
-}
-
-inline bool
-rpc_is_success(const rpc_msg &m)
-{
-  using enum accept_stat;
-  using enum reply_stat;
-  using enum msg_type;
-  return m.body.mtype() == REPLY && m.body.rbody().stat() == MSG_ACCEPTED &&
-         m.body.rbody().areply().reply_data.stat() == SUCCESS;
-}
-
-struct ProgVers {
-  std::uint32_t prog;
-  std::uint32_t vers;
-  friend bool operator==(ProgVers, ProgVers) = default;
-  friend std::strong_ordering operator<=>(ProgVers, ProgVers) = default;
-};
 
 struct RpcService {
   virtual ~RpcService() {}
@@ -184,88 +105,6 @@ struct RpcService {
   {
     return ProgVers{.prog = program(), .vers = version()};
   }
-};
-
-struct RpcLogger {
-  static inline int default_logfd = -1;
-  int logfd_ = default_logfd;
-  std::string peername_;
-
-  RpcLogger() noexcept = default;
-  RpcLogger(std::string peername, int logfd = default_logfd) noexcept
-    : logfd_(logfd), peername_(std::move(peername))
-  {}
-  RpcLogger(int peerfd, int logfd = default_logfd) noexcept;
-
-  template<typename Meta = void>
-  static std::string
-  make_log_message(bool am_server, const std::string &peername,
-                   const rpc_msg &msg, const is_xdr_type auto &...pl)
-      requires (sizeof...(pl) <= 1)
-  {
-    using enum msg_type;
-    std::string ret =
-        std::format("{} {} xid={} {}", peername,
-                    am_server == (msg.body.mtype() == CALL) ? "==>" : "<==",
-                    msg.xid, msg.body.mtype());
-    if (msg.body.mtype() == CALL) {
-      if constexpr (requires {
-                      { Meta::proc_name } -> decays_to<const char *>;
-                    })
-        uformat_to(&ret, " {}::{}", Meta::version_meta::version_name,
-                   Meta::proc_name);
-      else if constexpr (requires {
-                           { Meta::version_name } -> decays_to<const char *>;
-                         })
-        uformat_to(&ret, " {}::<proc#{}>", Meta::version_name,
-                   msg.body.cbody().proc);
-      else
-        uformat_to(&ret, " <prog#{},vers#{}>::<proc#{}>", msg.body.cbody().prog,
-                   msg.body.cbody().vers, msg.body.cbody().proc);
-    }
-    else if (!rpc_is_success(msg))
-      uformat_to(&ret, " FAIL {}", msg_show_stat(msg));
-    if constexpr (sizeof...(pl) > 0) {
-      ret += ' ';
-      ret = show(pl..., 0, std::move(ret));
-    }
-    if (ret.back() != '\n')
-      ret += '\n';
-    return ret;
-  }
-
-  template<typename Meta = void>
-  void log_client(const rpc_msg &msg, const is_xdr_type auto &...pl)
-      requires (sizeof...(pl) <= 1)
-  {
-    if (logfd_ < 0)
-      return;
-    auto logmsg = make_log_message<Meta>(false, peername_, msg, pl...);
-    write(logfd_, logmsg.data(), logmsg.size());
-  }
-  template<typename Meta = void>
-  void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
-      requires (sizeof...(pl) <= 1)
-  {
-    if (logfd_ < 0)
-      return;
-    auto logmsg = make_log_message<Meta>(true, peername_, msg, pl...);
-    write(logfd_, logmsg.data(), logmsg.size());
-  }
-};
-
-struct RpcNoLogger {
-  RpcNoLogger() noexcept = default;
-  RpcNoLogger(const std::string &, int = RpcLogger::default_logfd) noexcept {}
-  RpcNoLogger(int, int = RpcLogger::default_logfd) noexcept {}
-  template<typename = void>
-  void log_client(const rpc_msg &msg, const is_xdr_type auto &...pl)
-      requires (sizeof...(pl) <= 1)
-  {}
-  template<typename = void>
-  void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
-      requires (sizeof...(pl) <= 1)
-  {}
 };
 
 template<typename R> requires (!std::is_void_v<R>)

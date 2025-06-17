@@ -524,17 +524,6 @@ xdr_type_name()
   }(static_cast<X *>(nullptr));
 }
 
-template<typename Server, typename VersMeta,
-         template<typename> typename RetTrans = std::type_identity_t,
-         typename... ExtraArgs>
-struct rpc_compatible : std::false_type {};
-
-template<typename Server, typename VersMeta,
-         template<typename> typename RetTrans = std::type_identity_t,
-         typename... ExtraArgs>
-concept implements_rpc =
-    rpc_compatible<Server, VersMeta, RetTrans, ExtraArgs...>::value;
-
 template<is_xdr_struct T>
 inline auto
 xdr_cmp(const T &a, const T &b)
@@ -583,24 +572,25 @@ template<typename T> struct AlwaysEnum {
   using type = std::conditional_t<std::is_enum_v<T>, T, detail::EmptyEnum>;
 };
 
-// Invoke f<Vers::proc_meta<procno>> if such a type exists, otherwise
-// invoke f<void>.
-template<typename Vers, typename R = void, typename F>
-R
-with_proc_meta(std::uint32_t procno, F &&f)
-{
-  return [procno,
-          &f]<size_t... I>(std::index_sequence<I...>) -> decltype(auto) {
-    static const auto invokers = std::unordered_map{std::pair{
-        Vers::valid_procnos[I], +[](F &&f) -> R {
-          return std::forward<F>(f)
-              .template operator()<
-                  typename Vers::template proc_meta<Vers::valid_procnos[I]>>();
-        }}...};
-    if (auto it = invokers.find(procno); it != invokers.end())
-      return it->second(std::forward<F>(f));
-    return std::forward<F>(f).template operator()<void>();
-  }(std::make_index_sequence<Vers::valid_procnos.size()>{});
-}
+// Specialized to std::true_type by each RPC program/version for types
+// Server that implement the RPC interface defined by VersMeta.
+// RetTrans is a transformation of the return type (e.g., x23::Async
+// for a coroutine-based RPC implementation).  ExtraArgs are extra
+// arguments expected to be passed to each function (e.g., which might
+// contain session context).
+template<typename Server, typename VersMeta,
+         template<typename> typename RetTrans = std::type_identity_t,
+         typename... ExtraArgs>
+struct rpc_compatible : std::false_type {};
+
+// A concept corresponding to boolean in rpc_compatible.  Note that
+// each individual program/version already has a concept
+// is_program_version.  This concepts just generalizes that to an
+// arbitrary VersMeta.
+template<typename Server, typename VersMeta,
+         template<typename> typename RetTrans = std::type_identity_t,
+         typename... ExtraArgs>
+concept implements_rpc =
+    rpc_compatible<Server, VersMeta, RetTrans, ExtraArgs...>::value;
 
 } // namespace x23
