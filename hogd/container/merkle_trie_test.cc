@@ -142,19 +142,14 @@ TEST(MerkleTrie, BranchAndLeafFind)
   HexArray key_a("1234");
   std::string value_a = "hello";
   trie.insert(key_a, value_a);
-  printf("1a\n");
   EXPECT_EQ(*trie.find(key_a), value_a);
-  printf("1b\n");
   EXPECT_EQ(trie.find(HexArray("12")), nullptr);
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
-  printf("1\n");
   EXPECT_EQ(*trie.find(key_a), value_a);
-  printf("2\n");
   EXPECT_EQ(*trie.find(key_b), value_b);
-  printf("3\n");
   EXPECT_EQ(trie.find(HexArray("12")), nullptr);
   EXPECT_EQ(trie.find(HexArray("12345678")), nullptr);
 }
@@ -628,12 +623,12 @@ GenerateRandomPath()
   for (std::byte &b : path) {
     b = static_cast<std::byte>(path_dist(gen));
   }
-  // printf("path: %s (size %zu)\n", HexArray(path).str().c_str(), path.size());
   return HexArray(path);
 }
 
 } // namespace
 
+/*
 void
 GetDiff(std::map<HexArray, std::string> total,
         std::map<HexArray, std::string> seen)
@@ -668,6 +663,7 @@ GetDiff(std::map<HexArray, std::string> total,
     printf("in seen: %s\n", seen[diff].c_str());
   }
 }
+*/
 
 TEST(MerkleTrie, Stress)
 {
@@ -682,24 +678,19 @@ TEST(MerkleTrie, Stress)
 
   for (size_t i = 0; i < kNumIterations; i++) {
     HexArray path = GenerateRandomPath();
-    printf("i = %zu (insert key %s)\n", i, path.str().c_str());
     const std::string value = std::to_string(i);
-    // printf("Insert...\n");
     bool insert = trie.insert(path, value);
     EXPECT_EQ(insert, total.count(path) == 0);
     if (!insert) {
-      // A duplicate key was generated.
+      // A duplicate key was generated, so try again.
+      i--;
       continue;
     }
 
-    // printf("Done inserting.\n");
     total.insert({path, value});
-    // trie.Print();
 
     seen.clear();
-    // printf("For each...\n");
     trie.for_each(f);
-    // printf("Done with for each.\n");
     if (seen != total) {
       printf("seen (size %zu):\n", seen.size());
       for (const auto &[k, v] : seen) {
@@ -727,24 +718,10 @@ TEST(MerkleTrie, Stress)
     }
     EXPECT_EQ(seen, total);
 
-    // printf("Get encoding A.\n");
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
-    // printf("Now get encoding B.\n");
     const auto &[_, node_by_node] = trie.GetProofByNode(path);
-    /*
-    printf("to repeat, we are inserting %s with value %s\n", path.str().c_str(),
-           value.c_str());
-    printf("last node encoding: ");
-    for (std::byte b : node_by_node.back()) {
-      printf("%02x", b);
-    }
-    */
-    // printf("\n");
-    // printf("Prove...\n");
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
-    // printf("Proved. Now find...\n");
     EXPECT_EQ(*trie.find(path), value);
-    // printf("Found.\n");
   }
 
   for (const auto &[path, value] : total) {
@@ -754,19 +731,12 @@ TEST(MerkleTrie, Stress)
     EXPECT_EQ(*trie.find(path), value);
   }
 
-  trie.Print();
-
   for (size_t i = 0; i < kNumIterations; i++) {
     const auto &[path, value] = *total.begin();
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
-    if (!MerkleTrie::Prove(node_encodings, root_hash, path, value)) {
-      trie.Print();
-    }
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
 
-    // printf("remove %s\n", path.str().c_str());
     EXPECT_EQ(trie.remove(path), 1);
-    // trie.Print();
     auto it = total.erase(total.begin());
     if (i < kNumIterations - 1) {
       EXPECT_NE(it, total.end());
@@ -779,10 +749,6 @@ TEST(MerkleTrie, Stress)
 
     seen.clear();
     trie.for_each(f);
-    if (seen != total) {
-      GetDiff(total, seen);
-      trie.Print();
-    }
     EXPECT_EQ(seen, total);
   }
 

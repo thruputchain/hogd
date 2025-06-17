@@ -76,7 +76,6 @@ public:
   std::pair<SHA256Hash, std::vector<std::byte>> GetProof(const Key &k)
   {
     Node *node = FindNode(k);
-    // printf("FIND NODE ok: %p\n", node);
     if (!node) {
       return {SHA256Hash(), {}};
     }
@@ -98,9 +97,7 @@ public:
   GetProofByNode(const Key &k)
   {
     Node *node = FindNode(k);
-    // printf("FIND NODE: %p\n", node);
     if (!node) {
-      printf("wow ret\n");
       return {SHA256Hash(), {}};
     }
 
@@ -133,7 +130,6 @@ public:
     std::optional<std::string> observed_value;
     std::array<SHA256Hash, 16> child_hashes;
     while (idx < encodings.size()) {
-      size_t orig_idx = idx;
       NodeType type;
       size_t path_size;
       SHA256Hash prev_hash = hash;
@@ -151,48 +147,16 @@ public:
           verified_key_size++;
           size_t num_matches = 0;
           for (SHA256Hash child_hash : child_hashes) {
-            /*
-            printf("child_hash: ");
-            for (size_t i = 0; i < 32; i++) {
-              printf("%02x", child_hash[i]);
-            }
-            printf("\n");
-            */
             if (child_hash == prev_hash) {
               num_matches++;
             }
           }
-          /*
-          printf("check OK a, num_matches = %zu\n", num_matches);
-          for (size_t i = orig_idx; i < idx; i++) {
-            printf("%02x", encodings[i]);
-          }
-          printf("\n");
-          printf("prev_hash: ");
-          for (size_t i = 0; i < 32; i++) {
-            printf("%02x", prev_hash[i]);
-          }
-          printf("\n");
-          */
           ok = ok && (num_matches == 1);
         }
         else {
           // We could start on a branch if the value is directly inside the
           // branch.
-          // printf("check OK b\n");
           ok = (observed_value == value);
-        }
-        if (!ok) {
-          // TODO: Need to check whether branch has a value. An empty value is
-          // not the same as no value!
-          printf("yikes branch not ok\n");
-          if (observed_value) {
-            printf("saw observed value %s\n", observed_value->c_str());
-          }
-          else {
-            printf("no observed value\n");
-          }
-          printf("checking for value: %s\n", value.c_str());
         }
         break;
       }
@@ -233,7 +197,6 @@ public:
   std::string *find(const Key &k)
   {
     Node *node = FindNode(k);
-    // printf("found node %p\n", node);
     if (node) {
       switch (node->type) {
       case NodeType::kBranch:
@@ -284,9 +247,7 @@ public:
     assert(idx <= k.size());
 
     Node *to_hash = nullptr;
-    // printf("ok next = %p\n", next);
     if (idx == k.size()) {
-      // printf("C\n");
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
       assert(next->value->empty());
@@ -324,19 +285,16 @@ public:
         //   its own leaf node under the branch (so there will be two leaf
         //   nodes).
         if (next->child[branch_idx]->type == NodeType::kExtension) {
-          // printf("A\n");
           to_hash = InsertHandleExtensionChild(next->child[branch_idx], next, k,
                                                idx, std::move(obj));
         }
         else {
-          // printf("B\n");
           assert(next->child[branch_idx]->type == NodeType::kLeaf);
           to_hash = InsertHandleLeafChild(next->child[branch_idx], next, k, idx,
                                           std::move(obj));
         }
       }
       else {
-        // printf("D\n");
         Node *leaf = CreateLeaf(/*parent=*/next);
         // We are going to use the hex character at [idx] in the key to map to
         // the leaf node from the branch node. Thus, we add 1 below as we do not
@@ -406,9 +364,7 @@ public:
                          /*last_branch_hex_seen=*/std::byte(0x00), /*path=*/k,
                          idx, branch_hex, existing_key, branch_before_branch,
                          branch_before_branch_hex);
-    printf("remove %s\n", k.str().c_str());
     if (!existing_key) {
-      printf("hmm return 0 from remove\n");
       return 0;
     }
     assert(branch);
@@ -417,23 +373,9 @@ public:
     Node *to_hash = nullptr;
     if (existing_key == branch) {
       // The key is in a branch.
-
-      printf("remove A\n");
-      PrintHelper(branch);
       assert(branch->value);
       branch->value = std::nullopt;
       to_hash = branch;
-
-      {
-        size_t num_branches = 0;
-        for (Node *child : branch->child) {
-          if (child) {
-            num_branches++;
-          }
-        }
-        printf("remove A... num children is %zu\n", num_branches);
-        PrintHelper(branch);
-      }
     }
     else {
       size_t num_branches = 0;
@@ -451,7 +393,6 @@ public:
         // TODO: Fix all frees.
         // delete existing_key;
         to_hash = branch;
-        printf("remove B\n");
       }
       else if (branch_before_branch) {
         // We are going to remove the branch node.
@@ -466,7 +407,6 @@ public:
           if (cur->type == NodeType::kBranch) {
             break;
           }
-          printf("while true sees an extension\n");
           assert(cur->type == NodeType::kExtension);
           cur_path.Append(cur->path);
 
@@ -477,11 +417,7 @@ public:
 
         // cur_path.Append(branch_hex);
         if (existing_key != branch) {
-          printf("clear the child\n");
           branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
-        }
-        else {
-          printf("don't clear the child\n");
         }
 
         Node *other_child = nullptr;
@@ -495,46 +431,21 @@ public:
           }
         }
         assert(other_child);
-        printf("branch_before_branch = %p, branch = %p, other child hex: %02x, "
-               "branch_before_branch_hex: %02x\n",
-               branch_before_branch, branch, other_child_hex,
-               branch_before_branch_hex);
 
         Node *new_child = nullptr;
         if (num_branches == 1) {
-          printf("remove C, other_child = %p, other_child_hex = %02x\n",
-                 other_child, other_child_hex);
           if (!other_child) {
-            printf("removing the only child of a branch\n");
-            PrintHelper(branch);
 
             // TODO: What if the parent is an extension node?
-            printf("now check branch %p\n", branch);
-            printf("try with ternary: [%s]\n",
-                   branch->value ? branch->value->c_str() : "<empty>");
-            printf("try with ternary: [%s]\n", branch->value.has_value()
-                                                   ? branch->value->c_str()
-                                                   : "<empty>");
-            std::string blah =
-                branch->value ? branch->value->c_str() : "<empty>";
-            printf("blah is [%s]\n", blah.c_str());
             if (branch->value.has_value()) {
-              printf("hmm it thinks the branch value is [%s]\n",
-                     branch->value->c_str());
-              PrintHelper(branch);
               // The branch has a value, so the place the value in a leaf with
               // path size 0.
               new_child = CreateLeaf(/*parent=*/branch_before_branch);
               new_child->path = cur_path;
               new_child->value = std::move(branch->value);
-              printf("ok new child value is %s\n", new_child->value->c_str());
-            }
-            else {
-              printf("good here\n");
             }
           }
           else {
-            printf("removing the value from the branch itself\n");
             cur_path.Append(other_child_hex);
             new_child = CreateLeaf(/*parent=*/branch_before_branch);
             new_child->path = cur_path;
@@ -545,21 +456,16 @@ public:
         else {
           assert(num_branches == 2);
 
-          printf("remove D\n");
           if (other_child->type == NodeType::kBranch) {
-            printf("remove D1\n");
             new_child = CreateExtension(/*parent=*/branch_before_branch);
             cur_path.Append(other_child_hex);
             new_child->path = cur_path;
             if (new_child->path.size() == 0) {
-              printf("YIKES HERE A\n");
             }
             new_child->child[0] = other_child;
             other_child->parent = new_child;
           }
           else {
-            printf("remove D2, other_child = %p, other_child_hex = %02x\n",
-                   other_child, other_child_hex);
             cur_path.Append(other_child_hex);
             cur_path.Append(other_child->path);
             other_child->path = cur_path;
@@ -590,7 +496,6 @@ public:
         branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
         // delete existing_key;
         to_hash = branch;
-        printf("remove E\n");
       }
     }
 
@@ -1310,7 +1215,6 @@ private:
       return 0;
     }
     bool value_present = static_cast<bool>(encodings[idx]);
-    // printf("value_present: %d\n", value_present);
     idx += kValuePresentSize;
 
     size_t value_size = static_cast<size_t>(encodings[idx]);
