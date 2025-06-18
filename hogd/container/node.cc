@@ -138,11 +138,8 @@ GetChildEncoding(std::vector<std::byte> &encoding,
 
 bool
 GetValueFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
-                     Node &node)
+                     Node::Raw &node)
 {
-  if (idx + sizeof(size_t) > encodings.size()) {
-    return false;
-  }
   constexpr size_t kValuePresentSize = sizeof(bool);
   if (idx + kValuePresentSize > encodings.size()) {
     return false;
@@ -150,6 +147,9 @@ GetValueFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
   bool value_present = static_cast<bool>(encodings[idx]);
   idx += kValuePresentSize;
 
+  if (idx + sizeof(size_t) > encodings.size()) {
+    return false;
+  }
   size_t value_size = static_cast<size_t>(encodings[idx]);
   idx += sizeof(size_t);
 
@@ -170,7 +170,7 @@ GetValueFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
 
 bool
 GetPathFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
-                    Node &node)
+                    Node::Raw &node)
 {
   if (idx + sizeof(size_t) > encodings.size()) {
     return false;
@@ -179,9 +179,15 @@ GetPathFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
   idx += sizeof(size_t);
   size_t path_size_in_bytes = (path_size + 1) / 2;
 
-  // TODO: Get the path.
   if (idx + path_size_in_bytes > encodings.size()) {
     return false;
+  }
+  const std::vector<std::byte> path(encodings.begin() + idx,
+                                    encodings.begin() + idx +
+                                        path_size_in_bytes);
+  node.path = HexArray(path);
+  if (path_size % 2 == 1) {
+    node.path.RemoveFromBack(1);
   }
   idx += path_size_in_bytes;
 
@@ -190,7 +196,7 @@ GetPathFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
 
 bool
 GetBranchesFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
-                        Node &node, size_t num_branches)
+                        Node::Raw &node, size_t num_branches)
 {
   size_t branch_encoding_size = num_branches * sizeof(SHA256Hash);
   if (idx + branch_encoding_size > encodings.size()) {
@@ -198,7 +204,7 @@ GetBranchesFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
   }
   for (size_t i = 0; i < num_branches; i++) {
     size_t start = idx + (i * sizeof(SHA256Hash));
-    memcpy(&node.child[i], &encodings[start], sizeof(SHA256Hash));
+    memcpy(&node.child_hashes[i], &encodings[start], sizeof(SHA256Hash));
   }
   idx += branch_encoding_size;
 
@@ -207,7 +213,7 @@ GetBranchesFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
 
 bool
 GetBranchFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
-                      Node &node)
+                      Node::Raw &node)
 {
   if (!GetValueFromEncoding(encodings, idx, node)) {
     return false;
@@ -221,7 +227,7 @@ GetBranchFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
 
 size_t
 GetExtensionFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
-                         Node &node)
+                         Node::Raw &node)
 {
   if (!GetPathFromEncoding(encodings, idx, node)) {
     return false;
@@ -236,7 +242,7 @@ GetExtensionFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
 
 size_t
 GetLeafFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
-                    Node &node)
+                    Node::Raw &node)
 {
   if (!GetPathFromEncoding(encodings, idx, node)) {
     return false;
@@ -341,204 +347,39 @@ Node::GetNodeEncoding()
 
 bool
 Node::GetNodeFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
-                          Node &node)
+                          Node::Raw &node)
 {
+  size_t original_idx = idx;
+
   static constexpr size_t kTypeSize = 1;
   if (idx + kTypeSize > encodings.size()) {
     return false;
   }
   node.type = static_cast<Type>(encodings[idx++]);
 
+  bool ret;
   switch (node.type) {
   case Node::Type::kBranch:
-    return GetBranchFromEncoding(encodings, idx, node);
+    ret = GetBranchFromEncoding(encodings, idx, node);
     break;
   case Node::Type::kExtension:
-    return GetExtensionFromEncoding(encodings, idx, node);
+    ret = GetExtensionFromEncoding(encodings, idx, node);
     break;
   case Node::Type::kLeaf:
-    return GetLeafFromEncoding(encodings, idx, node);
+    ret = GetLeafFromEncoding(encodings, idx, node);
     break;
   default:
     // Improper node type in the encoding.
-    return false;
+    ret = false;
     break;
   }
-}
-
-bool
-Node::GetNodeHashFromEncoding(const std::vector<std::byte> &encodings,
-                              size_t &idx, SHA256Hash &hash, Node::Type &type,
-                              size_t &path_size, std::optional<std::string> &v,
-                              std::array<SHA256Hash, 16> &child_hashes)
-{
-  static constexpr size_t kTypeSize = 1;
-  if (idx + kTypeSize > encodings.size()) {
-    return false;
+  if (ret) {
+    const std::vector<std::byte> node_encodings(encodings.begin() +
+                                                    original_idx,
+                                                encodings.begin() + idx);
+    node.hash = sha256(node_encodings);
   }
-  type = static_cast<Node::Type>(encodings[idx]);
-  size_t encoding_size = 0;
-  switch (type) {
-  case Node::Type::kBranch:
-    encoding_size = GetBranchEncodingSize(encodings, idx, child_hashes, v);
-    break;
-  case Node::Type::kExtension:
-    encoding_size =
-        GetExtensionEncodingSize(encodings, idx, path_size, child_hashes);
-    break;
-  case Node::Type::kLeaf:
-    encoding_size = GetLeafEncodingSize(encodings, idx, path_size, v);
-    break;
-  default:
-    // Improper node type in the encoding.
-    return false;
-    break;
-  }
-  if (!encoding_size) {
-    return false;
-  }
-  const std::vector<std::byte> encoding(encodings.begin() + idx,
-                                        encodings.begin() + idx +
-                                            encoding_size);
-  hash = sha256(encoding);
-  idx += encoding_size;
-
-  return true;
-}
-
-size_t
-Node::GetBranchEncodingSize(const std::vector<std::byte> &encodings, size_t idx,
-                            std::array<SHA256Hash, 16> &child_hashes,
-                            std::optional<std::string> &v)
-{
-  const size_t orig_idx = idx;
-  static constexpr size_t kTypeSize = 1;
-  if (idx + kTypeSize > encodings.size()) {
-    return 0;
-  }
-  idx += kTypeSize;
-
-  if (idx + sizeof(size_t) > encodings.size()) {
-    return 0;
-  }
-  constexpr size_t kValuePresentSize = sizeof(bool);
-  if (idx + kValuePresentSize > encodings.size()) {
-    return 0;
-  }
-  bool value_present = static_cast<bool>(encodings[idx]);
-  idx += kValuePresentSize;
-
-  size_t value_size = static_cast<size_t>(encodings[idx]);
-  idx += sizeof(size_t);
-
-  if (idx + value_size > encodings.size()) {
-    return 0;
-  }
-  if (value_present) {
-    v = std::string(reinterpret_cast<const char *>(&encodings[idx]),
-                    value_size);
-  }
-  else {
-    v = std::nullopt;
-  }
-  idx += value_size;
-
-  static constexpr size_t kBranchEncodingSize = (16 * sizeof(SHA256Hash));
-  if (idx + kBranchEncodingSize > encodings.size()) {
-    return 0;
-  }
-  for (size_t i = 0; i < 16; i++) {
-    size_t start = idx + (i * sizeof(SHA256Hash));
-    memcpy(&child_hashes[i], &encodings[start], sizeof(SHA256Hash));
-  }
-  idx += kBranchEncodingSize;
-
-  return idx - orig_idx;
-}
-
-size_t
-Node::GetExtensionEncodingSize(const std::vector<std::byte> &encodings,
-                               size_t idx, size_t &path_size,
-                               std::array<SHA256Hash, 16> &child_hashes)
-{
-  const size_t orig_idx = idx;
-  static constexpr size_t kTypeSize = 1;
-  if (idx + kTypeSize > encodings.size()) {
-    return 0;
-  }
-  idx += kTypeSize;
-
-  if (idx + sizeof(size_t) > encodings.size()) {
-    return 0;
-  }
-  path_size = static_cast<size_t>(encodings[idx]);
-  idx += sizeof(size_t);
-  size_t path_size_in_bytes = (path_size + 1) / 2;
-
-  if (idx + path_size_in_bytes > encodings.size()) {
-    return 0;
-  }
-  idx += path_size_in_bytes;
-
-  static constexpr size_t kChildHashSize = sizeof(SHA256Hash);
-  if (idx + kChildHashSize > encodings.size()) {
-    return 0;
-  }
-  memcpy(&child_hashes[0], &encodings[idx], sizeof(SHA256Hash));
-  idx += kChildHashSize;
-
-  return idx - orig_idx;
-}
-
-size_t
-Node::GetLeafEncodingSize(const std::vector<std::byte> &encodings, size_t idx,
-                          size_t &path_size, std::optional<std::string> &v)
-{
-  const size_t orig_idx = idx;
-  static constexpr size_t kTypeSize = 1;
-  if (idx + kTypeSize > encodings.size()) {
-    return 0;
-  }
-  idx += kTypeSize;
-
-  if (idx + sizeof(size_t) > encodings.size()) {
-    return 0;
-  }
-  path_size = static_cast<size_t>(encodings[idx]);
-  idx += sizeof(size_t);
-  size_t path_size_in_bytes = (path_size + 1) / 2;
-
-  if (idx + path_size_in_bytes > encodings.size()) {
-    return 0;
-  }
-  idx += path_size_in_bytes;
-
-  constexpr size_t kValuePresentSize = sizeof(bool);
-  if (idx + kValuePresentSize > encodings.size()) {
-    return 0;
-  }
-  bool value_present = static_cast<bool>(encodings[idx]);
-  idx += kValuePresentSize;
-
-  if (idx + sizeof(size_t) > encodings.size()) {
-    return 0;
-  }
-  size_t value_size = static_cast<size_t>(encodings[idx]);
-  idx += sizeof(size_t);
-
-  if (idx + value_size > encodings.size()) {
-    return 0;
-  }
-  if (value_present) {
-    v = std::string(reinterpret_cast<const char *>(&encodings[idx]),
-                    value_size);
-  }
-  else {
-    v = std::nullopt;
-  }
-  idx += value_size;
-
-  return idx - orig_idx;
+  return ret;
 }
 
 } // namespace hogd

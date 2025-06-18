@@ -122,35 +122,33 @@ public:
                     const SHA256Hash &root_hash, const Key &k,
                     const std::string &value)
   {
-    size_t idx = 0;
-    SHA256Hash hash;
+    Node::Raw node;
+    memset(&node.hash, 0, sizeof(node.hash));
+
     size_t num_nodes = 0;
+    size_t idx = 0;
     // We just need to verify that we saw a path equal in length to [key]. We do
-    // not need to check the path contents because the path contents are already
-    // encoded in the hashes. If we reach the root node with all hashes matching
-    // up, and we examined a path equal in length to [key], then we verified
-    // that the KV pair is in the Merkle Patrica trie.
+    // not need to check the path contents themselves because the path contents
+    // are already included in the hashes. If the root hash we generate from the
+    // [encodings] matches the [root_hash] passed in **and** we examined a path
+    // equal in length to [k], then we verified that the KV pair is in the trie.
     size_t verified_key_size = 0;
-    std::optional<std::string> observed_value;
-    std::array<SHA256Hash, 16> child_hashes;
     while (idx < encodings.size()) {
-      Node::Type type;
-      size_t path_size;
-      SHA256Hash prev_hash = hash;
-      if (!Node::GetNodeHashFromEncoding(encodings, idx, hash, type, path_size,
-                                         observed_value, child_hashes)) {
+      SHA256Hash prev_hash = node.hash;
+      if (!Node::GetNodeFromEncoding(encodings, idx, node)) {
         return false;
       }
 
       bool ok;
-      switch (type) {
+      switch (node.type) {
       case Node::Type::kBranch:
       {
         if (num_nodes) {
           ok = true;
           verified_key_size++;
+
           size_t num_matches = 0;
-          for (SHA256Hash child_hash : child_hashes) {
+          for (SHA256Hash child_hash : node.child_hashes) {
             if (child_hash == prev_hash) {
               num_matches++;
             }
@@ -160,19 +158,19 @@ public:
         else {
           // We could start on a branch if the value is directly inside the
           // branch.
-          ok = (observed_value == value);
+          ok = (node.value == value);
         }
         break;
       }
       case Node::Type::kExtension:
         ok = num_nodes;
-        verified_key_size += path_size;
-        ok = ok && child_hashes[0] == prev_hash;
+        verified_key_size += node.path.size();
+        ok = ok && (node.child_hashes[0] == prev_hash);
         break;
       case Node::Type::kLeaf:
         ok = !num_nodes;
-        verified_key_size += path_size;
-        ok = ok && observed_value == value;
+        verified_key_size += node.path.size();
+        ok = ok && (node.value == value);
         break;
 
       default:
@@ -195,7 +193,7 @@ public:
 
     // Check that we verified the entire key and that the root hash matches
     // up.
-    return verified_key_size == k.size() && hash == root_hash;
+    return verified_key_size == k.size() && node.hash == root_hash;
   }
 
   std::string *find(const Key &k)

@@ -34,6 +34,13 @@ namespace hogd {
 class Node {
 public:
   enum class Type { kBranch, kExtension, kLeaf };
+  struct Raw {
+    Type type;
+    SHA256Hash hash;
+    HexArray path;
+    std::optional<std::string> value;
+    std::array<SHA256Hash, 16> child_hashes;
+  };
 
   Type type;
   SHA256Hash hash;
@@ -89,12 +96,7 @@ public:
   SHA256Hash GetNodeHash() { return sha256(GetNodeEncoding()); }
 
   static bool GetNodeFromEncoding(const std::vector<std::byte> &encodings,
-                                  size_t &idx, Node &node);
-  static bool GetNodeHashFromEncoding(const std::vector<std::byte> &encodings,
-                                      size_t &idx, SHA256Hash &hash,
-                                      Node::Type &type, size_t &path_size,
-                                      std::optional<std::string> &v,
-                                      std::array<SHA256Hash, 16> &child_hashes);
+                                  size_t &idx, Node::Raw &node);
 
   std::string str() const;
 
@@ -115,19 +117,5 @@ private:
   void GetBranchEncoding(std::vector<std::byte> &encoding) const;
   void GetExtensionEncoding(std::vector<std::byte> &encoding) const;
   void GetLeafEncoding(std::vector<std::byte> &encoding) const;
-
-  static size_t GetBranchEncodingSize(const std::vector<std::byte> &encodings,
-                                      size_t idx,
-                                      std::array<SHA256Hash, 16> &child_hashes,
-                                      std::optional<std::string> &v);
-
-  static size_t
-  GetExtensionEncodingSize(const std::vector<std::byte> &encodings, size_t idx,
-                           size_t &path_size,
-                           std::array<SHA256Hash, 16> &child_hashes);
-
-  static size_t GetLeafEncodingSize(const std::vector<std::byte> &encodings,
-                                    size_t idx, size_t &path_size,
-                                    std::optional<std::string> &v);
 };
 } // namespace hogd
