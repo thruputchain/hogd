@@ -64,17 +64,6 @@ public:
   // Basic sanity checks on the tree.
   void Check() { CheckHelper(root_, /*parent=*/nullptr); }
 
-  // TODO: For all of the methods below, should they include a mutex as well (in
-  // a pair)?
-
-  std::string &operator[](const Key &k)
-  {
-    static std::string kEmpty = "";
-
-    assert(false);
-    return kEmpty;
-  }
-
   SHA256Hash GetRootHash() const { return root_->hash; }
 
   std::pair<SHA256Hash, std::vector<std::byte>> GetProof(const Key &k);
@@ -90,14 +79,6 @@ public:
 
   bool insert(const Key &k, T &&obj);
   bool insert(const Key &k, const T &obj) { return insert(k, T(obj)); }
-
-  std::string &insert_or_assign(const Key &k, T &&obj)
-  {
-    static std::string kEmpty = "";
-
-    assert(false);
-    return kEmpty;
-  }
 
   size_t remove(const Key &k);
 
