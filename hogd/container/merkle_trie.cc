@@ -756,7 +756,6 @@ MerkleTrie::Walk(Node *root, HexArray &prefix,
 
   switch (root->type) {
   case Node::Type::kBranch:
-    f(prefix, *root);
     for (size_t i = 0; i < root->child.size(); i++) {
       std::byte digit = static_cast<std::byte>(i);
 
@@ -764,13 +763,14 @@ MerkleTrie::Walk(Node *root, HexArray &prefix,
       Walk(root->child[i], prefix, f);
       prefix.RemoveFromBack(1);
     }
+    f(prefix, *root);
     break;
   case Node::Type::kExtension:
     assert(root->child[0]);
 
     prefix.Append(root->path);
-    f(prefix, *root);
     Walk(root->child[0], prefix, f);
+    f(prefix, *root);
     prefix.RemoveFromBack(root->path.size());
     break;
   case Node::Type::kLeaf:
@@ -877,8 +877,7 @@ MerkleTrie::TraverseToBottom(Node *root, Node *prev_root,
   }
 }
 
-// Regenerates the hashes *only* for the nodes on the path from [n] to the
-// root of the trie.
+// static
 void
 MerkleTrie::GenerateHashesFrom(Node *n)
 {
@@ -892,53 +891,15 @@ MerkleTrie::GenerateHashesFrom(Node *n)
   }
 }
 
-// Regenerates all of the hashes in the trie.
-void
-MerkleTrie::RegenerateAllHashes(Node *root)
-{
-  if (!root) {
-    return;
-  }
-
-  switch (root->type) {
-  case Node::Type::kBranch:
-    for (Node *child : root->child) {
-      RegenerateAllHashes(child);
-    }
-    break;
-  case Node::Type::kExtension:
-    RegenerateAllHashes(root->child[0]);
-    break;
-  case Node::Type::kLeaf:
-    break;
-  }
-  root->hash = root->GetNodeHash();
-}
-
-// Frees all of the nodes starting at [root].
+// static
 void
 MerkleTrie::FreeAllNodes(Node *root)
 {
-  if (!root) {
-    return;
-  }
-
-  // We recurse to the bottom of the trie and then free nodes as we move back
-  // up. Keys do not exceed 65 bytes in length, so the trie will never have
-  // more than 65 * 2 = 130 levels.
-  switch (root->type) {
-  case Node::Type::kBranch:
-    for (Node *child : root->child) {
-      FreeAllNodes(child);
-    }
-    break;
-  case Node::Type::kExtension:
-    FreeAllNodes(root->child[0]);
-    break;
-  case Node::Type::kLeaf:
-    break;
-  }
-  // delete root;
+  HexArray prefix;
+  auto f = [](const HexArray &path, Node &node) {
+    delete &node;
+  };
+  Walk(root, prefix, f);
 }
 
 } // namespace hogd

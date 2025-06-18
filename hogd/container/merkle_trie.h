@@ -151,6 +151,12 @@ private:
   Node *InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
                               const Key &k, size_t idx, T &&obj);
 
+  // Does a post-order traversal of the tree starting at [root] with path
+  // [prefix], calling [f] on each node.
+  //
+  // A post-order traversal visits all of the children of a node before visiting
+  // the node itself. This is useful when regenerating all of the node hashes in
+  // a tree or freeing all of the nodes.
   static void Walk(Node *root, HexArray &prefix,
                    const std::function<void(const HexArray &, Node &)> &f);
 
@@ -162,9 +168,7 @@ private:
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.
-  void GenerateHashesFrom(Node *n);
-  // Regenerates all of the hashes in the trie.
-  void RegenerateAllHashes(Node *root);
+  static void GenerateHashesFrom(Node *n);
 
   void InitRootNode()
   {
@@ -173,11 +177,12 @@ private:
   }
 
   // Frees all of the nodes starting at [root].
-  void FreeAllNodes(Node *root);
+  static void FreeAllNodes(Node *root);
 
   Node *root_ = nullptr;
   size_t size_ = 0;
 
+  // TODO: How many of these are still necessary?
   FRIEND_TEST(MerkleTrie, TwoLeavesAndOneBranchProve);
   FRIEND_TEST(MerkleTrie, HashBranch);
   FRIEND_TEST(MerkleTrie, HashBranchSomeNullptr);
