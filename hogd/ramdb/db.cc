@@ -4,6 +4,7 @@
 #include <bit>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
+#include <format>
 #include <future>
 #include <latch>
 #include <limits>
@@ -248,8 +249,8 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
 
     // only allocate one head for this writer since snapshotting is
     // single-threaded anyway.
-    DiskWriter snap_writer{*loglet_allocator_, dir_, std::move(path),
-                           kMaxFileSize, 0};
+    std::string tmp_path = std::format("__{}.tmp", path);
+    DiskWriter snap_writer{*loglet_allocator_, dir_, tmp_path, kMaxFileSize, 0};
     // start snap writer bg thread; this also configures writer so that
     // sync() at end of snapshotting writes a commit record for end_lsn - 1.
     snap_writer.init(end_lsn - 1);
@@ -310,6 +311,14 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
       warn("snapshot sync failed");
       promise->set_value(ret.transform([](auto &e) {}));
       return;
+    }
+
+    // atomically rename snapshot files to prevent recovery from trying to
+    // recover partially written snapshots.
+    ErrnoStatus<void> r = dir_.rename(tmp_path, path);
+    if (!r) {
+      warn("snapshot atomic rename from {} to {} failed", tmp_path, path);
+      promise->set_value(ret.transform([](auto &e) {}));
     }
 
     info("syncing snapshot file to storage took {:.3f} s",
