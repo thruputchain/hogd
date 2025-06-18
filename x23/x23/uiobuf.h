@@ -55,6 +55,13 @@ public:
     super::clear();
     offset_ = 0;
   }
+  void resize(size_type new_size)
+  {
+    if (new_size)
+      super::resize(offset_ + new_size);
+    else
+      clear();
+  }
 
   auto begin(this auto &&self) noexcept
   {
@@ -90,9 +97,10 @@ public:
   }
   using super::resize_and_overwrite;
 
+  size_t capacity() const noexcept { return super::capacity() - offset_; }
   void reserve(size_type cap)
   {
-    if (cap <= super::capacity() - offset_)
+    if (cap <= capacity())
       return;
 
     size_type totcap = super::capacity();

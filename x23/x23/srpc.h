@@ -5,7 +5,7 @@
 #include <condition_variable>
 #include <print>
 #include <stop_token>
-#include <unordered_map>
+#include <map>
 
 #include <x23/cleanup.h>
 #include <x23/mvar.h>
@@ -29,18 +29,21 @@ struct SRpcService {
 class SRpcFd {
 public:
   using CallCB = std::function<void(BufView)>;
+  static inline size_t default_max_message_size = 0x200000;
+  size_t max_message_size_;
 
   SRpcFd(UniqueFd fd);
+  SRpcFd(const SRpcFd &) = delete;
   ~SRpcFd();
+  void fail();
 
 private:
+  static constexpr size_t kReadSize = 0x10000;
   using Xid = std::uint32_t;
 
   UniqueFd fd_;
-  VecQ<std::uint8_t> rdbuf_;
-  BufVec wrbuf_;
 
-  //std::unordered_map<ProgVers, std::unique_ptr<SRpcService>> services_;
+  std::map<ProgVers, std::unique_ptr<SRpcService>> services_{};
 
   Xid lastxid_{};
   MVar<std::unordered_map<Xid, CallCB>> pending_calls_;
@@ -56,6 +59,11 @@ private:
 
   void read_worker();
   void write_worker();
+  void write_ready()
+  {
+    auto _ptr = pending_calls_.take();
+    write_ready_.notify_one();
+  }
 };
 
 namespace detail {
