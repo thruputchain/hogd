@@ -668,15 +668,10 @@ MerkleTrie::InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
       new_branch_node;
 
   size_t common_range_length = GetLongestCommonRangeLength(key_a, 0, key_b, 0);
-  // printf("common_range_length = %zu, parent_branch = %p\n",
-  // common_range_length, parent_branch);
   if (common_range_length) {
     size_t diverge_idx = common_range_length;
     Node *new_extension_node = Node::CreateExtension(/*parent=*/parent_branch);
     new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
-    if (new_extension_node->path.size() == 0) {
-      printf("YIKES HERE C\n");
-    }
 
     parent_branch->child[std::to_integer<size_t>(parent_branch_digit)] =
         new_extension_node;
@@ -791,17 +786,13 @@ MerkleTrie::TraverseToBottom(Node *root, Node *prev_root,
   // when [idx >= path.size() * 2].
   if (idx >= path.size()) {
     if (root->type == Node::Type::kBranch) {
-      // printf("ret special case A\n");
       if (!root->value->empty()) {
         existing_key = root;
       }
       return root;
     }
     else if (prev_root && prev_root->type == Node::Type::kBranch) {
-      // printf("ret special case B, root = %p, prev_root = %p\n", root,
-      //    prev_root);
       if (root->type == Node::Type::kLeaf && root->path.size() == 0) {
-        // printf("yep here!!!!!!\n");
         existing_key = root;
 
         branch_before_branch = last_branch_seen;
@@ -865,7 +856,6 @@ MerkleTrie::TraverseToBottom(Node *root, Node *prev_root,
     }
     // We are going to return the parent node, so subtract 1 from [idx].
     idx--;
-    // printf("ret leaf here\n");
     return prev_root;
     break;
   }
