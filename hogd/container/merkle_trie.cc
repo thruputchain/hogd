@@ -665,7 +665,7 @@ MerkleTrie::InsertHandleExtensionChild(Node *extension, Node *parent_branch,
   // See the comments below. It is possible that we place [key_window] directly
   // into the branch. It is also possible that we omit part of the existing
   // subtree, too.
-  Node *branch;
+  Node *branch = nullptr;
   if (common_range_length) {
     // [key_window] and the extension node have a common range, so we are going
     // to break the extension node into two extension nodes:
@@ -725,6 +725,7 @@ MerkleTrie::InsertHandleExtensionChild(Node *extension, Node *parent_branch,
     branch = Node::CreateBranch(/*parent=*/parent_branch);
     parent_branch->child[std::to_integer<size_t>(k.Get(idx))] = branch;
   }
+  CHECK_PTR(branch);
 
   // In both cases above, we create a new branch node and now we need to place
   // an extension node as the child of that new branch node.
