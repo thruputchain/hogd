@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <cassert>
 #include <functional>
 #include <initializer_list>
 #include <iomanip>

@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <cassert>
 #include <functional>
 #include <initializer_list>
 #include <iomanip>
@@ -22,6 +21,7 @@
 #include <vector>
 
 #include "hex_array.h"
+#include "hogd/base/check.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
@@ -116,7 +116,7 @@ public:
   void for_each_parallel(F func, size_t width = kDefaultParallelRangeWidth,
                          WorkerPool &pool = WorkerPool::get_default_pool())
   {
-    assert(false);
+    CHECK(false);
   }
 
 private:

@@ -30,4 +30,5 @@
 #define CHECK_LE(val1, val2) __LCHECK(<=, <, val1, val2)
 #define CHECK_GT(val1, val2) __LCHECK(>, <=, val1, val2)
 #define CHECK_GE(val1, val2) __LCHECK(>=, >, val1, val2)
+#define CHECK_PTR(val1) CHECK_NE(val1, nullptr)
 #define CHECK(val1) CHECK_NE(val1, 0)

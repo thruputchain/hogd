@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <cassert>
 #include <functional>
 #include <initializer_list>
 #include <iomanip>
@@ -20,6 +19,7 @@
 #include <vector>
 
 #include "hex_array.h"
+#include "hogd/base/check.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
@@ -29,6 +29,43 @@
 #include "types.hh"
 
 namespace hogd {
+
+namespace {
+
+size_t
+GetLongestCommonRangeLength(const HexArray &a, size_t a_start,
+                            const HexArray &b, size_t b_start)
+{
+  CHECK_LE(a_start, a.size());
+  CHECK_LE(b_start, b.size());
+
+  size_t a_size = a.size() - a_start;
+  size_t length = 0;
+  for (size_t i = 0; i < a_size; i++) {
+    if (i + b_start >= b.size()) {
+      break;
+    }
+    if (a.Get(i + a_start) != b.Get(i + b_start)) {
+      break;
+    }
+    length++;
+  }
+  return length;
+}
+
+bool
+BranchHasChildHash(const Node::Raw &node, const SHA256Hash &child_hash)
+{
+  size_t num_matches = 0;
+  for (SHA256Hash h : node.child_hashes) {
+    if (h == child_hash) {
+      num_matches++;
+    }
+  }
+  return num_matches == 1;
+}
+
+} // namespace
 
 std::string
 MerkleTrie::str() const
@@ -67,7 +104,7 @@ MerkleTrie::GetProofByNode(const Key &k)
 std::pair<SHA256Hash, std::vector<std::byte>>
 MerkleTrie::GetProof(const Key &k)
 {
-  std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> proof =
+  const std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> proof =
       GetProofByNode(k);
   std::pair<SHA256Hash, std::vector<std::byte>> ret;
   ret.first = proof.first;
@@ -104,18 +141,9 @@ MerkleTrie::Prove(const std::vector<std::byte> &encodings,
     bool ok;
     switch (node.type) {
     case Node::Type::kBranch:
-    {
       if (num_nodes) {
-        ok = true;
         verified_key_size++;
-
-        size_t num_matches = 0;
-        for (SHA256Hash child_hash : node.child_hashes) {
-          if (child_hash == prev_hash) {
-            num_matches++;
-          }
-        }
-        ok = ok && (num_matches == 1);
+        ok = BranchHasChildHash(node, prev_hash);
       }
       else {
         // We could start on a branch if the value is directly inside the
@@ -123,7 +151,6 @@ MerkleTrie::Prove(const std::vector<std::byte> &encodings,
         ok = (node.value == value);
       }
       break;
-    }
     case Node::Type::kExtension:
       ok = num_nodes;
       verified_key_size += node.path.size();
@@ -136,7 +163,7 @@ MerkleTrie::Prove(const std::vector<std::byte> &encodings,
       break;
 
     default:
-      assert(false);
+      CHECK(false);
       return false;
       break;
     }
@@ -147,7 +174,7 @@ MerkleTrie::Prove(const std::vector<std::byte> &encodings,
   }
   // [idx] should never be greater than [encodings.size()] if we reach this
   // point.
-  assert(idx == encodings.size());
+  CHECK_EQ(idx, encodings.size());
   if (!num_nodes) {
     return false;
   }
@@ -173,9 +200,10 @@ MerkleTrie::find(const Key &k)
         return &value;
       }
       return nullptr;
-
+      break;
     case Node::Type::kLeaf:
     {
+      CHECK(node->value.has_value());
       // Get the [std::string] out of the [std::optional<std::string>] with
       // the dereference operator.
       std::string &value = *node->value;
@@ -183,7 +211,7 @@ MerkleTrie::find(const Key &k)
       break;
     }
     default:
-      assert(false);
+      CHECK(false);
       return nullptr;
       break;
     }
@@ -207,15 +235,15 @@ MerkleTrie::insert(const Key &k, T &&obj)
   if (existing_key) {
     return false;
   }
-  assert(next);
-  assert(next->type == Node::Type::kBranch);
-  assert(idx <= k.size());
+  CHECK_PTR(next);
+  CHECK_EQ(next->type, Node::Type::kBranch);
+  CHECK_LE(idx, k.size());
 
   Node *to_hash = nullptr;
   if (idx == k.size()) {
     // The key maps to a branch node, so we should add the value directly into
     // the branch node.
-    assert(next->value->empty());
+    CHECK(!next->value.has_value());
     next->value = std::move(obj);
     next->hash = next->GetNodeHash();
     to_hash = next;
@@ -254,7 +282,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
                                              idx, std::move(obj));
       }
       else {
-        assert(next->child[branch_idx]->type == Node::Type::kLeaf);
+        CHECK_EQ(next->child[branch_idx]->type, Node::Type::kLeaf);
         to_hash = InsertHandleLeafChild(next->child[branch_idx], next, k, idx,
                                         std::move(obj));
       }
@@ -323,13 +351,13 @@ MerkleTrie::remove(const Key &k)
   if (!existing_key) {
     return 0;
   }
-  assert(branch);
-  assert(branch->type == Node::Type::kBranch);
+  CHECK_PTR(branch);
+  CHECK_EQ(branch->type, Node::Type::kBranch);
 
   Node *to_hash = nullptr;
   if (existing_key == branch) {
     // The key is in a branch.
-    assert(branch->value);
+    CHECK(branch->value.has_value());
     branch->value = std::nullopt;
     to_hash = branch;
 
@@ -344,7 +372,7 @@ MerkleTrie::remove(const Key &k)
         num_branches++;
       }
     }
-    assert(num_branches);
+    CHECK(num_branches);
 
     if (num_branches > 2) {
       // Just remove the leaf node from the branch.
@@ -367,7 +395,7 @@ MerkleTrie::remove(const Key &k)
         if (cur->type == Node::Type::kBranch) {
           break;
         }
-        assert(cur->type == Node::Type::kExtension);
+        CHECK_EQ(cur->type, Node::Type::kExtension);
         cur_path.Append(cur->path);
 
         Node *next_cur = cur->child[0];
@@ -390,12 +418,16 @@ MerkleTrie::remove(const Key &k)
           break;
         }
       }
-      assert(other_child);
 
       Node *new_child = nullptr;
       if (num_branches == 1) {
-        if (!other_child) {
-
+        if (other_child) {
+          cur_path.Append(other_child_hex);
+          new_child = Node::CreateLeaf(/*parent=*/branch_before_branch);
+          new_child->path = cur_path;
+          new_child->value = std::move(branch->value);
+        }
+        else {
           // TODO: What if the parent is an extension node?
           if (branch->value.has_value()) {
             // The branch has a value, so the place the value in a leaf with
@@ -405,16 +437,11 @@ MerkleTrie::remove(const Key &k)
             new_child->value = std::move(branch->value);
           }
         }
-        else {
-          cur_path.Append(other_child_hex);
-          new_child = Node::CreateLeaf(/*parent=*/branch_before_branch);
-          new_child->path = cur_path;
-          new_child->value = std::move(branch->value);
-        }
         // delete branch;
       }
       else {
-        assert(num_branches == 2);
+        CHECK_PTR(other_child);
+        CHECK_EQ(num_branches, 2);
 
         if (other_child->type == Node::Type::kBranch) {
           new_child = Node::CreateExtension(/*parent=*/branch_before_branch);
@@ -452,7 +479,7 @@ MerkleTrie::remove(const Key &k)
       // If [branch_before_branch] is a nullptr, then [branch] must be the
       // root node, because the root node does not have a parent. The root
       // node also never has a value in it.
-      assert(branch == root_);
+      CHECK_EQ(branch, root_);
       branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
       // delete existing_key;
       to_hash = branch;
@@ -528,32 +555,6 @@ MerkleTrie::CheckHelper(Node *root, Node *parent)
   }
 }
 
-namespace {
-
-// TODO: Move to HexArray class?
-size_t
-GetLongestCommonRangeLength(const HexArray &a, size_t a_start,
-                            const HexArray &b, size_t b_start)
-{
-  assert(a_start <= a.size());
-  assert(b_start <= b.size());
-
-  size_t a_size = a.size() - a_start;
-  size_t length = 0;
-  for (size_t i = 0; i < a_size; i++) {
-    if (i + b_start >= b.size()) {
-      break;
-    }
-    if (a.Get(i + a_start) != b.Get(i + b_start)) {
-      break;
-    }
-    length++;
-  }
-  return length;
-}
-
-} // namespace
-
 Node *
 MerkleTrie::FindNode(const Key &k)
 {
@@ -579,11 +580,9 @@ MerkleTrie::InsertHandleExtensionChild(Node *current_extension,
   // We add 1 since one of the digits will be included in the [parent_branch]
   // node.
   Key key_a = k.GetSubarray(idx + 1, k.size());
-  assert(key_a.size());
 
   size_t common_range_length =
       GetLongestCommonRangeLength(key_a, 0, current_extension->path, 0);
-  assert(common_range_length);
   size_t diverge_idx = common_range_length;
 
   // TODO: This extension node could have a path length of 0. We should omit
@@ -713,7 +712,8 @@ MerkleTrie::InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
     to_hash = leaf;
   }
   else {
-    assert(shorter.Get(0) != longer.Get(0));
+    CHECK_NE(static_cast<uint8_t>(shorter.Get(0)),
+             static_cast<uint8_t>(longer.Get(0)));
 
     // The digits do not match, so create two leaf nodes.
 
@@ -759,7 +759,7 @@ MerkleTrie::Walk(Node *root, HexArray &prefix,
     f(prefix, *root);
     break;
   case Node::Type::kExtension:
-    assert(root->child[0]);
+    CHECK_PTR(root->child[0]);
 
     prefix.Append(root->path);
     Walk(root->child[0], prefix, f);
@@ -840,8 +840,9 @@ MerkleTrie::TraverseToBottom(Node *root, Node *prev_root,
   }
   case Node::Type::kExtension:
   {
-    if (path.GetSubarray(idx, idx + root->path.size()) == root->path) {
-      assert(root->child[0]);
+    if (idx + root->path.size() <= path.size() &&
+        path.GetSubarray(idx, idx + root->path.size()) == root->path) {
+      CHECK_PTR(root->child[0]);
       idx += root->path.size();
       return TraverseToBottom(root->child[0], root, last_branch_seen,
                               last_branch_hex_seen, path, idx, branch_hex,

@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <cassert>
 #include <functional>
 #include <initializer_list>
 #include <iomanip>
@@ -98,6 +97,19 @@ public:
   SHA256Hash GetNodeHash() { return sha256(GetNodeEncoding()); }
 
   std::string str() const;
+  friend std::ostream &operator<<(std::ostream &os, const Type type)
+  {
+    switch (type) {
+    case Type::kBranch:
+      return os << "Branch";
+    case Type::kExtension:
+      return os << "Extension";
+    case Type::kLeaf:
+      return os << "Leaf";
+    default:
+      return os << "Unknown-Node-Type";
+    }
+  }
   friend std::ostream &operator<<(std::ostream &os, const Node &node)
   {
     return os << node.str();

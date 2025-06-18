@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <cassert>
 #include <functional>
 #include <initializer_list>
 #include <iomanip>
@@ -21,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/check.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
@@ -36,14 +36,14 @@ namespace hogd {
 // TODO: Provide example.
 class HexArray {
 public:
-  static constexpr size_t kMaxNumHexDigits = 60;
+  static constexpr size_t kMaxNumHexDigits = 64;
   static_assert(kMaxNumHexDigits % 2 == 0);
 
   HexArray() { Init(); }
 
   HexArray(const std::string &s)
   {
-    assert(s.size() <= kMaxNumHexDigits);
+    CHECK_LE(s.size(), kMaxNumHexDigits);
     Init();
 
     for (size_t i = 0; i < s.size(); i++) {
@@ -57,7 +57,7 @@ public:
 
   HexArray(const std::vector<std::byte> &bytes)
   {
-    assert(bytes.size() <= kArrayLength);
+    CHECK_LE(bytes.size(), kArrayLength);
 
     Init();
 
@@ -67,7 +67,7 @@ public:
 
   HexArray(const SHA256Hash &hash)
   {
-    assert(hash.size() <= kArrayLength);
+    CHECK_LE(hash.size(), kArrayLength);
 
     Init();
 
@@ -100,7 +100,7 @@ public:
       return false;
     }
 
-    assert(size_ == a.size());
+    CHECK_EQ(size_, a.size());
     // Find the hex digit where the two arrays diverge.
     for (size_t i = 0; i < size_; i++) {
       if (Get(i) < a.Get(i)) {
@@ -151,7 +151,7 @@ public:
 
   void Append(std::byte b)
   {
-    assert(size_ + 1 <= kMaxNumHexDigits);
+    CHECK_LE(size_ + 1, kMaxNumHexDigits);
     Set(size_, b);
     size_++;
   }
@@ -159,7 +159,7 @@ public:
   // TODO: Optimize this.
   void Append(const HexArray &to_append)
   {
-    assert(size_ + to_append.size() <= kMaxNumHexDigits);
+    CHECK_LE(size_ + to_append.size(), kMaxNumHexDigits);
     for (size_t i = 0; i < to_append.size(); i++) {
       Set(size_ + i, to_append.Get(i));
     }
@@ -168,14 +168,14 @@ public:
 
   void RemoveFromBack(size_t to_remove)
   {
-    assert(to_remove <= size_);
+    CHECK_LE(to_remove, size_);
     size_ -= to_remove;
   }
 
   HexArray GetSubarray(size_t start, size_t end) const
   {
-    assert(start < size_);
-    assert(end < size_);
+    CHECK_LE(start, size_);
+    CHECK_LE(end, size_);
     HexArray h;
     for (size_t i = start; i < end; i++) {
       h.Append(Get(i));

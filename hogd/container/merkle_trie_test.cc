@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/check.h"
 #include "hogd/container/merkle_trie.h"
 #include "hogd/container/node.h"
 
@@ -23,7 +24,7 @@ HashFromString(const std::string &str)
 {
   // A SHA-256 hash is 32 bytes, so [str] should have 32 * 2 = 64
   // characters.
-  assert(str.size() == 64);
+  CHECK_EQ(str.size(), 64);
 
   SHA256Hash ret;
   for (size_t i = 0; i < str.size(); i += 2) {
