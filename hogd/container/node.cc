@@ -89,6 +89,53 @@ GetChildString(std::ostringstream &oss, size_t child_idx,
   }
 }
 
+void
+GetValueEncoding(std::vector<std::byte> &encoding,
+                 const std::optional<std::string> &value)
+{
+  std::byte value_present_byte = value ? std::byte{0x01} : std::byte{0x00};
+  encoding.push_back(value_present_byte);
+
+  std::vector<std::byte> value_size_bytes =
+      SizeToBytes(value ? value->size() : 0);
+  encoding.insert(encoding.end(), value_size_bytes.begin(),
+                  value_size_bytes.end());
+  if (value) {
+    const std::string &v = *value;
+    std::transform(v.begin(), v.end(), std::back_inserter(encoding),
+                   CastCharToByte);
+  }
+}
+
+void
+GetPathEncoding(std::vector<std::byte> &encoding, const HexArray &path)
+{
+  std::vector<std::byte> path_size_bytes = SizeToBytes(path.size());
+  encoding.insert(encoding.end(), path_size_bytes.begin(),
+                  path_size_bytes.end());
+
+  const std::vector<std::byte> path_bytes = path.ToByteVector();
+  encoding.insert(encoding.end(), path_bytes.begin(), path_bytes.end());
+}
+
+void
+GetChildEncoding(std::vector<std::byte> &encoding,
+                 const std::array<Node *, 16> children, size_t num_children)
+{
+  static constexpr std::array<std::byte, 32> kNullptr = {};
+
+  for (size_t i = 0; i < num_children; i++) {
+    Node *child = children[i];
+    if (child) {
+      std::transform(child->hash.begin(), child->hash.end(),
+                     std::back_inserter(encoding), CastCharToByte);
+    }
+    else {
+      encoding.insert(encoding.end(), kNullptr.begin(), kNullptr.end());
+    }
+  }
+}
+
 } // namespace
 
 void
@@ -139,81 +186,44 @@ Node::str() const
   return oss.str();
 }
 
+void
+Node::GetBranchEncoding(std::vector<std::byte> &encoding) const
+{
+  GetValueEncoding(encoding, value);
+  GetChildEncoding(encoding, child, /*num_children=*/16);
+}
+
+void
+Node::GetExtensionEncoding(std::vector<std::byte> &encoding) const
+{
+  GetPathEncoding(encoding, path);
+  GetChildEncoding(encoding, child, /*num_children=*/1);
+}
+
+void
+Node::GetLeafEncoding(std::vector<std::byte> &encoding) const
+{
+  GetPathEncoding(encoding, path);
+  GetValueEncoding(encoding, value);
+}
+
 std::vector<std::byte>
 Node::GetNodeEncoding()
 {
-  static constexpr std::array<std::byte, 32> kNullptr = {};
-
   // TODO: Optimize. We know the max lengths of the values we need to hash up
   // front.
   std::vector<std::byte> to_hash;
   to_hash.push_back(static_cast<std::byte>(type));
   switch (type) {
   case Node::Type::kBranch:
-  {
-    std::byte value_present_byte = value ? std::byte{0x01} : std::byte{0x00};
-    to_hash.push_back(value_present_byte);
-
-    std::vector<std::byte> value_size_bytes =
-        SizeToBytes(value ? value->size() : 0);
-    to_hash.insert(to_hash.end(), value_size_bytes.begin(),
-                   value_size_bytes.end());
-    if (value) {
-      const std::string &v = *value;
-      std::transform(v.begin(), v.end(), std::back_inserter(to_hash),
-                     CastCharToByte);
-    }
-
-    for (Node *child : child) {
-      if (child) {
-        std::transform(child->hash.begin(), child->hash.end(),
-                       std::back_inserter(to_hash), CastCharToByte);
-      }
-      else {
-        to_hash.insert(to_hash.end(), kNullptr.begin(), kNullptr.end());
-      }
-    }
+    GetBranchEncoding(to_hash);
     break;
-  }
   case Node::Type::kExtension:
-  {
-    std::vector<std::byte> path_size_bytes = SizeToBytes(path.size());
-    to_hash.insert(to_hash.end(), path_size_bytes.begin(),
-                   path_size_bytes.end());
-
-    const std::vector<std::byte> path_bytes = path.ToByteVector();
-    to_hash.insert(to_hash.end(), path_bytes.begin(), path_bytes.end());
-
-    if (child[0]) {
-      std::transform(child[0]->hash.begin(), child[0]->hash.end(),
-                     std::back_inserter(to_hash), CastCharToByte);
-    }
-    else {
-      to_hash.insert(to_hash.end(), kNullptr.begin(), kNullptr.end());
-    }
+    GetExtensionEncoding(to_hash);
     break;
-  }
   case Node::Type::kLeaf:
-  {
-    std::vector<std::byte> path_size_bytes = SizeToBytes(path.size());
-    to_hash.insert(to_hash.end(), path_size_bytes.begin(),
-                   path_size_bytes.end());
-
-    const std::vector<std::byte> path_bytes = path.ToByteVector();
-    to_hash.insert(to_hash.end(), path_bytes.begin(), path_bytes.end());
-
-    std::vector<std::byte> value_size_bytes =
-        SizeToBytes(value ? value->size() : 0);
-    to_hash.insert(to_hash.end(), value_size_bytes.begin(),
-                   value_size_bytes.end());
-
-    if (value) {
-      const std::string &v = *value;
-      std::transform(v.begin(), v.end(), std::back_inserter(to_hash),
-                     CastCharToByte);
-    }
+    GetLeafEncoding(to_hash);
     break;
-  }
   }
   return to_hash;
 }
@@ -365,6 +375,13 @@ Node::GetLeafEncodingSize(const std::vector<std::byte> &encodings, size_t idx,
   }
   idx += path_size_in_bytes;
 
+  constexpr size_t kValuePresentSize = sizeof(bool);
+  if (idx + kValuePresentSize > encodings.size()) {
+    return 0;
+  }
+  bool value_present = static_cast<bool>(encodings[idx]);
+  idx += kValuePresentSize;
+
   if (idx + sizeof(size_t) > encodings.size()) {
     return 0;
   }
@@ -374,7 +391,13 @@ Node::GetLeafEncodingSize(const std::vector<std::byte> &encodings, size_t idx,
   if (idx + value_size > encodings.size()) {
     return 0;
   }
-  v = std::string(reinterpret_cast<const char *>(&encodings[idx]), value_size);
+  if (value_present) {
+    v = std::string(reinterpret_cast<const char *>(&encodings[idx]),
+                    value_size);
+  }
+  else {
+    v = std::nullopt;
+  }
   idx += value_size;
 
   return idx - orig_idx;

@@ -110,6 +110,10 @@ private:
   void GetExtensionString(std::ostringstream &oss) const;
   void GetLeafString(std::ostringstream &oss) const;
 
+  void GetBranchEncoding(std::vector<std::byte> &encoding) const;
+  void GetExtensionEncoding(std::vector<std::byte> &encoding) const;
+  void GetLeafEncoding(std::vector<std::byte> &encoding) const;
+
   static size_t GetBranchEncodingSize(const std::vector<std::byte> &encodings,
                                       size_t idx,
                                       std::array<SHA256Hash, 16> &child_hashes,

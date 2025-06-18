@@ -632,7 +632,7 @@ TEST(MerkleTrie, HashLeaf)
 
   SHA256Hash hash = leaf.GetNodeHash();
   SHA256Hash expected = HashFromString(
-      "ed601bfeacd678e5814cb9adf207256004ce70dc2e41b8eda66ea002a5a03904");
+      "b8b1748d26a2919e0692c2bb970ccd1216b680f866c9a504bb173019ec1b0888");
   EXPECT_EQ(hash, expected);
 }
 
