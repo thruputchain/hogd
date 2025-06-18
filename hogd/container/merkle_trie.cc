@@ -43,27 +43,6 @@ MerkleTrie::str() const
   return oss.str();
 }
 
-std::pair<SHA256Hash, std::vector<std::byte>>
-MerkleTrie::GetProof(const Key &k)
-{
-  Node *node = FindNode(k);
-  if (!node) {
-    return {SHA256Hash(), {}};
-  }
-
-  std::vector<std::byte> ret;
-  while (true) {
-    if (!node) {
-      break;
-    }
-    std::vector<std::byte> encoding = node->GetNodeEncoding();
-    ret.insert(ret.end(), encoding.begin(), encoding.end());
-
-    node = node->parent;
-  }
-  return {GetRootHash(), ret};
-}
-
 std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
 MerkleTrie::GetProofByNode(const Key &k)
 {
@@ -83,6 +62,20 @@ MerkleTrie::GetProofByNode(const Key &k)
     node = node->parent;
   }
   return {GetRootHash(), ret};
+}
+
+std::pair<SHA256Hash, std::vector<std::byte>>
+MerkleTrie::GetProof(const Key &k)
+{
+  std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> proof =
+      GetProofByNode(k);
+  std::pair<SHA256Hash, std::vector<std::byte>> ret;
+  ret.first = proof.first;
+  for (const std::vector<std::byte> &node_encoding : proof.second) {
+    ret.second.insert(ret.second.end(), node_encoding.begin(),
+                      node_encoding.end());
+  }
+  return ret;
 }
 
 // static
