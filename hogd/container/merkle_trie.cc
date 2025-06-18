@@ -896,9 +896,7 @@ void
 MerkleTrie::FreeAllNodes(Node *root)
 {
   HexArray prefix;
-  auto f = [](const HexArray &path, Node &node) {
-    delete &node;
-  };
+  auto f = [](const HexArray &path, Node &node) { delete &node; };
   Walk(root, prefix, f);
 }
 
