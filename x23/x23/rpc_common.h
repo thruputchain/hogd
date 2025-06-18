@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <map>
+
 #include <x23/format.h>
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
@@ -86,6 +88,39 @@ struct ProgVers {
   std::uint32_t vers;
   friend bool operator==(ProgVers, ProgVers) = default;
   friend std::strong_ordering operator<=>(ProgVers, ProgVers) = default;
+};
+
+template<typename T>
+struct SrvMap : public std::map<ProgVers, std::unique_ptr<T>> {
+  using super = std::map<ProgVers, std::unique_ptr<T>>;
+  T *lookup(const rpc_msg &msg, rpc_msg *err) const
+  {
+    using enum accept_stat;
+    using enum reject_stat;
+    err->xid = msg.xid;
+    if (msg.body.cbody().rpcvers != 2) [[unlikely]] {
+      msg_set_reply_stat(err, RPC_MISMATCH);
+      return nullptr;
+    }
+
+    ProgVers pv{.prog = msg.body.cbody().prog, .vers = msg.body.cbody().vers};
+    auto it = super::find(pv);
+    if (it != super::end())
+      return it->second.get();
+
+    it = super::lower_bound(ProgVers{.prog = pv.prog, .vers = 0});
+    if (it == super::end() || it->first.prog != pv.prog)
+      msg_set_reply_stat(err, PROG_UNAVAIL);
+    else {
+      msg_set_reply_stat(err, PROG_MISMATCH);
+      auto &mmi = err->body.rbody().areply().reply_data.mismatch_info();
+      mmi.low = it->first.vers;
+      it = super::upper_bound(ProgVers{.prog = pv.prog, .vers = 0xffffffff});
+      mmi.high = (--it)->first.vers;
+    }
+    return nullptr;
+  }
+  T *lookup(rpc_msg *msgerr) const { return lookup(*msgerr, msgerr); }
 };
 
 // Invoke f<Vers::proc_meta<procno>> if such a type exists, otherwise

@@ -2,9 +2,15 @@
 #include <print>
 
 #include "x23/fileio.h"
+#include "x23/serialize.h"
 #include "x23/srpc.h"
+#include "x23/vec.h"
 
 namespace x23 {
+
+namespace {
+using enum msg_type;
+} // namespace
 
 SRpcFd::SRpcFd(UniqueFd fd)
   : max_message_size_(default_max_message_size), fd_(std::move(fd))
@@ -30,9 +36,8 @@ SRpcFd::read_worker()
   while (!ss_.stop_requested()) {
     size_t rdsz = kReadSize;
     if (rdbuf.size() > 4) {
-      auto msglen =
-          std::min<size_t>(max_message_size_,
-                           getbe<std::uint32_t>(rdbuf.data()) & 0x7fffffff);
+      std::uint32_t msglen = getbe<std::uint32_t>(rdbuf.data()) & 0x7fffffff;
+      msglen = std::min<std::uint32_t>(msglen, max_message_size_);
       if (msglen > rdbuf.size())
         rdsz = std::max(rdsz, msglen - rdbuf.size());
     }
@@ -46,7 +51,7 @@ SRpcFd::read_worker()
       return;
     }
 
-    while (rdbuf.size() >= 4) {
+    while (rdbuf.size() >= 4 && !ss_.stop_requested()) {
       std::uint32_t msglen = getbe<std::uint32_t>(rdbuf.data()) ^ 0x80000000;
 
       if (msglen > 0x7fffffff) {
@@ -63,20 +68,57 @@ SRpcFd::read_worker()
         fail();
         return;
       }
-
       if (rdbuf.size() < 4 + msglen)
-	break;
+        break;
 
-      // XXX - work in progress
+      input({rdbuf.data() + 4, msglen});
+      rdbuf.pop_front(4 + msglen);
     }
-
   }
+}
+
+void
+SRpcFd::input(BufView bytes)
+{
+  rpc_msg msg;
+  size_t n;
+  try {
+    n = deserialize_from(&msg, bytes);
+  } catch (const XdrException &e) {
+    std::println(stderr, "SRpcFd::input fd {}: {}", fd_.get(), e.what());
+    fail();
+    return;
+  }
+
+  if (msg.body.mtype() == CALL) {
+    Buf resp;
+    if (SRpcService *s = srvmap_.lookup(msg, &msg))
+      resp = s->serve(msg, bytes.subspan(n));
+    else
+      resp = serialize(msg);
+    auto q = write_queue_.take();
+    bool need_wake = q->empty();
+    q->emplace_back(std::move(resp), nullptr);
+    if (need_wake)
+      write_ready_.notify_one();
+    return;
+  }
+
+  auto pcs = pending_calls_.take();
+  if (auto pc = pcs->find(msg.xid); pc != pcs->end()) {
+    auto cb{std::move(pc->second)};
+    pcs->erase(pc);
+    pcs.reset();
+    cb(msg, bytes.subspan(n));
+  }
+  else
+    std::println(stderr, "SRpcFd::input fd {}: unknown Xid in reply",
+                 fd_.get());
 }
 
 void
 SRpcFd::write_worker()
 {
-  using enum msg_type;
   BufVec wrbuf;
   for (;;) {
     auto ptr = write_queue_.take();

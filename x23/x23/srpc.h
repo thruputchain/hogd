@@ -15,6 +15,10 @@
 
 namespace x23 {
 
+struct Foo {
+  int bar(int);
+};
+
 struct SRpcService {
   virtual ~SRpcService() {}
   virtual std::uint32_t program() const = 0;
@@ -28,9 +32,10 @@ struct SRpcService {
 
 class SRpcFd {
 public:
-  using CallCB = std::function<void(BufView)>;
+  using CallCB = std::function<void(const rpc_msg &, BufView)>;
   static inline size_t default_max_message_size = 0x200000;
   size_t max_message_size_;
+  SrvMap<SRpcService> srvmap_{};
 
   SRpcFd(UniqueFd fd);
   SRpcFd(const SRpcFd &) = delete;
@@ -42,8 +47,6 @@ private:
   using Xid = std::uint32_t;
 
   UniqueFd fd_;
-
-  std::map<ProgVers, std::unique_ptr<SRpcService>> services_{};
 
   Xid lastxid_{};
   MVar<std::unordered_map<Xid, CallCB>> pending_calls_;
@@ -58,6 +61,7 @@ private:
   std::stop_source ss_;
 
   void read_worker();
+  void input(BufView);
   void write_worker();
   void write_ready()
   {

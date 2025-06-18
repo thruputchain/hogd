@@ -118,37 +118,14 @@ RpcStreamImpl::reader(SLOC_ARG0)
 Detached
 RpcStreamImpl::serve_call(const rpc_msg &call, BufView args SLOC_ARG)
 {
-  using enum accept_stat;
-  using enum reject_stat;
   auto _r = shared_from_this();
-  const call_body &cb = call.body.cbody();
-  rpc_msg res{.xid = call.xid};
-
-  if (cb.rpcvers != 2) [[unlikely]] {
-    msg_set_reply_stat(&res, RPC_MISMATCH);
-    send_msg(res);
-    co_return;
+  rpc_msg res;
+  if (RpcService *s = srvmap_.lookup(call, &res)) {
+    Buf resp = co_await s->serve(call, args);
+    write_record(resp);
   }
-
-  auto it = srvmap_.find(ProgVers{cb.prog, cb.vers});
-  if (it == srvmap_.end()) {
-    it = srvmap_.lower_bound(ProgVers{cb.prog, 0});
-    if (it == srvmap_.end() || it->first.prog != cb.prog)
-      res.body.rbody().areply().reply_data.stat(PROG_UNAVAIL);
-    else {
-      res.body.rbody().areply().reply_data.stat(PROG_MISMATCH);
-      auto &mmi = res.body.rbody().areply().reply_data.mismatch_info();
-      mmi.low = it->first.vers;
-      it = srvmap_.upper_bound(ProgVers{cb.prog, 0xffffffff});
-      mmi.high = (--it)->first.vers;
-    }
+  else
     send_msg(res);
-    co_return;
-  }
-
-  RpcService *s = it->second.get();
-  Buf resp = co_await s->serve(call, args);
-  write_record(resp);
   co_return;
 }
 

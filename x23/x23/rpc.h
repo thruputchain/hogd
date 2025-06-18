@@ -231,7 +231,7 @@ protected:
   UniqueFd fd_;
   std::stop_source ss_;
   std::atomic<unsigned> nclients_{0};
-  std::map<ProgVers, std::unique_ptr<RpcService>> srvmap_;
+  SrvMap<RpcService> srvmap_;
 
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
