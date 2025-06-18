@@ -136,6 +136,119 @@ GetChildEncoding(std::vector<std::byte> &encoding,
   }
 }
 
+bool
+GetValueFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
+                     Node &node)
+{
+  if (idx + sizeof(size_t) > encodings.size()) {
+    return false;
+  }
+  constexpr size_t kValuePresentSize = sizeof(bool);
+  if (idx + kValuePresentSize > encodings.size()) {
+    return false;
+  }
+  bool value_present = static_cast<bool>(encodings[idx]);
+  idx += kValuePresentSize;
+
+  size_t value_size = static_cast<size_t>(encodings[idx]);
+  idx += sizeof(size_t);
+
+  if (idx + value_size > encodings.size()) {
+    return false;
+  }
+  if (value_present) {
+    node.value = std::string(reinterpret_cast<const char *>(&encodings[idx]),
+                             value_size);
+  }
+  else {
+    node.value = std::nullopt;
+  }
+  idx += value_size;
+
+  return true;
+}
+
+bool
+GetPathFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
+                    Node &node)
+{
+  if (idx + sizeof(size_t) > encodings.size()) {
+    return false;
+  }
+  size_t path_size = static_cast<size_t>(encodings[idx]);
+  idx += sizeof(size_t);
+  size_t path_size_in_bytes = (path_size + 1) / 2;
+
+  // TODO: Get the path.
+  if (idx + path_size_in_bytes > encodings.size()) {
+    return false;
+  }
+  idx += path_size_in_bytes;
+
+  return true;
+}
+
+bool
+GetBranchesFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
+                        Node &node, size_t num_branches)
+{
+  size_t branch_encoding_size = num_branches * sizeof(SHA256Hash);
+  if (idx + branch_encoding_size > encodings.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < num_branches; i++) {
+    size_t start = idx + (i * sizeof(SHA256Hash));
+    memcpy(&node.child[i], &encodings[start], sizeof(SHA256Hash));
+  }
+  idx += branch_encoding_size;
+
+  return true;
+}
+
+bool
+GetBranchFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
+                      Node &node)
+{
+  if (!GetValueFromEncoding(encodings, idx, node)) {
+    return false;
+  }
+  if (!GetBranchesFromEncoding(encodings, idx, node, /*num_branches=*/16)) {
+    return false;
+  }
+
+  return true;
+}
+
+size_t
+GetExtensionFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
+                         Node &node)
+{
+  if (!GetPathFromEncoding(encodings, idx, node)) {
+    return false;
+  }
+
+  if (!GetBranchesFromEncoding(encodings, idx, node, /*num_branches=*/1)) {
+    return false;
+  }
+
+  return true;
+}
+
+size_t
+GetLeafFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
+                    Node &node)
+{
+  if (!GetPathFromEncoding(encodings, idx, node)) {
+    return false;
+  }
+
+  if (!GetValueFromEncoding(encodings, idx, node)) {
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace
 
 void
@@ -172,10 +285,8 @@ Node::str() const
 
   switch (type) {
   case Node::Type::kBranch:
-  {
     GetBranchString(oss);
     break;
-  }
   case Node::Type::kExtension:
     GetExtensionString(oss);
     break;
@@ -226,6 +337,33 @@ Node::GetNodeEncoding()
     break;
   }
   return to_hash;
+}
+
+bool
+Node::GetNodeFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
+                          Node &node)
+{
+  static constexpr size_t kTypeSize = 1;
+  if (idx + kTypeSize > encodings.size()) {
+    return false;
+  }
+  node.type = static_cast<Type>(encodings[idx++]);
+
+  switch (node.type) {
+  case Node::Type::kBranch:
+    return GetBranchFromEncoding(encodings, idx, node);
+    break;
+  case Node::Type::kExtension:
+    return GetExtensionFromEncoding(encodings, idx, node);
+    break;
+  case Node::Type::kLeaf:
+    return GetLeafFromEncoding(encodings, idx, node);
+    break;
+  default:
+    // Improper node type in the encoding.
+    return false;
+    break;
+  }
 }
 
 bool

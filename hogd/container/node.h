@@ -88,6 +88,8 @@ public:
 
   SHA256Hash GetNodeHash() { return sha256(GetNodeEncoding()); }
 
+  static bool GetNodeFromEncoding(const std::vector<std::byte> &encodings,
+                                  size_t &idx, Node &node);
   static bool GetNodeHashFromEncoding(const std::vector<std::byte> &encodings,
                                       size_t &idx, SHA256Hash &hash,
                                       Node::Type &type, size_t &path_size,
