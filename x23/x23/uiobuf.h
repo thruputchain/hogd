@@ -120,6 +120,7 @@ static_assert(is_bytevec<VecQ<std::uint8_t>>);
 // kCopyThreshold, but will assume ownership of larger Bufs moved in.
 struct BufVec {
   static constexpr size_t kCopyThreshold = 4096;
+  static constexpr size_t kChunkSize = 2 * kCopyThreshold;
 
   VecQ<Buf> bufs_;
   size_t skip_{};
@@ -136,15 +137,14 @@ struct BufVec {
     if (offset)
       b = b.subspan(offset);
     if (backfull(b.size())) {
-      Buf back;
-      back.reserve(std::max(kCopyThreshold, b.size()));
+      Buf &back = bufs_.emplace_back();
+      back.reserve(std::max(kChunkSize, b.size()));
       back.append_range(b);
-      bufs_.emplace_back(std::move(back));
     }
     else
       bufs_.back().append_range(b);
   }
-  void append(Buf &&b, size_t offset)
+  void append(Buf &&b, size_t offset = 0)
   {
     if (b.size() >= kCopyThreshold && (offset == 0 || empty())) {
       bufs_.emplace_back(std::move(b));
@@ -155,14 +155,40 @@ struct BufVec {
       append(BufView{b}, offset);
   }
 
-  /* Work in progress
-  template<std::ranges::range R>
-  void append_many(R &&r)
-    requires std::is_rvalue_reference_v<decltype(r)> &&
-    std::same_as<std::ranges::range_value_t<R>, Buf>
+  template<std::ranges::forward_range R>
+  void move_append_range(R &&r)
+    requires requires { { std::move(*r.begin()) } -> std::same_as<Buf &&>; }
   {
+    auto it = r.begin();
+    while (it != r.end() && !backfull(r.size())) {
+      bufs_.back().append_range(*it);
+      (*it).clear();
+      ++it;
+    }
+
+    while (it != r.end()) {
+      if ((*it).size() >= kCopyThreshold) {
+	bufs_.emplace_back(std::move(*it++));
+	continue;
+      }
+
+      size_t n = 0;
+      auto eit = it;
+      while (eit != r.end() && (*eit).size() < kCopyThreshold) {
+	n += (*eit).size();
+	++eit;
+      }
+      if (eit == r.end())
+	n = std::max(n, kChunkSize);
+      Buf &back = bufs_.emplace_back();
+      back.reserve(n);
+      while (it != eit) {
+	back.append_range(*it);
+	(*it).clear();
+	++it;
+      }
+    }
   }
-  */
 
   void trim(size_t n)
   {
@@ -206,7 +232,7 @@ struct BufVec {
       trim(n);
       return !empty();
     }
-    if (errno == EAGAIN)
+    if (errno == EAGAIN)	// XXX not appropriate for srpc
       return true;
     Errno ret;
     clear();
