@@ -40,25 +40,12 @@ std::vector<std::byte>
 SizeToBytes(size_t s)
 {
   std::vector<std::byte> ret;
+  ret.reserve(sizeof(size_t));
+
   for (size_t i = 0; i < sizeof(size_t); i++) {
     ret.push_back(std::byte((s >> (8 * i)) & 0xFF));
   }
   return ret;
-}
-
-std::string
-GetTypeString(Node::Type type)
-{
-  switch (type) {
-  case Node::Type::kBranch:
-    return "Branch";
-  case Node::Type::kExtension:
-    return "Extension";
-  case Node::Type::kLeaf:
-    return "Leaf";
-  default:
-    return "Unknown-Node-Type";
-  }
 }
 
 void

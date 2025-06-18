@@ -99,16 +99,7 @@ public:
   std::string str() const;
   friend std::ostream &operator<<(std::ostream &os, const Type type)
   {
-    switch (type) {
-    case Type::kBranch:
-      return os << "Branch";
-    case Type::kExtension:
-      return os << "Extension";
-    case Type::kLeaf:
-      return os << "Leaf";
-    default:
-      return os << "Unknown-Node-Type";
-    }
+    return os << GetTypeString(type);
   }
   friend std::ostream &operator<<(std::ostream &os, const Node &node)
   {
@@ -123,6 +114,20 @@ private:
     node->parent = parent;
 
     return node;
+  }
+
+  static std::string GetTypeString(Type type)
+  {
+    switch (type) {
+    case Type::kBranch:
+      return "Branch";
+    case Type::kExtension:
+      return "Extension";
+    case Type::kLeaf:
+      return "Leaf";
+    default:
+      return "Unknown-Node-Type";
+    }
   }
 
   void GetBranchString(std::ostringstream &oss) const;
