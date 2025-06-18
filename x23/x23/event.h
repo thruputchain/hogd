@@ -74,24 +74,60 @@ private:
   atomic_shared_ptr<T> t_;
 };
 
-struct ReadBuffer : std::enable_shared_from_this<ReadBuffer> {
-  using Super = std::enable_shared_from_this<ReadBuffer>;
-  using Mem = std::array<char, 4092 - sizeof(Super)>;
+template<std::size_t StructSize = 4096>
+struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
+  static constexpr size_t kStructSize = StructSize;
+  using PosType = std::conditional_t<
+      kStructSize <= 0xff, std::uint8_t,
+      std::conditional_t<kStructSize <= 0xffff, std::uint16_t,
+                         std::conditional_t<kStructSize <= 0xffffffff,
+                                            std::uint32_t, size_t>>>;
+  using Super = std::enable_shared_from_this<GenReadBuffer>;
+  static constexpr size_t kTrimSize = sizeof(Super) + (2 * sizeof(PosType));
+  static_assert(kStructSize > kTrimSize);
+  using Mem = std::array<char, kStructSize - kTrimSize>;
 
-  std::uint16_t start_{};
-  std::uint16_t stop_{};
+  PosType start_{};
+  PosType stop_{};
   Mem m_;
 
-  ReadBuffer() noexcept = default;
-  ReadBuffer(ReadBuffer &&) noexcept = delete;
+  GenReadBuffer() noexcept = default;
+  GenReadBuffer(GenReadBuffer &&) noexcept = delete;
 
-  ssize_t operator()(int fd, void *buf, size_t len);
+  ssize_t operator()(int fd, void *buf, size_t len)
+  {
+    if (len == 0)
+      return 0;
+    assert(len <= PTRDIFF_MAX);
+
+    if (size_t buflen = stop_ - start_) {
+      size_t n = std::min(len, buflen);
+      memcpy(buf, m_.data() + start_, n);
+      start_ += n;
+      return n;
+    }
+
+    start_ = stop_ = 0;
+
+    struct iovec iov[2];
+    iov[0].iov_base = buf;
+    iov[0].iov_len = len;
+    iov[1].iov_base = m_.data();
+    iov[1].iov_len = m_.size();
+    auto n = ::readv(fd, iov, 2);
+    if (n <= ptrdiff_t(len))
+      return n;
+    stop_ = n - len;
+    return len;
+  }
+
   std::expected<size_t, Errno> read(BorrowedFd fd, is_bytevec auto *buf,
                                     size_t len)
   {
     return x23::read(fd, buf, len, this);
   }
 };
+using ReadBuffer = GenReadBuffer<4096>;
 
 struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
   CoroLock write_lock_;
@@ -215,9 +251,9 @@ private:
     Mode mode() const
     {
       for (;;) {
-	if (Mode m = mode_; m != kLocked)
-	  return m;
-	mode_.wait(kLocked, std::memory_order_relaxed);
+        if (Mode m = mode_; m != kLocked)
+          return m;
+        mode_.wait(kLocked, std::memory_order_relaxed);
       }
     }
 
@@ -366,7 +402,7 @@ public:
   connect(BorrowedFd fd, const sockaddr_storage *ss SLOC_PARM)
   {
     return connect(fd, reinterpret_cast<const sockaddr *>(ss),
-		   sizeof(*ss) X23_IFTRACE(, sloc));
+                   sizeof(*ss) X23_IFTRACE(, sloc));
   }
 
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,

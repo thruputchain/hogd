@@ -20,34 +20,6 @@ namespace x23 {
 
 namespace detail {
 
-ssize_t
-ReadBuffer::operator()(int fd, void *buf, size_t len)
-{
-  if (len == 0)
-    return 0;
-  assert(len <= PTRDIFF_MAX);
-
-  if (size_t buflen = stop_ - start_) {
-    size_t n = std::min(len, buflen);
-    memcpy(buf, m_.data() + start_, n);
-    start_ += n;
-    return n;
-  }
-
-  start_ = stop_ = 0;
-
-  struct iovec iov[2];
-  iov[0].iov_base = buf;
-  iov[0].iov_len = len;
-  iov[1].iov_base = m_.data();
-  iov[1].iov_len = m_.size();
-  auto n = ::readv(fd, iov, 2);
-  if (n <= ptrdiff_t(len))
-    return n;
-  stop_ = n - len;
-  return len;
-}
-
 Async<std::expected<void, Errno>>
 WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
 {

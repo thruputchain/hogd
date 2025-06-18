@@ -141,8 +141,6 @@ struct RpcDispatcher : RpcService {
   [[no_unique_address]] Logger logger_;
   [[no_unique_address]] std::tuple<ExtraArgs...> ea_;
 
-  RpcDispatcher(Impl impl, ExtraArgs... ea) : impl_(impl), ea_(std::move(ea)...)
-  {}
   RpcDispatcher(Impl impl, Logger log, ExtraArgs... ea)
     : impl_(std::move(impl)), logger_(log), ea_(std::move(ea)...)
   {}
@@ -167,8 +165,8 @@ private:
     const rpc_msg &callmsg_;
     const BufView argbytes_;
 
-    template<std::same_as<void>> Async<Buf> operator()(this Executor self
-						       SLOC_PARM)
+    template<std::same_as<void>>
+    Async<Buf> operator()(this Executor self SLOC_PARM)
     {
       using enum accept_stat;
       rpc_msg err{.xid = self.callmsg_.xid};
@@ -177,8 +175,8 @@ private:
       self.d_.logger_.template log_server<VersMeta>(err);
       co_return make_record(err);
     }
-    template<typename ProcMeta> Async<Buf> operator()(this Executor self
-						      SLOC_PARM)
+    template<typename ProcMeta>
+    Async<Buf> operator()(this Executor self SLOC_PARM)
     {
       using enum accept_stat;
       typename ProcMeta::arg_type args;

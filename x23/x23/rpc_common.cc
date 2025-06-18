@@ -1,0 +1,38 @@
+
+#include "x23/rpc_common.h"
+#include "x23/sockio.h"
+
+namespace x23 {
+
+RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
+{
+  peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
+}
+
+std::string
+msg_show_stat(const rpc_msg &msg)
+{
+  using enum accept_stat;
+  using enum reject_stat;
+  using enum msg_type;
+  using enum reply_stat;
+  if (msg.body.mtype() != REPLY) [[unlikely]]
+    return "CALL";
+  if (msg.body.rbody().stat() == MSG_ACCEPTED) [[likely]] {
+    if (accept_stat stat = msg.body.rbody().areply().reply_data.stat();
+        stat == PROG_MISMATCH)
+      return std::format(
+          "PROG_MISMATCH[low={},high={}]",
+          msg.body.rbody().areply().reply_data.mismatch_info().low,
+          msg.body.rbody().areply().reply_data.mismatch_info().high);
+    else
+      return std::format("{}", stat);
+  }
+  else if (reject_stat stat = msg.body.rbody().rreply().stat();
+           stat == AUTH_ERROR)
+    return std::format("{}", msg.body.rbody().rreply().rj_why());
+  else
+    return std::format("{}", stat);
+}
+
+} // namespace x23

@@ -9,6 +9,7 @@
 
 #include <x23/cleanup.h>
 #include <x23/err.h>
+#include <x23/fileio.h>
 #include <x23/vec.h>
 
 namespace x23 {
@@ -87,6 +88,7 @@ public:
     reserve(new_size);
     super::resize_uninitialized(new_size + offset_);
   }
+  using super::resize_and_overwrite;
 
   void reserve(size_type cap)
   {
@@ -110,6 +112,7 @@ public:
 private:
   size_type offset_{};
 };
+static_assert(is_bytevec<VecQ<std::uint8_t>>);
 
 // This is a vector of buffers that can be turned into an array of
 // iovec structures for use with writev.  Let's you trim an arbitrary
@@ -146,11 +149,20 @@ struct BufVec {
     if (b.size() >= kCopyThreshold && (offset == 0 || empty())) {
       bufs_.emplace_back(std::move(b));
       if (offset)
-	trim(offset);
+        trim(offset);
     }
     else
       append(BufView{b}, offset);
   }
+
+  /* Work in progress
+  template<std::ranges::range R>
+  void append_many(R &&r)
+    requires std::is_rvalue_reference_v<decltype(r)> &&
+    std::same_as<std::ranges::range_value_t<R>, Buf>
+  {
+  }
+  */
 
   void trim(size_t n)
   {
@@ -208,21 +220,21 @@ struct BufVec {
   // false.
   template<typename Buf>
   std::expected<bool, Errno> write_or_append(BorrowedFd fd, Buf &&buf)
-    requires requires { append(std::forward<Buf>(buf)); }
+      requires requires { append(std::forward<Buf>(buf)); }
   {
     if (empty()) {
       size_t n = ::write(fd.get(), buf.data(), buf.size());
       if (n < 0) {
-	if (errno != EAGAIN) {
-	  Errno ret;
-	  clear();
-	  return ret;
-	}
-	n = 0;
+        if (errno != EAGAIN) {
+          Errno ret;
+          clear();
+          return ret;
+        }
+        n = 0;
       }
       if (size_t(n) < buf.size()) {
-	append(std::forward<Buf>(buf), n);
-	return true;
+        append(std::forward<Buf>(buf), n);
+        return true;
       }
     }
     else

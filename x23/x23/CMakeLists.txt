@@ -4,8 +4,8 @@ add_library(x23
   atomicsharedptr.h
   callsite.h
   cleanup.h
-  corosync.h
   corosync.cc
+  corosync.h
   corotrace.h
   err.h
   event.cc
@@ -18,15 +18,15 @@ add_library(x23
   mvar.h
   refcnt.h
   rpc.cc
-  rpc.h
   rpc_common.cc
   rpc_common.h
+  rpc.h
   rpc_msg.x
   serialize.h
-  sockio.h
   sockio.cc
-  srpc.h
+  sockio.h
   srpc.cc
+  srpc.h
   testlock.h
   threadpool.cc
   threadpool.h

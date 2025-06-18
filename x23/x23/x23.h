@@ -61,7 +61,8 @@ constexpr auto num_string_array = []<size_t... I>(std::index_sequence<I...>) {
 } // namespace detail
 
 // Treat tuples like structures to make it easy to bundle multiple
-// arguments into a tuple.  Also, makes XdrVoid marshalabe.
+// arguments into a tuple.  Also, makes std::tuple<> serialize to 0
+// bytes.
 template<typename... T> struct xdr_meta<std::tuple<T...>> {
   static constexpr XdrCategory category = XdrCategory::kStruct;
   static constexpr const char *type_name = "tuple";
