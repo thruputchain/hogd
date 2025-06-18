@@ -55,17 +55,17 @@ StringFromHash(const SHA256Hash &hash)
 TEST(MerkleTrie, TwoLeaves)
 {
   MerkleTrie trie;
-  trie.Print();
+  std::cout << trie << std::endl;
 
   HexArray key("1234");
   std::string value = "hello";
   trie.insert(key, value);
-  trie.Print();
+  std::cout << trie << std::endl;
 
   key = HexArray("1223");
   value = "hello again";
   trie.insert(key, value);
-  trie.Print();
+  std::cout << trie << std::endl;
 }
 
 TEST(MerkleTrie, TwoLeavesFind)
@@ -98,25 +98,25 @@ TEST(MerkleTrie, TwoLeavesRemove)
   HexArray key_b("1223");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
-  trie.Print();
+  std::cout << trie << std::endl;
   trie.remove(key_b);
-  trie.Print();
+  std::cout << trie << std::endl;
 }
 
 TEST(MerkleTrie, BranchAndLeaf)
 {
   MerkleTrie trie;
-  trie.Print();
+  std::cout << trie << std::endl;
 
   HexArray key("1234");
   std::string value = "hello";
   trie.insert(key, value);
-  trie.Print();
+  std::cout << trie << std::endl;
 
   key = HexArray("123456");
   value = "hello again";
   trie.insert(key, value);
-  trie.Print();
+  std::cout << trie << std::endl;
 }
 
 TEST(MerkleTrie, BranchAndLeafRemove)
@@ -131,9 +131,9 @@ TEST(MerkleTrie, BranchAndLeafRemove)
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
 
-  trie.Print();
+  std::cout << trie << std::endl;
   trie.remove(key_b);
-  trie.Print();
+  std::cout << trie << std::endl;
 }
 
 TEST(MerkleTrie, BranchAndLeafFind)
@@ -183,14 +183,14 @@ TEST(MerkleTrie, BranchBranchLeaf)
   trie.insert(key_a, value_a);
   EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(trie.find(HexArray("12")), nullptr);
-  trie.Print();
+  std::cout << trie << std::endl;
 
   HexArray key_b("7ead1e640fb4854117ef3f882338ae");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
   EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(*trie.find(key_b), value_b);
-  trie.Print();
+  std::cout << trie << std::endl;
 
   HexArray key_c("76");
   std::string value_c = "hello three";
@@ -198,28 +198,28 @@ TEST(MerkleTrie, BranchBranchLeaf)
   EXPECT_EQ(*trie.find(key_a), value_a);
   EXPECT_EQ(*trie.find(key_b), value_b);
   EXPECT_EQ(*trie.find(key_c), value_c);
-  trie.Print();
+  std::cout << trie << std::endl;
 }
 
 TEST(MerkleTrie, TwoLeavesAndOneBranch)
 {
   MerkleTrie trie;
-  trie.Print();
+  std::cout << trie << std::endl;
 
   HexArray key("1234");
   std::string value = "hello";
   trie.insert(key, value);
-  trie.Print();
+  std::cout << trie << std::endl;
 
   key = HexArray("123456");
   value = "hello again";
   trie.insert(key, value);
-  trie.Print();
+  std::cout << trie << std::endl;
 
   key = HexArray("12ab");
   value = "hello three";
   trie.insert(key, value);
-  trie.Print();
+  std::cout << trie << std::endl;
 }
 
 TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
@@ -310,9 +310,9 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
   std::string value_c = "hello three";
   trie.insert(key_c, value_c);
 
-  trie.Print();
+  std::cout << trie << std::endl;
   trie.remove(key_b);
-  trie.Print();
+  std::cout << trie << std::endl;
 }
 
 TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
@@ -331,7 +331,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   std::string value_c = "hello three";
   trie.insert(key_c, value_c);
 
-  trie.Print();
+  std::cout << trie << std::endl;
   const auto &[root_hash, node_encodings] = trie.GetProof(key_b);
   const auto &[root_hash_by_node, node_encodings_by_node] =
       trie.GetProofByNode(key_b);
@@ -520,13 +520,13 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
   HexArray key_b("267124564f6835");
   std::string value_b = "hello again";
   trie.insert(key_b, value_b);
-  trie.Print();
+  std::cout << trie << std::endl;
 
   // This needs to be placed directly into the branch under the extension node.
   HexArray key_c("2671");
   std::string value_c = "hello three";
   trie.insert(key_c, value_c);
-  trie.Print();
+  std::cout << trie << std::endl;
 
   std::map<HexArray, std::string> seen;
   auto f = [&seen](const std::pair<HexArray, std::string> &pair) {

@@ -98,6 +98,10 @@ public:
   SHA256Hash GetNodeHash() { return sha256(GetNodeEncoding()); }
 
   std::string str() const;
+  friend std::ostream &operator<<(std::ostream &os, const Node &node)
+  {
+    return os << node.str();
+  }
 
 private:
   static Node *Create(Type type, Node *parent)

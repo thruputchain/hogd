@@ -30,15 +30,17 @@
 
 namespace hogd {
 
-void
-MerkleTrie::Print()
+std::string
+MerkleTrie::str() const
 {
   HexArray prefix;
-  auto per_node = [](const HexArray &path, Node &node) {
-    std::cout << node.str() << std::endl;
+  std::ostringstream oss;
+  auto per_node = [&oss](const HexArray &path, Node &node) {
+    oss << node << std::endl;
   };
   Walk(root_, prefix, per_node);
-  printf("----------\n\n");
+  oss << "----------" << std::endl;
+  return oss.str();
 }
 
 std::pair<SHA256Hash, std::vector<std::byte>>
@@ -743,6 +745,7 @@ MerkleTrie::InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
   return to_hash;
 }
 
+// static
 void
 MerkleTrie::Walk(Node *root, HexArray &prefix,
                  const std::function<void(const HexArray &, Node &)> &f)

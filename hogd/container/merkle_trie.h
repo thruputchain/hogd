@@ -55,8 +55,11 @@ public:
   MerkleTrie(MerkleTrie &&) noexcept = default;
   MerkleTrie &operator=(MerkleTrie &&) noexcept = default;
 
-  // TODO: Use Walk() instead.
-  void Print();
+  std::string str() const;
+  friend std::ostream &operator<<(std::ostream &os, const MerkleTrie &trie)
+  {
+    return os << trie.str();
+  }
 
   // Basic sanity checks on the tree.
   void Check() { CheckHelper(root_, /*parent=*/nullptr); }
@@ -148,8 +151,8 @@ private:
   Node *InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
                               const Key &k, size_t idx, T &&obj);
 
-  void Walk(Node *root, HexArray &prefix,
-            const std::function<void(const HexArray &, Node &)> &f);
+  static void Walk(Node *root, HexArray &prefix,
+                   const std::function<void(const HexArray &, Node &)> &f);
 
   Node *TraverseToBottom(Node *root, Node *prev_root, Node *last_branch_seen,
                          std::byte last_branch_hex_seen, const HexArray &path,
