@@ -65,6 +65,58 @@ BranchHasChildHash(const Node::Raw &node, const SHA256Hash &child_hash)
   return num_matches == 1;
 }
 
+void
+CheckBranch(Node *branch)
+{
+  if (branch->path.size()) {
+    printf("Unexpected path in branch: [%s]\n", branch->path.str().c_str());
+  }
+  size_t num_children = 0;
+  for (Node *child : branch->child) {
+    if (child) {
+      num_children++;
+    }
+  }
+  if (!num_children) {
+    printf("Branch node has no children\n");
+  }
+  if (!branch->value && num_children == 1) {
+    // Check if this is the root node. The root node is a branch that is
+    // allowed to have no children.
+    if (branch->parent) {
+      printf("Branch node has no value and only one child\n");
+    }
+  }
+}
+
+void
+CheckExtension(Node *extension)
+{
+  if (!extension->path.size()) {
+    printf("Unexpected empty path in extension: [%s]\n",
+           extension->path.str().c_str());
+  }
+  if (extension->child[0]) {
+    if (extension->child[0]->type == Node::Type::kExtension) {
+      printf("Extension node has extension node as child\n");
+    }
+    else if (extension->child[0]->type == Node::Type::kLeaf) {
+      printf("Extension node has leaf node as child\n");
+    }
+  }
+  else {
+    printf("Extension node has no child\n");
+  }
+}
+
+void
+CheckLeaf(Node *leaf)
+{
+  if (!leaf->value) {
+    printf("Unexpected empty value in leaf\n");
+  }
+}
+
 } // namespace
 
 std::string
@@ -504,50 +556,18 @@ MerkleTrie::CheckHelper(Node *root, Node *parent)
   switch (root->type) {
   case Node::Type::kBranch:
   {
-    if (root->path.size()) {
-      printf("Unexpected path in branch: [%s]\n", root->path.str().c_str());
-    }
-    size_t num_children = 0;
+    CheckBranch(root);
     for (Node *child : root->child) {
-      if (child) {
-        num_children++;
-      }
       CheckHelper(child, root);
-    }
-    if (!num_children) {
-      printf("Branch node has no children\n");
-    }
-    if (!root->value && num_children == 1) {
-      // Check if this is the root node. The root node is a branch that is
-      // allowed to have no children.
-      if (root->parent) {
-        printf("Branch node has no value and only one child\n");
-      }
     }
     break;
   }
   case Node::Type::kExtension:
-    if (!root->path.size()) {
-      printf("Unexpected empty path in extension: [%s]\n",
-             root->path.str().c_str());
-    }
-    if (root->child[0]) {
-      if (root->child[0]->type == Node::Type::kExtension) {
-        printf("Extension node has extension node as child\n");
-      }
-      else if (root->child[0]->type == Node::Type::kLeaf) {
-        printf("Extension node has leaf node as child\n");
-      }
-    }
-    else {
-      printf("Extension node has no child\n");
-    }
+    CheckExtension(root);
     CheckHelper(root->child[0], root);
     break;
   case Node::Type::kLeaf:
-    if (!root->value) {
-      printf("Unexpected empty value in leaf\n");
-    }
+    CheckLeaf(root);
     break;
   default:
     printf("Unknown node type: %d\n", static_cast<int>(root->type));
