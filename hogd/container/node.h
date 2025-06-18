@@ -92,11 +92,10 @@ public:
   }
 
   std::vector<std::byte> GetNodeEncoding();
-
-  SHA256Hash GetNodeHash() { return sha256(GetNodeEncoding()); }
-
   static bool GetNodeFromEncoding(const std::vector<std::byte> &encodings,
                                   size_t &idx, Node::Raw &node);
+
+  SHA256Hash GetNodeHash() { return sha256(GetNodeEncoding()); }
 
   std::string str() const;
 
