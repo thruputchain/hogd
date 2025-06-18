@@ -132,6 +132,8 @@ private:
   Node *InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
                               const Key &k, size_t idx, T &&obj);
 
+  static std::string StringFromNode(Node *root);
+
   // Does a post-order traversal of the tree starting at [root] with path
   // [prefix], calling [f] on each node.
   //

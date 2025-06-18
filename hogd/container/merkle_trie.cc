@@ -119,17 +119,60 @@ CheckLeaf(Node *leaf)
 
 } // namespace
 
+// static
 std::string
-MerkleTrie::str() const
+MerkleTrie::StringFromNode(Node *root)
 {
   HexArray prefix;
   std::ostringstream oss;
   auto per_node = [&oss](const HexArray &path, Node &node) {
     oss << node << std::endl;
   };
-  Walk(root_, prefix, per_node);
+  Walk(root, prefix, per_node);
   oss << "----------" << std::endl;
   return oss.str();
+}
+
+std::string
+MerkleTrie::str() const
+{
+  return StringFromNode(root_);
+}
+
+// static
+void
+MerkleTrie::Walk(Node *root, HexArray &prefix,
+                 const std::function<void(const HexArray &, Node &)> &f)
+{
+  if (!root) {
+    return;
+  }
+
+  switch (root->type) {
+  case Node::Type::kBranch:
+    for (size_t i = 0; i < root->child.size(); i++) {
+      std::byte digit = static_cast<std::byte>(i);
+
+      prefix.Append(digit);
+      Walk(root->child[i], prefix, f);
+      prefix.RemoveFromBack(1);
+    }
+    f(prefix, *root);
+    break;
+  case Node::Type::kExtension:
+    CHECK_PTR(root->child[0]);
+
+    prefix.Append(root->path);
+    Walk(root->child[0], prefix, f);
+    f(prefix, *root);
+    prefix.RemoveFromBack(root->path.size());
+    break;
+  case Node::Type::kLeaf:
+    prefix.Append(root->path);
+    f(prefix, *root);
+    prefix.RemoveFromBack(root->path.size());
+    break;
+  }
 }
 
 std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
@@ -255,6 +298,7 @@ MerkleTrie::find(const Key &k)
       break;
     case Node::Type::kLeaf:
     {
+      // A leaf must always have a value.
       CHECK(node->value.has_value());
       // Get the [std::string] out of the [std::optional<std::string>] with
       // the dereference operator.
@@ -297,10 +341,15 @@ MerkleTrie::insert(const Key &k, T &&obj)
     // the branch node.
     CHECK(!next->value.has_value());
     next->value = std::move(obj);
-    next->hash = next->GetNodeHash();
     to_hash = next;
   }
   else {
+    // The key does not map to an existing node. We must next check the branch
+    // to see if it has any children on the path corresponding to the key. If
+    // so, we need to handle the children, such as by splitting part an
+    // extension node. If there are no children, we can create a leaf node for
+    // the key and add it as a child of the branch.
+
     std::byte digit = k.Get(idx);
     size_t branch_idx = std::to_integer<size_t>(digit);
     if (next->child[branch_idx]) {
@@ -317,18 +366,6 @@ MerkleTrie::insert(const Key &k, T &&obj)
       // underneath the branch node (with an updated [path]), and
       // also create and place a new leaf node for [k] under the branch node.
       //
-      // 2. If the child is a leaf node, check to see what remaining hex
-      // characters the key and the leaf node have in common. If there is at
-      // least one common character, then we should create an extension node
-      // for the common path. Once the hex characters diverge, we should
-      // create a branch node. There are two options here:
-      //   a) One of the two keys ends on the branch, at which point we can
-      //   place this shorter key's value in the branch node and the other
-      //   key's value in a leaf of the branch.
-      //
-      //   b) Neither of the two keys has ended yet. Place each key's value in
-      //   its own leaf node under the branch (so there will be two leaf
-      //   nodes).
       if (next->child[branch_idx]->type == Node::Type::kExtension) {
         to_hash = InsertHandleExtensionChild(next->child[branch_idx], next, k,
                                              idx, std::move(obj));
@@ -347,10 +384,9 @@ MerkleTrie::insert(const Key &k, T &&obj)
       // node.
       leaf->path = k.GetSubarray(idx + 1, k.size());
       leaf->value = std::move(obj);
-      leaf->hash = leaf->GetNodeHash();
 
       next->child[branch_idx] = leaf;
-      to_hash = next;
+      to_hash = leaf;
     }
   }
 
@@ -591,92 +627,182 @@ MerkleTrie::FindNode(const Key &k)
   return existing_key;
 }
 
-// See the callsite for comments on this function.
+// We are inserting [k] into the trie, and it conflicts with an extension node
+// on the same path. This method resolves that conflict.
+//
+// Example:
+// We are inserting [k = 0x1234] into the trie and it conflicts with an
+// extension node with path [0x256]. In this case, we will replace the extension
+// node with the following:
+//
+// First Extension Node: Path is [0x2] with child c. Child is the branch node
+//                       below.
+// Branch Node: Has a leaf for [k] as child [0x3]. Has the second extension node
+//              below as as child [0x5].
+// Second Extension Node: Path is [0x6]. The child is c.
 Node *
-MerkleTrie::InsertHandleExtensionChild(Node *current_extension,
-                                       Node *parent_branch, const Key &k,
-                                       size_t idx, T &&obj)
+MerkleTrie::InsertHandleExtensionChild(Node *extension, Node *parent_branch,
+                                       const Key &k, size_t idx, T &&obj)
 {
+  CHECK_EQ(extension->type, Node::Type::kExtension);
+  CHECK_GT(extension->path.size(), 0);
+
+  // [key_window] holds the portion of [k] that we are currently looking at. In
+  // other words, we omit the prefix of [k] that corresponds to the nodes in the
+  // tree we have already visited.
+  //
   // We add 1 since one of the digits will be included in the [parent_branch]
   // node.
-  Key key_a = k.GetSubarray(idx + 1, k.size());
+  const Key key_window = k.GetSubarray(idx + 1, k.size());
 
   size_t common_range_length =
-      GetLongestCommonRangeLength(key_a, 0, current_extension->path, 0);
+      GetLongestCommonRangeLength(key_window, 0, extension->path, 0);
   size_t diverge_idx = common_range_length;
 
-  // TODO: This extension node could have a path length of 0. We should omit
-  // the extension node in that case.
-  Node *new_branch_node;
-  if (diverge_idx) {
-    Node *new_extension_node = Node::CreateExtension(/*parent=*/parent_branch);
-    new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
+  // We are going to create a new branch node, with a leaf for [key_window] as
+  // one child and the existing subtree as the other child.
+  //
+  // See the comments below. It is possible that we place [key_window] directly
+  // into the branch. It is also possible that we omit part of the existing
+  // subtree, too.
+  Node *branch;
+  if (common_range_length) {
+    // [key_window] and the extension node have a common range, so we are going
+    // to break the extension node into two extension nodes:
+    //
+    // 1. The first extension node will have the path that is present in both
+    // [key_window] and the existing extension node.
+    //
+    // 2. The second extension node will have the path that is not present in
+    // [key_window]. This extension node will be a child of the new branch.
+    //
+    // Example:
+    // If [key_window] has path [0x12ab] and [extension->path] is [0x1234], then
+    // the following nodes will be created:
+    //
+    // First Extension Node: Path is [0x12].
+    // Branch Node: A leaf for [key_window] is child [0xa] and the second
+    //              extension node is child [0x3].
+    // Second Extension Node: Path is [0x4].
+    // Leaf Node: Path is [0xb].
+    //
+    // Note that the second extension node may have a path length of 1, in which
+    // case we will omit the second extension node and add its child directly as
+    // a child of the new branch.
+    // Example:
+    // If [key_window] has path [0x1234] and [extension->path] is [0x1235], then
+    // the following nodes will be created:
+    //
+    // First Extension Node: Path is [0x123].
+    // Branch Node: A leaf for [key_window] is child [0x4]. The child of
+    //              [extension] is child [0x5] in this branch.
+    Node *first = Node::CreateExtension(/*parent=*/parent_branch);
+    first->path = key_window.GetSubarray(0, diverge_idx);
 
-    parent_branch->child[std::to_integer<size_t>(k.Get(idx))] =
-        new_extension_node;
+    // Place the first extension node as a child of the branch.
+    parent_branch->child[std::to_integer<size_t>(k.Get(idx))] = first;
 
-    new_branch_node = Node::CreateBranch(/*parent=*/new_extension_node);
-    new_extension_node->child[0] = new_branch_node;
+    // Create the new branch node and add it as a child of the first extension
+    // node.
+    branch = Node::CreateBranch(/*parent=*/first);
+    first->child[0] = branch;
   }
   else {
-    new_branch_node = Node::CreateBranch(/*parent=*/parent_branch);
-    parent_branch->child[std::to_integer<size_t>(k.Get(idx))] = new_branch_node;
+    // [key_window] and the extension node do not have a common range. For
+    // example, consider the following:
+    // Branch Node: The extension node below is child [0x1].
+    // Extension Node: Path is [0x234].
+    //
+    // Any leaves under the extension node have [0x1234] in their path.
+    //
+    // If [key_window] is [0x1abc], then the nodes for [key_window] will
+    // correspond to child [0x1] in the branch.
+    //
+    // In this case, we create a new branch and place that branch as child [0x1]
+    // of the branch node mentioned above. Then we place the extension node as
+    // one child of this new branch and we create a leaf node for [key_window]
+    // and place the leaf as the other child of the new branch.
+    branch = Node::CreateBranch(/*parent=*/parent_branch);
+    parent_branch->child[std::to_integer<size_t>(k.Get(idx))] = branch;
   }
 
-  // Move the already-existing extension node underneath the branch node.
-  // TODO: Similarly, this extension node could have a path length of 0. We
-  // should place the extension node's child directly into the branch node in
-  // this case.
-  std::byte current_extension_node_branch =
-      current_extension->path.Get(diverge_idx);
-  if (diverge_idx + 1 < current_extension->path.size()) {
-    new_branch_node
-        ->child[std::to_integer<size_t>(current_extension_node_branch)] =
-        current_extension;
-    current_extension->parent = new_branch_node;
+  // In both cases above, we create a new branch node and now we need to place
+  // an extension node as the child of that new branch node.
+  //
+  // However, note that in the first case above, we may omit the second
+  // extension node and instead place the extension node's child directly as a
+  // child of the branch.
+  CHECK_LT(diverge_idx, extension->path.size());
+  std::byte second_branch = extension->path.Get(diverge_idx);
+  if (diverge_idx < extension->path.size() - 1) {
+    // The second extension node has a path size larger than 1.
+    branch->child[std::to_integer<size_t>(second_branch)] = extension;
+    extension->parent = branch;
 
-    // Include 1 to account for the branch node, too. [common_range_length] is
-    // the size of the path in the extension node, and then we have 1 for the
-    // branch node.
-    current_extension->path =
-        current_extension->path.GetSubarray(diverge_idx + 1,
-                                            current_extension->path.size());
-    // We hash this extension node here, and then in the parent function, we
-    // hash all nodes on the path from the leaf below to the root. Note that
-    // this extension node and the leaf below share the same parent.
-    current_extension->hash = current_extension->GetNodeHash();
+    // Add 1 to account for the branch node. We are placing the second extension
+    // node as a child of the branch node, so the branch node accounts for 1 hex
+    // digit in the path.
+    extension->path =
+        extension->path.GetSubarray(diverge_idx + 1, extension->path.size());
+    // Note that this second extension node is *not* on the path from the node
+    // that will hold [key_window] to the root. Thus, when we rehash the nodes
+    // on [key_window]'s path in the trie, we will not rehash this second
+    // extension node. Thus, to ensure that the hashes are generated properly in
+    // the trie, we need to hash this second extension node here.
+    extension->hash = extension->GetNodeHash();
   }
   else {
-    new_branch_node
-        ->child[std::to_integer<size_t>(current_extension_node_branch)] =
-        current_extension->child[0];
-    current_extension->child[0]->parent = new_branch_node;
+    // The second extension node would have a path size of 1, so we instead
+    // place the second extension node's child directly as a child of the
+    // branch.
+    branch->child[std::to_integer<size_t>(second_branch)] = extension->child[0];
+    extension->child[0]->parent = branch;
   }
-  Node *new_node;
-  if (diverge_idx >= key_a.size()) {
-    // Place directly into the branch.
-    new_branch_node->value = std::move(obj);
-    new_node = new_branch_node;
+
+  // Now we need to place [key_window] into the trie. If [key_window] entirely
+  // overlaps with the path in the first extension node, then we place
+  // [key_window] directly into the new branch. Otherwise, we create a leaf node
+  // for [key_window] and add the leaf as a child of the new branch.
+  if (diverge_idx >= key_window.size()) {
+    // Place [key_window] directly into the branch.
+    CHECK_EQ(diverge_idx, key_window.size());
+    branch->value = std::move(obj);
+    return branch;
   }
   else {
-    // Create new leaf node.
-    Node *new_leaf_node = Node::CreateLeaf(/*parent=*/new_branch_node);
-    new_leaf_node->path = key_a.GetSubarray(diverge_idx + 1, key_a.size());
-    new_leaf_node->value = std::move(obj);
+    // Create new leaf node for [key_window] and add the leaf node as a child of
+    // the new branch.
+    Node *leaf = Node::CreateLeaf(/*parent=*/branch);
+    // Add 1 to account for the branch node. Since we are placing the leaf node
+    // for [key_window] as a child of the branch, the branch accounts for 1 hex
+    // digit in the path.
+    leaf->path = key_window.GetSubarray(diverge_idx + 1, key_window.size());
+    leaf->value = std::move(obj);
 
-    std::byte leaf_branch = key_a.Get(diverge_idx);
-    new_branch_node->child[std::to_integer<size_t>(leaf_branch)] =
-        new_leaf_node;
-    new_node = new_leaf_node;
+    std::byte leaf_branch = key_window.Get(diverge_idx);
+    branch->child[std::to_integer<size_t>(leaf_branch)] = leaf;
+    return leaf;
   }
-  return new_node;
 }
 
-// See the callsite for comments on this function.
+// 2. If the child is a leaf node, check to see what remaining hex
+// characters the key and the leaf node have in common. If there is at
+// least one common character, then we should create an extension node
+// for the common path. Once the hex characters diverge, we should
+// create a branch node. There are two options here:
+//   a) One of the two keys ends on the branch, at which point we can
+//   place this shorter key's value in the branch node and the other
+//   key's value in a leaf of the branch.
+//
+//   b) Neither of the two keys has ended yet. Place each key's value in
+//   its own leaf node under the branch (so there will be two leaf
+//   nodes).
 Node *
 MerkleTrie::InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
                                   const Key &k, size_t idx, T &&obj)
 {
+  CHECK_EQ(current_leaf->type, Node::Type::kLeaf);
+
   // We add 1 since one of the digits will be included in the [parent_branch]
   // node.
   std::byte parent_branch_digit = k.Get(idx);
@@ -751,42 +877,6 @@ MerkleTrie::InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
   }
   // delete current_leaf;
   return to_hash;
-}
-
-// static
-void
-MerkleTrie::Walk(Node *root, HexArray &prefix,
-                 const std::function<void(const HexArray &, Node &)> &f)
-{
-  if (!root) {
-    return;
-  }
-
-  switch (root->type) {
-  case Node::Type::kBranch:
-    for (size_t i = 0; i < root->child.size(); i++) {
-      std::byte digit = static_cast<std::byte>(i);
-
-      prefix.Append(digit);
-      Walk(root->child[i], prefix, f);
-      prefix.RemoveFromBack(1);
-    }
-    f(prefix, *root);
-    break;
-  case Node::Type::kExtension:
-    CHECK_PTR(root->child[0]);
-
-    prefix.Append(root->path);
-    Walk(root->child[0], prefix, f);
-    f(prefix, *root);
-    prefix.RemoveFromBack(root->path.size());
-    break;
-  case Node::Type::kLeaf:
-    prefix.Append(root->path);
-    f(prefix, *root);
-    prefix.RemoveFromBack(root->path.size());
-    break;
-  }
 }
 
 Node *
