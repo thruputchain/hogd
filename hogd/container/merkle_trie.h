@@ -75,24 +75,24 @@ public:
                     const SHA256Hash &root_hash, const Key &k,
                     const std::string &value);
 
-  std::string *find(const Key &k);
+  std::string *Find(const Key &k);
 
-  bool insert(const Key &k, T &&obj);
-  bool insert(const Key &k, const T &obj) { return insert(k, T(obj)); }
+  bool Insert(const Key &k, T &&obj);
+  bool Insert(const Key &k, const T &obj) { return Insert(k, T(obj)); }
 
-  size_t remove(const Key &k);
+  bool Remove(const Key &k);
 
   size_t size() { return size_; }
 
-  void clear()
+  void Clear()
   {
     FreeAllNodes(root_);
     InitRootNode();
     size_ = 0;
   }
 
-  // for_each executes func on each element.
-  template<typename F> void for_each(F func)
+  // Executes [func] on each element.
+  template<typename F> void ForEach(F func)
   {
     HexArray prefix;
     auto per_node = [&func](const HexArray &path, Node &node) {
@@ -110,11 +110,10 @@ public:
     Walk(root_, prefix, per_node);
   }
 
-  // for_each_parallel executes func in parallel on each element using a
-  // WorkerPool.
+  // Executes [func] in parallel on each element using a WorkerPool.
   template<typename F>
-  void for_each_parallel(F func, size_t width = kDefaultParallelRangeWidth,
-                         WorkerPool &pool = WorkerPool::get_default_pool())
+  void ForEachParallel(F func, size_t width = kDefaultParallelRangeWidth,
+                       WorkerPool &pool = WorkerPool::get_default_pool())
   {
     CHECK(false);
   }

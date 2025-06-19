@@ -281,7 +281,7 @@ MerkleTrie::Prove(const std::vector<std::byte> &encodings,
 }
 
 std::string *
-MerkleTrie::find(const Key &k)
+MerkleTrie::Find(const Key &k)
 {
   Node *node = FindNode(k);
   if (node) {
@@ -316,7 +316,7 @@ MerkleTrie::find(const Key &k)
 }
 
 bool
-MerkleTrie::insert(const Key &k, T &&obj)
+MerkleTrie::Insert(const Key &k, T &&obj)
 {
   size_t idx = 0;
   std::byte branch_hex = std::byte(0x00);
@@ -387,8 +387,8 @@ MerkleTrie::insert(const Key &k, T &&obj)
   return true;
 }
 
-size_t
-MerkleTrie::remove(const Key &k)
+bool
+MerkleTrie::Remove(const Key &k)
 {
   // If removing a value from a branch, do nothing.
   //
@@ -429,7 +429,7 @@ MerkleTrie::remove(const Key &k)
                        idx, branch_hex, existing_key, branch_before_branch,
                        branch_before_branch_hex);
   if (!existing_key) {
-    return 0;
+    return false;
   }
   CHECK_PTR(branch);
   CHECK_EQ(branch->type, Node::Type::kBranch);
@@ -444,6 +444,8 @@ MerkleTrie::remove(const Key &k)
     // TODO: Handle the case where the branch only has one child, and so now
     // the branch is no longer needed. I should probably do this when I clean
     // the rest of the code up.
+    //
+    // Be careful of the case where the branch is the root node.
   }
   else {
     size_t num_branches = 0;
@@ -568,7 +570,7 @@ MerkleTrie::remove(const Key &k)
 
   size_--;
   GenerateHashesFrom(to_hash);
-  return 1;
+  return true;
 }
 
 void

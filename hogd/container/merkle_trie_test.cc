@@ -60,12 +60,12 @@ TEST(MerkleTrie, TwoLeaves)
 
   HexArray key("1234");
   std::string value = "hello";
-  trie.insert(key, value);
+  trie.Insert(key, value);
   std::cout << trie << std::endl;
 
   key = HexArray("1223");
   value = "hello again";
-  trie.insert(key, value);
+  trie.Insert(key, value);
   std::cout << trie << std::endl;
 }
 
@@ -75,17 +75,17 @@ TEST(MerkleTrie, TwoLeavesFind)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
+  trie.Insert(key_a, value_a);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(trie.Find(HexArray("12")), nullptr);
 
   HexArray key_b("1223");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(*trie.find(key_b), value_b);
-  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
-  EXPECT_EQ(trie.find(HexArray("123456")), nullptr);
+  trie.Insert(key_b, value_b);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(*trie.Find(key_b), value_b);
+  EXPECT_EQ(trie.Find(HexArray("12")), nullptr);
+  EXPECT_EQ(trie.Find(HexArray("123456")), nullptr);
 }
 
 TEST(MerkleTrie, TwoLeavesRemove)
@@ -94,13 +94,13 @@ TEST(MerkleTrie, TwoLeavesRemove)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
+  trie.Insert(key_a, value_a);
 
   HexArray key_b("1223");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
+  trie.Insert(key_b, value_b);
   std::cout << trie << std::endl;
-  trie.remove(key_b);
+  trie.Remove(key_b);
   std::cout << trie << std::endl;
 }
 
@@ -111,12 +111,12 @@ TEST(MerkleTrie, BranchAndLeaf)
 
   HexArray key("1234");
   std::string value = "hello";
-  trie.insert(key, value);
+  trie.Insert(key, value);
   std::cout << trie << std::endl;
 
   key = HexArray("123456");
   value = "hello again";
-  trie.insert(key, value);
+  trie.Insert(key, value);
   std::cout << trie << std::endl;
 }
 
@@ -126,14 +126,14 @@ TEST(MerkleTrie, BranchAndLeafRemove)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
+  trie.Insert(key_a, value_a);
 
   HexArray key_b = HexArray("123456");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
+  trie.Insert(key_b, value_b);
 
   std::cout << trie << std::endl;
-  trie.remove(key_b);
+  trie.Remove(key_b);
   std::cout << trie << std::endl;
 }
 
@@ -143,17 +143,17 @@ TEST(MerkleTrie, BranchAndLeafFind)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
+  trie.Insert(key_a, value_a);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(trie.Find(HexArray("12")), nullptr);
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(*trie.find(key_b), value_b);
-  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
-  EXPECT_EQ(trie.find(HexArray("12345678")), nullptr);
+  trie.Insert(key_b, value_b);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(*trie.Find(key_b), value_b);
+  EXPECT_EQ(trie.Find(HexArray("12")), nullptr);
+  EXPECT_EQ(trie.Find(HexArray("12345678")), nullptr);
 }
 
 TEST(MerkleTrie, DoNotFindBranchValue)
@@ -162,17 +162,17 @@ TEST(MerkleTrie, DoNotFindBranchValue)
 
   HexArray key_a("123456");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
+  trie.Insert(key_a, value_a);
 
   HexArray key_b("123478");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
+  trie.Insert(key_b, value_b);
 
   // "1234" maps to a branch node that has no value (i.e., [node->value] is
   // [std::nullopt]). Check that we can properly detect this and return
   // [nullptr] rather than mistakenly return an empty string or something
   // similar.
-  EXPECT_EQ(trie.find(HexArray("1234")), nullptr);
+  EXPECT_EQ(trie.Find(HexArray("1234")), nullptr);
 }
 
 TEST(MerkleTrie, BranchBranchLeaf)
@@ -181,24 +181,24 @@ TEST(MerkleTrie, BranchBranchLeaf)
 
   HexArray key_a("76c772");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
+  trie.Insert(key_a, value_a);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(trie.Find(HexArray("12")), nullptr);
   std::cout << trie << std::endl;
 
   HexArray key_b("7ead1e640fb4854117ef3f882338ae");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(*trie.find(key_b), value_b);
+  trie.Insert(key_b, value_b);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(*trie.Find(key_b), value_b);
   std::cout << trie << std::endl;
 
   HexArray key_c("76");
   std::string value_c = "hello three";
-  trie.insert(key_c, value_c);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(*trie.find(key_b), value_b);
-  EXPECT_EQ(*trie.find(key_c), value_c);
+  trie.Insert(key_c, value_c);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(*trie.Find(key_b), value_b);
+  EXPECT_EQ(*trie.Find(key_c), value_c);
   std::cout << trie << std::endl;
 }
 
@@ -209,17 +209,17 @@ TEST(MerkleTrie, TwoLeavesAndOneBranch)
 
   HexArray key("1234");
   std::string value = "hello";
-  trie.insert(key, value);
+  trie.Insert(key, value);
   std::cout << trie << std::endl;
 
   key = HexArray("123456");
   value = "hello again";
-  trie.insert(key, value);
+  trie.Insert(key, value);
   std::cout << trie << std::endl;
 
   key = HexArray("12ab");
   value = "hello three";
-  trie.insert(key, value);
+  trie.Insert(key, value);
   std::cout << trie << std::endl;
 }
 
@@ -229,27 +229,27 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
+  trie.Insert(key_a, value_a);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(trie.Find(HexArray("12")), nullptr);
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(*trie.find(key_b), value_b);
-  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
-  EXPECT_EQ(trie.find(HexArray("12345678")), nullptr);
+  trie.Insert(key_b, value_b);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(*trie.Find(key_b), value_b);
+  EXPECT_EQ(trie.Find(HexArray("12")), nullptr);
+  EXPECT_EQ(trie.Find(HexArray("12345678")), nullptr);
 
   HexArray key_c("12ab");
   std::string value_c = "hello three";
-  trie.insert(key_c, value_c);
-  EXPECT_EQ(*trie.find(key_a), value_a);
-  EXPECT_EQ(*trie.find(key_b), value_b);
-  EXPECT_EQ(*trie.find(key_c), value_c);
-  EXPECT_EQ(trie.find(HexArray("12")), nullptr);
-  EXPECT_EQ(trie.find(HexArray("12abcd")), nullptr);
-  EXPECT_EQ(trie.find(HexArray("12345678")), nullptr);
+  trie.Insert(key_c, value_c);
+  EXPECT_EQ(*trie.Find(key_a), value_a);
+  EXPECT_EQ(*trie.Find(key_b), value_b);
+  EXPECT_EQ(*trie.Find(key_c), value_c);
+  EXPECT_EQ(trie.Find(HexArray("12")), nullptr);
+  EXPECT_EQ(trie.Find(HexArray("12abcd")), nullptr);
+  EXPECT_EQ(trie.Find(HexArray("12345678")), nullptr);
 }
 
 namespace {
@@ -273,25 +273,25 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
-  trie.for_each(f);
+  trie.Insert(key_a, value_a);
+  trie.ForEach(f);
   std::map<HexArray, std::string> expected = {{key_a, value_a}};
   EXPECT_EQ(seen, expected);
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
+  trie.Insert(key_b, value_b);
   seen.clear();
   expected.insert({{key_b, value_b}});
-  trie.for_each(f);
+  trie.ForEach(f);
   EXPECT_EQ(seen, expected);
 
   HexArray key_c("12ab");
   std::string value_c = "hello three";
-  trie.insert(key_c, value_c);
+  trie.Insert(key_c, value_c);
   seen.clear();
   expected.insert({{key_c, value_c}});
-  trie.for_each(f);
+  trie.ForEach(f);
   EXPECT_EQ(seen, expected);
 }
 
@@ -301,18 +301,18 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
+  trie.Insert(key_a, value_a);
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
+  trie.Insert(key_b, value_b);
 
   HexArray key_c("12ab");
   std::string value_c = "hello three";
-  trie.insert(key_c, value_c);
+  trie.Insert(key_c, value_c);
 
   std::cout << trie << std::endl;
-  trie.remove(key_b);
+  trie.Remove(key_b);
   std::cout << trie << std::endl;
 }
 
@@ -322,15 +322,15 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
+  trie.Insert(key_a, value_a);
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
+  trie.Insert(key_b, value_b);
 
   HexArray key_c("12ab");
   std::string value_c = "hello three";
-  trie.insert(key_c, value_c);
+  trie.Insert(key_c, value_c);
 
   std::cout << trie << std::endl;
   const auto &[root_hash, node_encodings] = trie.GetProof(key_b);
@@ -516,24 +516,24 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
 
   HexArray key_a("2671291b5a3887d332b73ec01345d7");
   std::string value_a = "hello";
-  trie.insert(key_a, value_a);
+  trie.Insert(key_a, value_a);
 
   HexArray key_b("267124564f6835");
   std::string value_b = "hello again";
-  trie.insert(key_b, value_b);
+  trie.Insert(key_b, value_b);
   std::cout << trie << std::endl;
 
   // This needs to be placed directly into the branch under the extension node.
   HexArray key_c("2671");
   std::string value_c = "hello three";
-  trie.insert(key_c, value_c);
+  trie.Insert(key_c, value_c);
   std::cout << trie << std::endl;
 
   std::map<HexArray, std::string> seen;
   auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
     ForEachFunc(seen, pair);
   };
-  trie.for_each(f);
+  trie.ForEach(f);
   std::map<HexArray, std::string> expected = {{key_a, value_a},
                                               {key_b, value_b},
                                               {key_c, value_c}};
@@ -710,7 +710,7 @@ TEST(MerkleTrie, Stress)
   for (size_t i = 0; i < kNumIterations; i++) {
     HexArray path = GenerateRandomPath();
     const std::string value = std::to_string(i);
-    bool insert = trie.insert(path, value);
+    bool insert = trie.Insert(path, value);
     EXPECT_EQ(insert, total.count(path) == 0);
     if (!insert) {
       // A duplicate key was generated, so try again.
@@ -721,13 +721,13 @@ TEST(MerkleTrie, Stress)
     total.insert({path, value});
 
     seen.clear();
-    trie.for_each(f);
+    trie.ForEach(f);
     EXPECT_EQ(seen, total);
 
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
     const auto &[_, node_by_node] = trie.GetProofByNode(path);
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
-    EXPECT_EQ(*trie.find(path), value);
+    EXPECT_EQ(*trie.Find(path), value);
 
     trie.Check();
   }
@@ -736,7 +736,7 @@ TEST(MerkleTrie, Stress)
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
 
-    EXPECT_EQ(*trie.find(path), value);
+    EXPECT_EQ(*trie.Find(path), value);
   }
 
   for (size_t i = 0; i < kNumIterations; i++) {
@@ -744,7 +744,7 @@ TEST(MerkleTrie, Stress)
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
 
-    EXPECT_EQ(trie.remove(path), 1);
+    EXPECT_EQ(trie.Remove(path), 1);
     auto it = total.erase(total.begin());
     if (i < kNumIterations - 1) {
       EXPECT_NE(it, total.end());
@@ -753,10 +753,10 @@ TEST(MerkleTrie, Stress)
       EXPECT_EQ(it, total.end());
     }
 
-    EXPECT_EQ(trie.find(path), nullptr);
+    EXPECT_EQ(trie.Find(path), nullptr);
 
     seen.clear();
-    trie.for_each(f);
+    trie.ForEach(f);
     EXPECT_EQ(seen, total);
 
     // TODO: trie.Check();
