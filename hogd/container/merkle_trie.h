@@ -34,10 +34,25 @@
 // values are strings.
 namespace hogd {
 
-// TODO: Describe the class.
+// This is a Merkle Patricia Trie.
 //
 // Example:
-// TODO: Provide example.
+// MerkleTrie trie;
+//
+// HexArray key("1234");
+// std::string value = "hello";
+// trie.Insert(key, value);
+//
+// std::pair<SHA256Hash, std::vector<std::byte>> proof = trie.GetProof();
+//
+// This returns true:
+// trie.Prove(proof.first, proof.second, key, value);
+//
+// This returns false:
+// HexArray different_key("12");
+// trie.Prove(proof.first, proof.second, different_key, value);
+//
+// trie.Remove(key);
 class MerkleTrie {
 public:
   // type definitions
@@ -71,8 +86,8 @@ public:
   std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
   GetProofByNode(const Key &k);
 
-  static bool Prove(const std::vector<std::byte> &encodings,
-                    const SHA256Hash &root_hash, const Key &k,
+  static bool Prove(const SHA256Hash &root_hash,
+                    const std::vector<std::byte> &encodings, const Key &k,
                     const std::string &value);
 
   std::string *Find(const Key &k);

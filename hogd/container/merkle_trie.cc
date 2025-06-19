@@ -280,8 +280,8 @@ MerkleTrie::GetProof(const Key &k)
 
 // static
 bool
-MerkleTrie::Prove(const std::vector<std::byte> &encodings,
-                  const SHA256Hash &root_hash, const Key &k,
+MerkleTrie::Prove(const SHA256Hash &root_hash,
+                  const std::vector<std::byte> &encodings, const Key &k,
                   const std::string &value)
 {
   Node::Raw node;
