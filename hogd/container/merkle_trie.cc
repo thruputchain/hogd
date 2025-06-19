@@ -735,6 +735,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
   // We are going to reuse [extension] in the if/else bodies below, so we cache
   // the node since we need its contents after it is reused.
   const Node extension_cache = *extension;
+  size_t parent_branch_hex = std::to_integer<size_t>(k.Get(idx));
   if (common_range_length) {
     // [key_window] and the extension node have a common range, so we are going
     // to break the extension node into two extension nodes:
@@ -769,7 +770,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     first->path = key_window.GetSubarray(0, diverge_idx);
 
     // Place the first extension node as a child of the branch.
-    extension_cache.parent->child[std::to_integer<size_t>(k.Get(idx))] = first;
+    extension_cache.parent->child[parent_branch_hex] = first;
 
     // Create the new branch node and add it as a child of the first extension
     // node.
@@ -804,14 +805,16 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     branch = extension;
     branch->type = Node::Type::kBranch;
     // Set the [branch]'s parent to be the same as [extension]'s parent. Note
-    // that since we are reusing the extension node, we could technically omit
-    // the line below, but we keep it for clarity.
+    // that since we are reusing the extension node, we can technically omit the
+    // line below, but we keep it for clarity.
     branch->parent = extension_cache.parent;
     branch->path.Clear();
     branch->value = std::nullopt;
     memset(branch->child.data(), 0,
            branch->child.size() * sizeof(branch->child[0]));
-    extension_cache.parent->child[std::to_integer<size_t>(k.Get(idx))] = branch;
+    // As mentioned in the comment above, we can technically omit the line below
+    // below, but we keep it for clarity.
+    extension_cache.parent->child[parent_branch_hex] = branch;
   }
   CHECK_PTR(branch);
   // Set [extension] to [nullptr] so that we crash if we accidentally use it
@@ -825,7 +828,6 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
   // extension node and instead place the extension node's child directly as a
   // child of the branch.
   CHECK_LT(diverge_idx, extension_cache.path.size());
-  // TODO: Do the cast here.
   size_t second_branch =
       std::to_integer<size_t>(extension_cache.path.Get(diverge_idx));
   if (diverge_idx < extension_cache.path.size() - 1) {
@@ -965,7 +967,8 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, const Key &k, size_t idx, T &&obj)
     // before writing [shorter_leaf->path] because we are not reusing [leaf].
     // Thus, [shorter_path] will never be a reference to [shorter_leaf->path]. I
     // still call it first though to match the style of the node creation below.
-    branch->child[std::to_integer<size_t>(shorter_path.Get(0))] = shorter_leaf;
+    size_t branch_hex = std::to_integer<size_t>(shorter_path.Get(0));
+    branch->child[branch_hex] = shorter_leaf;
     shorter_leaf->path = shorter_path.GetSubarray(1, shorter_path.size());
     shorter_leaf->value = std::move(shorter_value);
     // We hash this leaf here, and then in the parent function, we hash all
@@ -979,7 +982,8 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   //
   // We overwrite [leaf->path] below, so we need call [longer_path.Get(0)] first
   // as [longer_path] may be a reference to [leaf->path].
-  branch->child[std::to_integer<size_t>(longer_path.Get(0))] = leaf;
+  size_t branch_hex = std::to_integer<size_t>(longer_path.Get(0));
+  branch->child[branch_hex] = leaf;
   leaf->path = longer_path.GetSubarray(1, longer_path.size());
   leaf->value = std::move(longer_value);
   leaf->parent = branch;
