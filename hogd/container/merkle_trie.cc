@@ -330,6 +330,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
                        /*path=*/k, idx, branch_hex, existing_key,
                        branch_before_branch, branch_before_branch_hex);
   if (existing_key) {
+    // [k] already exists in the trie, so we cannot insert it.
     return false;
   }
   CHECK_PTR(branch);
@@ -356,13 +357,13 @@ MerkleTrie::insert(const Key &k, T &&obj)
       // branch node in the trie on [key]'s path, so the child node is either an
       // extension node or a leaf node.
       if (branch->child[branch_idx]->type == Node::Type::kExtension) {
-        to_hash = InsertHandleExtensionChild(branch->child[branch_idx], branch,
-                                             k, idx, std::move(obj));
+        to_hash = InsertHandleExtension(branch->child[branch_idx], branch, k,
+                                        idx, std::move(obj));
       }
       else {
         CHECK_EQ(branch->child[branch_idx]->type, Node::Type::kLeaf);
-        to_hash = InsertHandleLeafChild(branch->child[branch_idx], branch, k,
-                                        idx, std::move(obj));
+        to_hash = InsertHandleLeaf(branch->child[branch_idx], branch, k, idx,
+                                   std::move(obj));
       }
     }
     else {
@@ -379,6 +380,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
       to_hash = leaf;
     }
   }
+  CHECK_PTR(to_hash);
 
   size_++;
   GenerateHashesFrom(to_hash);
@@ -631,8 +633,8 @@ MerkleTrie::FindNode(const Key &k)
 //              below as as child [0x5].
 // Second Extension Node: Path is [0x6]. The child is c.
 Node *
-MerkleTrie::InsertHandleExtensionChild(Node *extension, Node *parent_branch,
-                                       const Key &k, size_t idx, T &&obj)
+MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
+                                  const Key &k, size_t idx, T &&obj)
 {
   CHECK_EQ(extension->type, Node::Type::kExtension);
   CHECK_GT(extension->path.size(), 0);
@@ -789,8 +791,8 @@ MerkleTrie::InsertHandleExtensionChild(Node *extension, Node *parent_branch,
 // extension node with the shared hex digits. We place the new branch node as a
 // child of this extension node.
 Node *
-MerkleTrie::InsertHandleLeafChild(Node *leaf, Node *parent_branch, const Key &k,
-                                  size_t idx, T &&obj)
+MerkleTrie::InsertHandleLeaf(Node *leaf, Node *parent_branch, const Key &k,
+                             size_t idx, T &&obj)
 {
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
 
