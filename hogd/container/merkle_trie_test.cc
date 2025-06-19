@@ -48,7 +48,8 @@ GenerateRandomPath()
   size_t path_size = path_size_dist(gen);
 
   // [path_size] may be odd, but [path] can only hold an even number of hex
-  // digits because there are two hex digits in an [std::byte].
+  // digits because there are two hex digits in an [std::byte]. We remove the
+  // extra hex digit below before returning the path.
   std::vector<std::byte> path((path_size + 1) / 2);
   std::uniform_int_distribution<int> path_dist(0, 0xff);
 
