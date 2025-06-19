@@ -90,51 +90,66 @@ GetNumChildrenInBranch(const Node &node)
   return num_children;
 }
 
-void
+bool
 CheckBranch(Node *branch)
 {
+  bool ret = true;
   if (branch->path.size()) {
     printf("Unexpected path in branch: [%s]\n", branch->path.str().c_str());
+    ret = false;
   }
   size_t num_children = GetNumChildrenInBranch(*branch);
-  if (!num_children) {
+  bool is_root = !branch->parent;
+  if (!num_children && !is_root) {
     printf("Branch node has no children\n");
+    ret = false;
   }
   if (!branch->value && num_children == 1) {
     // Check if this is the root node. The root node is a branch that is
     // allowed to have no children.
-    if (branch->parent) {
+    if (!is_root) {
       printf("Branch node has no value and only one child\n");
+      ret = false;
     }
   }
+  return ret;
 }
 
-void
+bool
 CheckExtension(Node *extension)
 {
+  bool ret = true;
   if (!extension->path.size()) {
     printf("Unexpected empty path in extension: [%s]\n",
            extension->path.str().c_str());
+    ret = false;
   }
   if (extension->child[0]) {
     if (extension->child[0]->type == Node::Type::kExtension) {
       printf("Extension node has extension node as child\n");
+      ret = false;
     }
     else if (extension->child[0]->type == Node::Type::kLeaf) {
       printf("Extension node has leaf node as child\n");
+      ret = false;
     }
   }
   else {
     printf("Extension node has no child\n");
+    ret = false;
   }
+  return ret;
 }
 
-void
+bool
 CheckLeaf(Node *leaf)
 {
+  bool ret = true;
   if (!leaf->value) {
     printf("Unexpected empty value in leaf\n");
+    ret = false;
   }
+  return ret;
 }
 
 } // namespace
@@ -642,36 +657,41 @@ MerkleTrie::Remove(const Key &k)
   return true;
 }
 
-void
+bool
 MerkleTrie::CheckHelper(Node *root, Node *parent)
 {
   if (!root) {
-    return;
+    return true;
   }
+
+  bool ret = true;
   if (root->parent != parent) {
     printf("The node's parent pointer does not match its actual parent.\n");
+    ret = false;
   }
 
   switch (root->type) {
   case Node::Type::kBranch:
   {
-    CheckBranch(root);
+    ret = ret && CheckBranch(root);
     for (Node *child : root->child) {
-      CheckHelper(child, root);
+      ret = ret && CheckHelper(child, root);
     }
     break;
   }
   case Node::Type::kExtension:
-    CheckExtension(root);
-    CheckHelper(root->child[0], root);
+    ret = ret && CheckExtension(root);
+    ret = ret && CheckHelper(root->child[0], root);
     break;
   case Node::Type::kLeaf:
-    CheckLeaf(root);
+    ret = ret && CheckLeaf(root);
     break;
   default:
+    ret = false;
     printf("Unknown node type: %d\n", static_cast<int>(root->type));
     break;
   }
+  return ret;
 }
 
 Node *

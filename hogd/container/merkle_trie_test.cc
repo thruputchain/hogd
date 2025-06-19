@@ -729,7 +729,7 @@ TEST(MerkleTrie, Stress)
     EXPECT_TRUE(MerkleTrie::Prove(node_encodings, root_hash, path, value));
     EXPECT_EQ(*trie.Find(path), value);
 
-    trie.Check();
+    EXPECT_TRUE(trie.Check());
   }
 
   for (const auto &[path, value] : total) {
@@ -759,7 +759,7 @@ TEST(MerkleTrie, Stress)
     trie.ForEach(f);
     EXPECT_EQ(seen, total);
 
-    // TODO: trie.Check();
+    EXPECT_TRUE(trie.Check());
   }
 }
 

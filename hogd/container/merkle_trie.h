@@ -62,7 +62,7 @@ public:
   }
 
   // Basic sanity checks on the tree.
-  void Check() { CheckHelper(root_, /*parent=*/nullptr); }
+  bool Check() { return CheckHelper(root_, /*parent=*/nullptr); }
 
   SHA256Hash GetRootHash() const { return root_->hash; }
 
@@ -120,7 +120,7 @@ public:
 
 private:
   Node *RemoveHandleBranch(const Key &k, Node *branch, size_t num_children);
-  void CheckHelper(Node *root, Node *parent);
+  bool CheckHelper(Node *root, Node *parent);
 
   Node *FindNode(const Key &k);
 
