@@ -61,7 +61,7 @@ public:
     return os << trie.str();
   }
 
-  // Basic sanity checks on the tree.
+  // Basic sanity checks on the trie.
   bool Check() { return CheckHelper(root_, /*parent=*/nullptr); }
 
   SHA256Hash GetRootHash() const { return root_->hash; }
@@ -135,12 +135,12 @@ private:
 
   static std::string StringFromNode(Node *root);
 
-  // Does a post-order traversal of the tree starting at [root] with path
+  // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.
   //
   // A post-order traversal visits all of the children of a node before visiting
   // the node itself. This is useful when regenerating all of the node hashes in
-  // a tree or freeing all of the nodes.
+  // a trie or freeing all of the nodes.
   static void Walk(Node *root, HexArray &prefix,
                    const std::function<void(const HexArray &, Node &)> &f);
 

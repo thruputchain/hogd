@@ -730,7 +730,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
 
   // [key_window] holds the portion of [k] that we are currently looking at. In
   // other words, we omit the prefix of [k] that corresponds to the nodes in the
-  // tree we have already visited.
+  // trie we have already visited.
   //
   // We add 1 since one of the digits will be included in the
   // [extension->parent] node, which is always a branch node.

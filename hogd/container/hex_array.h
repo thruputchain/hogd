@@ -1,4 +1,4 @@
-// merkle.h - provides a merkle patricia trie
+// hex_array.h - provides a hex array abstraction
 
 #pragma once
 
