@@ -38,23 +38,29 @@ HashFromString(const std::string &str)
   return ret;
 }
 
-// TODO: Generate paths with odd lengths.
 HexArray
 GenerateRandomPath()
 {
   std::random_device rd;
   std::mt19937 gen(rd());
 
-  std::uniform_int_distribution<size_t> path_size_dist(1, 20);
+  std::uniform_int_distribution<size_t> path_size_dist(0, 40);
   size_t path_size = path_size_dist(gen);
 
-  std::vector<std::byte> path(path_size);
+  // [path_size] may be odd, but [path] can only hold an even number of hex
+  // digits because there are two hex digits in an [std::byte].
+  std::vector<std::byte> path((path_size + 1) / 2);
   std::uniform_int_distribution<int> path_dist(0, 0xff);
 
   for (size_t i = 0; i < path.size(); i++) {
     path[i] = static_cast<std::byte>(path_dist(gen));
   }
-  return HexArray(path);
+  HexArray ret(path);
+  // If [path_size] is odd, remove a hex digit from the from path.
+  if (path_size % 2) {
+    ret.RemoveFromBack(1);
+  }
+  return ret;
 }
 
 } // namespace
