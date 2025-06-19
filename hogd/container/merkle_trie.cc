@@ -479,7 +479,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
     extension->parent->child[parent_branch_hex] = branch;
     branch->parent = extension->parent;
 
-    // TODO: Free the extension node.
+    delete extension;
   }
   else {
     CHECK_EQ(branch->parent->type, Node::Type::kBranch);
@@ -511,11 +511,13 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
 
     // The branch has a value, so the place the value in a leaf with path size
     // 0.
-    new_child = Node::CreateLeaf(/*parent=*/branch->parent);
+    //
+    // We reuse the branch node below.
+    new_child = branch;
+    new_child->type = Node::Type::kLeaf;
     new_child->path = cur_path;
-    new_child->value = std::move(branch->value);
-
-    // TODO: We can reuse [branch].
+    // We are reusing [branch] which already holds the value we want to place in
+    // the leaf. Thus, we do not need to assign [new_child->value].
   }
   else {
     CHECK_PTR(child);
@@ -528,14 +530,14 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
       // will be [cur_path] (to account for a possible extension node we removed
       // above) followed by the hex digit in [branch] that the remaining child
       // is under.
-      new_child = Node::CreateExtension(/*parent=*/branch->parent);
       cur_path.Append(child_hex);
       CHECK_GE(cur_path.size(), 1);
+      // We reuse the branch node below.
+      new_child = branch;
+      new_child->type = Node::Type::kExtension;
       new_child->path = cur_path;
       new_child->child[0] = child;
       child->parent = new_child;
-
-      // TODO: We can reuse [branch].
     }
     else {
       // The remaining child under [branch] is either an extension node or a
@@ -552,8 +554,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
       child->path = cur_path;
 
       new_child = child;
-
-      // TODO: Free [branch].
+      delete branch;
     }
   }
 
@@ -598,8 +599,7 @@ MerkleTrie::Remove(const Key &k)
     // Remove [k]'s leaf as a child of the branch.
     branch->child[branch_hex] = nullptr;
     num_children--;
-
-    // TODO: Free [existing_key].
+    delete existing_key;
   }
 
   Node *to_hash = nullptr;
@@ -821,7 +821,10 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
     branch->child[std::to_integer<size_t>(second_branch)] = extension->child[0];
     extension->child[0]->parent = branch;
 
-    // TODO: Free [extension].
+    // TODO: We could reuse this extension node above instead of allocating a
+    // new branch. Then if we enter the case above, we can allocate an extension
+    // node.
+    delete extension;
   }
 
   // Now we need to place [key_window] into the trie. If [key_window] entirely
