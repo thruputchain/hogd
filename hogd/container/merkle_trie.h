@@ -119,6 +119,7 @@ public:
   }
 
 private:
+  Node *RemoveHandleBranch(const Key &k, Node *branch, size_t num_children);
   void CheckHelper(Node *root, Node *parent);
 
   Node *FindNode(const Key &k);
