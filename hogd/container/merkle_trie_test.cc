@@ -62,10 +62,17 @@ GenerateRandomPath()
     ret.RemoveFromBack(1);
   }
   return ret;
+
+  void ForEachFunc(std::map<HexArray, std::string> & seen,
+                   const std::pair<HexArray, std::string> &pair)
+  {
+    seen[pair.first] = pair.second;
+  }
 }
 
 } // namespace
 
+// These tests add an empty key to the trie.
 TEST(MerkleTrie, EmptyKey)
 {
   MerkleTrie trie;
@@ -133,6 +140,7 @@ TEST(MerkleTrie, EmptyKeyRemoveChild)
   std::cout << trie << std::endl;
 }
 
+// These tests add an empty value to the trie.
 TEST(MerkleTrie, EmptyValue)
 {
   MerkleTrie trie;
@@ -168,6 +176,8 @@ TEST(MerkleTrie, EmptyValueRemove)
 
 // TODO: Check the return value of [trie.Insert()].
 
+// These tests add two KV pairs to the trie, with both KV pairs being in leaf
+// nodes.
 TEST(MerkleTrie, TwoLeaves)
 {
   MerkleTrie trie;
@@ -219,6 +229,8 @@ TEST(MerkleTrie, TwoLeavesRemove)
   std::cout << trie << std::endl;
 }
 
+// These tests add two KV pairs to the trie, with one KV pair being in a branch
+// node and the other being in a leaf node below the branch.
 TEST(MerkleTrie, BranchAndLeaf)
 {
   MerkleTrie trie;
@@ -272,6 +284,8 @@ TEST(MerkleTrie, BranchAndLeafFind)
   EXPECT_EQ(trie.Find(HexArray("12345678")), nullptr);
 }
 
+// This tests that a branch node with an empty value (i.e., a value of
+// [std::nullopt]) is not mistakenly thought to contain a KV pair.
 TEST(MerkleTrie, DoNotFindBranchValue)
 {
   MerkleTrie trie;
@@ -291,6 +305,15 @@ TEST(MerkleTrie, DoNotFindBranchValue)
   EXPECT_EQ(trie.Find(HexArray("1234")), nullptr);
 }
 
+// This test adds three KV pairs to the trie, with this structure:
+//
+//    [Branch]
+//       |
+//    [Branch]
+//     |    |
+// [Leaf]  [Branch (with value)]
+//                 |
+//               [Leaf]
 TEST(MerkleTrie, BranchBranchLeaf)
 {
   MerkleTrie trie;
@@ -318,6 +341,18 @@ TEST(MerkleTrie, BranchBranchLeaf)
   std::cout << trie << std::endl;
 }
 
+// These tests add three KV pairs to the trie, with this structure:
+//    [Branch]
+//       |
+//   [Extension]
+//       |
+//    [Branch]
+//     |    |
+// [Leaf] [Extension]
+//             |
+//         [Branch (with value)]
+//                 |
+//               [Leaf]
 TEST(MerkleTrie, TwoLeavesAndOneBranch)
 {
   MerkleTrie trie;
@@ -367,17 +402,6 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
   EXPECT_EQ(trie.Find(HexArray("12abcd")), nullptr);
   EXPECT_EQ(trie.Find(HexArray("12345678")), nullptr);
 }
-
-namespace {
-
-void
-ForEachFunc(std::map<HexArray, std::string> &seen,
-            const std::pair<HexArray, std::string> &pair)
-{
-  seen[pair.first] = pair.second;
-}
-
-} // namespace
 
 TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
 {
@@ -656,7 +680,7 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
   EXPECT_EQ(seen, expected);
 }
 
-// Hash a branch node. All child pointers are non-NULL.
+// This test hashes a branch node. All child pointers are non-NULL.
 TEST(MerkleTrie, HashBranch)
 {
   Node branch;
@@ -677,7 +701,8 @@ TEST(MerkleTrie, HashBranch)
   EXPECT_EQ(hash, expected);
 }
 
-// Hash a branch node. Some child pointers are NULL and the rest are non-NULL.
+// This test hashes a branch node. Some child pointers are NULL and the rest are
+// non-NULL.
 TEST(MerkleTrie, HashBranchSomeNullptr)
 {
   Node branch;
@@ -703,7 +728,7 @@ TEST(MerkleTrie, HashBranchSomeNullptr)
   EXPECT_EQ(hash, expected);
 }
 
-// Hash a branch node. All child pointers are NULL.
+// This test hashes a branch node. All child pointers are NULL.
 TEST(MerkleTrie, HashBranchAllNullptr)
 {
   Node branch;
@@ -718,7 +743,7 @@ TEST(MerkleTrie, HashBranchAllNullptr)
   EXPECT_EQ(hash, expected);
 }
 
-// Hash an extension node. Its child pointer is non-NULL.
+// This test hashes an extension node. Its child pointer is non-NULL.
 TEST(MerkleTrie, HashExtension)
 {
   Node extension;
@@ -738,7 +763,7 @@ TEST(MerkleTrie, HashExtension)
   EXPECT_EQ(hash, expected);
 }
 
-// Hash a leaf node.
+// This test hashes a leaf node.
 TEST(MerkleTrie, HashLeaf)
 {
   Node leaf;
@@ -753,6 +778,12 @@ TEST(MerkleTrie, HashLeaf)
   EXPECT_EQ(hash, expected);
 }
 
+// This test stresses the Merkle trie. It randomly generates 10,000 different
+// keys, places them into the trie, and then removes them from the trie. After
+// each operation, this test checks that [ForEach()],
+// [GetProof()/GetProofByNode()], [Prove()], and [Find()] return expected
+// values. This test also performs an integrity check on the trie after each
+// operation with [Check()].
 TEST(MerkleTrie, Stress)
 {
   static constexpr size_t kNumIterations = 10000;
