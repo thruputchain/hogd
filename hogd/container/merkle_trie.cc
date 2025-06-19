@@ -410,15 +410,12 @@ MerkleTrie::Insert(const Key &k, T &&obj)
 Node *
 MerkleTrie::RemoveHandleBranch(const Key &k, Node *branch, size_t num_children)
 {
-  // TODO: Uncomment this once we fix the TODO in Remove().
-  /*
   if (num_children < 2) {
     CHECK(branch->value.has_value());
   }
   else {
     CHECK(num_children == 2);
   }
-  */
 
   // There are exactly two children in the branch, or there is one child and
   // a value in the branch. Either way, there are two KV pairs "under" this
@@ -485,14 +482,12 @@ MerkleTrie::RemoveHandleBranch(const Key &k, Node *branch, size_t num_children)
   if (num_children == 1) {
     // We removed [k]'s leaf, so now no children remain.
     CHECK_EQ(other_child, nullptr);
-    // TODO: This if statement should be a CHECK once we fix the TODO above.
-    if (branch->value.has_value()) {
-      // The branch has a value, so the place the value in a leaf with
-      // path size 0.
-      new_child = Node::CreateLeaf(/*parent=*/branch->parent);
-      new_child->path = cur_path;
-      new_child->value = std::move(branch->value);
-    }
+    CHECK(branch->value.has_value());
+    // The branch has a value, so the place the value in a leaf with
+    // path size 0.
+    new_child = Node::CreateLeaf(/*parent=*/branch->parent);
+    new_child->path = cur_path;
+    new_child->value = std::move(branch->value);
   }
   else {
     // We removed [k]'s leaf, so now only one other child remains.
@@ -535,19 +530,12 @@ MerkleTrie::RemoveHandleBranch(const Key &k, Node *branch, size_t num_children)
   }
 
   // Now replace [branch] with [new_child].
-  // TODO: Uncomment this CHECK and remove the else body below once we fix
-  // the TODO in Remove().
-  // CHECK_PTR(new_child);
-
+  CHECK_PTR(new_child);
   branch->parent->child[parent_branch_hex] = new_child;
-  if (new_child) {
-    new_child->parent = branch->parent;
-    return new_child;
-  }
-  else {
-    return branch->parent;
-  }
+  new_child->parent = branch->parent;
+
   // TODO: Free [branch].
+  return new_child;
 }
 
 bool
@@ -606,14 +594,7 @@ MerkleTrie::Remove(const Key &k)
     branch->value = std::nullopt;
     to_hash = branch;
 
-    // TODO: Handle the case where the branch only has one child, and so now
-    // the branch is no longer needed. I should probably do this when I clean
-    // the rest of the code up.
-    //
-    // Be careful of the case where the branch is the root node.
     if (branch != root_ && num_children == 1) {
-      // TODO: Remove branch and move its child up.
-      printf("Need to handle this case :)\n");
       to_hash = RemoveHandleBranch(k, branch, 2);
     }
   }
