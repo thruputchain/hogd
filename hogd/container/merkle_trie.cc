@@ -944,8 +944,8 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   const bool key_shorter = key_window.size() <= leaf->path.size();
   const Key &shorter_path = key_shorter ? key_window : leaf->path;
   const Key &longer_path = key_shorter ? leaf->path : key_window;
-  const std::string &shorter_value = key_shorter ? obj : *leaf->value;
-  const std::string &longer_value = key_shorter ? *leaf->value : obj;
+  T &&shorter_value = key_shorter ? obj : std::move(*leaf->value);
+  T &&longer_value = key_shorter ? std::move(*leaf->value) : obj;
 
   if (shorter_path.empty()) {
     // The shorter key's remaining path is empty, so we should place the shorter
