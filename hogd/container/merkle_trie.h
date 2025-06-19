@@ -153,9 +153,9 @@ private:
   // on [path]. Note that [existing_key] should be a [nullptr] when this
   // function is called so that the caller can determine whether [existing_key]
   // is set to a node.
-  Node *TraverseToLowestBranch(const HexArray &path, Node *root,
-                               Node *prev_branch, size_t &idx,
-                               Node *&existing_key);
+  static Node *TraverseToLowestBranch(const HexArray &path, Node *root,
+                                      Node *prev_branch, size_t &idx,
+                                      Node *&existing_key);
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.

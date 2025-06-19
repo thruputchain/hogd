@@ -437,11 +437,11 @@ MerkleTrie::Insert(const Key &k, T &&obj)
 Node *
 MerkleTrie::RemoveHandleBranch(const Key &k, Node *branch, size_t num_children)
 {
-  if (num_children < 2) {
-    CHECK(branch->value.has_value());
+  if (num_children) {
+    CHECK_EQ(num_children, 1);
   }
   else {
-    CHECK(num_children == 2);
+    CHECK(branch->value.has_value());
   }
 
   // There are exactly two children in the branch, or there is one child and
@@ -483,17 +483,6 @@ MerkleTrie::RemoveHandleBranch(const Key &k, Node *branch, size_t num_children)
   }
   CHECK_EQ(branch->parent->type, Node::Type::kBranch);
 
-  // Remove [k]'s leaf as a child of the branch.
-  /*
-  {
-    CHECK_EQ(branch->child[std::to_integer<size_t>(branch_hex)]->type,
-             Node::Type::kLeaf);
-    branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
-
-    // TODO: Free the child node.
-  }
-  */
-
   Node *other_child = nullptr;
   std::byte other_child_hex = std::byte{0x00};
   for (size_t i = 0; i < branch->child.size(); i++) {
@@ -506,7 +495,7 @@ MerkleTrie::RemoveHandleBranch(const Key &k, Node *branch, size_t num_children)
   }
 
   Node *new_child = nullptr;
-  if (num_children == 1) {
+  if (num_children == 0) {
     // We removed [k]'s leaf, so now no children remain.
     CHECK_EQ(other_child, nullptr);
     CHECK(branch->value.has_value());
@@ -519,7 +508,7 @@ MerkleTrie::RemoveHandleBranch(const Key &k, Node *branch, size_t num_children)
   else {
     // We removed [k]'s leaf, so now only one other child remains.
     CHECK_PTR(other_child);
-    CHECK_EQ(num_children, 2);
+    CHECK_EQ(num_children, 1);
     // We already checked above that there are two KV pairs "under" this
     // branch. So if [num_children] is 2, then we know that the branch does
     // not have a value.
@@ -568,33 +557,6 @@ MerkleTrie::RemoveHandleBranch(const Key &k, Node *branch, size_t num_children)
 bool
 MerkleTrie::Remove(const Key &k)
 {
-  // If removing a value from a branch, do nothing.
-  //
-  // If removing a value in a leaf node, need to look at the parent, which is
-  // always a branch node.
-  // 1. If the branch node has 2+ *other* branches, just clear the current
-  //    branch and then we are done.
-  //
-  // 2. If the branch node only has 1 *other* branch, or if the branch node
-  //    has no *other* branches but does have a value, we can optimize by
-  //    removing the branch node. This is slightly tricky.
-  //
-  //    a) Keep going up the tree until we hit another branch node. Build up
-  //    the path as we go up the tree. Specifically, the parent of the branch
-  //    may be an extension node that we can remove, too.
-  //
-  //    b) If the 1 other branch is a leaf, or if there are no other branches
-  //    as there is just a value, then remove all of the nodes and add the
-  //    built-up path to the leaf.
-  //
-  //    c) If the 1 other branch is an extension, then remove all of the nodes
-  //    and add the built-up path to the extension.
-  //
-  //    d) If the 1 other branch is a branch, then remove all of the nodes,
-  //    replace them with an extension node that has the built-up path, and
-  //    then place the "1 other branch" beneath this extension node.
-  //
-  // 3. If the branch node has no *other* branches, then it must have a value.
   size_t idx = 0;
   Node *existing_key = nullptr;
   Node *branch =
@@ -608,53 +570,45 @@ MerkleTrie::Remove(const Key &k)
   CHECK_EQ(branch->type, Node::Type::kBranch);
 
   size_t num_children = GetNumChildrenInBranch(*branch);
-  Node *to_hash = nullptr;
   if (existing_key == branch) {
-    // [k] is in a branch, so clear its value.
+    // [k] maps to a branch, so clear the branch's value.
     CHECK(branch->value.has_value());
     branch->value = std::nullopt;
-    to_hash = branch;
-
-    if (branch != root_ && num_children == 1) {
-      to_hash = RemoveHandleBranch(k, branch, 2);
-    }
   }
   else {
-    size_t num_children = GetNumChildrenInBranch(*branch);
-    CHECK(num_children);
+    // [existing_key != branch], so we know that the key is leaf node which is a
+    // child of a branch. Thus, we need to remove this leaf node.
+    CHECK_EQ(existing_key->type, Node::Type::kLeaf);
 
     size_t branch_hex = std::to_integer<size_t>(k.Get(idx));
-    if (num_children > 2 || (num_children == 2 && branch->value)) {
-      // The branch has more than two children, or there are exactly two
-      // children and there is a value in the branch (so in other words, there
-      // are basically three KV pairs "under" this branch). Thus, we can just
-      // remove the leaf node from the branch as the branch will still have at
-      // least two KV pairs "under" it, so there is no further optimization
-      // possible.
-      branch->child[branch_hex] = nullptr;
-      // TODO: Fix all frees.
-      to_hash = branch;
-    }
-    else if (branch != root_) {
-      // Remove [k]'s leaf as a child of the branch.
-      {
-        CHECK_EQ(branch->child[branch_hex]->type, Node::Type::kLeaf);
-        branch->child[branch_hex] = nullptr;
+    CHECK_EQ(branch->child[branch_hex], existing_key);
+    CHECK(num_children);
 
-        // TODO: Free the child node.
-      }
-      to_hash = RemoveHandleBranch(k, branch, num_children);
-    }
-    else {
-      CHECK_EQ(branch, root_);
-      // [k] is in a leaf node. We know that [k] is not in a branch node because
-      // we would have handled it above.
-      CHECK_EQ(existing_key->type, Node::Type::kLeaf);
+    // Remove [k]'s leaf as a child of the branch.
+    branch->child[branch_hex] = nullptr;
+    num_children--;
 
-      branch->child[branch_hex] = nullptr;
-      to_hash = branch;
-    }
     // TODO: Free [existing_key].
+  }
+
+  Node *to_hash = nullptr;
+  if (branch == root_) {
+    // If the branch is the root node, we need to keep it. Even if the branch
+    // now has fewer than two KV pairs "under" it, there is no further
+    // optimization possible.
+    to_hash = branch;
+  }
+  else if (num_children > 1 || (num_children == 1 && branch->value)) {
+    // The branch has multiple children, or there is exactly one child and there
+    // is a value in the branch (so in other words, there are two KV pairs
+    // "under" this branch). Thus, as the branch still has at least two KV pairs
+    // "under" it, no further optimization is possible.
+    to_hash = branch;
+  }
+  else {
+    // The branch now has fewer than two KV pairs "under" it, so we can
+    // optimize our trie by removing the branch.
+    to_hash = RemoveHandleBranch(k, branch, num_children);
   }
 
   size_--;
@@ -982,6 +936,7 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, Node *parent_branch, const Key &k,
   return leaf;
 }
 
+// static
 Node *
 MerkleTrie::TraverseToLowestBranch(const HexArray &path, Node *root,
                                    Node *prev_root, size_t &idx,
