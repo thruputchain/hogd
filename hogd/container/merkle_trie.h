@@ -65,7 +65,7 @@ public:
 
   ~MerkleTrie() { FreeAllNodes(root_); }
 
-  // disable copy and support move.
+  // Disable copy and support move.
   MerkleTrie(const MerkleTrie &) = delete;
   MerkleTrie &operator=(const MerkleTrie &) = delete;
   MerkleTrie(MerkleTrie &&) noexcept = default;
