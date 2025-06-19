@@ -34,7 +34,8 @@
 // values are strings.
 namespace hogd {
 
-// This is a Merkle Patricia Trie.
+// This is a Merkle Patricia Trie. It holds KV pairs and can efficiently
+// prove/verify whether a KV pair is in the trie.
 //
 // Example:
 // MerkleTrie trie;
