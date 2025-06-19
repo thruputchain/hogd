@@ -341,7 +341,6 @@ MerkleTrie::Prove(const std::vector<std::byte> &encodings,
   if (!num_nodes) {
     return false;
   }
-  // TODO: Need to check that the root node is a branch?
 
   // Check that we verified the entire key and that the root hash matches
   // up.

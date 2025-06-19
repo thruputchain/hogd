@@ -30,10 +30,21 @@
 
 namespace hogd {
 
-// TODO: Describe the class.
+// This is an array of hex characters/digits. The closest equivalent would be an
+// [std::vector<std::byte>], but this is cumbersome to use as an [std::byte]
+// holds two hex digits, so we cannot index into the vector by hex digit index.
 //
 // Example:
-// TODO: Provide example.
+// HexArray h("1234");
+//
+// This prints "0x1234":
+// std::cout << h << std::endl;
+//
+// This appends another hex digit to [h]:
+// h.Append(0x5);
+//
+// This prints "0x12345":
+// std::cout << h << std::endl;
 class HexArray {
 public:
   static constexpr size_t kMaxNumHexDigits = 66;
@@ -126,6 +137,11 @@ public:
       oss << std::setw(1) << static_cast<int>(b);
     }
     return oss.str();
+  }
+
+  friend std::ostream &operator<<(std::ostream &os, const HexArray &h)
+  {
+    return os << h.str();
   }
 
   std::byte Get(size_t idx) const
