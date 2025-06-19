@@ -3,7 +3,6 @@
 #pragma once
 
 #include <coroutine>
-#include <new>
 #include <queue>
 #include <ranges>
 #include <stop_token>
@@ -17,19 +16,6 @@
 #include <x23/vec.h>
 
 namespace x23 {
-
-// Note: this could break binary compatibility, but we don't have that
-// across compilers anyway because of how clang deals with
-// [[no_unique_address]]:
-// https://github.com/llvm/llvm-project/issues/50766
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wunknown-warning-group"
-#pragma GCC diagnostic ignored "-Winterference-size"
-constexpr size_t hardware_destructive_interference_size =
-    std::hardware_destructive_interference_size;
-#pragma GCC diagnostic pop
 
 // Return the number of available hardware threads.  Tries to figure
 // it out from Cpus_allowed in /proc/self/status, which works on

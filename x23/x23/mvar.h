@@ -19,7 +19,8 @@ namespace x23 {
 // something like ++mvar->field.  Finally, MVar<T>::with(F) calls an
 // invocable of type F with a reference to the protected object,
 // releasing the lock on completion.
-template<typename T, typename Lock = std::mutex> class MVar {
+template<typename T, typename Lock = std::mutex>
+class alignas(hardware_destructive_interference_size) MVar {
 public:
   using value_type = T;
 
