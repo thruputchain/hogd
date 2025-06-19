@@ -150,6 +150,7 @@ TEST(MerkleTrie, BranchAndLeafFind)
   HexArray key_b("123456");
   std::string value_b = "hello again";
   trie.Insert(key_b, value_b);
+  std::cout << trie << std::endl;
   EXPECT_EQ(*trie.Find(key_a), value_a);
   EXPECT_EQ(*trie.Find(key_b), value_b);
   EXPECT_EQ(trie.Find(HexArray("12")), nullptr);

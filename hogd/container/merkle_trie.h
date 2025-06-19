@@ -143,8 +143,9 @@ private:
   static void Walk(Node *root, HexArray &prefix,
                    const std::function<void(const HexArray &, Node &)> &f);
 
-  Node *TraverseToBottom(Node *root, Node *prev_root, const HexArray &path,
-                         size_t &idx, Node *&existing_key);
+  Node *TraverseToLowestBranch(const HexArray &path, Node *root,
+                               Node *prev_branch, size_t &idx,
+                               Node *&existing_key);
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.

@@ -373,8 +373,9 @@ MerkleTrie::Insert(const Key &k, T &&obj)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  Node *branch = TraverseToBottom(root_, /*prev_root=*/nullptr,
-                                  /*path=*/k, idx, existing_key);
+  Node *branch =
+      TraverseToLowestBranch(/*path=*/k, root_, /*prev_root=*/nullptr, idx,
+                             existing_key);
   if (existing_key) {
     // [k] already exists in the trie, so we cannot insert it.
     return false;
@@ -399,9 +400,9 @@ MerkleTrie::Insert(const Key &k, T &&obj)
     // the key and add it as a child of the branch.
     size_t branch_idx = std::to_integer<size_t>(k.Get(idx));
     if (branch->child[branch_idx]) {
-      // There is already a child node. [TraverseToBottom] returns the lowest
-      // branch node in the trie on [key]'s path, so the child node is either an
-      // extension node or a leaf node.
+      // There is already a child node. [TraverseToLowestBranch] returns the
+      // lowest branch node in the trie on [key]'s path, so the child node is
+      // either an extension node or a leaf node.
       if (branch->child[branch_idx]->type == Node::Type::kExtension) {
         to_hash = InsertHandleExtension(branch->child[branch_idx], branch, k,
                                         idx, std::move(obj));
@@ -596,8 +597,9 @@ MerkleTrie::Remove(const Key &k)
   // 3. If the branch node has no *other* branches, then it must have a value.
   size_t idx = 0;
   Node *existing_key = nullptr;
-  Node *branch = TraverseToBottom(root_, /*prev_root=*/nullptr,
-                                  /*path=*/k, idx, existing_key);
+  Node *branch =
+      TraverseToLowestBranch(/*path=*/k, root_, /*prev_root=*/nullptr, idx,
+                             existing_key);
   if (!existing_key) {
     // [k] does not exist in the trie, so we cannot remove it.
     return false;
@@ -714,8 +716,8 @@ MerkleTrie::FindNode(const Key &k)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  TraverseToBottom(root_, /*prev_root=*/nullptr,
-                   /*path=*/k, idx, existing_key);
+  TraverseToLowestBranch(/*path=*/k, root_, /*prev_root=*/nullptr, idx,
+                         existing_key);
   return existing_key;
 }
 
@@ -981,39 +983,32 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, Node *parent_branch, const Key &k,
 }
 
 Node *
-MerkleTrie::TraverseToBottom(Node *root, Node *prev_root, const HexArray &path,
-                             size_t &idx, Node *&existing_key)
+MerkleTrie::TraverseToLowestBranch(const HexArray &path, Node *root,
+                                   Node *prev_root, size_t &idx,
+                                   Node *&existing_key)
 {
-  if (!root) {
-    return prev_root;
-  }
-  // There are two hex characters per byte. [idx] is the index of the current
-  // hex character we are looking at, so we reach the end of the byte array
-  // when [idx >= path.size() * 2].
-  if (idx >= path.size()) {
-    if (root->type == Node::Type::kBranch) {
-      if (!root->value->empty()) {
+  CHECK_PTR(root);
+  CHECK_LE(idx, path.size());
+
+  switch (root->type) {
+  case Node::Type::kBranch:
+  {
+    if (idx == path.size()) {
+      if (root->value) {
+        // [path] maps to this branch node.
         existing_key = root;
       }
       return root;
     }
-    else if (prev_root && prev_root->type == Node::Type::kBranch) {
-      if (root->type == Node::Type::kLeaf && root->path.size() == 0) {
-        existing_key = root;
-      }
-      idx--;
-      return prev_root;
-    }
-  }
 
-  std::byte current_hex = path.Get(idx);
-  switch (root->type) {
-  case Node::Type::kBranch:
-  {
-    Node *next = root->child[std::to_integer<size_t>(current_hex)];
+    size_t branch_hex = std::to_integer<size_t>(path.Get(idx));
+    Node *next = root->child[branch_hex];
     if (next) {
+      // There is a child that corresponds to the next hex digit in [path], so
+      // continue searching. We add 1 to [idx] since the branch corresponds to
+      // one hex digit in the path.
       idx++;
-      return TraverseToBottom(next, root, path, idx, existing_key);
+      return TraverseToLowestBranch(path, next, root, idx, existing_key);
     }
     else {
       // There is no child, so we have reached the bottom of the trie.
@@ -1023,17 +1018,23 @@ MerkleTrie::TraverseToBottom(Node *root, Node *prev_root, const HexArray &path,
   }
   case Node::Type::kExtension:
   {
+    // We check [idx + root->path.size() <= path.size()]. Note that when these
+    // two values are equal, the path maps to the child node, which is always a
+    // branch.
     if (idx + root->path.size() <= path.size() &&
         path.GetSubarray(idx, idx + root->path.size()) == root->path) {
-      CHECK_PTR(root->child[0]);
       idx += root->path.size();
-      return TraverseToBottom(root->child[0], root, path, idx, existing_key);
+      CHECK_PTR(root->child[0]);
+      return TraverseToLowestBranch(path, root->child[0], root, idx,
+                                    existing_key);
     }
     else {
       // The extension node's path does not match [key], so we can stop moving
-      // down the tree.
+      // down the trie.
       //
-      // We are going to return the parent node, so subtract 1 from [idx].
+      // We are going to return the parent node, which is always a branch, so
+      // subtract 1 from [idx] since the branch corresponds to one hex digit in
+      // the path.
       idx--;
       return prev_root;
     }
@@ -1041,9 +1042,12 @@ MerkleTrie::TraverseToBottom(Node *root, Node *prev_root, const HexArray &path,
   }
   case Node::Type::kLeaf:
     if (path.GetSubarray(idx, path.size()) == root->path) {
+      // [path] maps to this leaf node.
       existing_key = root;
     }
-    // We are going to return the parent node, so subtract 1 from [idx].
+    // We are going to return the parent node, which is always a branch, so
+    // subtract 1 from [idx] since the branch corresponds to one hex digit in
+    // the path.
     idx--;
     return prev_root;
     break;
