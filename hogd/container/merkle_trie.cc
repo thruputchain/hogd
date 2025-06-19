@@ -409,13 +409,13 @@ MerkleTrie::Insert(const Key &k, T &&obj)
       // lowest branch node in the trie on [key]'s path, so the child node is
       // either an extension node or a leaf node.
       if (branch->child[branch_idx]->type == Node::Type::kExtension) {
-        to_hash = InsertHandleExtension(branch->child[branch_idx], branch, k,
-                                        idx, std::move(obj));
+        to_hash = InsertHandleExtension(branch->child[branch_idx], k, idx,
+                                        std::move(obj));
       }
       else {
         CHECK_EQ(branch->child[branch_idx]->type, Node::Type::kLeaf);
-        to_hash = InsertHandleLeaf(branch->child[branch_idx], branch, k, idx,
-                                   std::move(obj));
+        to_hash =
+            InsertHandleLeaf(branch->child[branch_idx], k, idx, std::move(obj));
       }
     }
     else {
@@ -706,21 +706,19 @@ MerkleTrie::FindNode(const Key &k)
 //
 // static
 Node *
-MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
-                                  const Key &k, size_t idx, T &&obj)
+MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
+                                  T &&obj)
 {
   CHECK_EQ(extension->type, Node::Type::kExtension);
+  CHECK_EQ(extension->parent->type, Node::Type::kBranch);
   CHECK_GT(extension->path.size(), 0);
-
-  // TODO: No need to pass [parent_branch] as a parameter.
-  CHECK_EQ(extension->parent, parent_branch);
 
   // [key_window] holds the portion of [k] that we are currently looking at. In
   // other words, we omit the prefix of [k] that corresponds to the nodes in the
   // tree we have already visited.
   //
-  // We add 1 since one of the digits will be included in the [parent_branch]
-  // node.
+  // We add 1 since one of the digits will be included in the
+  // [extension->parent] node, which is always a branch node.
   const Key key_window = k.GetSubarray(idx + 1, k.size());
 
   size_t common_range_length =
@@ -767,11 +765,11 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
     // First Extension Node: Path is [0x123].
     // Branch Node: A leaf for [key_window] is child [0x4]. The child of
     //              [extension] is child [0x5] in this branch.
-    Node *first = Node::CreateExtension(/*parent=*/parent_branch);
+    Node *first = Node::CreateExtension(/*parent=*/extension_cache.parent);
     first->path = key_window.GetSubarray(0, diverge_idx);
 
     // Place the first extension node as a child of the branch.
-    parent_branch->child[std::to_integer<size_t>(k.Get(idx))] = first;
+    extension_cache.parent->child[std::to_integer<size_t>(k.Get(idx))] = first;
 
     // Create the new branch node and add it as a child of the first extension
     // node.
@@ -805,13 +803,15 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
     // Note that we reuse [extension] below.
     branch = extension;
     branch->type = Node::Type::kBranch;
-    // TODO: Is assigning the parent necessary?
-    branch->parent = parent_branch;
+    // Set the [branch]'s parent to be the same as [extension]'s parent. Note
+    // that since we are reusing the extension node, we could technically omit
+    // the line below, but we keep it for clarity.
+    branch->parent = extension_cache.parent;
     branch->path.Clear();
     branch->value = std::nullopt;
     memset(branch->child.data(), 0,
            branch->child.size() * sizeof(branch->child[0]));
-    parent_branch->child[std::to_integer<size_t>(k.Get(idx))] = branch;
+    extension_cache.parent->child[std::to_integer<size_t>(k.Get(idx))] = branch;
   }
   CHECK_PTR(branch);
   // Set [extension] to [nullptr] so that we crash if we accidentally use it
@@ -826,11 +826,12 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
   // child of the branch.
   CHECK_LT(diverge_idx, extension_cache.path.size());
   // TODO: Do the cast here.
-  std::byte second_branch = extension_cache.path.Get(diverge_idx);
+  size_t second_branch =
+      std::to_integer<size_t>(extension_cache.path.Get(diverge_idx));
   if (diverge_idx < extension_cache.path.size() - 1) {
     extension = Node::CreateExtension(/*parent=*/branch);
     // The second extension node has a path size larger than 1.
-    branch->child[std::to_integer<size_t>(second_branch)] = extension;
+    branch->child[second_branch] = extension;
 
     // Add 1 to account for the branch node. We are placing the second extension
     // node as a child of the branch node, so the branch node accounts for 1 hex
@@ -854,8 +855,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
     // The second extension node would have a path size of 1, so we instead
     // place the second extension node's child directly as a child of the
     // branch.
-    branch->child[std::to_integer<size_t>(second_branch)] =
-        extension_cache.child[0];
+    branch->child[second_branch] = extension_cache.child[0];
     extension_cache.child[0]->parent = branch;
   }
 
@@ -879,8 +879,8 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
     leaf->path = key_window.GetSubarray(diverge_idx + 1, key_window.size());
     leaf->value = std::move(obj);
 
-    std::byte leaf_branch = key_window.Get(diverge_idx);
-    branch->child[std::to_integer<size_t>(leaf_branch)] = leaf;
+    size_t leaf_branch = std::to_integer<size_t>(key_window.Get(diverge_idx));
+    branch->child[leaf_branch] = leaf;
     return leaf;
   }
 }
@@ -898,22 +898,19 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
 //
 // static
 Node *
-MerkleTrie::InsertHandleLeaf(Node *leaf, Node *parent_branch, const Key &k,
-                             size_t idx, T &&obj)
+MerkleTrie::InsertHandleLeaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 {
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
+  CHECK_EQ(leaf->parent->type, Node::Type::kBranch);
 
-  // TODO: No need to pass [parent_branch] as a parameter.
-  CHECK_EQ(leaf->parent, parent_branch);
-
-  // We add 1 since one of the digits will be included in the [parent_branch]
+  // We add 1 since one of the digits will be included in the [leaf->parent]
   // node.
   size_t parent_branch_digit = std::to_integer<size_t>(k.Get(idx));
   Key key_window = k.GetSubarray(idx + 1, k.size());
 
   // We create a branch that we will put both keys under.
-  Node *branch = Node::CreateBranch(/*parent=*/parent_branch);
-  parent_branch->child[parent_branch_digit] = branch;
+  Node *branch = Node::CreateBranch(/*parent=*/leaf->parent);
+  leaf->parent->child[parent_branch_digit] = branch;
 
   // Check to see if [key_window] and the path in [leaf] have any digits in
   // common. If they do, we create an extension node with the shared digits, and
@@ -922,10 +919,10 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, Node *parent_branch, const Key &k,
       GetLongestCommonRangeLength(key_window, 0, leaf->path, 0);
   if (common_range_length) {
     size_t diverge_idx = common_range_length;
-    Node *extension = Node::CreateExtension(/*parent=*/parent_branch);
+    Node *extension = Node::CreateExtension(/*parent=*/leaf->parent);
     extension->path = key_window.GetSubarray(0, diverge_idx);
 
-    parent_branch->child[parent_branch_digit] = extension;
+    leaf->parent->child[parent_branch_digit] = extension;
     extension->child[0] = branch;
     branch->parent = extension;
 
