@@ -1,7 +1,7 @@
 
 #include <print>
 
-#include "x23/fileio.h"
+#include "x23/sockio.h"
 #include "x23/serialize.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
@@ -14,19 +14,58 @@ using enum msg_type;
 
 SRpcFd::SRpcFd(UniqueFd fd)
   : max_message_size_(default_max_message_size), fd_(std::move(fd))
-{}
+{
+  set_nodelay(fd);
+  set_nonblock(fd, false);
+}
 
 SRpcFd::~SRpcFd()
 {
   fail();
+  bool running = false;
+  {
+    auto q = write_queue_.take();
+    if (write_thread_.joinable())
+      running = true;
+  }
+  if (running) {
+    read_thread_.join();
+    write_thread_.join();
+  }
 }
 
 void
 SRpcFd::fail()
 {
-  ss_.request_stop();
-  shutdown(fd_.get(), SHUT_RDWR);
-  write_ready();
+  if (ss_.request_stop()) {
+    shutdown(fd_.get(), SHUT_RDWR);
+    write_ready();
+    decltype(pending_calls_)::value_type pcs;
+    pcs.swap(*pending_calls_.take());
+    for (auto &pc : pcs)
+      pc.second(nullptr, {});
+  }
+}
+
+void
+SRpcFd::go()
+{
+  auto q = write_queue_.take();
+  assert(!write_thread_.joinable());
+  write_thread_ = std::thread{&SRpcFd::write_worker, this};
+  read_thread_ = std::thread{&SRpcFd::read_worker, this};
+}
+
+void
+SRpcFd::write_call(Buf record, CallCB cb)
+{
+  auto q = write_queue_.take();
+  if (ss_.stop_requested()) {
+    q.reset();
+    cb(nullptr, {});
+    return;
+  }
+  q->emplace_back(std::move(record), std::move(cb));
 }
 
 void
@@ -109,7 +148,7 @@ SRpcFd::input(BufView bytes)
     auto cb{std::move(pc->second)};
     pcs->erase(pc);
     pcs.reset();
-    cb(msg, bytes.subspan(n));
+    cb(&msg, bytes.subspan(n));
   }
   else
     std::println(stderr, "SRpcFd::input fd {}: unknown Xid in reply",

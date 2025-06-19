@@ -268,16 +268,7 @@ struct RpcStream : public detail::RpcStreamImpl {
   Async<typename ProcMeta::return_type>
   send_call(const is_xdr_type auto &...args)
   {
-    using enum msg_type;
-    using enum auth_flavor;
-    rpc_msg msg{};
-    msg.body.mtype(CALL);
-    msg.body.cbody().rpcvers = 2;
-    msg.body.cbody().prog = ProcMeta::version_meta::program;
-    msg.body.cbody().vers = ProcMeta::version_meta::version;
-    msg.body.cbody().proc = ProcMeta::proc;
-    msg.body.cbody().cred.flavor = AUTH_NONE;
-    msg.body.cbody().verf.flavor = AUTH_NONE;
+    auto msg = call_msg<ProcMeta>();
     Buf record = make_record(msg, args...);
 
     // Note we geneate the xid after calling make_record just in case
@@ -335,11 +326,13 @@ struct RpcStream : public detail::RpcStreamImpl {
     }
   };
 
+  /*
   template<typename VersMeta> requires requires { typename VersMeta::client; }
   typename VersMeta::template client<ClientRef> client(VersMeta = {})
   {
     return typename VersMeta::client{ClientRef{*this}};
   }
+  */
 
   struct Configurator {
     Configurator(std::shared_ptr<RpcStream> s) noexcept : s_(std::move(s)) {}
@@ -370,7 +363,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     }
 
     template<typename VersMeta>
-    requires requires { typename VersMeta::template client<RpcStream>; }
+    requires requires { typename VersMeta::template client<ClientRef>; }
     typename VersMeta::template client<ClientRef> client(VersMeta = {})
     {
       go();

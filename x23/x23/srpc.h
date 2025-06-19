@@ -3,9 +3,11 @@
 #pragma once
 
 #include <condition_variable>
+#include <memory>
 #include <print>
+#include <semaphore>
 #include <stop_token>
-#include <map>
+#include <thread>
 
 #include <x23/cleanup.h>
 #include <x23/mvar.h>
@@ -30,10 +32,15 @@ struct SRpcService {
   }
 };
 
-class SRpcFd {
+class SRpcFd : std::enable_shared_from_this<SRpcFd> {
 public:
-  using CallCB = std::function<void(const rpc_msg &, BufView)>;
-  static inline size_t default_max_message_size = 0x200000;
+  // Note the BufView argument to CallCB is only the argument, not the
+  // rpc_msg, which has already been decoded.
+  using CallCB = std::function<void(rpc_msg *, BufView)>;
+
+  // Note the maximum message size is 0x7fffffff because we don't
+  // support chunked messages.
+  static inline std::uint32_t default_max_message_size = 0x200000;
   size_t max_message_size_;
   SrvMap<SRpcService> srvmap_{};
 
@@ -41,6 +48,13 @@ public:
   SRpcFd(const SRpcFd &) = delete;
   ~SRpcFd();
   void fail();
+
+  // Enqueue a serialized call. record must be a complete RPC record
+  // including length, but the XID doesn't matter as it will be
+  // overwritten with a unique value at the time the RPC is sent.
+  void write_call(Buf record, CallCB cb);
+
+  void go();
 
 private:
   static constexpr size_t kReadSize = 0x10000;
@@ -59,6 +73,9 @@ private:
   std::condition_variable write_ready_;
 
   std::stop_source ss_;
+
+  std::thread read_thread_;
+  std::thread write_thread_;
 
   void read_worker();
   void input(BufView);
@@ -141,7 +158,7 @@ private:
       }
       d_.logger_.template log_server<ProcMeta>(callmsg_, args);
       try {
-        auto res = void_to_tuple([&] {
+        auto res = detail::void_to_tuple([&] {
           return std::apply(std::bind_front(ProcMeta::dispatch, *d_.impl_,
                                             args),
                             d_.ea_);
@@ -165,5 +182,77 @@ private:
 template<typename T, typename VersMeta, typename... ExtraArgs>
 concept implements_srpc =
     implements_rpc<T, VersMeta, std::type_identity_t, ExtraArgs...>;
+
+template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
+  using super = SRpcFd;
+
+  Logger logger_;
+
+  SRpcStream(UniqueFd fd, Logger logger = {})
+    : SRpcFd(std::move(fd)), logger_(std::move(logger))
+  {}
+
+  template<typename Server,
+           typename VersMeta = typename std::remove_cvref_t<
+               decltype(*std::declval<Server>())>::rpc_service,
+           typename... ExtraArgs>
+  requires implements_srpc<Server, VersMeta, ExtraArgs...>
+  SRpcStream &server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)
+  {
+    auto dispatch = new SRpcDispatcher<VersMeta, Server, Logger,
+                                       std::decay_t<ExtraArgs>...>(
+        std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
+    srvmap_.emplace(dispatch->getpv(), dispatch);
+    return *this;
+  }
+  template<typename VersMeta, typename Server, typename... ExtraArgs>
+  requires implements_srpc<Server, VersMeta, ExtraArgs...>
+  SRpcStream &server(Server srvr, ExtraArgs &&...ea)
+  {
+    return server<Server, VersMeta, ExtraArgs...>(std::move(srvr), {}, ea...);
+  }
+
+  /*
+  using ClientRef = std::shared_ptr<SRpcStream>;
+
+  template<typename VersMeta>
+  requires requires { typename VersMeta::template client<SRpcStream>; }
+  typename VersMeta::template client<ClientRef> client(VersMeta = {})
+  {
+    return typename VersMeta::template client<ClientRef>{ClientRef{*s_}};
+  }
+  */
+
+  template<typename ProcMeta>
+  ProcMeta::return_type send_call(const is_xdr_type auto &...args)
+  {
+    auto msg = call_msg<ProcMeta>();
+    Buf record = make_record(msg, args...);
+
+    std::binary_semaphore done{0};
+    std::expected<typename ProcMeta::return_type,
+                  std::variant<XdrCallFailed, XdrBadInput>>
+        ret;
+
+    write_call(record, [&](rpc_msg *msg, BufView res) {
+      if (!msg)
+        ret = std::unexpected{XdrBadInput("EOF")};
+      if (!rpc_is_success(*msg))
+        ret = std::unexpected{XdrCallFailed{*msg}};
+      else
+        try {
+          deserialize(&*ret, res);
+        } catch (XdrBadInput &e) {
+          ret = std::unexpected{std::move(e)};
+        }
+      done.release();
+    });
+
+    done.acquire();
+    if (ret)
+      return ret.value();
+    std::visit([](auto e) { throw e; }, ret.error());
+  }
+};
 
 } // namespace x23

@@ -32,6 +32,23 @@ struct XdrCallFailed : XdrException {
   }
 };
 
+template<typename ProcMeta>
+inline rpc_msg
+call_msg()
+{
+  using enum msg_type;
+  using enum auth_flavor;
+  rpc_msg msg{};
+  msg.body.mtype(CALL);
+  msg.body.cbody().rpcvers = 2;
+  msg.body.cbody().prog = ProcMeta::version_meta::program;
+  msg.body.cbody().vers = ProcMeta::version_meta::version;
+  msg.body.cbody().proc = ProcMeta::proc;
+  msg.body.cbody().cred.flavor = AUTH_NONE;
+  msg.body.cbody().verf.flavor = AUTH_NONE;
+  return msg;
+}
+
 inline void
 msg_set_reply_stat(rpc_msg *msg, accept_stat stat)
 {
