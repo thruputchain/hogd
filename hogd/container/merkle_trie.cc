@@ -758,6 +758,8 @@ MerkleTrie::InsertHandleExtensionChild(Node *extension, Node *parent_branch,
     // branch.
     branch->child[std::to_integer<size_t>(second_branch)] = extension->child[0];
     extension->child[0]->parent = branch;
+
+    // TODO: Free [extension].
   }
 
   // Now we need to place [key_window] into the trie. If [key_window] entirely
@@ -786,98 +788,104 @@ MerkleTrie::InsertHandleExtensionChild(Node *extension, Node *parent_branch,
   }
 }
 
-// 2. If the child is a leaf node, check to see what remaining hex
-// characters the key and the leaf node have in common. If there is at
-// least one common character, then we should create an extension node
-// for the common path. Once the hex characters diverge, we should
-// create a branch node. There are two options here:
-//   a) One of the two keys ends on the branch, at which point we can
-//   place this shorter key's value in the branch node and the other
-//   key's value in a leaf of the branch.
+// We are inserting [k] into the trie, and it conflicts with a leaf node on the
+// same path. This method resolves that conflict.
 //
-//   b) Neither of the two keys has ended yet. Place each key's value in
-//   its own leaf node under the branch (so there will be two leaf
-//   nodes).
+// We create a new branch node and place both [k] and the key in [leaf] as
+// children of this branch. Note that if one of the keys ends on the branch, we
+// place the key directly into the branch node rather than create a leaf for it.
+//
+// If [k] and the path in [leaf] have hex digits in common, we also create an
+// extension node with the shared hex digits. We place the new branch node as a
+// child of this extension node.
 Node *
-MerkleTrie::InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
-                                  const Key &k, size_t idx, T &&obj)
+MerkleTrie::InsertHandleLeafChild(Node *leaf, Node *parent_branch, const Key &k,
+                                  size_t idx, T &&obj)
 {
-  CHECK_EQ(current_leaf->type, Node::Type::kLeaf);
+  CHECK_EQ(leaf->type, Node::Type::kLeaf);
 
   // We add 1 since one of the digits will be included in the [parent_branch]
   // node.
-  std::byte parent_branch_digit = k.Get(idx);
-  Key key_a = k.GetSubarray(idx + 1, k.size());
-  Key key_b = current_leaf->path;
+  size_t parent_branch_digit = std::to_integer<size_t>(k.Get(idx));
+  Key key_window = k.GetSubarray(idx + 1, k.size());
 
-  Node *new_branch_node = Node::CreateBranch(/*parent=*/parent_branch);
-  parent_branch->child[std::to_integer<size_t>(parent_branch_digit)] =
-      new_branch_node;
+  // We create a branch that we will put both keys under.
+  Node *branch = Node::CreateBranch(/*parent=*/parent_branch);
+  parent_branch->child[parent_branch_digit] = branch;
 
-  size_t common_range_length = GetLongestCommonRangeLength(key_a, 0, key_b, 0);
+  // Check to see if [key_window] and the path in [leaf] have any digits in
+  // common. If they do, we create an extension node with the shared digits, and
+  // then we place the new branch as a child of this new extension node.
+  size_t common_range_length =
+      GetLongestCommonRangeLength(key_window, 0, leaf->path, 0);
   if (common_range_length) {
     size_t diverge_idx = common_range_length;
-    Node *new_extension_node = Node::CreateExtension(/*parent=*/parent_branch);
-    new_extension_node->path = key_a.GetSubarray(0, diverge_idx);
+    Node *extension = Node::CreateExtension(/*parent=*/parent_branch);
+    extension->path = key_window.GetSubarray(0, diverge_idx);
 
-    parent_branch->child[std::to_integer<size_t>(parent_branch_digit)] =
-        new_extension_node;
-    new_extension_node->child[0] = new_branch_node;
-    new_branch_node->parent = new_extension_node;
+    parent_branch->child[parent_branch_digit] = extension;
+    extension->child[0] = branch;
+    branch->parent = extension;
 
     // Now remove the extension path from these keys.
-    key_a = key_a.GetSubarray(diverge_idx, key_a.size());
-    key_b =
-        current_leaf->path.GetSubarray(diverge_idx, current_leaf->path.size());
+    key_window = key_window.GetSubarray(diverge_idx, key_window.size());
+    leaf->path = leaf->path.GetSubarray(diverge_idx, leaf->path.size());
   }
 
-  const Key &shorter = key_a.size() <= key_b.size() ? key_a : key_b;
-  const std::string &shorter_value =
-      key_a.size() <= key_b.size() ? obj : *current_leaf->value;
-  const Key &longer = key_a.size() <= key_b.size() ? key_b : key_a;
-  const std::string &longer_value =
-      key_a.size() <= key_b.size() ? *current_leaf->value : obj;
+  // Now we place both keys in the branch. Note that it is possible one of the
+  // keys is shorter than the other. If so, it is possible the shorter key's
+  // remaining path is empty, in which case it should be placed directly into
+  // the branch rather than in a leaf node that is a child of the branch.
+  const bool key_shorter = key_window.size() <= leaf->path.size();
+  const Key &shorter_path = key_shorter ? key_window : leaf->path;
+  const Key &longer_path = key_shorter ? leaf->path : key_window;
+  const std::string &shorter_value = key_shorter ? obj : *leaf->value;
+  const std::string &longer_value = key_shorter ? *leaf->value : obj;
 
-  Node *to_hash = nullptr;
-  if (shorter.empty()) {
-    // The shorter key is entirely contained within the larger key. Thus, we
-    // should add the shorter key's value to the last branch node created, and
-    // then we should add the longer key and its value to a leaf node of that
-    // branch.
-    new_branch_node->value = std::move(shorter_value);
-
-    // Longer key's leaf node.
-    Node *leaf = Node::CreateLeaf(/*parent=*/new_branch_node);
-    leaf->path = longer.GetSubarray(1, longer.size());
-    leaf->value = std::move(longer_value);
-    new_branch_node->child[std::to_integer<size_t>(longer.Get(0))] = leaf;
-    to_hash = leaf;
+  if (shorter_path.empty()) {
+    // The shorter key's remaining path is empty, so we should place the shorter
+    // key directly into the branch.
+    branch->value = std::move(shorter_value);
   }
   else {
-    CHECK_NE(static_cast<uint8_t>(shorter.Get(0)),
-             static_cast<uint8_t>(longer.Get(0)));
+    CHECK(!longer_path.empty());
+    CHECK_NE(static_cast<uint8_t>(shorter_path.Get(0)),
+             static_cast<uint8_t>(longer_path.Get(0)));
+    // We place the two keys into their own leaf nodes and we make those leaf
+    // nodes children of the branch.
 
-    // The digits do not match, so create two leaf nodes.
-
-    // Shorter key's leaf node.
-    Node *leaf = Node::CreateLeaf(/*parent=*/new_branch_node);
-    leaf->path = shorter.GetSubarray(1, shorter.size());
-    leaf->value = std::move(shorter_value);
-    new_branch_node->child[std::to_integer<size_t>(shorter.Get(0))] = leaf;
+    // Shorter key's leaf node. Note that we reuse [leaf] for the longer node
+    // below, so we allocate a new node here.
+    //
+    // Note that I am deliberately allocating a new node first *before* reusing
+    // [leaf]. The [shorter_*] and [longer_*] variables above contain references
+    // to elements in [leaf], so we cannot overwrite [leaf] until we no longer
+    // need those references.
+    Node *shorter_leaf = Node::CreateLeaf(/*parent=*/branch);
+    // Unlike the other nodes, we do not need to call [shorter_path.Get(0)]
+    // before writing [shorter_leaf->path] because we are not reusing [leaf].
+    // Thus, [shorter_path] will never be a reference to [shorter_leaf->path]. I
+    // still call it first though to match the style of the node creation below.
+    branch->child[std::to_integer<size_t>(shorter_path.Get(0))] = shorter_leaf;
+    shorter_leaf->path = shorter_path.GetSubarray(1, shorter_path.size());
+    shorter_leaf->value = std::move(shorter_value);
     // We hash this leaf here, and then in the parent function, we hash all
-    // nodes on the path from the leaf below to the root. Note that this leaf
-    // and the leaf below share the same parent.
-    leaf->hash = leaf->GetNodeHash();
-
-    // Longer key's leaf node.
-    leaf = Node::CreateLeaf(/*parent=*/new_branch_node);
-    leaf->path = longer.GetSubarray(1, longer.size());
-    leaf->value = std::move(longer_value);
-    new_branch_node->child[std::to_integer<size_t>(longer.Get(0))] = leaf;
-    to_hash = leaf;
+    // nodes on the path from the leaf *created below* to the root. Note that
+    // this leaf is not on that path, so we must hash it here.
+    shorter_leaf->hash = shorter_leaf->GetNodeHash();
   }
-  // delete current_leaf;
-  return to_hash;
+
+  // Now we place the longer key into a leaf node that is a child of the branch.
+  // Note that we reuse [leaf] rather than allocate a new node.
+  //
+  // We overwrite [leaf->path] below, so we need call [longer_path.Get(0)] first
+  // as [longer_path] may be a reference to [leaf->path].
+  branch->child[std::to_integer<size_t>(longer_path.Get(0))] = leaf;
+  leaf->path = longer_path.GetSubarray(1, longer_path.size());
+  leaf->value = std::move(longer_value);
+  leaf->parent = branch;
+
+  return leaf;
 }
 
 Node *
