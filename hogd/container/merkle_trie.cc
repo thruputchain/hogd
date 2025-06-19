@@ -188,14 +188,14 @@ CheckLeaf(Node *leaf)
 
 // static
 std::string
-MerkleTrie::StringFromNode(Node *root)
+MerkleTrie::StringFromNode(const Node *root)
 {
   HexArray prefix;
   std::ostringstream oss;
-  auto per_node = [&oss](const HexArray &path, Node &node) {
+  auto per_node = [&oss](const HexArray &path, const Node &node) {
     oss << node << std::endl;
   };
-  Walk(root, prefix, per_node);
+  Walk<const Node>(root, prefix, per_node);
   oss << "----------" << std::endl;
   return oss.str();
 }
@@ -203,14 +203,19 @@ MerkleTrie::StringFromNode(Node *root)
 std::string
 MerkleTrie::str() const
 {
-  return StringFromNode(root_);
+  return StringFromNode(&root_);
 }
 
 // static
+template<typename NodeType>
 void
-MerkleTrie::Walk(Node *root, HexArray &prefix,
-                 const std::function<void(const HexArray &, Node &)> &f)
+MerkleTrie::Walk(NodeType *root, HexArray &prefix,
+                 const std::function<void(const HexArray &, NodeType &)> &f)
 {
+  static_assert(std::is_same_v<NodeType, Node> ||
+                    std::is_same_v<NodeType, const Node>,
+                "[NodeType] must be [Node] or [const Node].");
+
   if (!root) {
     return;
   }
@@ -221,7 +226,7 @@ MerkleTrie::Walk(Node *root, HexArray &prefix,
       std::byte digit = static_cast<std::byte>(i);
 
       prefix.Append(digit);
-      Walk(root->child[i], prefix, f);
+      Walk<NodeType>(root->child[i], prefix, f);
       prefix.RemoveFromBack(1);
     }
     f(prefix, *root);
@@ -230,7 +235,7 @@ MerkleTrie::Walk(Node *root, HexArray &prefix,
     CHECK_PTR(root->child[0]);
 
     prefix.Append(root->path);
-    Walk(root->child[0], prefix, f);
+    Walk<NodeType>(root->child[0], prefix, f);
     f(prefix, *root);
     prefix.RemoveFromBack(root->path.size());
     break;
@@ -389,7 +394,7 @@ MerkleTrie::Insert(const Key &k, T &&obj)
   size_t idx = 0;
   Node *existing_key = nullptr;
   Node *branch =
-      TraverseToLowestBranch(/*path=*/k, root_, /*prev_root=*/nullptr, idx,
+      TraverseToLowestBranch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
                              existing_key);
   if (existing_key) {
     // [k] already exists in the trie, so we cannot insert it.
@@ -589,7 +594,7 @@ MerkleTrie::Remove(const Key &k)
   size_t idx = 0;
   Node *existing_key = nullptr;
   Node *branch =
-      TraverseToLowestBranch(/*path=*/k, root_, /*prev_root=*/nullptr, idx,
+      TraverseToLowestBranch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
                              existing_key);
   if (!existing_key) {
     // [k] does not exist in the trie, so we cannot remove it.
@@ -620,7 +625,7 @@ MerkleTrie::Remove(const Key &k)
   }
 
   Node *to_hash = nullptr;
-  if (branch == root_) {
+  if (branch == &root_) {
     // If the branch is the root node, we need to keep it. Even if the branch
     // now has fewer than two KV pairs "under" it, there is no further
     // optimization possible.
@@ -699,7 +704,7 @@ MerkleTrie::FindNode(const Key &k)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  TraverseToLowestBranch(/*path=*/k, root_, /*prev_root=*/nullptr, idx,
+  TraverseToLowestBranch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
                          existing_key);
   return existing_key;
 }
@@ -1082,13 +1087,16 @@ MerkleTrie::GenerateHashesFrom(Node *n)
   }
 }
 
-// static
 void
 MerkleTrie::FreeAllNodes(Node *root)
 {
   HexArray prefix;
-  auto f = [](const HexArray &path, Node &node) { delete &node; };
-  Walk(root, prefix, f);
+  auto f = [&](const HexArray &path, Node &node) {
+    if (&node != &root_) {
+      delete &node;
+    }
+  };
+  Walk<Node>(root, prefix, f);
 }
 
 } // namespace hogd

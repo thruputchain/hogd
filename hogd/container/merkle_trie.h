@@ -63,7 +63,7 @@ public:
 
   MerkleTrie() { InitRootNode(); }
 
-  ~MerkleTrie() { FreeAllNodes(root_); }
+  ~MerkleTrie() { FreeAllNodes(&root_); }
 
   // Disable copy and support move.
   MerkleTrie(const MerkleTrie &) = delete;
@@ -78,9 +78,9 @@ public:
   }
 
   // Basic sanity checks on the trie.
-  bool Check() { return CheckHelper(root_, /*parent=*/nullptr); }
+  bool Check() { return CheckHelper(&root_, /*parent=*/nullptr); }
 
-  SHA256Hash GetRootHash() const { return root_->hash; }
+  SHA256Hash GetRootHash() const { return root_.hash; }
 
   std::pair<SHA256Hash, std::vector<std::byte>> GetProof(const Key &k);
 
@@ -102,7 +102,7 @@ public:
 
   void Clear()
   {
-    FreeAllNodes(root_);
+    FreeAllNodes(&root_);
     InitRootNode();
     size_ = 0;
   }
@@ -123,7 +123,7 @@ public:
         break;
       }
     };
-    Walk(root_, prefix, per_node);
+    Walk<Node>(&root_, prefix, per_node);
   }
 
   // Executes [func] in parallel on each element using a WorkerPool.
@@ -149,7 +149,7 @@ private:
   static Node *InsertHandleLeaf(Node *current_leaf, const Key &k, size_t idx,
                                 T &&obj);
 
-  static std::string StringFromNode(Node *root);
+  static std::string StringFromNode(const Node *root);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.
@@ -157,8 +157,11 @@ private:
   // A post-order traversal visits all of the children of a node before visiting
   // the node itself. This is useful when regenerating all of the node hashes in
   // a trie or freeing all of the nodes.
-  static void Walk(Node *root, HexArray &prefix,
-                   const std::function<void(const HexArray &, Node &)> &f);
+  //
+  // [NodeType] must either be [Node] or [const Node].
+  template<typename NodeType>
+  static void Walk(NodeType *root, HexArray &prefix,
+                   const std::function<void(const HexArray &, NodeType &)> &f);
 
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
   // of the hex digit in [path] that corresponds to the lowest branch.
@@ -180,14 +183,18 @@ private:
 
   void InitRootNode()
   {
-    root_ = Node::CreateBranch(/*parent=*/nullptr);
-    GenerateHashesFrom(root_);
+    root_.Clear();
+    root_.InitBranch(/*parent=*/nullptr);
+    GenerateHashesFrom(&root_);
   }
 
   // Frees all of the nodes starting at [root].
-  static void FreeAllNodes(Node *root);
+  void FreeAllNodes(Node *root);
 
-  Node *root_ = nullptr;
+  // The root node in the trie. The root node always exists and is always a
+  // branch.
+  Node root_;
+  // The number of KV pairs in the trie.
   size_t size_ = 0;
 
   // TODO: How many of these are still necessary?
