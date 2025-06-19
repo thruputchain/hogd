@@ -44,13 +44,14 @@ public:
   HexArray(const std::string &s)
   {
     CHECK_LE(s.size(), kMaxNumHexDigits);
+
     Init();
 
     for (size_t i = 0; i < s.size(); i++) {
       std::string substr = s.substr(i, 1);
       std::byte b = static_cast<std::byte>(
           std::stoul(substr, /*pos=*/nullptr, /*base=*/16));
-      Set(i, b);
+      SetHelper(i, b);
     }
     size_ = s.size();
   }
@@ -129,6 +130,8 @@ public:
 
   std::byte Get(size_t idx) const
   {
+    CHECK_LT(idx, size_);
+
     if (idx % 2 == 0) {
       return static_cast<std::byte>(backing_store_[idx / 2] >> 4);
     }
@@ -139,20 +142,16 @@ public:
 
   void Set(size_t idx, std::byte b)
   {
-    if (idx % 2 == 0) {
-      backing_store_[idx / 2] &= std::byte{0x0F};
-      backing_store_[idx / 2] |= (b << 4);
-    }
-    else {
-      backing_store_[idx / 2] &= std::byte{0xF0};
-      backing_store_[idx / 2] |= (b & std::byte{0x0F});
-    }
+    CHECK_LT(idx, size_);
+
+    SetHelper(idx, b);
   }
 
   void Append(std::byte b)
   {
     CHECK_LE(size_ + 1, kMaxNumHexDigits);
-    Set(size_, b);
+
+    SetHelper(size_, b);
     size_++;
   }
 
@@ -160,8 +159,9 @@ public:
   void Append(const HexArray &to_append)
   {
     CHECK_LE(size_ + to_append.size(), kMaxNumHexDigits);
+
     for (size_t i = 0; i < to_append.size(); i++) {
-      Set(size_ + i, to_append.Get(i));
+      SetHelper(size_ + i, to_append.Get(i));
     }
     size_ += to_append.size();
   }
@@ -210,6 +210,20 @@ private:
     memset(backing_store_.data(), 0,
            backing_store_.size() * sizeof(backing_store_[0]));
     size_ = 0;
+  }
+
+  void SetHelper(size_t idx, std::byte b)
+  {
+    CHECK_LE(idx, kMaxNumHexDigits);
+
+    if (idx % 2 == 0) {
+      backing_store_[idx / 2] &= std::byte{0x0F};
+      backing_store_[idx / 2] |= (b << 4);
+    }
+    else {
+      backing_store_[idx / 2] &= std::byte{0xF0};
+      backing_store_[idx / 2] |= (b & std::byte{0x0F});
+    }
   }
 
   std::array<std::byte, kMaxNumHexDigits> backing_store_;

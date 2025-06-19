@@ -372,16 +372,9 @@ bool
 MerkleTrie::Insert(const Key &k, T &&obj)
 {
   size_t idx = 0;
-  std::byte branch_hex = std::byte(0x00);
   Node *existing_key = nullptr;
-  Node *branch_before_branch = nullptr;
-  std::byte branch_before_branch_hex = std::byte(0x00);
-  Node *branch =
-      TraverseToBottom(root_, /*prev_root=*/nullptr,
-                       /*last_branch_seen=*/nullptr,
-                       /*last_branch_hex_seen=*/std::byte(0x00),
-                       /*path=*/k, idx, branch_hex, existing_key,
-                       branch_before_branch, branch_before_branch_hex);
+  Node *branch = TraverseToBottom(root_, /*prev_root=*/nullptr,
+                                  /*path=*/k, idx, existing_key);
   if (existing_key) {
     // [k] already exists in the trie, so we cannot insert it.
     return false;
@@ -602,16 +595,9 @@ MerkleTrie::Remove(const Key &k)
   //
   // 3. If the branch node has no *other* branches, then it must have a value.
   size_t idx = 0;
-  std::byte branch_hex = std::byte(0x00);
   Node *existing_key = nullptr;
-  Node *branch_before_branch = nullptr;
-  std::byte branch_before_branch_hex = std::byte(0x00);
-  Node *branch =
-      TraverseToBottom(root_, /*prev_root=*/nullptr,
-                       /*last_branch_seen=*/nullptr,
-                       /*last_branch_hex_seen=*/std::byte(0x00), /*path=*/k,
-                       idx, branch_hex, existing_key, branch_before_branch,
-                       branch_before_branch_hex);
+  Node *branch = TraverseToBottom(root_, /*prev_root=*/nullptr,
+                                  /*path=*/k, idx, existing_key);
   if (!existing_key) {
     // [k] does not exist in the trie, so we cannot remove it.
     return false;
@@ -635,6 +621,7 @@ MerkleTrie::Remove(const Key &k)
     size_t num_children = GetNumChildrenInBranch(*branch);
     CHECK(num_children);
 
+    size_t branch_hex = std::to_integer<size_t>(k.Get(idx));
     if (num_children > 2 || (num_children == 2 && branch->value)) {
       // The branch has more than two children, or there are exactly two
       // children and there is a value in the branch (so in other words, there
@@ -642,16 +629,15 @@ MerkleTrie::Remove(const Key &k)
       // remove the leaf node from the branch as the branch will still have at
       // least two KV pairs "under" it, so there is no further optimization
       // possible.
-      branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
+      branch->child[branch_hex] = nullptr;
       // TODO: Fix all frees.
       to_hash = branch;
     }
     else if (branch != root_) {
       // Remove [k]'s leaf as a child of the branch.
       {
-        CHECK_EQ(branch->child[std::to_integer<size_t>(branch_hex)]->type,
-                 Node::Type::kLeaf);
-        branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
+        CHECK_EQ(branch->child[branch_hex]->type, Node::Type::kLeaf);
+        branch->child[branch_hex] = nullptr;
 
         // TODO: Free the child node.
       }
@@ -663,7 +649,7 @@ MerkleTrie::Remove(const Key &k)
       // we would have handled it above.
       CHECK_EQ(existing_key->type, Node::Type::kLeaf);
 
-      branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
+      branch->child[branch_hex] = nullptr;
       to_hash = branch;
     }
     // TODO: Free [existing_key].
@@ -727,15 +713,9 @@ Node *
 MerkleTrie::FindNode(const Key &k)
 {
   size_t idx = 0;
-  std::byte branch_hex = std::byte(0x00);
   Node *existing_key = nullptr;
-  Node *branch_before_branch = nullptr;
-  std::byte branch_before_branch_hex = std::byte(0x00);
   TraverseToBottom(root_, /*prev_root=*/nullptr,
-                   /*last_branch_seen=*/nullptr,
-                   /*last_branch_hex_seen=*/std::byte(0x00),
-                   /*path=*/k, idx, branch_hex, existing_key,
-                   branch_before_branch, branch_before_branch_hex);
+                   /*path=*/k, idx, existing_key);
   return existing_key;
 }
 
@@ -1001,13 +981,8 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, Node *parent_branch, const Key &k,
 }
 
 Node *
-MerkleTrie::TraverseToBottom(Node *root, Node *prev_root,
-                             Node *last_branch_seen,
-                             std::byte last_branch_hex_seen,
-                             const HexArray &path, size_t &idx,
-                             std::byte &branch_hex, Node *&existing_key,
-                             Node *&branch_before_branch,
-                             std::byte &branch_before_branch_hex)
+MerkleTrie::TraverseToBottom(Node *root, Node *prev_root, const HexArray &path,
+                             size_t &idx, Node *&existing_key)
 {
   if (!root) {
     return prev_root;
@@ -1025,20 +1000,10 @@ MerkleTrie::TraverseToBottom(Node *root, Node *prev_root,
     else if (prev_root && prev_root->type == Node::Type::kBranch) {
       if (root->type == Node::Type::kLeaf && root->path.size() == 0) {
         existing_key = root;
-
-        branch_before_branch = last_branch_seen;
-        branch_before_branch_hex = last_branch_hex_seen;
       }
       idx--;
       return prev_root;
     }
-  }
-  else if (prev_root && prev_root->type == Node::Type::kBranch) {
-    branch_before_branch = last_branch_seen;
-    last_branch_seen = prev_root;
-
-    branch_before_branch_hex = last_branch_hex_seen;
-    last_branch_hex_seen = path.Get(idx - 1);
   }
 
   std::byte current_hex = path.Get(idx);
@@ -1048,11 +1013,7 @@ MerkleTrie::TraverseToBottom(Node *root, Node *prev_root,
     Node *next = root->child[std::to_integer<size_t>(current_hex)];
     if (next) {
       idx++;
-      branch_hex = current_hex;
-      return TraverseToBottom(next, root, last_branch_seen,
-                              last_branch_hex_seen, path, idx, branch_hex,
-                              existing_key, branch_before_branch,
-                              branch_before_branch_hex);
+      return TraverseToBottom(next, root, path, idx, existing_key);
     }
     else {
       // There is no child, so we have reached the bottom of the trie.
@@ -1066,10 +1027,7 @@ MerkleTrie::TraverseToBottom(Node *root, Node *prev_root,
         path.GetSubarray(idx, idx + root->path.size()) == root->path) {
       CHECK_PTR(root->child[0]);
       idx += root->path.size();
-      return TraverseToBottom(root->child[0], root, last_branch_seen,
-                              last_branch_hex_seen, path, idx, branch_hex,
-                              existing_key, branch_before_branch,
-                              branch_before_branch_hex);
+      return TraverseToBottom(root->child[0], root, path, idx, existing_key);
     }
     else {
       // The extension node's path does not match [key], so we can stop moving
