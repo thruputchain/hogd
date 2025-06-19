@@ -59,7 +59,107 @@ GenerateRandomPath()
 
 } // namespace
 
-// TODO: Try to add an empty key. Try to add an empty value.
+TEST(MerkleTrie, EmptyKey)
+{
+  MerkleTrie trie;
+  std::cout << trie << std::endl;
+
+  HexArray key;
+  std::string value = "hello";
+  trie.Insert(key, value);
+  std::cout << trie << std::endl;
+}
+
+TEST(MerkleTrie, EmptyKeyFind)
+{
+  MerkleTrie trie;
+
+  HexArray key;
+  std::string value = "hello";
+  trie.Insert(key, value);
+  EXPECT_EQ(*trie.Find(key), value);
+}
+
+TEST(MerkleTrie, EmptyKeyRemove)
+{
+  MerkleTrie trie;
+
+  HexArray key;
+  std::string value = "hello";
+  trie.Insert(key, value);
+  std::cout << trie << std::endl;
+  trie.Remove(key);
+  std::cout << trie << std::endl;
+}
+
+TEST(MerkleTrie, EmptyKeyRemoveWithChild)
+{
+  MerkleTrie trie;
+
+  HexArray key_a;
+  std::string value_a = "hello";
+  trie.Insert(key_a, value_a);
+
+  HexArray key_b = HexArray("1");
+  std::string value_b = "hello again";
+  trie.Insert(key_b, value_b);
+
+  std::cout << trie << std::endl;
+  trie.Remove(key_a);
+  std::cout << trie << std::endl;
+}
+
+TEST(MerkleTrie, EmptyKeyRemoveChild)
+{
+  MerkleTrie trie;
+
+  HexArray key_a;
+  std::string value_a = "hello";
+  trie.Insert(key_a, value_a);
+
+  HexArray key_b = HexArray("1");
+  std::string value_b = "hello again";
+  trie.Insert(key_b, value_b);
+
+  std::cout << trie << std::endl;
+  trie.Remove(key_b);
+  std::cout << trie << std::endl;
+}
+
+TEST(MerkleTrie, EmptyValue)
+{
+  MerkleTrie trie;
+  std::cout << trie << std::endl;
+
+  HexArray key("1");
+  std::string value;
+  trie.Insert(key, value);
+  std::cout << trie << std::endl;
+}
+
+TEST(MerkleTrie, EmptyValueFind)
+{
+  MerkleTrie trie;
+
+  HexArray key("1");
+  std::string value;
+  trie.Insert(key, value);
+  EXPECT_EQ(*trie.Find(key), value);
+}
+
+TEST(MerkleTrie, EmptyValueRemove)
+{
+  MerkleTrie trie;
+
+  HexArray key("1");
+  std::string value;
+  trie.Insert(key, value);
+  std::cout << trie << std::endl;
+  trie.Remove(key);
+  std::cout << trie << std::endl;
+}
+
+// TODO: Check the return value of [trie.Insert()].
 
 TEST(MerkleTrie, TwoLeaves)
 {
