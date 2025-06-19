@@ -70,31 +70,33 @@ public:
 
   static Node *CreateBranch(Node *parent)
   {
-    Node *node = Create(Type::kBranch, parent);
-    node->value = std::nullopt;
-    memset(node->child.data(), 0, node->child.size() * sizeof(node->child[0]));
-    return node;
+    return Create(Type::kBranch, parent);
   }
 
   static Node *CreateExtension(Node *parent)
   {
-    Node *node = Create(Type::kExtension, parent);
-    memset(node->child.data(), 0, node->child.size() * sizeof(node->child[0]));
-    return node;
+    return Create(Type::kExtension, parent);
   }
 
-  static Node *CreateLeaf(Node *parent)
-  {
-    Node *node = Create(Type::kLeaf, parent);
-    node->value = std::nullopt;
-    return node;
-  }
+  static Node *CreateLeaf(Node *parent) { return Create(Type::kLeaf, parent); }
 
   std::vector<std::byte> GetNodeEncoding();
   static bool GetNodeFromEncoding(const std::vector<std::byte> &encodings,
                                   size_t &idx, Node::Raw &node);
 
   SHA256Hash ComputeNodeHash() { return sha256(GetNodeEncoding()); }
+
+  void Clear()
+  {
+    // [Node] is not a trivally copyable type (due to the [std::string] in the
+    // [value] field), so we cannot just memset() it to all zeroes. Instead, we
+    // assign each field individually.
+    memset(&hash, 0, sizeof(hash));
+    parent = nullptr;
+    path.Clear();
+    value = std::nullopt;
+    memset(child.data(), 0, child.size() * sizeof(child[0]));
+  }
 
   std::string str() const;
   friend std::ostream &operator<<(std::ostream &os, const Node &node)
@@ -124,9 +126,9 @@ private:
   static Node *Create(Type type, Node *parent)
   {
     Node *node = new Node;
+    node->Clear();
     node->type = type;
     node->parent = parent;
-
     return node;
   }
 

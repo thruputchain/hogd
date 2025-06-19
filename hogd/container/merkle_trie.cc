@@ -80,10 +80,8 @@ BranchGetChildIndex(const Node &branch, Node *child, size_t &idx)
 }
 
 size_t
-GetNumChildrenInBranch(const Node &node)
+GetNumChildren(const Node &node)
 {
-  CHECK_EQ(node.type, Node::Type::kBranch);
-
   size_t num_children = 0;
   for (const Node *child : node.child) {
     if (child) {
@@ -101,7 +99,7 @@ CheckBranch(Node *branch)
     printf("Unexpected path in branch: [%s]\n", branch->path.str().c_str());
     ret = false;
   }
-  size_t num_children = GetNumChildrenInBranch(*branch);
+  size_t num_children = GetNumChildren(*branch);
   bool is_root = !branch->parent;
   if (!num_children && !is_root) {
     printf("Branch node has no children\n");
@@ -130,6 +128,15 @@ bool
 CheckExtension(Node *extension)
 {
   bool ret = true;
+  if (extension->value) {
+    printf("Unexpected value in extension\n");
+    ret = false;
+  }
+  size_t num_children = GetNumChildren(*extension);
+  if (num_children > 1) {
+    printf("Unexpected multiple children in extension\n");
+    ret = false;
+  }
   if (!extension->path.size()) {
     printf("Unexpected empty path in extension: [%s]\n",
            extension->path.str().c_str());
@@ -161,6 +168,13 @@ bool
 CheckLeaf(Node *leaf)
 {
   bool ret = true;
+  size_t num_children = GetNumChildren(*leaf);
+  if (num_children) {
+    printf("Unexpected children in leaf\n");
+    ret = false;
+  }
+  // A path in the leaf node may or may not be empty, so we do not check its
+  // size.
   if (!leaf->value) {
     printf("Unexpected empty value in leaf\n");
     ret = false;
@@ -516,11 +530,14 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
     // 0.
     //
     // We reuse the branch node below.
+    std::optional<std::string> value = std::move(branch->value);
+    Node *parent = branch->parent;
     new_child = branch;
+    new_child->Clear();
     new_child->type = Node::Type::kLeaf;
+    new_child->parent = parent;
     new_child->path = cur_path;
-    // We are reusing [branch] which already holds the value we want to place in
-    // the leaf. Thus, we do not need to assign [new_child->value].
+    new_child->value = std::move(value);
   }
   else {
     CHECK_PTR(child);
@@ -537,7 +554,10 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
       CHECK_GE(cur_path.size(), 1);
       // We reuse the branch node below.
       new_child = branch;
+      Node *parent = branch->parent;
+      new_child->Clear();
       new_child->type = Node::Type::kExtension;
+      new_child->parent = parent;
       new_child->path = cur_path;
       new_child->child[0] = child;
       child->parent = new_child;
@@ -584,7 +604,7 @@ MerkleTrie::Remove(const Key &k)
   CHECK_PTR(branch);
   CHECK_EQ(branch->type, Node::Type::kBranch);
 
-  size_t num_children = GetNumChildrenInBranch(*branch);
+  size_t num_children = GetNumChildren(*branch);
   if (existing_key == branch) {
     // [k] maps to a branch, so clear the branch's value.
     CHECK(branch->value.has_value());
@@ -777,6 +797,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     //
     // Note that we reuse [extension] below.
     branch = extension;
+    branch->Clear();
     branch->type = Node::Type::kBranch;
     branch->parent = first;
     branch->path.Clear();
@@ -803,6 +824,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     //
     // Note that we reuse [extension] below.
     branch = extension;
+    branch->Clear();
     branch->type = Node::Type::kBranch;
     // Set the [branch]'s parent to be the same as [extension]'s parent. Note
     // that since we are reusing the extension node, we can technically omit the
