@@ -119,18 +119,20 @@ public:
   }
 
 private:
-  Node *RemoveHandleBranch(const Key &k, Node *branch, size_t num_children);
-  bool CheckHelper(Node *root, Node *parent);
+  static Node *RemoveBranch(const Key &k, Node *branch, size_t num_children);
+
+  static bool CheckHelper(Node *root, Node *parent);
 
   Node *FindNode(const Key &k);
 
   // See the implementation for comments on this function.
-  Node *InsertHandleExtension(Node *current_extension, Node *parent_branch,
-                              const Key &k, size_t idx, T &&obj);
+  static Node *InsertHandleExtension(Node *current_extension,
+                                     Node *parent_branch, const Key &k,
+                                     size_t idx, T &&obj);
 
   // See the implementation for comments on this function.
-  Node *InsertHandleLeaf(Node *current_leaf, Node *parent_branch, const Key &k,
-                         size_t idx, T &&obj);
+  static Node *InsertHandleLeaf(Node *current_leaf, Node *parent_branch,
+                                const Key &k, size_t idx, T &&obj);
 
   static std::string StringFromNode(Node *root);
 

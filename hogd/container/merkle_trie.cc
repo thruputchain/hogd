@@ -434,9 +434,11 @@ MerkleTrie::Insert(const Key &k, T &&obj)
   return true;
 }
 
+// static
 Node *
-MerkleTrie::RemoveHandleBranch(const Key &k, Node *branch, size_t num_children)
+MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
 {
+  // We should only remove a branch if it has one KV pair "under" it.
   if (num_children) {
     CHECK_EQ(num_children, 1);
   }
@@ -608,7 +610,7 @@ MerkleTrie::Remove(const Key &k)
   else {
     // The branch now has fewer than two KV pairs "under" it, so we can
     // optimize our trie by removing the branch.
-    to_hash = RemoveHandleBranch(k, branch, num_children);
+    to_hash = RemoveBranch(k, branch, num_children);
   }
 
   size_--;
@@ -617,6 +619,7 @@ MerkleTrie::Remove(const Key &k)
   return true;
 }
 
+// static
 bool
 MerkleTrie::CheckHelper(Node *root, Node *parent)
 {
@@ -688,6 +691,8 @@ MerkleTrie::FindNode(const Key &k)
 // Branch Node: Has a leaf for [k] as child [0x3]. Has the second extension node
 //              below as as child [0x5].
 // Second Extension Node: Path is [0x6]. The child is c.
+//
+// static
 Node *
 MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
                                   const Key &k, size_t idx, T &&obj)
@@ -846,6 +851,8 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
 // If [k] and the path in [leaf] have hex digits in common, we also create an
 // extension node with the shared hex digits. We place the new branch node as a
 // child of this extension node.
+//
+// static
 Node *
 MerkleTrie::InsertHandleLeaf(Node *leaf, Node *parent_branch, const Key &k,
                              size_t idx, T &&obj)
