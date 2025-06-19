@@ -124,13 +124,13 @@ private:
 
   Node *FindNode(const Key &k);
 
-  // See the callsite for comments on this function.
-  Node *InsertHandleExtensionChild(Node *current_extension, Node *parent_branch,
-                                   const Key &k, size_t idx, T &&obj);
-
-  // See the callsite for comments on this function.
-  Node *InsertHandleLeafChild(Node *current_leaf, Node *parent_branch,
+  // See the implementation for comments on this function.
+  Node *InsertHandleExtension(Node *current_extension, Node *parent_branch,
                               const Key &k, size_t idx, T &&obj);
+
+  // See the implementation for comments on this function.
+  Node *InsertHandleLeaf(Node *current_leaf, Node *parent_branch, const Key &k,
+                         size_t idx, T &&obj);
 
   static std::string StringFromNode(Node *root);
 
