@@ -94,26 +94,12 @@ public:
   static bool GetNodeFromEncoding(const std::vector<std::byte> &encodings,
                                   size_t &idx, Node::Raw &node);
 
-  SHA256Hash GetNodeHash() { return sha256(GetNodeEncoding()); }
+  SHA256Hash ComputeNodeHash() { return sha256(GetNodeEncoding()); }
 
   std::string str() const;
-  friend std::ostream &operator<<(std::ostream &os, const Type type)
-  {
-    return os << GetTypeString(type);
-  }
   friend std::ostream &operator<<(std::ostream &os, const Node &node)
   {
     return os << node.str();
-  }
-
-private:
-  static Node *Create(Type type, Node *parent)
-  {
-    Node *node = new Node;
-    node->type = type;
-    node->parent = parent;
-
-    return node;
   }
 
   static std::string GetTypeString(Type type)
@@ -128,6 +114,20 @@ private:
     default:
       return "Unknown-Node-Type";
     }
+  }
+  friend std::ostream &operator<<(std::ostream &os, const Type type)
+  {
+    return os << GetTypeString(type);
+  }
+
+private:
+  static Node *Create(Type type, Node *parent)
+  {
+    Node *node = new Node;
+    node->type = type;
+    node->parent = parent;
+
+    return node;
   }
 
   void GetBranchString(std::ostringstream &oss) const;

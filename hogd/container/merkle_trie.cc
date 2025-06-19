@@ -112,6 +112,14 @@ CheckBranch(Node *branch)
       ret = false;
     }
   }
+  if (!is_root) {
+    if (branch->parent->type != Node::Type::kBranch &&
+        branch->parent->type != Node::Type::kExtension) {
+      printf("Branch node has unexpected parent node type: %s\n",
+             Node::GetTypeString(branch->parent->type).c_str());
+      ret = false;
+    }
+  }
   return ret;
 }
 
@@ -138,6 +146,11 @@ CheckExtension(Node *extension)
     printf("Extension node has no child\n");
     ret = false;
   }
+  if (extension->parent->type != Node::Type::kBranch) {
+    printf("Extension node has unexpected parent node type: %s\n",
+           Node::GetTypeString(extension->parent->type).c_str());
+    ret = false;
+  }
   return ret;
 }
 
@@ -147,6 +160,11 @@ CheckLeaf(Node *leaf)
   bool ret = true;
   if (!leaf->value) {
     printf("Unexpected empty value in leaf\n");
+    ret = false;
+  }
+  if (leaf->parent->type != Node::Type::kBranch) {
+    printf("Extension Leaf has unexpected parent node type: %s\n",
+           Node::GetTypeString(leaf->parent->type).c_str());
     ret = false;
   }
   return ret;
@@ -670,21 +688,32 @@ MerkleTrie::CheckHelper(Node *root, Node *parent)
     ret = false;
   }
 
+  if (root->hash != root->ComputeNodeHash()) {
+    printf(
+        "The hash in the node does not match the hash we just calculated.\n");
+    ret = false;
+  }
   switch (root->type) {
   case Node::Type::kBranch:
   {
-    ret = ret && CheckBranch(root);
+    // I deliberately include [ret] second in the AND statements below to ensure
+    // that the functions in the first part of the AND are always called, even
+    // when [ret] is already [false].
+    //
+    // The functions print debug information, so we always want the functions to
+    // be called.
+    ret = CheckBranch(root) && ret;
     for (Node *child : root->child) {
-      ret = ret && CheckHelper(child, root);
+      ret = CheckHelper(child, root) && ret;
     }
     break;
   }
   case Node::Type::kExtension:
-    ret = ret && CheckExtension(root);
-    ret = ret && CheckHelper(root->child[0], root);
+    ret = CheckExtension(root) && ret;
+    ret = CheckHelper(root->child[0], root) && ret;
     break;
   case Node::Type::kLeaf:
-    ret = ret && CheckLeaf(root);
+    ret = CheckLeaf(root) && ret;
     break;
   default:
     ret = false;
@@ -833,7 +862,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
     // on [key_window]'s path in the trie, we will not rehash this second
     // extension node. Thus, to ensure that the hashes are generated properly in
     // the trie, we need to hash this second extension node here.
-    extension->hash = extension->GetNodeHash();
+    extension->hash = extension->ComputeNodeHash();
   }
   else {
     // The second extension node would have a path size of 1, so we instead
@@ -955,7 +984,7 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, Node *parent_branch, const Key &k,
     // We hash this leaf here, and then in the parent function, we hash all
     // nodes on the path from the leaf *created below* to the root. Note that
     // this leaf is not on that path, so we must hash it here.
-    shorter_leaf->hash = shorter_leaf->GetNodeHash();
+    shorter_leaf->hash = shorter_leaf->ComputeNodeHash();
   }
 
   // Now we place the longer key into a leaf node that is a child of the branch.
@@ -1072,7 +1101,7 @@ MerkleTrie::GenerateHashesFrom(Node *n)
       break;
     }
 
-    n->hash = n->GetNodeHash();
+    n->hash = n->ComputeNodeHash();
     n = n->parent;
   }
 }

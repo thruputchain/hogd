@@ -555,7 +555,7 @@ TEST(MerkleTrie, HashBranch)
     branch.child[i] = &child;
   }
 
-  SHA256Hash hash = branch.GetNodeHash();
+  SHA256Hash hash = branch.ComputeNodeHash();
   SHA256Hash expected = HashFromString(
       "20b58e07d23b8c60f45291cfb51f3b266ac2e21afe18f31a1dbc22e76446c137");
   EXPECT_EQ(hash, expected);
@@ -581,7 +581,7 @@ TEST(MerkleTrie, HashBranchSomeNullptr)
     }
   }
 
-  SHA256Hash hash = branch.GetNodeHash();
+  SHA256Hash hash = branch.ComputeNodeHash();
   SHA256Hash expected = HashFromString(
       "e237972b80de6f517ee566152092fef04a3d877adba234b7689420f80f2cdf46");
   EXPECT_EQ(hash, expected);
@@ -596,7 +596,7 @@ TEST(MerkleTrie, HashBranchAllNullptr)
   branch.value = "hello";
   memset(branch.child.data(), 0, branch.child.size() * sizeof(branch.child[0]));
 
-  SHA256Hash hash = branch.GetNodeHash();
+  SHA256Hash hash = branch.ComputeNodeHash();
   SHA256Hash expected = HashFromString(
       "e37f280ee5188cc892334bbfa5b456dc652c8d1c9b550a2fb8a9160095fe624e");
   EXPECT_EQ(hash, expected);
@@ -616,7 +616,7 @@ TEST(MerkleTrie, HashExtension)
           "1111111111111111111111111111111111111111111111111111111111111111")};
   extension.child[0] = &child;
 
-  SHA256Hash hash = extension.GetNodeHash();
+  SHA256Hash hash = extension.ComputeNodeHash();
   SHA256Hash expected = HashFromString(
       "d2af4c9af613a07327407c683265444011144af1e1b1658a9ff4bf14acbe930a");
   EXPECT_EQ(hash, expected);
@@ -631,7 +631,7 @@ TEST(MerkleTrie, HashLeaf)
   leaf.path = HexArray("00010203");
   leaf.value = "hello";
 
-  SHA256Hash hash = leaf.GetNodeHash();
+  SHA256Hash hash = leaf.ComputeNodeHash();
   SHA256Hash expected = HashFromString(
       "b8b1748d26a2919e0692c2bb970ccd1216b680f866c9a504bb173019ec1b0888");
   EXPECT_EQ(hash, expected);
