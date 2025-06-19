@@ -667,12 +667,12 @@ MerkleTrie::CheckHelper(Node *root, Node *parent)
   switch (root->type) {
   case Node::Type::kBranch:
   {
-    // I deliberately include [ret] second in the AND statements below to ensure
-    // that the functions in the first part of the AND are always called, even
-    // when [ret] is already [false].
+    // The functions below print debug information, so we always want the
+    // functions to be called.
     //
-    // The functions print debug information, so we always want the functions to
-    // be called.
+    // Thus, we deliberately include [ret] second in the AND statements below to
+    // ensure that the functions in the first part of the AND are always called,
+    // even when [ret] is already [false].
     ret = CheckBranch(root) && ret;
     for (Node *child : root->child) {
       ret = CheckHelper(child, root) && ret;
