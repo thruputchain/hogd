@@ -323,25 +323,26 @@ MerkleTrie::insert(const Key &k, T &&obj)
   Node *existing_key = nullptr;
   Node *branch_before_branch = nullptr;
   std::byte branch_before_branch_hex = std::byte(0x00);
-  Node *next = TraverseToBottom(root_, /*prev_root=*/nullptr,
-                                /*last_branch_seen=*/nullptr,
-                                /*last_branch_hex_seen=*/std::byte(0x00),
-                                /*path=*/k, idx, branch_hex, existing_key,
-                                branch_before_branch, branch_before_branch_hex);
+  Node *branch =
+      TraverseToBottom(root_, /*prev_root=*/nullptr,
+                       /*last_branch_seen=*/nullptr,
+                       /*last_branch_hex_seen=*/std::byte(0x00),
+                       /*path=*/k, idx, branch_hex, existing_key,
+                       branch_before_branch, branch_before_branch_hex);
   if (existing_key) {
     return false;
   }
-  CHECK_PTR(next);
-  CHECK_EQ(next->type, Node::Type::kBranch);
+  CHECK_PTR(branch);
+  CHECK_EQ(branch->type, Node::Type::kBranch);
   CHECK_LE(idx, k.size());
 
   Node *to_hash = nullptr;
   if (idx == k.size()) {
     // The key maps to a branch node, so we should add the value directly into
     // the branch node.
-    CHECK(!next->value.has_value());
-    next->value = std::move(obj);
-    to_hash = next;
+    CHECK(!branch->value.has_value());
+    branch->value = std::move(obj);
+    to_hash = branch;
   }
   else {
     // The key does not map to an existing node. We must next check the branch
@@ -349,43 +350,32 @@ MerkleTrie::insert(const Key &k, T &&obj)
     // so, we need to handle the children, such as by splitting part an
     // extension node. If there are no children, we can create a leaf node for
     // the key and add it as a child of the branch.
-
-    std::byte digit = k.Get(idx);
-    size_t branch_idx = std::to_integer<size_t>(digit);
-    if (next->child[branch_idx]) {
+    size_t branch_idx = std::to_integer<size_t>(k.Get(idx));
+    if (branch->child[branch_idx]) {
       // There is already a child node. [TraverseToBottom] returns the lowest
-      // branch node in the trie for [key], so the child node is either an
+      // branch node in the trie on [key]'s path, so the child node is either an
       // extension node or a leaf node.
-      //
-      // 1. If the child is an extension node, check to see how many hex
-      // characters the path and the extension node path have in common.
-      // They must have at least one character in common, as otherwise we
-      // wouldn't be here. Create a new extension node with the common
-      // characters. Then place a branch node node as a child of the new
-      // extension node. Then place the already-existing extension node
-      // underneath the branch node (with an updated [path]), and
-      // also create and place a new leaf node for [k] under the branch node.
-      //
-      if (next->child[branch_idx]->type == Node::Type::kExtension) {
-        to_hash = InsertHandleExtensionChild(next->child[branch_idx], next, k,
-                                             idx, std::move(obj));
+      if (branch->child[branch_idx]->type == Node::Type::kExtension) {
+        to_hash = InsertHandleExtensionChild(branch->child[branch_idx], branch,
+                                             k, idx, std::move(obj));
       }
       else {
-        CHECK_EQ(next->child[branch_idx]->type, Node::Type::kLeaf);
-        to_hash = InsertHandleLeafChild(next->child[branch_idx], next, k, idx,
-                                        std::move(obj));
+        CHECK_EQ(branch->child[branch_idx]->type, Node::Type::kLeaf);
+        to_hash = InsertHandleLeafChild(branch->child[branch_idx], branch, k,
+                                        idx, std::move(obj));
       }
     }
     else {
-      Node *leaf = Node::CreateLeaf(/*parent=*/next);
+      // There is no child node, so we create a leaf for [key] and place the
+      // leaf as a child of the branch.
+      Node *leaf = Node::CreateLeaf(/*parent=*/branch);
       // We are going to use the hex character at [idx] in the key to map to
       // the leaf node from the branch node. Thus, we add 1 below as we do not
       // want to include this character in the path that is stored in the leaf
       // node.
       leaf->path = k.GetSubarray(idx + 1, k.size());
       leaf->value = std::move(obj);
-
-      next->child[branch_idx] = leaf;
+      branch->child[branch_idx] = leaf;
       to_hash = leaf;
     }
   }
@@ -858,9 +848,9 @@ MerkleTrie::InsertHandleLeafChild(Node *leaf, Node *parent_branch, const Key &k,
     // below, so we allocate a new node here.
     //
     // Note that I am deliberately allocating a new node first *before* reusing
-    // [leaf]. The [shorter_*] and [longer_*] variables above contain references
-    // to elements in [leaf], so we cannot overwrite [leaf] until we no longer
-    // need those references.
+    // [leaf]. The [shorter_*] and [longer_*] variables above are references to
+    // elements in [leaf], so we cannot overwrite [leaf] until we no longer need
+    // those references.
     Node *shorter_leaf = Node::CreateLeaf(/*parent=*/branch);
     // Unlike the other nodes, we do not need to call [shorter_path.Get(0)]
     // before writing [shorter_leaf->path] because we are not reusing [leaf].
