@@ -28,9 +28,6 @@
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
-// TODO: When reusing a node, clear anything it does not need anymore. We should
-// check for this in the Check* functions.
-
 namespace hogd {
 
 namespace {
@@ -534,8 +531,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
     Node *parent = branch->parent;
     new_child = branch;
     new_child->Clear();
-    new_child->type = Node::Type::kLeaf;
-    new_child->parent = parent;
+    new_child->InitLeaf(parent);
     new_child->path = cur_path;
     new_child->value = std::move(value);
   }
@@ -556,8 +552,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
       new_child = branch;
       Node *parent = branch->parent;
       new_child->Clear();
-      new_child->type = Node::Type::kExtension;
-      new_child->parent = parent;
+      new_child->InitExtension(parent);
       new_child->path = cur_path;
       new_child->child[0] = child;
       child->parent = new_child;
@@ -798,12 +793,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     // Note that we reuse [extension] below.
     branch = extension;
     branch->Clear();
-    branch->type = Node::Type::kBranch;
-    branch->parent = first;
-    branch->path.Clear();
-    branch->value = std::nullopt;
-    memset(branch->child.data(), 0,
-           branch->child.size() * sizeof(branch->child[0]));
+    branch->InitBranch(/*parent=*/first);
     first->child[0] = branch;
   }
   else {
@@ -825,17 +815,10 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     // Note that we reuse [extension] below.
     branch = extension;
     branch->Clear();
-    branch->type = Node::Type::kBranch;
-    // Set the [branch]'s parent to be the same as [extension]'s parent. Note
-    // that since we are reusing the extension node, we can technically omit the
-    // line below, but we keep it for clarity.
-    branch->parent = extension_cache.parent;
-    branch->path.Clear();
-    branch->value = std::nullopt;
-    memset(branch->child.data(), 0,
-           branch->child.size() * sizeof(branch->child[0]));
-    // As mentioned in the comment above, we can technically omit the line below
-    // below, but we keep it for clarity.
+    branch->InitBranch(/*parent=*/extension_cache.parent);
+    // We are reusing [extension] as [branch], so they are the same pointer.
+    // Thus, we can technically omit the line below below, but we keep it for
+    // clarity.
     extension_cache.parent->child[parent_branch_hex] = branch;
   }
   CHECK_PTR(branch);

@@ -68,17 +68,47 @@ public:
   // unused.
   std::array<Node *, 16> child;
 
+  void InitBranch(Node *parent)
+  {
+    type = Type::kBranch;
+    this->parent = parent;
+  }
+
+  void InitExtension(Node *parent)
+  {
+    type = Type::kExtension;
+    this->parent = parent;
+  }
+
+  void InitLeaf(Node *parent)
+  {
+    type = Type::kLeaf;
+    this->parent = parent;
+  }
+
   static Node *CreateBranch(Node *parent)
   {
-    return Create(Type::kBranch, parent);
+    Node *node = new Node;
+    node->Clear();
+    node->InitBranch(parent);
+    return node;
   }
 
   static Node *CreateExtension(Node *parent)
   {
-    return Create(Type::kExtension, parent);
+    Node *node = new Node;
+    node->Clear();
+    node->InitExtension(parent);
+    return node;
   }
 
-  static Node *CreateLeaf(Node *parent) { return Create(Type::kLeaf, parent); }
+  static Node *CreateLeaf(Node *parent)
+  {
+    Node *node = new Node;
+    node->Clear();
+    node->InitLeaf(parent);
+    return node;
+  }
 
   std::vector<std::byte> GetNodeEncoding();
   static bool GetNodeFromEncoding(const std::vector<std::byte> &encodings,
@@ -123,15 +153,6 @@ public:
   }
 
 private:
-  static Node *Create(Type type, Node *parent)
-  {
-    Node *node = new Node;
-    node->Clear();
-    node->type = type;
-    node->parent = parent;
-    return node;
-  }
-
   void GetBranchString(std::ostringstream &oss) const;
   void GetExtensionString(std::ostringstream &oss) const;
   void GetLeafString(std::ostringstream &oss) const;
