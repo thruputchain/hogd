@@ -143,6 +143,16 @@ private:
   static void Walk(Node *root, HexArray &prefix,
                    const std::function<void(const HexArray &, Node &)> &f);
 
+  // Returns the lowest branch in the trie on [path]. [idx] is set to the index
+  // of the hex digit in [path] that corresponds to the lowest branch.
+  //
+  // If a node for [path] already exists in the trie, [existing_key] is set to
+  // the node. Thus, since a KV pair can only be placed in a branch or a leaf,
+  // [existing_key] is only set to nodes of these types. Regardless of whether
+  // this node exist, the function always returns the lowest branch in the trie
+  // on [path]. Note that [existing_key] should be a [nullptr] when this
+  // function is called so that the caller can determine whether [existing_key]
+  // is set to a node.
   Node *TraverseToLowestBranch(const HexArray &path, Node *root,
                                Node *prev_branch, size_t &idx,
                                Node *&existing_key);
