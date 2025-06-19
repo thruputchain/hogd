@@ -28,6 +28,9 @@
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
+// TODO: When reusing a node, clear anything it does not need anymore. We should
+// check for this in the Check* functions.
+
 namespace hogd {
 
 namespace {
@@ -709,6 +712,9 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
   CHECK_EQ(extension->type, Node::Type::kExtension);
   CHECK_GT(extension->path.size(), 0);
 
+  // TODO: No need to pass [parent_branch] as a parameter.
+  CHECK_EQ(extension->parent, parent_branch);
+
   // [key_window] holds the portion of [k] that we are currently looking at. In
   // other words, we omit the prefix of [k] that corresponds to the nodes in the
   // tree we have already visited.
@@ -728,6 +734,9 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
   // into the branch. It is also possible that we omit part of the existing
   // subtree, too.
   Node *branch = nullptr;
+  // We are going to reuse [extension] in the if/else bodies below, so we cache
+  // the node since we need its contents after it is reused.
+  const Node extension_cache = *extension;
   if (common_range_length) {
     // [key_window] and the extension node have a common range, so we are going
     // to break the extension node into two extension nodes:
@@ -766,7 +775,15 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
 
     // Create the new branch node and add it as a child of the first extension
     // node.
-    branch = Node::CreateBranch(/*parent=*/first);
+    //
+    // Note that we reuse [extension] below.
+    branch = extension;
+    branch->type = Node::Type::kBranch;
+    branch->parent = first;
+    branch->path.Clear();
+    branch->value = std::nullopt;
+    memset(branch->child.data(), 0,
+           branch->child.size() * sizeof(branch->child[0]));
     first->child[0] = branch;
   }
   else {
@@ -784,10 +801,22 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
     // of the branch node mentioned above. Then we place the extension node as
     // one child of this new branch and we create a leaf node for [key_window]
     // and place the leaf as the other child of the new branch.
-    branch = Node::CreateBranch(/*parent=*/parent_branch);
+    //
+    // Note that we reuse [extension] below.
+    branch = extension;
+    branch->type = Node::Type::kBranch;
+    // TODO: Is assigning the parent necessary?
+    branch->parent = parent_branch;
+    branch->path.Clear();
+    branch->value = std::nullopt;
+    memset(branch->child.data(), 0,
+           branch->child.size() * sizeof(branch->child[0]));
     parent_branch->child[std::to_integer<size_t>(k.Get(idx))] = branch;
   }
   CHECK_PTR(branch);
+  // Set [extension] to [nullptr] so that we crash if we accidentally use it
+  // below without reassigning it.
+  extension = nullptr;
 
   // In both cases above, we create a new branch node and now we need to place
   // an extension node as the child of that new branch node.
@@ -795,18 +824,25 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
   // However, note that in the first case above, we may omit the second
   // extension node and instead place the extension node's child directly as a
   // child of the branch.
-  CHECK_LT(diverge_idx, extension->path.size());
-  std::byte second_branch = extension->path.Get(diverge_idx);
-  if (diverge_idx < extension->path.size() - 1) {
+  CHECK_LT(diverge_idx, extension_cache.path.size());
+  // TODO: Do the cast here.
+  std::byte second_branch = extension_cache.path.Get(diverge_idx);
+  if (diverge_idx < extension_cache.path.size() - 1) {
+    extension = Node::CreateExtension(/*parent=*/branch);
     // The second extension node has a path size larger than 1.
     branch->child[std::to_integer<size_t>(second_branch)] = extension;
-    extension->parent = branch;
 
     // Add 1 to account for the branch node. We are placing the second extension
     // node as a child of the branch node, so the branch node accounts for 1 hex
     // digit in the path.
     extension->path =
-        extension->path.GetSubarray(diverge_idx + 1, extension->path.size());
+        extension_cache.path.GetSubarray(diverge_idx + 1,
+                                         extension_cache.path.size());
+    extension->child[0] = extension_cache.child[0];
+    // [extension] was reused above, so [extension_cache.child[0]->parent]
+    // currently points to the reused node rather than the [extension] we just
+    // allocated. Thus, we update the parent pointer to [extension].
+    extension_cache.child[0]->parent = extension;
     // Note that this second extension node is *not* on the path from the node
     // that will hold [key_window] to the root. Thus, when we rehash the nodes
     // on [key_window]'s path in the trie, we will not rehash this second
@@ -818,13 +854,9 @@ MerkleTrie::InsertHandleExtension(Node *extension, Node *parent_branch,
     // The second extension node would have a path size of 1, so we instead
     // place the second extension node's child directly as a child of the
     // branch.
-    branch->child[std::to_integer<size_t>(second_branch)] = extension->child[0];
-    extension->child[0]->parent = branch;
-
-    // TODO: We could reuse this extension node above instead of allocating a
-    // new branch. Then if we enter the case above, we can allocate an extension
-    // node.
-    delete extension;
+    branch->child[std::to_integer<size_t>(second_branch)] =
+        extension_cache.child[0];
+    extension_cache.child[0]->parent = branch;
   }
 
   // Now we need to place [key_window] into the trie. If [key_window] entirely
@@ -870,6 +902,9 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, Node *parent_branch, const Key &k,
                              size_t idx, T &&obj)
 {
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
+
+  // TODO: No need to pass [parent_branch] as a parameter.
+  CHECK_EQ(leaf->parent, parent_branch);
 
   // We add 1 since one of the digits will be included in the [parent_branch]
   // node.

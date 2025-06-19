@@ -198,6 +198,9 @@ public:
     return ret;
   }
 
+  // TODO: Add a test for this.
+  void Clear() { size_ = 0; }
+
   size_t size() const { return size_; }
   bool empty() const { return !size_; }
 
