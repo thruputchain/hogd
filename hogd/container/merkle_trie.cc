@@ -1092,6 +1092,8 @@ MerkleTrie::FreeAllNodes(Node *root)
 {
   HexArray prefix;
   auto f = [&](const HexArray &path, Node &node) {
+    // [root_] is a [MerkleTrie] class member of type [Node]. It is not a
+    // pointer to a [Node] value on the heap, so we cannot free the root node.
     if (&node != &root_) {
       delete &node;
     }
