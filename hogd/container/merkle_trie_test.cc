@@ -16,8 +16,6 @@ namespace hogd {
 
 namespace {
 
-// TODO: This functionality should be replaced with HexArray.
-
 // Converts a human-readable hex string (e.g., "0x1234") to a [SHA256Hex].
 SHA256Hash
 HashFromString(const std::string &str)
@@ -26,28 +24,38 @@ HashFromString(const std::string &str)
   // characters.
   CHECK_EQ(str.size(), 64);
 
+  HexArray h(str);
   SHA256Hash ret;
   for (size_t i = 0; i < str.size(); i += 2) {
-    std::string substr = str.substr(i, 2);
-    unsigned char byte = static_cast<unsigned char>(
-        std::stoul(substr, /*pos=*/nullptr, /*base=*/16));
-    ret[i / 2] = byte;
+    std::byte first_hex_digit = h.Get(i);
+    std::byte second_hex_digit = h.Get(i + 1);
+    // [HexArray::Get] always return an [std::byte] with the most significant
+    // four bits zeroed out. Thus, for [second_hex_digit] below, we do not need
+    // to zero out these bits again.
+    std::byte b = (first_hex_digit << 4) | second_hex_digit;
+    ret[i / 2] = static_cast<unsigned char>(b);
   }
   return ret;
 }
 
-/*
-std::string
-StringFromHash(const SHA256Hash &hash)
+// TODO: Generate paths with odd lengths.
+HexArray
+GenerateRandomPath()
 {
-  std::ostringstream oss;
-  oss << std::hex << std::setfill('0');
-  for (size_t i = 0; i < 32; i++) {
-    oss << std::setw(2) << static_cast<int>(hash[i]);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+
+  std::uniform_int_distribution<size_t> path_size_dist(1, 20);
+  size_t path_size = path_size_dist(gen);
+
+  std::vector<std::byte> path(path_size);
+  std::uniform_int_distribution<int> path_dist(0, 0xff);
+
+  for (size_t i = 0; i < path.size(); i++) {
+    path[i] = static_cast<std::byte>(path_dist(gen));
   }
-  return oss.str();
+  return HexArray(path);
 }
-*/
 
 } // namespace
 
@@ -637,65 +645,6 @@ TEST(MerkleTrie, HashLeaf)
       "b8b1748d26a2919e0692c2bb970ccd1216b680f866c9a504bb173019ec1b0888");
   EXPECT_EQ(hash, expected);
 }
-
-namespace {
-
-HexArray
-GenerateRandomPath()
-{
-  std::random_device rd;
-  std::mt19937 gen(rd());
-
-  std::uniform_int_distribution<size_t> path_size_dist(1, 20);
-  size_t path_size = path_size_dist(gen);
-
-  std::vector<std::byte> path(path_size);
-  std::uniform_int_distribution<int> path_dist(0, 0xff);
-
-  for (std::byte &b : path) {
-    b = static_cast<std::byte>(path_dist(gen));
-  }
-  return HexArray(path);
-}
-
-} // namespace
-
-/*
-void
-GetDiff(std::map<HexArray, std::string> total,
-        std::map<HexArray, std::string> seen)
-{
-  HexArray diff;
-  std::string value;
-  for (const auto &[k, _] : total) {
-    if (seen.count(k) == 0 || total[k] != seen[k]) {
-      diff = k;
-      value = total[k];
-      break;
-    }
-  }
-  for (const auto &[k, _] : seen) {
-    if (total.count(k) == 0 || total[k] != seen[k]) {
-      diff = k;
-      value = seen[k];
-      break;
-    }
-  }
-  printf("Difference: %s (%s)\n", diff.str().c_str(), value.c_str());
-  if (total.count(diff) == 0) {
-    printf("not in total\n");
-  }
-  else {
-    printf("in total: %s\n", total[diff].c_str());
-  }
-  if (seen.count(diff) == 0) {
-    printf("not in seen\n");
-  }
-  else {
-    printf("in seen: %s\n", seen[diff].c_str());
-  }
-}
-*/
 
 TEST(MerkleTrie, Stress)
 {
