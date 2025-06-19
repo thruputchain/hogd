@@ -582,10 +582,10 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   copy = node_encodings;
   // Find matching branch.
   int matching_idx = -1;
-  size_t branch_start_idx =
-      idx + node_encodings_by_node[node_idx].size() - (16 * sizeof(SHA256Hash));
+  size_t branch_start_idx = idx + node_encodings_by_node[node_idx].size() -
+                            (Node::kMaxNumBranches * sizeof(SHA256Hash));
   SHA256Hash to_find = sha256(node_encodings_by_node[node_idx - 1]);
-  for (size_t i = 0; i < 16; i++) {
+  for (size_t i = 0; i < Node::kMaxNumBranches; i++) {
     SHA256Hash *to_compare = reinterpret_cast<SHA256Hash *>(
         &copy[branch_start_idx + (i * sizeof(SHA256Hash))]);
     if (*to_compare == to_find) {
@@ -605,7 +605,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   // Change a non-matching hash in a branch. We will just choose a different
   // branch from above.
   int nonmatching_idx = matching_idx + sizeof(SHA256Hash);
-  nonmatching_idx %= 16 * sizeof(SHA256Hash);
+  nonmatching_idx %= Node::kMaxNumBranches * sizeof(SHA256Hash);
   copy = node_encodings;
 
   {
@@ -663,7 +663,7 @@ TEST(MerkleTrie, HashBranch)
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  std::vector<Node> children(16, Node{});
+  std::vector<Node> children(Node::kMaxNumBranches, Node{});
   for (size_t i = 0; i < children.size(); i++) {
     Node &child = children[i];
     size_t digit = i % 10;
@@ -684,7 +684,7 @@ TEST(MerkleTrie, HashBranchSomeNullptr)
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  std::vector<Node> children(16, Node{});
+  std::vector<Node> children(Node::kMaxNumBranches, Node{});
   for (size_t i = 0; i < children.size(); i++) {
     if (i % 2) {
       Node &child = children[i];

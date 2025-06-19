@@ -63,7 +63,7 @@ GetPathString(std::ostringstream &oss, const HexArray &path)
 
 void
 GetChildString(std::ostringstream &oss, size_t child_idx,
-               const std::array<Node *, 16> children)
+               const std::array<Node *, Node::kMaxNumBranches> children)
 {
   oss << std::format("Child {}: ", static_cast<uint8_t>(child_idx));
   if (children[child_idx]) {
@@ -106,7 +106,8 @@ GetPathEncoding(std::vector<std::byte> &encoding, const HexArray &path)
 
 void
 GetChildEncoding(std::vector<std::byte> &encoding,
-                 const std::array<Node *, 16> children, size_t num_children)
+                 const std::array<Node *, Node::kMaxNumBranches> children,
+                 size_t num_children)
 {
   static constexpr std::array<std::byte, 32> kNullptr = {};
 
@@ -204,7 +205,8 @@ GetBranchFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
   if (!GetValueFromEncoding(encodings, idx, node)) {
     return false;
   }
-  if (!GetBranchesFromEncoding(encodings, idx, node, /*num_branches=*/16)) {
+  if (!GetBranchesFromEncoding(encodings, idx, node,
+                               /*num_branches=*/Node::kMaxNumBranches)) {
     return false;
   }
 
@@ -293,7 +295,7 @@ void
 Node::GetBranchEncoding(std::vector<std::byte> &encoding) const
 {
   GetValueEncoding(encoding, value);
-  GetChildEncoding(encoding, child, /*num_children=*/16);
+  GetChildEncoding(encoding, child, /*num_children=*/kMaxNumBranches);
 }
 
 void

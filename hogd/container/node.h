@@ -32,13 +32,23 @@ namespace hogd {
 
 class Node {
 public:
+  // The maximum number of children of a branch node. The trie branches on a hex
+  // digit. There are 16 different hex digits, so we need 16 different child
+  // slots.
+  static constexpr size_t kMaxNumBranches = 16;
+  static_assert(0xF + 1 == kMaxNumBranches);
+  // We also use the [child] array to hold the child of an extension node, so
+  // ensure [kMaxNumBranches] is at least 1.
+  static_assert(kMaxNumBranches);
+
   enum class Type { kBranch, kExtension, kLeaf };
+
   struct Raw {
     Type type;
     SHA256Hash hash;
     HexArray path;
     std::optional<std::string> value;
-    std::array<SHA256Hash, 16> child_hashes;
+    std::array<SHA256Hash, kMaxNumBranches> child_hashes;
   };
 
   Type type;
@@ -46,8 +56,6 @@ public:
   Node *parent;
 
   // TODO: Optimize the variables below with a union or different node types.
-  // TODO: Optimize the vectors below--use something other than a vector. We
-  // know that path lengths will never exceed 65 bytes.
 
   // Used by extensions and leaves.
   HexArray path;
@@ -60,13 +68,12 @@ public:
 
   // Used by branches and extensions.
   //
-  // For branches, we branch on a hex value and up to all 16 slots may be
-  // filled. There are 16 different hex values, so we need 16 different branch
-  // slots.
+  // For branches, we branch on a hex digit and up to all [kMaxNumBranches]
+  // slots may be filled.
   //
-  // For extensions, only the first slot is filled. The other 15 slots are
-  // unused.
-  std::array<Node *, 16> child;
+  // For extensions, only the first slot is filled. The other
+  // [kMaxNumBranches - 1] slots are unused.
+  std::array<Node *, kMaxNumBranches> child;
 
   void InitBranch(Node *parent)
   {
