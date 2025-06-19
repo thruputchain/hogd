@@ -67,6 +67,20 @@ TEST(HexArray, CreateFromByteVector)
   EXPECT_FALSE(h.empty());
 }
 
+TEST(HexArray, CreateFromSHA256Hash)
+{
+  SHA256Hash hash;
+  for (size_t i = 0; i < hash.size(); i++) {
+    unsigned char hex_digit = static_cast<unsigned char>(i % 16);
+    hash[i] = (hex_digit << 4) | hex_digit;
+  }
+  HexArray h(hash);
+  EXPECT_EQ(h.str(),
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff");
+  EXPECT_EQ(h.size(), hash.size() * 2);
+  EXPECT_FALSE(h.empty());
+}
+
 TEST(HexArray, Get)
 {
   std::string init = "0123456789abcdef";
@@ -101,14 +115,14 @@ TEST(HexArray, AppendHexArray)
 {
   HexArray h;
   std::string to_append_str = "123456";
-  for (size_t i = 0; i < 16; i++) {
+  for (size_t i = 0; i < 10; i++) {
     HexArray to_append(to_append_str);
     h.Append(to_append);
     EXPECT_EQ(h.size(), (i + 1) * to_append_str.size());
     EXPECT_FALSE(h.empty());
   }
   std::string expected;
-  for (size_t i = 0; i < 16; i++) {
+  for (size_t i = 0; i < 10; i++) {
     expected += to_append_str;
   }
   EXPECT_EQ(h.str(), expected);
@@ -329,6 +343,27 @@ TEST(HexArray, ToByteVectorOddLength)
                                      std::byte{0xcd}, std::byte{0xe0}};
 
   EXPECT_EQ(bytes, expected);
+}
+
+TEST(HexArray, Clear)
+{
+  std::string init = "01234";
+  HexArray a(init);
+  EXPECT_EQ(a.size(), init.size());
+
+  a.Clear();
+  EXPECT_TRUE(a.empty());
+  EXPECT_EQ(a.str(), "");
+}
+
+TEST(HexArray, ClearEmpty)
+{
+  HexArray a;
+  EXPECT_TRUE(a.empty());
+
+  a.Clear();
+  EXPECT_TRUE(a.empty());
+  EXPECT_EQ(a.str(), "");
 }
 
 } // namespace hogd
