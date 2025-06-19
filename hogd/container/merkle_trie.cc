@@ -65,18 +65,27 @@ BranchHasChildHash(const Node::Raw &node, const SHA256Hash &child_hash)
   return num_matches == 1;
 }
 
+size_t
+GetNumChildrenInBranch(const Node &node)
+{
+  CHECK_EQ(node.type, Node::Type::kBranch);
+
+  size_t num_children = 0;
+  for (const Node *child : node.child) {
+    if (child) {
+      num_children++;
+    }
+  }
+  return num_children;
+}
+
 void
 CheckBranch(Node *branch)
 {
   if (branch->path.size()) {
     printf("Unexpected path in branch: [%s]\n", branch->path.str().c_str());
   }
-  size_t num_children = 0;
-  for (Node *child : branch->child) {
-    if (child) {
-      num_children++;
-    }
-  }
+  size_t num_children = GetNumChildrenInBranch(*branch);
   if (!num_children) {
     printf("Branch node has no children\n");
   }
@@ -429,14 +438,16 @@ MerkleTrie::Remove(const Key &k)
                        idx, branch_hex, existing_key, branch_before_branch,
                        branch_before_branch_hex);
   if (!existing_key) {
+    // [k] does not exist in the trie, so we cannot remove it.
     return false;
   }
   CHECK_PTR(branch);
   CHECK_EQ(branch->type, Node::Type::kBranch);
 
+  size_t num_children = GetNumChildrenInBranch(*branch);
   Node *to_hash = nullptr;
   if (existing_key == branch) {
-    // The key is in a branch.
+    // [k] is in a branch, so clear its value.
     CHECK(branch->value.has_value());
     branch->value = std::nullopt;
     to_hash = branch;
@@ -446,48 +457,60 @@ MerkleTrie::Remove(const Key &k)
     // the rest of the code up.
     //
     // Be careful of the case where the branch is the root node.
+    if (branch != root_ && num_children == 1) {
+      // TODO: Remove branch and move its child up.
+      printf("Need to handle this case :)\n");
+    }
   }
   else {
-    size_t num_branches = 0;
-    for (Node *child : branch->child) {
-      if (child) {
-        num_branches++;
-      }
-    }
-    CHECK(num_branches);
+    size_t num_children = GetNumChildrenInBranch(*branch);
+    CHECK(num_children);
 
-    if (num_branches > 2) {
-      // Just remove the leaf node from the branch.
-
+    if (num_children > 2 || (num_children == 2 && branch->value)) {
+      // The branch has more than two children, or there are exactly two
+      // children and there is a value in the branch (so in other words, there
+      // are basically three KV pairs "under" this branch). Thus, we can just
+      // remove the leaf node from the branch as the branch will still have at
+      // least two KV pairs "under" it, so there is no further optimization
+      // possible.
       branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
       // TODO: Fix all frees.
-      // delete existing_key;
       to_hash = branch;
     }
-    else if (branch_before_branch) {
-      // We are going to remove the branch node.
-
-      Node *cur =
-          branch_before_branch
-              ->child[std::to_integer<size_t>(branch_before_branch_hex)];
-      HexArray cur_path;
-      // TODO: There should only be one extension node at most, so we probably
-      // do not need a while loop.
-      while (true) {
-        if (cur->type == Node::Type::kBranch) {
-          break;
-        }
-        CHECK_EQ(cur->type, Node::Type::kExtension);
-        cur_path.Append(cur->path);
-
-        Node *next_cur = cur->child[0];
-        // delete cur;
-        cur = next_cur;
+    else if (branch != root_) {
+      CHECK_PTR(branch_before_branch);
+      // TODO: Uncomment this once we fix the TODO above.
+      /*
+      if (num_children < 2) {
+        CHECK(branch->value.has_value());
       }
+      else {
+        CHECK(num_children == 2);
+      }
+      */
 
-      // cur_path.Append(branch_hex);
-      if (existing_key != branch) {
+      // There are exactly two children in the branch, or there is one child and
+      // a value in the branch. Either way, there are two KV pairs "under" this
+      // branch, so once we remove one of them, only one KV pair will remain
+      // "under" this branch. Thus, the branch node is no longer needed, so we
+      // are going to remove it.
+      HexArray cur_path;
+      // We are removing the branch node, but it is possible that the branch's
+      // parent is an extension node. In this case, we need to remove the
+      // extension node, too, and we need to add the extension node's path as a
+      // prefix to the child in the branch.
+      CHECK_PTR(branch->parent);
+      if (branch->parent->type == Node::Type::kExtension) {
+        cur_path.Append(branch->parent->path);
+        // TODO: Free the extension node.
+      }
+      // Remove [k]'s leaf as a child of the branch.
+      {
+        CHECK_EQ(branch->child[std::to_integer<size_t>(branch_hex)]->type,
+                 Node::Type::kLeaf);
         branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
+
+        // TODO: Free the child node.
       }
 
       Node *other_child = nullptr;
@@ -502,50 +525,62 @@ MerkleTrie::Remove(const Key &k)
       }
 
       Node *new_child = nullptr;
-      if (num_branches == 1) {
-        if (other_child) {
-          cur_path.Append(other_child_hex);
+      if (num_children == 1) {
+        // We removed [k]'s leaf, so now no children remain.
+        CHECK_EQ(other_child, nullptr);
+        // TODO: This if statement should be a CHECK once we fix the TODO above.
+        if (branch->value.has_value()) {
+          // The branch has a value, so the place the value in a leaf with
+          // path size 0.
           new_child = Node::CreateLeaf(/*parent=*/branch_before_branch);
           new_child->path = cur_path;
           new_child->value = std::move(branch->value);
         }
-        else {
-          // TODO: What if the parent is an extension node?
-          if (branch->value.has_value()) {
-            // The branch has a value, so the place the value in a leaf with
-            // path size 0.
-            new_child = Node::CreateLeaf(/*parent=*/branch_before_branch);
-            new_child->path = cur_path;
-            new_child->value = std::move(branch->value);
-          }
-        }
-        // delete branch;
       }
       else {
+        // We removed [k]'s leaf, so now only one other child remains.
         CHECK_PTR(other_child);
-        CHECK_EQ(num_branches, 2);
+        CHECK_EQ(num_children, 2);
+        // We already checked above that there are two KV pairs "under" this
+        // branch. So if [num_children] is 2, then we know that the branch does
+        // not have a value.
+        CHECK(!branch->value.has_value());
 
         if (other_child->type == Node::Type::kBranch) {
+          // The remaining child under [branch] is also a branch. Thus, we can
+          // replace [branch] with an extension node. The path in the extension
+          // node will be [cur_path] (to account for a possible extension node
+          // we removed above) followed by the hex digit in the branch that the
+          // remaining child is under.
           new_child = Node::CreateExtension(/*parent=*/branch_before_branch);
           cur_path.Append(other_child_hex);
+          CHECK_GE(cur_path.size(), 1);
           new_child->path = cur_path;
-          if (new_child->path.size() == 0) {
-          }
           new_child->child[0] = other_child;
           other_child->parent = new_child;
         }
         else {
+          // The remaining child under [branch] is either an extension node or a
+          // leaf node. Either way, we will add a prefix to the path in the
+          // node. The prefix will be [cur_path] (to account for a possible
+          // extension node we removed above) followed by the hex digit in the
+          // branch that the remaining child is under.
           cur_path.Append(other_child_hex);
+
+          // Add [other_child->path] to [cur_path] since we then overwrite
+          // [other_child->path] entirely with [cur_path]. We want to make sure
+          // the existing path in [other_child] remains.
           cur_path.Append(other_child->path);
           other_child->path = cur_path;
 
           new_child = other_child;
         }
-
-        // delete branch;
-        // delete existing_key;
       }
 
+      // Now replace [branch] with [new_child].
+      // TODO: Uncomment this CHECK and remove the else body below once we fix
+      // the TODO above.
+      // CHECK_PTR(new_child);
       branch_before_branch
           ->child[std::to_integer<size_t>(branch_before_branch_hex)] =
           new_child;
@@ -556,19 +591,25 @@ MerkleTrie::Remove(const Key &k)
       else {
         to_hash = branch_before_branch;
       }
+      // TODO: Free [branch].
     }
     else {
       // If [branch_before_branch] is a nullptr, then [branch] must be the
-      // root node, because the root node does not have a parent. The root
-      // node also never has a value in it.
+      // root node, because the root node does not have a parent.
       CHECK_EQ(branch, root_);
+      CHECK_EQ(branch_before_branch, nullptr);
+      // [k] is in a leaf node. We know that [k] is not in a branch node because
+      // we would have handled it above.
+      CHECK_EQ(existing_key->type, Node::Type::kLeaf);
+
       branch->child[std::to_integer<size_t>(branch_hex)] = nullptr;
-      // delete existing_key;
       to_hash = branch;
     }
+    // TODO: Free [existing_key].
   }
 
   size_--;
+  CHECK_PTR(to_hash);
   GenerateHashesFrom(to_hash);
   return true;
 }
