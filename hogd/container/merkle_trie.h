@@ -196,16 +196,6 @@ private:
   Node root_;
   // The number of KV pairs in the trie.
   size_t size_ = 0;
-
-  // TODO: How many of these are still necessary?
-  FRIEND_TEST(MerkleTrie, TwoLeavesAndOneBranchProve);
-  FRIEND_TEST(MerkleTrie, HashBranch);
-  FRIEND_TEST(MerkleTrie, HashBranchSomeNullptr);
-  FRIEND_TEST(MerkleTrie, HashBranchAllNullptr);
-  FRIEND_TEST(MerkleTrie, HashExtension);
-  FRIEND_TEST(MerkleTrie, HashExtensionNullptr);
-  FRIEND_TEST(MerkleTrie, HashLeaf);
-  FRIEND_TEST(MerkleTrie, Stress);
 };
 
 } // namespace hogd
