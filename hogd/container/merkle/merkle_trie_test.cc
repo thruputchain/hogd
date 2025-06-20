@@ -503,6 +503,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
   std::cout << trie << std::endl;
 }
 
+// TODO: Clean this up further.
 // This tests generating a proof and verifying a proof.
 TEST(MerkleTrie, Prove)
 {
