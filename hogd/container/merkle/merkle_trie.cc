@@ -1,23 +1,29 @@
 #include "hogd/container/merkle/merkle_trie.h"
 
-#include <gtest/gtest.h>
+#include <cstddef>
+#include <cstring>
 
+#include <functional>
+#include <optional>
+#include <print>
+#include <sstream>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/check.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
-#include "hogd/crypto/crypto.h"
+#include "types.hh"
 
 namespace hogd {
 
 namespace {
 
 size_t
-GetLongestCommonRangeLength(const HexArray &a, size_t a_start,
-                            const HexArray &b, size_t b_start)
+get_longest_common_range_length(const HexArray &a, size_t a_start,
+                                const HexArray &b, size_t b_start)
 {
   CHECK_LE(a_start, a.size());
   CHECK_LE(b_start, b.size());
@@ -28,7 +34,7 @@ GetLongestCommonRangeLength(const HexArray &a, size_t a_start,
     if (i + b_start >= b.size()) {
       break;
     }
-    if (a.Get(i + a_start) != b.Get(i + b_start)) {
+    if (a.get(i + a_start) != b.get(i + b_start)) {
       break;
     }
     length++;
@@ -37,7 +43,7 @@ GetLongestCommonRangeLength(const HexArray &a, size_t a_start,
 }
 
 bool
-BranchHasChildHash(const Node::Raw &node, const SHA256Hash &child_hash)
+branch_has_child_hash(const Node::Raw &node, const SHA256Hash &child_hash)
 {
   size_t num_matches = 0;
   for (SHA256Hash h : node.child_hashes) {
@@ -49,7 +55,7 @@ BranchHasChildHash(const Node::Raw &node, const SHA256Hash &child_hash)
 }
 
 bool
-BranchGetChildIndex(const Node &branch, Node *child, size_t &idx)
+branch_get_child_index(const Node &branch, Node *child, size_t &idx)
 {
   for (idx = 0; idx < branch.child.size(); idx++) {
     if (branch.child[idx] == child) {
@@ -60,7 +66,7 @@ BranchGetChildIndex(const Node &branch, Node *child, size_t &idx)
 }
 
 size_t
-GetNumChildren(const Node &node)
+get_num_children(const Node &node)
 {
   size_t num_children = 0;
   for (const Node *child : node.child) {
@@ -72,32 +78,32 @@ GetNumChildren(const Node &node)
 }
 
 bool
-CheckBranch(Node *branch)
+check_branch(Node *branch)
 {
   bool ret = true;
-  if (branch->path.size()) {
-    printf("Unexpected path in branch: [%s]\n", branch->path.str().c_str());
+  if (!branch->path.empty()) {
+    std::println("Unexpected path in branch: [{}]", branch->path.str());
     ret = false;
   }
-  size_t num_children = GetNumChildren(*branch);
-  bool is_root = !branch->parent;
+  size_t num_children = get_num_children(*branch);
+  bool is_root = branch->parent == nullptr;
   if (!num_children && !is_root) {
-    printf("Branch node has no children\n");
+    std::println("Branch node has no children");
     ret = false;
   }
   if (!branch->value && num_children == 1) {
     // Check if this is the root node. The root node is a branch that is
     // allowed to have no children.
     if (!is_root) {
-      printf("Branch node has no value and only one child\n");
+      std::println("Branch node has no value and only one child");
       ret = false;
     }
   }
   if (!is_root) {
     if (branch->parent->type != Node::Type::kBranch &&
         branch->parent->type != Node::Type::kExtension) {
-      printf("Branch node has unexpected parent node type: %s\n",
-             Node::GetTypeString(branch->parent->type).c_str());
+      std::println("Branch node has unexpected parent node type: {}",
+                   Node::get_type_string(branch->parent->type));
       ret = false;
     }
   }
@@ -105,63 +111,63 @@ CheckBranch(Node *branch)
 }
 
 bool
-CheckExtension(Node *extension)
+check_extension(Node *extension)
 {
   bool ret = true;
   if (extension->value) {
-    printf("Unexpected value in extension\n");
+    std::println("Unexpected value in extension");
     ret = false;
   }
-  size_t num_children = GetNumChildren(*extension);
+  size_t num_children = get_num_children(*extension);
   if (num_children > 1) {
-    printf("Unexpected multiple children in extension\n");
+    std::println("Unexpected multiple children in extension");
     ret = false;
   }
-  if (!extension->path.size()) {
-    printf("Unexpected empty path in extension: [%s]\n",
-           extension->path.str().c_str());
+  if (extension->path.empty()) {
+    std::println("Unexpected empty path in extension: [{}]",
+                 extension->path.str());
     ret = false;
   }
   if (extension->child[0]) {
     if (extension->child[0]->type == Node::Type::kExtension) {
-      printf("Extension node has extension node as child\n");
+      std::println("Extension node has extension node as child");
       ret = false;
     }
     else if (extension->child[0]->type == Node::Type::kLeaf) {
-      printf("Extension node has leaf node as child\n");
+      std::println("Extension node has leaf node as child");
       ret = false;
     }
   }
   else {
-    printf("Extension node has no child\n");
+    std::println("Extension node has no child");
     ret = false;
   }
   if (extension->parent->type != Node::Type::kBranch) {
-    printf("Extension node has unexpected parent node type: %s\n",
-           Node::GetTypeString(extension->parent->type).c_str());
+    std::println("Extension node has unexpected parent node type: {}",
+                 Node::get_type_string(extension->parent->type));
     ret = false;
   }
   return ret;
 }
 
 bool
-CheckLeaf(Node *leaf)
+check_leaf(Node *leaf)
 {
   bool ret = true;
-  size_t num_children = GetNumChildren(*leaf);
+  size_t num_children = get_num_children(*leaf);
   if (num_children) {
-    printf("Unexpected children in leaf\n");
+    std::println("Unexpected children in leaf");
     ret = false;
   }
   // A path in the leaf node may or may not be empty, so we do not check its
   // size.
   if (!leaf->value) {
-    printf("Unexpected empty value in leaf\n");
+    std::println("Unexpected empty value in leaf");
     ret = false;
   }
   if (leaf->parent->type != Node::Type::kBranch) {
-    printf("Extension Leaf has unexpected parent node type: %s\n",
-           Node::GetTypeString(leaf->parent->type).c_str());
+    std::println("Extension Leaf has unexpected parent node type: {}",
+                 Node::get_type_string(leaf->parent->type));
     ret = false;
   }
   return ret;
@@ -171,21 +177,21 @@ CheckLeaf(Node *leaf)
 
 // static
 std::string
-MerkleTrie::StringFromNode(const Node &node)
+MerkleTrie::string_from_node(const Node &node)
 {
   HexArray prefix;
   std::ostringstream oss;
-  auto per_node = [&oss](const HexArray &path, const Node &node) {
-    oss << node << std::endl;
+  auto per_node = [&oss](const HexArray & /*path*/, const Node &node) {
+    oss << node << '\n';
   };
-  Walk<const Node>(&node, prefix, per_node);
-  oss << "----------" << std::endl;
+  walk<const Node>(&node, prefix, per_node);
+  oss << "----------" << '\n';
   return oss.str();
 }
 
 // static
 bool
-MerkleTrie::CheckHelper(Node *root, Node *parent)
+MerkleTrie::check_helper(Node *root, Node *parent)
 {
   if (!root) {
     return true;
@@ -193,13 +199,13 @@ MerkleTrie::CheckHelper(Node *root, Node *parent)
 
   bool ret = true;
   if (root->parent != parent) {
-    printf("The node's parent pointer does not match its actual parent.\n");
+    std::println("The node's parent pointer does not match its actual parent.");
     ret = false;
   }
 
-  if (root->hash != root->ComputeNodeHash()) {
-    printf(
-        "The hash in the node does not match the hash we just calculated.\n");
+  if (root->hash != root->compute_node_hash()) {
+    std::println(
+        "The hash in the node does not match the hash we just calculated.");
     ret = false;
   }
   switch (root->type) {
@@ -211,22 +217,22 @@ MerkleTrie::CheckHelper(Node *root, Node *parent)
     // Thus, we deliberately include [ret] second in the AND statements below to
     // ensure that the functions in the first part of the AND are always called,
     // even when [ret] is already [false].
-    ret = CheckBranch(root) && ret;
+    ret = check_branch(root) && ret;
     for (Node *child : root->child) {
-      ret = CheckHelper(child, root) && ret;
+      ret = check_helper(child, root) && ret;
     }
     break;
   }
   case Node::Type::kExtension:
-    ret = CheckExtension(root) && ret;
-    ret = CheckHelper(root->child[0], root) && ret;
+    ret = check_extension(root) && ret;
+    ret = check_helper(root->child[0], root) && ret;
     break;
   case Node::Type::kLeaf:
-    ret = CheckLeaf(root) && ret;
+    ret = check_leaf(root) && ret;
     break;
   default:
     ret = false;
-    printf("Unknown node type: %d\n", static_cast<int>(root->type));
+    std::println("Unknown node type: {}", static_cast<int>(root->type));
     break;
   }
   return ret;
@@ -235,32 +241,14 @@ MerkleTrie::CheckHelper(Node *root, Node *parent)
 std::string
 MerkleTrie::str() const
 {
-  return StringFromNode(root_);
-}
-
-std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
-MerkleTrie::GetProofByNode(const Key &k)
-{
-  Node *node = FindNode(k);
-  if (!node) {
-    return {SHA256Hash(), {}};
-  }
-
-  std::vector<std::vector<std::byte>> ret;
-  while (node) {
-    const std::vector<std::byte> &encoding = node->GetNodeEncoding();
-    ret.push_back(encoding);
-
-    node = node->parent;
-  }
-  return {GetRootHash(), ret};
+  return string_from_node(root_);
 }
 
 std::pair<SHA256Hash, std::vector<std::byte>>
-MerkleTrie::GetProof(const Key &k)
+MerkleTrie::get_proof(const Key &k) const
 {
   const std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> &proof =
-      GetProofByNode(k);
+      get_proof_by_node(k);
   std::pair<SHA256Hash, std::vector<std::byte>> ret;
   ret.first = proof.first;
   // Combine all of the node encodings into a single vector of bytes.
@@ -271,9 +259,27 @@ MerkleTrie::GetProof(const Key &k)
   return ret;
 }
 
+std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
+MerkleTrie::get_proof_by_node(const Key &k) const
+{
+  Node *node = find_node(k);
+  if (!node) {
+    return {SHA256Hash(), {}};
+  }
+
+  std::vector<std::vector<std::byte>> ret;
+  while (node) {
+    const std::vector<std::byte> &encoding = node->get_node_encoding();
+    ret.push_back(encoding);
+
+    node = node->parent;
+  }
+  return {get_root_hash(), ret};
+}
+
 // static
 bool
-MerkleTrie::Prove(const SHA256Hash &root_hash,
+MerkleTrie::prove(const SHA256Hash &root_hash,
                   const std::vector<std::byte> &encodings, const Key &k,
                   const T &value)
 {
@@ -290,7 +296,7 @@ MerkleTrie::Prove(const SHA256Hash &root_hash,
   size_t verified_key_size = 0;
   while (idx < encodings.size()) {
     SHA256Hash prev_hash = node.hash;
-    if (!Node::GetNodeFromEncoding(encodings, idx, node)) {
+    if (!Node::get_node_from_encoding(encodings, idx, node)) {
       return false;
     }
 
@@ -299,7 +305,7 @@ MerkleTrie::Prove(const SHA256Hash &root_hash,
     case Node::Type::kBranch:
       if (num_nodes) {
         verified_key_size++;
-        ok = BranchHasChildHash(node, prev_hash);
+        ok = branch_has_child_hash(node, prev_hash);
       }
       else {
         // We could start on a branch if the value is directly inside the
@@ -308,12 +314,12 @@ MerkleTrie::Prove(const SHA256Hash &root_hash,
       }
       break;
     case Node::Type::kExtension:
-      ok = num_nodes;
+      ok = (num_nodes != 0U);
       verified_key_size += node.path.size();
       ok = ok && (node.child_hashes[0] == prev_hash);
       break;
     case Node::Type::kLeaf:
-      ok = !num_nodes;
+      ok = (num_nodes == 0U);
       verified_key_size += node.path.size();
       ok = ok && (node.value == value);
       break;
@@ -341,9 +347,9 @@ MerkleTrie::Prove(const SHA256Hash &root_hash,
 }
 
 MerkleTrie::T *
-MerkleTrie::Find(const Key &k)
+MerkleTrie::find(const Key &k)
 {
-  Node *node = FindNode(k);
+  Node *node = find_node(k);
   if (!node) {
     return nullptr;
   }
@@ -376,23 +382,23 @@ MerkleTrie::Find(const Key &k)
 }
 
 Node *
-MerkleTrie::FindNode(const Key &k)
+MerkleTrie::find_node(const Key &k) const
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  TraverseToLowestBranch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
-                         existing_key);
+  traverse_to_lowest_branch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
+                            existing_key);
   return existing_key;
 }
 
 bool
-MerkleTrie::Insert(const Key &k, T &&obj)
+MerkleTrie::insert(const Key &k, T &&obj)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
   Node *branch =
-      TraverseToLowestBranch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
-                             existing_key);
+      traverse_to_lowest_branch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
+                                existing_key);
   if (existing_key) {
     // [k] already exists in the trie, so we cannot insert it.
     return false;
@@ -415,30 +421,30 @@ MerkleTrie::Insert(const Key &k, T &&obj)
     // so, we need to handle the children, such as by splitting part an
     // extension node. If there are no children, we can create a leaf node for
     // the key and add it as a child of the branch.
-    size_t branch_idx = std::to_integer<size_t>(k.Get(idx));
+    auto branch_idx = std::to_integer<size_t>(k.get(idx));
     if (branch->child[branch_idx]) {
       // There is already a child node. [TraverseToLowestBranch] returns the
       // lowest branch node in the trie on [key]'s path, so the child node is
       // either an extension node or a leaf node.
       if (branch->child[branch_idx]->type == Node::Type::kExtension) {
-        to_hash = InsertHandleExtension(branch->child[branch_idx], k, idx,
-                                        std::move(obj));
+        to_hash = insert_handle_extension(branch->child[branch_idx], k, idx,
+                                          std::move(obj));
       }
       else {
         CHECK_EQ(branch->child[branch_idx]->type, Node::Type::kLeaf);
-        to_hash =
-            InsertHandleLeaf(branch->child[branch_idx], k, idx, std::move(obj));
+        to_hash = insert_handle_leaf(branch->child[branch_idx], k, idx,
+                                     std::move(obj));
       }
     }
     else {
       // There is no child node, so we create a leaf for [key] and place the
       // leaf as a child of the branch.
-      Node *leaf = Node::CreateLeaf(/*parent=*/branch);
+      Node *leaf = Node::create_leaf(/*parent=*/branch);
       // We are going to use the hex character at [idx] in the key to map to
       // the leaf node from the branch node. Thus, we add 1 below as we do not
       // want to include this character in the path that is stored in the leaf
       // node.
-      leaf->path = k.GetSubarray(idx + 1, k.size());
+      leaf->path = k.get_subarray(idx + 1, k.size());
       leaf->value = std::move(obj);
       branch->child[branch_idx] = leaf;
       to_hash = leaf;
@@ -447,7 +453,7 @@ MerkleTrie::Insert(const Key &k, T &&obj)
   CHECK_PTR(to_hash);
 
   size_++;
-  GenerateHashesFrom(to_hash);
+  generate_hashes_from(to_hash);
   return true;
 }
 
@@ -467,8 +473,8 @@ MerkleTrie::Insert(const Key &k, T &&obj)
 //
 // static
 Node *
-MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
-                                  T &&obj)
+MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
+                                    T &&obj)
 {
   CHECK_EQ(extension->type, Node::Type::kExtension);
   CHECK_EQ(extension->parent->type, Node::Type::kBranch);
@@ -480,10 +486,10 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
   //
   // We add 1 since one of the digits will be included in the
   // [extension->parent] node, which is always a branch node.
-  const Key key_window = k.GetSubarray(idx + 1, k.size());
+  const Key key_window = k.get_subarray(idx + 1, k.size());
 
   size_t common_range_length =
-      GetLongestCommonRangeLength(key_window, 0, extension->path, 0);
+      get_longest_common_range_length(key_window, 0, extension->path, 0);
   size_t diverge_idx = common_range_length;
 
   // We are going to create a new branch node, with a leaf for [key_window] as
@@ -496,7 +502,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
   // We are going to reuse [extension] in the if/else bodies below, so we cache
   // the node since we need its contents after it is reused.
   const Node extension_cache = *extension;
-  size_t parent_branch_hex = std::to_integer<size_t>(k.Get(idx));
+  auto parent_branch_hex = std::to_integer<size_t>(k.get(idx));
   if (common_range_length) {
     // [key_window] and the extension node have a common range, so we are going
     // to break the extension node into two extension nodes:
@@ -527,8 +533,8 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     // First Extension Node: Path is [0x123].
     // Branch Node: A leaf for [key_window] is child [0x4]. The child of
     //              [extension] is child [0x5] in this branch.
-    Node *first = Node::CreateExtension(/*parent=*/extension_cache.parent);
-    first->path = key_window.GetSubarray(0, diverge_idx);
+    Node *first = Node::create_extension(/*parent=*/extension_cache.parent);
+    first->path = key_window.get_subarray(0, diverge_idx);
 
     // Place the first extension node as a child of the branch.
     extension_cache.parent->child[parent_branch_hex] = first;
@@ -538,8 +544,8 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     //
     // Note that we reuse [extension] below.
     branch = extension;
-    branch->Clear();
-    branch->InitBranch(/*parent=*/first);
+    branch->clear();
+    branch->init_branch(/*parent=*/first);
     first->child[0] = branch;
   }
   else {
@@ -560,8 +566,8 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     //
     // Note that we reuse [extension] below.
     branch = extension;
-    branch->Clear();
-    branch->InitBranch(/*parent=*/extension_cache.parent);
+    branch->clear();
+    branch->init_branch(/*parent=*/extension_cache.parent);
     // We are reusing [extension] as [branch], so they are the same pointer.
     // Thus, we can technically omit the line below below, but we keep it for
     // clarity.
@@ -579,10 +585,10 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
   // extension node and instead place the extension node's child directly as a
   // child of the branch.
   CHECK_LT(diverge_idx, extension_cache.path.size());
-  size_t second_branch =
-      std::to_integer<size_t>(extension_cache.path.Get(diverge_idx));
+  auto second_branch =
+      std::to_integer<size_t>(extension_cache.path.get(diverge_idx));
   if (diverge_idx < extension_cache.path.size() - 1) {
-    extension = Node::CreateExtension(/*parent=*/branch);
+    extension = Node::create_extension(/*parent=*/branch);
     // The second extension node has a path size larger than 1.
     branch->child[second_branch] = extension;
 
@@ -590,8 +596,8 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     // node as a child of the branch node, so the branch node accounts for 1 hex
     // digit in the path.
     extension->path =
-        extension_cache.path.GetSubarray(diverge_idx + 1,
-                                         extension_cache.path.size());
+        extension_cache.path.get_subarray(diverge_idx + 1,
+                                          extension_cache.path.size());
     extension->child[0] = extension_cache.child[0];
     // [extension] was reused above, so [extension_cache.child[0]->parent]
     // currently points to the reused node rather than the [extension] we just
@@ -602,7 +608,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     // on [key_window]'s path in the trie, we will not rehash this second
     // extension node. Thus, to ensure that the hashes are generated properly in
     // the trie, we need to hash this second extension node here.
-    extension->hash = extension->ComputeNodeHash();
+    extension->hash = extension->compute_node_hash();
   }
   else {
     // The second extension node would have a path size of 1, so we instead
@@ -622,20 +628,18 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
     branch->value = std::move(obj);
     return branch;
   }
-  else {
-    // Create new leaf node for [key_window] and add the leaf node as a child of
-    // the new branch.
-    Node *leaf = Node::CreateLeaf(/*parent=*/branch);
-    // Add 1 to account for the branch node. Since we are placing the leaf node
-    // for [key_window] as a child of the branch, the branch accounts for 1 hex
-    // digit in the path.
-    leaf->path = key_window.GetSubarray(diverge_idx + 1, key_window.size());
-    leaf->value = std::move(obj);
+  // Create new leaf node for [key_window] and add the leaf node as a child of
+  // the new branch.
+  Node *leaf = Node::create_leaf(/*parent=*/branch);
+  // Add 1 to account for the branch node. Since we are placing the leaf node
+  // for [key_window] as a child of the branch, the branch accounts for 1 hex
+  // digit in the path.
+  leaf->path = key_window.get_subarray(diverge_idx + 1, key_window.size());
+  leaf->value = std::move(obj);
 
-    size_t leaf_branch = std::to_integer<size_t>(key_window.Get(diverge_idx));
-    branch->child[leaf_branch] = leaf;
-    return leaf;
-  }
+  auto leaf_branch = std::to_integer<size_t>(key_window.get(diverge_idx));
+  branch->child[leaf_branch] = leaf;
+  return leaf;
 }
 
 // We are inserting [k] into the trie, and it conflicts with a leaf node on the
@@ -651,37 +655,37 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
 //
 // static
 Node *
-MerkleTrie::InsertHandleLeaf(Node *leaf, const Key &k, size_t idx, T &&obj)
+MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 {
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
   CHECK_EQ(leaf->parent->type, Node::Type::kBranch);
 
   // We add 1 since one of the digits will be included in the [leaf->parent]
   // node.
-  size_t parent_branch_digit = std::to_integer<size_t>(k.Get(idx));
-  Key key_window = k.GetSubarray(idx + 1, k.size());
+  auto parent_branch_digit = std::to_integer<size_t>(k.get(idx));
+  Key key_window = k.get_subarray(idx + 1, k.size());
 
   // We create a branch that we will put both keys under.
-  Node *branch = Node::CreateBranch(/*parent=*/leaf->parent);
+  Node *branch = Node::create_branch(/*parent=*/leaf->parent);
   leaf->parent->child[parent_branch_digit] = branch;
 
   // Check to see if [key_window] and the path in [leaf] have any digits in
   // common. If they do, we create an extension node with the shared digits, and
   // then we place the new branch as a child of this new extension node.
   size_t common_range_length =
-      GetLongestCommonRangeLength(key_window, 0, leaf->path, 0);
+      get_longest_common_range_length(key_window, 0, leaf->path, 0);
   if (common_range_length) {
     size_t diverge_idx = common_range_length;
-    Node *extension = Node::CreateExtension(/*parent=*/leaf->parent);
-    extension->path = key_window.GetSubarray(0, diverge_idx);
+    Node *extension = Node::create_extension(/*parent=*/leaf->parent);
+    extension->path = key_window.get_subarray(0, diverge_idx);
 
     leaf->parent->child[parent_branch_digit] = extension;
     extension->child[0] = branch;
     branch->parent = extension;
 
     // Now remove the extension path from these keys.
-    key_window = key_window.GetSubarray(diverge_idx, key_window.size());
-    leaf->path = leaf->path.GetSubarray(diverge_idx, leaf->path.size());
+    key_window = key_window.get_subarray(diverge_idx, key_window.size());
+    leaf->path = leaf->path.get_subarray(diverge_idx, leaf->path.size());
   }
 
   // Now we place both keys in the branch. Note that it is possible one of the
@@ -701,8 +705,8 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   }
   else {
     CHECK(!longer_path.empty());
-    CHECK_NE(static_cast<uint8_t>(shorter_path.Get(0)),
-             static_cast<uint8_t>(longer_path.Get(0)));
+    CHECK_NE(static_cast<uint8_t>(shorter_path.get(0)),
+             static_cast<uint8_t>(longer_path.get(0)));
     // We place the two keys into their own leaf nodes and we make those leaf
     // nodes children of the branch.
 
@@ -713,29 +717,29 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, const Key &k, size_t idx, T &&obj)
     // [leaf]. The [shorter_*] and [longer_*] variables above are references to
     // elements in [leaf], so we cannot overwrite [leaf] until we no longer need
     // those references.
-    Node *shorter_leaf = Node::CreateLeaf(/*parent=*/branch);
-    // Unlike the other nodes, we do not need to call [shorter_path.Get(0)]
+    Node *shorter_leaf = Node::create_leaf(/*parent=*/branch);
+    // Unlike the other nodes, we do not need to call [shorter_path.get(0)]
     // before writing [shorter_leaf->path] because we are not reusing [leaf].
     // Thus, [shorter_path] will never be a reference to [shorter_leaf->path]. I
     // still call it first though to match the style of the node creation below.
-    size_t branch_hex = std::to_integer<size_t>(shorter_path.Get(0));
+    auto branch_hex = std::to_integer<size_t>(shorter_path.get(0));
     branch->child[branch_hex] = shorter_leaf;
-    shorter_leaf->path = shorter_path.GetSubarray(1, shorter_path.size());
+    shorter_leaf->path = shorter_path.get_subarray(1, shorter_path.size());
     shorter_leaf->value = std::move(shorter_value);
     // We hash this leaf here, and then in the parent function, we hash all
     // nodes on the path from the leaf *created below* to the root. Note that
     // this leaf is not on that path, so we must hash it here.
-    shorter_leaf->hash = shorter_leaf->ComputeNodeHash();
+    shorter_leaf->hash = shorter_leaf->compute_node_hash();
   }
 
   // Now we place the longer key into a leaf node that is a child of the branch.
   // Note that we reuse [leaf] rather than allocate a new node.
   //
-  // We overwrite [leaf->path] below, so we need call [longer_path.Get(0)] first
+  // We overwrite [leaf->path] below, so we need call [longer_path.get(0)] first
   // as [longer_path] may be a reference to [leaf->path].
-  size_t branch_hex = std::to_integer<size_t>(longer_path.Get(0));
+  auto branch_hex = std::to_integer<size_t>(longer_path.get(0));
   branch->child[branch_hex] = leaf;
-  leaf->path = longer_path.GetSubarray(1, longer_path.size());
+  leaf->path = longer_path.get_subarray(1, longer_path.size());
   leaf->value = std::move(longer_value);
   leaf->parent = branch;
 
@@ -743,13 +747,13 @@ MerkleTrie::InsertHandleLeaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 }
 
 bool
-MerkleTrie::Remove(const Key &k)
+MerkleTrie::remove(const Key &k)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
   Node *branch =
-      TraverseToLowestBranch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
-                             existing_key);
+      traverse_to_lowest_branch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
+                                existing_key);
   if (!existing_key) {
     // [k] does not exist in the trie, so we cannot remove it.
     return false;
@@ -757,7 +761,7 @@ MerkleTrie::Remove(const Key &k)
   CHECK_PTR(branch);
   CHECK_EQ(branch->type, Node::Type::kBranch);
 
-  size_t num_children = GetNumChildren(*branch);
+  size_t num_children = get_num_children(*branch);
   if (existing_key == branch) {
     // [k] maps to a branch, so clear the branch's value.
     CHECK(branch->value.has_value());
@@ -768,7 +772,7 @@ MerkleTrie::Remove(const Key &k)
     // child of a branch. Thus, we need to remove this leaf node.
     CHECK_EQ(existing_key->type, Node::Type::kLeaf);
 
-    size_t branch_hex = std::to_integer<size_t>(k.Get(idx));
+    auto branch_hex = std::to_integer<size_t>(k.get(idx));
     CHECK_EQ(branch->child[branch_hex], existing_key);
     CHECK_GT(num_children, 0UL);
 
@@ -779,7 +783,7 @@ MerkleTrie::Remove(const Key &k)
   }
 
   Node *to_hash = nullptr;
-  if (branch == &root_) {
+  if (branch == &root_) { // NOLINT(bugprone-branch-clone)
     // If the branch is the root node, we need to keep it. Even if the branch
     // now has fewer than two KV pairs "under" it, there is no further
     // optimization possible.
@@ -795,12 +799,12 @@ MerkleTrie::Remove(const Key &k)
   else {
     // The branch now has fewer than two KV pairs "under" it, so we can
     // optimize our trie by removing the branch.
-    to_hash = RemoveBranch(k, branch, num_children);
+    to_hash = remove_branch(k, branch, num_children);
   }
 
   size_--;
   CHECK_PTR(to_hash);
-  GenerateHashesFrom(to_hash);
+  generate_hashes_from(to_hash);
   return true;
 }
 
@@ -809,7 +813,7 @@ MerkleTrie::Remove(const Key &k)
 //
 // static
 Node *
-MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
+MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
 {
   // We should only remove a branch if it has one KV pair "under" it.
   if (num_children) {
@@ -838,9 +842,9 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
     Node *extension = branch->parent;
     // [extension] is the child of the parent branch, so we use it to set
     // [parent_branch_hex].
-    CHECK(
-        BranchGetChildIndex(*extension->parent, extension, parent_branch_hex));
-    cur_path.Append(branch->parent->path);
+    CHECK(branch_get_child_index(*extension->parent, extension,
+                                 parent_branch_hex));
+    cur_path.append(branch->parent->path);
 
     // Remove the extension node as a child of the parent branch. Replace it
     // with [branch].
@@ -853,7 +857,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
     CHECK_EQ(branch->parent->type, Node::Type::kBranch);
     // The branch's parent is the parent branch itself. Thus, we use [branch] to
     // set [parent_branch_hex].
-    CHECK(BranchGetChildIndex(*branch->parent, branch, parent_branch_hex));
+    CHECK(branch_get_child_index(*branch->parent, branch, parent_branch_hex));
   }
   CHECK_EQ(branch->parent->type, Node::Type::kBranch);
 
@@ -884,8 +888,8 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
     std::optional<T> value = std::move(branch->value);
     Node *parent = branch->parent;
     new_child = branch;
-    new_child->Clear();
-    new_child->InitLeaf(parent);
+    new_child->clear();
+    new_child->init_leaf(parent);
     new_child->path = cur_path;
     new_child->value = std::move(value);
   }
@@ -900,13 +904,13 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
       // will be [cur_path] (to account for a possible extension node we removed
       // above) followed by the hex digit in [branch] that the remaining child
       // is under.
-      cur_path.Append(child_hex);
+      cur_path.append(child_hex);
       CHECK_GE(cur_path.size(), 1UL);
       // We reuse the branch node below.
       new_child = branch;
       Node *parent = branch->parent;
-      new_child->Clear();
-      new_child->InitExtension(parent);
+      new_child->clear();
+      new_child->init_extension(parent);
       new_child->path = cur_path;
       new_child->child[0] = child;
       child->parent = new_child;
@@ -917,12 +921,12 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
       // The prefix will be [cur_path] (to account for a possible extension node
       // we removed above) followed by the hex digit in the branch that the
       // remaining child is under.
-      cur_path.Append(child_hex);
+      cur_path.append(child_hex);
 
       // Add [child->path] to [cur_path] since we then overwrite [child->path]
       // entirely with [cur_path]. We want to make sure the existing path in
       // [child] remains.
-      cur_path.Append(child->path);
+      cur_path.append(child->path);
       child->path = cur_path;
 
       new_child = child;
@@ -941,7 +945,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
 // static
 template<typename NodeType>
 void
-MerkleTrie::Walk(NodeType *root, HexArray &prefix,
+MerkleTrie::walk(NodeType *root, HexArray &prefix,
                  const std::function<void(const HexArray &, NodeType &)> &f)
 {
   static_assert(std::is_same_v<NodeType, Node> ||
@@ -955,35 +959,34 @@ MerkleTrie::Walk(NodeType *root, HexArray &prefix,
   switch (root->type) {
   case Node::Type::kBranch:
     for (size_t i = 0; i < root->child.size(); i++) {
-      std::byte digit = static_cast<std::byte>(i);
+      auto digit = static_cast<std::byte>(i);
 
-      prefix.Append(digit);
-      Walk<NodeType>(root->child[i], prefix, f);
-      prefix.RemoveFromBack(1);
+      prefix.append(digit);
+      walk<NodeType>(root->child[i], prefix, f);
+      prefix.remove_from_back(1);
     }
     f(prefix, *root);
     break;
   case Node::Type::kExtension:
     CHECK_PTR(root->child[0]);
 
-    prefix.Append(root->path);
-    Walk<NodeType>(root->child[0], prefix, f);
+    prefix.append(root->path);
+    walk<NodeType>(root->child[0], prefix, f);
     f(prefix, *root);
-    prefix.RemoveFromBack(root->path.size());
+    prefix.remove_from_back(root->path.size());
     break;
   case Node::Type::kLeaf:
-    prefix.Append(root->path);
+    prefix.append(root->path);
     f(prefix, *root);
-    prefix.RemoveFromBack(root->path.size());
+    prefix.remove_from_back(root->path.size());
     break;
   }
 }
 
-// static
 Node *
-MerkleTrie::TraverseToLowestBranch(const HexArray &path, Node *root,
-                                   Node *prev_root, size_t &idx,
-                                   Node *&existing_key)
+MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
+                                      Node *prev_root, size_t &idx,
+                                      Node *&existing_key)
 {
   CHECK_PTR(root);
   CHECK_LE(idx, path.size());
@@ -999,19 +1002,18 @@ MerkleTrie::TraverseToLowestBranch(const HexArray &path, Node *root,
       return root;
     }
 
-    size_t branch_hex = std::to_integer<size_t>(path.Get(idx));
+    auto branch_hex = std::to_integer<size_t>(path.get(idx));
     Node *next = root->child[branch_hex];
     if (next) {
       // There is a child that corresponds to the next hex digit in [path], so
       // continue searching. We add 1 to [idx] since the branch corresponds to
       // one hex digit in the path.
       idx++;
-      return TraverseToLowestBranch(path, next, root, idx, existing_key);
+      return traverse_to_lowest_branch(path, next, root, idx, existing_key);
     }
-    else {
-      // There is no child, so we have reached the bottom of the trie.
-      return root;
-    }
+    // There is no child, so we have reached the bottom of the trie.
+    return root;
+
     break;
   }
   case Node::Type::kExtension:
@@ -1020,26 +1022,25 @@ MerkleTrie::TraverseToLowestBranch(const HexArray &path, Node *root,
     // two values are equal, the path maps to the child node, which is always a
     // branch.
     if (idx + root->path.size() <= path.size() &&
-        path.GetSubarray(idx, idx + root->path.size()) == root->path) {
+        path.get_subarray(idx, idx + root->path.size()) == root->path) {
       idx += root->path.size();
       CHECK_PTR(root->child[0]);
-      return TraverseToLowestBranch(path, root->child[0], root, idx,
-                                    existing_key);
+      return traverse_to_lowest_branch(path, root->child[0], root, idx,
+                                       existing_key);
     }
-    else {
-      // The extension node's path does not match [key], so we can stop moving
-      // down the trie.
-      //
-      // We are going to return the parent node, which is always a branch, so
-      // subtract 1 from [idx] since the branch corresponds to one hex digit in
-      // the path.
-      idx--;
-      return prev_root;
-    }
+    // The extension node's path does not match [key], so we can stop moving
+    // down the trie.
+    //
+    // We are going to return the parent node, which is always a branch, so
+    // subtract 1 from [idx] since the branch corresponds to one hex digit in
+    // the path.
+    idx--;
+    return prev_root;
+
     break;
   }
   case Node::Type::kLeaf:
-    if (path.GetSubarray(idx, path.size()) == root->path) {
+    if (path.get_subarray(idx, path.size()) == root->path) {
       // [path] maps to this leaf node.
       existing_key = root;
     }
@@ -1058,27 +1059,27 @@ MerkleTrie::TraverseToLowestBranch(const HexArray &path, Node *root,
 
 // static
 void
-MerkleTrie::GenerateHashesFrom(Node *n)
+MerkleTrie::generate_hashes_from(Node *n)
 {
   while (n) {
-    n->hash = n->ComputeNodeHash();
+    n->hash = n->compute_node_hash();
 
     n = n->parent;
   }
 }
 
 void
-MerkleTrie::FreeAllNodes(Node *root)
+MerkleTrie::free_all_nodes(Node *root) const
 {
   HexArray prefix;
-  auto f = [&](const HexArray &path, Node &node) {
+  auto f = [&](const HexArray & /*path*/, Node &node) {
     // [root_] is a [MerkleTrie] class member of type [Node]. It is not a
     // pointer to a [Node] value on the heap, so we cannot free the root node.
     if (&node != &root_) {
       delete &node;
     }
   };
-  Walk<Node>(root, prefix, f);
+  walk<Node>(root, prefix, f);
 }
 
 } // namespace hogd

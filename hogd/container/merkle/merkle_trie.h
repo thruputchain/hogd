@@ -2,19 +2,24 @@
 
 #pragma once
 
-#include <gtest/gtest.h>
+#include <cstddef>
+#include <functional>
 
+#include <ostream>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/check.h"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
-#include "hogd/crypto/crypto.h"
+#include "types.hh"
 
-// TODO: Support template types. For now, the keys are [HexArray]'s and the
-// values are strings.
+// TODO(jhumphri): Support template types. For now, the keys are [HexArray]'s
+// and the values are strings.
 namespace hogd {
 
 // This is a Merkle Patricia Trie. It holds KV pairs and can efficiently
@@ -25,27 +30,27 @@ namespace hogd {
 //
 // HexArray key("1234");
 // std::string value = "hello";
-// trie.Insert(key, value);
+// trie.insert(key, value);
 //
-// std::pair<SHA256Hash, std::vector<std::byte>> proof = trie.GetProof();
+// std::pair<SHA256Hash, std::vector<std::byte>> proof = trie.get_proof();
 //
 // This returns true:
-// trie.Prove(proof.first, proof.second, key, value);
+// trie.prove(proof.first, proof.second, key, value);
 //
 // This returns false:
 // HexArray different_key("12");
-// trie.Prove(proof.first, proof.second, different_key, value);
+// trie.prove(proof.first, proof.second, different_key, value);
 //
-// trie.Remove(key);
+// trie.remove(key);
 class MerkleTrie {
 public:
   // Type definitions.
   using Key = HexArray;
   using T = std::string;
 
-  MerkleTrie() { InitRootNode(); }
+  MerkleTrie() { init_root_node(); }
 
-  ~MerkleTrie() { FreeAllNodes(&root_); }
+  ~MerkleTrie() { free_all_nodes(&root_); }
 
   // Disable copy and support move.
   MerkleTrie(const MerkleTrie &) = delete;
@@ -60,58 +65,59 @@ public:
   }
 
   // Basic sanity checks on the trie.
-  bool Check() { return CheckHelper(&root_, /*parent=*/nullptr); }
+  bool check() { return check_helper(&root_, /*parent=*/nullptr); }
 
   // Returns the hash of the root node in the trie.
-  SHA256Hash GetRootHash() const { return root_.hash; }
+  SHA256Hash get_root_hash() const { return root_.hash; }
 
   // Returns a proof that the KV pair with key [k] is in the trie.
-  std::pair<SHA256Hash, std::vector<std::byte>> GetProof(const Key &k);
+  std::pair<SHA256Hash, std::vector<std::byte>> get_proof(const Key &k) const;
 
   // Returns a proof that the KV pair with key [k] is in the trie. The second
   // element in the pair is a vector of encodings for each node. This function
-  // separates each node encoding into its own index, whereas the [GetProof()]
+  // separates each node encoding into its own index, whereas the [get_proof()]
   // function above returns the encodings concatted together.
   std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
-  GetProofByNode(const Key &k);
+  get_proof_by_node(const Key &k) const;
 
   // Returns true if the KV pair with key [k] and value [value] is in the trie.
   // [root_hash] is the hash of the root node and [encodings] is a vector of the
   // node encodings for all nodes on the path of this KV pair in the trie. Note
-  // that if you call [GetProof()] above, [root_hash] is the first element in
+  // that if you call [get_proof()] above, [root_hash] is the first element in
   // the returned pair and [encodings] is the second element. If you call
-  // [GetProofByNode()], [root_hash] is the first element in the returned pair
-  // and [encodings] is the flattened vector formed from the second element.
-  static bool Prove(const SHA256Hash &root_hash,
+  // [get_proof_by_node()], [root_hash] is the first element in the returned
+  // pair and [encodings] is the flattened vector formed from the second
+  // element.
+  static bool prove(const SHA256Hash &root_hash,
                     const std::vector<std::byte> &encodings, const Key &k,
                     const T &value);
 
   // Finds the value for key [k]. If key [k] does not exist in the trie, returns
   // a nullptr.
-  T *Find(const Key &k);
+  T *find(const Key &k);
 
   // Inserts a KV pair with key [k] and value [obj] into the trie. You must pass
   // [obj] to this method with [std::move()].
-  bool Insert(const Key &k, T &&obj);
+  bool insert(const Key &k, T &&obj);
   // Inserts a KV pair with key [k] and value [obj] into the trie. This method
   // copies [obj] rather than move it as the method above does.
-  bool Insert(const Key &k, const T &obj) { return Insert(k, T(obj)); }
+  bool insert(const Key &k, const T &obj) { return insert(k, T(obj)); }
 
   // Removes the KV pair for key [k] from the trie.
-  bool Remove(const Key &k);
+  bool remove(const Key &k);
 
-  size_t size() { return size_; }
+  size_t size() const { return size_; }
 
   // Removes all KV pairs from the trie.
-  void Clear()
+  void clear()
   {
-    FreeAllNodes(&root_);
-    InitRootNode();
+    free_all_nodes(&root_);
+    init_root_node();
     size_ = 0;
   }
 
   // Executes [func] on each element.
-  template<typename F> void ForEach(F func)
+  template<typename F> void for_each(F func)
   {
     HexArray prefix;
     auto per_node = [&func](const HexArray &path, Node &node) {
@@ -131,8 +137,9 @@ public:
 
   // Executes [func] in parallel on each element using a WorkerPool.
   template<typename F>
-  void ForEachParallel(F func, size_t width = kDefaultParallelRangeWidth,
-                       WorkerPool &pool = WorkerPool::get_default_pool())
+  void for_each_parallel(F /*func*/,
+                         size_t /*width*/ = kDefaultParallelRangeWidth,
+                         WorkerPool & /*pool*/ = WorkerPool::get_default_pool())
   {
     CHECK(false);
   }
@@ -140,26 +147,30 @@ public:
 private:
   // Returns a string representation of [node] and all nodes under it in the
   // trie.
-  static std::string StringFromNode(const Node &node);
+  static std::string string_from_node(const Node &node);
 
-  // Recursive helper function for [Check()].
-  static bool CheckHelper(Node *root, Node *parent);
+  // Recursive helper function for [check()].
+  static bool check_helper(Node *root, Node *parent);
 
   // Finds the node for key [k]. Returns nullptr if [k] is not in the trie.
-  Node *FindNode(const Key &k);
+  Node *find_node(const Key &k) const;
 
-  // See the implementation for comments on this function.
-  static Node *InsertHandleExtension(Node *current_extension, const Key &k,
-                                     size_t idx, T &&obj);
+  // Helper function for [insert()]. When we add a KV pair and there is an
+  // extension node below the lowest branch for that pair, we need to handle the
+  // extension node and its subtree.
+  static Node *insert_handle_extension(Node *current_extension, const Key &k,
+                                       size_t idx, T &&obj);
 
-  // See the implementation for comments on this function.
-  static Node *InsertHandleLeaf(Node *current_leaf, const Key &k, size_t idx,
-                                T &&obj);
+  // Helper function for [insert()]. When we add a KV pair and there is a leaf
+  // node below the lowest branch for that pair, we need to handle the leaf
+  // node.
+  static Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
+                                  T &&obj);
 
-  // Helper function for [Remove()]. When we remove a KV pair, the closest
+  // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
-  static Node *RemoveBranch(const Key &k, Node *branch, size_t num_children);
+  static Node *remove_branch(const Key &k, Node *branch, size_t num_children);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.
@@ -170,7 +181,7 @@ private:
   //
   // [NodeType] must either be [Node] or [const Node].
   template<typename NodeType>
-  static void Walk(NodeType *root, HexArray &prefix,
+  static void walk(NodeType *root, HexArray &prefix,
                    const std::function<void(const HexArray &, NodeType &)> &f);
 
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
@@ -183,23 +194,23 @@ private:
   // on [path]. Note that [existing_key] should be a [nullptr] when this
   // function is called so that the caller can determine whether [existing_key]
   // is set to a node.
-  static Node *TraverseToLowestBranch(const HexArray &path, Node *root,
-                                      Node *prev_branch, size_t &idx,
-                                      Node *&existing_key);
+  Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
+                                  Node *prev_root, size_t &idx,
+                                  Node *&existing_key);
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.
-  static void GenerateHashesFrom(Node *n);
+  static void generate_hashes_from(Node *n);
 
   // Frees all of the nodes starting at [root]. Does not free [root_].
-  void FreeAllNodes(Node *root);
+  void free_all_nodes(Node *root) const;
 
   // Initializes the root node. The root node is always a branch.
-  void InitRootNode()
+  void init_root_node()
   {
-    root_.Clear();
-    root_.InitBranch(/*parent=*/nullptr);
-    GenerateHashesFrom(&root_);
+    root_.clear();
+    root_.init_branch(/*parent=*/nullptr);
+    generate_hashes_from(&root_);
   }
 
   // The root node in the trie. The root node always exists and is always a

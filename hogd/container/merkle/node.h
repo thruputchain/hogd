@@ -2,13 +2,20 @@
 
 #pragma once
 
-#include <gtest/gtest.h>
+#include <array>
+#include <cstddef>
+#include <cstring>
 
+#include <optional>
+#include <ostream>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -21,7 +28,7 @@ public:
   static_assert(0xF + 1 == kMaxNumBranches);
   // We also use the [child] array to hold the child of an extension node, so
   // ensure [kMaxNumBranches] is at least 1.
-  static_assert(kMaxNumBranches);
+  static_assert(kMaxNumBranches != 0U);
 
   enum class Type { kBranch, kExtension, kLeaf };
 
@@ -52,15 +59,16 @@ public:
   SHA256Hash hash;
   Node *parent;
 
-  // TODO: Optimize the variables below with a union or different node types.
+  // TODO(jhumphri): Optimize the variables below with a union or different node
+  // types.
 
   // Used by extensions and leaves.
   HexArray path;
 
   // Used by branches and leaves.
-  // TODO: Should we be able to place values in extension nodes, too? For
-  // example, the [TwoLeavesAndOneBranch] test would produce a more efficient
-  // trie if we could do this.
+  // TODO(jhumphri): Should we be able to place values in extension nodes, too?
+  // For example, the [TwoLeavesAndOneBranch] test would produce a more
+  // efficient trie if we could do this.
   std::optional<std::string> value;
 
   // Used by branches and extensions.
@@ -72,66 +80,66 @@ public:
   // [kMaxNumBranches - 1] slots are unused.
   std::array<Node *, kMaxNumBranches> child;
 
-  void InitBranch(Node *parent)
+  void init_branch(Node *parent)
   {
     type = Type::kBranch;
     this->parent = parent;
   }
 
-  void InitExtension(Node *parent)
+  void init_extension(Node *parent)
   {
     type = Type::kExtension;
     this->parent = parent;
   }
 
-  void InitLeaf(Node *parent)
+  void init_leaf(Node *parent)
   {
     type = Type::kLeaf;
     this->parent = parent;
   }
 
-  static Node *CreateBranch(Node *parent)
+  static Node *create_branch(Node *parent)
   {
     Node *node = new Node;
-    node->Clear();
-    node->InitBranch(parent);
+    node->clear();
+    node->init_branch(parent);
     return node;
   }
 
-  static Node *CreateExtension(Node *parent)
+  static Node *create_extension(Node *parent)
   {
     Node *node = new Node;
-    node->Clear();
-    node->InitExtension(parent);
+    node->clear();
+    node->init_extension(parent);
     return node;
   }
 
-  static Node *CreateLeaf(Node *parent)
+  static Node *create_leaf(Node *parent)
   {
     Node *node = new Node;
-    node->Clear();
-    node->InitLeaf(parent);
+    node->clear();
+    node->init_leaf(parent);
     return node;
   }
 
   // Returns an encoding of the node as a byte vector.
-  std::vector<std::byte> GetNodeEncoding();
+  std::vector<std::byte> get_node_encoding() const;
 
   // This reads a raw node representation from [encodings] starting at index
   // [idx].
-  static bool GetNodeFromEncoding(const std::vector<std::byte> &encodings,
-                                  size_t &idx, Node::Raw &node);
+  static bool get_node_from_encoding(const std::vector<std::byte> &encodings,
+                                     size_t &idx, Node::Raw &node);
 
-  SHA256Hash ComputeNodeHash() { return sha256(GetNodeEncoding()); }
+  SHA256Hash compute_node_hash() const { return sha256(get_node_encoding()); }
 
-  void Clear()
+  void clear()
   {
     // [Node] is not a trivally copyable type (due to the [std::string] in the
     // [value] field), so we cannot just memset() it to all zeroes. Instead, we
     // assign each field individually.
     memset(&hash, 0, sizeof(hash));
     parent = nullptr;
-    path.Clear();
+    path.clear();
     value = std::nullopt;
     memset(child.data(), 0, child.size() * sizeof(child[0]));
   }
@@ -143,7 +151,7 @@ public:
     return os << node.str();
   }
 
-  static std::string GetTypeString(Type type)
+  static std::string get_type_string(Type type)
   {
     switch (type) {
     case Type::kBranch:
@@ -158,18 +166,18 @@ public:
   }
   friend std::ostream &operator<<(std::ostream &os, const Type type)
   {
-    return os << GetTypeString(type);
+    return os << get_type_string(type);
   }
 
 private:
   // These encode the node into a byte vector.
-  void GetBranchEncoding(std::vector<std::byte> &encoding) const;
-  void GetExtensionEncoding(std::vector<std::byte> &encoding) const;
-  void GetLeafEncoding(std::vector<std::byte> &encoding) const;
+  void get_branch_encoding(std::vector<std::byte> &encoding) const;
+  void get_extension_encoding(std::vector<std::byte> &encoding) const;
+  void get_leaf_encoding(std::vector<std::byte> &encoding) const;
 
   // These write a string representation of the node to [oss].
-  void GetBranchString(std::ostringstream &oss) const;
-  void GetExtensionString(std::ostringstream &oss) const;
-  void GetLeafString(std::ostringstream &oss) const;
+  void get_branch_string(std::ostringstream &oss) const;
+  void get_extension_string(std::ostringstream &oss) const;
+  void get_leaf_string(std::ostringstream &oss) const;
 };
 } // namespace hogd

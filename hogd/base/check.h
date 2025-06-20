@@ -1,9 +1,10 @@
 // macros for checking conditions.
 
-// TODO: Add open source license?
+// TODO(jhumphri): Add open source license?
 
 #pragma once
 
+#include <iostream>
 #include <thread>
 
 #define __LCHECK(op, invop, expr1, expr2)                                      \
@@ -15,10 +16,10 @@
       std::cerr << __FILE__ << ":" << __LINE__ << "("                          \
                 << std::this_thread::get_id() << ") "                          \
                 << "CHECK FAILED: " << #expr1 << " " #op " " << #expr2 << " [" \
-                << __val1 << " " #invop " " << __val2 << "]" << std::endl;     \
+                << __val1 << " " #invop " " << __val2 << "]" << '\n';          \
       if (__errno) {                                                           \
         std::cerr << "errno: " << __errno << " [" << std::strerror(__errno)    \
-                  << "]" << std::endl;                                         \
+                  << "]" << '\n';                                              \
       }                                                                        \
       exit(1);                                                                 \
     }                                                                          \

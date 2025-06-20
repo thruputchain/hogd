@@ -1,11 +1,16 @@
+#include <cstddef>
+#include <cstring>
 #include <gtest/gtest.h>
-#include <string.h>
+#include <optional>
 
+#include <string>
 #include <vector>
 
 #include "hogd/base/check.h"
-#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/base/types.h"
+#include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -13,7 +18,7 @@ namespace {
 
 // Converts a human-readable hex string (e.g., "0x1234") to a [SHA256Hex].
 SHA256Hash
-HashFromString(const std::string &str)
+hash_from_string(const std::string &str)
 {
   // A SHA-256 hash is 32 bytes, so [str] should have 32 * 2 = 64
   // characters.
@@ -22,8 +27,8 @@ HashFromString(const std::string &str)
   HexArray h(str);
   SHA256Hash ret;
   for (size_t i = 0; i < str.size(); i += 2) {
-    std::byte first_hex_digit = h.Get(i);
-    std::byte second_hex_digit = h.Get(i + 1);
+    std::byte first_hex_digit = h.get(i);
+    std::byte second_hex_digit = h.get(i + 1);
     // [HexArray::Get] always return an [std::byte] with the most significant
     // four bits zeroed out. Thus, for [second_hex_digit] below, we do not need
     // to zero out these bits again.
@@ -34,7 +39,7 @@ HashFromString(const std::string &str)
 }
 
 void
-ExpectHashIsClear(const Node &node)
+expect_hash_is_clear(const Node &node)
 {
   for (unsigned char ch : node.hash) {
     EXPECT_EQ(ch, 0x00);
@@ -42,7 +47,7 @@ ExpectHashIsClear(const Node &node)
 }
 
 void
-ExpectChildrenAreClear(const Node &node)
+expect_children_are_clear(const Node &node)
 {
   for (Node *child : node.child) {
     EXPECT_EQ(child, nullptr);
@@ -51,7 +56,7 @@ ExpectChildrenAreClear(const Node &node)
 
 } // namespace
 
-TEST(Node, Clear)
+TEST(Node, clear)
 {
   Node node;
   // We do not set or check [node.type] because [node.type] is an enum class.
@@ -65,28 +70,28 @@ TEST(Node, Clear)
   node.child[0] = &node;
   node.child[Node::kMaxNumBranches - 1] = &node;
 
-  node.Clear();
+  node.clear();
 
   // As mentioned above, we do not check [node.type].
-  ExpectHashIsClear(node);
+  expect_hash_is_clear(node);
   EXPECT_EQ(node.parent, nullptr);
   EXPECT_TRUE(node.path.empty());
   EXPECT_EQ(node.value, std::nullopt);
-  ExpectChildrenAreClear(node);
+  expect_children_are_clear(node);
 }
 
 TEST(Node, CreateBranch)
 {
   Node parent;
-  Node *branch = Node::CreateBranch(&parent);
+  Node *branch = Node::create_branch(&parent);
 
   EXPECT_EQ(branch->type, Node::Type::kBranch);
   EXPECT_EQ(branch->parent, &parent);
 
-  ExpectHashIsClear(*branch);
+  expect_hash_is_clear(*branch);
   EXPECT_TRUE(branch->path.empty());
   EXPECT_EQ(branch->value, std::nullopt);
-  ExpectChildrenAreClear(*branch);
+  expect_children_are_clear(*branch);
 
   delete branch;
 }
@@ -96,8 +101,8 @@ TEST(Node, InitBranch)
   Node parent;
   Node branch;
 
-  branch.Clear();
-  branch.InitBranch(&parent);
+  branch.clear();
+  branch.init_branch(&parent);
 
   EXPECT_EQ(branch.type, Node::Type::kBranch);
   EXPECT_EQ(branch.parent, &parent);
@@ -106,15 +111,15 @@ TEST(Node, InitBranch)
 TEST(Node, CreateExtension)
 {
   Node parent;
-  Node *extension = Node::CreateExtension(&parent);
+  Node *extension = Node::create_extension(&parent);
 
   EXPECT_EQ(extension->type, Node::Type::kExtension);
   EXPECT_EQ(extension->parent, &parent);
 
-  ExpectHashIsClear(*extension);
+  expect_hash_is_clear(*extension);
   EXPECT_TRUE(extension->path.empty());
   EXPECT_EQ(extension->value, std::nullopt);
-  ExpectChildrenAreClear(*extension);
+  expect_children_are_clear(*extension);
 
   delete extension;
 }
@@ -124,8 +129,8 @@ TEST(Node, InitExtension)
   Node parent;
   Node extension;
 
-  extension.Clear();
-  extension.InitExtension(&parent);
+  extension.clear();
+  extension.init_extension(&parent);
 
   EXPECT_EQ(extension.type, Node::Type::kExtension);
   EXPECT_EQ(extension.parent, &parent);
@@ -134,15 +139,15 @@ TEST(Node, InitExtension)
 TEST(Node, CreateLeaf)
 {
   Node parent;
-  Node *leaf = Node::CreateLeaf(&parent);
+  Node *leaf = Node::create_leaf(&parent);
 
   EXPECT_EQ(leaf->type, Node::Type::kLeaf);
   EXPECT_EQ(leaf->parent, &parent);
 
-  ExpectHashIsClear(*leaf);
+  expect_hash_is_clear(*leaf);
   EXPECT_TRUE(leaf->path.empty());
   EXPECT_EQ(leaf->value, std::nullopt);
-  ExpectChildrenAreClear(*leaf);
+  expect_children_are_clear(*leaf);
 
   delete leaf;
 }
@@ -152,8 +157,8 @@ TEST(Node, InitLeaf)
   Node parent;
   Node leaf;
 
-  leaf.Clear();
-  leaf.InitLeaf(&parent);
+  leaf.clear();
+  leaf.init_leaf(&parent);
 
   EXPECT_EQ(leaf.type, Node::Type::kLeaf);
   EXPECT_EQ(leaf.parent, &parent);
@@ -170,12 +175,12 @@ TEST(Node, HashBranch)
   for (size_t i = 0; i < children.size(); i++) {
     Node &child = children[i];
     size_t digit = i % 10;
-    child.hash = HashFromString(std::string(64, '0' + digit));
+    child.hash = hash_from_string(std::string(64, '0' + digit));
     branch.child[i] = &child;
   }
 
-  SHA256Hash hash = branch.ComputeNodeHash();
-  SHA256Hash expected = HashFromString(
+  SHA256Hash hash = branch.compute_node_hash();
+  SHA256Hash expected = hash_from_string(
       "20b58e07d23b8c60f45291cfb51f3b266ac2e21afe18f31a1dbc22e76446c137");
   EXPECT_EQ(hash, expected);
 }
@@ -193,7 +198,7 @@ TEST(Node, HashBranchSomeNullptr)
     if (i % 2) {
       Node &child = children[i];
       size_t digit = i % 10;
-      child.hash = HashFromString(std::string(64, '0' + digit));
+      child.hash = hash_from_string(std::string(64, '0' + digit));
       branch.child[i] = &child;
     }
     else {
@@ -201,8 +206,8 @@ TEST(Node, HashBranchSomeNullptr)
     }
   }
 
-  SHA256Hash hash = branch.ComputeNodeHash();
-  SHA256Hash expected = HashFromString(
+  SHA256Hash hash = branch.compute_node_hash();
+  SHA256Hash expected = hash_from_string(
       "e237972b80de6f517ee566152092fef04a3d877adba234b7689420f80f2cdf46");
   EXPECT_EQ(hash, expected);
 }
@@ -216,8 +221,8 @@ TEST(Node, HashBranchAllNullptr)
   branch.value = "hello";
   memset(branch.child.data(), 0, branch.child.size() * sizeof(branch.child[0]));
 
-  SHA256Hash hash = branch.ComputeNodeHash();
-  SHA256Hash expected = HashFromString(
+  SHA256Hash hash = branch.compute_node_hash();
+  SHA256Hash expected = hash_from_string(
       "e37f280ee5188cc892334bbfa5b456dc652c8d1c9b550a2fb8a9160095fe624e");
   EXPECT_EQ(hash, expected);
 }
@@ -232,12 +237,12 @@ TEST(Node, HashExtension)
   extension.path = HexArray("00010203");
 
   static Node child{
-      .hash = HashFromString(
+      .hash = hash_from_string(
           "1111111111111111111111111111111111111111111111111111111111111111")};
   extension.child[0] = &child;
 
-  SHA256Hash hash = extension.ComputeNodeHash();
-  SHA256Hash expected = HashFromString(
+  SHA256Hash hash = extension.compute_node_hash();
+  SHA256Hash expected = hash_from_string(
       "d2af4c9af613a07327407c683265444011144af1e1b1658a9ff4bf14acbe930a");
   EXPECT_EQ(hash, expected);
 }
@@ -251,8 +256,8 @@ TEST(Node, HashLeaf)
   leaf.path = HexArray("00010203");
   leaf.value = "hello";
 
-  SHA256Hash hash = leaf.ComputeNodeHash();
-  SHA256Hash expected = HashFromString(
+  SHA256Hash hash = leaf.compute_node_hash();
+  SHA256Hash expected = hash_from_string(
       "b8b1748d26a2919e0692c2bb970ccd1216b680f866c9a504bb173019ec1b0888");
   EXPECT_EQ(hash, expected);
 }
