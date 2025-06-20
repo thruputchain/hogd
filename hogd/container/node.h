@@ -136,6 +136,7 @@ public:
   }
 
   std::string str() const;
+
   friend std::ostream &operator<<(std::ostream &os, const Node &node)
   {
     return os << node.str();

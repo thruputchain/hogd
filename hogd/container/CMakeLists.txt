@@ -12,6 +12,19 @@ target_link_libraries(
 gtest_discover_tests(hex_array_test)
 
 add_executable(
+  node_test
+  node_test.cc
+  node.cc
+)
+target_link_libraries(
+  node_test
+  base
+  hogd
+  GTest::gtest_main
+)
+gtest_discover_tests(node_test)
+
+add_executable(
   merkle_trie_test
   merkle_trie_test.cc
   merkle_trie.cc
