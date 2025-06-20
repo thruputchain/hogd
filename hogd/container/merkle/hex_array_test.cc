@@ -90,8 +90,8 @@ TEST(HexArray, Set)
 {
   std::string init = "0123456789abcdef";
   HexArray h(init);
-  for (int i = 0; i < h.size(); i++) {
-    h.Set(i, static_cast<std::byte>(0xf - i));
+  for (size_t i = 0; i < h.size(); i++) {
+    h.Set(i, static_cast<std::byte>(0xF - i));
   }
   EXPECT_EQ(h.str(), "fedcba9876543210");
 }

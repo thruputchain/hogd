@@ -472,7 +472,7 @@ MerkleTrie::InsertHandleExtension(Node *extension, const Key &k, size_t idx,
 {
   CHECK_EQ(extension->type, Node::Type::kExtension);
   CHECK_EQ(extension->parent->type, Node::Type::kBranch);
-  CHECK_GT(extension->path.size(), 0);
+  CHECK(!extension->path.empty());
 
   // [key_window] holds the portion of [k] that we are currently looking at. In
   // other words, we omit the prefix of [k] that corresponds to the nodes in the
@@ -770,7 +770,7 @@ MerkleTrie::Remove(const Key &k)
 
     size_t branch_hex = std::to_integer<size_t>(k.Get(idx));
     CHECK_EQ(branch->child[branch_hex], existing_key);
-    CHECK(num_children);
+    CHECK_GT(num_children, 0UL);
 
     // Remove [k]'s leaf as a child of the branch.
     branch->child[branch_hex] = nullptr;
@@ -813,7 +813,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
 {
   // We should only remove a branch if it has one KV pair "under" it.
   if (num_children) {
-    CHECK_EQ(num_children, 1);
+    CHECK_EQ(num_children, 1UL);
   }
   else {
     CHECK(branch->value.has_value());
@@ -891,7 +891,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
   }
   else {
     CHECK_PTR(child);
-    CHECK_EQ(num_children, 1);
+    CHECK_EQ(num_children, 1UL);
     CHECK(!branch->value.has_value());
 
     if (child->type == Node::Type::kBranch) {
@@ -901,7 +901,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
       // above) followed by the hex digit in [branch] that the remaining child
       // is under.
       cur_path.Append(child_hex);
-      CHECK_GE(cur_path.size(), 1);
+      CHECK_GE(cur_path.size(), 1UL);
       // We reuse the branch node below.
       new_child = branch;
       Node *parent = branch->parent;

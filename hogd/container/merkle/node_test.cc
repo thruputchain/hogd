@@ -17,7 +17,7 @@ HashFromString(const std::string &str)
 {
   // A SHA-256 hash is 32 bytes, so [str] should have 32 * 2 = 64
   // characters.
-  CHECK_EQ(str.size(), 64);
+  CHECK_EQ(str.size(), 64UL);
 
   HexArray h(str);
   SHA256Hash ret;
