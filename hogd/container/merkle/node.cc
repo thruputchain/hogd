@@ -153,8 +153,12 @@ GetPathFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
   }
   size_t path_size = static_cast<size_t>(encodings[idx]);
   idx += sizeof(size_t);
-  size_t path_size_in_bytes = (path_size + 1) / 2;
 
+  if (path_size > HexArray::kMaxNumHexDigits) {
+    return false;
+  }
+
+  size_t path_size_in_bytes = (path_size + 1) / 2;
   if (idx + path_size_in_bytes > encodings.size()) {
     return false;
   }
@@ -234,73 +238,6 @@ GetLeafFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
 
 } // namespace
 
-void
-Node::GetBranchString(std::ostringstream &oss) const
-{
-  GetValueString(oss, value);
-  for (size_t i = 0; i < child.size(); i++) {
-    GetChildString(oss, i, child);
-  }
-}
-
-void
-Node::GetExtensionString(std::ostringstream &oss) const
-{
-  GetPathString(oss, path);
-  GetChildString(oss, /*child_idx=*/0, child);
-}
-
-void
-Node::GetLeafString(std::ostringstream &oss) const
-{
-  GetPathString(oss, path);
-  GetValueString(oss, value);
-}
-
-std::string
-Node::str() const
-{
-  std::ostringstream oss;
-
-  oss << std::format("{} ({}, {})\n", GetTypeString(type), HexArray(hash).str(),
-                     reinterpret_cast<const void *>(this));
-  oss << std::format("Parent: {}\n", reinterpret_cast<const void *>(parent));
-
-  switch (type) {
-  case Node::Type::kBranch:
-    GetBranchString(oss);
-    break;
-  case Node::Type::kExtension:
-    GetExtensionString(oss);
-    break;
-  case Node::Type::kLeaf:
-    GetLeafString(oss);
-    break;
-  }
-  return oss.str();
-}
-
-void
-Node::GetBranchEncoding(std::vector<std::byte> &encoding) const
-{
-  GetValueEncoding(encoding, value);
-  GetChildEncoding(encoding, child, /*num_children=*/kMaxNumBranches);
-}
-
-void
-Node::GetExtensionEncoding(std::vector<std::byte> &encoding) const
-{
-  GetPathEncoding(encoding, path);
-  GetChildEncoding(encoding, child, /*num_children=*/1);
-}
-
-void
-Node::GetLeafEncoding(std::vector<std::byte> &encoding) const
-{
-  GetPathEncoding(encoding, path);
-  GetValueEncoding(encoding, value);
-}
-
 std::vector<std::byte>
 Node::GetNodeEncoding()
 {
@@ -320,6 +257,33 @@ Node::GetNodeEncoding()
     break;
   }
   return to_hash;
+}
+
+void
+Node::GetBranchEncoding(std::vector<std::byte> &encoding) const
+{
+  CHECK_EQ(type, Node::Type::kBranch);
+
+  GetValueEncoding(encoding, value);
+  GetChildEncoding(encoding, child, /*num_children=*/kMaxNumBranches);
+}
+
+void
+Node::GetExtensionEncoding(std::vector<std::byte> &encoding) const
+{
+  CHECK_EQ(type, Node::Type::kExtension);
+
+  GetPathEncoding(encoding, path);
+  GetChildEncoding(encoding, child, /*num_children=*/1);
+}
+
+void
+Node::GetLeafEncoding(std::vector<std::byte> &encoding) const
+{
+  CHECK_EQ(type, Node::Type::kLeaf);
+
+  GetPathEncoding(encoding, path);
+  GetValueEncoding(encoding, value);
 }
 
 bool
@@ -357,6 +321,58 @@ Node::GetNodeFromEncoding(const std::vector<std::byte> &encodings, size_t &idx,
     node.hash = sha256(node_encodings);
   }
   return ret;
+}
+
+std::string
+Node::str() const
+{
+  std::ostringstream oss;
+
+  oss << std::format("{} ({}, {})\n", GetTypeString(type), HexArray(hash).str(),
+                     reinterpret_cast<const void *>(this));
+  oss << std::format("Parent: {}\n", reinterpret_cast<const void *>(parent));
+
+  switch (type) {
+  case Node::Type::kBranch:
+    GetBranchString(oss);
+    break;
+  case Node::Type::kExtension:
+    GetExtensionString(oss);
+    break;
+  case Node::Type::kLeaf:
+    GetLeafString(oss);
+    break;
+  }
+  return oss.str();
+}
+
+void
+Node::GetBranchString(std::ostringstream &oss) const
+{
+  CHECK_EQ(type, Node::Type::kBranch);
+
+  GetValueString(oss, value);
+  for (size_t i = 0; i < child.size(); i++) {
+    GetChildString(oss, i, child);
+  }
+}
+
+void
+Node::GetExtensionString(std::ostringstream &oss) const
+{
+  CHECK_EQ(type, Node::Type::kExtension);
+
+  GetPathString(oss, path);
+  GetChildString(oss, /*child_idx=*/0, child);
+}
+
+void
+Node::GetLeafString(std::ostringstream &oss) const
+{
+  CHECK_EQ(type, Node::Type::kLeaf);
+
+  GetPathString(oss, path);
+  GetValueString(oss, value);
 }
 
 } // namespace hogd

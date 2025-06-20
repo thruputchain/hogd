@@ -642,6 +642,13 @@ TEST(MerkleTrie, Prove)
   }
 
   {
+    // Make the path longer than the [HexArray] capacity in a leaf node.
+    std::vector<std::byte> copy = node_encodings;
+    copy[1] = std::byte{0xFF};
+    EXPECT_FALSE(MerkleTrie::Prove(root_hash, copy, key_b, value_b));
+  }
+
+  {
     size_t idx = 0;
     size_t node_idx = 0;
     bool found_extension = false;
@@ -660,6 +667,13 @@ TEST(MerkleTrie, Prove)
       // Change the path in an extension node.
       std::vector<std::byte> copy = node_encodings;
       copy[idx + 1 + sizeof(size_t)] = std::byte{0x00};
+      EXPECT_FALSE(MerkleTrie::Prove(root_hash, copy, key_b, value_b));
+    }
+
+    {
+      // Make the path longer than the [HexArray] capacity in an extension node.
+      std::vector<std::byte> copy = node_encodings;
+      copy[idx + 1] = std::byte{0xFF};
       EXPECT_FALSE(MerkleTrie::Prove(root_hash, copy, key_b, value_b));
     }
 

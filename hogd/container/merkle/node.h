@@ -25,6 +25,21 @@ public:
 
   enum class Type { kBranch, kExtension, kLeaf };
 
+  // This is a raw representation of the node, used to hold the node's contents
+  // after it has been read from an encoding.
+  //
+  // This [Raw] type is identical to [Node] apart from the children, which are
+  // hashes in the [Raw] type and pointers in the [Node] type. We typically only
+  // read node encodings when verifying a Merkle Trie Proof, and for branches in
+  // and extensions in particular, their corresponding node encodings in the
+  // proof directly include the hashes of their children. We write these hashes
+  // to [child_hashes] in the [Raw] type.
+  //
+  // Alternatively, we could just regenerate [Node] instances when verifying a
+  // proof rather than use this [Raw] type, but for branches and extensions, we
+  // would need to allocate children nodes and write pointers to them in the
+  // [child] array in the [Node] type. Handling this allocation seems overly
+  // complicated, so we use this [Raw] type instead.
   struct Raw {
     Type type;
     SHA256Hash hash;
@@ -99,7 +114,11 @@ public:
     return node;
   }
 
+  // Returns an encoding of the node as a byte vector.
   std::vector<std::byte> GetNodeEncoding();
+
+  // This reads a raw node representation from [encodings] starting at index
+  // [idx].
   static bool GetNodeFromEncoding(const std::vector<std::byte> &encodings,
                                   size_t &idx, Node::Raw &node);
 
@@ -143,12 +162,14 @@ public:
   }
 
 private:
-  void GetBranchString(std::ostringstream &oss) const;
-  void GetExtensionString(std::ostringstream &oss) const;
-  void GetLeafString(std::ostringstream &oss) const;
-
+  // These encode the node into a byte vector.
   void GetBranchEncoding(std::vector<std::byte> &encoding) const;
   void GetExtensionEncoding(std::vector<std::byte> &encoding) const;
   void GetLeafEncoding(std::vector<std::byte> &encoding) const;
+
+  // These write a string representation of the node to [oss].
+  void GetBranchString(std::ostringstream &oss) const;
+  void GetExtensionString(std::ostringstream &oss) const;
+  void GetLeafString(std::ostringstream &oss) const;
 };
 } // namespace hogd
