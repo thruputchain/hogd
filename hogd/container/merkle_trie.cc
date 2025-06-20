@@ -257,7 +257,7 @@ MerkleTrie::GetProofByNode(const Key &k)
 
   std::vector<std::vector<std::byte>> ret;
   while (node) {
-    std::vector<std::byte> encoding = node->GetNodeEncoding();
+    const std::vector<std::byte> &encoding = node->GetNodeEncoding();
     ret.push_back(encoding);
 
     node = node->parent;
