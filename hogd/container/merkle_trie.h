@@ -30,7 +30,7 @@
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
-// TODO: Support template types. For now, the keys are byte arrays and the
+// TODO: Support template types. For now, the keys are [HexArray]s and the
 // values are strings.
 namespace hogd {
 
@@ -56,10 +56,9 @@ namespace hogd {
 // trie.Remove(key);
 class MerkleTrie {
 public:
-  // type definitions
+  // Type definitions.
   using Key = HexArray;
   using T = std::string;
-  using value_type = std::pair<const Key, T>;
 
   MerkleTrie() { InitRootNode(); }
 
@@ -89,9 +88,9 @@ public:
 
   static bool Prove(const SHA256Hash &root_hash,
                     const std::vector<std::byte> &encodings, const Key &k,
-                    const std::string &value);
+                    const T &value);
 
-  std::string *Find(const Key &k);
+  T *Find(const Key &k);
 
   bool Insert(const Key &k, T &&obj);
   bool Insert(const Key &k, const T &obj) { return Insert(k, T(obj)); }

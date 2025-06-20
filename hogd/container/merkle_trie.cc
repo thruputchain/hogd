@@ -287,7 +287,7 @@ MerkleTrie::GetProof(const Key &k)
 bool
 MerkleTrie::Prove(const SHA256Hash &root_hash,
                   const std::vector<std::byte> &encodings, const Key &k,
-                  const std::string &value)
+                  const T &value)
 {
   Node::Raw node;
   memset(&node.hash, 0, sizeof(node.hash));
@@ -352,7 +352,7 @@ MerkleTrie::Prove(const SHA256Hash &root_hash,
   return verified_key_size == k.size() && node.hash == root_hash;
 }
 
-std::string *
+MerkleTrie::T *
 MerkleTrie::Find(const Key &k)
 {
   Node *node = FindNode(k);
@@ -364,9 +364,9 @@ MerkleTrie::Find(const Key &k)
   case Node::Type::kBranch:
     // Check if the branch has a value.
     if (node->value) {
-      // Get the [std::string] out of the [std::optional<std::string>] with
-      // the dereference operator.
-      std::string &value = *node->value;
+      // Get the [T] out of the [std::optional<T>] with the dereference
+      // operator.
+      T &value = *node->value;
       return &value;
     }
     return nullptr;
@@ -375,9 +375,8 @@ MerkleTrie::Find(const Key &k)
   {
     // A leaf must always have a value.
     CHECK(node->value.has_value());
-    // Get the [std::string] out of the [std::optional<std::string>] with
-    // the dereference operator.
-    std::string &value = *node->value;
+    // Get the [T] out of the [std::optional<T>] with the dereference operator.
+    T &value = *node->value;
     return &value;
     break;
   }
@@ -531,7 +530,7 @@ MerkleTrie::RemoveBranch(const Key &k, Node *branch, size_t num_children)
     // 0.
     //
     // We reuse the branch node below.
-    std::optional<std::string> value = std::move(branch->value);
+    std::optional<T> value = std::move(branch->value);
     Node *parent = branch->parent;
     new_child = branch;
     new_child->Clear();
