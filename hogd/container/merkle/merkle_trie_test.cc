@@ -772,6 +772,65 @@ TEST(MerkleTrie, Prove)
   }
 }
 
+// Test that we cannot prove a KV pair with an empty key and value is in an
+// empty trie.
+TEST(MerkleTrie, ProveEmptyTrie)
+{
+  MerkleTrie trie;
+
+  HexArray key;
+  std::string value;
+  const auto &[root_hash, node_encodings] = trie.GetProof(key);
+  EXPECT_FALSE(MerkleTrie::Prove(root_hash, node_encodings, key, value));
+}
+
+// Test that we can prove a KV pair with an empty key and value is in the trie,
+// and that we cannot prove it is in the trie once we remove it.
+TEST(MerkleTrie, ProveEmptyKVPair)
+{
+  MerkleTrie trie;
+
+  HexArray key;
+  std::string value;
+  EXPECT_TRUE(trie.Insert(key, value));
+
+  {
+    const auto &[root_hash, node_encodings] = trie.GetProof(key);
+    EXPECT_TRUE(MerkleTrie::Prove(root_hash, node_encodings, key, value));
+  }
+
+  {
+    EXPECT_TRUE(trie.Remove(key));
+    const auto &[root_hash, node_encodings] = trie.GetProof(key);
+    EXPECT_FALSE(MerkleTrie::Prove(root_hash, node_encodings, key, value));
+  }
+}
+
+// Test that we can no longer prove a KV pair is in the trie after removing it.
+// Also check that after removign it, we cannot prove a KV pair with an empty
+// key and value is in the trie.
+TEST(MerkleTrie, ProveAfterRemovingKey)
+{
+  MerkleTrie trie;
+
+  HexArray key("1234");
+  std::string value = "hello";
+  EXPECT_TRUE(trie.Insert(key, value));
+  EXPECT_TRUE(trie.Remove(key));
+
+  {
+    const auto &[root_hash, node_encodings] = trie.GetProof(key);
+    EXPECT_FALSE(MerkleTrie::Prove(root_hash, node_encodings, key, value));
+  }
+
+  {
+    key = HexArray();
+    value = "";
+    const auto &[root_hash, node_encodings] = trie.GetProof(key);
+    EXPECT_FALSE(MerkleTrie::Prove(root_hash, node_encodings, key, value));
+  }
+}
+
 // This tests that when we change each byte in the proof to every possible byte
 // value (0x00 through 0xFF, inclusive), [Prove()] returns false.
 TEST(MerkleTrie, ProveAllByteVariations)
@@ -856,15 +915,14 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
   EXPECT_EQ(seen, expected);
 }
 
-// This test stresses the Merkle trie. It randomly generates 10,000 different
-// keys, places them into the trie, and then removes them from the trie. After
-// each operation, this test checks that [ForEach()],
-// [GetProof()/GetProofByNode()], [Prove()], and [Find()] return expected
-// values. This test also performs an integrity check on the trie after each
-// operation with [Check()].
+// This test stresses the Merkle trie. It randomly generates 10,000 different KV
+// pairs, places them into the trie, and then removes them from the trie. After
+// each operation, this test checks that [ForEach()], [GetProof()], [Prove()],
+// and [Find()] return expected values. This test also performs an integrity
+// check on the trie after each operation with [Check()].
 TEST(MerkleTrie, Stress)
 {
-  static constexpr size_t kNumIterations = 10000;
+  static constexpr size_t kNumIterations = 10'000;
   MerkleTrie trie;
 
   std::map<HexArray, std::string> total;
@@ -892,7 +950,6 @@ TEST(MerkleTrie, Stress)
     EXPECT_EQ(seen, total);
 
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
-    const auto &[_, node_by_node] = trie.GetProofByNode(path);
     EXPECT_TRUE(MerkleTrie::Prove(root_hash, node_encodings, path, value));
     EXPECT_EQ(*trie.Find(path), value);
 
@@ -930,6 +987,68 @@ TEST(MerkleTrie, Stress)
 
     EXPECT_TRUE(trie.Check());
   }
+}
+
+// This test first adds 1 million KV pairs to the trie, then proves each KV pair
+// in the trie, then removes all KV pairs.
+//
+// This is a larger number of KV pairs than in the [MerkleTrie::Stress] test,
+// but we perform fewer checks to reduce test runtime.
+TEST(MerkleTrie, StressTwo)
+{
+  static constexpr size_t kNumIterations = 1'000'000;
+  MerkleTrie trie;
+
+  std::map<HexArray, std::string> total;
+  std::map<HexArray, std::string> seen;
+  auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
+    ForEachFunc(seen, pair);
+  };
+
+  // Insert the KV pairs.
+  for (size_t i = 0; i < kNumIterations; i++) {
+    HexArray path = GenerateRandomPath();
+    const std::string value = std::to_string(i);
+    bool insert = trie.Insert(path, value);
+    EXPECT_EQ(insert, total.count(path) == 0);
+    if (!insert) {
+      // A duplicate key was generated, so try again.
+      i--;
+      continue;
+    }
+
+    total.insert({path, value});
+  }
+
+  EXPECT_TRUE(trie.Check());
+  // Check every single KV pair.
+  for (const auto &[path, value] : total) {
+    const auto &[root_hash, node_encodings] = trie.GetProof(path);
+    EXPECT_TRUE(MerkleTrie::Prove(root_hash, node_encodings, path, value));
+
+    EXPECT_EQ(*trie.Find(path), value);
+  }
+
+  // Remove all KV pairs.
+  for (size_t i = 0; i < kNumIterations; i++) {
+    const auto &[path, value] = *total.begin();
+
+    EXPECT_TRUE(trie.Remove(path));
+    auto it = total.erase(total.begin());
+    if (i < kNumIterations - 1) {
+      EXPECT_NE(it, total.end());
+    }
+    else {
+      EXPECT_EQ(it, total.end());
+    }
+  }
+
+  EXPECT_TRUE(trie.Check());
+  EXPECT_EQ(trie.size(), 0);
+
+  seen.clear();
+  trie.ForEach(f);
+  EXPECT_EQ(seen, total);
 }
 
 } // namespace hogd
