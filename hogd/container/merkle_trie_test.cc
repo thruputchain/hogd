@@ -501,9 +501,8 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
   std::cout << trie << std::endl;
 }
 
-// This tests generating a proof and verifying a proof for the trie structure
-// described above.
-TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
+// This tests generating a proof and verifying a proof.
+TEST(MerkleTrie, Prove)
 {
   MerkleTrie trie;
 
@@ -551,6 +550,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   // Try removing a hex digit from the key.
   EXPECT_FALSE(MerkleTrie::Prove(root_hash, node_encodings,
                                  key_b.GetSubarray(1, key_b.size()), value_b));
+
   {
     // Try adding a hex digit to the key.
     HexArray key_b_copy = key_b;
@@ -620,7 +620,6 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
   {
     // Remove a byte from an intermediate node and test that the improper
     // encoding is detected.
-    // TODO: Do this for all node types.
     std::vector<std::byte> copy = node_encodings;
     copy.erase(copy.begin() + node_encodings_by_node[0].size());
     EXPECT_FALSE(MerkleTrie::Prove(root_hash, copy, key_b, value_b));
@@ -676,6 +675,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
 
   {
     int matching_idx = -1;
+    int nonmatching_idx;
     size_t branch_start_idx;
     {
       // Change the matching hash in a branch. [Prove()] should verify that the
@@ -718,7 +718,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
         EXPECT_FALSE(MerkleTrie::Prove(root_hash, copy, key_b, value_b));
       }
     }
-    int nonmatching_idx;
+
     {
       // Change a non-matching hash in a branch. We will just choose a different
       // branch from above. This will cause the hash we generate for the branch
@@ -746,6 +746,41 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchProve)
       std::swap(matching_hash, nonmatching_hash);
       EXPECT_FALSE(MerkleTrie::Prove(root_hash, copy, key_b, value_b));
     }
+  }
+}
+
+// This tests that when we change a random byte in the proof, [Prove()] returns
+// false;
+TEST(MerkleTrie, ProveRandom)
+{
+  static size_t constexpr kNumIterations = 10000;
+  MerkleTrie trie;
+
+  HexArray key_a("1234");
+  std::string value_a = "hello";
+  EXPECT_TRUE(trie.Insert(key_a, value_a));
+
+  HexArray key_b("123456");
+  std::string value_b = "hello again";
+  EXPECT_TRUE(trie.Insert(key_b, value_b));
+
+  HexArray key_c("12ab");
+  std::string value_c = "hello three";
+  EXPECT_TRUE(trie.Insert(key_c, value_c));
+
+  auto [root_hash, node_encodings] = trie.GetProof(key_b);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<size_t> byte_idx_dist(0, node_encodings.size() -
+                                                             1);
+  for (size_t i = 0; i < kNumIterations; i++) {
+    // Change a random byte in [node_encodings].
+    size_t byte_idx = byte_idx_dist(gen);
+    std::byte cur = node_encodings[byte_idx];
+    node_encodings[byte_idx] = std::byte(static_cast<char>(cur) + 0x1);
+
+    EXPECT_FALSE(MerkleTrie::Prove(root_hash, node_encodings, key_b, value_b));
+    node_encodings[byte_idx] = cur;
   }
 }
 
@@ -806,6 +841,7 @@ TEST(MerkleTrie, Stress)
     ForEachFunc(seen, pair);
   };
 
+  // Insert the KV pairs.
   for (size_t i = 0; i < kNumIterations; i++) {
     HexArray path = GenerateRandomPath();
     const std::string value = std::to_string(i);
@@ -831,6 +867,7 @@ TEST(MerkleTrie, Stress)
     EXPECT_TRUE(trie.Check());
   }
 
+  // Check every single KV pair.
   for (const auto &[path, value] : total) {
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
     EXPECT_TRUE(MerkleTrie::Prove(root_hash, node_encodings, path, value));
@@ -838,6 +875,7 @@ TEST(MerkleTrie, Stress)
     EXPECT_EQ(*trie.Find(path), value);
   }
 
+  // Remove all KV pairs.
   for (size_t i = 0; i < kNumIterations; i++) {
     const auto &[path, value] = *total.begin();
     const auto &[root_hash, node_encodings] = trie.GetProof(path);
