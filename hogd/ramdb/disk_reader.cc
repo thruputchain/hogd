@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -150,12 +151,20 @@ static_assert(std::is_trivially_copyable_v<SafeItemHeader>);
 
 // helper class that parses log and snapshot file names
 struct FileMetadata {
-  static std::optional<FileMetadata> from_path(const std::string_view &path)
+  static std::optional<FileMetadata> from_path(const Directory &dir,
+                                               std::string_view path)
   {
     FileMetadata file{};
 
     file.path_ = path;
     file.snapshot_file_ = has_extension(path, "snap");
+
+    ErrnoStatus<struct stat> r = dir.stat(file.path_);
+    if (!r) {
+      info("couldn't stat filename {}; ignoring", file.path_);
+      return std::nullopt;
+    }
+    file.bytes_ = r->st_size;
 
     if (file.snapshot_file_) {
       std::vector<std::string_view> parts = split(file.path_, '-');
@@ -219,6 +228,8 @@ struct FileMetadata {
   uint64_t begin_lsn_;
   uint64_t end_lsn_exclusive_;
   bool snapshot_file_;
+
+  size_t bytes_;
 
 private:
   FileMetadata() = default;
@@ -309,7 +320,7 @@ load_log_file(
 
       // insert the changes into the database.
       // for WAL files this applies just one lsn of items. snapshot
-      // files may commit items of many lsns.
+      // files may commit items of many lsns per commit record.
       ret = func(buf.take_buffer());
       if (!ret)
         return ret.error();
@@ -327,6 +338,46 @@ load_log_file(
   }
 
   return {};
+}
+
+DBStatus<std::vector<FileMetadata>>
+find_files(const Directory &dir)
+{
+  DBStatus<std::vector<std::string>> filenames =
+      dir.list().transform_error(to_db_error);
+  if (!filenames)
+    return filenames.error();
+
+  std::vector<FileMetadata> files{};
+  for (auto &fn : *filenames) {
+    auto file = FileMetadata::from_path(dir, fn);
+    if (file)
+      files.emplace_back(*file);
+  }
+  std::ranges::sort(files, &FileMetadata::operator<);
+
+  return std::move(files);
+}
+
+std::vector<FileMetadata>
+log_files(const std::vector<FileMetadata> &files)
+{
+  return files | std::views::filter([](auto &f) { return !f.snapshot_file_; }) |
+         std::ranges::to<std::vector<FileMetadata>>();
+}
+
+std::optional<FileMetadata>
+longest_full_snapshot(const std::vector<FileMetadata> &files)
+{
+  auto candidates = files | std::views::filter([](auto &f) {
+                      return f.snapshot_file_ && f.begin_lsn_ == 0;
+                    }) |
+                    std::ranges::to<std::vector<FileMetadata>>();
+
+  if (candidates.empty())
+    return std::nullopt;
+
+  return std::ranges::max(candidates, &FileMetadata::operator<);
 }
 
 } // namespace
@@ -360,6 +411,70 @@ DiskReader::verify(Directory &dir)
   return lsn;
 }
 
+size_t
+DiskReader::log_bytes(const Directory &dir)
+{
+  auto files = find_files(dir);
+  if (!files) {
+    warn("couldn't find files for cleanup in {}", dir.get_path());
+    return 0;
+  }
+
+  auto all_log_files = *files | std::views::filter([](auto &f) {
+    return !f.snapshot_file_;
+  }) | std::ranges::to<std::vector<FileMetadata>>();
+
+  size_t total_log_bytes =
+      std::ranges::fold_left(all_log_files |
+                                 std::views::transform(&FileMetadata::bytes_),
+                             0, std::plus<>());
+  return total_log_bytes;
+}
+
+void
+DiskReader::cleanup(const Directory &dir)
+{
+  info("cleaning up log files");
+
+  auto files = find_files(dir);
+  if (!files) {
+    warn("couldn't find files for cleanup in {}", dir.get_path());
+    return;
+  }
+
+  uint64_t missing_lsn = 0;
+  std::unordered_set<std::string> needed{};
+
+  auto snapshot = longest_full_snapshot(*files);
+  if (snapshot) {
+    needed.emplace(snapshot->path_);
+    missing_lsn = snapshot->end_lsn_exclusive_;
+  }
+
+  auto all_log_files = log_files(*files);
+
+  std::span needed_wal_files{all_log_files};
+  // a log file is not needed if there is a log file with a higher begin lsn
+  // that is <= the first missing lsn (the records it contains must all be
+  // less than the newer log file).
+  while (needed_wal_files.size() > 1 &&
+         needed_wal_files[1].begin_lsn_ <= missing_lsn) {
+    needed_wal_files = needed_wal_files.subspan(1);
+  }
+
+  needed.insert_range(needed_wal_files |
+                      std::views::transform(&FileMetadata::path_));
+
+  for (auto &file : *files) {
+    if (needed.contains(file.path_))
+      continue;
+    info("file {} not needed for recovery; cleaning up", file.path_);
+    ErrnoStatus<void> r = dir.unlink(file.path_);
+    if (!r)
+      warn("failed to remove {} during cleanup", file.path_);
+  }
+}
+
 DBStatus<void>
 DiskReader::load_database(
     Directory &dir,
@@ -376,7 +491,7 @@ DiskReader::load_database(
 
   std::vector<FileMetadata> files{};
   for (auto &fn : *filenames) {
-    auto file = FileMetadata::from_path(fn);
+    auto file = FileMetadata::from_path(dir, fn);
     if (file)
       files.emplace_back(*file);
   }

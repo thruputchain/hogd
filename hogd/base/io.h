@@ -192,7 +192,7 @@ public:
   ErrnoStatus<void> skip(size_t n)
   {
     while (true) {
-      if (n < pos_.size()) {
+      if (n <= pos_.size()) {
         pos_ = pos_.subspan(n);
         return {};
       }

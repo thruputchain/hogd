@@ -1,6 +1,7 @@
 #include "hogd/ramdb/db.h"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
@@ -13,6 +14,7 @@
 #include <optional>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -43,7 +45,7 @@ active_cores(const WorkerPool &pool)
 }
 
 DBStatus<std::unique_ptr<Database>>
-create_db(const std::string &path, size_t heap_size, int bucket_order)
+create_db(std::string_view path, size_t heap_size, int bucket_order)
 {
   // NOTE: all variables with the _order suffix means they are log2(n).
 
@@ -125,6 +127,14 @@ Database::notify_low_mem()
 }
 
 void
+Database::notify_wal_grew()
+{
+  std::scoped_lock g(lock_);
+  run_disk_cleanup_ = true;
+  cv_.notify_one();
+}
+
+void
 Database::background_worker(const std::stop_token &stoken)
 {
   // NOTE: This thread is needed to synchronize compaction and expansion.
@@ -132,7 +142,7 @@ Database::background_worker(const std::stop_token &stoken)
 
   while (true) {
     bool expand = false;
-    bool compact;
+    bool compact, disk_cleanup;
     {
       // wait for change in status or timeout.
       std::scoped_lock g(lock_);
@@ -149,6 +159,8 @@ Database::background_worker(const std::stop_token &stoken)
       // check if the buckets need to be expanded.
       if (!active_ && map_.prepare_expand())
         expand = true;
+
+      disk_cleanup = std::exchange(run_disk_cleanup_, false);
     }
 
     // run item compactor if needed.
@@ -174,6 +186,46 @@ Database::background_worker(const std::stop_token &stoken)
     if (!compact && !expand) {
       loglet_allocator_->print_stats();
       disk_writer_.print_stats();
+    }
+
+    if (disk_cleanup) {
+      info("triggering disk cleanup due to wal growth");
+      if (cleanup_running_.load(std::memory_order_acquire)) {
+        info("cleanup already running; skipping");
+      }
+      else {
+        if (cleanup_th_.joinable())
+          cleanup_th_.join();
+
+        // determine how much wal data there is, see if it's "too much".
+        size_t log_bytes = DiskReader::log_bytes(dir_);
+        bool needed = log_bytes >= disk_writer_.get_file_size_threshold();
+        info("disk logs occupy {}; cleanup {}needed",
+             print_iec_bytes(log_bytes, true), needed ? "" : "not ");
+
+        if (needed) {
+          cleanup_running_.store(true, std::memory_order_relaxed);
+
+          cleanup_th_ = std::jthread{[this]() {
+            // start a full snapshot so wal log files become prunable.
+            auto ret = sync_and_snapshot(0);
+            if (!ret) {
+              warn("failed to snapshot while attempting disk cleanup: {}",
+                   ret.error());
+            }
+            else {
+              auto snap_ret = ret->second.get();
+              if (!snap_ret)
+                warn("failed to snapshot while attempting disk cleanup: {}",
+                     snap_ret.error());
+            }
+
+            DiskReader::cleanup(dir_);
+
+            cleanup_running_.store(false, std::memory_order_release);
+          }};
+        }
+      }
     }
   }
 }
@@ -206,13 +258,14 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
 }
 
 DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
-Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
+Database::sync_and_snapshot(uint64_t begin_lsn)
 {
   DBStatus<uint64_t> ret = sync();
   if (!ret) [[unlikely]]
     return ret.error();
 
   uint64_t end_lsn = *ret;
+  std::string path = std::format("{}-{}.snap", begin_lsn, end_lsn);
   info("begin snapshot from lsn {} -> lsn {} to {}", begin_lsn, end_lsn, path);
 
   if (begin_lsn > end_lsn) {
@@ -250,10 +303,10 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
     // only allocate one head for this writer since snapshotting is
     // single-threaded anyway.
     std::string tmp_path = std::format("__{}.tmp", path);
-    DiskWriter snap_writer{*loglet_allocator_, dir_, tmp_path, kMaxFileSize, 0};
+    DiskWriter snap_writer{*loglet_allocator_, dir_, 0};
     // start snap writer bg thread; this also configures writer so that
     // sync() at end of snapshotting writes a commit record for end_lsn - 1.
-    snap_writer.init(end_lsn - 1);
+    snap_writer.init(end_lsn - 1, tmp_path, kMaxFileSize);
 
     auto add_item_to_snapshot = [&snap_writer, &begin_lsn, &end_lsn,
                                  &stats = perthread_stats](ItemHeader *item) {
@@ -318,7 +371,14 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
     ErrnoStatus<void> r = dir_.rename(tmp_path, path);
     if (!r) {
       warn("snapshot atomic rename from {} to {} failed", tmp_path, path);
-      promise->set_value(ret.transform([](auto &e) {}));
+      promise->set_value(ret.error());
+      return;
+    }
+    // sync the dir to avoid losing the updated dentry (thanks abelay!).
+    DBStatus<void> dirsync_ret = dir_.sync().transform_error(to_db_error);
+    if (!dirsync_ret) {
+      promise->set_value(dirsync_ret.error());
+      return;
     }
 
     info("syncing snapshot file to storage took {:.3f} s",
@@ -339,8 +399,9 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
 }
 
 DBStatus<std::unique_ptr<Database>>
-Database::open_internal(const std::string &path, std::optional<uint64_t> lsn,
-                        size_t heap_size, int bucket_order)
+Database::open_internal(std::string_view path, std::optional<uint64_t> lsn,
+                        size_t heap_size, int bucket_order,
+                        size_t log_file_size_threshold)
 {
   DBStatus<std::unique_ptr<Database>> ret =
       create_db(path, heap_size, bucket_order);
@@ -366,7 +427,7 @@ Database::open_internal(const std::string &path, std::optional<uint64_t> lsn,
     info("no existing database found; creating a new database.");
   else
     info("loaded up to LSN {}, {} items", *load_ret, db->map_.size());
-  db->disk_writer_.init(*load_ret);
+  db->disk_writer_.init(*load_ret, "{}.log", log_file_size_threshold);
   return db;
 }
 

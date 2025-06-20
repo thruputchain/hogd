@@ -44,11 +44,10 @@ class DiskWriter {
 public:
   friend ScopedDiskWrite;
 
-  DiskWriter(LogletAllocator &allocator, Directory &dir,
-             std::string filename_format, size_t file_size_threshold,
-             int write_head_order)
-    : allocator_(allocator), filename_format_{std::move(filename_format)},
-      dir_(dir), file_size_threshold_{file_size_threshold},
+  DiskWriter(LogletAllocator &allocator, Directory &dir, int write_head_order,
+             std::function<void()> wal_grew_observer = nullptr)
+    : allocator_(allocator), dir_(dir),
+      wal_grew_observer_{std::move(wal_grew_observer)},
       heads_(1UL << write_head_order)
   {}
   ~DiskWriter() { writer_th_.request_stop(); }
@@ -59,8 +58,11 @@ public:
   DiskWriter(const DiskWriter &w) = delete;
   DiskWriter &operator=(const DiskWriter &w) = delete;
 
-  // init must be called before using this class. It sets the initial LSN.
-  void init(uint64_t lsn);
+  // init must be called before using this class. It sets the initial LSN,
+  // what filenames the files is produces should be called, and
+  // how long each log file should be before rolling over to a new log file.
+  void init(uint64_t lsn, std::string_view filename_format,
+            size_t log_file_size_threshold);
 
   // write_record returns a scoped handle that allows the caller to write to
   // the appropriate log head.
@@ -89,6 +91,9 @@ public:
   // print_stats prints disk usage statistics.
   void print_stats();
 
+  // size in bytes a log file must be before writer creates a new file.
+  size_t get_file_size_threshold() const { return file_size_threshold_; }
+
 private:
   struct WriteHead {
     std::mutex lock;
@@ -100,11 +105,13 @@ private:
   // format string for how filenames should be generated.
   // should contain exactly one {} which indicates where lsn or
   // chunk number should be inserted into the generated filenames.
-  const std::string filename_format_;
+  std::string filename_format_;
   // the directory containing the log files.
   Directory &dir_;
   // log file size before rolling over to a new file/lsn.
   size_t file_size_threshold_;
+  // called when writer creates a new log file.
+  std::function<void()> wal_grew_observer_;
 
   // protects everything in this block.
   std::mutex to_disk_lock_;

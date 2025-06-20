@@ -18,6 +18,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/random_bytes.h"
 #include "hogd/base/status.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/constants.h"
@@ -68,7 +69,8 @@ protected:
   }
 
   DBStatus<void>
-  open_db(uint64_t target_lsn = std::numeric_limits<uint64_t>::max());
+  open_db(uint64_t target_lsn = std::numeric_limits<uint64_t>::max(),
+          size_t log_file_size_threshold = kDiskLogFileThreshold);
   void insert_n(size_t count);
   DBError insert_until_failure();
   void remove_every_n(int n);
@@ -82,15 +84,16 @@ protected:
 };
 
 DBStatus<void>
-DatabaseTest::open_db(uint64_t target_lsn)
+DatabaseTest::open_db(uint64_t target_lsn, size_t log_file_size_threshold)
 {
   size_t heap_size =
       Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
   DBStatus<std::unique_ptr<Database>> ret =
       target_lsn == std::numeric_limits<uint64_t>::max()
-          ? Database::open(dir_.get_path(), heap_size, kBucketOrder)
+          ? Database::open(dir_.get_path(), heap_size, kBucketOrder,
+                           log_file_size_threshold)
           : Database::open_lsn(dir_.get_path(), target_lsn, heap_size,
-                               kBucketOrder);
+                               kBucketOrder, log_file_size_threshold);
   if (!ret)
     return ret.error();
   db_ = std::move(*ret);
@@ -304,9 +307,7 @@ TEST_F(DatabaseTest, Snapshot)
   insert_n(kInsertions);
   remove_every_n(3);
 
-  std::string path = "test-snapshot.snap";
-
-  auto sync_ret = db_->sync_and_snapshot(path, 0);
+  auto sync_ret = db_->sync_and_snapshot(0);
   EXPECT_TRUE(sync_ret);
   auto &[lsn, snapshot_future] = *sync_ret;
   EXPECT_EQ(lsn, 1);
@@ -315,6 +316,7 @@ TEST_F(DatabaseTest, Snapshot)
   check_integrity();
 
   // ensure the checkpoint file exists and has stuff in it
+  const std::string path = "0-1.snap";
   ErrnoStatus<struct stat> s = dir_.stat(path);
   ASSERT_TRUE(static_cast<bool>(s));
   ASSERT_GT(s.value().st_size, 10000);
@@ -331,16 +333,14 @@ TEST_F(DatabaseTest, Snapshot)
 
 TEST_F(DatabaseTest, SnapshotRepeatable)
 {
-  using namespace std::chrono_literals;
   // check to make sure that if we take multiple full snapshots with
   // the last one spanning lsns that we can still recover properly.
 
   insert_n(kInsertions);
   remove_every_n(3);
 
-  std::string path = "0-1.snap";
   {
-    auto sync_ret = db_->sync_and_snapshot(path, 0);
+    auto sync_ret = db_->sync_and_snapshot(0);
     ASSERT_TRUE(sync_ret);
     auto &[lsn, snapshot_future] = *sync_ret;
     ASSERT_EQ(lsn, 1);
@@ -348,16 +348,13 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
     ASSERT_TRUE(ret);
   }
   check_integrity();
-
-  // ensure the checkpoint file exists
-  check_file_exists(path);
+  check_file_exists("0-1.snap");
 
   remove_every_n(1);
   insert_n(kInsertions);
 
-  path = "0-2.snap";
   {
-    auto sync_ret = db_->sync_and_snapshot(path, 0);
+    auto sync_ret = db_->sync_and_snapshot(0);
     ASSERT_TRUE(sync_ret);
     auto &[lsn, snapshot_future] = *sync_ret;
     ASSERT_EQ(lsn, 2);
@@ -380,14 +377,11 @@ TEST_F(DatabaseTest, SnapshotRepeatable)
 
 TEST_F(DatabaseTest, SnapshotIncremental)
 {
-  std::string path0 = "test-snapshot-0-1.snap";
-  std::string path1 = "test-snapshot-1-2.snap";
-
   insert_n(kInsertions);
   remove_every_n(3);
 
   {
-    auto sync_ret = db_->sync_and_snapshot(path0, 0);
+    auto sync_ret = db_->sync_and_snapshot(0);
     EXPECT_TRUE(sync_ret);
     auto &[lsn, snapshot_future] = *sync_ret;
     EXPECT_EQ(lsn, 1);
@@ -401,12 +395,12 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   check_integrity();
 
   // ensure the checkpoint file exists
-  check_file_exists(path0);
+  check_file_exists("0-1.snap");
 
   // snapshot 0-1 okay, add more and sync, do incremental snapshot
   insert_n(kInsertions / 2);
   {
-    auto sync_ret = db_->sync_and_snapshot(path1, 1);
+    auto sync_ret = db_->sync_and_snapshot(1);
     EXPECT_TRUE(sync_ret);
     auto &[lsn, snapshot_future] = *sync_ret;
     EXPECT_EQ(lsn, 2);
@@ -416,13 +410,9 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   check_integrity();
 
   // ensure the checkpoint file exists
-  check_file_exists(path1);
-
-  // replace the recovery log with the snapshot to see if it recovers...
-  ErrnoStatus<void> r = dir_.rename(path0, "0.log");
-  ASSERT_TRUE(static_cast<bool>(r));
-  r = dir_.rename(path1, "1.log");
-  ASSERT_TRUE(static_cast<bool>(r));
+  check_file_exists("1-2.snap");
+  // ensure we can recover from just snapshot files.
+  ASSERT_TRUE(dir_.unlink("0.log"));
 
   // the DB should succeed when we restore from disk.
   auto ret = open_db();
@@ -439,7 +429,7 @@ TEST_F(DatabaseTest, SnapshotOngoingPuts)
 
   // Take a snapshot of the oracle.
   std::unordered_map<std::string, std::string> backup(oracle_);
-  auto sync_ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  auto sync_ret = db_->sync_and_snapshot(0);
   EXPECT_TRUE(sync_ret);
   auto &[_, snapshot_future] = *sync_ret;
 
@@ -452,8 +442,7 @@ TEST_F(DatabaseTest, SnapshotOngoingPuts)
   bg.join();
   check_integrity();
 
-  ErrnoStatus<void> rr = dir_.rename("snapshot.dat", "0.log");
-  ASSERT_TRUE(static_cast<bool>(rr));
+  EXPECT_TRUE(dir_.unlink("0.log"));
 
   auto ret = open_db();
   EXPECT_TRUE(static_cast<bool>(ret));
@@ -470,7 +459,7 @@ TEST_F(DatabaseTest, SnapshotOngoingRemoves)
 
   // Take a snapshot of the oracle.
   std::unordered_map<std::string, std::string> backup{oracle_};
-  auto sync_ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  auto sync_ret = db_->sync_and_snapshot(0);
   EXPECT_TRUE(sync_ret);
   auto &[_, snapshot_future] = *sync_ret;
 
@@ -482,8 +471,7 @@ TEST_F(DatabaseTest, SnapshotOngoingRemoves)
   bg.join();
   check_integrity();
 
-  ErrnoStatus<void> rr = dir_.rename("snapshot.dat", "0.log");
-  ASSERT_TRUE(static_cast<bool>(rr));
+  EXPECT_TRUE(dir_.unlink("0.log"));
 
   auto ret = open_db();
   EXPECT_TRUE(static_cast<bool>(ret));
@@ -493,6 +481,7 @@ TEST_F(DatabaseTest, SnapshotOngoingRemoves)
   check_integrity();
 }
 
+// ensure that recovery uses both snapshots and wal files together to recover.
 TEST_F(DatabaseTest, RecoverFromSnapshotAndLog)
 {
   uint64_t lsn = 0;
@@ -510,19 +499,19 @@ TEST_F(DatabaseTest, RecoverFromSnapshotAndLog)
   // wal contains 1 record with lsn 0 and 1 record with lsn 1.
   sync_n(2);
   check_file_exists("0.log");
+  // 1.log doesn't yet exist because sync() doesn't create a new
+  // log file unless the log file is over a certain size.
 
   // add a record in lsn 2.
   insert_n(1);
 
   // snapshot all three records.
-  const std::string path = "0-3.snap";
-  auto r = db_->sync_and_snapshot(path, 0);
+  auto r = db_->sync_and_snapshot(0);
   ASSERT_TRUE(r);
-  auto &[rlsn, snapshot_future] = *r;
-  ASSERT_EQ(rlsn, 3);
-  DBStatus<void> ret = snapshot_future.get();
+  lsn = r->first;
+  ASSERT_EQ(lsn, 3);
+  DBStatus<void> ret = r->second.get();
   ASSERT_TRUE(ret);
-  lsn = rlsn;
 
   // make sure the db wasn't affected.
   check_integrity();
@@ -533,6 +522,71 @@ TEST_F(DatabaseTest, RecoverFromSnapshotAndLog)
 
   // record and ensure all 4 records are recovered.
   ret = open_db();
+  ASSERT_TRUE(static_cast<bool>(ret));
+  check_integrity();
+}
+
+TEST_F(DatabaseTest, DiskCleanup)
+{
+  constexpr uint64_t kInfTargetLSN = std::numeric_limits<uint64_t>::max();
+  constexpr size_t kDiskLogFileSize = 1 * 1024 * 1024; // 1 MB
+  constexpr size_t kItemSize = kKeySize + kValueSize;
+  constexpr size_t kEntriesPerLogFile = kDiskLogFileSize / kItemSize;
+  constexpr size_t kBatchSize = 1024;
+  constexpr size_t kBatches = kEntriesPerLogFile / kBatchSize;
+
+  // reset db to use much smaller log file sizes so test runs quickly.
+  db_.reset();
+  ASSERT_TRUE(dir_.unlink_all());
+  DBStatus<void> ret = open_db(kInfTargetLSN, kDiskLogFileSize);
+  ASSERT_TRUE(ret);
+
+  uint64_t lsn = 0;
+
+  auto fill_file_and_sync = [this, &lsn](size_t n_syncs) {
+    for (; lsn < n_syncs; lsn++) {
+      // doing in batches controls heap size for the test while growing the log.
+      for (size_t b = 0; b < kBatches; b++) {
+        insert_n(kBatchSize);
+        remove_every_n(1);
+      }
+
+      check_file_exists(std::format("{}.log", lsn));
+
+      DBStatus<uint64_t> r = db_->sync();
+      ASSERT_TRUE(r);
+      ASSERT_EQ(*r, lsn + 1);
+    }
+  };
+
+  // create enough log files that we exceed the cleaning threshold
+  fill_file_and_sync(kDiskLogCleanupRatio);
+
+  auto wait_for_deletion = [this](const std::string &path) {
+    ElapsedTimer timer{};
+    constexpr double kTimeout = 2.0;
+
+    while (timer.elapsed() < kTimeout) {
+      ErrnoStatus<File> f = dir_.openat(path, O_RDONLY);
+      if (!f)
+        return;
+
+      using namespace std::chrono_literals;
+      std::this_thread::sleep_for(10ms);
+    }
+
+    FAIL() << "file did not get deleted as expected: " << path;
+  };
+
+  // all but the newest wal file should get cleaned up eventually.
+  wait_for_deletion("0.log");
+  wait_for_deletion("1.log");
+  wait_for_deletion("2.log");
+  wait_for_deletion("3.log");
+
+  check_file_exists("4.log");
+
+  ret = open_db(kInfTargetLSN, kDiskLogFileSize);
   ASSERT_TRUE(static_cast<bool>(ret));
   check_integrity();
 }
