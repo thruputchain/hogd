@@ -1049,6 +1049,10 @@ MerkleTrie::TraverseToLowestBranch(const HexArray &path, Node *root,
     idx--;
     return prev_root;
     break;
+  default:
+    CHECK(false);
+    return nullptr;
+    break;
   }
 }
 
