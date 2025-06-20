@@ -384,6 +384,12 @@ TEST(MerkleTrie, BranchBranchLeaf)
   EXPECT_EQ(*trie.Find(key_b), value_b);
   EXPECT_EQ(*trie.Find(key_c), value_c);
   std::cout << trie << std::endl;
+
+  // We manually observed this root hash previously.
+  EXPECT_EQ(
+      HexArray(trie.GetRootHash()),
+      HexArray(
+          "dd9dfb98cd1516f5022f76d8972ed5fdc56c481c54a0a764c03d6003d1a39641"));
 }
 
 // These tests add three KV pairs to the trie, with this structure:
