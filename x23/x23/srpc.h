@@ -49,6 +49,15 @@ public:
   ~SRpcFd();
   void fail();
 
+  template<typename... Args>
+  void fail(std::format_string<Args...> fmt, Args &&...args)
+  {
+    Str msg = uformat("SRpcFd(fd {}): ", fd_.get()) +
+              uvformat(fmt.get(), std::make_format_args(args...)) + "\n";
+    ::write(2, msg.data(), msg.size());
+    fail();
+  }
+
   // Enqueue a serialized call. record must be a complete RPC record
   // including length, but the XID doesn't matter as it will be
   // overwritten with a unique value at the time the RPC is sent.
@@ -56,14 +65,24 @@ public:
 
   void go();
 
+protected:
+  using Xid = std::uint32_t;
+
+  // Get a probably unique Xid for debug logging purposes.  It's more
+  // efficient to leave the Xid as 0 and let the write_worker fill it
+  // in, thereby avoiding any contention on calls_.
+  Xid genxid();
+
 private:
   static constexpr size_t kReadSize = 0x10000;
-  using Xid = std::uint32_t;
 
   UniqueFd fd_;
 
-  Xid lastxid_{};
-  MVar<std::unordered_map<Xid, CallCB>> pending_calls_;
+  struct PendingCalls {
+    Xid lastxid_;
+    std::unordered_map<Xid, CallCB> cbmap_;
+  };
+  MVar<PendingCalls> calls_;
 
   struct WriteItem {
     Buf data_;
@@ -82,7 +101,7 @@ private:
   void write_worker();
   void write_ready()
   {
-    auto _ptr = pending_calls_.take();
+    auto _ptr = calls_.take();
     write_ready_.notify_one();
   }
 };
@@ -227,31 +246,43 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
   ProcMeta::return_type send_call(const is_xdr_type auto &...args)
   {
     auto msg = call_msg<ProcMeta>();
+    const bool logging = logger_.active();
+    Xid xid = logging ? genxid() : 0;
+    msg.xid = xid;
     Buf record = make_record(msg, args...);
 
-    std::binary_semaphore done{0};
     std::expected<typename ProcMeta::return_type,
-                  std::variant<XdrCallFailed, XdrBadInput>>
+                  std::variant<XdrBadInput, XdrCallFailed>>
         ret;
+    std::binary_semaphore done{0};
 
     write_call(record, [&](rpc_msg *msg, BufView res) {
-      if (!msg)
+      if (!msg) {
+        logger_.log_client_fail(xid, "EOF");
         ret = std::unexpected{XdrBadInput("EOF")};
-      if (!rpc_is_success(*msg))
+      }
+      if (!rpc_is_success(*msg)) {
         ret = std::unexpected{XdrCallFailed{*msg}};
+        logger_.template log_client<ProcMeta>(std::move(*msg));
+      }
       else
         try {
           deserialize(&*ret, res);
         } catch (XdrBadInput &e) {
+          if (logging)
+            logger_.template log_client<ProcMeta>(
+                *msg, uformat(" deserializion error: {}", e.what()));
           ret = std::unexpected{std::move(e)};
         }
       done.release();
     });
+    logger_.template log_client<ProcMeta>(msg, std::forward_as_tuple(args...));
 
     done.acquire();
-    if (ret)
-      return ret.value();
-    std::visit([](auto e) { throw e; }, ret.error());
+
+    if (!ret)
+      std::visit([&](auto e) { throw e; }, ret.error());
+    return std::move(*ret);
   }
 };
 

@@ -1,8 +1,8 @@
 
 #include <print>
 
-#include "x23/sockio.h"
 #include "x23/serialize.h"
+#include "x23/sockio.h"
 #include "x23/srpc.h"
 #include "x23/vec.h"
 
@@ -34,14 +34,24 @@ SRpcFd::~SRpcFd()
   }
 }
 
+SRpcFd::Xid
+SRpcFd::genxid()
+{
+  auto cs = calls_.take();
+  for (++cs->lastxid_; cs->cbmap_.contains(cs->lastxid_) || !cs->lastxid_;
+       ++cs->lastxid_)
+    ;
+  return cs->lastxid_;
+}
+
 void
 SRpcFd::fail()
 {
   if (ss_.request_stop()) {
     shutdown(fd_.get(), SHUT_RDWR);
     write_ready();
-    decltype(pending_calls_)::value_type pcs;
-    pcs.swap(*pending_calls_.take());
+    decltype(PendingCalls::cbmap_) pcs;
+    pcs.swap(calls_->cbmap_);
     for (auto &pc : pcs)
       pc.second(nullptr, {});
   }
@@ -143,11 +153,11 @@ SRpcFd::input(BufView bytes)
     return;
   }
 
-  auto pcs = pending_calls_.take();
-  if (auto pc = pcs->find(msg.xid); pc != pcs->end()) {
+  auto cs = calls_.take();
+  if (auto pc = cs->cbmap_.find(msg.xid); pc != cs->cbmap_.end()) {
     auto cb{std::move(pc->second)};
-    pcs->erase(pc);
-    pcs.reset();
+    cs->cbmap_.erase(pc);
+    cs.reset();
     cb(&msg, bytes.subspan(n));
   }
   else
@@ -173,30 +183,33 @@ SRpcFd::write_worker()
     q.swap(*ptr);
     ptr.reset();
 
-    auto pcs = pending_calls_.take();
+    auto calls = calls_.take();
     for (auto &it : q)
       if (it.replycb_) {
-        assert(it.data_.size() >= 32 &&
-               getbe<u_int32_t>(it.data_.data() + 4) == uint32_t(CALL) &&
-               getbe<uint32_t>(it.data_.data() + 8) == 2);
-        do {
-          putbe(it.data_.data(), ++lastxid_);
-        } while (!pcs->try_emplace(lastxid_, std::move(it.replycb_)).second);
+        assert(it.data_.size() >= 36 &&
+               getbe<uint32_t>(it.data_.data() + 8) == uint32_t(CALL) &&
+               getbe<uint32_t>(it.data_.data() + 12) == 2);
+        Xid xid = getbe<uint32_t>(it.data_.data() + 4);
+        if (!xid)
+          xid = ++calls->lastxid_;
+        else if (calls->lastxid_ - xid > 0x8000'0000U)
+          calls->lastxid_ = xid;
+        while (!calls->cbmap_.try_emplace(xid, std::move(it.replycb_)).second) {
+          putbe(it.data_.data(), xid = ++calls->lastxid_);
+        }
       }
-    pcs.reset();
+    calls.reset();
 
     wrbuf.move_append_range(
         q | std::views::transform(std::mem_fn(&WriteItem::data_)));
     for (;;) {
       auto res = wrbuf.write(fd_.get());
       if (!res) {
-        std::println(stderr, "SRpcFd::write_worker fd {}: {}", fd_.get(),
-                     res.error());
-        fail();
+	fail("write_worker: {}", res.error());
         return;
       }
-      if (res && !*res)
-        break;
+      if (!*res)
+	break;
     }
   }
 }

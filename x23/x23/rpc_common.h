@@ -16,6 +16,8 @@ struct XdrCallFailed : XdrException {
   using enum msg_type;
   const rpc_msg m_;
   XdrCallFailed(const rpc_msg &m) : XdrException(make_message(m)), m_(m) {}
+  XdrCallFailed(rpc_msg &&m) : XdrException(make_message(m)), m_(std::move(m))
+  {}
 
   static std::string make_message(const rpc_msg &m)
   {
@@ -170,6 +172,7 @@ struct RpcLogger {
     : logfd_(logfd), peername_(std::move(peername))
   {}
   RpcLogger(int peerfd, int logfd = default_logfd) noexcept;
+  bool active() const { return logfd_ >= 0; }
 
   template<typename Meta = void>
   static std::string
@@ -217,6 +220,13 @@ struct RpcLogger {
     auto logmsg = make_log_message<Meta>(false, peername_, msg, pl...);
     write(logfd_, logmsg.data(), logmsg.size());
   }
+  void log_client_fail(std::uint32_t xid, std::string_view text)
+  {
+    if (logfd_ < 0)
+      return;
+    auto logmsg = std::format("{} CALL xid={} ==> {}\n", peername_, xid, text);
+    write(logfd_, logmsg.data(), logmsg.size());
+  }
   template<typename Meta = void>
   void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
@@ -232,10 +242,12 @@ struct RpcNoLogger {
   RpcNoLogger() noexcept = default;
   RpcNoLogger(const std::string &, int = RpcLogger::default_logfd) noexcept {}
   RpcNoLogger(int, int = RpcLogger::default_logfd) noexcept {}
+  static constexpr bool active() { return false; }
   template<typename = void>
   void log_client(const rpc_msg &msg, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
   {}
+  void log_client_fail(std::uint32_t xid, std::string_view text) {}
   template<typename = void>
   void log_server(const rpc_msg &msg, const is_xdr_type auto &...pl)
       requires (sizeof...(pl) <= 1)
