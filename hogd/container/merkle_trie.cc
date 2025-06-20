@@ -256,10 +256,7 @@ MerkleTrie::GetProofByNode(const Key &k)
   }
 
   std::vector<std::vector<std::byte>> ret;
-  while (true) {
-    if (!node) {
-      break;
-    }
+  while (node) {
     std::vector<std::byte> encoding = node->GetNodeEncoding();
     ret.push_back(encoding);
 
@@ -1076,12 +1073,9 @@ MerkleTrie::TraverseToLowestBranch(const HexArray &path, Node *root,
 void
 MerkleTrie::GenerateHashesFrom(Node *n)
 {
-  while (true) {
-    if (!n) {
-      break;
-    }
-
+  while (n) {
     n->hash = n->ComputeNodeHash();
+
     n = n->parent;
   }
 }
