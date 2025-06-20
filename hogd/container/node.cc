@@ -57,7 +57,14 @@ GetValueString(std::ostringstream &oss, const std::optional<std::string> &value)
 void
 GetPathString(std::ostringstream &oss, const HexArray &path)
 {
-  oss << std::format("Path: 0x{}\n", path.str());
+  oss << "Path: [";
+  if (path.empty()) {
+    oss << "<empty>";
+  }
+  else {
+    oss << std::format("0x{}", path.str());
+  }
+  oss << "]" << std::endl;
   oss << std::format("Path Size: {}\n", path.size());
 }
 
