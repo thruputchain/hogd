@@ -7,6 +7,7 @@
 #include <optional>
 #include <print>
 #include <sstream>
+#include <stack>
 #include <string>
 #include <utility>
 #include <vector>
@@ -386,8 +387,7 @@ MerkleTrie::find_node(const Key &k)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  traverse_to_lowest_branch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
-                            existing_key);
+  traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
   return existing_key;
 }
 
@@ -397,8 +397,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
   size_t idx = 0;
   Node *existing_key = nullptr;
   Node *branch =
-      traverse_to_lowest_branch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
-                                existing_key);
+      traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
   if (existing_key) {
     // [k] already exists in the trie, so we cannot insert it.
     return false;
@@ -760,8 +759,7 @@ MerkleTrie::remove(const Key &k)
   size_t idx = 0;
   Node *existing_key = nullptr;
   Node *branch =
-      traverse_to_lowest_branch(/*path=*/k, &root_, /*prev_root=*/nullptr, idx,
-                                existing_key);
+      traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
   if (!existing_key) {
     // [k] does not exist in the trie, so we cannot remove it.
     return false;
@@ -953,116 +951,135 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
 // static
 template<typename NodeType>
 void
-MerkleTrie::walk(NodeType *root, HexArray &prefix,
+MerkleTrie::walk(NodeType *root, const HexArray &root_prefix,
                  const std::function<void(const HexArray &, NodeType &)> &f)
 {
   static_assert(std::is_same_v<NodeType, Node> ||
                     std::is_same_v<NodeType, const Node>,
                 "[NodeType] must be [Node] or [const Node].");
 
-  if (!root) {
-    return;
+  std::stack<std::pair<HexArray, NodeType *>> nodes_one;
+  nodes_one.push({root_prefix, root});
+  std::stack<std::pair<HexArray, NodeType *>> nodes_two;
+  while (!nodes_one.empty()) {
+    auto [prefix, node] = nodes_one.top();
+    nodes_one.pop();
+    if (!node) {
+      continue;
+    }
+
+    switch (node->type) {
+    case Node::Type::kBranch:
+      for (size_t i = 0; i < node->child.size(); i++) {
+        auto digit = static_cast<std::byte>(i);
+
+        prefix.append(digit);
+        nodes_one.push({prefix, node->child[i]});
+        prefix.remove_from_back(1);
+      }
+      nodes_two.push({prefix, node});
+      break;
+    case Node::Type::kExtension:
+      CHECK_PTR(node->child[0]);
+
+      prefix.append(node->path);
+      nodes_one.push({prefix, node->child[0]});
+      nodes_two.push({prefix, node});
+      prefix.remove_from_back(node->path.size());
+      break;
+    case Node::Type::kLeaf:
+      prefix.append(node->path);
+      nodes_two.push({prefix, node});
+      break;
+    }
   }
 
-  switch (root->type) {
-  case Node::Type::kBranch:
-    for (size_t i = 0; i < root->child.size(); i++) {
-      auto digit = static_cast<std::byte>(i);
-
-      prefix.append(digit);
-      walk<NodeType>(root->child[i], prefix, f);
-      prefix.remove_from_back(1);
-    }
-    f(prefix, *root);
-    break;
-  case Node::Type::kExtension:
-    CHECK_PTR(root->child[0]);
-
-    prefix.append(root->path);
-    walk<NodeType>(root->child[0], prefix, f);
-    f(prefix, *root);
-    prefix.remove_from_back(root->path.size());
-    break;
-  case Node::Type::kLeaf:
-    prefix.append(root->path);
-    f(prefix, *root);
-    prefix.remove_from_back(root->path.size());
-    break;
+  while (!nodes_two.empty()) {
+    auto &[prefix, node] = nodes_two.top();
+    f(prefix, *node);
+    nodes_two.pop();
   }
 }
 
+// static
 Node *
 MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
-                                      Node *prev_root, size_t &idx,
-                                      Node *&existing_key)
+                                      size_t &idx, Node *&existing_key)
 {
   CHECK_PTR(root);
   CHECK_LE(idx, path.size());
 
-  switch (root->type) {
-  case Node::Type::kBranch:
-  {
-    if (idx == path.size()) {
-      if (root->value) {
-        // [path] maps to this branch node.
+  Node *prev_root = nullptr;
+  while (true) {
+    switch (root->type) {
+    case Node::Type::kBranch:
+    {
+      if (idx == path.size()) {
+        if (root->value) {
+          // [path] maps to this branch node.
+          existing_key = root;
+        }
+        return root;
+      }
+
+      auto branch_hex = std::to_integer<size_t>(path.get(idx));
+      Node *next = root->child[branch_hex];
+      if (next) {
+        // There is a child that corresponds to the next hex digit in [path], so
+        // continue searching. We add 1 to [idx] since the branch corresponds to
+        // one hex digit in the path.
+        idx++;
+        prev_root = root;
+        root = next;
+        continue;
+      }
+      // There is no child, so we have reached the bottom of the trie.
+      return root;
+      break;
+    }
+    case Node::Type::kExtension:
+    {
+      // We check [idx + root->path.size() <= path.size()]. Note that when these
+      // two values are equal, the path maps to the child node, which is always
+      // a branch.
+      if (idx + root->path.size() <= path.size() &&
+          path.get_subarray(idx, idx + root->path.size()) == root->path) {
+        idx += root->path.size();
+        CHECK_PTR(root->child[0]);
+        prev_root = root;
+        root = root->child[0];
+        continue;
+      }
+      // The extension node's path does not match [key], so we can stop moving
+      // down the trie.
+      //
+      // We are going to return the parent node, which is always a branch, so
+      // subtract 1 from [idx] since the branch corresponds to one hex digit in
+      // the path.
+      idx--;
+      return prev_root;
+      break;
+    }
+    case Node::Type::kLeaf:
+      if (path.get_subarray(idx, path.size()) == root->path) {
+        // [path] maps to this leaf node.
         existing_key = root;
       }
-      return root;
+      // We are going to return the parent node, which is always a branch, so
+      // subtract 1 from [idx] since the branch corresponds to one hex digit in
+      // the path.
+      idx--;
+      return prev_root;
+      break;
+    default:
+      CHECK(false);
+      return nullptr;
+      break;
     }
-
-    auto branch_hex = std::to_integer<size_t>(path.get(idx));
-    Node *next = root->child[branch_hex];
-    if (next) {
-      // There is a child that corresponds to the next hex digit in [path], so
-      // continue searching. We add 1 to [idx] since the branch corresponds to
-      // one hex digit in the path.
-      idx++;
-      return traverse_to_lowest_branch(path, next, root, idx, existing_key);
-    }
-    // There is no child, so we have reached the bottom of the trie.
-    return root;
-
-    break;
   }
-  case Node::Type::kExtension:
-  {
-    // We check [idx + root->path.size() <= path.size()]. Note that when these
-    // two values are equal, the path maps to the child node, which is always a
-    // branch.
-    if (idx + root->path.size() <= path.size() &&
-        path.get_subarray(idx, idx + root->path.size()) == root->path) {
-      idx += root->path.size();
-      CHECK_PTR(root->child[0]);
-      return traverse_to_lowest_branch(path, root->child[0], root, idx,
-                                       existing_key);
-    }
-    // The extension node's path does not match [key], so we can stop moving
-    // down the trie.
-    //
-    // We are going to return the parent node, which is always a branch, so
-    // subtract 1 from [idx] since the branch corresponds to one hex digit in
-    // the path.
-    idx--;
-    return prev_root;
 
-    break;
-  }
-  case Node::Type::kLeaf:
-    if (path.get_subarray(idx, path.size()) == root->path) {
-      // [path] maps to this leaf node.
-      existing_key = root;
-    }
-    // We are going to return the parent node, which is always a branch, so
-    // subtract 1 from [idx] since the branch corresponds to one hex digit in
-    // the path.
-    idx--;
-    return prev_root;
-    break;
-  default:
-    CHECK(false);
-    return nullptr;
-    break;
-  }
+  CHECK(false);
+  return nullptr;
 }
 
 // static

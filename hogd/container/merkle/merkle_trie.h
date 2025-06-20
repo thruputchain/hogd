@@ -181,7 +181,7 @@ private:
   //
   // [NodeType] must either be [Node] or [const Node].
   template<typename NodeType>
-  static void walk(NodeType *root, HexArray &prefix,
+  static void walk(NodeType *root, const HexArray &prefix,
                    const std::function<void(const HexArray &, NodeType &)> &f);
 
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
@@ -194,9 +194,8 @@ private:
   // on [path]. Note that [existing_key] should be a [nullptr] when this
   // function is called so that the caller can determine whether [existing_key]
   // is set to a node.
-  Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
-                                  Node *prev_root, size_t &idx,
-                                  Node *&existing_key);
+  static Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
+                                         size_t &idx, Node *&existing_key);
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.
