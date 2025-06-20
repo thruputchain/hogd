@@ -1,4 +1,4 @@
-#include "hogd/container/merkle_trie.h"
+#include "hogd/container/merkle/merkle_trie.h"
 
 #include <gtest/gtest.h>
 
@@ -24,7 +24,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/container/node.h"
+#include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 

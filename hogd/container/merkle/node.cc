@@ -1,4 +1,4 @@
-#include "hogd/container/node.h"
+#include "hogd/container/merkle/node.h"
 
 #include <gtest/gtest.h>
 

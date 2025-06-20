@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "hogd/container/hex_array.h"
+#include "hogd/container/merkle/hex_array.h"
 
 namespace hogd {
 

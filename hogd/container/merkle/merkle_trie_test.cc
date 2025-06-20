@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "hogd/base/check.h"
-#include "hogd/container/merkle_trie.h"
-#include "hogd/container/node.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/merkle/node.h"
 
 namespace hogd {
 
