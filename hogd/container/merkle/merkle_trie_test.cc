@@ -772,11 +772,10 @@ TEST(MerkleTrie, Prove)
   }
 }
 
-// This tests that when we change a random byte in the proof, [Prove()] returns
-// false;
-TEST(MerkleTrie, ProveRandom)
+// This tests that when we change each byte in the proof to every possible byte
+// value (0x00 through 0xFF, inclusive), [Prove()] returns false.
+TEST(MerkleTrie, ProveAllByteVariations)
 {
-  static size_t constexpr kNumIterations = 10000;
   MerkleTrie trie;
 
   HexArray key_a("1234");
@@ -792,19 +791,29 @@ TEST(MerkleTrie, ProveRandom)
   EXPECT_TRUE(trie.Insert(key_c, value_c));
 
   auto [root_hash, node_encodings] = trie.GetProof(key_b);
+
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> byte_idx_dist(0, node_encodings.size() -
-                                                             1);
-  for (size_t i = 0; i < kNumIterations; i++) {
-    // Change a random byte in [node_encodings].
-    size_t byte_idx = byte_idx_dist(gen);
-    std::byte cur = node_encodings[byte_idx];
-    node_encodings[byte_idx] = std::byte(static_cast<char>(cur) + 0x1);
+  std::uniform_int_distribution<size_t> byte_dist(0, 0xFF);
 
-    EXPECT_FALSE(MerkleTrie::Prove(root_hash, node_encodings, key_b, value_b));
-    node_encodings[byte_idx] = cur;
+  for (size_t i = 0; i < node_encodings.size(); i++) {
+    // Change the byte at index [i] in [node_encodings].
+    const std::byte cur = node_encodings[i];
+    for (size_t j = 0; j <= 0xFF; j++) {
+      std::byte to_set = std::byte(j);
+      if (to_set == cur) {
+        // Make sure we do not set the byte to its current value in
+        // [node_encodings] as [MerkleTrie::Prove()] will then return true
+        // below.
+        continue;
+      }
+      node_encodings[i] = to_set;
+      EXPECT_FALSE(
+          MerkleTrie::Prove(root_hash, node_encodings, key_b, value_b));
+    }
+    node_encodings[i] = cur;
   }
+  EXPECT_TRUE(MerkleTrie::Prove(root_hash, node_encodings, key_b, value_b));
 }
 
 // This test adds three KV pairs to the trie, with this structure:
