@@ -188,14 +188,14 @@ CheckLeaf(Node *leaf)
 
 // static
 std::string
-MerkleTrie::StringFromNode(const Node *root)
+MerkleTrie::StringFromNode(const Node &node)
 {
   HexArray prefix;
   std::ostringstream oss;
   auto per_node = [&oss](const HexArray &path, const Node &node) {
     oss << node << std::endl;
   };
-  Walk<const Node>(root, prefix, per_node);
+  Walk<const Node>(&node, prefix, per_node);
   oss << "----------" << std::endl;
   return oss.str();
 }
@@ -203,7 +203,7 @@ MerkleTrie::StringFromNode(const Node *root)
 std::string
 MerkleTrie::str() const
 {
-  return StringFromNode(&root_);
+  return StringFromNode(root_);
 }
 
 // static

@@ -30,7 +30,7 @@
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
-// TODO: Support template types. For now, the keys are [HexArray]s and the
+// TODO: Support template types. For now, the keys are [HexArray]'s and the
 // values are strings.
 namespace hogd {
 
@@ -79,26 +79,47 @@ public:
   // Basic sanity checks on the trie.
   bool Check() { return CheckHelper(&root_, /*parent=*/nullptr); }
 
+  // Returns the hash of the root node in the trie.
   SHA256Hash GetRootHash() const { return root_.hash; }
 
+  // Returns a proof that the KV pair with key [k] is in the trie.
   std::pair<SHA256Hash, std::vector<std::byte>> GetProof(const Key &k);
 
+  // Returns a proof that the KV pair with key [k] is in the trie. The second
+  // element in the pair is a vector of encodings for each node. This function
+  // separates each node encoding into its own index, whereas the [GetProof()]
+  // function above returns the encodings concatted together.
   std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
   GetProofByNode(const Key &k);
 
+  // Returns true if the KV pair with key [k] and value [value] is in the trie.
+  // [root_hash] is the hash of the root node and [encodings] is a vector of the
+  // node encodings for all nodes on the path of this KV pair in the trie. Note
+  // that if you call [GetProof()] above, [root_hash] is the first element in
+  // the returned pair and [encodings] is the second element. If you call
+  // [GetProofByNode()], [root_hash] is the first element in the returned pair
+  // and [encodings] is the flattened vector formed from the second element.
   static bool Prove(const SHA256Hash &root_hash,
                     const std::vector<std::byte> &encodings, const Key &k,
                     const T &value);
 
+  // Finds the value for key [k]. If key [k] does not exist in the trie, returns
+  // a nullptr.
   T *Find(const Key &k);
 
+  // Inserts a KV pair with key [k] and value [obj] into the trie. You must pass
+  // [obj] to this method with [std::move()].
   bool Insert(const Key &k, T &&obj);
+  // Inserts a KV pair with key [k] and value [obj] into the trie. This method
+  // copies [obj] rather than move it as the method above does.
   bool Insert(const Key &k, const T &obj) { return Insert(k, T(obj)); }
 
+  // Removes the KV pair for key [k] from the trie.
   bool Remove(const Key &k);
 
   size_t size() { return size_; }
 
+  // Removes all KV pairs from the trie.
   void Clear()
   {
     FreeAllNodes(&root_);
@@ -134,10 +155,10 @@ public:
   }
 
 private:
-  static Node *RemoveBranch(const Key &k, Node *branch, size_t num_children);
-
+  // Recursive helper function for [Check()].
   static bool CheckHelper(Node *root, Node *parent);
 
+  // Finds the node for key [k].
   Node *FindNode(const Key &k);
 
   // See the implementation for comments on this function.
@@ -148,7 +169,14 @@ private:
   static Node *InsertHandleLeaf(Node *current_leaf, const Key &k, size_t idx,
                                 T &&obj);
 
-  static std::string StringFromNode(const Node *root);
+  // Helper function for [Remove()]. When we remove a KV pair, the closest
+  // branch to it may now have fewer than "two" KV pairs under it. In this case,
+  // the branch is no longer needed, so this function removes it.
+  static Node *RemoveBranch(const Key &k, Node *branch, size_t num_children);
+
+  // Returns a string representation of [node] and all nodes under it in the
+  // trie.
+  static std::string StringFromNode(const Node &node);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.
@@ -180,6 +208,7 @@ private:
   // root of the trie.
   static void GenerateHashesFrom(Node *n);
 
+  // Initializes the root node. The root node is always a branch.
   void InitRootNode()
   {
     root_.Clear();
