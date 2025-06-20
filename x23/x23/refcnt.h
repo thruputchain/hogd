@@ -21,6 +21,38 @@ template<typename T> struct RefOps {
 
 } // namespace detail
 
+class RefCount {
+protected:
+  // An object is created with a 0 reference count and only gets
+  // deleted when the refernce count is first raised then lowered to
+  // zero.  If you don't know whether any references have been kept,
+  // you can delete the object with incdec().
+  void incdec()
+  {
+    if (count_.load(std::memory_order_relaxed) == 0)
+      delete this;
+  }
+
+  virtual ~RefCount() = default;
+
+private:
+  template<typename T> friend struct detail::RefOps;
+
+  std::atomic_uintptr_t count_{0};
+
+  void incref() { count_.fetch_add(1, std::memory_order_relaxed); }
+
+  void decref()
+  {
+    if (count_.fetch_sub(1, std::memory_order_release) != 1)
+      return;
+    // Have to synchronize with releases in other threads before
+    // we clobber the object memory.
+    count_.load(std::memory_order_acquire);
+    delete this;
+  }
+};
+
 // Refcounted pointer for classes with incref()/decref() methods.  If
 // you just want to delete at 0 reference count, use std::shared_ptr.
 // If you need something else, then define `incref()` and `decref()`

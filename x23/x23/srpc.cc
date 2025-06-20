@@ -21,7 +21,7 @@ SRpcFd::SRpcFd(UniqueFd fd)
 
 SRpcFd::~SRpcFd()
 {
-  fail();
+  stop();
   bool running = false;
   {
     auto q = write_queue_.take();
@@ -45,7 +45,7 @@ SRpcFd::genxid()
 }
 
 void
-SRpcFd::fail()
+SRpcFd::stop()
 {
   if (ss_.request_stop()) {
     shutdown(fd_.get(), SHUT_RDWR);
@@ -94,9 +94,9 @@ SRpcFd::read_worker()
     auto res = read(fd_, &rdbuf, rdsz);
     if (!res || !*res) {
       if (!res)
-        std::println(stderr, "SRpcFd::read_worker fd {}: {}", fd_.get(),
-                     res.error());
-      fail();
+	fail("read_worker: {}", res.error());
+      else
+	stop();
       return;
     }
 
@@ -104,17 +104,11 @@ SRpcFd::read_worker()
       std::uint32_t msglen = getbe<std::uint32_t>(rdbuf.data()) ^ 0x80000000;
 
       if (msglen > 0x7fffffff) {
-        std::println(stderr,
-                     "SRpcFd::read_worker fd {}: partial messages unsupported",
-                     fd_.get());
-        fail();
+	fail("read_worker: partial messages unsupported");
         return;
       }
       if (msglen > max_message_size_) {
-        std::println(stderr,
-                     "SRpcFd::read_worker fd {}: messages size {} too big",
-                     fd_.get(), msglen);
-        fail();
+	fail("read_worker: message size {} too big", msglen);
         return;
       }
       if (rdbuf.size() < 4 + msglen)
@@ -134,8 +128,7 @@ SRpcFd::input(BufView bytes)
   try {
     n = deserialize_from(&msg, bytes);
   } catch (const XdrException &e) {
-    std::println(stderr, "SRpcFd::input fd {}: {}", fd_.get(), e.what());
-    fail();
+    fail("input fd: {}", e.what());
     return;
   }
 

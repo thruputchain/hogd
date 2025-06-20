@@ -3,7 +3,6 @@
 #pragma once
 
 #include <condition_variable>
-#include <memory>
 #include <print>
 #include <semaphore>
 #include <stop_token>
@@ -11,6 +10,7 @@
 
 #include <x23/cleanup.h>
 #include <x23/mvar.h>
+#include <x23/refcnt.h>
 #include <x23/rpc_common.h>
 #include <x23/uiobuf.h>
 #include <x23/vec.h>
@@ -32,22 +32,20 @@ struct SRpcService {
   }
 };
 
-class SRpcFd : std::enable_shared_from_this<SRpcFd> {
+class SRpcFd : public RefCount {
 public:
   // Note the BufView argument to CallCB is only the argument, not the
   // rpc_msg, which has already been decoded.
   using CallCB = std::function<void(rpc_msg *, BufView)>;
 
-  // Note the maximum message size is 0x7fffffff because we don't
-  // support chunked messages.
+  // Note if you change this, it don't set it larger than 0x7fffffff
+  // because we don't support chunked messages.
   static inline std::uint32_t default_max_message_size = 0x200000;
   size_t max_message_size_;
   SrvMap<SRpcService> srvmap_{};
 
   SRpcFd(UniqueFd fd);
   SRpcFd(const SRpcFd &) = delete;
-  ~SRpcFd();
-  void fail();
 
   template<typename... Args>
   void fail(std::format_string<Args...> fmt, Args &&...args)
@@ -55,7 +53,7 @@ public:
     Str msg = uformat("SRpcFd(fd {}): ", fd_.get()) +
               uvformat(fmt.get(), std::make_format_args(args...)) + "\n";
     ::write(2, msg.data(), msg.size());
-    fail();
+    stop();
   }
 
   // Enqueue a serialized call. record must be a complete RPC record
@@ -68,6 +66,8 @@ public:
 protected:
   using Xid = std::uint32_t;
 
+  virtual ~SRpcFd();
+
   // Get a probably unique Xid for debug logging purposes.  It's more
   // efficient to leave the Xid as 0 and let the write_worker fill it
   // in, thereby avoiding any contention on calls_.
@@ -75,8 +75,6 @@ protected:
 
 private:
   static constexpr size_t kReadSize = 0x10000;
-
-  UniqueFd fd_;
 
   struct PendingCalls {
     Xid lastxid_;
@@ -91,8 +89,9 @@ private:
   MVar<Vec<WriteItem>> write_queue_;
   std::condition_variable write_ready_;
 
+  UniqueFd fd_;
+  std::atomic_int refcnt_{0};
   std::stop_source ss_;
-
   std::thread read_thread_;
   std::thread write_thread_;
 
@@ -101,9 +100,10 @@ private:
   void write_worker();
   void write_ready()
   {
-    auto _ptr = calls_.take();
+    auto _ptr = write_queue_.take();
     write_ready_.notify_one();
   }
+  void stop();
 };
 
 namespace detail {
@@ -231,16 +231,14 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
     return server<Server, VersMeta, ExtraArgs...>(std::move(srvr), {}, ea...);
   }
 
-  /*
-  using ClientRef = std::shared_ptr<SRpcStream>;
+  using ClientRef = RefPtr<SRpcStream>;
 
   template<typename VersMeta>
-  requires requires { typename VersMeta::template client<SRpcStream>; }
+  requires requires { typename VersMeta::template client<ClientRef>; }
   typename VersMeta::template client<ClientRef> client(VersMeta = {})
   {
-    return typename VersMeta::template client<ClientRef>{ClientRef{*s_}};
+    return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }
-  */
 
   template<typename ProcMeta>
   ProcMeta::return_type send_call(const is_xdr_type auto &...args)
