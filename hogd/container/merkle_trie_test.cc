@@ -784,7 +784,7 @@ TEST(MerkleTrie, ProveRandom)
   }
 }
 
-// These tests add three KV pairs to the trie, with this structure:
+// This test adds three KV pairs to the trie, with this structure:
 //    [Branch]
 //       |
 //   [Extension]
