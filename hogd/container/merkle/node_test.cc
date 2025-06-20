@@ -219,7 +219,9 @@ TEST(Node, HashBranchAllNullptr)
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  memset(branch.child.data(), 0, branch.child.size() * sizeof(branch.child[0]));
+  memset(static_cast<void *>(branch.child.data()), 0,
+         branch.child.size() *
+             sizeof(branch.child[0])); // NOLINT(bugprone-sizeof-expression)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(

@@ -71,14 +71,14 @@ public:
   SHA256Hash get_root_hash() const { return root_.hash; }
 
   // Returns a proof that the KV pair with key [k] is in the trie.
-  std::pair<SHA256Hash, std::vector<std::byte>> get_proof(const Key &k) const;
+  std::pair<SHA256Hash, std::vector<std::byte>> get_proof(const Key &k);
 
   // Returns a proof that the KV pair with key [k] is in the trie. The second
   // element in the pair is a vector of encodings for each node. This function
   // separates each node encoding into its own index, whereas the [get_proof()]
   // function above returns the encodings concatted together.
   std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
-  get_proof_by_node(const Key &k) const;
+  get_proof_by_node(const Key &k);
 
   // Returns true if the KV pair with key [k] and value [value] is in the trie.
   // [root_hash] is the hash of the root node and [encodings] is a vector of the
@@ -132,7 +132,7 @@ public:
         break;
       }
     };
-    Walk<Node>(&root_, prefix, per_node);
+    walk<Node>(&root_, prefix, per_node);
   }
 
   // Executes [func] in parallel on each element using a WorkerPool.
@@ -153,7 +153,7 @@ private:
   static bool check_helper(Node *root, Node *parent);
 
   // Finds the node for key [k]. Returns nullptr if [k] is not in the trie.
-  Node *find_node(const Key &k) const;
+  Node *find_node(const Key &k);
 
   // Helper function for [insert()]. When we add a KV pair and there is an
   // extension node below the lowest branch for that pair, we need to handle the

@@ -130,7 +130,7 @@ get_value_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
   if (idx + kValuePresentSize > encodings.size()) {
     return false;
   }
-  bool value_present = static_cast<bool>(encodings[idx]);
+  bool value_present = static_cast<unsigned char>(encodings[idx]) != 0U;
   idx += kValuePresentSize;
 
   if (idx + sizeof(size_t) > encodings.size()) {

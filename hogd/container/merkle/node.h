@@ -141,7 +141,9 @@ public:
     parent = nullptr;
     path.clear();
     value = std::nullopt;
-    memset(child.data(), 0, child.size() * sizeof(child[0]));
+    memset(static_cast<void *>(child.data()), 0,
+           child.size() *
+               sizeof(child[0])); // NOLINT(bugprone-sizeof-expression)
   }
 
   std::string str() const;
