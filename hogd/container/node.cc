@@ -65,7 +65,7 @@ void
 GetChildString(std::ostringstream &oss, size_t child_idx,
                const std::array<Node *, Node::kMaxNumBranches> children)
 {
-  oss << std::format("Child {}: ", static_cast<uint8_t>(child_idx));
+  oss << std::format("Child {:#x}: ", static_cast<uint8_t>(child_idx));
   if (children[child_idx]) {
     oss << std::format("{} ({})\n", HexArray(children[child_idx]->hash).str(),
                        reinterpret_cast<const void *>(children[child_idx]));
