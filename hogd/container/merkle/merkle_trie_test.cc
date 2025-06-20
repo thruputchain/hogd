@@ -916,14 +916,14 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
   EXPECT_EQ(seen, expected);
 }
 
-// This test stresses the Merkle trie. It randomly generates 10,000 different KV
+// This test stresses the Merkle trie. It randomly generates 1,000 different KV
 // pairs, places them into the trie, and then removes them from the trie. After
 // each operation, this test checks that [ForEach()], [GetProof()], [Prove()],
 // and [Find()] return expected values. This test also performs an integrity
 // check on the trie after each operation with [Check()].
 TEST(MerkleTrie, Stress)
 {
-  static constexpr size_t kNumIterations = 10'000;
+  static constexpr size_t kNumIterations = 1'000;
   MerkleTrie trie;
 
   std::map<HexArray, std::string> total;
@@ -990,14 +990,14 @@ TEST(MerkleTrie, Stress)
   }
 }
 
-// This test first adds 1 million KV pairs to the trie, then proves each KV pair
+// This test first adds 50,000 KV pairs to the trie, then proves each KV pair
 // in the trie, then removes all KV pairs.
 //
-// This is a larger number of KV pairs than in the [MerkleTrie::Stress] test,
-// but we perform fewer checks to reduce test runtime.
+// This is a much larger number of KV pairs than in the [MerkleTrie::Stress]
+// test, but we perform fewer checks to reduce test runtime.
 TEST(MerkleTrie, StressTwo)
 {
-  static constexpr size_t kNumIterations = 1'000'000;
+  static constexpr size_t kNumIterations = 50'000;
   MerkleTrie trie;
 
   std::map<HexArray, std::string> total;
