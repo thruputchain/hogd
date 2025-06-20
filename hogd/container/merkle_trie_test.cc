@@ -624,6 +624,13 @@ TEST(MerkleTrie, Prove)
   }
 
   {
+    // Set the node type to an invalid type.
+    std::vector<std::byte> copy = node_encodings;
+    copy[0] = std::byte{0xFF};
+    EXPECT_FALSE(MerkleTrie::Prove(root_hash, copy, key_b, value_b));
+  }
+
+  {
     // Remove a byte from an intermediate node and test that the improper
     // encoding is detected.
     std::vector<std::byte> copy = node_encodings;

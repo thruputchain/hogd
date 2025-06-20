@@ -268,7 +268,7 @@ MerkleTrie::GetProofByNode(const Key &k)
 std::pair<SHA256Hash, std::vector<std::byte>>
 MerkleTrie::GetProof(const Key &k)
 {
-  const std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> proof =
+  const std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> &proof =
       GetProofByNode(k);
   std::pair<SHA256Hash, std::vector<std::byte>> ret;
   ret.first = proof.first;
