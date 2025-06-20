@@ -138,10 +138,14 @@ public:
   }
 
 private:
+  // Returns a string representation of [node] and all nodes under it in the
+  // trie.
+  static std::string StringFromNode(const Node &node);
+
   // Recursive helper function for [Check()].
   static bool CheckHelper(Node *root, Node *parent);
 
-  // Finds the node for key [k].
+  // Finds the node for key [k]. Returns nullptr if [k] is not in the trie.
   Node *FindNode(const Key &k);
 
   // See the implementation for comments on this function.
@@ -156,10 +160,6 @@ private:
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
   static Node *RemoveBranch(const Key &k, Node *branch, size_t num_children);
-
-  // Returns a string representation of [node] and all nodes under it in the
-  // trie.
-  static std::string StringFromNode(const Node &node);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.
@@ -191,6 +191,9 @@ private:
   // root of the trie.
   static void GenerateHashesFrom(Node *n);
 
+  // Frees all of the nodes starting at [root]. Does not free [root_].
+  void FreeAllNodes(Node *root);
+
   // Initializes the root node. The root node is always a branch.
   void InitRootNode()
   {
@@ -198,9 +201,6 @@ private:
     root_.InitBranch(/*parent=*/nullptr);
     GenerateHashesFrom(&root_);
   }
-
-  // Frees all of the nodes starting at [root].
-  void FreeAllNodes(Node *root);
 
   // The root node in the trie. The root node always exists and is always a
   // branch.
