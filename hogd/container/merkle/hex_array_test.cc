@@ -1,10 +1,6 @@
 #include <gtest/gtest.h>
 #include <string.h>
 
-#include <atomic>
-#include <string>
-#include <thread>
-#include <utility>
 #include <vector>
 
 #include "hogd/container/merkle/hex_array.h"

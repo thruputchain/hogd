@@ -2,31 +2,14 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
-#include <bit>
-#include <functional>
-#include <initializer_list>
-#include <iomanip>
-#include <iterator>
-#include <memory>
-#include <mutex>
-#include <optional>
-#include <ranges>
-#include <sstream>
-#include <stdexcept>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
-#include "hex_array.h"
 #include "hogd/base/check.h"
-#include "hogd/base/compiler.h"
-#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
-#include "types.hh"
 
 namespace hogd {
 
