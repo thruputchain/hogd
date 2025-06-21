@@ -65,7 +65,7 @@ public:
   }
 
   // Basic sanity checks on the trie.
-  bool check() { return check_helper(&root_, /*parent=*/nullptr); }
+  bool check() { return check_helper(&root_); }
 
   // Returns the hash of the root node in the trie.
   SHA256Hash get_root_hash() const { return root_.hash; }
@@ -150,7 +150,7 @@ private:
   static std::string string_from_node(const Node &node);
 
   // Recursive helper function for [check()].
-  static bool check_helper(Node *root, Node *parent);
+  static bool check_helper(Node *root);
 
   // Finds the node for key [k]. Returns nullptr if [k] is not in the trie.
   Node *find_node(const Key &k);

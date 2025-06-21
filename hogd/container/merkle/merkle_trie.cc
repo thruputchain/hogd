@@ -192,49 +192,80 @@ MerkleTrie::string_from_node(const Node &node)
 
 // static
 bool
-MerkleTrie::check_helper(Node *root, Node *parent)
+MerkleTrie::check_helper(Node *root)
 {
-  if (!root) {
-    return true;
-  }
+  struct CheckInfo {
+    Node *node;
+    Node *parent;
+    int64_t last_child_visited;
+  };
+
+  std::stack<CheckInfo> path;
+  path.push({.node = root, .parent = nullptr, .last_child_visited = -1});
 
   bool ret = true;
-  if (root->parent != parent) {
-    std::println("The node's parent pointer does not match its actual parent.");
-    ret = false;
-  }
+  while (!path.empty()) {
+    auto &info = path.top();
 
-  if (root->hash != root->compute_node_hash()) {
-    std::println(
-        "The hash in the node does not match the hash we just calculated.");
-    ret = false;
-  }
-  switch (root->type) {
-  case Node::Type::kBranch:
-  {
-    // The functions below print debug information, so we always want the
-    // functions to be called.
-    //
-    // Thus, we deliberately include [ret] second in the AND statements below to
-    // ensure that the functions in the first part of the AND are always called,
-    // even when [ret] is already [false].
-    ret = check_branch(root) && ret;
-    for (Node *child : root->child) {
-      ret = check_helper(child, root) && ret;
+    if (!info.node) {
+      path.pop();
+      continue;
     }
-    break;
-  }
-  case Node::Type::kExtension:
-    ret = check_extension(root) && ret;
-    ret = check_helper(root->child[0], root) && ret;
-    break;
-  case Node::Type::kLeaf:
-    ret = check_leaf(root) && ret;
-    break;
-  default:
-    ret = false;
-    std::println("Unknown node type: {}", static_cast<int>(root->type));
-    break;
+
+    // We can use [last_child_visited] to determine whether we have visited
+    // [info.node] yet. If it is equal to -1, then we have not visited the node
+    // yet.
+    if (info.last_child_visited == -1) {
+      if (info.node->parent != info.parent) {
+        std::println(
+            "The node's parent pointer does not match its actual parent.");
+        ret = false;
+      }
+
+      if (info.node->hash != info.node->compute_node_hash()) {
+        std::println(
+            "The hash in the node does not match the hash we just calculated.");
+        ret = false;
+      }
+    }
+    info.last_child_visited++;
+
+    switch (info.node->type) {
+    case Node::Type::kBranch:
+      CHECK_LE(info.last_child_visited,
+               static_cast<int64_t>(info.node->child.size()));
+      if (info.last_child_visited == info.node->child.size()) {
+        ret = check_branch(info.node) && ret;
+      }
+      else {
+        // Visit the next child.
+        path.push({.node = info.node->child[info.last_child_visited],
+                   .parent = info.node,
+                   .last_child_visited = -1});
+        continue;
+      }
+      break;
+    case Node::Type::kExtension:
+      CHECK_LE(info.last_child_visited, 1);
+      if (info.last_child_visited == 1) {
+        ret = check_extension(info.node) && ret;
+      }
+      else {
+        path.push({.node = info.node->child[0],
+                   .parent = info.node,
+                   .last_child_visited = -1});
+        continue;
+      }
+      break;
+    case Node::Type::kLeaf:
+      ret = check_leaf(info.node) && ret;
+      break;
+    default:
+      ret = false;
+      std::println("Unknown node type: {}", static_cast<int>(info.node->type));
+      break;
+    }
+    path.pop();
   }
   return ret;
 }
