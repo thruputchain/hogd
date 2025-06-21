@@ -976,7 +976,8 @@ MerkleTrie::walk(
     case Node::Type::kBranch:
       CHECK_LE(info.last_child_visited,
                static_cast<int64_t>(info.node->child.size()));
-      if (info.last_child_visited == info.node->child.size()) {
+      if (info.last_child_visited ==
+          static_cast<int64_t>(info.node->child.size())) {
         f(info.path, *info.node, info.parent);
       }
       else {
