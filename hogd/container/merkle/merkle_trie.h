@@ -123,7 +123,7 @@ public:
   template<typename F> void for_each(F func)
   {
     HexArray prefix;
-    auto per_node = [&func](const HexArray &path, Node &node) {
+    auto per_node = [&func](const HexArray &path, Node &node, Node *parent) {
       switch (node.type) {
       case Node::Type::kBranch:
       case Node::Type::kLeaf:
@@ -184,8 +184,9 @@ private:
   //
   // [NodeType] must either be [Node] or [const Node].
   template<typename NodeType>
-  static void walk(NodeType *root, const HexArray &prefix,
-                   const std::function<void(const HexArray &, NodeType &)> &f);
+  static void
+  walk(NodeType *root, const HexArray &prefix,
+       const std::function<void(const HexArray &, NodeType &, NodeType *)> &f);
 
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
   // of the hex digit in [path] that corresponds to the lowest branch.
