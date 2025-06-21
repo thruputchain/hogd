@@ -249,14 +249,14 @@ MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
 
 #undef MAKE_LOG_FUNC_EX
 
-// TODO: I changed this back for now because I want to pass the values to the
-// stream insertion operator to get their string representations. Check with
-// Adam to see if we do want all classes/structs in Groundhog to implement an
-// std::formatter<> specialization in which case I will add the specialization
-// to the Merkle Trie code. However, I do not know if all types we use from
-// third-party libraries implement the specialization, and we are going to need
-// the CHECK macros to work with these types, so it is not clear to me that we
-// should remove the stream insertion operator.
+// TODO(jhumphri): I changed this back for now because I want to pass the values
+// to the stream insertion operator to get their string representations. Check
+// with Adam to see if we do want all classes/structs in Groundhog to implement
+// an std::formatter<> specialization in which case I will add the
+// specialization to the Merkle Trie code. However, I do not know if all types
+// we use from third-party libraries implement the specialization, and we are
+// going to need the CHECK macros to work with these types, so it is not clear
+// to me that we should remove the stream insertion operator.
 //
 // Also, I took out the call to panic() for now because it seems to segfault,
 // even when I use Adam's implementation of [LOG_INTERNAL_CHECK].
