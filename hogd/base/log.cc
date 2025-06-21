@@ -4,6 +4,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include <ranges>
 #include <source_location>
 #include <string>

@@ -277,7 +277,7 @@ MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
 #define DCHECK_PTR(val1)
 #define DCHECK(val1)
 
-#else /* NDEBUG */
+#else // NDEBUG
 
 #define DCHECK_EQ(val1, val2) CHECK_EQ(val1, val2)
 #define DCHECK_NE(val1, val2) CHECK_NE(val1, val2)
@@ -288,7 +288,7 @@ MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
 #define DCHECK_PTR(val1) CHECK_PTR(val1)
 #define DCHECK(val1) CHECK(val1)
 
-#endif /* NDEBUG */
+#endif // NDEBUG
 
 // NOLINTEND(readability-identifier-naming)
 
