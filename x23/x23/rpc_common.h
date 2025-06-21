@@ -14,7 +14,7 @@ namespace x23 {
 
 struct XdrCallFailed : XdrException {
   using enum msg_type;
-  const rpc_msg m_;
+  rpc_msg m_;
   XdrCallFailed(const rpc_msg &m) : XdrException(make_message(m)), m_(m) {}
   XdrCallFailed(rpc_msg &&m) : XdrException(make_message(m)), m_(std::move(m))
   {}
@@ -27,10 +27,8 @@ struct XdrCallFailed : XdrException {
       auto stat = m.body.rbody().areply().reply_data.stat();
       return std::format("RPC call failed ({})", stat);
     }
-    else {
-      auto stat = m.body.rbody().rreply().stat();
-      return std::format("RPC call rejected ({})", stat);
-    }
+    auto stat = m.body.rbody().rreply().stat();
+    return std::format("RPC call rejected ({})", stat);
   }
 };
 

@@ -76,8 +76,21 @@ tcplisten(std::uint16_t port, int backlog)
 
   if (listen(lfd.get(), backlog) < 0)
     Errno{}.raise("listen");
-  set_nonblock(lfd.get());
   return lfd;
+}
+
+UniqueFd
+tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
+{
+  UniqueFd fd(socket(ss.ss_family, SOCK_STREAM, 0));
+  if (!fd)
+    Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
+  if (prep_fd)
+    prep_fd(fd.get());
+  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss), sizeof(ss)) ==
+      -1)
+    Errno{}.raise("connect({})", HostPort(ss));
+  return fd;
 }
 
 sockaddr_storage

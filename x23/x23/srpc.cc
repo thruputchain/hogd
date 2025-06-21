@@ -15,8 +15,8 @@ using enum msg_type;
 SRpcFd::SRpcFd(UniqueFd fd)
   : max_message_size_(default_max_message_size), fd_(std::move(fd))
 {
-  set_nodelay(fd);
-  set_nonblock(fd, false);
+  set_nodelay(fd_);
+  set_nonblock(fd_, false);
 }
 
 SRpcFd::~SRpcFd()
@@ -24,7 +24,7 @@ SRpcFd::~SRpcFd()
   stop();
   bool running = false;
   {
-    auto q = write_queue_.take();
+    auto _lk = write_queue_.take();
     if (write_thread_.joinable())
       running = true;
   }
@@ -59,9 +59,11 @@ SRpcFd::stop() noexcept
 void
 SRpcFd::go()
 {
+  // If this fails, you have neither clients nor servers.
+  assert(refcount() || !srvmap_.empty());
+
   // We lock write_queue_ to guard against the unlikely possibility
-  // that go() gets called concurrently or that the write thread
-  // somehow exits before we've even started the read thread.
+  // that go() gets called concurrently.
   auto _lk = write_queue_.take();
   if (!write_thread_.joinable()) {
     // If there are clients, we rely on the clients to hold the
@@ -70,9 +72,9 @@ SRpcFd::go()
     RefPtr<SRpcFd> selfref{nullptr};
     if (refcount() == 0)
       selfref = RefPtr{*this};
+    read_thread_ = std::thread{&SRpcFd::read_worker, this};
     write_thread_ =
         std::thread{&SRpcFd::write_worker, this, std::move(selfref)};
-    read_thread_ = std::thread{&SRpcFd::read_worker, this};
   }
 }
 
@@ -80,12 +82,17 @@ void
 SRpcFd::write_call(Buf record, CallCB cb)
 {
   auto q = write_queue_.take();
+  // Important to check stop_requested while locking write_queue_, as
+  // otherwise we could enqueue it after stop() flushed the queue.
   if (ss_.stop_requested()) {
     q.reset();
     cb(nullptr, {});
     return;
   }
+  bool need_wake = q->empty();
   q->emplace_back(std::move(record), std::move(cb));
+  if (need_wake)
+    this->write_ready();
 }
 
 void
@@ -152,7 +159,7 @@ SRpcFd::input(BufView bytes) noexcept
     bool need_wake = q->empty();
     q->emplace_back(std::move(resp), nullptr);
     if (need_wake)
-      write_ready_.notify_one();
+      write_ready();
     return;
   }
 
@@ -163,9 +170,11 @@ SRpcFd::input(BufView bytes) noexcept
     cs.reset();
     cb(&msg, bytes.subspan(n));
   }
-  else
-    std::println(stderr, "SRpcFd::input fd {}: unknown Xid in reply",
-                 fd_.get());
+  else {
+    cs.reset();
+    std::println(stderr, "SRpcFd::input fd {}: unknown Xid {} in reply",
+                 fd_.get(), msg.xid);
+  }
 }
 
 void
@@ -174,18 +183,16 @@ SRpcFd::write_worker(RefPtr<SRpcFd> _selfref) noexcept
   Defer _join([this] { read_thread_.join(); });
   BufVec wrbuf;
   for (;;) {
-    auto ptr = write_queue_.take();
+    Vec<WriteItem> q;
     for (;;) {
+      write_ready_ = false;
       if (ss_.stop_requested())
         return;
-      if (!ptr->empty())
+      q.swap(*write_queue_.take());
+      if (!q.empty())
         break;
-      ptr.wait(write_ready_);
+      write_ready_.wait(false);
     }
-
-    Vec<WriteItem> q;
-    q.swap(*ptr);
-    ptr.reset();
 
     auto calls = calls_.take();
     for (auto &it : q)
@@ -195,12 +202,11 @@ SRpcFd::write_worker(RefPtr<SRpcFd> _selfref) noexcept
                getbe<uint32_t>(it.data_.data() + 12) == 2);
         Xid xid = getbe<uint32_t>(it.data_.data() + 4);
         if (!xid)
-          xid = ++calls->lastxid_;
+          putbe(it.data_.data() + 4, xid = ++calls->lastxid_);
         else if (calls->lastxid_ - xid > 0x8000'0000U)
           calls->lastxid_ = xid;
-        while (!calls->cbmap_.try_emplace(xid, std::move(it.replycb_)).second) {
-          putbe(it.data_.data(), xid = ++calls->lastxid_);
-        }
+        while (!calls->cbmap_.try_emplace(xid, std::move(it.replycb_)).second)
+          putbe(it.data_.data() + 4, xid = ++calls->lastxid_);
       }
     calls.reset();
 

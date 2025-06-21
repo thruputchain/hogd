@@ -57,6 +57,7 @@ struct Listener : DestroyInhibit {
   {
     if (!lfd_)
       throw Errno{};
+    set_nonblock(lfd_);
     sockaddr_in sin;
     sin.sin_family = AF_INET;
     sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);

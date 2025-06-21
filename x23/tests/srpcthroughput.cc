@@ -1,11 +1,20 @@
 
 #include <charconv>
+#include <chrono>
+
+#include <sys/poll.h>
 
 #include <x23/sockio.h>
 #include <x23/srpc.h>
 #include <x23/threadpool.h> // for nproc()
 
 #include "tests/xdrtest.hh"
+
+#if NDEBUG
+#define make_rpc_stream srpc_stream
+#else // !NDEBUG
+#define make_rpc_stream srpc_stream_logged
+#endif // !NDEBUG
 
 using namespace x23;
 
@@ -45,27 +54,108 @@ do_server(std::uint16_t port, bool quiet)
   for (;;) {
     sockaddr_storage ss;
     socklen_t sslen = sizeof(ss);
-    UniqueFd fd {accept(lfd.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
-    std::println("accepted fd {} TCP port {} from {}", fd.get(),
-		 server_port.load(), HostPort(ss));
+    UniqueFd fd{accept(lfd.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
+    if (!fd)
+      std::println(stderr, "accept: {}", Errno{});
+    else {
+      std::println("accepted fd {} TCP port {} from {}", fd.get(),
+                   server_port.load(), HostPort(ss));
+      srpc_stream_logged(fd.release())->server(&server);
+    }
   }
+}
 
-  std::weak_ptr<int> x;
-
-  exit(1);
+// Format an int with commas, because {:L} doesn't seem to work yet.
+std::string
+formatL(uint64_t v)
+{
+  std::string ret, in = std::format("{}", v);
+  for (size_t i = 0, e = in.size(); i != e; ++i) {
+    if ((e - i) % 3 == 0 && i != 0)
+      ret += ',';
+    ret += in[i];
+  }
+  return ret;
 }
 
 void
 do_client(int port, const char *server)
-{}
+{
+  auto server_addr =
+      *HostPort{server ? server : "localhost", uformat("{}", port)}.to_addr(
+          true);
+  DestroyInhibit inh;
+  std::stop_source ss;
+  std::atomic<uint64_t> counter{0};
+
+  for (unsigned i = 0; i < opt_connections; ++i) {
+    auto fd = tcpconnect(server_addr);
+    auto client = make_rpc_stream(fd.release())->client(blank_rpc_v1{});
+    for (unsigned j = 0; j < opt_threads_per_connection; ++j) {
+      if (opt_data)
+        std::thread(
+            [&counter, ss = ss.get_token()](decltype(client) c,
+                                            RefPtr<DestroyInhibit> inh) {
+              Data bytes(size_t(*opt_data), std::uint8_t(0xc7));
+              while (!ss.stop_requested()) {
+                c.echo(bytes);
+                counter.fetch_add(1, std::memory_order_relaxed);
+              }
+            },
+            client, RefPtr(inh))
+            .detach();
+      else
+        std::thread(
+            [&counter, ss = ss.get_token()](decltype(client) c,
+                                            RefPtr<DestroyInhibit> inh) {
+              while (!ss.stop_requested()) {
+                c.null();
+                counter.fetch_add(1, std::memory_order_relaxed);
+              }
+            },
+            client, RefPtr(inh))
+            .detach();
+    }
+  }
+
+  // Warm up for 100 msec
+  poll(nullptr, 0, 100);
+
+  using namespace std::chrono;
+  auto start = high_resolution_clock::now();
+  counter = 0;
+  sleep(opt_seconds);
+  auto final_count = counter.load();
+  auto elapsed = high_resolution_clock::now() - start;
+
+  ss.request_stop();
+
+  double rate = double(final_count) / duration<double>(elapsed).count();
+
+  if (opt_csv)
+    std::println("{},{},{},{},{:.0f}", server ? server : "INTERNAL",
+                 opt_data ? std::string{} : std::to_string(*opt_data),
+                 opt_connections, opt_threads_per_connection, rate);
+  else
+    std::println(
+        "{}: {} {} connections, {} threads/connection\n"
+        "    {} RPCs / {} = {} RPCs/sec",
+        server ? server : "INTERNAL",
+        opt_data ? std::format("{} bytes", *opt_data) : std::string("no data"),
+	opt_connections, opt_threads_per_connection,
+        final_count, elapsed, formatL(rate));
+
+  inh.destroy_wait();
+}
 
 [[noreturn]]
 static void
 usage(int err)
 {
   std::println(err ? stderr : stdout,
-               "usage: {} [-C|-S] [-q] [-c #connections] [-t #threads/conn]\n"
-               "       {:{}}  [-s seconds] [-d bytes] [port [server]]\n",
+               "usage: {0} [-C] [-q] [-c #connections] [-t #threads/conn]\n"
+               "       {1:{2}} [-s seconds] [-d bytes] [port [server]]\n"
+               "       {0} -S [port]",
                progname, "", progname.size());
   exit(err);
 }

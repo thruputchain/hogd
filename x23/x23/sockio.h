@@ -33,6 +33,11 @@ void set_nonblock(BorrowedFd fd, bool on = true);
 // Listen on a TCP port on any IP address (allowing IPv4 and IPv6)
 UniqueFd tcplisten(std::uint16_t port, int backlog = 5);
 
+// Create a TCP connection.  You can make bind the socket or make the
+// file descriptor non-blocking in prep_fd.
+UniqueFd tcpconnect(const sockaddr_storage &ss,
+		    std::function<void(int)> prep_fd = nullptr);
+
 sockaddr_storage local_addr(BorrowedFd s);
 sockaddr_storage remote_addr(BorrowedFd s);
 

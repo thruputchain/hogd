@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <condition_variable>
 #include <print>
 #include <semaphore>
 #include <stop_token>
@@ -54,18 +53,18 @@ public:
     stop();
   }
 
-  // Enqueue a serialized call. record must be a complete RPC record
-  // including length, rpc_msg, and arguments.  However, if the XID
-  // inside the rpc_msg is 0 (or not unique) it will be overwritten
-  // with a unique value at the time the RPC is sent.
-  void write_call(Buf record, CallCB cb);
-
   void go();
 
 protected:
   using Xid = std::uint32_t;
 
   virtual ~SRpcFd();
+
+  // Enqueue a serialized call. record must be a complete RPC record
+  // including length, rpc_msg, and arguments.  However, if the XID
+  // inside the rpc_msg is 0 (or not unique) it will be overwritten
+  // with a unique value at the time the RPC is sent.
+  void write_call(Buf record, CallCB cb);
 
   // Get a probably unique Xid for debug logging purposes.  It's more
   // efficient to leave the Xid as 0 and let the write_worker fill it
@@ -86,7 +85,7 @@ private:
     CallCB replycb_;
   };
   MVar<Vec<WriteItem>> write_queue_;
-  std::condition_variable write_ready_;
+  std::atomic_bool write_ready_{false};
 
   UniqueFd fd_;
   std::atomic_int refcnt_{0};
@@ -99,8 +98,8 @@ private:
   void write_worker(RefPtr<SRpcFd>) noexcept;
   void write_ready() noexcept
   {
-    auto _ptr = write_queue_.take();
-    write_ready_.notify_one();
+    if (!write_ready_.exchange(true))
+      write_ready_.notify_one();
   }
   void stop() noexcept;
 
@@ -109,7 +108,7 @@ private:
 
 namespace detail {
 inline auto
-void_to_tuple(auto &&f)
+void_to_0tuple(auto &&f)
 {
   if constexpr (std::is_void_v<decltype(f())>) {
     f();
@@ -178,10 +177,12 @@ private:
       }
       d_.logger_.template log_server<ProcMeta>(callmsg_, args);
       try {
-        auto res = detail::void_to_tuple([&] {
-          return std::apply(std::bind_front(ProcMeta::dispatch, *d_.impl_,
-                                            args),
-                            d_.ea_);
+        auto res = detail::void_to_0tuple([&] {
+          return std::apply(
+              [&](auto &...ea) {
+                return ProcMeta::dispatch(*d_.impl_, args, ea...);
+              },
+              d_.ea_);
         });
         msg_set_reply_stat(&rmsg, SUCCESS);
         d_.logger_.template log_server<ProcMeta>(rmsg, res);
@@ -257,9 +258,8 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
     msg.xid = xid;
     Buf record = make_record(msg, args...);
 
-    std::expected<typename ProcMeta::return_type,
-                  std::variant<XdrBadInput, XdrCallFailed>>
-        ret;
+    using ErrType = std::variant<XdrBadInput, XdrCallFailed>;
+    std::expected<typename ProcMeta::return_type, ErrType> ret;
     std::binary_semaphore done{0};
 
     write_call(record, [&](rpc_msg *msg, BufView res) {
@@ -268,16 +268,21 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
         ret = std::unexpected{XdrBadInput("EOF")};
       }
       if (!rpc_is_success(*msg)) {
-        ret = std::unexpected{XdrCallFailed{*msg}};
-        logger_.template log_client<ProcMeta>(std::move(*msg));
+        logger_.template log_client<ProcMeta>(*msg);
+	ret = std::unexpected{XdrCallFailed(std::move(*msg))};
       }
       else
         try {
-          deserialize(&*ret, res);
+          if constexpr (std::is_void_v<typename decltype(ret)::value_type>) {
+	    if (!res.empty())
+	      throw XdrBadInput("Received bytes for void result");
+	  }
+          else
+            deserialize(&ret.value(), res);
         } catch (XdrBadInput &e) {
           if (logging)
             logger_.template log_client<ProcMeta>(
-                *msg, uformat(" deserializion error: {}", e.what()));
+                *msg, uformat("deserializion error: {}", e.what()));
           ret = std::unexpected{std::move(e)};
         }
       done.release();
@@ -288,23 +293,21 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
 
     if (!ret)
       std::visit([&](auto e) { throw e; }, ret.error());
-    return std::move(*ret);
+    return *std::move(ret);
   }
 };
 
 template<typename Logger = RpcNoLogger>
 typename SRpcStream<Logger>::Configurator
-srpc_stream(UniqueFd fd, Logger logger = {})
+srpc_stream(int fd, Logger logger = {})
 {
-  return new SRpcStream(std::move(fd), std::move(logger));
+  return new SRpcStream(fd, std::move(logger));
 }
 
 inline SRpcStream<RpcLogger>::Configurator
-srpc_stream_logged(UniqueFd fd, int logfd = RpcLogger::default_logfd)
+srpc_stream_logged(int fd, int logfd = RpcLogger::default_logfd)
 {
-  SRpcStream<RpcLogger> *s =
-    new SRpcStream<RpcLogger>(std::move(fd), RpcLogger(fd.get(), logfd));
-  return s;
+  return new SRpcStream<RpcLogger>(UniqueFd{fd}, RpcLogger(fd, logfd));
 }
 
 } // namespace x23
