@@ -1,4 +1,4 @@
-# create container module test binary
+# create container module test binaries
 add_executable(
   hex_array_test
   hex_array_test.cc
