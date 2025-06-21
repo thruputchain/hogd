@@ -1022,7 +1022,7 @@ MerkleTrie::walk(
     case Node::Type::kExtension:
       // An extension node always has exactly one child. It is not possible for
       // an extension node to have no children.
-      CHECK_LE(info.next_child_to_visit, 1);
+      CHECK_LE(info.next_child_to_visit, 1UL);
       if (info.next_child_to_visit == 1) {
         // We have visited the extension node's one child, so now we can visit
         // the extension node.
@@ -1045,7 +1045,7 @@ MerkleTrie::walk(
     case Node::Type::kLeaf:
       // A leaf node has no children, so we can visit a leaf immediately upon
       // encountering it.
-      CHECK_EQ(info.next_child_to_visit, 0);
+      CHECK_EQ(info.next_child_to_visit, 0UL);
 
       // Append the leaf's path to [info.path] so that the full path is passed
       // to [f].
