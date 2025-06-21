@@ -50,8 +50,8 @@ public:
 
   MerkleTrie() { init_root_node(); }
 
-  ~MerkleTrie()
-  { // NOLINT(bugprone-exception-escape)
+  ~MerkleTrie() // NOLINT(bugprone-exception-escape)
+  {
     free_all_nodes(&root_);
   }
 
