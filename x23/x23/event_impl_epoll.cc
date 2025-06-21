@@ -62,18 +62,27 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
 }
 
 void
-CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode)
+CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
 {
   using enum FdState::Mode;
   FdState::Mode old_mode = fdp->mode_;
-  if (mode == old_mode)
-    return;
+  do {
+    if (old_mode == mode || (mode == kActive && old_mode == kPoisoned))
+      return;
+    if (old_mode == kLocked) {
+      fdp->mode_.wait(kLocked);
+      continue;
+    }
+  } while (!fdp->mode_.compare_exchange_strong(old_mode, kLocked));
 
-  if ((mode == kActive && old_mode == kPoisoned) || old_mode == kLocked ||
-      !fdp->mode_.compare_exchange_strong(old_mode, kLocked))
+  if (mode == kActive && stop_requested()) {
+    fdp->mode_ = old_mode;
+    fdp->mode_.notify_all();
     return;
-  Defer unlock([&fdp] {
-    fdp->mode_ = kPoisoned;
+  }
+
+  Defer unlock([&fdp, mode] {
+    fdp->mode_ = mode;
     fdp->mode_.notify_all();
   });
 
@@ -83,20 +92,17 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode)
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
     ev.data.fd = fd;
-    int err = epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev);
+    [[maybe_unused]] int err =
+        epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev);
     assert(err != -1);
-    fdp->mode_ = mode;
-    fdp->mode_.notify_all();
-    unlock.release();
   }
   else {
     if (old_mode == kActive) {
-      int err = epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
+      [[maybe_unused]] int err =
+          epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
       assert(err != -1 || errno == EBADF);
     }
-    fdp->mode_ = mode;
-    fdp->mode_.notify_all();
-    unlock.release();
+    unlock.reset();
     docbs(fdp);
   }
 }
@@ -151,9 +157,8 @@ CoroPollImpl::wake()
 {
   struct epoll_event ev;
   ev.events = EPOLLIN | EPOLLONESHOT;
-  ev.data.fd = always_eof().get();
-  getfd(ev.data.fd); // make sure state_ is big enough in check()
-  if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, ev.data.fd, &ev) == -1 &&
+  ev.data.fd = -1;
+  if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, always_eof().get(), &ev) == -1 &&
       errno != EEXIST) [[unlikely]]
     Errno{}.raise("EPOLL_CTL_ADD always_eof");
 }
@@ -212,6 +217,8 @@ CoroPollImpl::check(int timeout)
   Errno err = stop_requested() ? EBADF : 0;
   for (int i = 0; i < n; ++i) {
     int fd = evs[i].data.fd;
+    if (fd < 0)
+      continue;
     state_[fd].ready |= evs[i].events;
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {
@@ -230,7 +237,7 @@ CoroPollImpl::check(int timeout)
 void
 CoroPollImpl::reset(BorrowedFd fd)
 {
-  //std::println("reset({})", fd.get());
+  // std::println("reset({})", fd.get());
 
   auto fdp = getfd(fd);
   fdp->buf_clear();

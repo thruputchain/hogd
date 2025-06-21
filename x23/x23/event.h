@@ -282,7 +282,7 @@ private:
   FdPtr getfd(BorrowedFd fd);
 
   static BorrowedFd always_eof();
-  void setmode(const FdPtr &fd, FdState::Mode mode);
+  void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
   void docb(const FdPtr &fdp, bool write)
   {
     using enum FdState::Mode;

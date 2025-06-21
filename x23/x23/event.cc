@@ -157,9 +157,9 @@ CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
       struct sockaddr peer;
       len = sizeof(peer);
       if (getpeername(fd.get(), &peer, &len) == -1) {
-	if (errno != ENOTCONN)
-	  Errno{}.raise("getpeername({}) after SO_ERROR 0", fd.get());
-	err = EINPROGRESS;
+        if (errno != ENOTCONN)
+          Errno{}.raise("getpeername({}) after SO_ERROR 0", fd.get());
+        err = EINPROGRESS;
       }
     }
     else
