@@ -1,5 +1,45 @@
 // -*-C++-*-
 
+// This module implements simple synchronous RPCs.  Each file
+// descriptor has two threads, a read thread and a write thread.
+//
+// On the server side, all RPC methods run to completion in the read
+// thread.  The server reads requests in batches, and wakes the write
+// thread once it has finished processing a batch.
+//
+// On the client side, each call immediately wakes the write thread.
+// Results are unmarshalled in the read thread before being returned
+// to the caller.
+//
+// A simple example client:
+//
+//   UniqueFd fd = x23::tcpconnect(HostPort{"localhost", 1234}.to_addr(true));
+//   auto c = x23::make_rpc_stream(fd.release())->client(blank_rpc_v1{});
+//   c->null();  ;; makes remote procedure call
+//
+// A simple server:
+//
+//   struct Server {
+//     using rpc_service = blank_rpc_v1;
+//
+//     void null() {}
+//     Data echo(Data arg) { return arg; }
+//   };
+//   Server server;
+//
+//   int fd = accept(listen_fd, nullptr, nullptr);
+//   if (fd == -1)
+//     x23::Errno.raise("accept");
+//   srpc_stream_logged(fd)->server(&server);
+//
+// You can have both clients and servers on the same SRpcStream.  By
+// default, if there are any clients, then the stream will be
+// destroyed when the last client reference is destroyed.  If there
+// are no clients, then the server will be destroyed when it reads an
+// EOF or error from the file descriptor.  On a server, you can also
+// get a reference with get_fd(), and then the SRpcStream will be
+// deleted when you drop the reference.
+
 #pragma once
 
 #include <print>
@@ -54,6 +94,7 @@ public:
   }
 
   void go();
+  void stop() noexcept;
 
 protected:
   using Xid = std::uint32_t;
@@ -101,7 +142,6 @@ private:
     if (!write_ready_.exchange(true))
       write_ready_.notify_one();
   }
-  void stop() noexcept;
 
   friend class RefCount;
 };
@@ -234,6 +274,8 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
   }
 
   using ClientRef = RefPtr<SRpcStream>;
+
+  ClientRef get_ref() { return *this; }
 
   template<typename VersMeta>
   requires requires { typename VersMeta::template client<ClientRef>; }
