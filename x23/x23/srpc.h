@@ -267,7 +267,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
         logger_.log_client_fail(xid, "EOF");
         ret = std::unexpected{XdrBadInput("EOF")};
       }
-      if (!rpc_is_success(*msg)) {
+      else if (!rpc_is_success(*msg)) {
         logger_.template log_client<ProcMeta>(*msg);
 	ret = std::unexpected{XdrCallFailed(std::move(*msg))};
       }

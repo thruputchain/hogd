@@ -22,15 +22,15 @@ SRpcFd::SRpcFd(UniqueFd fd)
 SRpcFd::~SRpcFd()
 {
   stop();
-  bool running = false;
-  {
-    auto _lk = write_queue_.take();
-    if (write_thread_.joinable())
-      running = true;
+  if (write_thread_.joinable()) {
+    // The only reference keeping server-only SRpcFds alive will be in
+    // write_worker, meaning SRpcFds is destoyed as write_worker
+    // exits.  We can't join ourselves so just detach.
+    if (std::this_thread::get_id() == write_thread_.get_id())
+      write_thread_.detach();
+    else
+      write_thread_.join();
   }
-  if (running)
-    // The write thread will join read_thread_ first
-    write_thread_.join();
 }
 
 SRpcFd::Xid

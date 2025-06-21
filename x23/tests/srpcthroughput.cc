@@ -89,17 +89,27 @@ do_client(int port, const char *server)
   std::atomic<uint64_t> counter{0};
 
   for (unsigned i = 0; i < opt_connections; ++i) {
-    auto fd = tcpconnect(server_addr);
+    UniqueFd fd;
+    try {
+      fd = tcpconnect(server_addr);
+    } catch (std::exception &e) {
+      std::println("{}", e.what());
+      continue;
+    }
     auto client = make_rpc_stream(fd.release())->client(blank_rpc_v1{});
     for (unsigned j = 0; j < opt_threads_per_connection; ++j) {
       if (opt_data)
         std::thread(
             [&counter, ss = ss.get_token()](decltype(client) c,
                                             RefPtr<DestroyInhibit> inh) {
-              Data bytes(size_t(*opt_data), std::uint8_t(0xc7));
-              while (!ss.stop_requested()) {
-                c.echo(bytes);
-                counter.fetch_add(1, std::memory_order_relaxed);
+              try {
+                Data bytes(size_t(*opt_data), std::uint8_t(0xc7));
+                while (!ss.stop_requested()) {
+                  c.echo(bytes);
+                  counter.fetch_add(1, std::memory_order_relaxed);
+                }
+              } catch (std::exception &e) {
+                std::println("{}", e.what());
               }
             },
             client, RefPtr(inh))
@@ -108,9 +118,13 @@ do_client(int port, const char *server)
         std::thread(
             [&counter, ss = ss.get_token()](decltype(client) c,
                                             RefPtr<DestroyInhibit> inh) {
-              while (!ss.stop_requested()) {
-                c.null();
-                counter.fetch_add(1, std::memory_order_relaxed);
+              try {
+                while (!ss.stop_requested()) {
+                  c.null();
+                  counter.fetch_add(1, std::memory_order_relaxed);
+                }
+              } catch (std::exception &e) {
+                std::println("{}", e.what());
               }
             },
             client, RefPtr(inh))
@@ -137,13 +151,13 @@ do_client(int port, const char *server)
                  opt_data ? std::string{} : std::to_string(*opt_data),
                  opt_connections, opt_threads_per_connection, rate);
   else
-    std::println(
-        "{}: {} {} connections, {} threads/connection\n"
-        "    {} RPCs / {} = {} RPCs/sec",
-        server ? server : "INTERNAL",
-        opt_data ? std::format("{} bytes", *opt_data) : std::string("no data"),
-	opt_connections, opt_threads_per_connection,
-        final_count, elapsed, formatL(rate));
+    std::println("{}: {} {} connections, {} threads/connection\n"
+                 "    {} RPCs / {} = {} RPCs/sec",
+                 server ? server : "INTERNAL",
+                 opt_data ? std::format("{} bytes", *opt_data)
+                          : std::string("no data"),
+                 opt_connections, opt_threads_per_connection, final_count,
+                 elapsed, formatL(rate));
 
   inh.destroy_wait();
 }
