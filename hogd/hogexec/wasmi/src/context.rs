@@ -8,18 +8,44 @@ use crate::external_call;
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
-// This structure internally (appears to be) threadsafe,
-// although our usage pattern should allocate one per
-// each transaction.
+// This structure internally (appears to be) threadsafe.
+// Specifically, Engine is a shared_pointer around EngineInner,
+// which appears to have appropriate mutexes.
 //
-// This borrows the wasmi use patterns from stellar:
+// One strategy would be to create a shared Engine object, and then put each Module
+// as a (cached) object on the Engine.  This would save some module instantiation costs.
+// This is what stellar-core does
+// https://github.com/stellar/rs-soroban-env/blob/0a1c157deb1214f963a4e3dbc9abdce8ab5ef84a/soroban-env-host/src/vm/module_cache.rs#L87
+//
+// However, the internal data structures of EngineInner have the potential to be contended,
+// especially under Groundhog's concurrent execution model.
+//
+// The memory usage savings of a shared Engine are nonzero (we save when one Module is used by many transactions).
+// By size, (I suspect) the biggest costs are the the Wasmi codemap and the instance stacks
+// https://docs.rs/wasmi/latest/src/wasmi/engine/mod.rs.html#429
+// The codemap is what stores compiled wasm functions -- this could be deduplicated across shared modules.
+// The instance stacks store the wasm stack, which must be distinct for every instance (so no savings possible there).
+//
+// However, there is one big problem with the Wasmi API.  Unless I (geoff) am misreading wasmi,
+// entries in the CodeMap are never garbage collected.  That means that if an engine is reused across transactions,
+// without a module cache, we will leak (nontrivial amounts of) memory.  This also means that, for example,
+// an LRU cache of modules cannot be implemented.
+//
+// Each transaction requires its own Store.  It would be nice if we could share Modules and InstancePres
+// across transactions, but that's not viable -- Module requires an Engine parameter (we could share engines, in principle)
+// and InstancePre requires a Store parameter (unlike, for example, the wasmtime api).
+//
+// This implementation borrows some of the wasmi use patterns from stellar (without the module cache)
 // e.g. https://github.com/stellar/rs-soroban-env/blob/f9a51971d3ca66216e290b074a1feee5334b58ff/soroban-env-host/src/vm.rs#L166
 //
-// Engine can be potentially shared between instances.
-// The WASM official C API spec says that only one ``engine'' should be created
+// The WASM official C API spec says that only one Engine should be created
 // per process, although that's more strict than necessary.
 // Linker can be shared between instances.
 // Store and Module and Instance are per-WasmiRuntime structures.
+
+// WARNING (Especially if we use a Module cache):  Wasmi charges gas for lazy compilation and validation of modules,
+// but not for eager compilation and validation (unclear why this choice was made).  If a module cache is used,
+// we must use CompilationMode::Eager.
 
 pub struct WasmiContext {
     pub engine: Engine,
@@ -38,7 +64,7 @@ unsafe impl Sync for BorrowBypass {}
 
 fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
     let slice = unsafe { slice::from_raw_parts(bytes, len as usize) };
-    match std::str::from_utf8(&slice) {
+    match std::str::from_utf8(slice) {
         Ok(s) => Ok(s.to_owned()), // TODO check this is a copy and not something weird
         Err(x) => Err(x),
     }
@@ -49,7 +75,7 @@ impl WasmiContext {
         let stack_limit = StackLimits::default();
 
         let engine = Engine::new(
-            &Config::default()
+            Config::default()
                 .consume_fuel(true)
                 .floats(false)
                 .set_stack_limits(stack_limit),
@@ -62,7 +88,7 @@ impl WasmiContext {
     }
 
     fn verify_contract(&self, contract_data: &[u8]) -> bool {
-        return Module::validate(&self.engine, contract_data).is_ok();
+        Module::validate(&self.engine, contract_data).is_ok()
     }
 
     fn link_function_0args(
@@ -71,9 +97,7 @@ impl WasmiContext {
         import_name: &str,
         fn_name: &str,
     ) -> Result<(), Error> {
-        let x = BorrowBypass {
-            fn_pointer: fn_pointer.clone(),
-        };
+        let x = BorrowBypass { fn_pointer };
 
         match self.linker.func_wrap(
             import_name,
@@ -81,10 +105,10 @@ impl WasmiContext {
             move |caller: Caller<'_, *mut c_void>| -> Result<i32, wasmi::Error> {
 
                 let res = unsafe {
-                    external_call::c_call_0args(x.clone().fn_pointer, caller.data().clone())
+                    external_call::c_call_0args(x.clone().fn_pointer, *caller.data())
                 };
 
-                return external_call::handle_trampoline_error(res);
+                external_call::handle_trampoline_error(res)
         }) {
             Ok(_) => Ok(()),
             Err(err) => Err(err.into()),
@@ -97,9 +121,7 @@ impl WasmiContext {
         import_name: &str,
         fn_name: &str,
     ) -> Result<(), Error> {
-        let x = BorrowBypass {
-            fn_pointer: fn_pointer.clone(),
-        };
+        let x = BorrowBypass { fn_pointer };
 
         match self.linker.func_wrap(
             import_name,
@@ -110,12 +132,12 @@ impl WasmiContext {
                 let res = unsafe {
                     external_call::c_call_1args(
                         x.clone().fn_pointer,
-                        caller.data().clone(),
+                        *caller.data(),
                         arg1,
                     )
                 };
 
-                return external_call::handle_trampoline_error(res);
+                external_call::handle_trampoline_error(res)
             },
         ) {
             Ok(_) => Ok(()),
@@ -129,9 +151,7 @@ impl WasmiContext {
         import_name: &str,
         fn_name: &str,
     ) -> Result<(), Error> {
-        let x = BorrowBypass {
-            fn_pointer: fn_pointer.clone(),
-        };
+        let x = BorrowBypass { fn_pointer };
 
         match self.linker.func_wrap(
             import_name,
@@ -143,12 +163,12 @@ impl WasmiContext {
                 let res = unsafe {
                     external_call::c_call_2args(
                         x.clone().fn_pointer,
-                        caller.data().clone(),
+                        *caller.data(),
                         arg1,
                         arg2,
                     )
                 };
-                return external_call::handle_trampoline_error(res);
+                external_call::handle_trampoline_error(res)
             },
         ) {
             Ok(_) => Ok(()),
@@ -162,9 +182,7 @@ impl WasmiContext {
         import_name: &str,
         fn_name: &str,
     ) -> Result<(), Error> {
-        let x = BorrowBypass {
-            fn_pointer: fn_pointer.clone(),
-        };
+        let x = BorrowBypass { fn_pointer };
 
         match self.linker.func_wrap(
             import_name,
@@ -177,13 +195,13 @@ impl WasmiContext {
                 let res = unsafe {
                     external_call::c_call_3args(
                         x.clone().fn_pointer,
-                        caller.data().clone(),
+                        *caller.data(),
                         arg1,
                         arg2,
                         arg3,
                     )
                 };
-                return external_call::handle_trampoline_error(res);
+                external_call::handle_trampoline_error(res)
             },
         ) {
             Ok(_) => Ok(()),
@@ -197,9 +215,7 @@ impl WasmiContext {
         import_name: &str,
         fn_name: &str,
     ) -> Result<(), Error> {
-        let x = BorrowBypass {
-            fn_pointer: fn_pointer.clone(),
-        };
+        let x = BorrowBypass { fn_pointer };
 
         match self.linker.func_wrap(
             import_name,
@@ -213,14 +229,14 @@ impl WasmiContext {
                 let res = unsafe {
                     external_call::c_call_4args(
                         x.clone().fn_pointer,
-                        caller.data().clone(),
+                        *caller.data(),
                         arg1,
                         arg2,
                         arg3,
                         arg4,
                     )
                 };
-                return external_call::handle_trampoline_error(res);
+                external_call::handle_trampoline_error(res)
             },
         ) {
             Ok(_) => Ok(()),
@@ -234,9 +250,7 @@ impl WasmiContext {
         import_name: &str,
         fn_name: &str,
     ) -> Result<(), Error> {
-        let x = BorrowBypass {
-            fn_pointer: fn_pointer.clone(),
-        };
+        let x = BorrowBypass { fn_pointer };
 
         match self.linker.func_wrap(
             import_name,
@@ -251,7 +265,7 @@ impl WasmiContext {
                 let res = unsafe {
                     external_call::c_call_5args(
                         x.clone().fn_pointer,
-                        caller.data().clone(),
+                        *caller.data(),
                         arg1,
                         arg2,
                         arg3,
@@ -259,7 +273,7 @@ impl WasmiContext {
                         arg5,
                     )
                 };
-                return external_call::handle_trampoline_error(res);
+                external_call::handle_trampoline_error(res)
             },
         ) {
             Ok(_) => Ok(()),
@@ -273,9 +287,7 @@ impl WasmiContext {
         import_name: &str,
         fn_name: &str,
     ) -> Result<(), Error> {
-        let x = BorrowBypass {
-            fn_pointer: fn_pointer.clone(),
-        };
+        let x = BorrowBypass { fn_pointer };
 
         match self.linker.func_wrap(
             import_name,
@@ -291,7 +303,7 @@ impl WasmiContext {
                 let res = unsafe {
                     external_call::c_call_6args(
                         x.clone().fn_pointer,
-                        caller.data().clone(),
+                        *caller.data(),
                         arg1,
                         arg2,
                         arg3,
@@ -300,7 +312,7 @@ impl WasmiContext {
                         arg6,
                     )
                 };
-                return external_call::handle_trampoline_error(res);
+                external_call::handle_trampoline_error(res)
             },
         ) {
             Ok(_) => Ok(()),
@@ -314,9 +326,7 @@ impl WasmiContext {
         import_name: &str,
         fn_name: &str,
     ) -> Result<(), Error> {
-        let x = BorrowBypass {
-            fn_pointer: fn_pointer.clone(),
-        };
+        let x = BorrowBypass { fn_pointer };
 
         match self.linker.func_wrap(
             import_name,
@@ -333,7 +343,7 @@ impl WasmiContext {
                 let res = unsafe {
                     external_call::c_call_7args(
                         x.clone().fn_pointer,
-                        caller.data().clone(),
+                        *caller.data(),
                         arg1,
                         arg2,
                         arg3,
@@ -343,7 +353,7 @@ impl WasmiContext {
                         arg7,
                     )
                 };
-                return external_call::handle_trampoline_error(res);
+                external_call::handle_trampoline_error(res)
             },
         ) {
             Ok(_) => Ok(()),
@@ -357,9 +367,7 @@ impl WasmiContext {
         import_name: &str,
         fn_name: &str,
     ) -> Result<(), Error> {
-        let x = BorrowBypass {
-            fn_pointer: fn_pointer.clone(),
-        };
+        let x = BorrowBypass { fn_pointer };
 
         match self.linker.func_wrap(
             import_name,
@@ -377,7 +385,7 @@ impl WasmiContext {
                 let res = unsafe {
                     external_call::c_call_8args(
                         x.clone().fn_pointer,
-                        caller.data().clone(),
+                        *caller.data(),
                         arg1,
                         arg2,
                         arg3,
@@ -388,7 +396,7 @@ impl WasmiContext {
                         arg8,
                     )
                 };
-                return external_call::handle_trampoline_error(res);
+                external_call::handle_trampoline_error(res)
             },
         ) {
             Ok(_) => Ok(()),
@@ -397,8 +405,11 @@ impl WasmiContext {
     }
 }
 
+/// # Safety
+/// Caller must have exclusive (non-concurrent) access to the context, and context must not be a nullptr.
+/// Context must have been created by new_wasmi_context.
 #[no_mangle]
-pub extern "C" fn wasmi_link_nargs(
+pub unsafe extern "C" fn wasmi_link_nargs(
     context_void: *mut c_void,
     module_name: *const u8,
     module_name_len: u32,
@@ -411,10 +422,10 @@ pub extern "C" fn wasmi_link_nargs(
     let context: *mut WasmiContext =
         unsafe { core::mem::transmute(context_void) };
 
-    assert!(context != core::ptr::null_mut());
+    debug_assert!(!context.is_null());
 
-    assert!(module_name != core::ptr::null());
-    assert!(method_name != core::ptr::null());
+    debug_assert!(!module_name.is_null());
+    debug_assert!(!method_name.is_null());
 
     // assert module name & method_name nonzero
     // WASMI (and apparently the wasm standard) will accept modules with no names,
@@ -433,8 +444,8 @@ pub extern "C" fn wasmi_link_nargs(
         }
     };
 
-    debug_assert!(module.len() != 0);
-    debug_assert!(method.len() != 0);
+    debug_assert!(!module.is_empty());
+    debug_assert!(!method.is_empty());
 
     let c = unsafe { &mut *context };
 
@@ -453,10 +464,7 @@ pub extern "C" fn wasmi_link_nargs(
         }
     };
 
-    match res {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    res.is_ok()
 }
 
 // Rust FFI needs no_mangle and extern "C"
@@ -464,28 +472,37 @@ pub extern "C" fn wasmi_link_nargs(
 pub extern "C" fn new_wasmi_context() -> *mut c_void {
     let b = Box::new(WasmiContext::new());
 
-    return unsafe { core::mem::transmute(Box::into_raw(b)) };
+    unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 
+/// # Safety
+/// Caller must have exclusive (non-concurrent) access to the context, and context must not be a nullptr.
+/// Context must have been created by new_wasmi_context.
+/// Context must not be accessed after this call.
 #[no_mangle]
-pub extern "C" fn free_wasmi_context(p: *mut c_void) {
-    debug_assert!(p != core::ptr::null_mut());
+pub unsafe extern "C" fn free_wasmi_context(p: *mut c_void) {
+    debug_assert!(!p.is_null());
 
     let context: *mut WasmiContext = unsafe { core::mem::transmute(p) };
 
     unsafe { drop(Box::from_raw(context)) };
 }
 
+/// # Safety
+/// Context must not be a nullptr.
+/// Context must have been created by new_wasmi_context.
+/// Multiple contracts can be verified concurrently.
+/// The linker can be modified concurrently.
 #[no_mangle]
-pub extern "C" fn wasmi_verify_contract(
+pub unsafe extern "C" fn wasmi_verify_contract(
     p: *const c_void,
     contract_data_p: *const u8,
     contract_size: usize,
 ) -> bool {
-    debug_assert!(p != core::ptr::null());
+    debug_assert!(!p.is_null());
 
     // empty contract might trigger this case.
-    if contract_data_p == core::ptr::null() {
+    if contract_data_p.is_null() {
         return false;
     }
 
@@ -494,5 +511,5 @@ pub extern "C" fn wasmi_verify_contract(
     let wasm: &[u8] =
         unsafe { slice::from_raw_parts(contract_data_p, contract_size) };
 
-    return unsafe { (*context).verify_contract(wasm) };
+    unsafe { (*context).verify_contract(wasm) }
 }
