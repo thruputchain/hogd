@@ -91,7 +91,7 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full SLOC_ARG)
         break;
     }
     else if (res.error() == EAGAIN) {
-      if (Errno err = co_await read_wait(fd.get()))
+      if (Errno err = co_await read_wait(fd))
         co_return err;
     }
     else

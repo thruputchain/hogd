@@ -58,8 +58,8 @@ do_server(std::uint16_t port, bool quiet)
     if (!fd)
       std::println(stderr, "accept: {}", Errno{});
     else {
-      std::println("accepted fd {} TCP port {} from {}", fd.get(),
-                   server_port.load(), HostPort(ss));
+      // std::println("accepted fd {} TCP port {} from {}", fd.get(),
+      //             server_port.load(), HostPort(ss));
       srpc_stream_logged(fd.release())->server(&server);
     }
   }

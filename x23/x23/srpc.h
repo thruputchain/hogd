@@ -37,7 +37,7 @@ public:
 
   // Note if you change this, it don't set it larger than 0x7fffffff
   // because we don't support chunked messages.
-  static inline std::uint32_t default_max_message_size = 0x200000;
+  static inline std::uint32_t default_max_message_size = 0x100'0000;
   size_t max_message_size_;
   SrvMap<SRpcService> srvmap_{};
 
