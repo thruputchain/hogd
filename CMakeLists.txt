@@ -103,6 +103,9 @@ endif()
 # Related to how dependencies are tracked in ExternalProject_Add_StepTargets
 cmake_policy(SET CMP0114 NEW)
 
+set(LIBSODIUM_C_FLAGS "${EXTERNAL_C_FLAGS} -Wno-unused-function")
+set(LIBSODIUM_CXX_FLAGS "${EXTERNAL_CXX_FLAGS} -Wno-unused-function")
+
 # Enable libsodium
 # --enable-opt sets -march=native and other compiler flags
 # that the libsodium authors deem important
@@ -116,7 +119,8 @@ ExternalProject_Add(libsodium_build
       --enable-opt
       --disable-pie
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-      CFLAGS=${EXTERNAL_C_FLAGS} CXXFLAGS=${EXTERNAL_CXX_FLAGS}
+      CFLAGS=${LIBSODIUM_C_FLAGS}
+      CXXFLAGS=${LIBSODIUM_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
     INSTALL_COMMAND "" # Skip installation step
 )
