@@ -56,7 +56,7 @@ for_each_func(std::map<HexArray, std::string> &seen,
 
 } // namespace
 
-// Tests that size() and empty() return expected values.
+// Tests that [size()] and [empty()] return expected values.
 TEST(MerkleTrie, SizeAndEmpty)
 {
   MerkleTrie trie;
