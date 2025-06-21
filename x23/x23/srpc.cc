@@ -28,10 +28,9 @@ SRpcFd::~SRpcFd()
     if (write_thread_.joinable())
       running = true;
   }
-  if (running) {
-    read_thread_.join();
+  if (running)
+    // The write thread will join read_thread_ first
     write_thread_.join();
-  }
 }
 
 SRpcFd::Xid
@@ -45,7 +44,7 @@ SRpcFd::genxid()
 }
 
 void
-SRpcFd::stop()
+SRpcFd::stop() noexcept
 {
   if (ss_.request_stop()) {
     shutdown(fd_.get(), SHUT_RDWR);
@@ -60,10 +59,21 @@ SRpcFd::stop()
 void
 SRpcFd::go()
 {
-  auto q = write_queue_.take();
-  assert(!write_thread_.joinable());
-  write_thread_ = std::thread{&SRpcFd::write_worker, this};
-  read_thread_ = std::thread{&SRpcFd::read_worker, this};
+  // We lock write_queue_ to guard against the unlikely possibility
+  // that go() gets called concurrently or that the write thread
+  // somehow exits before we've even started the read thread.
+  auto _lk = write_queue_.take();
+  if (!write_thread_.joinable()) {
+    // If there are clients, we rely on the clients to hold the
+    // refcount.  If there are only servers, then we rely on selfref
+    // to ensure the SRpcFd is deleted when the write thread exits.
+    RefPtr<SRpcFd> selfref{nullptr};
+    if (refcount() == 0)
+      selfref = RefPtr{*this};
+    write_thread_ =
+        std::thread{&SRpcFd::write_worker, this, std::move(selfref)};
+    read_thread_ = std::thread{&SRpcFd::read_worker, this};
+  }
 }
 
 void
@@ -79,7 +89,7 @@ SRpcFd::write_call(Buf record, CallCB cb)
 }
 
 void
-SRpcFd::read_worker()
+SRpcFd::read_worker() noexcept
 {
   VecQ<std::uint8_t> rdbuf;
   while (!ss_.stop_requested()) {
@@ -94,9 +104,9 @@ SRpcFd::read_worker()
     auto res = read(fd_, &rdbuf, rdsz);
     if (!res || !*res) {
       if (!res)
-	fail("read_worker: {}", res.error());
+        fail("read_worker: {}", res.error());
       else
-	stop();
+        stop();
       return;
     }
 
@@ -104,11 +114,11 @@ SRpcFd::read_worker()
       std::uint32_t msglen = getbe<std::uint32_t>(rdbuf.data()) ^ 0x80000000;
 
       if (msglen > 0x7fffffff) {
-	fail("read_worker: partial messages unsupported");
+        fail("read_worker: partial messages unsupported");
         return;
       }
       if (msglen > max_message_size_) {
-	fail("read_worker: message size {} too big", msglen);
+        fail("read_worker: message size {} too big", msglen);
         return;
       }
       if (rdbuf.size() < 4 + msglen)
@@ -121,7 +131,7 @@ SRpcFd::read_worker()
 }
 
 void
-SRpcFd::input(BufView bytes)
+SRpcFd::input(BufView bytes) noexcept
 {
   rpc_msg msg;
   size_t n;
@@ -159,8 +169,9 @@ SRpcFd::input(BufView bytes)
 }
 
 void
-SRpcFd::write_worker()
+SRpcFd::write_worker(RefPtr<SRpcFd> _selfref) noexcept
 {
+  Defer _join([this] { read_thread_.join(); });
   BufVec wrbuf;
   for (;;) {
     auto ptr = write_queue_.take();
@@ -198,11 +209,11 @@ SRpcFd::write_worker()
     for (;;) {
       auto res = wrbuf.write(fd_.get());
       if (!res) {
-	fail("write_worker: {}", res.error());
+        fail("write_worker: {}", res.error());
         return;
       }
       if (!*res)
-	break;
+        break;
     }
   }
 }

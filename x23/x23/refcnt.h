@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <utility>
 
@@ -21,38 +22,6 @@ template<typename T> struct RefOps {
 
 } // namespace detail
 
-class RefCount {
-protected:
-  // An object is created with a 0 reference count and only gets
-  // deleted when the refernce count is first raised then lowered to
-  // zero.  If you don't know whether any references have been kept,
-  // you can delete the object with incdec().
-  void incdec()
-  {
-    if (count_.load(std::memory_order_relaxed) == 0)
-      delete this;
-  }
-
-  virtual ~RefCount() = default;
-
-private:
-  template<typename T> friend struct detail::RefOps;
-
-  std::atomic_uintptr_t count_{0};
-
-  void incref() { count_.fetch_add(1, std::memory_order_relaxed); }
-
-  void decref()
-  {
-    if (count_.fetch_sub(1, std::memory_order_release) != 1)
-      return;
-    // Have to synchronize with releases in other threads before
-    // we clobber the object memory.
-    count_.load(std::memory_order_acquire);
-    delete this;
-  }
-};
-
 // Refcounted pointer for classes with incref()/decref() methods.  If
 // you just want to delete at 0 reference count, use std::shared_ptr.
 // If you need something else, then define `incref()` and `decref()`
@@ -63,8 +32,18 @@ public:
   using element_type = T;
   using ops = Ops;
 
+  // Classes that don't have:
+  //
+  //   static constexpr bool kAllowRefPtrConversion = true;
+  //
+  // need to provide a factory function that creates RefPtrs.
+  template<std::same_as<T> U = T> requires (U::kAllowRefPtrConversion)
+  RefPtr(T &t) : p_(&t)
+  {
+    ops::incref(p_);
+  }
+
   RefPtr(std::nullptr_t) noexcept : p_(nullptr) {}
-  RefPtr(T &t) : p_(&t) { ops::incref(p_); }
   RefPtr(const RefPtr &other) : RefPtr(*other) {}
   RefPtr(RefPtr &&other) noexcept : p_(std::exchange(other.p_, nullptr)) {}
   ~RefPtr() { clear(); }
@@ -103,12 +82,47 @@ public:
 
 private:
   T *p_;
+
+  template<std::same_as<T> U = T>
+  requires (!requires { requires bool(U::kAllowRefPtrConversion); })
+  RefPtr(T &t) : p_(&t)
+  {
+    ops::incref(p_);
+  }
+
+  friend T;
+};
+
+// Base for classes that want to be managed by a RefPtr and deleted
+// when the reference count goes to zero.
+class RefCount {
+protected:
+  auto refcount() const noexcept { return count_.load(); }
+  void finalize(this auto &self) noexcept { delete &self; }
+
+private:
+  std::atomic<unsigned> count_{0};
+
+  void incref() noexcept { count_.fetch_add(1, std::memory_order_relaxed); }
+  void decref(this auto &self) noexcept
+  {
+    auto &c = self.RefCount::count_;
+    if (c.fetch_sub(1, std::memory_order_release) == 1) {
+      // Synchronize with decrefs in other threads before freeing.
+      c.load(std::memory_order_acquire);
+      self.finalize();
+    }
+  }
+
+  template<typename T> friend struct detail::RefOps;
 };
 
 // DestroyInhibit is a reference count that waits for all references
 // to be released before destroy_wait() returns.
 class DestroyInhibit {
 public:
+  static constexpr bool kAllowRefPtrConversion = true;
+
   DestroyInhibit() noexcept = default;
   DestroyInhibit(DestroyInhibit &&) = delete;
   ~DestroyInhibit() { assert(refcnt_.load(std::memory_order_relaxed) == 0); }

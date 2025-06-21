@@ -17,10 +17,6 @@
 
 namespace x23 {
 
-struct Foo {
-  int bar(int);
-};
-
 struct SRpcService {
   virtual ~SRpcService() {}
   virtual std::uint32_t program() const = 0;
@@ -34,8 +30,10 @@ struct SRpcService {
 
 class SRpcFd : public RefCount {
 public:
-  // Note the BufView argument to CallCB is only the argument, not the
-  // rpc_msg, which has already been decoded.
+  // Note the BufView argument to CallCB is only the arguments, not
+  // the rpc_msg, which has already been decoded.  (This is an
+  // asymmetry with write_call, in which the Buf argument contains the
+  // record length, rpc_msg, and arguments.)
   using CallCB = std::function<void(rpc_msg *, BufView)>;
 
   // Note if you change this, it don't set it larger than 0x7fffffff
@@ -57,8 +55,9 @@ public:
   }
 
   // Enqueue a serialized call. record must be a complete RPC record
-  // including length, but the XID doesn't matter as it will be
-  // overwritten with a unique value at the time the RPC is sent.
+  // including length, rpc_msg, and arguments.  However, if the XID
+  // inside the rpc_msg is 0 (or not unique) it will be overwritten
+  // with a unique value at the time the RPC is sent.
   void write_call(Buf record, CallCB cb);
 
   void go();
@@ -95,15 +94,17 @@ private:
   std::thread read_thread_;
   std::thread write_thread_;
 
-  void read_worker();
-  void input(BufView);
-  void write_worker();
-  void write_ready()
+  void read_worker() noexcept;
+  void input(BufView) noexcept;
+  void write_worker(RefPtr<SRpcFd>) noexcept;
+  void write_ready() noexcept
   {
     auto _ptr = write_queue_.take();
     write_ready_.notify_one();
   }
-  void stop();
+  void stop() noexcept;
+
+  friend class RefCount;
 };
 
 namespace detail {
@@ -240,6 +241,13 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
     return typename VersMeta::template client<ClientRef>{ClientRef{*this}};
   }
 
+  struct Configurator {
+    SRpcStream *s_;
+    Configurator(SRpcStream *s) : s_(s) {}
+    SRpcStream *operator->() const { return s_; }
+    ~Configurator() { s_->go(); }
+  };
+
   template<typename ProcMeta>
   ProcMeta::return_type send_call(const is_xdr_type auto &...args)
   {
@@ -283,5 +291,20 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
     return std::move(*ret);
   }
 };
+
+template<typename Logger = RpcNoLogger>
+typename SRpcStream<Logger>::Configurator
+srpc_stream(UniqueFd fd, Logger logger = {})
+{
+  return new SRpcStream(std::move(fd), std::move(logger));
+}
+
+inline SRpcStream<RpcLogger>::Configurator
+srpc_stream_logged(UniqueFd fd, int logfd = RpcLogger::default_logfd)
+{
+  SRpcStream<RpcLogger> *s =
+    new SRpcStream<RpcLogger>(std::move(fd), RpcLogger(fd.get(), logfd));
+  return s;
+}
 
 } // namespace x23
