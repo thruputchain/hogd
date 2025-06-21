@@ -15,11 +15,14 @@ pub struct WasmiMemorySlice {
     sz: u32,
 }
 
+/// # Safety
+/// Caller must have exclusive (non-concurrent) access to the runtime, and runtime must not be a nullptr.
+/// Runtime must have been created by new_wasmi_runtime.
 #[no_mangle]
-pub extern "C" fn wasmi_get_memory(
+pub unsafe extern "C" fn wasmi_get_memory(
     runtime_void: *mut c_void,
 ) -> WasmiMemorySlice {
-    assert!(runtime_void != core::ptr::null_mut());
+    debug_assert!(!runtime_void.is_null());
 
     let runtime: *mut WasmiRuntime =
         unsafe { core::mem::transmute(runtime_void) };
@@ -43,18 +46,29 @@ pub extern "C" fn wasmi_get_memory(
     }
 }
 
+/// # Safety
+/// Caller must have exclusive (non-concurrent) access to the runtime, and runtime must not be a nullptr.
+/// Runtime must have been created by new_wasmi_runtime.
 #[no_mangle]
-pub extern "C" fn wasmi_get_available_gas(runtime_void: *const c_void) -> u64 {
-    assert!(runtime_void != core::ptr::null());
+pub unsafe extern "C" fn wasmi_get_available_gas(
+    runtime_void: *const c_void,
+) -> u64 {
+    debug_assert!(!runtime_void.is_null());
     let runtime: *const WasmiRuntime =
         unsafe { core::mem::transmute(runtime_void) };
     let r = unsafe { &*runtime };
-    return r.store.get_fuel().unwrap();
+    r.store.get_fuel().unwrap()
 }
 
+/// # Safety
+/// Caller must have exclusive (non-concurrent) access to the runtime, and runtime must not be a nullptr.
+/// Runtime must have been created by new_wasmi_runtime.
 #[no_mangle]
-pub extern "C" fn wasmi_set_available_gas(runtime_void: *mut c_void, gas: u64) {
-    assert!(runtime_void != core::ptr::null_mut());
+pub unsafe extern "C" fn wasmi_set_available_gas(
+    runtime_void: *mut c_void,
+    gas: u64,
+) {
+    debug_assert!(!runtime_void.is_null());
     let runtime: *mut WasmiRuntime =
         unsafe { core::mem::transmute(runtime_void) };
     let r = unsafe { &mut *runtime };
