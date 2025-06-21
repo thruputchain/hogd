@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "hogd/base/check.h"
+#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"

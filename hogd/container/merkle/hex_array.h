@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include "hogd/base/check.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "types.hh"
 

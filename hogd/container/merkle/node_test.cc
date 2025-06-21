@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "hogd/base/check.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
@@ -56,7 +56,7 @@ expect_children_are_clear(const Node &node)
 
 } // namespace
 
-TEST(Node, clear)
+TEST(Node, Clear)
 {
   Node node;
   // We do not set or check [node.type] because [node.type] is an enum class.

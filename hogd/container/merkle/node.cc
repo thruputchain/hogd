@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "hogd/base/check.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
