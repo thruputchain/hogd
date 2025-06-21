@@ -4,6 +4,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <ranges>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -65,7 +66,7 @@ do_panic(std::string_view fmt, const std::source_location &loc,
   auto trace = std::stacktrace::current();
   std::format_to(std::back_inserter(buf), "\n{}",
                  ansi_color(Style::kNormal, Color::kGreen));
-  for (const auto &entry : trace) {
+  for (const auto &entry : trace | std::views::drop(2)) {
     std::format_to(std::back_inserter(buf), "{}\n", entry);
   }
   std::format_to(std::back_inserter(buf), "{}", ansi_reset());
