@@ -109,7 +109,11 @@ public:
   // Removes the KV pair for key [k] from the trie.
   bool remove(const Key &k);
 
+  // Returns the number of KV pairs in the trie.
   size_t size() const { return size_; }
+
+  // Returns true when there are no KV pairs in the trie.
+  bool empty() const { return size_ == 0; }
 
   // Removes all KV pairs from the trie.
   void clear()

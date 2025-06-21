@@ -56,6 +56,25 @@ for_each_func(std::map<HexArray, std::string> &seen,
 
 } // namespace
 
+// Tests that size() and empty() return expected values.
+TEST(MerkleTrie, SizeAndEmpty)
+{
+  MerkleTrie trie;
+
+  EXPECT_EQ(trie.size(), 0);
+  EXPECT_TRUE(trie.empty());
+
+  const HexArray key("12");
+  const std::string value = "hello";
+  EXPECT_TRUE(trie.insert(key, value));
+  EXPECT_EQ(trie.size(), 1);
+  EXPECT_FALSE(trie.empty());
+
+  EXPECT_TRUE(trie.remove(key));
+  EXPECT_EQ(trie.size(), 0);
+  EXPECT_TRUE(trie.empty());
+}
+
 // These tests add an empty key to the trie.
 TEST(MerkleTrie, EmptyKey)
 {
