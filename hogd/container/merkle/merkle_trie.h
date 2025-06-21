@@ -123,7 +123,7 @@ public:
   template<typename F> void for_each(F func)
   {
     HexArray prefix;
-    auto per_node = [&func](const HexArray &path, Node &node, Node *parent) {
+    auto f = [&func](const HexArray &path, Node &node, Node * /*parent*/) {
       switch (node.type) {
       case Node::Type::kBranch:
       case Node::Type::kLeaf:
@@ -135,7 +135,7 @@ public:
         break;
       }
     };
-    walk<Node>(&root_, prefix, per_node);
+    walk<Node>(&root_, prefix, f);
   }
 
   // Executes [func] in parallel on each element using a WorkerPool.

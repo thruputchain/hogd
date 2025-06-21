@@ -182,9 +182,9 @@ MerkleTrie::string_from_node(const Node &node)
 {
   HexArray prefix;
   std::ostringstream oss;
-  auto per_node = [&oss](const HexArray & /*path*/, const Node &node,
-                         const Node *parent) { oss << node << '\n'; };
-  walk<const Node>(&node, prefix, per_node);
+  auto f = [&oss](const HexArray & /*path*/, const Node &node,
+                  const Node * /*parent*/) { oss << node << '\n'; };
+  walk<const Node>(&node, prefix, f);
   oss << "----------" << '\n';
   return oss.str();
 }
@@ -1112,7 +1112,7 @@ void
 MerkleTrie::free_all_nodes(Node *root) const
 {
   HexArray prefix;
-  auto f = [&](const HexArray & /*path*/, Node &node, Node *parent) {
+  auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
     // [root_] is a [MerkleTrie] class member of type [Node]. It is not a
     // pointer to a [Node] value on the heap, so we cannot free the root node.
     if (&node != &root_) {
