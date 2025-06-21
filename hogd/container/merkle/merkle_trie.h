@@ -50,7 +50,10 @@ public:
 
   MerkleTrie() { init_root_node(); }
 
-  ~MerkleTrie() { free_all_nodes(&root_); }
+  ~MerkleTrie()
+  { // NOLINT(bugprone-exception-escape)
+    free_all_nodes(&root_);
+  }
 
   // Disable copy and support move.
   MerkleTrie(const MerkleTrie &) = delete;

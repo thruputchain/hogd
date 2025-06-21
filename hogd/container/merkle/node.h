@@ -19,6 +19,7 @@
 
 namespace hogd {
 
+// This is a node in a Merkle Patricia trie.
 class Node {
 public:
   // The maximum number of children of a branch node. The trie branches on a hex

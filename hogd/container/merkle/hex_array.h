@@ -32,7 +32,7 @@ namespace hogd {
 // std::cout << h << std::endl;
 //
 // This appends another hex digit to [h]:
-// h.Append(0x5);
+// h.append(0x5);
 //
 // This prints "0x12345":
 // std::cout << h << std::endl;
