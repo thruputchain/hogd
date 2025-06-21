@@ -949,18 +949,41 @@ MerkleTrie::walk(
                     std::is_same_v<NodeType, const Node>,
                 "[NodeType] must be [Node] or [const Node].");
 
+  // We perform a post-order traversal iteratively. We use iteration rather than
+  // recursion to avoid exceeding the stack size when traversing deep trees.
+
+  // We use this type along with the data structures below to track when we are
+  // in the tree.
   struct CheckInfo {
+    // The node we are currently looking at.
     NodeType *node;
+    // The parent of this node.
     NodeType *parent;
+    // The path that maps to this node.
     HexArray path;
-    int64_t last_child_visited;
+    // This is only relevant for branch and extension nodes. When we first
+    // encounter these nodes in an iterative loop, we cannot *immediately*
+    // "visit" them (i.e., execute [f] on them)--we need to visit all of their
+    // children first.
+    //
+    // A branch or extension node will be left in the stack until all of its
+    // children has been visited. When this node pushes one of its children onto
+    // the stack, the node waits until the child is popped off the stack before
+    // pushing the next child. Thus, the node will not enqueue the next child
+    // until a subsequent iteration, and thus we need to track this child so
+    // that the node knows which child to push at that point.
+    //
+    // We use [next_child_to_visit] to track which child should be pushed next
+    // for [node].
+    size_t next_child_to_visit;
   };
 
   std::stack<CheckInfo> path;
+  // Push the root node onto the stack.
   path.push(CheckInfo{.node = root,
                       .parent = nullptr,
                       .path = root_prefix,
-                      .last_child_visited = -1});
+                      .next_child_to_visit = 0});
 
   while (!path.empty()) {
     CheckInfo &info = path.top();
@@ -970,45 +993,67 @@ MerkleTrie::walk(
       continue;
     }
 
-    info.last_child_visited++;
-
     switch (info.node->type) {
     case Node::Type::kBranch:
-      CHECK_LE(info.last_child_visited,
-               static_cast<int64_t>(info.node->child.size()));
-      if (info.last_child_visited ==
-          static_cast<int64_t>(info.node->child.size())) {
+      CHECK_LE(info.next_child_to_visit, info.node->child.size());
+      if (info.next_child_to_visit == info.node->child.size()) {
+        // We have visited all of the branch's children, so now we can "visit"
+        // (i.e., call [f] on) the branch.
         f(info.path, *info.node, info.parent);
       }
       else {
         // Visit the next child.
-        info.path.append(std::byte(info.last_child_visited));
-        path.push({.node = info.node->child[info.last_child_visited],
+
+        // Append the branch path we are taking to [info.path] so that it holds
+        // the path to the child. For example, if [info.next_child_to_visit] is
+        // 0x3, then we know we will next visit the child at index 0x3, so we
+        // append 0x3 to [info.path].
+        info.path.append(std::byte(info.next_child_to_visit));
+        path.push({.node = info.node->child[info.next_child_to_visit],
                    .parent = info.node,
                    .path = info.path,
-                   .last_child_visited = -1});
+                   .next_child_to_visit = 0});
+        // Now change [info.path] back to holding the path to the branch node.
         info.path.remove_from_back(1);
+        info.next_child_to_visit++;
         continue;
       }
       break;
     case Node::Type::kExtension:
-      CHECK_LE(info.last_child_visited, 1);
-      if (info.last_child_visited == 1) {
+      // An extension node always has exactly one child. It is not possible for
+      // an extension node to have no children.
+      CHECK_LE(info.next_child_to_visit, 1);
+      if (info.next_child_to_visit == 1) {
+        // We have visited the extension node's one child, so now we can visit
+        // the extension node.
         f(info.path, *info.node, info.parent);
       }
       else {
+        // Append the extension node's path to [info.path] so that [info.path]
+        // holds the path to the child when we push the child.
         info.path.append(info.node->path);
         path.push({.node = info.node->child[0],
                    .parent = info.node,
                    .path = info.path,
-                   .last_child_visited = -1});
+                   .next_child_to_visit = 0});
+        // Now change [info.path] back to holding the path to the extenion node.
         info.path.remove_from_back(info.node->path.size());
+        info.next_child_to_visit++;
         continue;
       }
       break;
     case Node::Type::kLeaf:
+      // A leaf node has no children, so we can visit a leaf immediately upon
+      // encountering it.
+      CHECK_EQ(info.next_child_to_visit, 0);
+
+      // Append the leaf's path to [info.path] so that the full path is passed
+      // to [f].
       info.path.append(info.node->path);
       f(info.path, *info.node, info.parent);
+      // No need to remove the portion of the path we just appended above
+      // because we pop the leaf anyway below, so we do not access the leaf
+      // after this point.
       break;
     }
 
