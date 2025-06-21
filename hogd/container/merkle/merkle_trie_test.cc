@@ -971,7 +971,11 @@ TEST(MerkleTrie, Stress)
 
   // Remove all KV pairs.
   for (size_t i = 0; i < kNumIterations; i++) {
-    const auto &[path, value] = *total.begin();
+    // We copy [path] from the [total] iterator rather than make [path] a
+    // reference because we continue using [path] after removing the the KV
+    // pair from [total].
+    const HexArray path = total.begin()->first;
+    const std::string &value = total.begin()->second;
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
     EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
 
