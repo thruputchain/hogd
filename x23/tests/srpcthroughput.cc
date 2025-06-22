@@ -45,7 +45,7 @@ Server server;
 void
 do_server(std::uint16_t port, bool quiet)
 {
-  UniqueFd lfd = tcplisten(port, opt_connections + 5);
+  UniqueFd lfd = stcplisten(port, opt_connections + 5);
   server_port = get_port(local_addr(lfd));
   server_port.notify_all();
   if (port == 0 && !quiet)

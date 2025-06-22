@@ -30,8 +30,17 @@ void set_nodelay(BorrowedFd fd, bool on = true);
 // Set (on) or clear (!on) the O_NONBLOCK flag on a file descriptor
 void set_nonblock(BorrowedFd fd, bool on = true);
 
-// Listen on a TCP port on any IP address (allowing IPv4 and IPv6)
-UniqueFd tcplisten(std::uint16_t port, int backlog = 5);
+// Listen on a TCP port on any IP address (allowing IPv4 and IPv6).
+// stcplisten does not make the socket non-blocking
+UniqueFd stcplisten(std::uint16_t port, int backlog = 5);
+
+inline UniqueFd
+tcplisten(std::uint16_t port, int backlog = 5)
+{
+  auto fd = stcplisten(port, backlog);
+  set_nonblock(fd);
+  return fd;
+}
 
 // Create a TCP connection.  You can make bind the socket or make the
 // file descriptor non-blocking in prep_fd.

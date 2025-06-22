@@ -47,7 +47,7 @@ set_nonblock(BorrowedFd fd, bool on)
 }
 
 UniqueFd
-tcplisten(std::uint16_t port, int backlog)
+stcplisten(std::uint16_t port, int backlog)
 {
   UniqueFd lfd(socket(AF_INET6, SOCK_STREAM, 0));
   if (!lfd)
