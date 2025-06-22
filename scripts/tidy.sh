@@ -24,6 +24,10 @@ find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
 xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
 -header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*'
 
+if [ $? -ne 0 ]; then
+  exit 1
+fi
+
 # Run clippy
 cd ${ROOT_DIR}/hogd/hogexec/wasmi
 cargo clippy
