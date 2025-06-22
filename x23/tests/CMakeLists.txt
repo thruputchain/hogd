@@ -7,7 +7,6 @@ endif()
 
 add_xdr(xdrtest xdrtest.x)
 
-
 set(TEST_EXECUTABLES)
 macro(add_x23_test TEST_NAME)
   add_executable(test_${TEST_NAME} ${EXCLUDE_TOKEN} ${TEST_NAME}.cc
