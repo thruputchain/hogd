@@ -157,7 +157,7 @@ struct BufHolder {
 
 class CoroPollImpl : public DestroyInhibit {
 public:
-  using WorkItem = CoroCB<Errno>;
+  using WorkItem = CpuHinted<CoroCB<Errno>>;
   ThreadPool &pool_;
 
   CoroPollImpl(ThreadPool &pool);
@@ -172,7 +172,7 @@ public:
   Async<Errno> read_wait(BorrowedFd fd)
   {
     auto [async, cb] = make_async<Errno>();
-    setcb(fd, false, cb);
+    setcb(fd, false, {cb, cpuid()});
     return std::move(async);
   }
 
@@ -185,7 +185,7 @@ public:
   Async<Errno> write_wait(BorrowedFd fd)
   {
     auto [async, cb] = make_async<Errno>();
-    setcb(fd, true, cb);
+    setcb(fd, true, {cb, cpuid()});
     return std::move(async);
   }
 
@@ -231,11 +231,12 @@ private:
 
   struct FdPtr;
   struct FdState : BufHolder {
+    using AtomicWorkItem = CpuHinted<std::atomic<WorkItem::value_type>>;
     enum Mode { kFree, kActive, kPoisoned, kLocked };
     std::atomic<Mode> mode_{kFree};
     std::atomic<std::uint32_t> ready{0};
     // callbacks: [0] = reader, [1] = writer
-    std::array<std::atomic<WorkItem>, 2> callbacks{};
+    std::array<AtomicWorkItem, 2> callbacks{};
 
     FdState() noexcept = default;
     FdState(FdState &&other) noexcept : BufHolder(std::move(other))
@@ -261,8 +262,10 @@ private:
     {
       mode_ = other.mode_.load();
       ready = other.ready.load();
-      for (size_t i = 0; i < callbacks.size(); ++i)
-        callbacks[i] = other.callbacks[i].load();
+      for (size_t i = 0; i < callbacks.size(); ++i) {
+        callbacks[i].value = other.callbacks[i].value.load();
+        callbacks[i].cpuhint = other.callbacks[i].cpuhint.load();
+      }
     }
   };
 
@@ -288,7 +291,7 @@ private:
     using enum FdState::Mode;
     FdState::Mode mode = fdp->mode();
     if ((fdp->ready & epflags[write]) || mode != kActive)
-      if (WorkItem wi = fdp->callbacks[write].exchange(nullptr)) {
+      if (WorkItem wi = fdp->callbacks[write].exchange({})) {
         --numcoro_;
         wi(mode == kActive ? 0 : EBADF);
       }
@@ -317,7 +320,7 @@ private:
   MVar<std::unordered_map<int, FdState>> state_;
   UniqueFd selfpipe_[2];
 
-  std::vector<std::coroutine_handle<>> report_badfd(FdState &fds);
+  std::vector<ThreadPool::Job> report_badfd(FdState &fds);
 #endif // !USE_EPOLL
 };
 

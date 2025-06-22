@@ -22,7 +22,7 @@ CoroPollImpl::clear(BorrowedFd fd, bool write)
   // std::println("{}_clear({})", write ? "write" : "read", fd.get());
 
   auto fdp = getfd(fd);
-  assert(!fdp->callbacks[write].load(std::memory_order_relaxed));
+  assert(!fdp->callbacks[write].value.load(std::memory_order_relaxed));
   setmode(fdp, FdState::Mode::kActive);
   fdp->ready &= ~epflags[write];
 }
@@ -54,7 +54,7 @@ CoroPollImpl::setcb(BorrowedFd fd, bool write, WorkItem wi)
   [[maybe_unused]] auto oldwi = fdp->callbacks[write].exchange(wi);
   // If this assertion fails, you attempted to register two read or
   // two write callbacks on the same file descriptor.
-  assert(!oldwi);
+  assert(!*oldwi);
 
   setmode(fdp, kActive);
   // have to re-check in case write edge occured before we published wi
@@ -213,7 +213,7 @@ CoroPollImpl::check(int timeout)
   }
 
   auto lk = resize_lock_.hold_shared();
-  std::vector<std::coroutine_handle<>> coroqueue;
+  std::vector<ThreadPool::Job> coroqueue;
   Errno err = stop_requested() ? EBADF : 0;
   for (int i = 0; i < n; ++i) {
     int fd = evs[i].data.fd;
@@ -222,10 +222,10 @@ CoroPollImpl::check(int timeout)
     state_[fd].ready |= evs[i].events;
     for (unsigned write = 0; write < 2; ++write)
       if (evs[i].events & epflags[write]) {
-        if (WorkItem wi = state_[fd].callbacks[write].exchange(nullptr)) {
+        if (WorkItem wi = state_[fd].callbacks[write]. exchange({})) {
           --numcoro_;
-          if (std::coroutine_handle<> h = wi.set_result_without_resuming(err))
-            coroqueue.push_back(h);
+          if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
+            coroqueue.push_back({h, wi.cpuhint});
         }
       }
   }
@@ -253,9 +253,9 @@ CoroPollImpl::poison(BorrowedFd fd)
 void
 CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
 {
-  if (WorkItem wi = getfd(fd.get())->callbacks[write].exchange(nullptr))
-    if (std::coroutine_handle<> h = wi.set_result_without_resuming(err))
-      pool_.go(h);
+  if (WorkItem wi = getfd(fd.get())->callbacks[write].exchange({}))
+    if (std::coroutine_handle<> h = wi->set_result_without_resuming(err))
+      pool_.go({h, wi.cpuhint});
 }
 
 } // namespace x23::detail

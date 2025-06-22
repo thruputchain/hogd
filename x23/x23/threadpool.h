@@ -28,26 +28,96 @@ namespace x23 {
 // std::thread::hardware_concurrency().
 unsigned nproc();
 
-struct CpuMap {
+inline unsigned
+cpuid() noexcept
+{
 #if HAVE_SCHED_GETCPU
-  const Vec<int> map_;
-  const int num_buckets_;
-  int my_bucket() const
+  return sched_getcpu();
+#else  // !HAVE_SCHED_GETCPU
+  static const std::hash<std::thread::id> hasher;
+  return hasher(std::this_thread::get_id());
+#endif // !HAVE_SCHED_GETCPU
+}
+
+template<typename T> struct CpuHinted {
+  using value_type = T;
+
+  [[no_unique_address]] T value;
+  unsigned cpuhint;
+
+  template<std::constructible_from<> = T>
+  CpuHinted() noexcept : value{}, cpuhint{}
+  {}
+  CpuHinted(T v, unsigned h) noexcept : value(std::move(v)), cpuhint(h) {}
+
+  template<std::convertible_to<T> U>
+  CpuHinted(const CpuHinted<U> &u) : value(u.value), cpuhint(u.cpuhint)
+  {}
+
+  decltype(auto) operator*(this auto &&self) noexcept { return self.value; }
+  auto operator->(this auto &&self) noexcept { return &self.value; }
+
+  template<std::same_as<T> U = T> requires requires(const U u) {
+    { bool{u} } noexcept;
+  }
+  explicit operator bool() const noexcept
   {
-    int n = sched_getcpu();
-    assert(n >= 0 && n < map_.size());
-    return map_[n];
+    return bool{value};
+  }
+
+  template<typename... Args>
+  decltype(auto) operator()(this auto &&self, Args &&...args)
+      requires requires { self.value(std::forward<Args>(args)...); }
+  {
+    return self.value(std::forward<Args>(args)...);
+  }
+};
+
+template<typename T> struct CpuHinted<std::atomic<T>> {
+  using value_type = std::atomic<T>;
+
+  std::atomic<T> value;
+  std::atomic<unsigned> cpuhint = cpuid();
+
+  template<std::constructible_from<> = T>
+  CpuHinted() noexcept : value{}, cpuhint(0)
+  {}
+  CpuHinted(T v, unsigned h) noexcept : value(std::move(v)), cpuhint(h) {}
+
+  template<std::convertible_to<T> U>
+  CpuHinted(const CpuHinted<U> &u) : value(u.value), cpuhint(u.cpuhint)
+  {}
+
+  decltype(auto) operator*(this auto &&self) noexcept
+  {
+    return self.value.load();
+  }
+
+  // Since cpuhint is just a hint, it's okay to be wrong when we swap.
+  CpuHinted<T> exchange(const CpuHinted<T> &newval)
+  {
+    return CpuHinted<T>(value.exchange(newval.value),
+                        cpuhint.exchange(newval.cpuhint,
+                                         std::memory_order_relaxed));
+  }
+};
+
+struct CpuMap {
+  const Vec<int> map_;
+  const unsigned num_buckets_;
+  int my_bucket() const noexcept
+  {
+    unsigned n = cpuid();
+    if (n < num_buckets_)
+#if HAVE_SCHED_GETCPU
+        [[likely]]
+#endif // HAVE_SCHED_GETCPU
+      return map_[n];
+    return map_[n % num_buckets_];
   }
   CpuMap(Vec<int> map) noexcept
     : map_(std::move(map)), num_buckets_(1 + std::ranges::max(map_))
   {}
-
-#else  // !HAVE_SCHED_GETCPU
-  static inline const std::array<int, 1> map_{0};
-  static const int num_buckets_ = 1;
-  static int my_bucket() { return 0; };
-  CpuMap(Vec<int>) noexcept {}
-#endif // !HAVE_SCHED_GETCPU
 };
 
 // Return a mapping of CPU numbers to buckets on linux.  For a given
@@ -78,12 +148,14 @@ CpuMap make_llc_map();
 
 class ThreadPool {
 public:
+  using Job = CpuHinted<std::coroutine_handle<>>;
+
   const size_t nthreads_;
 
   ThreadPool(size_t nthreads = nproc());
   ~ThreadPool();
 
-  void go(const is_range_of<std::coroutine_handle<>> auto &rg)
+  void go(const is_range_of<Job> auto &rg)
   {
     // Crash if someone tries to use a ThreadPool being destroyed.
     assert(!ss_.stop_requested());
@@ -94,7 +166,7 @@ public:
 
     // qs->q_.push_range(rg);
     // XXX libstdc++ bug requires the following
-    for (std::coroutine_handle<> it : rg)
+    for (auto &it : rg)
       qs->q_.push(it);
 
     if (was_empty) {
@@ -104,22 +176,20 @@ public:
         qs->not_empty_.notify_one();
     }
   }
-  void go(std::coroutine_handle<> item)
-  {
-    go(std::ranges::views::single(item));
-  }
+  void go(Job item) { go(std::ranges::views::single(item)); }
 
   // Make a callback asynchronously in another thread
-  template<typename R> void make_callback(CoroCB<R> cb, references<R> auto &&r)
+  template<typename R>
+  void make_callback(CpuHinted<CoroCB<R>> cb, references<R> auto &&r)
   {
     if (std::coroutine_handle<> h =
-            cb.set_result_without_resuming(std::forward<decltype(r)>(r)))
-      go(h);
+            cb->set_result_without_resuming(std::forward<decltype(r)>(r)))
+      go({h, cb.cpuhint});
   }
-  void make_callback(CoroCB<void> cb)
+  void make_callback(CpuHinted<CoroCB<void>> cb)
   {
-    if (std::coroutine_handle<> h = cb.set_result_without_resuming())
-      go(h);
+    if (std::coroutine_handle<> h = cb->set_result_without_resuming())
+      go({h, cb.cpuhint});
   }
 
   // co_await pool.bg() suspends the current coroutine and resumes it
@@ -131,7 +201,7 @@ public:
       bool await_ready() const noexcept { return false; }
       void await_suspend(std::coroutine_handle<> h) const noexcept
       {
-        pool.go(h);
+        pool.go({h, cpuid()});
       }
       void await_resume() const noexcept {}
     };
@@ -163,7 +233,7 @@ public:
     // args into the lambda.  Otherwise we could return and they could
     // be destroyed before they are used.  That incurs a second move
     // into the new thread, but that's unavoidable for safety.
-    std::jthread([this, cb, f = std::forward<F>(f),
+    std::jthread([this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
                   ... args = std::forward<Args>(args)] {
       if constexpr (std::is_void_v<R>) {
         std::invoke(f, args...);
@@ -274,7 +344,7 @@ private:
   };
 
   struct QState {
-    std::queue<std::coroutine_handle<>> q_;
+    std::queue<Job> q_;
     std::condition_variable not_empty_;
 
     std::unique_ptr<ThreadState[]> tstate_;

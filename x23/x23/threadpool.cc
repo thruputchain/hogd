@@ -72,7 +72,7 @@ ThreadPool::worker(size_t threadno)
       qs.wait(qs->not_empty_);
     }
 
-    std::coroutine_handle<> work = qs->q_.front();
+    Job work = qs->q_.front();
     qs->q_.pop();
     ts.count_ = count++;
     qs.reset();
@@ -135,7 +135,7 @@ try {
     } catch (...) {
       continue;
     }
-    if (cpu >= ret.size())
+    if (unsigned(cpu) >= ret.size())
       ret.resize(cpu + 1, -1);
 
     std::filesystem::path idpath = cpudir.path() / path;
