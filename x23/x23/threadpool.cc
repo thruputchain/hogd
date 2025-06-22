@@ -115,9 +115,9 @@ try {
   // The buckets are unique numbers but not always contiguous, so map
   // them to contiguous range of integers in [0,N).
   int nextbucket = 0;
-  std::unordered_map<int, int> bucketmap;
-  auto bucket = [&](int n) {
-    if (auto [it, ok] = bucketmap.try_emplace(n, nextbucket); !ok)
+  std::unordered_map<std::string, int> bucketmap;
+  auto bucket = [&](std::string b) {
+    if (auto [it, ok] = bucketmap.try_emplace(b, nextbucket); !ok)
       return it->second;
     return nextbucket++;
   };
@@ -129,27 +129,22 @@ try {
     std::string name = cpudir.path().filename();
     if (!name.starts_with("cpu"))
       continue;
-    int cpu, bucketid;
+    int cpu;
     try {
       cpu = stoi(name.substr(3));
     } catch (...) {
       continue;
     }
+    if (cpu >= ret.size())
+      ret.resize(cpu+1, -1);
+
     std::filesystem::path idpath = cpudir.path() / path;
     auto idstr = readfile<std::string>(idpath);
     if (!idstr) {
       std::println(stderr, "{}: {}", idpath.string(), idstr.error());
       continue;
     }
-    try {
-      bucketid = stoi(*idstr);
-    } catch (...) {
-      std::println(stderr, "failed to parse {}", idpath.string());
-      continue;
-    }
-    if (cpu >= ret.size())
-      ret.resize(cpu+1, -1);
-    ret[cpu] = bucket(bucketid);
+    ret[cpu] = bucket(*idstr);
   }
   return ret;
 } catch (...) {

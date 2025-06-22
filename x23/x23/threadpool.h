@@ -50,18 +50,24 @@ struct CpuMap {
 #endif // !HAVE_SCHED_GETCPU
 };
 
-// Return a bucketing of CPU numbers to buckets on linux.  The
-// argument PATH is appended to the following path for each cpu #N:
+// Return a mapping of CPU numbers to buckets on linux.  For a given
+// argument PATH, iterates over the following file for each CPU N:
 //
-//     /sys/devices/system/cpu/cpuN/
+//     /sys/devices/system/cpu/cpuN/PATH
 //
-// The file is expected to contain an integer by which CPUs should be
-// bucketed.  To look up cache mappings, use the following paths:
+// The file is expected to contain a unique string by which CPUs
+// should be bucketed.  The following PATHs are useful:
 //
-//     L1d - "cache/index0/id"
-//     L1i - "cache/index1/id"
-//     L2  - "cache/index2/id"
-//     L3  - "cache/index3/id"
+//          core - "topology/core_id"
+//     L1d cache - "cache/index0/shared_cpu_map"
+//     L1i cache - "cache/index1/shared_cpu_map"
+//      L2 cache - "cache/index2/shared_cpu_map"
+//      L3 cache - "cache/index3/shared_cpu_map"
+//
+// Note that it doesn't actually parse the shared_cpu_map, files, just
+// expects them to be unique per bucket.  Some linux machines have a
+// "cache/index[0-3]/id", but this seems to be relatively recent, so
+// it's safer to go by the shared_cpu_map file.
 //
 // Returns a dummy single-bucket mapping if the id files do not exist.
 CpuMap make_cpu_map(std::string_view path);
