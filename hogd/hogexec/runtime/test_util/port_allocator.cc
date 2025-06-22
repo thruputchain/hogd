@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <fcntl.h>
 #include <stdexcept>
 #include <string>
 #include <sys/fcntl.h>
@@ -91,7 +92,7 @@ free_test_port(uint32_t port, std::string const &portfile)
     throw std::runtime_error("Failed to lseek port file: " + portfile);
   }
   uint8_t byte = 0;
-  if (int r = write(lock_file.fd_, &byte, sizeof(byte)); r == -1) {
+  if (write(lock_file.fd_, &byte, sizeof(byte)) == -1) {
     throw std::runtime_error("Failed to write port file: " + portfile);
   }
 }

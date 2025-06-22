@@ -18,6 +18,7 @@ struct TemporaryPort {
     : port_(allocate_test_port(portfile)), portfile_(portfile)
   {}
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~TemporaryPort() { free_test_port(port_, portfile_); }
 
   const uint32_t port_;
