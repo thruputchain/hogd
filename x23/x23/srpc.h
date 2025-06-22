@@ -69,6 +69,8 @@ struct SRpcService {
 
 class SRpcFd : public RefCount {
 public:
+  static inline bool ignore_sigpipe = true;
+
   // Note the BufView argument to CallCB is only the arguments, not
   // the rpc_msg, which has already been decoded.  (This is an
   // asymmetry with write_call, in which the Buf argument contains the

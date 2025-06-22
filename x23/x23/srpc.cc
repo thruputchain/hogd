@@ -1,6 +1,8 @@
 
 #include <print>
 
+#include <signal.h>
+
 #include "x23/serialize.h"
 #include "x23/sockio.h"
 #include "x23/srpc.h"
@@ -62,6 +64,11 @@ SRpcFd::go()
   // If this fails, you have neither clients nor servers.
   assert(refcount() || !srvmap_.empty());
 
+  if (ignore_sigpipe) {
+    ignore_sigpipe = false;
+    signal(SIGPIPE, SIG_IGN);
+  }
+
   // We lock write_queue_ to guard against the unlikely possibility
   // that go() gets called concurrently.
   auto _lk = write_queue_.take();
@@ -110,7 +117,7 @@ SRpcFd::read_worker() noexcept
     rdsz = std::max(rdsz, rdbuf.capacity());
     auto res = read(fd_, &rdbuf, rdsz);
     if (!res || !*res) {
-      if (!res)
+      if (!res && res.error() != ECONNRESET)
         fail("read_worker: {}", res.error());
       else
         stop();
@@ -215,7 +222,10 @@ SRpcFd::write_worker(RefPtr<SRpcFd> _selfref) noexcept
     for (;;) {
       auto res = wrbuf.write(fd_.get());
       if (!res) {
-        fail("write_worker: {}", res.error());
+	if (res.error() == ECONNRESET || res.error() == EPIPE)
+	  stop();
+	else
+	  fail("write_worker: {}", res.error());
         return;
       }
       if (!*res)
