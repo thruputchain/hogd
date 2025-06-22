@@ -50,11 +50,12 @@ fullread(BorrowedFd fd, BufT *buf, size_t len, bool eofok = false)
     auto r = read(fd, buf, len);
     if (!r)
       return r.error();
-    if (!*r)
+    if (!*r) {
       if (eofok)
         return nread;
       else
         return Errno{ECONNRESET};
+    }
     nread += *r;
     len -= *r;
   }
