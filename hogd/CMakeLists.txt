@@ -15,10 +15,18 @@ add_library(
   hogd
   init.cc
 )
+add_library(hogd_interface INTERFACE)
+target_link_libraries(
+  hogd_interface INTERFACE
+  crypto_interface
+  protocol
+)
+
 target_link_libraries(
   hogd
   base
   crypto
+  hogd_interface
 )
 
 # Additional libraries that are not included by default (i.e., in hogd library)

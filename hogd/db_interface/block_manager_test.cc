@@ -3,6 +3,7 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -52,6 +53,35 @@ TEST(BlockManagerTest, CommitCleanup)
   EXPECT_FALSE(m.get_block_data(3));
 }
 
+TEST(BlockManagerTest, ChildOfCommittedBlock)
+{
+  InMemoryDatabase db;
+  BlockManager m(0, &db);
+  EXPECT_TRUE(
+      m.add_child(0, 1, BlockExecutionMode::kBlockExecutionModeProposal));
+  ASSERT_TRUE(m.get_block_data(1));
+  m.get_block_data(1)->close_block();
+  EXPECT_TRUE(m.commit_block(1));
+  EXPECT_TRUE(m.get_block_data(1));
+
+  EXPECT_TRUE(
+      m.add_child(1, 2, BlockExecutionMode::kBlockExecutionModeProposal));
+  EXPECT_TRUE(m.get_block_data(2));
+  m.get_block_data(2)->close_block();
+
+  EXPECT_FALSE(
+      m.get_block_data(2)->get_snapshot_view()->get_snapshot_deployment(
+          ContractAddress{}));
+
+  EXPECT_TRUE(
+      m.add_child(1, 3, BlockExecutionMode::kBlockExecutionModeProposal));
+  EXPECT_TRUE(m.get_block_data(3));
+  m.get_block_data(3)->close_block();
+
+  EXPECT_TRUE(m.commit_block(2));
+  EXPECT_FALSE(m.get_block_data(3));
+}
+
 TEST(BlockManagerTest, AddSequenceOfChildren)
 {
   InMemoryDatabase db;
@@ -83,6 +113,33 @@ TEST(BlockManagerTest, AddSequenceOfChildren)
   EXPECT_FALSE(m.get_block_data(1));
   EXPECT_FALSE(m.get_block_data(2));
   EXPECT_TRUE(m.get_block_data(3));
+}
+
+TEST(BlockManagerTest, AccessingSnapshotData)
+{
+  // edge case found from a runtime test
+  InMemoryDatabase db;
+  db.write_deployment(ContractAddress{}, SHA256Hash{});
+  BlockManager m(0, &db);
+
+  EXPECT_TRUE(
+      m.add_child(0, 1, BlockExecutionMode::kBlockExecutionModeProposal));
+  ASSERT_TRUE(m.get_block_data(1));
+  m.get_block_data(1)->close_block();
+  EXPECT_TRUE(m.commit_block(1));
+
+  EXPECT_TRUE(
+      m.add_child(1, 2, BlockExecutionMode::kBlockExecutionModeProposal));
+  ASSERT_TRUE(m.get_block_data(2));
+  m.get_block_data(2)->close_block();
+  EXPECT_TRUE(m.commit_block(2));
+
+  EXPECT_TRUE(
+      m.add_child(2, 3, BlockExecutionMode::kBlockExecutionModeProposal));
+  ASSERT_TRUE(m.get_block_data(3));
+
+  EXPECT_TRUE(m.get_block_data(3)->get_snapshot_view()->get_snapshot_deployment(
+      ContractAddress{}));
 }
 
 } // namespace hogd

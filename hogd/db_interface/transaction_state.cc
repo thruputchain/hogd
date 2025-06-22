@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/storage_item/storage_lock_util.h"
 #include "rpc_types.hh"
@@ -18,6 +19,7 @@ namespace hogd {
 
 TransactionState::TransactionState()
 {
+  // TODO(geoff): updated interface doesn't need this
   subtransaction_stack_.emplace_back();
 }
 
@@ -42,8 +44,43 @@ TransactionState::add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
                             MeteredStorageLock &&new_lock)
 {
   assert(!finished_);
-  subtransaction_stack_.back().deltas_[addrkey] = std::move(delta);
-  held_locks_[addrkey] = std::move(new_lock);
+  if constexpr (is_debug_build()) {
+    if (subtransaction_stack_.back().deltas_.contains(addrkey)) {
+      assert(addrkey.key.key_type() ==
+             StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+    }
+  }
+  subtransaction_stack_.back().deltas_[addrkey] =
+      std::make_pair(std::move(delta), new_lock.locked_tokens_);
+  held_locks_[addrkey] = std::move(new_lock.lock_);
+}
+
+std::optional<StorageDelta>
+TransactionState::get_delta(AddressAndKey const &addrkey) const
+{
+  assert(!finished_);
+  for (size_t i = subtransaction_stack_.size(); i > 0; --i) {
+    auto const &subtx = subtransaction_stack_[i - 1];
+    auto it = subtx.deltas_.find(addrkey);
+    if (it != subtx.deltas_.end()) {
+      return it->second.first;
+    }
+  }
+  return std::nullopt;
+}
+
+int128_t
+TransactionState::get_cost(AddressAndKey const &addrkey) const
+{
+  assert(!finished_);
+  for (size_t i = subtransaction_stack_.size(); i > 0; --i) {
+    auto const &subtx = subtransaction_stack_[i - 1];
+    auto it = subtx.deltas_.find(addrkey);
+    if (it != subtx.deltas_.end()) {
+      return it->second.second;
+    }
+  }
+  return 0;
 }
 
 StorageLock
@@ -54,7 +91,7 @@ TransactionState::get_lock(AddressAndKey const &addrkey)
   if (it == held_locks_.end()) {
     return StorageLock(StorageLockType::kNone);
   }
-  return it->second.lock_;
+  return it->second;
 }
 
 std::unordered_map<AddressAndKey,
@@ -71,8 +108,13 @@ TransactionState::extract_results()
   for (size_t i = subtransaction_stack_.size(); i > 0; --i) {
     auto &subtx = subtransaction_stack_[i - 1];
     for (auto &[addrkey, delta] : subtx.deltas_) {
+      auto lock = held_locks_.at(addrkey);
+      auto cost = delta.second;
       result.emplace(addrkey,
-                     std::make_pair(std::move(delta), held_locks_.at(addrkey)));
+                     std::make_pair(std::move(delta.first),
+                                    MeteredStorageLock{.lock_ = std::move(lock),
+                                                       .locked_tokens_ =
+                                                           cost}));
     }
   }
 

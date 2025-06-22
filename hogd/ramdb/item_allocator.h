@@ -129,11 +129,6 @@ public:
   // give_to_compactor makes a full loglet available to the compactor.
   void give_to_compactor(UniqueLoglet &&ll);
 
-  // force all threads to move to a new loglet. Only allowed while
-  // threads are not actively using their heads (e.g. times when
-  // sync() is safe on the DB).
-  void roll_heads();
-
 private:
   using CompactionStats = detail::CompactionStats;
 

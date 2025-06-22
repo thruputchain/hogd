@@ -4,6 +4,8 @@
 
 #include <limits>
 #include <memory>
+#include <span>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -11,6 +13,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -19,6 +22,8 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogd/hogexec/runtime/test_util/port_allocator.h"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -62,15 +67,8 @@ protected:
                            invoked_addr.size());
 
                auto invoke_res = handler.invoke(
-                   Invocation{.invoked_address = invoked_addr,
-                              .method = invoked_id,
-
-                              .gas_limit =
-                                  std::numeric_limits<GasAmount>::max(),
-                              .calldata = {}
-
-                   },
-                   std::numeric_limits<GasAmount>::max(),
+                   invoked_addr, invoked_id,
+                   std::numeric_limits<GasAmount>::max(), Calldata{},
                    std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
                if (invoke_res.first) {
@@ -87,11 +85,13 @@ protected:
     contract_map.emplace(1, std::move(contract_1));
 
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
-    snapshot_server_.start_server(10000);
+    snapshot_server_.start_server(port_.port_);
     db_proxy_ =
         std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             10000});
+                                                             port_.port_});
   }
+
+  TemporaryPort port_;
 
   x23::ThreadPool pool_ = x23::ThreadPool(1);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
@@ -143,11 +143,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                  NativeRuntime &runtime) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
         auto [r1, g1] =
-            handler.invoke(Invocation{.invoked_address = address,
-                                      .method = 0,
-                                      .gas_limit = UINT64_MAX,
-                                      .calldata = {100, 0, 0, 0}},
-                           UINT64_MAX,
+            handler.invoke(address, 0, UINT64_MAX, Calldata{100, 0, 0, 0},
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -157,11 +153,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto [r2, g2] =
-            handler.invoke(Invocation{.invoked_address = address,
-                                      .method = 0,
-                                      .gas_limit = UINT64_MAX,
-                                      .calldata = {200, 0, 0, 0}},
-                           UINT64_MAX,
+            handler.invoke(address, 0, UINT64_MAX, Calldata{200, 0, 0, 0},
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -171,11 +163,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto [r3, g3] =
-            handler.invoke(Invocation{.invoked_address = address,
-                                      .method = 0,
-                                      .gas_limit = UINT64_MAX,
-                                      .calldata = {150, 0, 0, 0}},
-                           UINT64_MAX,
+            handler.invoke(address, 0, UINT64_MAX, Calldata{150, 0, 0, 0},
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r3.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -194,14 +182,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   builder.add(2,
               [&address](SystemCallHandler &handler,
                          NativeRuntime &runtime) -> InvokeStatus<int32_t> {
-                auto [r, g] =
-                    handler.invoke(Invocation{.invoked_address = address,
-                                              .method = 1,
-                                              .gas_limit = UINT64_MAX,
-                                              .calldata = {}},
-                                   UINT64_MAX,
-                                   std::to_underlying(
-                                       InvokeFlag::kInvokeFlagNone));
+                auto [r, g] = handler.invoke(address, 1, UINT64_MAX, Calldata{},
+                                             std::to_underlying(
+                                                 InvokeFlag::kInvokeFlagNone));
                 if (!r.has_value()) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
@@ -231,22 +214,193 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   snapshot_server_.setup_create_deployment(address, sha256(contract));
 
   SystemCallHandler handler(
-      SignedTransaction{.tx =
-                            Transaction{
-                                .invocation =
-                                    {
-                                        .invoked_address = address,
-                                        .method = 2,
-                                        .gas_limit = UINT64_MAX,
-                                        .calldata = {},
-                                    },
-                            }},
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      {
+                          .invoked_address = address,
+                          .entrypoint = entrypoint_from_method_id(2),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              }},
       snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
       ProposalModeData{}, runtime_context_);
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.result_);
   ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150);
+}
+
+namespace {
+auto
+make_bytestring(std::string_view str)
+{
+  Bytestring bytestring;
+  bytestring.resize_uninitialized(str.size());
+  std::memcpy(bytestring.data(), str.data(), str.size());
+  return bytestring;
+}
+} // namespace
+
+TEST_F(NativeContractTest, LazyLoadingBytestring)
+{
+  // Test to verify that items are loaded lazily
+  NativeContractBuilder builder;
+  ContractAddress address{};
+  StorageKeyContractData bad_key{};
+  StorageKey bad_full_key(StorageKeyType::kStorageKeyTypeContractData);
+  bad_full_key.contract_data_key() = bad_key;
+
+  auto bstring = make_bytestring("bad");
+
+  builder.add(0, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+    // comment this set_bytestring to verify that the test framework
+    // does, in fact, throw errors if you get_bytestring from the snapshot
+    auto r = handler.set_bytestring(bad_key, std::as_bytes(std::span(bstring)));
+    if (!r.has_value() || !r.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    auto r2 = handler.get_bytestring(bad_key);
+    if (!r2.has_value() || !r2.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (r2.value().value().size() != bstring.size()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (std::memcmp(r2.value().value().data(), bstring.data(),
+                    bstring.size()) != 0) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    return {};
+  });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+
+  runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() = 0;
+
+  snapshot_server_.setup_create_contract(contract);
+  snapshot_server_.setup_create_deployment(address, sha256(contract));
+  snapshot_server_.setup_ban_item(
+      AddressAndKey{.address = address, .key = bad_full_key});
+
+  SystemCallHandler handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      {
+                          .invoked_address = address,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = UINT64_MAX,
+                          .calldata = {},
+                      },
+              },
+      },
+      snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
+      ProposalModeData{}, runtime_context_);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.result_);
+}
+
+TEST_F(NativeContractTest, LazyLoadingNNInt)
+{
+  // Test to verify that items are loaded lazily
+  NativeContractBuilder builder;
+  ContractAddress address{};
+  StorageKeyContractData bad_key{};
+  StorageKey bad_full_key(StorageKeyType::kStorageKeyTypeContractData);
+  bad_full_key.contract_data_key() = bad_key;
+
+  builder.add(0, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+    auto r = handler.add_nnint(bad_key, 100);
+    if (!r.has_value() || !r.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    auto r2 = handler.add_nnint(bad_key, -200);
+    if (!r2.has_value() || !r2.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    return {};
+  });
+
+  builder.add(1, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+    auto r = handler.set_nnint(bad_key, 100, 200);
+    if (!r.has_value() || !r.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    return {};
+  });
+
+  auto native_contract = builder.build();
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+
+  runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, *db_proxy_);
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() = 0;
+
+  snapshot_server_.setup_create_contract(contract);
+  snapshot_server_.setup_create_deployment(address, sha256(contract));
+  snapshot_server_.setup_ban_item(
+      AddressAndKey{.address = address, .key = bad_full_key});
+
+  {
+    SystemCallHandler handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        {
+                            .invoked_address = address,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = {},
+                        },
+                },
+        },
+        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 0),
+        ProposalModeData{}, runtime_context_);
+
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.result_);
+  }
+  {
+    SystemCallHandler handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        {
+                            .invoked_address = address,
+                            .entrypoint = entrypoint_from_method_id(1),
+                            .gas_limit = UINT64_MAX,
+                            .calldata = {},
+                        },
+                },
+        },
+        snapshot, PerTransactionDatabaseProxy(*db_proxy_, 0, 1),
+        ProposalModeData{}, runtime_context_);
+
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.result_);
+  }
 }
 
 } // namespace hogd

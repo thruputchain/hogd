@@ -1,5 +1,3 @@
-#include "ffi_enums.hh"
-#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <algorithm>
@@ -8,8 +6,10 @@
 #include <span>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -84,9 +84,10 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
               input_calldata.size());
 
   auto [invoke_res, gas_amount] =
-      syscall_handler.invoke(Invocation(input_address, input_method,
-                                        input_gas_limit, calldata),
-                             remaining_gas.gas_amount_, input_flags);
+      syscall_handler.invoke(input_address, input_method,
+                             std::min<GasAmount>(input_gas_limit,
+                                                 remaining_gas.gas_amount_),
+                             calldata, input_flags);
 
   // invocation returned successfully
   if (invoke_res) {

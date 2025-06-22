@@ -8,8 +8,7 @@ set_source_files_properties(
 
 add_subdirectory(test_util)
 
-add_library(
-  runtime
+add_library(runtime_objects OBJECT
   contract_trait.cc
   database_proxy.cc
   execution_mode.cc
@@ -35,13 +34,20 @@ add_library(
   wasmi_runtime.cc
 )
 
-add_executable(
-  runtime_test
+target_link_libraries(
+  runtime_objects
+  hogd_interface
+)
+
+add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
+
+add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
   error_handling_test.cc
   execution_mode_test.cc
   fibonacci_test.cc
   gas_api_test.cc
+  interleaving_tests.cc
   instantiate_test.cc
   invoke_arity_test.cc
   item_view_test.cc
@@ -55,6 +61,18 @@ add_executable(
   try_invoke_test.cc
   userctx_test.cc
 )
+
+target_link_libraries(
+  runtime_test_objects
+  GTest::gtest
+  hogd_interface
+)
+
+add_executable(
+  runtime_test
+  $<TARGET_OBJECTS:runtime_test_objects>
+)
+
 target_link_libraries(
   runtime
   wasmi_lib
@@ -64,14 +82,14 @@ target_link_libraries(
 )
 
 add_dependencies(
-  runtime
+  runtime_objects
   generate_syscall_inner_h
   generate_wasmi_ffi_h
   protocol
 )
 
 target_include_directories(
-  runtime
+  runtime_objects
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
@@ -88,6 +106,7 @@ target_link_libraries(
   runtime_test_util
   db_interface
   storage_cost
+  model_checker
   GTest::gtest
 )
 gtest_discover_tests(runtime_test)

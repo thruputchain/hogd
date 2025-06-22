@@ -64,8 +64,8 @@ public:
   // Create and run a child call frame.
   // Should be called from within a syscall.
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-  invoke(Invocation const &invocation, GasAmount gas_limit,
-         InvokeFlagSet flags);
+  invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
+         Calldata calldata, InvokeFlagSet flags);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -113,6 +113,8 @@ public:
   SystemStatus<SyscallStatus<void>>
   set_nnint(StorageKeyContractData const &storage_key, int128_t set_value,
             int128_t add_value);
+  SystemStatus<SyscallStatus<void>>
+  add_nnint(StorageKeyContractData const &storage_key, int128_t add_value);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
@@ -126,7 +128,7 @@ public:
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
-  SystemStatus<int128_t>
+  SystemStatus<SyscallStatus<int128_t>>
   get_native_token_balance(ContractAddress const &contract_address);
   SystemStatus<SyscallStatus<void>>
   modify_native_token_balance(ContractAddress const &contract_address,

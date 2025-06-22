@@ -20,7 +20,7 @@ namespace hogd {
 // principle, at the cost of much more code complexity. This edge case
 // should disappear by the next block.
 BlockManager::BlockManager(BlockID root_id, InMemoryDatabase *base_database)
-  : cost_model_(12000, 1, 5, 100), last_committed_id_(root_id),
+  : cost_model_(12000, 1, 5, 100, 5), last_committed_id_(root_id),
     base_database_(base_database)
 {
   block_cache_.emplace(last_committed_id_, Block());
@@ -55,6 +55,10 @@ BlockManager::commit_block(BlockID id)
     if (!descendant_check) {
       return false;
     }
+    // TODO(geoff): In a real impl this should definitely not be on the critical
+    // path, but this won't be a real implementation (pending abelay's
+    // replacement of this)
+    block_cache_.at(id).block_data_->commit_to_database();
 
     // TODO(geoff): consider putting last_committed onto a queue
     // of elements that can be committed to DB and then removed.
@@ -179,6 +183,7 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
     block_cache_.emplace(new_id, Block(base_database_, mode, &cost_model_));
   }
   else {
+    assert(parent_id != last_committed_id_);
     // parent is not committed to database, so we can use the parent's block
     // state
     block_cache_.emplace(new_id,

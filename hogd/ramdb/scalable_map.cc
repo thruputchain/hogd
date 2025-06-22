@@ -192,10 +192,10 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
     if ((*bu)->get_key() == key) {
       // If the item that is about to be overwritten should be included in an
       // ongoing snapshot, make sure the snapshot gets a copy of the item.
-      uint64_t &old_lsn = (*bu)->lsn;
-      if (snap_end_lsn_ && old_lsn >= snap_begin_lsn_ &&
-          old_lsn < snap_end_lsn_)
-        snap_add_item_cb_(hash, *bu);
+      // This must be done under the bucket lock because we must ensure the
+      // snapshotter doesn't copy an old value for this key into the snapshot.
+      if (mutation_cb_)
+        mutation_cb_(*bu);
 
       // Is the item size unchanged? Update in place.
       if ((*bu)->get_value().size() == val.size()) {
@@ -237,6 +237,11 @@ ScalableMap::remove(std::span<const std::byte> key)
   record.reset();
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
+      // See comment in put(). Forwards the item to an ongoing snapshot
+      // that should include it before removing it.
+      if (mutation_cb_)
+        mutation_cb_(*bu);
+
       unlink(bu);
       counter_dec(cnt);
       break;
@@ -388,19 +393,11 @@ ScalableMap::modify_locked(
 }
 
 void
-ScalableMap::register_in_progress_snapshot(
-    uint64_t begin_lsn, uint64_t end_lsn,
-    std::function<void(uint64_t, ItemHeader *)> add_item_cb)
+ScalableMap::register_mutation_cb(std::function<void(ItemHeader *)> cb)
 {
   std::vector<std::unique_lock<std::mutex>> locks{mutexes_.begin(),
                                                   mutexes_.end()};
-
-  snap_begin_lsn_ = begin_lsn;
-  snap_end_lsn_ = end_lsn;
-
-  snap_add_item_cb_ = std::move(add_item_cb);
-  debug("Registered snapshot range as {} to {}", snap_begin_lsn_,
-        snap_end_lsn_);
+  mutation_cb_ = std::move(cb);
 }
 
 } // namespace hogd

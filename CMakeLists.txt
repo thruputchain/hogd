@@ -100,22 +100,39 @@ set(EXTERNAL_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
 set(EXTERNAL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG}")
 endif()
 
+# Related to how dependencies are tracked in ExternalProject_Add_StepTargets
+cmake_policy(SET CMP0114 NEW)
+
+if (CMAKE_BUILD_TYPE STREQUAL "Release")
+  set(LIBSODIUM_C_FLAGS "${EXTERNAL_C_FLAGS} -Wno-unused-function")
+  set(LIBSODIUM_CXX_FLAGS "${EXTERNAL_CXX_FLAGS} -Wno-unused-function")
+else()
+  # Turn on minimal optimization for libsodium, so that FORTIFY_SOURCE is active for both debug and release builds
+  # On the presumption that during debugging, we do want the FORTIFY_SOURCE checks to be active
+  # on the libsodium code.
+  set(LIBSODIUM_C_FLAGS "${EXTERNAL_C_FLAGS} -Wno-unused-function -O1")
+  set(LIBSODIUM_CXX_FLAGS "${EXTERNAL_CXX_FLAGS} -Wno-unused-function -O1")
+endif()
+
 # Enable libsodium
 # --enable-opt sets -march=native and other compiler flags
 # that the libsodium authors deem important
 include(ExternalProject)
 ExternalProject_Add(libsodium_build
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
+    BINARY_DIR ${CMAKE_BINARY_DIR}/libsodium_build
     CONFIGURE_COMMAND
-      ${CMAKE_SOURCE_DIR}/external/libsodium/configure
+      ${CMAKE_SOURCE_DIR}/external/libsodium/configure 
       --prefix=<BINARY_DIR>
       --enable-opt
       --disable-pie
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-      CFLAGS=${EXTERNAL_C_FLAGS} CXXFLAGS=${EXTERNAL_CXX_FLAGS}
+      CFLAGS=${LIBSODIUM_C_FLAGS}
+      CXXFLAGS=${LIBSODIUM_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
     INSTALL_COMMAND "" # Skip installation step
 )
+ExternalProject_Add_StepTargets(libsodium_build configure)
 
 ExternalProject_Get_Property(libsodium_build binary_dir)
 set(LIBSODIUM_PCFILEDIR "${binary_dir}")
@@ -132,7 +149,7 @@ set(LIBSODIUM_LIBRARY
 
 add_library(libsodium STATIC IMPORTED)
 set_target_properties(libsodium PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_LIBRARY}")
-
+add_dependencies(libsodium libsodium-build)
 # Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
 add_subdirectory(x23)

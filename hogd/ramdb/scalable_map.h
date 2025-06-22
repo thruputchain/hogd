@@ -94,9 +94,7 @@ public:
   modify_locked(std::span<const std::byte> key,
                 const std::function<void(ItemHeader **h, size_t hash)> &fn);
 
-  void register_in_progress_snapshot(
-      uint64_t begin_lsn, uint64_t end_lsn,
-      std::function<void(uint64_t, ItemHeader *)> add_item_cb);
+  void register_mutation_cb(std::function<void(ItemHeader *)> cb);
 
   // size returns an estimate of the number of elements in the map.
   size_t size() const
@@ -165,13 +163,9 @@ private:
   // the buckets for storing items (indexed by hash value).
   std::vector<ItemHeader *> buckets_;
 
-  // The lowest LSN of items that should be included in an ongoing snapshot.
-  uint64_t snap_begin_lsn_{};
-  // One greater than the highest LSN of items that should be included in an
-  // ongoing snapshot. If this is 0, then no snapshot is in progress.
-  uint64_t snap_end_lsn_{};
-  // A callback that adds a particular item to an ongoing snapshot.
-  std::function<void(uint64_t, ItemHeader *)> snap_add_item_cb_;
+  // A callback triggered before an item is overwritten in put() or
+  // remove(). Used by the snapshotter.
+  std::function<void(ItemHeader *)> mutation_cb_;
 
   // acquire_bucket uses the hash of the key to return the appropriate lock
   // (with it held), bucket, and item counter.

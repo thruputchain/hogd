@@ -18,4 +18,10 @@ StorageCostModel::get_retrocausal_queue_cost(int64_t active_queue_size,
          (active_block_count * kRCQCostPerBlock);
 }
 
+int128_t
+StorageCostModel::get_replay_cache_cost(size_t replay_cache_size) const
+{
+  return replay_cache_size * kReplayCacheCostPerEntry;
+}
+
 } // namespace hogd

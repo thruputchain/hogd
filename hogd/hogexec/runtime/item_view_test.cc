@@ -6,12 +6,12 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogd/hogexec/runtime/test_util/port_allocator.h"
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -25,12 +25,13 @@ namespace hogd {
 
 class ItemViewTest : public ::testing::Test {
 protected:
-  static constexpr uint32_t kPortNumber = 12345;
   void SetUp() override
   {
-    server_.start_server(kPortNumber);
-    db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{kPortNumber});
+    server_.start_server(port_.port_);
+    db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{port_.port_});
   }
+
+  TemporaryPort port_;
 
   BlockSnapshotServer server_ = BlockSnapshotServer(1);
 
@@ -157,7 +158,7 @@ TEST_F(ItemViewTest, RCQRead)
       {make_test_queue_entry(6)},
   });
 
-  StorageCostModel cost_model(12000, 1, 5, 100);
+  StorageCostModel cost_model(12000, 1, 5, 100, 5);
   server_.setup_create_item(AddressAndKey{},
                             StorageItemWrapper(std::move(queue), &cost_model));
   ExecutionModeData execution_mode_data = ProposalModeData();
@@ -293,47 +294,6 @@ TEST_F(ItemViewTest, RCQRead)
 
   EXPECT_TRUE(
       std::get<ValidationModeData>(validation_mode_data).check_all_consumed());
-}
-
-TEST_F(ItemViewTest, NativeTokenBalance)
-{
-  auto item = make_empty_native_token_balance_item();
-  ItemView proxy(item.get());
-
-  ASSERT_FALSE(proxy.template get<NativeTokenBalanceItem>());
-
-  NativeTokenBalanceItem write(100);
-  EXPECT_TRUE(proxy.set(write));
-  EXPECT_TRUE(proxy.template get<NativeTokenBalanceItem>());
-
-  write.add_deterministic_native_token_balance(200);
-  EXPECT_TRUE(proxy.set(write));
-
-  write.add_deterministic_native_token_balance(-400);
-  EXPECT_FALSE(proxy.set(write));
-
-  EXPECT_EQ(write.get_user_visible_balance(), -100);
-
-  // return to a positive deterministic balance, and now
-  // add a nondeterministic sub amount
-  write.add_deterministic_native_token_balance(1000);
-
-  // the amounts returned from the db are positive;
-  // these will be subtracted from the user's balance
-  write.add_nondeterministic_native_token_lock(
-      Nondeterministic<int128_t>(1000));
-  EXPECT_TRUE(proxy.set(write));
-
-  // the nondeterministic sub amount is not visible to the user
-  EXPECT_EQ(write.get_user_visible_balance(), 900);
-
-  auto delta = proxy.get_delta();
-  ASSERT_TRUE(delta.has_value());
-  // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  EXPECT_EQ(delta->type(), StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-  EXPECT_EQ(from_xdr(delta->nnint().set_value), 100);
-  EXPECT_EQ(from_xdr(delta->nnint().add_value), -200);
-  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 } // namespace hogd

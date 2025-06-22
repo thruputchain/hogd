@@ -106,6 +106,8 @@ private:
   void commit_delta(StorageDelta const &delta,
                     bool maintain_permanent_exclusive_lock);
 
+  bool try_reserve_nnint_set_add(int128_t set_value, int128_t add_value);
+
   // Locking methods
   // kExclusiveLock -> kNone
   void revert_exclusive_lock_to_none();
