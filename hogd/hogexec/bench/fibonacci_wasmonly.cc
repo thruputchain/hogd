@@ -158,8 +158,9 @@ setup_benchmark(BenchmarkState &bs)
 void
 run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
               int num_exec_threads)
-{
-  auto& exec_pool = WorkerPool::get_default_pool();
+{ 
+  WorkerPool exec_pool(num_exec_threads);
+  //auto& exec_pool = WorkerPool::get_default_pool();
   exec_pool.adjust_workers(num_exec_threads);
 
   using fib_client_t = ContractTraitClient<Fibonacci>;
@@ -182,7 +183,9 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
         if (!handler.root_invoke().is_root_success()) {
           throw std::runtime_error("Failed to invoke transaction");
         }
-        // Deliberately skipping try_commit_transaction step: thus no RPCs
+	//if (auto r = handler.try_commit_transaction()(); !r.has_value() || !r.value()) {
+	//	throw std::runtime_error("foo");
+	//}
         if (remaining.fetch_sub(1) == 1) {
           cb();
         }
@@ -190,18 +193,18 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
     }
     async();
     auto finish_time = std::chrono::steady_clock::now();
-    std::println("time taken: {} ms for {} txs on {} threads",
+    std::println("time taken: {} ms for {} txs (fib {}) on {} threads",
                  std::chrono::duration_cast<std::chrono::milliseconds>(
                      finish_time - start_time)
                      .count(),
-                 num_txs, num_exec_threads);
+                 num_txs, nfib, num_exec_threads);
   }
 }
 
 void
 run_fibonacci_wasmonly()
 {  // this pool does around 2 rpcs total in this test
-  x23::ThreadPool db_pool = x23::ThreadPool(1);
+  x23::ThreadPool db_pool = x23::ThreadPool(10);
 
   BenchmarkState bs(db_pool);
   setup_benchmark(bs);
@@ -209,8 +212,8 @@ run_fibonacci_wasmonly()
   using fib_client_t = ContractTraitClient<Fibonacci>;
   fib_client_t fib_client(ContractAddress{});
 
-  for (auto nthread : {1, 2, 4, 8, 16, 32, 64}) {
-    run_bench_rep(bs, 100, 5, nthread);
+  for (auto nthread : { 128, 256, 512, 1024, 2048, 4196}) {
+    run_bench_rep(bs, 100000, 30, nthread);
   }
 }
 } // namespace
