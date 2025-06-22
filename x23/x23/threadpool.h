@@ -72,6 +72,10 @@ struct CpuMap {
 // Returns a dummy single-bucket mapping if the id files do not exist.
 CpuMap make_cpu_map(std::string_view path);
 
+// Calls make_cpu_map for the last level cache, which is generally
+// cache/index3/shared_cpu_map or cache/index2/shared_cpu_map.
+CpuMap make_llc_map();
+
 class ThreadPool {
 public:
   const size_t nthreads_;

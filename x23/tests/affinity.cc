@@ -6,8 +6,9 @@
 int
 main()
 {
-  auto cpumap = x23::make_cpu_map("cache/index3/shared_cpu_map");
+  //auto cpumap = x23::make_cpu_map("cache/index3/shared_cpu_map");
   //auto cpumap = x23::make_cpu_map("topology/core_id");
+  auto cpumap = make_llc_map();
   for (int i = 0; i < cpumap.map_.size(); ++i)
     std::println("CPU {} -> Bucket {}", i, cpumap.map_[i]);
 

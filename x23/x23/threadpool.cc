@@ -136,7 +136,7 @@ try {
       continue;
     }
     if (cpu >= ret.size())
-      ret.resize(cpu+1, -1);
+      ret.resize(cpu + 1, -1);
 
     std::filesystem::path idpath = cpudir.path() / path;
     auto idstr = readfile<std::string>(idpath);
@@ -150,12 +150,37 @@ try {
 } catch (...) {
   return {{0}};
 }
-#else // !HAVE_SCHED_GETCPU
+#else  // !HAVE_SCHED_GETCPU
 CpuMap
 make_cpu_map(std::string_view path)
 {
   return {{0}};
 }
 #endif // !HAVE_SCHED_GETCPU
+
+CpuMap
+make_llc_map()
+try {
+  int last = -1;
+  for (const auto &cachedir : std::filesystem::directory_iterator(
+           "/sys/devices/system/cpu/cpu0/cache")) {
+    std::string name = cachedir.path().filename();
+    if (!name.starts_with("index"))
+      continue;
+    int index;
+    try {
+      index = stoi(name.substr(5));
+    } catch (...) {
+      continue;
+    }
+    last = std::max(last, index);
+  }
+
+  if (last >= 0)
+    return make_cpu_map(std::format("cache/index{}/shared_cpu_map", last));
+  return {{0}};
+} catch (...) {
+  return {{0}};
+}
 
 } // namespace x23
