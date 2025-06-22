@@ -6,7 +6,12 @@
 int
 main()
 {
-  auto l3map = x23::cpu_cache_map(3);
-  for (const auto &[cpu,cache] : l3map)
-    std::println("CPU {} -> Cache {}", cpu, cache);
+  auto cpumap = x23::make_cpu_map("cache/index3/id");
+  for (int i = 0; i < cpumap.map_.size(); ++i)
+    std::println("CPU {} -> Cache {}", i, cpumap.map_[i]);
+
+  std::println("{} total caches", cpumap.num_buckets_);
+
+  std::println("currently running on {} -> {}", sched_getcpu(),
+               cpumap.my_bucket());
 }

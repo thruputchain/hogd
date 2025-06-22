@@ -1,6 +1,7 @@
 
 #include <filesystem>
 #include <regex>
+#include <unordered_map>
 
 #include "x23/fileio.h"
 #include "x23/threadpool.h"
@@ -107,40 +108,59 @@ nproc()
   return std::thread::hardware_concurrency();
 }
 
-std::unordered_map<int, int>
-cpu_cache_map(int level)
+#if HAVE_SCHED_GETCPU
+CpuMap
+make_cpu_map(std::string_view path)
 try {
-  std::unordered_map<int, int> ret;
+  // The buckets are unique numbers but not always contiguous, so map
+  // them to contiguous range of integers in [0,N).
+  int nextbucket = 0;
+  std::unordered_map<int, int> bucketmap;
+  auto bucket = [&](int n) {
+    if (auto [it, ok] = bucketmap.try_emplace(n, nextbucket); !ok)
+      return it->second;
+    return nextbucket++;
+  };
+
+  Vec<int> ret;
 
   for (const auto &cpudir :
        std::filesystem::directory_iterator("/sys/devices/system/cpu")) {
     std::string name = cpudir.path().filename();
     if (!name.starts_with("cpu"))
       continue;
-    int cpu, cacheid;
+    int cpu, bucketid;
     try {
       cpu = stoi(name.substr(3));
     } catch (...) {
       continue;
     }
-    std::filesystem::path idpath =
-        cpudir.path() / "cache" / std::format("index{}", level) / "id";
+    std::filesystem::path idpath = cpudir.path() / path;
     auto idstr = readfile<std::string>(idpath);
     if (!idstr) {
       std::println(stderr, "{}: {}", idpath.string(), idstr.error());
       continue;
     }
     try {
-      cacheid = stoi(*idstr);
+      bucketid = stoi(*idstr);
     } catch (...) {
       std::println(stderr, "failed to parse {}", idpath.string());
       continue;
     }
-    ret[cpu] = cacheid;
+    if (cpu >= ret.size())
+      ret.resize(cpu+1, -1);
+    ret[cpu] = bucket(bucketid);
   }
   return ret;
 } catch (...) {
-  return {};
+  return {{0}};
 }
+#else // !HAVE_SCHED_GETCPU
+CpuMap
+make_cpu_map(std::string_view path)
+{
+  return {{0}};
+}
+#endif // !HAVE_SCHED_GETCPU
 
 } // namespace x23

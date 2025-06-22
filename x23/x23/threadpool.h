@@ -7,14 +7,18 @@
 #include <ranges>
 #include <stop_token>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
+#include <x23/config.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
 #include <x23/vec.h>
+
+#if HAVE_SCHED_GETCPU
+#include <sched.h>
+#endif // HAVE_SCHED_GETCPU
 
 namespace x23 {
 
@@ -24,15 +28,43 @@ namespace x23 {
 // std::thread::hardware_concurrency().
 unsigned nproc();
 
-// Return a mapping of CPU number to cache, similar to what you see in
-// "lscpu -e".  The level corresponds to N in the pathname:
-//     /sys/devices/system/cpu/cpu0/cache/indexN
-// Generally this is:
-//     0 - L1d
-//     1 - L1i
-//     2 - L2
-//     3 - L3
-std::unordered_map<int, int> cpu_cache_map(int level);
+struct CpuMap {
+#if HAVE_SCHED_GETCPU
+  const Vec<int> map_;
+  const int num_buckets_;
+  int my_bucket() const
+  {
+    int n = sched_getcpu();
+    assert(n >= 0 && n < map_.size());
+    return map_[n];
+  }
+  CpuMap(Vec<int> map) noexcept
+    : map_(std::move(map)), num_buckets_(1 + std::ranges::max(map_))
+  {}
+
+#else  // !HAVE_SCHED_GETCPU
+  static inline const std::array<int, 1> map_{0};
+  static const int num_buckets_ = 1;
+  static int my_bucket() { return 0; };
+  CpuMap(Vec<int>) noexcept {}
+#endif // !HAVE_SCHED_GETCPU
+};
+
+// Return a bucketing of CPU numbers to buckets on linux.  The
+// argument PATH is appended to the following path for each cpu #N:
+//
+//     /sys/devices/system/cpu/cpuN/
+//
+// The file is expected to contain an integer by which CPUs should be
+// bucketed.  To look up cache mappings, use the following paths:
+//
+//     L1d - "cache/index0/id"
+//     L1i - "cache/index1/id"
+//     L2  - "cache/index2/id"
+//     L3  - "cache/index3/id"
+//
+// Returns a dummy single-bucket mapping if the id files do not exist.
+CpuMap make_cpu_map(std::string_view path);
 
 class ThreadPool {
 public:
