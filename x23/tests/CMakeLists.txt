@@ -16,6 +16,7 @@ macro(add_x23_test TEST_NAME)
   list(APPEND TEST_EXECUTABLES test_${TEST_NAME})
 endmacro()
 
+add_x23_test(affinity)
 add_x23_test(callback)
 add_x23_test(cleanup)
 add_x23_test(event)

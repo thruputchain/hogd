@@ -43,7 +43,7 @@ read(BorrowedFd fd, BufT *buf, size_t len, Read readfn = &::read)
 // a premature EOF.
 template<is_bytevec BufT>
 std::expected<size_t, Errno>
-fullread(BorrowedFd fd, BufT *buf, size_t len)
+fullread(BorrowedFd fd, BufT *buf, size_t len, bool eofok = false)
 {
   size_t nread = 0;
   while (len) {
@@ -51,7 +51,10 @@ fullread(BorrowedFd fd, BufT *buf, size_t len)
     if (!r)
       return r.error();
     if (!*r)
-      return Errno{ECONNRESET};
+      if (eofok)
+        return nread;
+      else
+        return Errno{ECONNRESET};
     nread += *r;
     len -= *r;
   }
@@ -69,7 +72,8 @@ std::expected<size_t, Errno>
 readall(BorrowedFd fd, BufT *buf)
 {
   if (auto sb = seek_bounds(fd))
-    return fullread(fd, buf, sb->end - sb->cur);
+    // Some /proc file systems let you seek beyond the end, so set eofok
+    return fullread(fd, buf, sb->end - sb->cur, true);
 
   size_t nread{};
   for (;;) {

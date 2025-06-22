@@ -7,6 +7,7 @@
 #include <ranges>
 #include <stop_token>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <x23/async.h>
@@ -22,6 +23,16 @@ namespace x23 {
 // modern linux distributions, but then falls back to
 // std::thread::hardware_concurrency().
 unsigned nproc();
+
+// Return a mapping of CPU number to cache, similar to what you see in
+// "lscpu -e".  The level corresponds to N in the pathname:
+//     /sys/devices/system/cpu/cpu0/cache/indexN
+// Generally this is:
+//     0 - L1d
+//     1 - L1i
+//     2 - L2
+//     3 - L3
+std::unordered_map<int, int> cpu_cache_map(int level);
 
 class ThreadPool {
 public:
