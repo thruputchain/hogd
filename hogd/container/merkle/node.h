@@ -6,13 +6,13 @@
 #include <cstddef>
 #include <cstring>
 
+#include <format>
 #include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"

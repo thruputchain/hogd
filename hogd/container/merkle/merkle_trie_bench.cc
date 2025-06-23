@@ -1,9 +1,13 @@
 #include <benchmark/benchmark.h>
 
+#include <cstddef>
+#include <cstring>
+#include <memory>
 #include <random>
 #include <vector>
 
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 
@@ -46,8 +50,6 @@ precompute_paths(size_t num_paths)
   return paths;
 }
 
-} // namespace
-
 // Inserts 2 million KV pairs into a trie. Node hashes are computed on every
 // insert operation.
 void
@@ -57,8 +59,8 @@ insert_two_million(benchmark::State &state)
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (auto _ : state) {
-    for (size_t i = 0; i < paths.size(); i++) {
-      CHECK(trie.insert(paths[i], "hello"));
+    for (const auto &path : paths) {
+      CHECK(trie.insert(path, "hello"));
     }
   }
 }
@@ -75,8 +77,8 @@ generate_all_hashes_two_million(benchmark::State &state)
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (auto _ : state) {
-    for (size_t i = 0; i < paths.size(); i++) {
-      CHECK(trie.insert(paths[i], "hello"));
+    for (const auto &path : paths) {
+      CHECK(trie.insert(path, "hello"));
     }
     trie.generate_all_hashes();
     trie.set_should_hash_nodes_on_each_op(true);
@@ -97,8 +99,8 @@ insert_two_million_no_hash(benchmark::State &state)
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (auto _ : state) {
-    for (size_t i = 0; i < paths.size(); i++) {
-      CHECK(trie.insert(paths[i], "hello"));
+    for (const auto &path : paths) {
+      CHECK(trie.insert(path, "hello"));
     }
   }
 }
@@ -113,8 +115,8 @@ insert_two_million_hash_once_at_end(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   for (auto _ : state) {
     trie.generate_all_hashes();
@@ -137,8 +139,8 @@ incremental_insert(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
@@ -169,16 +171,16 @@ insert_when_already_large(benchmark::State &state)
 
   std::vector<HexArray> paths =
       precompute_paths(/*num_paths=*/kLargeNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
 
   paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (auto _ : state) {
-    for (size_t i = 0; i < paths.size(); i++) {
-      CHECK(trie.insert(paths[i], "hello"));
+    for (const auto &path : paths) {
+      CHECK(trie.insert(path, "hello"));
     }
   }
 }
@@ -195,13 +197,13 @@ generate_all_hashes_incremental_insert(benchmark::State &state)
 
   std::vector<HexArray> paths =
       precompute_paths(/*num_paths=*/kLargeNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
 
   paths = precompute_paths(/*num_paths=*/kNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   for (auto _ : state) {
     trie.generate_all_hashes();
@@ -219,14 +221,14 @@ insert_when_already_large_no_hash(benchmark::State &state)
 
   std::vector<HexArray> paths =
       precompute_paths(/*num_paths=*/kLargeNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
 
   paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (auto _ : state) {
-    for (size_t i = 0; i < paths.size(); i++) {
-      CHECK(trie.insert(paths[i], "hello"));
+    for (const auto &path : paths) {
+      CHECK(trie.insert(path, "hello"));
     }
   }
 }
@@ -246,15 +248,15 @@ insert_when_already_large_hash_once_at_end(benchmark::State &state)
 
   std::vector<HexArray> paths =
       precompute_paths(/*num_paths=*/kLargeNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   trie.generate_all_hashes();
 
   paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (auto _ : state) {
-    for (size_t i = 0; i < paths.size(); i++) {
-      CHECK(trie.insert(paths[i], "hello"));
+    for (const auto &path : paths) {
+      CHECK(trie.insert(path, "hello"));
     }
     trie.generate_all_hashes();
   }
@@ -271,12 +273,12 @@ remove_two_million(benchmark::State &state)
   MerkleTrie trie;
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   for (auto _ : state) {
-    for (size_t i = 0; i < paths.size(); i++) {
-      trie.remove(paths[i]);
+    for (const auto &path : paths) {
+      trie.remove(path);
     }
   }
 }
@@ -290,12 +292,12 @@ remove_two_million_no_hash(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   for (auto _ : state) {
-    for (size_t i = 0; i < paths.size(); i++) {
-      trie.remove(paths[i]);
+    for (const auto &path : paths) {
+      trie.remove(path);
     }
   }
 }
@@ -311,12 +313,12 @@ remove_two_million_hash_once_at_end(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   for (auto _ : state) {
-    for (size_t i = 0; i < paths.size(); i++) {
-      trie.remove(paths[i]);
+    for (const auto &path : paths) {
+      trie.remove(path);
     }
     trie.generate_all_hashes();
   }
@@ -333,8 +335,8 @@ find(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
@@ -353,8 +355,8 @@ get_proof(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
@@ -374,8 +376,8 @@ prove(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
-  for (size_t i = 0; i < paths.size(); i++) {
-    CHECK(trie.insert(paths[i], "hello"));
+  for (const auto &path : paths) {
+    CHECK(trie.insert(path, "hello"));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
@@ -387,8 +389,6 @@ prove(benchmark::State &state)
 }
 BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
 
-namespace {
-
 struct Init {
   Init()
   {
@@ -397,10 +397,10 @@ struct Init {
   }
 };
 
-} // namespace
-
 // This runs [Init]'s constructor at program startup to do initialization.
 Init init;
+
+} // namespace
 
 } // namespace hogd
 BENCHMARK_MAIN();

@@ -1139,7 +1139,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
 }
 
 void
-MerkleTrie::generate_hashes_from(Node *n)
+MerkleTrie::generate_hashes_from(Node *n) const
 {
   if (!should_hash_nodes_on_each_op_) {
     return;

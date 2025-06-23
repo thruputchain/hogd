@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstring>
 
+#include <format>
 #include <iomanip>
 #include <ios>
 #include <iterator>

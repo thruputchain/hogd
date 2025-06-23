@@ -4,11 +4,13 @@
 #include <iostream>
 #include <map>
 
+#include <memory>
 #include <random>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -19,6 +21,9 @@
 namespace hogd {
 
 namespace {
+
+// TODO(jhumphri): Compare with an existing Merkle Trie implementation to ensure
+// correctness.
 
 // Generates a random path with anywhere from 0 to 40 hex digits (inclusive).
 HexArray

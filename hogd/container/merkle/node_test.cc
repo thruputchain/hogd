@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <cstring>
 #include <gtest/gtest.h>
+#include <memory>
 #include <optional>
 
 #include <string>
