@@ -50,7 +50,7 @@
 #include <x23/cleanup.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
-#include <x23/rpc_common.h>
+#include <x23/rpc_common.h> // IWYU pragma: export
 #include <x23/uiobuf.h>
 #include <x23/vec.h>
 
