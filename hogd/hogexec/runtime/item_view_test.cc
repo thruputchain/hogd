@@ -11,6 +11,7 @@
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogd/hogexec/runtime/test_util/port_allocator.h"
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -24,12 +25,13 @@ namespace hogd {
 
 class ItemViewTest : public ::testing::Test {
 protected:
-  static constexpr uint32_t kPortNumber = 12345;
   void SetUp() override
   {
-    server_.start_server(kPortNumber);
-    db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{kPortNumber});
+    server_.start_server(port_.port_);
+    db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{port_.port_});
   }
+
+  TemporaryPort port_;
 
   BlockSnapshotServer server_ = BlockSnapshotServer(1);
 
