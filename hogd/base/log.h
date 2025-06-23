@@ -247,6 +247,49 @@ MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
 
 #undef MAKE_LOG_FUNC_EX
 
+#define LOG_INTERNAL_CHECK(op, invop, expr1, expr2)                            \
+  do {                                                                         \
+    auto __val1 = expr1;                                                       \
+    auto __val2 = expr2;                                                       \
+    if (!(__val1 op __val2)) {                                                 \
+      panic("{}:{} CHECK FAILED: {} {} {} [{} {} {}]", __FILE__, __LINE__,     \
+            CSTR(expr1), CSTR(op), CSTR(expr2), __val1, CSTR(invop), __val2);  \
+    }                                                                          \
+  } while (0)
+
+#define CHECK_EQ(val1, val2) LOG_INTERNAL_CHECK(==, !=, val1, val2)
+#define CHECK_NE(val1, val2) LOG_INTERNAL_CHECK(!=, ==, val1, val2)
+#define CHECK_LT(val1, val2) LOG_INTERNAL_CHECK(<, >=, val1, val2)
+#define CHECK_LE(val1, val2) LOG_INTERNAL_CHECK(<=, <, val1, val2)
+#define CHECK_GT(val1, val2) LOG_INTERNAL_CHECK(>, <=, val1, val2)
+#define CHECK_GE(val1, val2) LOG_INTERNAL_CHECK(>=, >, val1, val2)
+#define CHECK_PTR(val1) CHECK_NE(val1, nullptr)
+#define CHECK(val1) CHECK_NE(val1, 0)
+
+#ifdef NDEBUG
+
+#define DCHECK_EQ(val1, val2)
+#define DCHECK_NE(val1, val2)
+#define DCHECK_LT(val1, val2)
+#define DCHECK_LE(val1, val2)
+#define DCHECK_GT(val1, val2)
+#define DCHECK_GE(val1, val2)
+#define DCHECK_PTR(val1)
+#define DCHECK(val1)
+
+#else // NDEBUG
+
+#define DCHECK_EQ(val1, val2) CHECK_EQ(val1, val2)
+#define DCHECK_NE(val1, val2) CHECK_NE(val1, val2)
+#define DCHECK_LT(val1, val2) CHECK_LT(val1, val2)
+#define DCHECK_LE(val1, val2) CHECK_LE(val1, val2)
+#define DCHECK_GT(val1, val2) CHECK_GT(val1, val2)
+#define DCHECK_GE(val1, val2) CHECK_GE(val1, val2)
+#define DCHECK_PTR(val1) CHECK_PTR(val1)
+#define DCHECK(val1) CHECK(val1)
+
+#endif // NDEBUG
+
 // NOLINTEND(readability-identifier-naming)
 
 // log_init initializes the logging subsystem.
