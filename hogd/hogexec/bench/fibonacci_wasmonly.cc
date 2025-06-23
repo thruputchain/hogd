@@ -213,7 +213,7 @@ run_fibonacci_wasmonly()
   fib_client_t fib_client(ContractAddress{});
 
   for (auto nthread : { 128, 256, 512, 1024, 2048, 4196}) {
-    run_bench_rep(bs, 100000, 30, nthread);
+    run_bench_rep(bs, 100000, 20, nthread);
   }
 }
 } // namespace
