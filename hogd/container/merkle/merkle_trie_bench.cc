@@ -155,6 +155,116 @@ BENCHMARK(incremental_insert)
     ->Iterations(kAdditionalPaths)
     ->Unit(benchmark::kMicrosecond);
 
+namespace {
+
+constexpr size_t kLargeNumKVPairs = 20'000'000;
+
+} // namespace
+
+// Inserts 20 million KV pairs into a trie. Measures the overhead of
+// incrementally adding an additional 2 million KV pairs.
+void
+insert_when_already_large(benchmark::State &state)
+{
+  hogd::MerkleTrie trie;
+  trie.set_should_hash_nodes_on_each_op(false);
+
+  std::vector<hogd::HexArray> paths =
+      precompute_paths(/*num_paths=*/kLargeNumKVPairs);
+  for (size_t i = 0; i < paths.size(); i++) {
+    CHECK(trie.insert(paths[i], "hello"));
+  }
+  trie.generate_all_hashes();
+  trie.set_should_hash_nodes_on_each_op(true);
+
+  paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  for (auto _ : state) {
+    for (size_t i = 0; i < paths.size(); i++) {
+      CHECK(trie.insert(paths[i], "hello"));
+    }
+  }
+}
+BENCHMARK(insert_when_already_large)->Iterations(1)->Unit(benchmark::kSecond);
+
+// Inserts 20 million KV pairs into a trie. Incrementally adds an additional 2
+// million KV pairs. Just measures the overhead of rehashing all nodes at the
+// end.
+void
+generate_all_hashes_incremental_insert(benchmark::State &state)
+{
+  hogd::MerkleTrie trie;
+  trie.set_should_hash_nodes_on_each_op(false);
+
+  std::vector<hogd::HexArray> paths =
+      precompute_paths(/*num_paths=*/kLargeNumKVPairs);
+  for (size_t i = 0; i < paths.size(); i++) {
+    CHECK(trie.insert(paths[i], "hello"));
+  }
+
+  paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  for (size_t i = 0; i < paths.size(); i++) {
+    CHECK(trie.insert(paths[i], "hello"));
+  }
+  for (auto _ : state) {
+    trie.generate_all_hashes();
+  }
+}
+BENCHMARK(generate_all_hashes_incremental_insert)->Unit(benchmark::kSecond);
+
+// Inserts 20 million KV pairs into a trie. Measures the overhead of
+// incrementally adding an additional 2 million KV pairs. No hashing occurs.
+void
+insert_when_already_large_no_hash(benchmark::State &state)
+{
+  hogd::MerkleTrie trie;
+  trie.set_should_hash_nodes_on_each_op(false);
+
+  std::vector<hogd::HexArray> paths =
+      precompute_paths(/*num_paths=*/kLargeNumKVPairs);
+  for (size_t i = 0; i < paths.size(); i++) {
+    CHECK(trie.insert(paths[i], "hello"));
+  }
+
+  paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  for (auto _ : state) {
+    for (size_t i = 0; i < paths.size(); i++) {
+      CHECK(trie.insert(paths[i], "hello"));
+    }
+  }
+}
+BENCHMARK(insert_when_already_large_no_hash)
+    ->Iterations(1)
+    ->Unit(benchmark::kSecond);
+
+// Inserts 20 million KV pairs into a trie. Measures the overhead of
+// incrementally adding an additional 2 million KV pairs. No hashing occurs
+// after each insert. Rather, hashing is performanced once for all nodes at the
+// end.
+void
+insert_when_already_large_hash_once_at_end(benchmark::State &state)
+{
+  hogd::MerkleTrie trie;
+  trie.set_should_hash_nodes_on_each_op(false);
+
+  std::vector<hogd::HexArray> paths =
+      precompute_paths(/*num_paths=*/kLargeNumKVPairs);
+  for (size_t i = 0; i < paths.size(); i++) {
+    CHECK(trie.insert(paths[i], "hello"));
+  }
+  trie.generate_all_hashes();
+
+  paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  for (auto _ : state) {
+    for (size_t i = 0; i < paths.size(); i++) {
+      CHECK(trie.insert(paths[i], "hello"));
+    }
+    trie.generate_all_hashes();
+  }
+}
+BENCHMARK(insert_when_already_large_hash_once_at_end)
+    ->Iterations(1)
+    ->Unit(benchmark::kSecond);
+
 // Removes 2 million KV pairs from a trie. Nodes are hashed after each
 // [remove()] operation.
 void
@@ -239,7 +349,7 @@ find(benchmark::State &state)
     CHECK_NE(trie.find(paths[0]), nullptr);
   }
 }
-BENCHMARK(find);
+BENCHMARK(find)->Unit(benchmark::kNanosecond);
 
 // Generates a proof for a single KV pair.
 void
@@ -261,7 +371,7 @@ get_proof(benchmark::State &state)
     (void)pair;
   }
 }
-BENCHMARK(get_proof);
+BENCHMARK(get_proof)->Unit(benchmark::kMicrosecond);
 
 // Checks the proof for a single KV pair.
 void
@@ -283,6 +393,6 @@ prove(benchmark::State &state)
     CHECK(trie.prove(pair.first, pair.second, paths[0], "hello"));
   }
 }
-BENCHMARK(prove);
+BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
 
 BENCHMARK_MAIN();
