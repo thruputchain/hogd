@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <utility>
 
@@ -31,8 +32,18 @@ public:
   using element_type = T;
   using ops = Ops;
 
+  // Classes that don't have:
+  //
+  //   static constexpr bool kAllowRefPtrConversion = true;
+  //
+  // need to provide a factory function that creates RefPtrs.
+  template<std::same_as<T> U = T> requires (U::kAllowRefPtrConversion)
+  RefPtr(T &t) : p_(&t)
+  {
+    ops::incref(p_);
+  }
+
   RefPtr(std::nullptr_t) noexcept : p_(nullptr) {}
-  RefPtr(T &t) : p_(&t) { ops::incref(p_); }
   RefPtr(const RefPtr &other) : RefPtr(*other) {}
   RefPtr(RefPtr &&other) noexcept : p_(std::exchange(other.p_, nullptr)) {}
   ~RefPtr() { clear(); }
@@ -71,12 +82,47 @@ public:
 
 private:
   T *p_;
+
+  template<std::same_as<T> U = T>
+  requires (!requires { requires bool(U::kAllowRefPtrConversion); })
+  RefPtr(T &t) : p_(&t)
+  {
+    ops::incref(p_);
+  }
+
+  friend T;
+};
+
+// Base for classes that want to be managed by a RefPtr and deleted
+// when the reference count goes to zero.
+class RefCount {
+protected:
+  auto refcount() const noexcept { return count_.load(); }
+  void finalize(this auto &self) noexcept { delete &self; }
+
+private:
+  std::atomic<unsigned> count_{0};
+
+  void incref() noexcept { count_.fetch_add(1, std::memory_order_relaxed); }
+  void decref(this auto &self) noexcept
+  {
+    auto &c = self.RefCount::count_;
+    if (c.fetch_sub(1, std::memory_order_release) == 1) {
+      // Synchronize with decrefs in other threads before freeing.
+      c.load(std::memory_order_acquire);
+      self.finalize();
+    }
+  }
+
+  template<typename T> friend struct detail::RefOps;
 };
 
 // DestroyInhibit is a reference count that waits for all references
 // to be released before destroy_wait() returns.
 class DestroyInhibit {
 public:
+  static constexpr bool kAllowRefPtrConversion = true;
+
   DestroyInhibit() noexcept = default;
   DestroyInhibit(DestroyInhibit &&) = delete;
   ~DestroyInhibit() { assert(refcnt_.load(std::memory_order_relaxed) == 0); }

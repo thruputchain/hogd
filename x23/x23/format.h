@@ -87,7 +87,7 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
       }
     }
     else
-      throw XdrException("Cannot format xdr_type of unknown tagetory");
+      throw XdrException("Cannot format xdr_type of unknown catetory");
   };
 
   go(&ret, x, indent);
