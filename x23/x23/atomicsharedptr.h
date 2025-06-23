@@ -18,13 +18,12 @@ template<typename T> struct atomic_shared_ptr : std::shared_ptr<T> {
 
   using super::super;
   // Because inherited copy/move constructors don't count
-  atomic_shared_ptr(const super &other) : super(other) {}
-  atomic_shared_ptr(super &&other) : super(std::move(other)) {}
+  atomic_shared_ptr(super other) noexcept : super(std::move(other)) {}
   // Because you can't copy/move std::atomic
   atomic_shared_ptr(const atomic_shared_ptr &) = delete;
 
   // Because std::atomic<std::shared_ptr<T>>::operator= also returns void
-  void operator=(std::nullptr_t) { store(nullptr); }
+  void operator=(std::nullptr_t) noexcept { store(nullptr); }
   void operator=(super desired) { store(std::move(desired)); }
 
   super load() const { return std::atomic_load(this); }

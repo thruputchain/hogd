@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <new>
 #include <ranges>
 #include <stdexcept>
 #include <type_traits>
@@ -253,5 +254,18 @@ pause_instruction()
 #endif // HAVE_BUILTIN_ARM_YIELD
 }
 } // namespace detail
+
+// Note: this could break binary compatibility, but we don't have that
+// across compilers anyway because of how clang deals with
+// [[no_unique_address]]:
+// https://github.com/llvm/llvm-project/issues/50766
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wunknown-warning-group"
+#pragma GCC diagnostic ignored "-Winterference-size"
+constexpr size_t hardware_destructive_interference_size =
+    std::hardware_destructive_interference_size;
+#pragma GCC diagnostic pop
 
 } // namespace x23

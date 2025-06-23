@@ -2,10 +2,10 @@
 #include <atomic>
 #include <charconv>
 #include <chrono>
-#include <poll.h>
 #include <utility>
 
 #include <netinet/in.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include <x23/refcnt.h>
@@ -17,11 +17,12 @@
 using namespace x23;
 
 std::string progname;
-std::shared_ptr<ThreadPool> pool;
 bool opt_csv;
 unsigned opt_connections;
 unsigned opt_async_rpcs_per_thread = 10;
 unsigned opt_seconds = 1;
+unsigned opt_threads;
+unsigned opt_pools = 1;
 std::optional<std::uint32_t> opt_data;
 
 #if NDEBUG
@@ -30,17 +31,33 @@ std::optional<std::uint32_t> opt_data;
 #define make_rpc_stream rpc_stream_logged
 #endif // !NDEBUG
 
+// CoroPoll and ThreadPool
+struct CpTp {
+  ThreadPool pool_;
+  CoroPoll cp_;
+  CpTp(size_t nthreads) : pool_(nthreads), cp_(pool_) {}
+
+  struct Vec : x23::Vec<std::unique_ptr<CpTp>> {
+    using super = x23::Vec<std::unique_ptr<CpTp>>;
+    using super::super;
+    CoroPoll &get(BorrowedFd fd) { return (*this)[fd.get() % size()]->cp_; }
+  };
+
+  static Vec make_vec(size_t nthreads, size_t ncptp);
+};
+
 struct Listener : DestroyInhibit {
-  CoroPoll &cp_;
+  CpTp::Vec &cps_;
   UniqueFd lfd_;
   sockaddr_storage addr_{};
   std::atomic_int count_{};
 
-  Listener(CoroPoll &cp, int port = 0)
-    : cp_(cp), lfd_(tcplisten(port, opt_connections > 5 ? opt_connections : 5))
+  Listener(CpTp::Vec &cps, int port = 0)
+    : cps_(cps), lfd_(tcplisten(port, opt_connections + 5))
   {
     if (!lfd_)
       throw Errno{};
+    set_nonblock(lfd_);
     sockaddr_in sin;
     sin.sin_family = AF_INET;
     sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -52,7 +69,7 @@ struct Listener : DestroyInhibit {
   ~Listener()
   {
     std::println("destroying server");
-    cp_.reset(lfd_.get());
+    cps_.get(0).reset(lfd_.get());
     lfd_.reset();
     std::println("destroy_wait");
     destroy_wait();
@@ -79,15 +96,31 @@ struct Server {
 };
 static_assert(is_blank_rpc_v1<Server *, Async>);
 
+CpTp::Vec
+CpTp::make_vec(size_t nthreads, size_t ncptp)
+{
+  assert(ncptp > 0 && nthreads >= ncptp);
+
+  Vec ret;
+  ret.reserve(ncptp);
+  size_t mintpp = nthreads / ncptp;
+  size_t extratpp = nthreads % ncptp;
+  for (size_t i = 0; i < ncptp; ++i)
+    ret.emplace_back(new CpTp{mintpp + size_t(i < extratpp)});
+  return ret;
+}
+
 Detached
 Listener::accept_loop(this RefPtr<Listener> self SLOC_ARG)
 {
   sockaddr_storage ss;
   socklen_t socklen;
-  while (auto s = co_await self->cp_.accept(self->lfd_, &ss, &socklen)) {
+  while (auto s =
+             co_await self->cps_.get(0).accept(self->lfd_, &ss, &socklen)) {
     //    std::println("accepted fd {} TCP port {} from {}", *s,
     //                 get_port(self->addr_), HostPort(ss));
-    make_rpc_stream(self->cp_, *s).server(std::make_unique<Server>(self));
+    make_rpc_stream(self->cps_.get(*s), *s)
+        .server(std::make_unique<Server>(self));
   }
   std::println("server stopping");
 }
@@ -97,9 +130,8 @@ std::atomic<std::uint16_t> server_port{0};
 void
 do_server(int port, bool quiet)
 {
-  auto retain_pool(pool);
-  CoroPoll cp(*retain_pool);
-  Listener listener(cp, port);
+  auto cps = CpTp::make_vec(opt_threads, opt_pools);
+  Listener listener(cps, port);
   server_port = get_port(listener.addr_);
   if (port == 0 && !quiet)
     std::println("port {}", server_port.load());
@@ -109,29 +141,50 @@ do_server(int port, bool quiet)
   exit(0);
 }
 
+// Format an int with commas, because {:L} doesn't seem to work yet.
+std::string
+formatL(uint64_t v)
+{
+  std::string ret, in = std::format("{}", v);
+  for (size_t i = 0, e = in.size(); i != e; ++i) {
+    if ((e - i) % 3 == 0 && i != 0)
+      ret += ',';
+    ret += in[i];
+  }
+  return ret;
+}
+
 void
 do_client(int port, const char *server)
 {
+  auto &cps = *new CpTp::Vec{CpTp::make_vec(opt_threads, opt_pools)};
   std::atomic_int count{0};
 
-  CoroPoll cp(*pool);
   auto server_addr =
       *HostPort{server ? server : "localhost", uformat("{}", port)}.to_addr(
           true);
 
-  auto make_client = [&](unsigned ncoros) -> Detached {
-    auto conn = co_await cp.tcpconnect(&server_addr);
-    if (!conn) {
-      std::println(stderr, "tcpconnect: {}", conn.error());
+  using DiRef = RefPtr<DestroyInhibit>;
+
+  auto make_client = [&](DiRef dir, unsigned ncoros) -> Detached {
+    UniqueFd fd{socket(server_addr.ss_family, SOCK_STREAM, 0)};
+    if (!fd) {
+      std::println(stderr, "socket: {}", Errno{});
       co_return;
     }
-    //    std::println("connected fd {} TCP port {} to {}", *conn,
-    //                 get_port(local_addr(*conn)), HostPort(server_addr));
-    auto c = make_rpc_stream(cp, *conn).template client<blank_rpc_v1>();
+    if (auto res = co_await cps.get(fd).connect(fd, &server_addr); !res) {
+      std::println(stderr, "connect(fd {}): {}", fd.get(), res.error());
+      co_return;
+    }
+
+    // std::println("connected fd {} TCP port {} to {}", fd.get(),
+    // 		 get_port(local_addr(fd)), HostPort(server_addr));
+    auto &cp = cps.get(fd);
+    auto c = make_rpc_stream(cp, fd.release()).template client<blank_rpc_v1>();
 
     if (opt_data) {
       for (unsigned i = 0; i < ncoros; ++i)
-        [](auto c, std::atomic_int &count) -> Detached {
+        [](DiRef dir, auto c, std::atomic_int &count) -> Detached {
           Data bytes(size_t(*opt_data), std::uint8_t(0xc5));
           try {
             for (;;) {
@@ -139,26 +192,29 @@ do_client(int port, const char *server)
               ++count;
             }
           } catch (const XdrException &e) {
+            // std::println("Excpetion: {}", e.what());
           }
           co_return;
-        }(c, count);
+        }(dir, c, count);
     }
     else
       for (unsigned i = 0; i < ncoros; ++i)
-        [](auto c, std::atomic_int &count) -> Detached {
+        [](DiRef dir, auto c, std::atomic_int &count) -> Detached {
           try {
             for (;;) {
               co_await c.null();
               ++count;
             }
           } catch (const XdrException &e) {
+            // std::println("Excpetion: {}", e.what());
           }
           co_return;
-        }(c, count);
+        }(dir, c, count);
   };
 
+  DestroyInhibit inh;
   for (int i = opt_connections; i > 0; --i)
-    make_client(opt_async_rpcs_per_thread);
+    make_client(inh, opt_async_rpcs_per_thread);
 
   // Warm up for 100 msec
   poll(nullptr, 0, 100);
@@ -175,16 +231,17 @@ do_client(int port, const char *server)
   if (opt_csv)
     std::println("{},{},{},{},{},{:.0f}", server ? server : "INTERNAL",
                  opt_data ? std::string{} : std::to_string(*opt_data),
-                 pool->nthreads_, opt_connections, opt_async_rpcs_per_thread,
-                 rate);
+                 opt_threads, opt_connections, opt_async_rpcs_per_thread, rate);
   else
-    std::println("{}: {}, {} threads, {} connections, {} coros/connection\n"
-                 "    {} RPCs / {} = {:.0f} RPCs/sec",
-                 server ? server : "INTERNAL",
-                 opt_data ? std::format("{} bytes", *opt_data)
-                          : std::string("no data"),
-                 pool->nthreads_, opt_connections, opt_async_rpcs_per_thread,
-                 final_count, elapsed, rate);
+    std::println(
+        "{}: {}, {} pool{}, {} threads, {} connections, {} coros/connection\n"
+        "    {} RPCs / {} = {} RPCs/sec",
+        server ? server : "INTERNAL",
+        opt_data ? std::format("{} bytes", *opt_data) : std::string("no data"),
+        opt_pools, opt_pools == 1 ? "" : "s", opt_threads, opt_connections,
+        opt_async_rpcs_per_thread, final_count, elapsed, formatL(rate));
+  delete &cps;
+  inh.destroy_wait();
 }
 
 [[noreturn]]
@@ -193,7 +250,8 @@ usage(int err)
 {
   std::println(err ? stderr : stdout,
                "usage: {} [-C|-S] [-q] [-a #coros/thread] [-t #threads]\n"
-               "       {:{}} [-c #connections] [-s seconds] [-d bytes] [port]",
+               "       {:{}} [-c #connections] [-s seconds] [-d bytes]\n"
+               "       [port [server]]",
                progname, "", progname.size());
   exit(err);
 }
@@ -216,11 +274,10 @@ main(int argc, char **argv)
 
   char opt_mode{};
   std::uint16_t port{};
-  unsigned opt_threads{};
   const char *server{};
 
   int opt;
-  while ((opt = getopt(argc, argv, "CSqt:c:a:s:d:")) != -1)
+  while ((opt = getopt(argc, argv, "CSqt:c:a:s:d:p:")) != -1)
     switch (opt) {
     case 'C':
     case 'S':
@@ -247,6 +304,9 @@ main(int argc, char **argv)
     case 's':
       parse_int_opt(opt_seconds);
       break;
+    case 'p':
+      parse_int_opt(opt_pools);
+      break;
     default:
       usage(2);
     }
@@ -262,7 +322,9 @@ main(int argc, char **argv)
 
   if (!opt_threads)
     opt_threads = opt_mode ? nproc() : (nproc() + 1) / 2;
-  pool = std::make_shared<ThreadPool>(opt_threads);
+  if (opt_threads < opt_pools)
+    opt_threads = opt_pools;
+
   if (!opt_connections)
     opt_connections = opt_threads;
 
