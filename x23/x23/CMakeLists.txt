@@ -11,6 +11,7 @@ add_library(x23
   event.cc
   event.h
   event_impl.cc
+  fastclock.h
   fileio.cc
   fileio.h
   format.h
