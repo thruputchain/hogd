@@ -151,6 +151,20 @@ public:
     CHECK(false);
   }
 
+  // If called with true, nodes are hashed on every [insert()/remove()]
+  // operation. If called with false, nodes are only hashed when
+  // [generate_all_hashes()] is called.
+  //
+  // Disabling hashing on every op improves performance when reconstructing a
+  // trie from disk.
+  void set_should_hash_nodes_on_each_op(bool to_set)
+  {
+    should_hash_nodes_on_each_op_ = to_set;
+  }
+
+  // Generates a hash for every node in the tree.
+  void generate_all_hashes();
+
 private:
   // Returns a string representation of [node] and all nodes under it in the
   // trie.
@@ -165,14 +179,14 @@ private:
   // Helper function for [insert()]. When we add a KV pair and there is an
   // extension node below the lowest branch for that pair, we need to handle the
   // extension node and its subtree.
-  static Node *insert_handle_extension(Node *current_extension, const Key &k,
-                                       size_t idx, T &&obj);
+  Node *insert_handle_extension(Node *current_extension, const Key &k,
+                                size_t idx, T &&obj);
 
   // Helper function for [insert()]. When we add a KV pair and there is a leaf
   // node below the lowest branch for that pair, we need to handle the leaf
   // node.
-  static Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
-                                  T &&obj);
+  Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
+                           T &&obj);
 
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
@@ -205,9 +219,13 @@ private:
   static Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
                                          size_t &idx, Node *&existing_key);
 
+  // Computes and writes the hash for [node] only if
+  // [should_hash_nodes_on_each_op_] is true.
+  void compute_node_hash(Node &node) const;
+
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.
-  static void generate_hashes_from(Node *n);
+  void generate_hashes_from(Node *n);
 
   // Frees all of the nodes starting at [root]. Does not free [root_].
   void free_all_nodes(Node *root) const;
@@ -225,6 +243,10 @@ private:
   Node root_;
   // The number of KV pairs in the trie.
   size_t size_ = 0;
+  // If this is true, nodes are hashed on every [insert()/remove()] operation.
+  // If this is false, nodes are only hashed when [generate_all_hashes()] is
+  // called.
+  bool should_hash_nodes_on_each_op_ = true;
 };
 
 } // namespace hogd

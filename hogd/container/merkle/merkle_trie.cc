@@ -458,8 +458,6 @@ MerkleTrie::insert(const Key &k, T &&obj)
 // node
 //              below as as child [0x5].
 // Second Extension Node: Path is [0x6]. The child is c.
-//
-// static
 Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
                                     T &&obj)
@@ -595,7 +593,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // on [key_window]'s path in the trie, we will not rehash this second
     // extension node. Thus, to ensure that the hashes are generated properly
     // in the trie, we need to hash this second extension node here.
-    extension->hash = extension->compute_node_hash();
+    compute_node_hash(*extension);
   }
   else {
     // The second extension node would have a path size of 1, so we instead
@@ -640,8 +638,6 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 // If [k] and the path in [leaf] have hex digits in common, we also create an
 // extension node with the shared hex digits. We place the new branch node as
 // a child of this extension node.
-//
-// static
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 {
@@ -726,7 +722,7 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
     // We hash this leaf here, and then in the parent function, we hash all
     // nodes on the path from the leaf *created below* to the root. Note that
     // this leaf is not on that path, so we must hash it here.
-    shorter_leaf->hash = shorter_leaf->compute_node_hash();
+    compute_node_hash(*shorter_leaf);
   }
 
   // Now we place the longer key into a leaf node that is a child of the
@@ -1142,15 +1138,36 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
   return nullptr;
 }
 
-// static
 void
 MerkleTrie::generate_hashes_from(Node *n)
 {
+  if (!should_hash_nodes_on_each_op_) {
+    return;
+  }
+
   while (n) {
     n->hash = n->compute_node_hash();
 
     n = n->parent;
   }
+}
+
+void
+MerkleTrie::compute_node_hash(Node &node) const
+{
+  if (should_hash_nodes_on_each_op_) {
+    node.hash = node.compute_node_hash();
+  }
+}
+
+void
+MerkleTrie::generate_all_hashes()
+{
+  HexArray prefix;
+  auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
+    node.hash = node.compute_node_hash();
+  };
+  walk<Node>(&root_, prefix, f);
 }
 
 void
