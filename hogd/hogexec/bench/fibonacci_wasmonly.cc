@@ -7,15 +7,16 @@
 #include <memory>
 #include <print>
 #include <stdexcept>
-#include <vector>
+#include <string>
+#include <unistd.h>
 
-#include "exec_coord.hh"
+#include "db_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
+#include "hogd/db_interface/db_coord_server.h"
 #include "hogd/db_interface/db_executor_server.h"
-#include "hogd/hogexec/interface/executor_context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -40,39 +41,45 @@ namespace hogd {
 namespace {
 
 struct BenchmarkState {
-
+  
   BenchmarkState(x23::ThreadPool &db_pool) : db_pool_(db_pool) {}
-  // This pool only serves RPCs from the db, which should be zero in this test
-  // outside of setup.
-
-  InMemoryDatabase in_memory_db_ = InMemoryDatabase();
-  BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
 
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
 
-  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
 
-  x23::ThreadPool &db_pool_;
+  x23::ThreadPool& db_pool_;
   x23::CoroPoll cp_ = x23::CoroPoll(db_pool_);
 
-  const StorageCostModel cost_model_ = StorageCostModel(12000, 1, 5, 100, 5);
-
-  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
+  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 
-  void initialize()
+  using coord_client_t = DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  std::unique_ptr<coord_client_t> coord_client_;
+
+  void initialize(uint32_t exec_port, uint32_t coord_port)
   {
-    constexpr static uint32_t kPortNumber = 10000;
-    db_executor_server_.start_server(kPortNumber);
 
     db_proxy_ =
         std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             kPortNumber});
+                                                             exec_port});
 
-    [[maybe_unused]] auto res = block_manager_.add_child(
-        0, 1, BlockExecutionMode::kBlockExecutionModeProposal);
-    assert(res);
+    coord_client_ = [&] -> std::unique_ptr<coord_client_t> {
+      auto fd =
+          cp_.tcpconnect("localhost", std::to_string(coord_port))();
+      if (!fd) {
+        throw std::runtime_error("Failed to connect to coord server");
+      }
+      auto client_config = x23::rpc_stream_logged(cp_, *fd);
+      return std::make_unique<coord_client_t>(client_config.template client<DbCoord1>());
+    }();
+
+    auto r= coord_client_->dbcoord_create_snapshot(0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
+    if (r != DbResult::DbResultOK) {
+      throw std::runtime_error("Failed to create snapshot");
+    }
+
     block_number_++;
 
     snapshot_cache_ =
@@ -89,14 +96,21 @@ struct BenchmarkState {
 
   void advance_block()
   {
-    auto r = block_manager_.get_block_data(block_number_);
-    assert(r);
-    r->close_block();
+    auto r = coord_client_->dbcoord_close_snapshot(block_number_)();
+    if (r.result() != DbResult::DbResultOK) {
+      throw std::runtime_error("Failed to close snapshot");
+    }
 
-    [[maybe_unused]] auto r2 = block_manager_.add_child(
-        block_number_, block_number_ + 1,
-        BlockExecutionMode::kBlockExecutionModeProposal);
-    assert(r2);
+    auto r2 = coord_client_->dbcoord_commit_snapshot(block_number_)();
+    if (r2.result() != DbResult::DbResultOK) {
+      throw std::runtime_error("Failed to commit snapshot");
+    }
+
+    auto r3 = coord_client_->dbcoord_create_snapshot(block_number_, block_number_ + 1, BlockExecutionMode::kBlockExecutionModeProposal)();
+    if (r3 != DbResult::DbResultOK) {
+      throw std::runtime_error("Failed to create snapshot");
+    }
+
     block_number_++;
 
     snapshot_cache_ =
@@ -104,10 +118,14 @@ struct BenchmarkState {
   }
 
   TransactionID allocate_txid() { return next_tx_id_++; }
+};
 
-  void setup_grant_storage_token(ContractAddress const &address,
+void setup_grant_storage_token(
+  InMemoryDatabase &in_memory_db,
+  StorageCostModel const &cost_model,
+  ContractAddress const &address,
                                  int128_t amount)
-  {
+{
     assert(amount >= 0);
     assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
 
@@ -116,25 +134,17 @@ struct BenchmarkState {
         .key =
             StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
 
-    in_memory_db_.write_item(
+    in_memory_db.write_item(
         addrkey,
-        std::make_shared<const StorageItemWrapper>(amount, &cost_model_));
-  }
-};
+        std::make_shared<const StorageItemWrapper>(amount, &cost_model));
+}
 
 void
-setup_benchmark(BenchmarkState &bs)
+setup_benchmark(BenchmarkState &bs, uint32_t exec_port, uint32_t coord_port)
 {
-  bs.initialize();
+  bs.initialize(exec_port, coord_port);
 
-  auto contract = test::load_test_contract("fibonacci.wasm");
   ContractAddress contract_addr{};
-
-  bs.in_memory_db_.write_contract(sha256(*contract), contract);
-  bs.in_memory_db_.write_deployment(contract_addr, sha256(*contract));
-
-  bs.setup_grant_storage_token(contract_addr, 1'000'000'000);
-
   using fib_client_t = ContractTraitClient<Fibonacci>;
 
   fib_client_t fib_client(contract_addr);
@@ -201,16 +211,40 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
   }
 }
 
-void
-run_fibonacci_wasmonly()
-{  // this pool does around 2 rpcs total in this test
-  x23::ThreadPool db_pool = x23::ThreadPool(10);
+void run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
+{
+  x23::ThreadPool db_pool = x23::ThreadPool(nthreads);
 
+  InMemoryDatabase in_memory_db = InMemoryDatabase();
+  StorageCostModel cost_model = StorageCostModel(12000, 1, 5, 100, 5);
+  ContractAddress contract_addr{};
+
+  auto contract = test::load_test_contract("fibonacci.wasm");
+
+  in_memory_db.write_contract(sha256(*contract), contract);
+  in_memory_db.write_deployment(contract_addr, sha256(*contract));
+
+  setup_grant_storage_token(in_memory_db, cost_model, contract_addr, 1'000'000'000);
+
+  BlockManager block_manager = BlockManager(0, &in_memory_db);
+  DbExecutorServer db_executor_server = DbExecutorServer(&block_manager);
+  x23::CoroPoll cp = x23::CoroPoll(db_pool);
+  std::println("Starting executor server on port {}", exec_port);
+  db_executor_server.start_server(exec_port);
+
+  DbCoordServer db_coord_server = DbCoordServer(&block_manager);
+  std::println("Starting coord server on port {}", coord_port);
+  db_coord_server.start_server(coord_port);
+
+  while (true) {}
+}
+
+void run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
+{
+  x23::ThreadPool db_pool = x23::ThreadPool(1);
   BenchmarkState bs(db_pool);
-  setup_benchmark(bs);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
-  fib_client_t fib_client(ContractAddress{});
+  setup_benchmark(bs, exec_port, coord_port);
 
   for (auto nthread : { 128, 256, 512, 1024, 2048, 4196}) {
     run_bench_rep(bs, 100000, 20, nthread);
@@ -227,6 +261,37 @@ main(int argc, char *argv[])
   if (ret)
     return ret;
 
-  hogd::run_fibonacci_wasmonly();
+  int exec_port = 10000;
+  int coord_port = 10001;
+
+  bool run_client = false;
+  bool run_server = false;
+
+  int opt;
+  while ((opt = getopt(argc, argv, "cs")) != -1) {
+    switch (opt) {
+      case 'c':
+        run_client = true;
+        break;
+      case 's':
+        run_server = true;
+        break;
+      default:
+        std::println("Usage: {} [-c] [-s]", argv[0]);
+        return 1;
+    }
+  }
+
+  if (run_client == run_server) {
+    std::println("Error: Must specify exactly one of -c (client) or -s (server)");
+    return 1;
+  }
+
+  if (run_server) {
+    hogd::run_fibonacci_server(1, exec_port, coord_port);
+  } else if (run_client) {
+    hogd::run_fibonacci_client(exec_port, coord_port);
+  }
+
   return 0;
 }
