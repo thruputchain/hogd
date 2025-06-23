@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
@@ -184,3 +185,33 @@ private:
   void get_leaf_string(std::ostringstream &oss) const;
 };
 } // namespace hogd
+
+// We need to define the formatters in the [std] namespace.
+template<> struct std::formatter<hogd::Node> : std::formatter<std::string> {
+  auto format(const hogd::Node &node, std::format_context &ctx) const
+  {
+    std::ostringstream oss;
+    oss << node;
+    return std::formatter<std::string>::format(oss.str(), ctx);
+  }
+};
+
+// Also need to define a formatter for [Node *], not just [Node].
+template<> struct std::formatter<hogd::Node *> : std::formatter<std::string> {
+  auto format(const hogd::Node *node, std::format_context &ctx) const
+  {
+    std::ostringstream oss;
+    oss << node;
+    return std::formatter<std::string>::format(oss.str(), ctx);
+  }
+};
+
+template<>
+struct std::formatter<hogd::Node::Type> : std::formatter<std::string> {
+  auto format(const hogd::Node::Type &type, std::format_context &ctx) const
+  {
+    std::ostringstream oss;
+    oss << type;
+    return std::formatter<std::string>::format(oss.str(), ctx);
+  }
+};

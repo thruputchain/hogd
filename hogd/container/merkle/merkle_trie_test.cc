@@ -1085,5 +1085,8 @@ int
 main(int argc, char *argv[])
 {
   testing::InitGoogleTest(&argc, argv);
+  // Initialize logging. This is needed for the CHECK macros.
+  log_init(std::make_unique<hogd::ConsoleLogger>());
+
   return RUN_ALL_TESTS();
 }

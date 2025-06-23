@@ -10,6 +10,7 @@
 #include <source_location>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 
 #include "hogd/base/compiler.h"
@@ -260,21 +261,28 @@ MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
 //
 // Also, I took out the call to panic() for now because it seems to segfault,
 // even when I use Adam's implementation of [LOG_INTERNAL_CHECK].
+
+template<typename T>
+constexpr auto
+format_arg(T &&t)
+{
+  if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::nullptr_t>) {
+    return static_cast<const void *>(nullptr);
+  }
+  else {
+    return std::forward<T>(t);
+  }
+}
+
 #define LOG_INTERNAL_CHECK(op, invop, expr1, expr2)                            \
   do {                                                                         \
     auto __val1 = expr1;                                                       \
     auto __val2 = expr2;                                                       \
     if (!(__val1 op __val2)) {                                                 \
-      int __errno = errno;                                                     \
-      std::cerr << __FILE__ << ":" << __LINE__ << "("                          \
-                << std::this_thread::get_id() << ") "                          \
-                << "CHECK FAILED: " << #expr1 << " " #op " " << #expr2 << " [" \
-                << __val1 << " " #invop " " << __val2 << "]" << '\n';          \
-      if (__errno) {                                                           \
-        std::cerr << "errno: " << __errno << " [" << std::strerror(__errno)    \
-                  << "]" << '\n';                                              \
-      }                                                                        \
-      exit(1);                                                                 \
+      hogd::panic("{}:{} CHECK FAILED: {} {} {} [{} {} {}]", __FILE__,         \
+                  __LINE__, CSTR(expr1), CSTR(op), CSTR(expr2),                \
+                  hogd::format_arg(__val1), CSTR(invop),                       \
+                  hogd::format_arg(__val2));                                   \
     }                                                                          \
   } while (0)
 
@@ -284,7 +292,7 @@ MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
 #define CHECK_LE(val1, val2) LOG_INTERNAL_CHECK(<=, <, val1, val2)
 #define CHECK_GT(val1, val2) LOG_INTERNAL_CHECK(>, <=, val1, val2)
 #define CHECK_GE(val1, val2) LOG_INTERNAL_CHECK(>=, >, val1, val2)
-#define CHECK_PTR(val1) CHECK_NE(val1, nullptr)
+#define CHECK_PTR(val1) CHECK_NE(static_cast<void *>(val1), nullptr)
 #define CHECK(val1) CHECK_NE(val1, 0)
 
 #ifdef NDEBUG

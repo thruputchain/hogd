@@ -3,6 +3,7 @@
 #include <random>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 
@@ -346,7 +347,7 @@ find(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(true);
 
   for (auto _ : state) {
-    CHECK_NE(trie.find(paths[0]), nullptr);
+    CHECK_PTR(trie.find(paths[0]));
   }
 }
 BENCHMARK(find)->Unit(benchmark::kNanosecond);
@@ -395,4 +396,18 @@ prove(benchmark::State &state)
 }
 BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
 
+namespace {
+
+struct Init {
+  Init()
+  {
+    // Initialize logging. This is needed for the CHECK macros.
+    log_init(std::make_unique<hogd::ConsoleLogger>());
+  }
+};
+
+// This runs [Init]'s constructor at program startup to do initialization.
+Init init;
+
+} // namespace
 BENCHMARK_MAIN();

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <functional>
 
+#include <format>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -250,3 +251,14 @@ private:
 };
 
 } // namespace hogd
+
+// We need to define the formatter in the [std] namespace.
+template<>
+struct std::formatter<hogd::MerkleTrie> : std::formatter<std::string> {
+  auto format(const hogd::MerkleTrie &trie, std::format_context &ctx) const
+  {
+    std::ostringstream oss;
+    oss << trie;
+    return std::formatter<std::string>::format(oss.str(), ctx);
+  }
+};

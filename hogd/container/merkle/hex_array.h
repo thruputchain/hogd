@@ -236,3 +236,13 @@ private:
 };
 
 } // namespace hogd
+
+// We need to define the formatter in the [std] namespace.
+template<> struct std::formatter<hogd::HexArray> : std::formatter<std::string> {
+  auto format(const hogd::HexArray &h, std::format_context &ctx) const
+  {
+    std::ostringstream oss;
+    oss << h;
+    return std::formatter<std::string>::format(oss.str(), ctx);
+  }
+};
