@@ -4,6 +4,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
@@ -62,7 +63,8 @@ protected:
     context.link_fn("test", "external_call",
                     &consume_gas_call); // called by "call1"
 
-    runtime_ = context.make_new_runtime(contract, nullptr, true);
+    runtime_ =
+        context.make_new_runtime(contract, sha256(contract), nullptr, true);
 
     ASSERT_TRUE(!!runtime_);
   }

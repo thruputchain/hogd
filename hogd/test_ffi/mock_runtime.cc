@@ -29,6 +29,7 @@ MockRuntime::invoke_internal(std::string_view method_name)
 
 std::unique_ptr<Runtime>
 MockRuntimeContext::make_new_runtime(Contract const &contract,
+                                     SHA256Hash const &hash,
                                      SystemCallHandler *syscall_handler,
                                      bool do_contract_verify)
 {
@@ -42,7 +43,7 @@ MockRuntimeContext::make_new_runtime(Contract const &contract,
   }
   // otherwise some other contract type; returns whatever the base context
   // wants to do with the contract.
-  return base_context_->make_new_runtime(contract, syscall_handler,
+  return base_context_->make_new_runtime(contract, hash, syscall_handler,
                                          do_contract_verify);
 }
 

@@ -4,6 +4,7 @@ use core::ffi::c_void;
 use core::slice;
 use core::str::Utf8Error;
 
+use crate::module_cache;
 use crate::external_call;
 
 // A WasmiContext provides shared data structures
@@ -47,9 +48,12 @@ use crate::external_call;
 // but not for eager compilation and validation (unclear why this choice was made).  If a module cache is used,
 // we must use CompilationMode::Eager.
 
+use crate::module_cache::ModuleCache;
+
 pub struct WasmiContext {
     pub engine: Engine,
     pub linker: Linker<*mut c_void>,
+    pub module_cache: *mut ModuleCache,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -71,7 +75,7 @@ fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
 }
 
 impl WasmiContext {
-    fn new() -> WasmiContext {
+    fn new(module_cache: *mut ModuleCache) -> WasmiContext {
         let stack_limit = StackLimits::default();
 
         let engine = Engine::new(
@@ -84,6 +88,7 @@ impl WasmiContext {
         Self {
             engine: engine.clone(),
             linker: Linker::new(&engine),
+            module_cache,
         }
     }
 
@@ -468,9 +473,14 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 }
 
 // Rust FFI needs no_mangle and extern "C"
+/// # Safety
+/// module_cache can be nullptr, in which case no module cache is used.
+/// module_cache is threadsafe, so it can be safely shared across threads.
 #[no_mangle]
-pub extern "C" fn new_wasmi_context() -> *mut c_void {
-    let b = Box::new(WasmiContext::new());
+pub unsafe extern "C" fn new_wasmi_context(module_cache: *mut c_void) -> *mut c_void {
+    let b = Box::new(WasmiContext::new(unsafe {
+        core::mem::transmute::<*mut c_void, *mut module_cache::ModuleCache>(module_cache)
+    }));
 
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }

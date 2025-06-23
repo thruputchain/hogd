@@ -18,6 +18,7 @@ MultiplexedContext::MultiplexedContext(
 
 std::unique_ptr<Runtime>
 MultiplexedContext::make_new_runtime(Contract const &contract,
+                                     SHA256Hash const &hash,
                                      SystemCallHandler *syscall_handler,
                                      bool do_contract_verify)
 {
@@ -25,7 +26,7 @@ MultiplexedContext::make_new_runtime(Contract const &contract,
   if (it == contexts_.end()) {
     return nullptr;
   }
-  return it->second->make_new_runtime(contract, syscall_handler,
+  return it->second->make_new_runtime(contract, hash, syscall_handler,
                                       do_contract_verify);
 }
 

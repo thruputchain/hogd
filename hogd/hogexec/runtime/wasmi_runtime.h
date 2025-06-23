@@ -52,6 +52,7 @@ public:
   ~WasmiContext() override;
 
   std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
+                                            SHA256Hash const &hash,
                                             SystemCallHandler *syscall_handler,
                                             bool do_contract_verify) override;
 
@@ -90,6 +91,15 @@ private:
 
   // manipulated in rust
   void *wasmi_runtime_ptr_;
+};
+
+class WasmiModuleCache {
+public:
+  WasmiModuleCache(size_t capacity);
+  ~WasmiModuleCache();
+
+private:
+  void *wasmi_module_cache_ptr_;
 };
 
 } // namespace hogd

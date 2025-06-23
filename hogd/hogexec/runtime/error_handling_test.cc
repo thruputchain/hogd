@@ -7,6 +7,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
@@ -110,7 +111,8 @@ protected:
 
 TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 {
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
   EXPECT_FALSE(runtime_);
 }
 
@@ -118,7 +120,8 @@ TEST_F(WasmiErrorHandlingTest, UnlinkedFn)
 TEST_F(WasmiErrorHandlingTest, RuntimeError)
 {
   context_.link_fn("test", "external_call", &throw_runtime_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -132,7 +135,8 @@ TEST_F(WasmiErrorHandlingTest, RuntimeError)
 TEST_F(WasmiErrorHandlingTest, ExitHandling)
 {
   context_.link_fn("test", "external_call", &exit_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -144,7 +148,8 @@ TEST_F(WasmiErrorHandlingTest, ExitHandling)
 TEST_F(WasmiErrorHandlingTest, HostError)
 {
   context_.link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
   auto res = runtime_->invoke("call1", UINT64_MAX);
@@ -155,7 +160,8 @@ TEST_F(WasmiErrorHandlingTest, HostError)
 TEST_F(WasmiErrorHandlingTest, AbortTransaction)
 {
   context_.link_fn("test", "external_call", &throw_abort_transaction);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
   auto res = runtime_->invoke("call1", UINT64_MAX);
@@ -166,7 +172,8 @@ TEST_F(WasmiErrorHandlingTest, AbortTransaction)
 TEST_F(WasmiErrorHandlingTest, ValidationError)
 {
   context_.link_fn("test", "external_call", &throw_validation_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(!!runtime_);
 
@@ -179,7 +186,8 @@ TEST_F(WasmiErrorHandlingTest, ValidationError)
 TEST_F(WasmiErrorHandlingTest, OtherWeirdError)
 {
   context_.link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -194,7 +202,8 @@ TEST_F(WasmiErrorHandlingTest, WasmError)
 {
   // must link all the fns, required for linking
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -213,7 +222,8 @@ TEST_F(WasmiErrorHandlingTest, NonexistFn)
 {
   // must link all the fns, required for linking
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -231,7 +241,8 @@ TEST_F(WasmiErrorHandlingTest, NonexistFn)
 TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
 {
   context_.link_fn("test", "external_call", &throw_unrecoverable_host_error);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -249,7 +260,8 @@ TEST_F(WasmiErrorHandlingTest, FollowBadWithGood)
 TEST_F(WasmiErrorHandlingTest, CheckReturn)
 {
   context_.link_fn("test", "external_call", &return_syscall);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -261,7 +273,8 @@ TEST_F(WasmiErrorHandlingTest, CheckReturn)
 TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 {
   context_.link_fn("test", "external_call", &throw_bad_alloc);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -279,7 +292,8 @@ TEST_F(WasmiErrorHandlingTest, FollowReallyBadWithGood)
 TEST_F(WasmiErrorHandlingTest, Reentrance)
 {
   context_.link_fn("test", "external_call", &reentrance);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -296,7 +310,8 @@ TEST_F(WasmiErrorHandlingTest, Reentrance)
 TEST_F(WasmiErrorHandlingTest, NullHandling)
 {
   Contract null_contract(ContractType::kWasmi);
-  runtime_ = context_.make_new_runtime(null_contract, nullptr, true);
+  runtime_ = context_.make_new_runtime(null_contract, sha256(null_contract),
+                                       nullptr, true);
 
   EXPECT_FALSE(runtime_);
 }
@@ -310,7 +325,8 @@ TEST_F(WasmiErrorHandlingTest, NullLinkHandling)
   EXPECT_FALSE(context_.link_fn("test", "", &good_call));
   EXPECT_TRUE(context_.link_fn("foo", "good_call", &good_call));
 
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   EXPECT_FALSE(runtime_);
 }
@@ -318,7 +334,8 @@ TEST_F(WasmiErrorHandlingTest, NullLinkHandling)
 TEST_F(WasmiErrorHandlingTest, OutOfGas)
 {
   context_.link_fn("test", "external_call", &consume_too_much_gas);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -336,7 +353,8 @@ TEST_F(WasmiErrorHandlingTest, OutOfGas)
 TEST_F(WasmiErrorHandlingTest, NoGas)
 {
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 
@@ -349,7 +367,8 @@ TEST_F(WasmiErrorHandlingTest, NoGas)
 TEST_F(WasmiErrorHandlingTest, Spin)
 {
   context_.link_fn("test", "external_call", &good_call);
-  runtime_ = context_.make_new_runtime(contract_, nullptr, true);
+  runtime_ =
+      context_.make_new_runtime(contract_, sha256(contract_), nullptr, true);
 
   ASSERT_TRUE(runtime_);
 

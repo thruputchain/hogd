@@ -5,12 +5,12 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+use core::fmt;
 use wasmi::core::HostError;
 use wasmi::Error;
 
-use crate::ffi_enums::HostFnErrorCode;
-
-use core::fmt;
+use crate::ffi_enums::{HostFnErrorCode, InvokeErrorCode};
+use crate::invoke_result::WasmiInvokeResult;
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug)]
@@ -35,6 +35,29 @@ impl fmt::Display for TrampolineError {
 }
 
 impl HostError for TrampolineError {}
+
+impl TrampolineError {
+    pub fn to_wasmi_invoke_result(self) -> WasmiInvokeResult {
+        match self.error {
+            TrampolineErrorEnum::OutOfGas => {
+                WasmiInvokeResult::error(InvokeErrorCode::kInvokeOutOfGas)
+            }
+            TrampolineErrorEnum::Return => WasmiInvokeResult::success(),
+            TrampolineErrorEnum::Exit => {
+                WasmiInvokeResult::error(InvokeErrorCode::kInvokeDeterministic)
+            }
+            TrampolineErrorEnum::ValidationFailure => WasmiInvokeResult::error(
+                InvokeErrorCode::kInvokeValidationFailure,
+            ),
+            TrampolineErrorEnum::AbortTransaction => WasmiInvokeResult::error(
+                InvokeErrorCode::kInvokeAbortTransaction,
+            ),
+            _ => {
+                WasmiInvokeResult::error(InvokeErrorCode::kInvokeUnrecoverable)
+            }
+        }
+    }
+}
 
 // This is annoying, but I'm not sure how better to deal with this
 pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
