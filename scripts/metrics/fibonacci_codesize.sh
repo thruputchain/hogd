@@ -13,6 +13,13 @@ if [ ! -f "$FILE" ]; then
     exit 2
 fi
 
-SIZE=$(stat -f%z "$FILE")
+if [[ "$(uname)" == "Darwin" ]]; then
+    SIZE=$(stat -f%z "$FILE")
+elif [[ "$(uname)" == "Linux" ]]; then
+    SIZE=$(stat -c%s "$FILE")
+else
+    echo "Unsupported OS: $(uname)"
+    exit 3
+fi
 echo $SIZE
 

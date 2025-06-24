@@ -5,7 +5,7 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-set -ex
+set -e
 
 BUILD_DIR=$1
 
@@ -43,7 +43,9 @@ fi
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
 git add metrics/
-git commit -m "Add metrics for $branch $commit" --author "metrics-script <metrics-script@groundhogchain.com>"
+git config user.name "metrics-script"
+git config user.email "metrics-script@groundhogchain.com"
+git commit -m "Add metrics for $branch $commit"
 git push
 
 
