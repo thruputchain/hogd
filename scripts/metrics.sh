@@ -5,7 +5,7 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-set -ex
+set -e
 
 BUILD_DIR=$1
 
@@ -20,7 +20,7 @@ fi
 commit=$(git rev-parse HEAD)
 
 # Get current commit timestamp in ISO 8601 format (YYYY-MM-DDTHH:MM:SS)
-commit_time=$(git show -s --format=%cd --date=format:'%Y-%m-%dT%H:%M:%S' HEAD)
+commit_time=$(TZ=UTC git show -s --format=%cd --date=format:'%Y-%m-%dT%H:%M:%SZ' HEAD)
 
 # Check if the working directory is dirty (tracked files only)
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
