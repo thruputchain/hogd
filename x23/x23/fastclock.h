@@ -13,12 +13,13 @@
 #include <thread>
 
 #ifndef FASTCLOCK_USE_TSC
-#if (defined(__x86_64__) || defined(__i386__) || defined(__aarch64__)) && defined(__SIZEOF_INT128__)
+#if (defined(__x86_64__) || defined(__i386__) || defined(__aarch64__)) &&      \
+    defined(__SIZEOF_INT128__)
 #define FASTCLOCK_USE_TSC 1
 #if defined(__x86_64__) || defined(__i386__)
 #include <x86intrin.h>
 #endif // x86
-#else // !(x86 || arm)
+#else  // !(x86 || arm)
 #define FASTCLOCK_USE_TSC 0
 #endif // !(x86 || arm)
 #endif // !FASTCLOCK_USE_TSC
@@ -60,7 +61,7 @@ private:
   {
     if (calibration_lock.test_and_set()) {
       if (calibrated.load(std::memory_order_relaxed))
-	calibrated.wait(false);
+        calibrated.wait(false);
       return;
     }
 
@@ -90,7 +91,7 @@ private:
   }
 
 public:
-  static time_point now() noexcept
+  static uint64_t get_ns() noexcept
   {
     if (!calibrated.load(std::memory_order_acquire)) [[unlikely]]
       calibrate();
@@ -98,13 +99,21 @@ public:
     uint64_t tsc = read_counter();
     __uint128_t scaled = static_cast<__uint128_t>(tsc) * multiplier;
     auto ns = static_cast<uint64_t>(scaled >> shift);
-    return time_point(duration(ns));
+    return ns;
   }
+
+  static time_point now() noexcept { return time_point(duration(get_ns())); }
 };
 
 #else // !FASTCLOCK_USE_TSC
 
-using fastclock = std::chrono::steady_clock;
+struct fastclock : std::chrono::steady_clock {
+  static uint64_t get_ns() noexcept
+  {
+    return duration_cast<std::chrono::nanoseconds>(now().time_since_epoch())
+        .count();
+  }
+};
 
 #endif // !FASTCLOCK_USE_TSC
 
