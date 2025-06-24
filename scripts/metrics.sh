@@ -5,6 +5,8 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
+set -ex
+
 BUILD_DIR=$1
 
 # Get current branch name
@@ -41,7 +43,7 @@ fi
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
 git add metrics/
-git commit -m "Add metrics for $branch $commit"
+git commit -m "Add metrics for $branch $commit" --author "metrics-script <metrics-script@groundhogchain.com>"
 git push
 
 
