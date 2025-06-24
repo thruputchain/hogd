@@ -112,6 +112,7 @@ public:
 
   static Node *create_branch(Node *parent)
   {
+    // TODO(jhumphri): Use unique_ptr<> rather than [new] (here and elsewhere).
     Node *node = new Node;
     node->clear();
     node->init_branch(parent);
