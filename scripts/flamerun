@@ -1,0 +1,63 @@
+#!/bin/bash
+
+URL="https://github.com/brendangregg/FlameGraph.git"
+INSTALL="$HOME/.cache/FlameGraph"
+OUTPUT=flamegraph.html
+
+if ! test -d "$INSTALL"; then
+    git clone "$URL" "$INSTALL" || exit 1
+fi
+
+args=()
+
+usage() {
+    echo "usage: ${0##*/} [-h] [-o FILE] [PERF-ARGS] [--] [COMMAND ...]"
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -o)
+            if [[ $# -gt 1 ]]; then
+                OUTPUT="$2"
+                shift 2  # Skip both -o and its argument
+            else
+                echo "Error: -o requires an argument" >&2
+                exit 1
+            fi
+            ;;
+        -o*)
+            OUTPUT="${1#-o}"  # Remove -o prefix
+            shift
+            ;;
+	--)
+	    args+=("$@")
+	    break
+	    ;;
+	-h)
+	    usage
+	    ;;
+        *)
+            args+=("$1")
+            shift
+            ;;
+    esac
+done
+
+delete_me=()
+
+trap 'rm -f ${delete_me[@]}' 0
+
+data=$(mktemp /tmp/perfXXXXXXX.data)
+delete_me+=("$data")
+
+folded=$(mktemp /tmp/perfXXXXXXX.folded)
+delete_me+=("$folded")
+
+trap : SIGINT
+perf record -g -o "$data" "${args[@]}"
+trap - SIGINT
+
+perf script -i "$data" | "$INSTALL/stackcollapse-perf.pl" > "$folded"
+mv -f "$OUTPUT" "$OUTPUT"~
+"$INSTALL/flamegraph.pl" "$folded" > "$OUTPUT"
