@@ -26,6 +26,7 @@ jobs:
           ${{ secrets.HOGD_SELF_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
           ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+          ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -43,3 +44,8 @@ jobs:
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: check
       run: ./scripts/check.sh -p
+    - name: build for metrics
+      run: ./scripts/build.sh -d release -t Release -c gcc
+    - name: run metrics
+      run: ./scripts/metrics.sh release
+
