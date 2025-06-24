@@ -7,6 +7,7 @@
 
 #include <format>
 #include <ostream>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -73,7 +74,11 @@ public:
   bool check() { return check_helper(&root_); }
 
   // Returns the hash of the root node in the trie.
-  SHA256Hash get_root_hash() const { return root_.hash; }
+  SHA256Hash get_root_hash()
+  {
+    std::shared_lock<std::shared_mutex> lock(root_.rw_lock);
+    return root_.hash;
+  }
 
   // Returns a proof that the KV pair with key [k] is in the trie.
   std::pair<SHA256Hash, std::vector<std::byte>> get_proof(const Key &k);
@@ -219,7 +224,11 @@ private:
   // function is called so that the caller can determine whether [existing_key]
   // is set to a node.
   static Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
-                                         size_t &idx, Node *&existing_key);
+                                         bool write, size_t &idx,
+                                         Node *&existing_key);
+
+  // Unlocks all nodes from [n] up through the root (inclusive).
+  static void unlock_chain_from(Node *n);
 
   // Computes and writes the hash for [node] only if
   // [should_hash_nodes_on_each_op_] is true.

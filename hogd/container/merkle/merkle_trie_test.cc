@@ -92,7 +92,7 @@ TEST(MerkleTrie, EmptyKey)
   std::cout << trie << '\n';
 }
 
-TEST(MerkleTrie, EmptyKeyfind)
+TEST(MerkleTrie, EmptyKeyFind)
 {
   MerkleTrie trie;
 
@@ -160,7 +160,7 @@ TEST(MerkleTrie, EmptyValue)
   std::cout << trie << '\n';
 }
 
-TEST(MerkleTrie, EmptyValuefind)
+TEST(MerkleTrie, EmptyValueFind)
 {
   MerkleTrie trie;
 
@@ -267,7 +267,7 @@ TEST(MerkleTrie, TwoLeaves)
   std::cout << trie << '\n';
 }
 
-TEST(MerkleTrie, TwoLeavesfind)
+TEST(MerkleTrie, TwoLeavesFind)
 {
   MerkleTrie trie;
 
@@ -337,7 +337,7 @@ TEST(MerkleTrie, BranchAndLeafRemove)
   std::cout << trie << '\n';
 }
 
-TEST(MerkleTrie, BranchAndLeaffind)
+TEST(MerkleTrie, BranchAndLeafFind)
 {
   MerkleTrie trie;
 
@@ -453,7 +453,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranch)
   std::cout << trie << '\n';
 }
 
-TEST(MerkleTrie, TwoLeavesAndOneBranchfind)
+TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
 {
   MerkleTrie trie;
 

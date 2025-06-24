@@ -91,18 +91,6 @@ public:
   // [kMaxNumBranches - 1] slots are unused.
   std::array<Node *, kMaxNumBranches> child;
 
-  // Acquire the reader lock.
-  std::shared_lock<std::shared_mutex> lock_reader()
-  {
-    return std::shared_lock<std::shared_mutex>(rw_lock);
-  }
-
-  // Acquire the writer lock.
-  std::unique_lock<std::shared_mutex> lock_writer()
-  {
-    return std::unique_lock<std::shared_mutex>(rw_lock);
-  }
-
   void init_branch(Node *parent)
   {
     type = Type::kBranch;

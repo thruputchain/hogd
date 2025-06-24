@@ -260,9 +260,10 @@ MerkleTrie::get_proof_by_node(const Key &k)
     const std::vector<std::byte> &encoding = node->get_node_encoding();
     ret.push_back(encoding);
 
+    node->rw_lock.unlock();
     node = node->parent;
   }
-  return {get_root_hash(), ret};
+  return {root_.hash, ret};
 }
 
 // static
@@ -342,6 +343,7 @@ MerkleTrie::find(const Key &k)
     return nullptr;
   }
 
+  T *ret = nullptr;
   switch (node->type) {
   case Node::Type::kBranch:
     // Check if the branch has a value.
@@ -349,9 +351,8 @@ MerkleTrie::find(const Key &k)
       // Get the [T] out of the [std::optional<T>] with the dereference
       // operator.
       T &value = *node->value;
-      return &value;
+      ret = &value;
     }
-    return nullptr;
     break;
   case Node::Type::kLeaf:
   {
@@ -360,14 +361,16 @@ MerkleTrie::find(const Key &k)
     // Get the [T] out of the [std::optional<T>] with the dereference
     // operator.
     T &value = *node->value; // NOLINT(bugprone-unchecked-optional-access)
-    return &value;
+    ret = &value;
     break;
   }
   default:
     CHECK(false);
-    return nullptr;
     break;
   }
+
+  unlock_chain_from(node);
+  return ret;
 }
 
 Node *
@@ -375,7 +378,11 @@ MerkleTrie::find_node(const Key &k)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
+  Node *branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/false,
+                                           idx, existing_key);
+  if (!existing_key) {
+    unlock_chain_from(branch);
+  }
   return existing_key;
 }
 
@@ -384,10 +391,11 @@ MerkleTrie::insert(const Key &k, T &&obj)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  Node *branch =
-      traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
+  Node *branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/true,
+                                           idx, existing_key);
   if (existing_key) {
     // [k] already exists in the trie, so we cannot insert it.
+    unlock_chain_from(existing_key);
     return false;
   }
   CHECK_PTR(branch);
@@ -441,6 +449,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
 
   size_++;
   generate_hashes_from(to_hash);
+  unlock_chain_from(to_hash);
   return true;
 }
 
@@ -751,10 +760,11 @@ MerkleTrie::remove(const Key &k)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  Node *branch =
-      traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
+  Node *branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/true,
+                                           idx, existing_key);
   if (!existing_key) {
     // [k] does not exist in the trie, so we cannot remove it.
+    unlock_chain_from(branch);
     return false;
   }
   CHECK_PTR(branch);
@@ -804,6 +814,7 @@ MerkleTrie::remove(const Key &k)
   size_--;
   CHECK_PTR(to_hash);
   generate_hashes_from(to_hash);
+  unlock_chain_from(to_hash);
   return true;
 }
 
@@ -1067,13 +1078,21 @@ MerkleTrie::walk(
 // static
 Node *
 MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
-                                      size_t &idx, Node *&existing_key)
+                                      bool write, size_t &idx,
+                                      Node *&existing_key)
 {
   CHECK_PTR(root);
   CHECK_LE(idx, path.size());
 
   Node *prev_root = nullptr;
   while (true) {
+    if (write) {
+      root->rw_lock.lock();
+    }
+    else {
+      root->rw_lock.lock_shared();
+    }
+
     switch (root->type) {
     case Node::Type::kBranch:
     {
@@ -1120,6 +1139,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       // subtract 1 from [idx] since the branch corresponds to one hex digit
       // in the path.
       idx--;
+      root->rw_lock.unlock();
       return prev_root;
       break;
     }
@@ -1127,6 +1147,9 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       if (path.get_subarray(idx, path.size()) == root->path) {
         // [path] maps to this leaf node.
         existing_key = root;
+      }
+      else {
+        root->rw_lock.unlock();
       }
       // We are going to return the parent node, which is always a branch, so
       // subtract 1 from [idx] since the branch corresponds to one hex digit
@@ -1145,6 +1168,16 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
   return nullptr;
 }
 
+// static
+void
+MerkleTrie::unlock_chain_from(Node *n)
+{
+  while (n) {
+    n->rw_lock.unlock();
+    n = n->parent;
+  }
+}
+
 void
 MerkleTrie::generate_hashes_from(Node *n) const
 {
@@ -1154,7 +1187,6 @@ MerkleTrie::generate_hashes_from(Node *n) const
 
   while (n) {
     n->hash = n->compute_node_hash();
-
     n = n->parent;
   }
 }
