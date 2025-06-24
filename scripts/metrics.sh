@@ -42,14 +42,25 @@ fi
 
 # Put metrics to run here
 ./metrics_history/scripts/make_metric_file.sh fibonacci-codesize $branch $commit $commit_time
-./scripts/metrics/fibonacci_codesize.sh $BUILD_DIR >> metrics_history/metrics/fibonacci-codesize/$branch/$commit
+./scripts/metrics/fibonacci_codesize.sh $BUILD_DIR > metrics_history/metrics/fibonacci-codesize/$branch/${commit_time}_$commit
 
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
+
+# Check if git committer name and email are set; if not, set them to metrics-script
+committer_name=$(git config user.name)
+committer_email=$(git config user.email)
+if [ -z "$committer_name" ]; then
+    committer_name="metrics-script"
+fi
+if [ -z "$committer_email" ]; then
+    committer_email="metrics-script@groundhogchain.com"
+fi
+
 git add metrics/
-GIT_COMMITTER_NAME="metrics-script" \
-GIT_COMMITTER_EMAIL="metrics-script@groundhogchain.com" \
-git commit -m "Add metrics for $branch $commit" --author "metrics-script <metrics-script@groundhogchain.com>"
+GIT_COMMITTER_NAME="$committer_name" \
+GIT_COMMITTER_EMAIL="$committer_email" \
+git commit -m "Add metrics for $branch $commit" --author "$committer_name <$committer_email>"
 git push
 
 
