@@ -350,8 +350,8 @@ private:
     ThreadPool *const pool_;
     const size_t threadno_;
     uint64_t rndseed_;
-    unsigned cpu_;
-    unsigned bucket_;
+    int cpu_;
+    int bucket_;
     std::jthread thread_{};
 
     Worker(ThreadPool *pool, size_t threadno);
