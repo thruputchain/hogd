@@ -10,7 +10,11 @@ set -e
 BUILD_DIR=$1
 
 # Get current branch name
-branch=$(git rev-parse --abbrev-ref HEAD)
+if [[ -z ${GITHUB_REF_NAME} ]]; then
+    branch=$(git rev-parse --abbrev-ref HEAD)
+else
+    branch=${GITHUB_REF_NAME}
+fi
 
 # Get current commit hash
 commit=$(git rev-parse HEAD)
