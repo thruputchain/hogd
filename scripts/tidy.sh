@@ -30,4 +30,4 @@ fi
 
 # Run clippy
 cd ${ROOT_DIR}/hogd/hogexec/wasmi
-cargo clippy
+cargo clippy --no-deps
