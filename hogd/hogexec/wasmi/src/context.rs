@@ -4,8 +4,8 @@ use core::ffi::c_void;
 use core::slice;
 use core::str::Utf8Error;
 
-use crate::module_cache;
 use crate::external_call;
+use crate::module_cache;
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -477,9 +477,13 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 /// module_cache can be nullptr, in which case no module cache is used.
 /// module_cache is threadsafe, so it can be safely shared across threads.
 #[no_mangle]
-pub unsafe extern "C" fn new_wasmi_context(module_cache: *mut c_void) -> *mut c_void {
+pub unsafe extern "C" fn new_wasmi_context(
+    module_cache: *mut c_void,
+) -> *mut c_void {
     let b = Box::new(WasmiContext::new(unsafe {
-        core::mem::transmute::<*mut c_void, *mut module_cache::ModuleCache>(module_cache)
+        core::mem::transmute::<*mut c_void, *mut module_cache::ModuleCache>(
+            module_cache,
+        )
     }));
 
     unsafe { core::mem::transmute(Box::into_raw(b)) }
