@@ -151,9 +151,9 @@ ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno)
 {
   my_thread_pool = pool_;
   my_thread_no = threadno;
-  auto cpu = cpuid();
-  auto bucket = llc_map.bucket(cpu);
-  pool_->bucket_nthreads_[bucket]++;
+  cpu_ = cpuid();
+  bucket_ = llc_map.bucket(cpu_);
+  pool_->bucket_nthreads_[bucket_]++;
   thread_ = std::jthread(&ThreadPool::Worker::work, this);
 }
 
