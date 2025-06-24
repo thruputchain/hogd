@@ -19,8 +19,9 @@ fi
 # Get current commit hash
 commit=$(git rev-parse HEAD)
 
-# Get current commit timestamp in ISO 8601 format (YYYY-MM-DDTHH:MM:SS)
-commit_time=$(TZ=UTC git show -s --format=%cd --date=format:'%Y-%m-%dT%H:%M:%S' HEAD)
+# Get current commit timestamp in UTC ISO 8601 format (YYYY-MM-DDTHH:MM:SS)
+commit_unix_time=$(git show -s --format=%ct HEAD)
+commit_time=$(date -u -r "$commit_unix_time" "+%Y-%m-%dT%H:%M:%S")
 
 # Check if the working directory is dirty (tracked files only)
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
