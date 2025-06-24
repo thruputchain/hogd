@@ -1107,21 +1107,22 @@ TEST(MerkleTrie, SingleThread)
 // thread.
 TEST(MerkleTrie, Multithread)
 {
-  constexpr size_t kNumKVPairsPerThread = 100'000;
-  constexpr size_t kNumThreads = 20;
+  constexpr size_t kNumKVPairs = 2'000'000;
+  constexpr size_t kNumThreads = 128;
+  constexpr size_t kNumKVPairsPerThread = kNumKVPairs / kNumThreads;
 
   MerkleTrie trie;
   WorkerPool pool(kNumThreads);
   std::vector<std::future<void>> futures;
   for (size_t i = 0; i < kNumThreads; i++) {
     futures.push_back(pool.submit([&trie] {
-      for (size_t i = 0; i < kNumKVPairsPerThread; i++) {
+      for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
         HexArray path = generate_random_path();
-        const std::string value = std::to_string(i);
+        const std::string value = std::to_string(j);
         bool insert = trie.insert(path, value);
         if (!insert) {
           // A duplicate key was generated, so try again.
-          i--;
+          j--;
           continue;
         }
       }
