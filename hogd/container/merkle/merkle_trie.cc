@@ -819,7 +819,6 @@ MerkleTrie::remove(const Key &k)
   }
 
   size_.fetch_add(-1, std::memory_order_relaxed);
-  ;
   CHECK_PTR(to_hash);
   generate_hashes_from(to_hash);
   unlock_chain_from(to_hash);
@@ -989,11 +988,11 @@ MerkleTrie::walk(
     // children first.
     //
     // A branch or extension node will be left in the stack until all of its
-    // children has been visited. When this node pushes one of its children onto
-    // the stack, the node waits until the child is popped off the stack before
-    // pushing the next child. Thus, the node will not enqueue the next child
-    // until a subsequent iteration, and thus we need to track this child so
-    // that the node knows which child to push at that point.
+    // children have been visited. When this node pushes one of its children
+    // onto the stack, the node waits until the child is popped off the stack
+    // before pushing the next child. Thus, the node will not enqueue the next
+    // child until a subsequent iteration, and thus we need to track this child
+    // so that the node knows which child to push at that point.
     //
     // We use [next_child_to_visit] to track which child should be pushed next
     // for [node].
