@@ -7,7 +7,6 @@
 
 #include <format>
 #include <ostream>
-#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -76,8 +75,10 @@ public:
   // Returns the hash of the root node in the trie.
   SHA256Hash get_root_hash()
   {
-    std::shared_lock<std::shared_mutex> lock(root_.rw_lock);
-    return root_.hash;
+    root_.rw_lock.lock_reader();
+    SHA256Hash ret = root_.hash;
+    root_.rw_lock.unlock();
+    return ret;
   }
 
   // Returns a proof that the KV pair with key [k] is in the trie.

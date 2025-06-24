@@ -16,6 +16,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/container/merkle/rw_lock.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
@@ -65,7 +66,7 @@ public:
   Node(Node &&) noexcept = delete;
   Node &operator=(Node &&) noexcept = delete;
 
-  std::shared_mutex rw_lock;
+  RwLock rw_lock;
   Type type;
   SHA256Hash hash;
   Node *parent;

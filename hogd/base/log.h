@@ -267,9 +267,9 @@ format_arg(T &&t)
     auto __val1 = expr1;                                                       \
     auto __val2 = expr2;                                                       \
     if (!(__val1 op __val2)) {                                                 \
-      panic("{}:{} CHECK FAILED: {} {} {} [{} {} {}]", __FILE__, __LINE__,     \
-            CSTR(expr1), CSTR(op), CSTR(expr2), format_arg(__val1),            \
-            CSTR(invop), format_arg(__val2));                                  \
+      panic("{}:{} (TID {}) CHECK FAILED: {} {} {} [{} {} {}]", __FILE__,      \
+            __LINE__, gettid(), CSTR(expr1), CSTR(op), CSTR(expr2),            \
+            format_arg(__val1), CSTR(invop), format_arg(__val2));              \
     }                                                                          \
   } while (0)
 
