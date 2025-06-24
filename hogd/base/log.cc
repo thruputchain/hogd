@@ -73,8 +73,6 @@ do_panic(std::string_view fmt, const std::source_location &loc,
   std::format_to(std::back_inserter(buf), "{}", ansi_reset());
 #endif // HAVE_CXX_STACKTRACE
 
-  // If you are segfaulting on the line below, it is likely because you have not
-  // called [log_init()], so [logger] is a [nullptr].
   logger->vlog(LogLevel::kCritical, "{}", loc, std::make_format_args(buf));
   detail::logger->flush();
   // TODO(amb): do more to cleanup safely (e.g., flush to disk?)
