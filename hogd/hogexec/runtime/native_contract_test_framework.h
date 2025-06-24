@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/test_util/port_allocator.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -145,12 +146,12 @@ public:
 private:
   void initialize(BlockExecutionMode mode)
   {
-    constexpr static uint32_t kPortNumber = 10000;
-    db_executor_server_.start_server(kPortNumber);
+    assert(port_.port_ >= kMinTestPort);
+    db_executor_server_.start_server(port_.port_);
 
     db_proxy_ =
         std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             10000});
+                                                             port_.port_});
     [[maybe_unused]] auto res = block_manager_.add_child(0, 1, mode);
     assert(res);
     block_number_++;
@@ -165,6 +166,8 @@ private:
     return PerTransactionDatabaseProxy(*db_proxy_, block_number_,
                                        allocate_txid());
   }
+
+  TemporaryPort port_;
 
   x23::ThreadPool pool_ = x23::ThreadPool(1);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);

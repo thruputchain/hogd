@@ -4,15 +4,18 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source ${SCRIPT_DIR}/env.sh
 BUILD_DIR=bcheck
+PARALLEL=
 
 print_usage() {
   printf "usage: scripts/check.sh [OPTION]...\n"
   printf -- "-e enable extra checks\n"
+  printf -- "-p run tests in parallel\n"
 }
 
-while getopts 'e' flag; do
+while getopts 'ep' flag; do
   case "${flag}" in
     e) EXTRA=yes ;;
+    p) PARALLEL=--parallel ;;
     *) print_usage
        exit 1 ;;
     esac
@@ -30,7 +33,7 @@ if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" ; t
 fi
 
 printf "${COLOR}\nSTEP 2: Check tests (gcc)\n${NC}"
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/gcc --output-on-failure; then
+if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/gcc --output-on-failure ${PARALLEL}; then
     printf "tests failed!\n"
     exit 1
 fi
@@ -42,7 +45,7 @@ if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" 
 fi
 
 printf "${COLOR}\nSTEP 4: Check tests (llvm)\n${NC}"
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure; then
+if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL}; then
     printf "tests failed!\n"
     exit 1
 fi

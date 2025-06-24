@@ -5,40 +5,8 @@
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 
-namespace x23 {
+namespace x23::detail {
 
-RpcLogger::RpcLogger(int peerfd, int logfd) noexcept : logfd_(logfd)
-{
-  peername_ = std::format("{} (fd {})", show_addr(remote_addr(peerfd)), peerfd);
-}
-
-std::string
-msg_show_stat(const rpc_msg &msg)
-{
-  using enum accept_stat;
-  using enum reject_stat;
-  using enum msg_type;
-  using enum reply_stat;
-  if (msg.body.mtype() != REPLY) [[unlikely]]
-    return "CALL";
-  if (msg.body.rbody().stat() == MSG_ACCEPTED) [[likely]] {
-    if (accept_stat stat = msg.body.rbody().areply().reply_data.stat();
-        stat == PROG_MISMATCH)
-      return std::format(
-          "PROG_MISMATCH[low={},high={}]",
-          msg.body.rbody().areply().reply_data.mismatch_info().low,
-          msg.body.rbody().areply().reply_data.mismatch_info().high);
-    else
-      return std::format("{}", stat);
-  }
-  else if (reject_stat stat = msg.body.rbody().rreply().stat();
-           stat == AUTH_ERROR)
-    return std::format("{}", msg.body.rbody().rreply().rj_why());
-  else
-    return std::format("{}", stat);
-}
-
-namespace detail {
 RpcStreamImpl::RpcStreamImpl(CoroPoll &cp, UniqueFd fd)
   : cp_(cp), fd_(std::move(fd))
 {
@@ -68,11 +36,8 @@ RpcStreamImpl::write_record(Buf b SLOC_ARG)
   if (ss_.stop_requested())
     co_return;
   auto _r = shared_from_this();
-  CoroGuard g;
-  co_await g(sendlock_);
   if (!ss_.stop_requested())
-    co_await cp_->write(fd_, b);
-  co_await g.reset_and_return();
+    co_await cp_->bgwrite(fd_, b);
 }
 
 Async<std::expected<std::uint32_t, Errno>>
@@ -153,38 +118,15 @@ RpcStreamImpl::reader(SLOC_ARG0)
 Detached
 RpcStreamImpl::serve_call(const rpc_msg &call, BufView args SLOC_ARG)
 {
-  using enum accept_stat;
-  using enum reject_stat;
   auto _r = shared_from_this();
-  const call_body &cb = call.body.cbody();
-  rpc_msg res{.xid = call.xid};
-
-  if (cb.rpcvers != 2) [[unlikely]] {
-    msg_set_reply_stat(&res, RPC_MISMATCH);
-    send_msg(res);
-    co_return;
+  rpc_msg res;
+  if (RpcService *s = srvmap_.lookup(call, &res)) {
+    Buf resp = co_await s->serve(call, args);
+    write_record(resp);
   }
-
-  auto it = srvmap_.find(ProgVers{cb.prog, cb.vers});
-  if (it == srvmap_.end()) {
-    it = srvmap_.lower_bound(ProgVers{cb.prog, 0});
-    if (it == srvmap_.end() || it->first.prog != cb.prog)
-      res.body.rbody().areply().reply_data.stat(PROG_UNAVAIL);
-    else {
-      res.body.rbody().areply().reply_data.stat(PROG_MISMATCH);
-      auto &mmi = res.body.rbody().areply().reply_data.mismatch_info();
-      mmi.low = it->first.vers;
-      it = srvmap_.upper_bound(ProgVers{cb.prog, 0xffffffff});
-      mmi.high = (--it)->first.vers;
-    }
+  else
     send_msg(res);
-    co_return;
-  }
-
-  RpcService *s = it->second.get();
-  Buf resp = co_await s->serve(call, args);
-  write_record(resp);
   co_return;
 }
-} // namespace detail
-} // namespace x23
+
+} // namespace x23::detail
