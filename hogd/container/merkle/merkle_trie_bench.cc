@@ -10,6 +10,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/crypto/crypto.h"
 
 namespace hogd {
 
@@ -388,6 +389,48 @@ prove(benchmark::State &state)
   }
 }
 BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
+
+void
+hash_parallel(benchmark::State &state, int num_threads)
+{
+  constexpr size_t kTotalHashes = 20'000'000;
+  const size_t per_thread_iterations = kTotalHashes / num_threads;
+
+  std::vector<std::byte> init(100);
+  std::vector<std::vector<std::byte>> to_hash(num_threads, init);
+
+  WorkerPool pool(num_threads);
+  std::vector<std::future<void>> futures(num_threads);
+
+  for (auto _ : state) {
+    for (size_t i = 0; i < num_threads; i++) {
+      futures[i] = pool.submit([per_thread_iterations, i, &to_hash] {
+        for (size_t j = 0; j < per_thread_iterations; j++) {
+          sha256(to_hash[i]);
+          to_hash[i][0] = std::byte(static_cast<uint8_t>(to_hash[i][0]) + 1);
+        }
+      });
+    }
+    for (std::future<void> &future : futures) {
+      future.get();
+    }
+  }
+}
+
+void hash_parallel_1_thread(benchmark::State &state) {
+  hash_parallel(state, /*num_threads=*/1);
+}
+BENCHMARK(hash_parallel_1_thread)->Unit(benchmark::kMillisecond);
+
+void hash_parallel_64_threads(benchmark::State &state) {
+  hash_parallel(state, /*num_threads=*/64);
+}
+BENCHMARK(hash_parallel_64_threads)->Unit(benchmark::kMillisecond);
+
+void hash_parallel_128_threads(benchmark::State &state) {
+  hash_parallel(state, /*num_threads=*/128);
+}
+BENCHMARK(hash_parallel_128_threads)->Unit(benchmark::kMillisecond);
 
 struct Init {
   Init()
