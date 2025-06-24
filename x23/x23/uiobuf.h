@@ -75,7 +75,7 @@ public:
     return super::emplace_back(std::forward<Args>(args)...);
   }
   using super::push_back;
-  void pop_front(size_type n = 1) noexcept
+  void pop_front(size_type n) noexcept
   {
     if (auto sz = size(); n < sz)
       offset_ += n;
@@ -83,6 +83,12 @@ public:
       assert(n == sz);
       clear();
     }
+  }
+  value_type pop_return_front() noexcept
+  {
+    value_type ret = std::move(front);
+    pop_front(1);
+    return ret;
   }
   using super::pop_back;
   void swap(VecQ &other) noexcept
@@ -208,7 +214,7 @@ struct BufVec {
       }
       n -= frontsize - skip_;
       skip_ = 0;
-      bufs_.pop_front();
+      bufs_.pop_front(1);
     }
   }
 

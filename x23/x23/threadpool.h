@@ -3,8 +3,7 @@
 #pragma once
 
 #include <coroutine>
-#include <queue>
-#include <ranges>
+#include <deque>
 #include <stop_token>
 #include <thread>
 #include <vector>
@@ -14,6 +13,7 @@
 #include <x23/config.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
+#include <x23/uiobuf.h>
 #include <x23/vec.h>
 
 #if HAVE_SCHED_GETCPU
@@ -77,7 +77,7 @@ template<typename T> struct CpuHinted<std::atomic<T>> {
   using value_type = std::atomic<T>;
 
   std::atomic<T> value;
-  std::atomic<unsigned> cpuhint = cpuid();
+  std::atomic<unsigned> cpuhint;
 
   template<std::constructible_from<> = T>
   CpuHinted() noexcept : value{}, cpuhint(0)
@@ -87,11 +87,6 @@ template<typename T> struct CpuHinted<std::atomic<T>> {
   template<std::convertible_to<T> U>
   CpuHinted(const CpuHinted<U> &u) : value(u.value), cpuhint(u.cpuhint)
   {}
-
-  decltype(auto) operator*(this auto &&self) noexcept
-  {
-    return self.value.load();
-  }
 
   // Since cpuhint is just a hint, it's okay to be wrong when we swap.
   CpuHinted<T> exchange(const CpuHinted<T> &newval)
@@ -104,19 +99,17 @@ template<typename T> struct CpuHinted<std::atomic<T>> {
 
 struct CpuMap {
   const Vec<int> map_;
-  const unsigned num_buckets_;
-  int my_bucket() const noexcept
+  const int nbuckets_;
+  int bucket(int n = cpuid()) const noexcept
   {
-    unsigned n = cpuid();
-    if (n < num_buckets_)
 #if HAVE_SCHED_GETCPU
-        [[likely]]
-#endif // HAVE_SCHED_GETCPU
+    if (n < nbuckets_) [[likely]]
       return map_[n];
-    return map_[n % num_buckets_];
+#endif // HAVE_SCHED_GETCPU
+    return map_[n % nbuckets_];
   }
   CpuMap(Vec<int> map) noexcept
-    : map_(std::move(map)), num_buckets_(1 + std::ranges::max(map_))
+    : map_(std::move(map)), nbuckets_(1 + std::ranges::max(map_))
   {}
 };
 
@@ -151,32 +144,13 @@ public:
   using Job = CpuHinted<std::coroutine_handle<>>;
 
   const size_t nthreads_;
+  const size_t nbuckets_;
 
   ThreadPool(size_t nthreads = nproc());
   ~ThreadPool();
 
-  void go(const is_range_of<Job> auto &rg)
-  {
-    // Crash if someone tries to use a ThreadPool being destroyed.
-    assert(!ss_.stop_requested());
-    if (rg.empty())
-      return;
-    auto qs = qstate_.take();
-    bool was_empty = qs->q_.empty();
-
-    // qs->q_.push_range(rg);
-    // XXX libstdc++ bug requires the following
-    for (auto &it : rg)
-      qs->q_.push(it);
-
-    if (was_empty) {
-      if (size_t n = qs->q_.size(); n > 1)
-        qs->not_empty_.notify_all();
-      else if (n == 1)
-        qs->not_empty_.notify_one();
-    }
-  }
-  void go(Job item) { go(std::ranges::views::single(item)); }
+  void go(const std::vector<Job> &jobs);
+  void go(Job item) { go(std::vector{item}); }
 
   // Make a callback asynchronously in another thread
   template<typename R>
@@ -245,6 +219,14 @@ public:
     return std::move(async);
   }
 
+  static inline const CpuMap core_map = make_cpu_map("topology/core_id");
+  static inline const CpuMap llc_map = make_llc_map();
+
+  // Return once every thread in the threadpool has been suspended at
+  // least once.  It is an error to call this funciton from within the
+  // ThreadPool, as that would cause deadlock.
+  void quiesce() noexcept;
+
   // Drain pauses the current thread and doesn't return untill all
   // coroutine handles that were either in the queue or executing at
   // the time drain was invoked have completed.  Do not call this from
@@ -298,9 +280,10 @@ public:
     ThreadPool *tp = my_thread_pool;
     // If this crashes, you called get_suspend_count in a thread that
     // wasn't part of a thread pool:
-    auto qs = tp->qstate_.take();
+    assert(tp);
     return SuspendCount{std::this_thread::get_id(),
-                        qs->tstate_[my_thread_no].count_};
+                        tp->tstate_[my_thread_no].count_.load(
+                            std::memory_order_relaxed)};
   }
 
   // A CrashIfSuspended will crash your program if the coroutine in
@@ -333,27 +316,76 @@ public:
   };
 
 private:
-  inline static thread_local ThreadPool *my_thread_pool{};
-  inline static thread_local size_t my_thread_no{};
+  // Timestamp for empty queues
+  static constexpr uint64_t kEmpty = std::numeric_limits<uint64_t>::max();
+
+  // Check an extra queue in round-robin order when enquing jobs, so
+  // as to migrate to underutilized run queues.
+  std::atomic_uint32_t rr_qno_{};
+
+  // Number of threads currently running in each bucket
+  std::unique_ptr<std::atomic_uint[]> bucket_nthreads_;
+
+  struct QueueItem {
+    Job job;        // Job to run
+    uint64_t qtime; // Time job was placed in queue
+  };
+  struct Queue {
+    // qtime of oldest JOb at front of queue, or kEmpty if empty
+    std::atomic<uint64_t> qtime_;
+    std::atomic_bool wake_on_qtime_increase_{false};
+    MVar<std::deque<QueueItem>> q_;
+
+    uint64_t qtime() const { return qtime_.load(std::memory_order_relaxed); }
+  };
+  using QPtr = decltype(Queue::q_)::Ptr;
+  std::unique_ptr<Queue[]> runqueues_;
+
+  struct Worker {
+    struct LockedQueue {
+      Queue *qp;
+      QPtr ptr;
+    };
+
+    ThreadPool *const pool_;
+    const size_t threadno_;
+    uint64_t rndseed_;
+    unsigned cpu_;
+    unsigned bucket_;
+    std::jthread thread_{};
+
+    Worker(ThreadPool *pool, size_t threadno);
+    Worker(Worker &&) noexcept = default;
+
+    void checkcpu() noexcept;
+    LockedQueue getq() noexcept;
+    std::coroutine_handle<> qpop(LockedQueue &ptr);
+    void work();
+  };
 
   struct alignas(hardware_destructive_interference_size) ThreadState {
     // 2*count of iterations of the loop.  Even numbers mean the
     // thread is idle, odd numbers means it is executing a coroutine.
-    size_t count_{0};
-    bool please_wake_{false};
+    std::atomic_size_t count_{0};
+    std::atomic_bool please_wake_{false};
   };
+  std::unique_ptr<ThreadState[]> tstate_;
 
-  struct QState {
-    std::queue<Job> q_;
-    std::condition_variable not_empty_;
-
-    std::unique_ptr<ThreadState[]> tstate_;
-    std::condition_variable count_updated_;
-  };
-  MVar<QState> qstate_;
+  inline static thread_local ThreadPool *my_thread_pool{};
+  inline static thread_local size_t my_thread_no{};
 
   std::stop_source ss_;
-  std::vector<std::jthread> pool_;
+  std::vector<std::unique_ptr<Worker>> pool_;
+
+  // https://en.wikipedia.org/wiki/Xorshift
+  static uint64_t rnd(uint64_t &seed) noexcept
+  {
+    uint64_t x = seed;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    return seed = x;
+  }
 
   void worker(size_t threadno);
 };

@@ -1,8 +1,10 @@
 
+#include <algorithm>
 #include <filesystem>
 #include <regex>
 #include <unordered_map>
 
+#include "x23/fastclock.h"
 #include "x23/fileio.h"
 #include "x23/threadpool.h"
 
@@ -10,22 +12,113 @@
 
 namespace x23 {
 
-ThreadPool::ThreadPool(size_t nthreads) : nthreads_(nthreads)
+ThreadPool::ThreadPool(size_t nthreads)
+  : nthreads_(nthreads), nbuckets_(llc_map.nbuckets_),
+    bucket_nthreads_(new std::atomic_uint[nbuckets_]{}),
+    runqueues_(std::make_unique<Queue[]>(nthreads)),
+    tstate_(std::make_unique<ThreadState[]>(nthreads))
 {
-  auto qs = qstate_.take();
-  qs->tstate_ = std::make_unique<ThreadState[]>(nthreads_);
   pool_.reserve(nthreads_);
   for (size_t i = 0; i < nthreads_; ++i)
-    pool_.push_back(std::jthread(&ThreadPool::worker, this, i));
+    pool_.push_back(std::make_unique<Worker>(this, i));
 }
 
 ThreadPool::~ThreadPool()
 {
-  auto qs = qstate_.take();
   ss_.request_stop();
-  qs->not_empty_.notify_all();
-  qs.reset();
+  for (unsigned i = 0; i < nbuckets_; ++i) {
+    auto ptr = runqueues_[i].q_.take();
+    runqueues_[i].qtime_ = 0;
+    runqueues_[i].qtime_.notify_all();
+  }
   pool_.clear(); // Join all threads before destroying fields
+}
+
+void
+ThreadPool::go(const std::vector<Job> &jobs)
+{
+  assert(!ss_.stop_requested());
+
+  struct Q {
+    bool needed{};
+    uint64_t qtime{};
+    QPtr ptr;
+  };
+  std::vector<Q> qs(nbuckets_);
+  std::vector<unsigned> qnos; // indices i at which qs[i].ptr is locked
+  std::vector<unsigned> wake; // buckets that need to be notified
+
+  auto lock = [&](unsigned i) {
+    if (!qs[i].ptr && bucket_nthreads_[i]) {
+      qs[i].ptr = runqueues_[i].q_.take();
+      if (!bucket_nthreads_[i])
+        qs[i].ptr = nullptr;
+      else {
+        qnos.push_back(i);
+        qs[i].qtime = runqueues_[i].qtime_.load(std::memory_order_relaxed);
+      }
+    }
+  };
+
+  for (const auto &j : jobs)
+    qs[llc_map.bucket(j.cpuhint)].needed = true;
+  // add an extra bucket to even out the load
+  auto extra = rr_qno_.fetch_add(1, std::memory_order_relaxed) % nbuckets_;
+  qs[extra].needed = true;
+
+  for (unsigned i = 0; i < nbuckets_; ++i)
+    if (qs[i].needed)
+      lock(i);
+
+  // make sure we have at least one bucket
+  while (qnos.empty())
+    lock((extra = (extra + 1) % nbuckets_));
+
+  // Index of an "other queue" to check in qnos
+  unsigned oq = std::ranges::lower_bound(qnos, extra) - qnos.begin();
+
+  uint64_t now = fastclock::get_ns();
+
+  for (const auto &j : jobs) {
+    auto bucket = llc_map.bucket(j.cpuhint);
+    if (oq >= qnos.size())
+      oq = 0;
+    if (auto altbucket = qnos[oq];
+        !qs[bucket].ptr || qs[bucket].qtime < qs[altbucket].qtime - 100'000) {
+      bucket = altbucket;
+      ++oq;
+    }
+    if (qs[bucket].ptr->empty()) {
+      qs[bucket].qtime = now;
+      runqueues_[bucket].qtime_.store(now, std::memory_order_relaxed);
+      wake.push_back(bucket);
+    }
+    qs[bucket].ptr->emplace_back(j, now);
+  }
+
+  qs.clear(); // release locks before waking threads
+  for (auto n : wake)
+    // Unfortunately have to notify_all, since we might enqueue more
+    // while the queue is not empty and hence never signal again, so
+    // notify_one is not sufficient.  But notify_all will be wasteful
+    // precisely when the system is not loaded, which is okay.
+    runqueues_[n].qtime_.notify_all();
+}
+
+void
+ThreadPool::quiesce() noexcept
+{
+  assert(ThreadPool::my_thread_pool != this);
+
+  std::vector<size_t> counts(nthreads_);
+  for (size_t i = 0; i < nthreads_; ++i)
+    counts[i] = tstate_[i].count_;
+
+  for (size_t i = 0; i < nthreads_; ++i)
+    while (counts[i] % 2 && counts[i] == tstate_[i].count_) {
+      tstate_[i].please_wake_ = true;
+      tstate_[i].count_.wait(counts[i]);
+    }
 }
 
 void
@@ -33,51 +126,140 @@ ThreadPool::drain() noexcept
 {
   assert(ThreadPool::my_thread_pool != this);
 
-  std::binary_semaphore drainwait(0);
-  spawn([&drainwait] { drainwait.release(); });
-  drainwait.acquire();
-
-  auto qs = qstate_.take();
-  std::vector<size_t> counts(nthreads_);
-  for (size_t i = 0; i < nthreads_; ++i)
-    counts[i] = qs->tstate_[i].count_;
+  std::vector<size_t> backtimes(nthreads_);
+  for (size_t i = 0; i < nthreads_; ++i) {
+    auto ptr = runqueues_[i].q_.take();
+    backtimes[i] = ptr->empty() ? kEmpty : ptr->back().qtime;
+  }
 
   for (size_t i = 0; i < nthreads_; ++i)
-    while (counts[i] % 2 && counts[i] == qs->tstate_[i].count_) {
-      qs->tstate_[i].please_wake_ = true;
-      qs.wait(qs->count_updated_);
-    }
+    if (backtimes[i] != kEmpty)
+      for (;;) {
+	uint64_t qt = runqueues_[i].qtime_;
+        if (qt > backtimes[i])
+	  break;
+	runqueues_[i].wake_on_qtime_increase_ = true;
+	runqueues_[i].qtime_.wait(qt);
+      }
+
+  quiesce();
+}
+
+ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno)
+  : pool_(pool), threadno_(threadno),
+    rndseed_(fastclock::get_ns() << 16 | (threadno ? threadno : 0xffff))
+{
+  my_thread_pool = pool_;
+  my_thread_no = threadno;
+  auto cpu = cpuid();
+  auto bucket = llc_map.bucket(cpu);
+  pool_->bucket_nthreads_[bucket]++;
+  thread_ = std::jthread(&ThreadPool::Worker::work, this);
 }
 
 void
-ThreadPool::worker(size_t threadno)
+ThreadPool::Worker::checkcpu() noexcept
 {
-  my_thread_pool = this;
-  my_thread_no = threadno;
-  size_t count = 0;
+  cpu_ = cpuid();
+  auto newbucket = llc_map.bucket(cpu_);
+  if (newbucket == bucket_)
+    return;
+
+  // The last thread in a bucket can't leave if the queue is non-empty
+  unsigned zero = 0;
+  if (pool_->bucket_nthreads_[bucket_].fetch_sub(1) > 1 ||
+      pool_->runqueues_[bucket_].q_->empty() ||
+      !pool_->bucket_nthreads_[bucket_].compare_exchange_strong(zero, 1))
+    pool_->bucket_nthreads_[bucket_ = newbucket].fetch_add(
+        1, std::memory_order_relaxed);
+}
+
+ThreadPool::Worker::LockedQueue
+ThreadPool::Worker::getq() noexcept
+{
   for (;;) {
-    auto qs = qstate_.take();
-    auto &ts = qs->tstate_[threadno];
-    ts.count_ = count++;
+    checkcpu();
+    auto &myq = pool_->runqueues_[bucket_];
+    if (auto ptr = myq.q_.take(); !ptr->empty())
+      return {.qp = &myq, .ptr = std::move(ptr)};
+
+    // Our queue is empty? Pick older job from two run random runqueues
+    if (auto nb = pool_->nbuckets_; nb > 1) {
+      Queue *qs[2];
+      if (nb > 3) {
+        qs[0] = &pool_->runqueues_[rnd(rndseed_) % pool_->nbuckets_];
+        qs[1] = &pool_->runqueues_[rnd(rndseed_) % pool_->nbuckets_];
+      }
+      else {
+        qs[0] = &pool_->runqueues_[(bucket_ + 1) % nb];
+        qs[1] = &pool_->runqueues_[(bucket_ + 2) % nb];
+      }
+
+      uint64_t qt[2]{qs[0]->qtime(), qs[1]->qtime()};
+      auto i = unsigned{qt[1] < qt[0]};
+      if (qt[i] != kEmpty) // Don't bother with mutex if probably empty
+        if (auto ptr = qs[i]->q_.take(); !ptr->empty())
+          return {.qp = qs[i], .ptr = std::move(ptr)};
+    }
+
+    if (pool_->ss_.stop_requested())
+      return {};
+    myq.qtime_.wait(kEmpty);
+  }
+}
+
+std::coroutine_handle<>
+ThreadPool::Worker::qpop(LockedQueue &lq)
+{
+  auto mycore = core_map.bucket(cpu_);
+  const auto qi = lq.ptr->front();
+  const auto qt = lq.ptr->front().qtime;
+
+  if (core_map.bucket(qi.job.cpuhint) != mycore) {
+    // Try to find work on the same core without going forward more
+    // than 5 microseconds.
+    for (auto it = lq.ptr->begin() + 1;
+         it != lq.ptr->end() && it->qtime < qt + 5'000; ++it)
+      if (core_map.bucket(it->job.cpuhint) != mycore) {
+	auto ret = it->job.value;
+	lq.ptr->erase(it);
+	return ret;
+      }
+  }
+
+  lq.ptr->pop_front();
+
+  uint64_t nqt = lq.ptr->empty() ? kEmpty : lq.ptr->front().qtime;
+  if (nqt != qt) {
+    lq.qp->qtime_.store(kEmpty, std::memory_order_relaxed);
+    if (lq.qp->wake_on_qtime_increase_) {
+      lq.qp->wake_on_qtime_increase_ = false;
+      lq.qp->qtime_.notify_all();
+    }
+  };
+
+  return qi.job.value;
+}
+
+void
+ThreadPool::Worker::work()
+{
+  size_t count = 0;
+  auto &ts = pool_->tstate_[threadno_];
+  for (;;) {
+    ts.count_.store(count++);
     if (ts.please_wake_) {
       ts.please_wake_ = false;
-      qs->count_updated_.notify_all();
+      ts.count_.notify_all();
     }
 
-    for (;;) {
-      if (ss_.stop_requested()) [[unlikely]]
-        return;
-      if (!qs->q_.empty())
-        break;
-      qs.wait(qs->not_empty_);
-    }
+    auto lq = getq();
+    if (!lq.qp)
+      return;
+    auto task = qpop(lq);
 
-    Job work = qs->q_.front();
-    qs->q_.pop();
     ts.count_ = count++;
-    qs.reset();
-
-    work();
+    task();
   }
 }
 
@@ -150,13 +332,6 @@ try {
 } catch (...) {
   return {{0}};
 }
-#else  // !HAVE_SCHED_GETCPU
-CpuMap
-make_cpu_map(std::string_view path)
-{
-  return {{0}};
-}
-#endif // !HAVE_SCHED_GETCPU
 
 CpuMap
 make_llc_map()
@@ -182,5 +357,18 @@ try {
 } catch (...) {
   return {{0}};
 }
+
+#else  // !HAVE_SCHED_GETCPU
+CpuMap
+make_cpu_map(std::string_view path)
+{
+  return {{0}};
+}
+CpuMap
+make_llc_map()
+{
+  return {{0}};
+}
+#endif // !HAVE_SCHED_GETCPU
 
 } // namespace x23

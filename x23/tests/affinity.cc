@@ -12,8 +12,8 @@ main()
   for (size_t i = 0; i < cpumap.map_.size(); ++i)
     std::println("CPU {} -> Bucket {}", i, cpumap.map_[i]);
 
-  std::println("{} total buckets", cpumap.num_buckets_);
+  std::println("{} total buckets", cpumap.nbuckets_);
 
-  std::println("currently running on {} -> {}", sched_getcpu(),
-               cpumap.my_bucket());
+  std::println("currently running on {} -> {}", x23::cpuid(),
+               cpumap.bucket());
 }
