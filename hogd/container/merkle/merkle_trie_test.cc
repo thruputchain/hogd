@@ -1085,6 +1085,26 @@ TEST(MerkleTrie, StressTwo)
   EXPECT_EQ(seen, total);
 }
 
+// Inserts 2 million KV pairs with a single thread.
+TEST(MerkleTrie, SingleThread)
+{
+  constexpr size_t kNumKVPairs = 2'000'000;
+
+  MerkleTrie trie;
+  for (size_t i = 0; i < kNumKVPairs; i++) {
+    HexArray path = generate_random_path();
+    const std::string value = std::to_string(i);
+    bool insert = trie.insert(path, value);
+    if (!insert) {
+      // A duplicate key was generated, so try again.
+      i--;
+      continue;
+    }
+  }
+}
+
+// Inserts 2 million KV pairs in total with 20 threads, so 100,000 KV pairs per
+// thread.
 TEST(MerkleTrie, Multithread)
 {
   constexpr size_t kNumKVPairsPerThread = 100'000;
