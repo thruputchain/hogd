@@ -447,7 +447,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
   }
   CHECK_PTR(to_hash);
 
-  size_++;
+  size_.fetch_add(1, std::memory_order_relaxed);
   generate_hashes_from(to_hash);
   unlock_chain_from(to_hash);
   return true;
@@ -593,9 +593,9 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // The second extension node has a path size larger than 1.
     branch->child[second_branch] = extension;
 
-    // Add 1 to account for the branch node. We are placing the second
-    // extension node as a child of the branch node, so the branch node
-    // accounts for 1 hex digit in the path.
+    // Add 1 to account for the branch node. We are placing the second extension
+    // node as a child of the branch node, so the branch node accounts for 1 hex
+    // digit in the path.
     extension->path =
         extension_cache_path.get_subarray(diverge_idx + 1,
                                           extension_cache_path.size());
@@ -621,8 +621,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 
   // Now we need to place [key_window] into the trie. If [key_window] entirely
   // overlaps with the path in the first extension node, then we place
-  // [key_window] directly into the new branch. Otherwise, we create a leaf
-  // node for [key_window] and add the leaf as a child of the new branch.
+  // [key_window] directly into the new branch. Otherwise, we create a leaf node
+  // for [key_window] and add the leaf as a child of the new branch.
   if (diverge_idx >= key_window.size()) {
     // Place [key_window] directly into the branch.
     CHECK_EQ(diverge_idx, key_window.size());
@@ -643,17 +643,16 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   return leaf;
 }
 
-// We are inserting [k] into the trie, and it conflicts with a leaf node on
-// the same path. This method resolves that conflict.
+// We are inserting [k] into the trie, and it conflicts with a leaf node on the
+// same path. This method resolves that conflict.
 //
 // We create a new branch node and place both [k] and the key in [leaf] as
-// children of this branch. Note that if one of the keys ends on the branch,
-// we place the key directly into the branch node rather than create a leaf
-// for it.
+// children of this branch. Note that if one of the keys ends on the branch, we
+// place the key directly into the branch node rather than create a leaf for it.
 //
 // If [k] and the path in [leaf] have hex digits in common, we also create an
-// extension node with the shared hex digits. We place the new branch node as
-// a child of this extension node.
+// extension node with the shared hex digits. We place the new branch node as a
+// child of this extension node.
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 {
@@ -670,8 +669,8 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   leaf->parent->child[parent_branch_digit] = branch;
 
   // Check to see if [key_window] and the path in [leaf] have any digits in
-  // common. If they do, we create an extension node with the shared digits,
-  // and then we place the new branch as a child of this new extension node.
+  // common. If they do, we create an extension node with the shared digits, and
+  // then we place the new branch as a child of this new extension node.
   size_t common_range_length =
       get_longest_common_range_length(key_window, 0, leaf->path, 0);
   if (common_range_length) {
@@ -770,6 +769,14 @@ MerkleTrie::remove(const Key &k)
   CHECK_PTR(branch);
   CHECK_EQ(branch->type, Node::Type::kBranch);
 
+  // TODO(jhumphri): Acquire the writer lock for the branch above [branch]. If
+  // we cannot do it with [try_lock()], then we must be racing with another
+  // thread. Unlock all nodes in this case and try again.
+  //
+  // Hmm, this would require us to drop the reader lock and then require the
+  // writer lock, so another thread could acquire the lock before we get the
+  // writer lock.
+
   size_t num_children = get_num_children(*branch);
   if (existing_key == branch) {
     // [k] maps to a branch, so clear the branch's value.
@@ -811,7 +818,8 @@ MerkleTrie::remove(const Key &k)
     to_hash = remove_branch(k, branch, num_children);
   }
 
-  size_--;
+  size_.fetch_add(-1, std::memory_order_relaxed);
+  ;
   CHECK_PTR(to_hash);
   generate_hashes_from(to_hash);
   unlock_chain_from(to_hash);

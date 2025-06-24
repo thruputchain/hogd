@@ -12,6 +12,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
@@ -951,7 +952,7 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
 // check on the trie after each operation with [check()].
 TEST(MerkleTrie, Stress)
 {
-  static constexpr size_t kNumIterations = 1'000;
+  constexpr size_t kNumIterations = 1'000;
   MerkleTrie trie;
 
   std::map<HexArray, std::string> total;
@@ -1029,7 +1030,7 @@ TEST(MerkleTrie, Stress)
 // test, but we perform fewer checks to reduce test runtime.
 TEST(MerkleTrie, StressTwo)
 {
-  static constexpr size_t kNumIterations = 50'000;
+  constexpr size_t kNumIterations = 50'000;
   MerkleTrie trie;
 
   std::map<HexArray, std::string> total;
@@ -1082,6 +1083,33 @@ TEST(MerkleTrie, StressTwo)
   seen.clear();
   trie.for_each(f);
   EXPECT_EQ(seen, total);
+}
+
+TEST(MerkleTrie, Multithread)
+{
+  constexpr size_t kNumKVPairsPerThread = 100'000;
+  constexpr size_t kNumThreads = 20;
+
+  MerkleTrie trie;
+  WorkerPool pool(kNumThreads);
+  std::vector<std::future<void>> futures;
+  for (size_t i = 0; i < kNumThreads; i++) {
+    futures.push_back(pool.submit([&trie] {
+      for (size_t i = 0; i < kNumKVPairsPerThread; i++) {
+        HexArray path = generate_random_path();
+        const std::string value = std::to_string(i);
+        bool insert = trie.insert(path, value);
+        if (!insert) {
+          // A duplicate key was generated, so try again.
+          i--;
+          continue;
+        }
+      }
+    }));
+  }
+  for (std::future<void> &future : futures) {
+    future.get();
+  }
 }
 
 } // namespace hogd

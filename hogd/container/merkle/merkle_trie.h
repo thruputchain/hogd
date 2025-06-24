@@ -117,10 +117,10 @@ public:
   bool remove(const Key &k);
 
   // Returns the number of KV pairs in the trie.
-  size_t size() const { return size_; }
+  size_t size() const { return size_.load(std::memory_order_relaxed); }
 
   // Returns true when there are no KV pairs in the trie.
-  bool empty() const { return size_ == 0; }
+  bool empty() const { return size() == 0; }
 
   // Removes all KV pairs from the trie.
   void clear()
@@ -253,7 +253,7 @@ private:
   // branch.
   Node root_;
   // The number of KV pairs in the trie.
-  size_t size_ = 0;
+  std::atomic<size_t> size_ = 0;
   // If this is true, nodes are hashed on every [insert()/remove()] operation.
   // If this is false, nodes are only hashed when [generate_all_hashes()] is
   // called.
