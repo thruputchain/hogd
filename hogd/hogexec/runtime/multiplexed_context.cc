@@ -8,6 +8,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "types.hh"
 
 namespace hogd {
 
