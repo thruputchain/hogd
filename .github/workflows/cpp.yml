@@ -43,9 +43,14 @@ jobs:
     - name: set gcc-14 in check
       run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: check
-      run: ./scripts/check.sh -p
-    - name: build for metrics
-      run: ./scripts/build.sh -d release -t Release -c gcc
+      run: |
+        echo "Starting release build in background..."
+        ./scripts/build.sh -d release -t Release -c gcc > release.log 2>&1 &
+        RELEASE_PID=$!
+        ./scripts/check.sh -p
+        echo "Waiting for release build to finish..."
+        wait $RELEASE_PID
+        echo "Release build complete"
     - name: run metrics
       run: ./scripts/metrics.sh release
 
