@@ -172,7 +172,7 @@ TEST(Node, HashBranch)
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  std::vector<Node> children(Node::kMaxNumBranches, Node{});
+  std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
     Node &child = children[i];
     size_t digit = i % 10;
@@ -194,7 +194,7 @@ TEST(Node, HashBranchSomeNullptr)
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  std::vector<Node> children(Node::kMaxNumBranches, Node{});
+  std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
     if (i % 2) {
       Node &child = children[i];
@@ -239,9 +239,9 @@ TEST(Node, HashExtension)
          extension.hash.size() * sizeof(extension.hash[0]));
   extension.path = HexArray("00010203");
 
-  static Node child{
-      .hash = hash_from_string(
-          "1111111111111111111111111111111111111111111111111111111111111111")};
+  static Node child;
+  child.hash = hash_from_string(
+      "1111111111111111111111111111111111111111111111111111111111111111");
   extension.child[0] = &child;
 
   SHA256Hash hash = extension.compute_node_hash();

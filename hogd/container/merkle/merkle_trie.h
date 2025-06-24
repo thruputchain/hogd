@@ -57,11 +57,11 @@ public:
     free_all_nodes(&root_);
   }
 
-  // Disable copy and support move.
+  // Disable copy and move.
   MerkleTrie(const MerkleTrie &) = delete;
   MerkleTrie &operator=(const MerkleTrie &) = delete;
-  MerkleTrie(MerkleTrie &&) noexcept = default;
-  MerkleTrie &operator=(MerkleTrie &&) noexcept = default;
+  MerkleTrie(MerkleTrie &&) noexcept = delete;
+  MerkleTrie &operator=(MerkleTrie &&) noexcept = delete;
 
   std::string str() const;
   friend std::ostream &operator<<(std::ostream &os, const MerkleTrie &trie)

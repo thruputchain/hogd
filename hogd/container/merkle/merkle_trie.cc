@@ -486,8 +486,15 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   // existing subtree, too.
   Node *branch = nullptr;
   // We are going to reuse [extension] in the if/else bodies below, so we
-  // cache the node since we need its contents after it is reused.
-  const Node extension_cache = *extension;
+  // cache some of the node contents since we need them after the node is
+  // reused.
+  //
+  // [Node] has its copy constructor and copy assignment operator delete, so we
+  // copy the fields individually.
+  Node *const extension_cache_parent = extension->parent;
+  const HexArray extension_cache_path = extension->path;
+  Node *const extension_cache_child = extension->child[0];
+
   auto parent_branch_hex = std::to_integer<size_t>(k.get(idx));
   if (common_range_length) {
     // [key_window] and the extension node have a common range, so we are
@@ -518,11 +525,11 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // First Extension Node: Path is [0x123].
     // Branch Node: A leaf for [key_window] is child [0x4]. The child of
     //              [extension] is child [0x5] in this branch.
-    Node *first = Node::create_extension(/*parent=*/extension_cache.parent);
+    Node *first = Node::create_extension(/*parent=*/extension_cache_parent);
     first->path = key_window.get_subarray(0, diverge_idx);
 
     // Place the first extension node as a child of the branch.
-    extension_cache.parent->child[parent_branch_hex] = first;
+    extension_cache_parent->child[parent_branch_hex] = first;
 
     // Create the new branch node and add it as a child of the first extension
     // node.
@@ -552,11 +559,11 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // Note that we reuse [extension] below.
     branch = extension;
     branch->clear();
-    branch->init_branch(/*parent=*/extension_cache.parent);
+    branch->init_branch(/*parent=*/extension_cache_parent);
     // We are reusing [extension] as [branch], so they are the same pointer.
     // Thus, we can technically omit the line below below, but we keep it for
     // clarity.
-    extension_cache.parent->child[parent_branch_hex] = branch;
+    extension_cache_parent->child[parent_branch_hex] = branch;
   }
   CHECK_PTR(branch);
   // Set [extension] to [nullptr] so that we crash if we accidentally use it
@@ -569,10 +576,10 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   // However, note that in the first case above, we may omit the second
   // extension node and instead place the extension node's child directly as a
   // child of the branch.
-  CHECK_LT(diverge_idx, extension_cache.path.size());
+  CHECK_LT(diverge_idx, extension_cache_path.size());
   auto second_branch =
-      std::to_integer<size_t>(extension_cache.path.get(diverge_idx));
-  if (diverge_idx < extension_cache.path.size() - 1) {
+      std::to_integer<size_t>(extension_cache_path.get(diverge_idx));
+  if (diverge_idx < extension_cache_path.size() - 1) {
     extension = Node::create_extension(/*parent=*/branch);
     // The second extension node has a path size larger than 1.
     branch->child[second_branch] = extension;
@@ -581,13 +588,13 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // extension node as a child of the branch node, so the branch node
     // accounts for 1 hex digit in the path.
     extension->path =
-        extension_cache.path.get_subarray(diverge_idx + 1,
-                                          extension_cache.path.size());
-    extension->child[0] = extension_cache.child[0];
-    // [extension] was reused above, so [extension_cache.child[0]->parent]
+        extension_cache_path.get_subarray(diverge_idx + 1,
+                                          extension_cache_path.size());
+    extension->child[0] = extension_cache_child;
+    // [extension] was reused above, so [extension_cache_child->parent]
     // currently points to the reused node rather than the [extension] we just
     // allocated. Thus, we update the parent pointer to [extension].
-    extension_cache.child[0]->parent = extension;
+    extension_cache_child->parent = extension;
     // Note that this second extension node is *not* on the path from the node
     // that will hold [key_window] to the root. Thus, when we rehash the nodes
     // on [key_window]'s path in the trie, we will not rehash this second
@@ -599,8 +606,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // The second extension node would have a path size of 1, so we instead
     // place the second extension node's child directly as a child of the
     // branch.
-    branch->child[second_branch] = extension_cache.child[0];
-    extension_cache.child[0]->parent = branch;
+    branch->child[second_branch] = extension_cache_child;
+    extension_cache_child->parent = branch;
   }
 
   // Now we need to place [key_window] into the trie. If [key_window] entirely

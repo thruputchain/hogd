@@ -9,6 +9,7 @@
 #include <format>
 #include <optional>
 #include <ostream>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -57,6 +58,14 @@ public:
     std::array<SHA256Hash, kMaxNumBranches> child_hashes;
   };
 
+  Node() = default;
+  // Disable copy and move.
+  Node(const Node &) = delete;
+  Node &operator=(const Node &) = delete;
+  Node(Node &&) noexcept = delete;
+  Node &operator=(Node &&) noexcept = delete;
+
+  std::shared_mutex rw_lock;
   Type type;
   SHA256Hash hash;
   Node *parent;
@@ -81,6 +90,18 @@ public:
   // For extensions, only the first slot is filled. The other
   // [kMaxNumBranches - 1] slots are unused.
   std::array<Node *, kMaxNumBranches> child;
+
+  // Acquire the reader lock.
+  std::shared_lock<std::shared_mutex> lock_reader()
+  {
+    return std::shared_lock<std::shared_mutex>(rw_lock);
+  }
+
+  // Acquire the writer lock.
+  std::unique_lock<std::shared_mutex> lock_writer()
+  {
+    return std::unique_lock<std::shared_mutex>(rw_lock);
+  }
 
   void init_branch(Node *parent)
   {
