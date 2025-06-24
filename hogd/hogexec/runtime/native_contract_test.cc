@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
+#include "hogd/hogexec/runtime/test_util/port_allocator.h"
 #include "storage_item.hh"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -84,11 +85,13 @@ protected:
     contract_map.emplace(1, std::move(contract_1));
 
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
-    snapshot_server_.start_server(10000);
+    snapshot_server_.start_server(port_.port_);
     db_proxy_ =
         std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             10000});
+                                                             port_.port_});
   }
+
+  TemporaryPort port_;
 
   x23::ThreadPool pool_ = x23::ThreadPool(1);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);

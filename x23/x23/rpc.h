@@ -80,8 +80,6 @@
 
 #pragma once
 
-#include <x23/rpc_common.h>
-
 #include <map>
 #include <print>
 #include <stop_token>
@@ -91,7 +89,7 @@
 #include <x23/event.h>
 #include <x23/fileio.h>
 #include <x23/mvar.h>
-#include <x23/serialize.h>
+#include <x23/rpc_common.h> // IWYU pragma: export
 #include <x23/x23.h>
 
 namespace x23 {

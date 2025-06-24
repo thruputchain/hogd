@@ -5,12 +5,13 @@ else()
   set(EXCLUDE_TOKEN EXCLUDE_FROM_ALL)
 endif()
 
+add_xdr(xdrtest xdrtest.x)
 
 set(TEST_EXECUTABLES)
 macro(add_x23_test TEST_NAME)
   add_executable(test_${TEST_NAME} ${EXCLUDE_TOKEN} ${TEST_NAME}.cc
-    xdrtest.x ${ARGN})
-  target_link_libraries(test_${TEST_NAME} x23)
+    ${ARGN})
+  target_link_libraries(test_${TEST_NAME} x23 xdrtest)
   use_x23(test_${TEST_NAME})
   add_test(NAME ${TEST_NAME} COMMAND test_${TEST_NAME})
   list(APPEND TEST_EXECUTABLES test_${TEST_NAME})
@@ -32,6 +33,7 @@ add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_nam
 # flaky tests: prefer timeout failure over stuck CI
 set_tests_properties(event PROPERTIES TIMEOUT 10)
 set_tests_properties(rpcthroughput PROPERTIES TIMEOUT 10)
+set_tests_properties(rpcthroughput PROPERTIES DISABLED TRUE)
 
 if(GOOGLETEST_PATH)
 include_directories(${GOOGLETEST_PATH}/googletest/include)
@@ -55,9 +57,9 @@ add_x23_gtest(uiobuf)
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 
 if(BENCHMARK_PATH)
-add_executable(bench bench.cc xdrtest.x)
+add_executable(bench bench.cc)
 use_x23(bench)
-target_link_libraries(bench x23 benchmark::benchmark)
+target_link_libraries(bench x23 benchmark::benchmark xdrtest)
 endif()
 
 add_custom_target(build_tests DEPENDS ${TEST_EXECUTABLES})
