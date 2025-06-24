@@ -15,23 +15,29 @@ namespace x23 {
 ThreadPool::ThreadPool(size_t nthreads)
   : nthreads_(nthreads), nbuckets_(llc_map.nbuckets_),
     bucket_nthreads_(new std::atomic_uint[nbuckets_]{}),
-    runqueues_(std::make_unique<Queue[]>(nthreads)),
+    runqueues_(std::make_unique<Queue[]>(nbuckets_)),
     tstate_(std::make_unique<ThreadState[]>(nthreads))
 {
-  pool_.reserve(nthreads_);
-  for (size_t i = 0; i < nthreads_; ++i)
-    pool_.push_back(std::make_unique<Worker>(this, i));
+  workers_.reserve(nthreads_);
+  threads_.reserve(nthreads_);
+  for (size_t i = 0; i < nthreads_; ++i) {
+    workers_.push_back(std::make_unique<Worker>(this, i));
+    threads_.emplace_back(&ThreadPool::Worker::work, workers_.back().get());
+  }
 }
 
 ThreadPool::~ThreadPool()
 {
+  std::println(stderr, "ThreadPool::~ThreadPool");
   ss_.request_stop();
   for (unsigned i = 0; i < nbuckets_; ++i) {
     auto ptr = runqueues_[i].q_.take();
     runqueues_[i].qtime_ = 0;
     runqueues_[i].qtime_.notify_all();
   }
-  pool_.clear(); // Join all threads before destroying fields
+  std::println(stderr, "about to join threads");
+  threads_.clear(); // Join all threads before destroying fields
+  std::println(stderr, "joined threads");
 }
 
 void
@@ -42,8 +48,9 @@ ThreadPool::go(const std::vector<Job> &jobs)
   struct Q {
     bool needed{};
     uint64_t qtime{};
-    QPtr ptr;
+    ThreadPool::QPtr ptr;
   };
+
   std::vector<Q> qs(nbuckets_);
   std::vector<unsigned> qnos; // indices i at which qs[i].ptr is locked
   std::vector<unsigned> wake; // buckets that need to be notified
@@ -135,27 +142,20 @@ ThreadPool::drain() noexcept
   for (size_t i = 0; i < nthreads_; ++i)
     if (backtimes[i] != kEmpty)
       for (;;) {
-	uint64_t qt = runqueues_[i].qtime_;
+        uint64_t qt = runqueues_[i].qtime_;
         if (qt > backtimes[i])
-	  break;
-	runqueues_[i].wake_on_qtime_increase_ = true;
-	runqueues_[i].qtime_.wait(qt);
+          break;
+        runqueues_[i].wake_on_qtime_increase_ = true;
+        runqueues_[i].qtime_.wait(qt);
       }
 
   quiesce();
 }
 
-ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno)
+ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno) noexcept
   : pool_(pool), threadno_(threadno),
-    rndseed_(fastclock::get_ns() << 16 | (threadno ? threadno : 0xffff))
-{
-  my_thread_pool = pool_;
-  my_thread_no = threadno;
-  cpu_ = cpuid();
-  bucket_ = llc_map.bucket(cpu_);
-  pool_->bucket_nthreads_[bucket_]++;
-  thread_ = std::jthread(&ThreadPool::Worker::work, this);
-}
+    rndseed_(fastclock::get_ns() << 20 ^ (threadno ? threadno : 0xfffff))
+{}
 
 void
 ThreadPool::Worker::checkcpu() noexcept
@@ -183,7 +183,7 @@ ThreadPool::Worker::getq() noexcept
     if (auto ptr = myq.q_.take(); !ptr->empty())
       return {.qp = &myq, .ptr = std::move(ptr)};
 
-    // Our queue is empty? Pick older job from two run random runqueues
+    // Our queue is empty? Pick older job from two random runqueues
     if (auto nb = pool_->nbuckets_; nb > 1) {
       Queue *qs[2];
       if (nb > 3) {
@@ -211,6 +211,8 @@ ThreadPool::Worker::getq() noexcept
 std::coroutine_handle<>
 ThreadPool::Worker::qpop(LockedQueue &lq)
 {
+  assert(!lq.ptr->empty());
+
   auto mycore = core_map.bucket(cpu_);
   const auto qi = lq.ptr->front();
   const auto qt = lq.ptr->front().qtime;
@@ -221,9 +223,9 @@ ThreadPool::Worker::qpop(LockedQueue &lq)
     for (auto it = lq.ptr->begin() + 1;
          it != lq.ptr->end() && it->qtime < qt + 5'000; ++it)
       if (core_map.bucket(it->job.cpuhint) != mycore) {
-	auto ret = it->job.value;
-	lq.ptr->erase(it);
-	return ret;
+        auto ret = it->job.value;
+        lq.ptr->erase(it);
+        return ret;
       }
   }
 
@@ -244,8 +246,14 @@ ThreadPool::Worker::qpop(LockedQueue &lq)
 void
 ThreadPool::Worker::work()
 {
-  size_t count = 0;
+  my_thread_pool = pool_;
+  my_thread_no = threadno_;
+  cpu_ = cpuid();
+  bucket_ = llc_map.bucket(cpu_);
+  pool_->bucket_nthreads_[bucket_]++;
+
   auto &ts = pool_->tstate_[threadno_];
+  size_t count = 0;
   for (;;) {
     ts.count_.store(count++);
     if (ts.please_wake_) {

@@ -341,7 +341,14 @@ private:
   using QPtr = decltype(Queue::q_)::Ptr;
   std::unique_ptr<Queue[]> runqueues_;
 
-  struct Worker {
+  class Worker {
+  public:
+    Worker(ThreadPool *pool, size_t threadno) noexcept;
+    Worker(Worker &&) noexcept = delete;
+
+    void work();
+
+  private:
     struct LockedQueue {
       Queue *qp;
       QPtr ptr;
@@ -352,15 +359,10 @@ private:
     uint64_t rndseed_;
     int cpu_;
     int bucket_;
-    std::jthread thread_{};
-
-    Worker(ThreadPool *pool, size_t threadno);
-    Worker(Worker &&) noexcept = default;
 
     void checkcpu() noexcept;
     LockedQueue getq() noexcept;
     std::coroutine_handle<> qpop(LockedQueue &ptr);
-    void work();
   };
 
   struct alignas(hardware_destructive_interference_size) ThreadState {
@@ -375,7 +377,8 @@ private:
   inline static thread_local size_t my_thread_no{};
 
   std::stop_source ss_;
-  std::vector<std::unique_ptr<Worker>> pool_;
+  std::vector<std::unique_ptr<Worker>> workers_;
+  std::vector<std::jthread> threads_;
 
   // https://en.wikipedia.org/wiki/Xorshift
   static uint64_t rnd(uint64_t &seed) noexcept
@@ -386,8 +389,6 @@ private:
     x ^= x << 17;
     return seed = x;
   }
-
-  void worker(size_t threadno);
 };
 
 } // namespace x23
