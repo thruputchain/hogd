@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <sys/socket.h>
 #include <utility>
 #include <vector>
 
