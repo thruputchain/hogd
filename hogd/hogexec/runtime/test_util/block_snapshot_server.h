@@ -67,7 +67,7 @@ public:
   x23::Async<ExpectedQueueEntry> get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  void start_server(uint32_t port_number);
+  sockaddr_storage start_server(uint32_t port_number);
 
   // Only used within test setup
   void setup_create_contract(Contract const &contract);

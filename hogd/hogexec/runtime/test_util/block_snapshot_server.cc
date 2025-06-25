@@ -129,7 +129,7 @@ BlockSnapshotServer::abort_transaction(BlockID block, TransactionID tx)
   // unimplemented;
 }
 
-void
+sockaddr_storage
 BlockSnapshotServer::start_server(uint32_t port_number)
 {
   auto lfd = x23::tcplisten(port_number);
@@ -137,6 +137,7 @@ BlockSnapshotServer::start_server(uint32_t port_number)
     perror("listen");
     exit(EXIT_FAILURE);
   }
+  auto out = x23::local_addr(lfd);
 
   [](x23::CoroPoll &cp, BlockSnapshotServer *server,
      x23::UniqueFd lfd) -> x23::Detached {
@@ -145,6 +146,8 @@ BlockSnapshotServer::start_server(uint32_t port_number)
       x23::rpc_stream_logged(cp, *c).server(server);
     }
   }(cp_, this, std::move(lfd));
+
+  return out;
 }
 
 x23::Async<ExpectedRetrocausalQueueBlock>
