@@ -1792,7 +1792,7 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 TEST_F(TryInvokeTest, InvokeErrorHandling)
 {
   // This test is a guard against an unchecked error condition in the
-  // invoke syscall handler (fixing an earlier bug).
+  // invoke syscall handler (fixing an earlier bug, PR #200).
   //
   // There are many ways that an invocation can fail.  This test makes sure
   // those errors are passed back to the caller correctly.
