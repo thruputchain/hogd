@@ -1164,9 +1164,20 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
   CHECK_PTR(root);
   CHECK_LE(idx, path.size());
 
+  Node *const original_root = root;
+  const size_t original_idx = idx;
+
   Node *prev_root = nullptr;
   while (true) {
-    root->rw_lock.lock_reader();
+    if (!root->rw_lock.try_lock_reader()) {
+      // We are conflicting with a writer that is moving up the trie. We defer
+      // to the writer, so unlock all nodes in the chain and try again.
+      unlock_chain_from(root->parent);
+
+      root = original_root;
+      idx = original_idx;
+      continue;
+    }
 
     switch (root->type) {
     case Node::Type::kBranch:

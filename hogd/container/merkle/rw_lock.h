@@ -35,22 +35,27 @@ public:
   RwLock &operator=(RwLock &&) noexcept = delete;
 
   // TODO: Do not use x86 instructions.
-  void lock_reader()
+  bool try_lock_reader()
   {
     while (true) {
-      while (writer_waiting_for_upgrade_.load(std::memory_order_relaxed)) {
-        asm volatile("pause");
+      if (writer_waiting_for_upgrade_.load(std::memory_order_relaxed)) {
+        return false;
       }
 
       int64_t cur;
-      while ((cur = lock_.load(std::memory_order_relaxed)) == kWriterLocked) {
-        asm volatile("pause");
+      if ((cur = lock_.load(std::memory_order_relaxed)) == kWriterLocked) {
+        return false;
       }
+      // TODO(jhumphri): Is this safe? What is the writer gets the lock while
+      // the reader is on this line, and then the writer deletes the node before
+      // the reader runs the cmpxchg below?
       if (lock_.compare_exchange_weak(/*expected=*/cur, /*desired=*/cur + 1,
                                       /*success=*/std::memory_order_acquire,
                                       /*failure=*/std::memory_order_relaxed)) {
-        return;
+        return true;
       }
+      // If the cmpxchg above fails, we try again because we expect there to be
+      // a lot of readers contending on the lock.
       asm volatile("pause");
       // [cur] is overwritten with the value that was in [lock_] when the
       // cmpxchg was performanced. [cur] is set again in the while loop

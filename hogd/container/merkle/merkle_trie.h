@@ -75,7 +75,13 @@ public:
   // Returns the hash of the root node in the trie.
   SHA256Hash get_root_hash()
   {
-    root_.rw_lock.lock_reader();
+    // It is fine to spin on [try_lock_reader()] because we know the root node
+    // is never deleted by a writer.
+    while (!root_.rw_lock.try_lock_reader()) {
+      // TODO(jhumphri): Do not use x86 instructions.
+      asm volatile("pause");
+    }
+
     SHA256Hash ret = root_.hash;
     root_.rw_lock.unlock();
     return ret;
