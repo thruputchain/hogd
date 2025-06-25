@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <sys/socket.h>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
@@ -29,7 +30,7 @@ public:
   }
 
   // Start the server on the specified port
-  void start_server(uint32_t port_number);
+  sockaddr_storage start_server(uint32_t port_number);
 
   // RPC methods
 

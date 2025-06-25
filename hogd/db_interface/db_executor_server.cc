@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <sys/socket.h>
 #include <utility>
 
 #include "contract.hh"
@@ -19,7 +20,7 @@
 
 namespace hogd {
 
-void
+sockaddr_storage
 DbExecutorServer::start_server(uint32_t port_number)
 {
   auto lfd = x23::tcplisten(port_number);
@@ -27,6 +28,7 @@ DbExecutorServer::start_server(uint32_t port_number)
     perror("listen");
     exit(EXIT_FAILURE);
   }
+  auto out = x23::local_addr(lfd);
 
   [](x23::CoroPoll &cp, DbExecutorServer *server,
      x23::UniqueFd lfd) -> x23::Detached {
@@ -35,6 +37,8 @@ DbExecutorServer::start_server(uint32_t port_number)
       x23::rpc_stream_logged(cp, *c).server(server);
     }
   }(cp_, this, std::move(lfd));
+
+  return out;
 }
 
 bool
