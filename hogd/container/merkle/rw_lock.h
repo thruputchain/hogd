@@ -76,6 +76,16 @@ public:
                                          /*failure=*/std::memory_order_relaxed);
   }
 
+  bool try_upgrade_to_writer()
+  {
+    // We expect only the current thread to be a reader, so we set [expected] to
+    // 1.
+    int64_t expected = 1;
+    return lock_.compare_exchange_strong(expected, /*desired=*/kWriterLocked,
+                                         /*success=*/std::memory_order_acquire,
+                                         /*failure=*/std::memory_order_relaxed);
+  }
+
   void print_lock() const
   {
     printf("lock: %ld (%p)\n", lock_.load(std::memory_order_relaxed), this);

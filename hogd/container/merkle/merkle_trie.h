@@ -105,6 +105,10 @@ public:
 
   // Finds the value for key [k]. If key [k] does not exist in the trie, returns
   // a nullptr.
+  //
+  // We do not guarantee pointer stability for the value. If the trie is mutated
+  // while the caller holds the returned pointer, the pointer may no longer be
+  // valid.
   T *find(const Key &k);
 
   // Inserts a KV pair with key [k] and value [obj] into the trie. You must pass

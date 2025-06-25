@@ -395,13 +395,27 @@ MerkleTrie::insert(const Key &k, T &&obj)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  Node *branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/true,
-                                           idx, existing_key);
-  if (existing_key) {
-    // [k] already exists in the trie, so we cannot insert it.
-    unlock_chain_from(existing_key);
-    return false;
+  Node *branch;
+  while (true) {
+    branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/false, idx,
+                                       existing_key);
+    if (existing_key) {
+      // [k] already exists in the trie, so we cannot insert it.
+      unlock_chain_from(existing_key);
+      return false;
+    }
+    if (branch->rw_lock.try_upgrade_to_writer()) {
+      break;
+    }
+    // Need to try again. We cannot block on acquiring the writer lock because
+    // we could deadlock with another thread trying to do the same.
+    //
+    // We also cannot drop the lock and then acquire it as the writer because it
+    // is possible that another thread is attempting to remove [k], acquires the
+    // writer lock for [branch] before we do, and then removes [k].
+    unlock_chain_from(branch);
   }
+
   CHECK_PTR(branch);
   CHECK_EQ(branch->type, Node::Type::kBranch);
   CHECK_LE(idx, k.size());
