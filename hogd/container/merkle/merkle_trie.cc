@@ -411,8 +411,8 @@ MerkleTrie::insert(const Key &k, T &&obj)
     // we could deadlock with another thread trying to do the same.
     //
     // We also cannot drop the lock and then acquire it as the writer because it
-    // is possible that another thread is attempting to remove [k], acquires the
-    // writer lock for [branch] before we do, and then removes [k].
+    // is possible that another thread is attempting to insert [k], acquires the
+    // writer lock for [branch] before we do, and then inserts [k].
     unlock_chain_from(branch);
   }
 
@@ -788,25 +788,56 @@ MerkleTrie::remove(const Key &k)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  Node *branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/true,
-                                           idx, existing_key);
-  if (!existing_key) {
-    // [k] does not exist in the trie, so we cannot remove it.
-    unlock_chain_from(branch);
-    return false;
+  Node *branch;
+  size_t num_children;
+
+  while (true) {
+    branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/true, idx,
+                                       existing_key);
+    if (!existing_key) {
+      // [k] does not exist in the trie, so we cannot remove it.
+      unlock_chain_from(branch);
+      return false;
+    }
+    CHECK_PTR(branch);
+    CHECK_EQ(branch->type, Node::Type::kBranch);
+
+    if (!branch->rw_lock.try_upgrade_to_writer()) {
+      // Need to try again. We cannot block on acquiring the writer lock because
+      // we could deadlock with another thread trying to do the same.
+      //
+      // We also cannot drop the lock and then acquire it as the writer because
+      // it is possible that another thread is attempting to remove [k],
+      // acquires the writer lock for [branch] before we do, and then removes
+      // [k].
+      unlock_chain_from(existing_key);
+      continue;
+    }
+
+    num_children = get_num_children(*branch);
+    if (branch != &root_ &&
+        (num_children < 2 || (num_children == 1 && branch->value))) {
+      // We need to remove this branch node, so acquire the writer lock for the
+      // nodes above us until we reach the next branch. The next branch is
+      // either the parent, or if the parent is an extension, then the
+      // grandparent.
+      if (!branch->parent->rw_lock.try_upgrade_to_writer()) {
+        unlock_chain_from(existing_key);
+        continue;
+      }
+      if (branch->parent->type != Node::Type::kBranch) {
+        CHECK_EQ(branch->parent->type, Node::Type::kExtension);
+        CHECK_EQ(branch->parent->parent->type, Node::Type::kBranch);
+
+        if (!branch->parent->parent->rw_lock.try_upgrade_to_writer()) {
+          unlock_chain_from(existing_key);
+          continue;
+        }
+      }
+    }
+    break;
   }
-  CHECK_PTR(branch);
-  CHECK_EQ(branch->type, Node::Type::kBranch);
 
-  // TODO(jhumphri): Acquire the writer lock for the branch above [branch]. If
-  // we cannot do it with [try_lock()], then we must be racing with another
-  // thread. Unlock all nodes in this case and try again.
-  //
-  // Hmm, this would require us to drop the reader lock and then require the
-  // writer lock, so another thread could acquire the lock before we get the
-  // writer lock.
-
-  size_t num_children = get_num_children(*branch);
   if (existing_key == branch) {
     // [k] maps to a branch, so clear the branch's value.
     CHECK(branch->value.has_value());
@@ -943,6 +974,8 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
     CHECK_EQ(num_children, 1UL);
     CHECK(!branch->value.has_value());
 
+    child->rw_lock.lock_writer();
+
     if (child->type == Node::Type::kBranch) {
       // The remaining child under [branch] is also a branch. Thus, we can
       // replace [branch] with an extension node. The path in the extension
@@ -971,7 +1004,6 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
       // Add [child->path] to [cur_path] since we then overwrite [child->path]
       // entirely with [cur_path]. We want to make sure the existing path in
       // [child] remains.
-      child->rw_lock.lock_writer();
       cur_path.append(child->path);
       child->path = cur_path;
 
