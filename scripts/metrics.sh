@@ -51,6 +51,9 @@ fi
 ./metrics_history/scripts/make_metric_file.sh fibonacci-codesize $branch $commit $commit_time
 ./scripts/metrics/fibonacci_codesize.sh $BUILD_DIR > metrics_history/metrics/fibonacci-codesize/$branch/${commit_time}_$commit
 
+./metrics_history/scripts/make_metric_file.sh fibonacci-wasmonly $branch $commit $commit_time
+./scripts/metrics/fibonacci_wasmonly_bench.sh $BUILD_DIR > metrics_history/metrics/fibonacci-wasmonly/$branch/${commit_time}_$commit
+
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
 
