@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <gtest/gtest.h>
 
 #include <cassert>
@@ -22,6 +23,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/preset_native_token.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "model_checker/async.h"
@@ -30,6 +32,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "vscode/hogd/hogexec/runtime/syscall_inner.h"
 
 namespace hogd {
 
@@ -1784,6 +1787,148 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 
     work_queue.advance_cursor();
   }
+}
+
+TEST_F(TryInvokeTest, InvokeErrorHandling) {
+  // This test is a guard against an unchecked error condition in the
+  // invoke syscall handler (fixing an earlier bug).
+  //
+  // There are many ways that an invocation can fail.  This test makes sure those errors
+  // are passed back to the caller correctly.
+  
+  // This test creates two native contracts.  The first has two methods.
+  // The first method returns a deterministic error and consumes 100 gas.
+  // The second method returns success.
+  // The second contract has one method.
+  // These are both deployed to separate addresses.
+  // This second contract's method performs the following actions:
+  // 1. try_invoke on a third address, which has no contract deployed there.
+  //    The try_invoke should fail, and the error should be checked as the appropriate error code.
+  // 2. try_invoke on the first contract, but with a method number that does not exist.
+  //    The try_invoke should fail, and the error should be checked as the appropriate error code.
+  // 3. try_invoke on the first contract, with the correct method number, but with a gas limit of 50.
+  //    The try_invoke should fail, and the error should be checked as the appropriate error code.
+  // 4. try_invoke on the first contract, with the correct method number, but with a gas limit of 1000.
+  //    The try_invoke should succeed, and the error should be checked as the appropriate error code.
+  // 5. try_invoke on the first contract, on the method that returns success.  Should succeed.
+ 
+
+  constexpr uint32_t kErrorContractId = 0;
+  constexpr uint32_t kCallerContractId = 1;
+  ContractAddress error_contract_addr = make_contract_address(10);
+  ContractAddress caller_contract_addr = make_contract_address(11);
+  ContractAddress missing_contract_addr = make_contract_address(12);
+
+  // Contract 0: always errors, consumes 100 gas
+  auto error_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0, [](SystemCallHandler & /*handler*/, NativeRuntime &runtime) -> InvokeStatus<void> {
+            if (!runtime.consume_gas(100)) {
+              return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+            }
+            return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+          }},
+          {1, [](SystemCallHandler & /*handler*/, NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+            return {};
+          }}});
+
+  // Contract 1: performs the four try_invoke error cases
+  auto caller_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0, [=](SystemCallHandler &handler, NativeRuntime &runtime) -> InvokeStatus<void> {
+            RuntimeMemoryLength output_return_buffer_len;
+            WrappedGasAmount remaining_gas = {runtime.get_available_gas()};
+            Calldata calldata = {};
+            std::span<const std::byte> calldata_span = std::as_bytes(std::span(calldata.data(), calldata.size()));
+            // 1. try_invoke on a missing contract
+            {
+              auto [res, _gas] = syscall_Invoke_inner(
+                handler, 
+                remaining_gas, 
+                missing_contract_addr, 0, 1000, calldata_span, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke), output_return_buffer_len);
+              
+              if (!res.has_value() || res.value() != SyscallErrorCode::kContractLookupFailed) {
+                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+              }
+            }
+            // 2. try_invoke on error_contract, but with a method that does not exist
+            {
+              auto [res, _gas] = syscall_Invoke_inner(
+                handler, 
+                remaining_gas, 
+                error_contract_addr, 999, 1000, calldata_span, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke), output_return_buffer_len);
+              if (!res.has_value() || res.value() != SyscallErrorCode::kDeterministicWasm) {
+                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+              }
+            } 
+            // 3. try_invoke on error_contract, correct method, but with gas limit 50 (not enough)
+            {
+              auto [res, _gas] = syscall_Invoke_inner(
+                handler, 
+                remaining_gas, 
+                error_contract_addr, 0, 50, calldata_span, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke), output_return_buffer_len);
+              if (res.has_value() || res.error().code() != HostFnErrorCode::kHostOutOfGas) {
+                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+              }
+            }
+            // 4. try_invoke on error_contract, correct method, with gas limit 1000 (enough)
+            {
+              auto [res, _gas] = syscall_Invoke_inner(
+                handler, 
+                remaining_gas, 
+                error_contract_addr, 0, 1000, calldata_span, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke), output_return_buffer_len);
+              if (!res.has_value() || res.value() != SyscallErrorCode::kDeterministicWasm) {
+                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+              }
+            }
+            // 5. try_invoke on error_contract, valid method, with gas limit 1000 (enough)
+            {
+              auto [res, _gas] = syscall_Invoke_inner(
+                handler, 
+                remaining_gas, 
+                error_contract_addr, 1, 1000, calldata_span, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke), output_return_buffer_len);
+              if (!res.has_value() || res.value() != SyscallErrorCode::kNone) {
+                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+              }
+            }
+
+            return {};
+          }}});
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(kErrorContractId, std::move(error_contract));
+  contract_map.emplace(kCallerContractId, std::move(caller_contract));
+  auto runtime_context = std::make_shared<NativeContext>(std::move(contract_map));
+
+  // Deploy contracts
+  auto error_contract_xdr = make_native_contract(kErrorContractId);
+  in_memory_db_.write_contract(sha256(*error_contract_xdr), error_contract_xdr);
+  in_memory_db_.write_deployment(error_contract_addr, sha256(*error_contract_xdr));
+
+  auto caller_contract_xdr = make_native_contract(kCallerContractId);
+  in_memory_db_.write_contract(sha256(*caller_contract_xdr), caller_contract_xdr);
+  in_memory_db_.write_deployment(caller_contract_addr, sha256(*caller_contract_xdr));
+
+  // Grant tokens to both contracts
+  setup_grant_storage_token(error_contract_addr, 1'000'000'000);
+  setup_grant_storage_token(caller_contract_addr, 1'000'000'000);
+
+  // Now invoke the caller contract
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{
+              .invocation = Invocation{
+                  .invoked_address = caller_contract_addr,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = UINT64_MAX,
+                  .calldata = {}}}},
+      runtime_context);
+
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction()();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
