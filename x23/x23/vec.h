@@ -40,16 +40,24 @@
 #include <algorithm>
 #include <cassert>
 #include <climits>
+#include <compare>
+#include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <format>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <ranges>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include <x23/cleanup.h>
 #include <x23/config.h>
