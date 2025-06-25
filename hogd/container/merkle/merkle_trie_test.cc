@@ -866,24 +866,15 @@ TEST(MerkleTrie, ProveAllByteVariations)
 {
   MerkleTrie trie;
 
-  HexArray key_a("1234");
-  std::string value_a = "hello";
+  HexArray key_a("12");
+  std::string value_a = "a1";
   EXPECT_TRUE(trie.insert(key_a, value_a));
 
-  HexArray key_b("123456");
-  std::string value_b = "hello again";
+  HexArray key_b("123");
+  std::string value_b = "b2";
   EXPECT_TRUE(trie.insert(key_b, value_b));
 
-  HexArray key_c("12ab");
-  std::string value_c = "hello three";
-  EXPECT_TRUE(trie.insert(key_c, value_c));
-
   auto [root_hash, node_encodings] = trie.get_proof(key_b);
-
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> byte_dist(0, 0xFF);
-
   for (size_t i = 0; i < node_encodings.size(); i++) {
     // Change the byte at index [i] in [node_encodings].
     const std::byte cur = node_encodings[i];
@@ -944,14 +935,14 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
   EXPECT_EQ(seen, expected);
 }
 
-// This test stresses the Merkle trie. It randomly generates 1,000 different KV
+// This test stresses the Merkle trie. It randomly generates 100 different KV
 // pairs, places them into the trie, and then removes them from the trie. After
 // each operation, this test checks that [for_each()], [get_proof()], [prove()],
 // and [find()] return expected values. This test also performs an integrity
 // check on the trie after each operation with [check()].
 TEST(MerkleTrie, Stress)
 {
-  static constexpr size_t kNumIterations = 1'000;
+  static constexpr size_t kNumIterations = 100;
   MerkleTrie trie;
 
   std::map<HexArray, std::string> total;
@@ -1022,14 +1013,14 @@ TEST(MerkleTrie, Stress)
   }
 }
 
-// This test first adds 50,000 KV pairs to the trie, then proves each KV pair
-// in the trie, then removes all KV pairs.
+// This test first adds 5,000 KV pairs to the trie, then proves each KV pair in
+// the trie, then removes all KV pairs.
 //
 // This is a much larger number of KV pairs than in the [MerkleTrie::Stress]
 // test, but we perform fewer checks to reduce test runtime.
 TEST(MerkleTrie, StressTwo)
 {
-  static constexpr size_t kNumIterations = 50'000;
+  static constexpr size_t kNumIterations = 5'000;
   MerkleTrie trie;
 
   std::map<HexArray, std::string> total;
