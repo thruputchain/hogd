@@ -1085,7 +1085,7 @@ TEST(MerkleTrie, StressTwo)
   EXPECT_EQ(seen, total);
 }
 
-// Inserts 2 million KV pairs with a single thread.
+// Inserts and removes 2 million KV pairs with a single thread.
 TEST(MerkleTrie, SingleThread)
 {
   constexpr size_t kNumKVPairs = 2'000'000;
@@ -1115,12 +1115,11 @@ TEST(MerkleTrie, SingleThread)
   }
 }
 
-// Inserts 2 million KV pairs in total with 20 threads, so 100,000 KV pairs per
-// thread.
+// Inserts and removes 2 million KV pairs in total with multiple threads.
 TEST(MerkleTrie, Multithread)
 {
-  constexpr size_t kNumKVPairs = 200'000;
-  constexpr size_t kNumThreads = 2;
+  constexpr size_t kNumKVPairs = 2'000'000;
+  constexpr size_t kNumThreads = 8;
   constexpr size_t kNumKVPairsPerThread = kNumKVPairs / kNumThreads;
 
   MerkleTrie trie;
