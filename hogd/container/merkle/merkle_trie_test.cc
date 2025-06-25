@@ -1091,15 +1091,22 @@ TEST(MerkleTrie, SingleThread)
   constexpr size_t kNumKVPairs = 2'000'000;
 
   MerkleTrie trie;
+  std::vector<HexArray> paths;
   for (size_t i = 0; i < kNumKVPairs; i++) {
-    HexArray path = generate_random_path();
+    paths.push_back(generate_random_path());
     const std::string value = std::to_string(i);
-    bool insert = trie.insert(path, value);
+    bool insert = trie.insert(paths.back(), value);
     if (!insert) {
       // A duplicate key was generated, so try again.
+      paths.pop_back();
       i--;
       continue;
     }
+  }
+
+  // Now remove all of the KV pairs.
+  for (size_t i = 0; i < kNumKVPairs; i++) {
+    CHECK(trie.remove(paths[i]));
   }
 }
 
@@ -1114,17 +1121,33 @@ TEST(MerkleTrie, Multithread)
   MerkleTrie trie;
   WorkerPool pool(kNumThreads);
   std::vector<std::future<void>> futures;
+  std::vector<std::vector<HexArray>> paths(kNumThreads);
   for (size_t i = 0; i < kNumThreads; i++) {
-    futures.push_back(pool.submit([&trie] {
+    futures.push_back(pool.submit([i, &trie, &paths] {
       for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
-        HexArray path = generate_random_path();
+        printf("%zu %zu\n", i, j);
+        paths[i].push_back(generate_random_path());
         const std::string value = std::to_string(j);
-        bool insert = trie.insert(path, value);
+        bool insert = trie.insert(paths[i].back(), value);
         if (!insert) {
           // A duplicate key was generated, so try again.
+          paths[i].pop_back();
           j--;
           continue;
         }
+      }
+    }));
+  }
+  for (std::future<void> &future : futures) {
+    future.get();
+  }
+  futures.clear();
+
+  // Now remove all of the KV pairs.
+  for (size_t i = 0; i < kNumThreads; i++) {
+    futures.push_back(pool.submit([i, &trie, &paths] {
+      for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
+        CHECK(trie.remove(paths[i][j]));
       }
     }));
   }

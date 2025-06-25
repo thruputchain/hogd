@@ -382,8 +382,8 @@ MerkleTrie::find_node(const Key &k)
 {
   size_t idx = 0;
   Node *existing_key = nullptr;
-  Node *branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/false,
-                                           idx, existing_key);
+  Node *branch =
+      traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
   if (!existing_key) {
     unlock_chain_from(branch);
   }
@@ -397,8 +397,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
   Node *existing_key = nullptr;
   Node *branch;
   while (true) {
-    branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/false, idx,
-                                       existing_key);
+    branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
     if (existing_key) {
       // [k] already exists in the trie, so we cannot insert it.
       unlock_chain_from(existing_key);
@@ -407,15 +406,15 @@ MerkleTrie::insert(const Key &k, T &&obj)
     if (branch->rw_lock.try_upgrade_to_writer()) {
       break;
     }
-    // Need to try again. We cannot block on acquiring the writer lock because
-    // we could deadlock with another thread trying to do the same.
+    printf("could not upgrade to writer (%p, root = %p)\n", branch, &root_);
+    // We need to try again. We cannot block on acquiring the writer lock
+    // because we could deadlock with another thread trying to do the same.
     //
     // We also cannot drop the lock and then acquire it as the writer because it
     // is possible that another thread is attempting to insert [k], acquires the
     // writer lock for [branch] before we do, and then inserts [k].
     unlock_chain_from(branch);
   }
-
   CHECK_PTR(branch);
   CHECK_EQ(branch->type, Node::Type::kBranch);
   CHECK_LE(idx, k.size());
@@ -792,8 +791,7 @@ MerkleTrie::remove(const Key &k)
   size_t num_children;
 
   while (true) {
-    branch = traverse_to_lowest_branch(/*path=*/k, &root_, /*write=*/true, idx,
-                                       existing_key);
+    branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
     if (!existing_key) {
       // [k] does not exist in the trie, so we cannot remove it.
       unlock_chain_from(branch);
@@ -803,8 +801,8 @@ MerkleTrie::remove(const Key &k)
     CHECK_EQ(branch->type, Node::Type::kBranch);
 
     if (!branch->rw_lock.try_upgrade_to_writer()) {
-      // Need to try again. We cannot block on acquiring the writer lock because
-      // we could deadlock with another thread trying to do the same.
+      // We need to try again. We cannot block on acquiring the writer lock
+      // because we could deadlock with another thread trying to do the same.
       //
       // We also cannot drop the lock and then acquire it as the writer because
       // it is possible that another thread is attempting to remove [k],
@@ -816,12 +814,15 @@ MerkleTrie::remove(const Key &k)
 
     num_children = get_num_children(*branch);
     if (branch != &root_ &&
-        (num_children < 2 || (num_children == 1 && branch->value))) {
-      // We need to remove this branch node, so acquire the writer lock for the
-      // nodes above us until we reach the next branch. The next branch is
-      // either the parent, or if the parent is an extension, then the
+        (num_children == 2 || (num_children == 1 && branch->value))) {
+      // We are going to remove this branch node below, so acquire the writer
+      // lock for the nodes above us until we reach the next branch. The next
+      // branch is either the parent, or if the parent is an extension, then the
       // grandparent.
       if (!branch->parent->rw_lock.try_upgrade_to_writer()) {
+        // We do not block on acquiring the writer lock when moving up the trie
+        // because we could deadlock with another thread that is acquiring
+        // writer locks as it moves down the trie.
         unlock_chain_from(existing_key);
         continue;
       }
@@ -830,6 +831,8 @@ MerkleTrie::remove(const Key &k)
         CHECK_EQ(branch->parent->parent->type, Node::Type::kBranch);
 
         if (!branch->parent->parent->rw_lock.try_upgrade_to_writer()) {
+          // As explained above, we do not block on acquiring the writer lock
+          // when we move up the trie.
           unlock_chain_from(existing_key);
           continue;
         }
@@ -992,6 +995,8 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
       new_child->path = cur_path;
       new_child->child[0] = child;
       child->parent = new_child;
+
+      child->rw_lock.unlock();
     }
     else {
       // The remaining child under [branch] is either an extension node or a
@@ -1146,20 +1151,14 @@ MerkleTrie::walk(
 // static
 Node *
 MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
-                                      bool write, size_t &idx,
-                                      Node *&existing_key)
+                                      size_t &idx, Node *&existing_key)
 {
   CHECK_PTR(root);
   CHECK_LE(idx, path.size());
 
   Node *prev_root = nullptr;
   while (true) {
-    if (write) {
-      root->rw_lock.lock_writer();
-    }
-    else {
-      root->rw_lock.lock_reader();
-    }
+    root->rw_lock.lock_reader();
 
     switch (root->type) {
     case Node::Type::kBranch:

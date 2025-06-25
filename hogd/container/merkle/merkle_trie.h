@@ -229,8 +229,7 @@ private:
   // function is called so that the caller can determine whether [existing_key]
   // is set to a node.
   static Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
-                                         bool write, size_t &idx,
-                                         Node *&existing_key);
+                                         size_t &idx, Node *&existing_key);
 
   // Unlocks all nodes from [n] up through the root (inclusive).
   static void unlock_chain_from(Node *n);
