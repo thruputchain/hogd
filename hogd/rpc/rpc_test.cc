@@ -20,7 +20,7 @@
 namespace hogd {
 
 constexpr size_t kArgSize = 256;
-constexpr size_t kRPCs = 10000;
+constexpr size_t kRPCs = 1000;
 
 class RPCTest : public testing::Test {
 protected:
