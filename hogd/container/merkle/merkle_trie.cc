@@ -805,7 +805,7 @@ MerkleTrie::remove(const Key &k)
     CHECK_PTR(branch);
     CHECK_EQ(branch->type, Node::Type::kBranch);
 
-    if (!branch->rw_lock.try_upgrade_to_writer()) {
+    if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
       // We need to try again. We cannot block on acquiring the writer lock
       // because we could deadlock with another thread trying to do the same.
       //
@@ -814,7 +814,6 @@ MerkleTrie::remove(const Key &k)
       // acquires the writer lock for [branch] before we do, and then removes
       // [k].
       unlock_chain_from(existing_key);
-      printf("continue 1\n");
       continue;
     }
 
@@ -825,23 +824,22 @@ MerkleTrie::remove(const Key &k)
       // lock for the nodes above us until we reach the next branch. The next
       // branch is either the parent, or if the parent is an extension, then the
       // grandparent.
-      if (!branch->parent->rw_lock.try_upgrade_to_writer()) {
+      if (!branch->parent->rw_lock.try_upgrade_to_writer_if_only_one()) {
         // We do not block on acquiring the writer lock when moving up the trie
         // because we could deadlock with another thread that is acquiring
         // writer locks as it moves down the trie.
         unlock_chain_from(existing_key);
-        printf("continue 2\n");
         continue;
       }
       if (branch->parent->type != Node::Type::kBranch) {
         CHECK_EQ(branch->parent->type, Node::Type::kExtension);
         CHECK_EQ(branch->parent->parent->type, Node::Type::kBranch);
 
-        if (!branch->parent->parent->rw_lock.try_upgrade_to_writer()) {
+        if (!branch->parent->parent->rw_lock
+                 .try_upgrade_to_writer_if_only_one()) {
           // As explained above, we do not block on acquiring the writer lock
           // when we move up the trie.
           unlock_chain_from(existing_key);
-          printf("continue 3\n");
           continue;
         }
       }
@@ -1274,7 +1272,10 @@ MerkleTrie::generate_hashes_from(Node *n) const
   while (n) {
     if (!n->rw_lock.i_am_current_writer() &&
         !n->rw_lock.try_upgrade_to_writer_if_only_one()) {
-      break;
+      // We are conflicting with a writer for [n]. We can stop generating hashes
+      // because we know the other thread will generate a hashes for all nodes
+      // from [n] to the root (inclusive).
+      return;
     }
     n->hash = n->compute_node_hash();
     n = n->parent;

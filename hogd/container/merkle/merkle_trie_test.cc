@@ -1159,18 +1159,22 @@ TEST(MerkleTrie, Multithread)
   }
 
   // Now remove all of the KV pairs.
-  // for (size_t i = 0; i < kNumThreads; i++) {
-  //   futures.push_back(pool.submit([i, &trie, &paths] {
-  //     for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
-  //     printf("remove %zu %zu\n", i, j);
-  //       CHECK(trie.remove(paths[i][j]));
-  //     }
-  //   }));
-  // }
-  // for (std::future<void> &future : futures) {
-  //   future.get();
-  // }
+  for (size_t i = 0; i < kNumThreads; i++) {
+    futures.push_back(pool.submit([i, &trie, &paths] {
+      for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
+        // printf("remove %zu %zu\n", i, j);
+        CHECK(trie.remove(paths[i][j]));
+      }
+    }));
+  }
+  for (std::future<void> &future : futures) {
+    future.get();
+  }
 
+  EXPECT_TRUE(trie.empty());
+  EXPECT_TRUE(trie.check());
+
+  // TODO(jhumphri): Release reader locks as we move down the trie.
   // TODO(jhumphri): Try insert and remove at the same time.
 }
 
