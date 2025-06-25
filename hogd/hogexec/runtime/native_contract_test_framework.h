@@ -150,8 +150,8 @@ private:
     uint32_t port = x23::get_port(addr);
 
     db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             port});
+        std::make_unique<DatabaseProxy>(cp_,
+                                        LocalMockDB{.read_port_number_ = port});
     [[maybe_unused]] auto res = block_manager_.add_child(0, 1, mode);
     assert(res);
     block_number_++;
