@@ -95,7 +95,7 @@ CoroPollImpl::check(int timeout)
           cbs.push_back({h, f.callbacks[write].cpuhint});
   }
   ptr.reset();
-  pool_.go(cbs);
+  pool_.go(std::move(cbs));
 }
 
 int

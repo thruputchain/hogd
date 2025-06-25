@@ -149,7 +149,7 @@ public:
   ThreadPool(size_t nthreads = nproc());
   ~ThreadPool();
 
-  void go(const std::vector<Job> &jobs);
+  void go(std::vector<Job> &&jobs);
   void go(Job item) { go(std::vector{item}); }
 
   // Make a callback asynchronously in another thread
@@ -319,26 +319,31 @@ private:
   // Timestamp for empty queues
   static constexpr uint64_t kEmpty = std::numeric_limits<uint64_t>::max();
 
-  // Check an extra queue in round-robin order when enquing jobs, so
-  // as to migrate to underutilized run queues.
-  std::atomic_uint32_t rr_qno_{};
-
   // Number of threads currently running in each bucket
-  std::unique_ptr<std::atomic_uint[]> bucket_nthreads_;
+  std::unique_ptr<std::atomic_uint[]> queue_nthreads_;
+  unsigned queue_nthreads(int qn)
+  {
+    return queue_nthreads_[qn].load(std::memory_order_relaxed);
+  }
 
   struct QueueItem {
     Job job;        // Job to run
     uint64_t qtime; // Time job was placed in queue
   };
   struct Queue {
-    // qtime of oldest JOb at front of queue, or kEmpty if empty
-    std::atomic<uint64_t> qtime_;
+    // qtime of oldest Job at front of queue, or kEmpty if empty
+    std::atomic<uint64_t> qtime_{kEmpty};
     std::atomic_bool wake_on_qtime_increase_{false};
     MVar<std::deque<QueueItem>> q_;
 
     uint64_t qtime() const { return qtime_.load(std::memory_order_relaxed); }
   };
   using QPtr = decltype(Queue::q_)::Ptr;
+  struct LockedQueue {
+    int qno;
+    QPtr ptr;
+  };
+
   std::unique_ptr<Queue[]> runqueues_;
 
   class Worker {
@@ -349,11 +354,6 @@ private:
     void work();
 
   private:
-    struct LockedQueue {
-      Queue *qp;
-      QPtr ptr;
-    };
-
     ThreadPool *const pool_;
     const size_t threadno_;
     uint64_t rndseed_;
@@ -389,6 +389,8 @@ private:
     x ^= x << 17;
     return seed = x;
   }
+
+  void qselect(LockedQueue *lq, unsigned cpuhint);
 };
 
 } // namespace x23

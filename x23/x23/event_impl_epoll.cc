@@ -231,7 +231,7 @@ CoroPollImpl::check(int timeout)
   }
   lk.reset();
 
-  pool_.go(coroqueue);
+  pool_.go(std::move(coroqueue));
 }
 
 void
