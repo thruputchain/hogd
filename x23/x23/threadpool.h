@@ -108,11 +108,10 @@ public:
   // immediately.  Since the task will consume one of the tasks in the
   // ThreadPool, it should avoid performing operations that would
   // block the thread for a long time.
-  template<typename... Args>
-  Detached spawn(auto cb, Args&&... args)
+  Detached spawn(std::invocable auto cb)
   {
     co_await bg();
-    cb(std::forward<Args>(args)...);
+    cb();
   }
 
   // Run a potentially blocking task in a new thread that is not part
