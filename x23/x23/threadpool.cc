@@ -333,7 +333,11 @@ try {
     auto idstr = readfile<std::string>(idpath);
     if (!idstr) {
       std::println(stderr, "{}: {}", idpath.string(), idstr.error());
-      continue;
+      // This probably means that we are on a mobile CPU with some
+      // "efficiency cores" missing an L3 cache.  That's not the kind
+      // of high-core-count or multi-socket machine where L3-cache
+      // affinity really helps, so just return a single bucket.
+      return {{0}};
     }
     ret[cpu] = bucket(*idstr);
   }
