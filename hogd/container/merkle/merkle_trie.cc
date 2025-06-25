@@ -393,20 +393,22 @@ MerkleTrie::find_node(const Key &k)
 bool
 MerkleTrie::insert(const Key &k, T &&obj)
 {
-  size_t idx = 0;
-  Node *existing_key = nullptr;
+  size_t idx;
+  Node *existing_key;
   Node *branch;
   while (true) {
+    idx = 0;
+    existing_key = nullptr;
+
     branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
     if (existing_key) {
       // [k] already exists in the trie, so we cannot insert it.
       unlock_chain_from(existing_key);
       return false;
     }
-    if (branch->rw_lock.try_upgrade_to_writer()) {
+    if (branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
       break;
     }
-    printf("could not upgrade to writer (%p, root = %p)\n", branch, &root_);
     // We need to try again. We cannot block on acquiring the writer lock
     // because we could deadlock with another thread trying to do the same.
     //
@@ -609,6 +611,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   CHECK_LT(diverge_idx, extension_cache_path.size());
   auto second_branch =
       std::to_integer<size_t>(extension_cache_path.get(diverge_idx));
+  extension_cache_child->rw_lock.lock_writer();
   if (diverge_idx < extension_cache_path.size() - 1) {
     extension = Node::create_extension(/*parent=*/branch);
     // The second extension node has a path size larger than 1.
@@ -637,10 +640,9 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // place the second extension node's child directly as a child of the
     // branch.
     branch->child[second_branch] = extension_cache_child;
-    extension_cache_child->rw_lock.lock_writer();
     extension_cache_child->parent = branch;
-    extension_cache_child->rw_lock.unlock();
   }
+  extension_cache_child->rw_lock.unlock();
 
   // Now we need to place [key_window] into the trie. If [key_window] entirely
   // overlaps with the path in the first extension node, then we place
@@ -785,12 +787,15 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 bool
 MerkleTrie::remove(const Key &k)
 {
-  size_t idx = 0;
-  Node *existing_key = nullptr;
+  size_t idx;
+  Node *existing_key;
   Node *branch;
   size_t num_children;
 
   while (true) {
+    idx = 0;
+    existing_key = nullptr;
+
     branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
     if (!existing_key) {
       // [k] does not exist in the trie, so we cannot remove it.
@@ -809,6 +814,7 @@ MerkleTrie::remove(const Key &k)
       // acquires the writer lock for [branch] before we do, and then removes
       // [k].
       unlock_chain_from(existing_key);
+      printf("continue 1\n");
       continue;
     }
 
@@ -824,6 +830,7 @@ MerkleTrie::remove(const Key &k)
         // because we could deadlock with another thread that is acquiring
         // writer locks as it moves down the trie.
         unlock_chain_from(existing_key);
+        printf("continue 2\n");
         continue;
       }
       if (branch->parent->type != Node::Type::kBranch) {
@@ -834,6 +841,7 @@ MerkleTrie::remove(const Key &k)
           // As explained above, we do not block on acquiring the writer lock
           // when we move up the trie.
           unlock_chain_from(existing_key);
+          printf("continue 3\n");
           continue;
         }
       }

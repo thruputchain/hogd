@@ -34,9 +34,14 @@ public:
   RwLock(RwLock &&) noexcept = delete;
   RwLock &operator=(RwLock &&) noexcept = delete;
 
+  // TODO: Do not use x86 instructions.
   void lock_reader()
   {
     while (true) {
+      while (writer_waiting_for_upgrade_.load(std::memory_order_relaxed)) {
+        asm volatile("pause");
+      }
+
       int64_t cur;
       while ((cur = lock_.load(std::memory_order_relaxed)) == kWriterLocked) {
         asm volatile("pause");
@@ -86,9 +91,46 @@ public:
                                          /*failure=*/std::memory_order_relaxed);
   }
 
-  void print_lock() const
+  bool try_upgrade_to_writer_if_only_one()
   {
-    printf("lock: %ld (%p)\n", lock_.load(std::memory_order_relaxed), this);
+    {
+      bool expected = false;
+      if (!writer_waiting_for_upgrade_.compare_exchange_strong(
+              expected, /*desired=*/true,
+              /*success=*/std::memory_order_relaxed,
+              /*failure=*/std::memory_order_relaxed)) {
+        return false;
+      }
+    }
+
+    {
+      // Wait until we are the only reader left. This also ensures that we do
+      // not race with another thread that calls [lock_writer()].
+      int64_t expected = 1;
+      while (
+          !lock_.compare_exchange_weak(expected,
+                                       /*desired=*/kWriterLocked,
+                                       /*success=*/std::memory_order_acquire,
+                                       /*failure=*/std::memory_order_relaxed)) {
+        asm volatile("pause");
+        // [expected] is overwritten with the value that was in [lock_] when the
+        // cmpxchg was performed. We need to set [expected] back to [kUnlocked].
+        expected = 1;
+      }
+    }
+
+    writer_waiting_for_upgrade_.store(false, std::memory_order_relaxed);
+    return true;
+  }
+
+  int64_t get_lock_value_relaxed() const
+  {
+    return lock_.load(std::memory_order_relaxed);
+  }
+
+  bool get_writer_waiting_for_upgrade_relaxed() const
+  {
+    return writer_waiting_for_upgrade_.load(std::memory_order_relaxed);
   }
 
   bool is_locked_relaxed() const
@@ -116,6 +158,7 @@ private:
   void unlock_writer() { lock_.store(kUnlocked, std::memory_order_release); }
 
   std::atomic<int64_t> lock_ = kUnlocked;
+  std::atomic<bool> writer_waiting_for_upgrade_ = false;
 };
 
 } // namespace hogd
