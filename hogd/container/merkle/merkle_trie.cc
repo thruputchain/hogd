@@ -1261,6 +1261,10 @@ MerkleTrie::generate_hashes_from(Node *n) const
   }
 
   while (n) {
+    if (!n->rw_lock.i_am_current_writer() &&
+        !n->rw_lock.try_upgrade_to_writer_if_only_one()) {
+      break;
+    }
     n->hash = n->compute_node_hash();
     n = n->parent;
   }

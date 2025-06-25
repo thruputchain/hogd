@@ -1124,7 +1124,7 @@ TEST(MerkleTrie, Multithread)
   constexpr size_t kNumKVPairsPerThread = kNumKVPairs / kNumThreads;
 
   MerkleTrie trie;
-  trie.set_should_hash_nodes_on_each_op(false);
+  // trie.set_should_hash_nodes_on_each_op(false);
 
   WorkerPool pool(kNumThreads);
   std::vector<std::future<void>> futures;
@@ -1132,6 +1132,7 @@ TEST(MerkleTrie, Multithread)
   for (size_t i = 0; i < kNumThreads; i++) {
     futures.push_back(pool.submit([i, &trie, &paths] {
       for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
+        printf("%zu\n", j);
         paths[i].push_back(generate_random_path());
         const std::string value = std::to_string(j);
         bool insert = trie.insert(paths[i].back(), value);

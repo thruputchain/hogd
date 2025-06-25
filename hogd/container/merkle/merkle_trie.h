@@ -250,7 +250,7 @@ private:
   {
     root_.clear();
     root_.init_branch(/*parent=*/nullptr);
-    generate_hashes_from(&root_);
+    compute_node_hash(root_);
   }
 
   // The root node in the trie. The root node always exists and is always a

@@ -71,14 +71,20 @@ public:
       // cmpxchg was performed. We need to set [expected] back to [kUnlocked].
       expected = kUnlocked;
     }
+    current_writer_.store(gettid(), std::memory_order_relaxed);
   }
 
   bool try_lock_writer()
   {
     int64_t expected = kUnlocked;
-    return lock_.compare_exchange_strong(expected, /*desired=*/kWriterLocked,
-                                         /*success=*/std::memory_order_acquire,
-                                         /*failure=*/std::memory_order_relaxed);
+    bool ret =
+        lock_.compare_exchange_strong(expected, /*desired=*/kWriterLocked,
+                                      /*success=*/std::memory_order_acquire,
+                                      /*failure=*/std::memory_order_relaxed);
+    if (ret) {
+      current_writer_.store(gettid(), std::memory_order_relaxed);
+    }
+    return ret;
   }
 
   bool try_upgrade_to_writer()
@@ -86,9 +92,14 @@ public:
     // We expect only the current thread to be a reader, so we set [expected] to
     // 1.
     int64_t expected = 1;
-    return lock_.compare_exchange_strong(expected, /*desired=*/kWriterLocked,
-                                         /*success=*/std::memory_order_acquire,
-                                         /*failure=*/std::memory_order_relaxed);
+    bool ret =
+        lock_.compare_exchange_strong(expected, /*desired=*/kWriterLocked,
+                                      /*success=*/std::memory_order_acquire,
+                                      /*failure=*/std::memory_order_relaxed);
+    if (ret) {
+      current_writer_.store(gettid(), std::memory_order_relaxed);
+    }
+    return ret;
   }
 
   bool try_upgrade_to_writer_if_only_one()
@@ -120,6 +131,7 @@ public:
     }
 
     writer_waiting_for_upgrade_.store(false, std::memory_order_relaxed);
+    current_writer_.store(gettid(), std::memory_order_relaxed);
     return true;
   }
 
@@ -131,6 +143,17 @@ public:
   bool get_writer_waiting_for_upgrade_relaxed() const
   {
     return writer_waiting_for_upgrade_.load(std::memory_order_relaxed);
+  }
+
+  pid_t get_current_writer() const
+  {
+    return current_writer_.load(std::memory_order_relaxed);
+  }
+
+  bool i_am_current_writer() const
+  {
+    return lock_.load(std::memory_order_relaxed) == kWriterLocked &&
+           current_writer_.load(std::memory_order_relaxed) == gettid();
   }
 
   bool is_locked_relaxed() const
@@ -159,6 +182,7 @@ private:
 
   std::atomic<int64_t> lock_ = kUnlocked;
   std::atomic<bool> writer_waiting_for_upgrade_ = false;
+  std::atomic<pid_t> current_writer_;
 };
 
 } // namespace hogd
