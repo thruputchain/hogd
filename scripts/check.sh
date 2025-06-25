@@ -14,7 +14,7 @@ print_usage() {
   printf -- "-b do builds in parallel\n"
 }
 
-while getopts 'ep' flag; do
+while getopts 'epb' flag; do
   case "${flag}" in
     e) EXTRA=yes ;;
     p) PARALLEL=--parallel ;;
