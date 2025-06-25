@@ -95,7 +95,7 @@ target_include_directories(
 )
 
 target_include_directories(
-  runtime_test
+  runtime_test_objects
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
