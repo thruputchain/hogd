@@ -33,7 +33,7 @@ if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" ; t
 fi
 
 printf "${COLOR}\nSTEP 2: Check tests (gcc)\n${NC}"
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/gcc --output-on-failure ${PARALLEL}; then
+if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/gcc --output-on-failure ${PARALLEL} --timeout 100; then
     printf "tests failed!\n"
     exit 1
 fi
@@ -45,7 +45,7 @@ if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" 
 fi
 
 printf "${COLOR}\nSTEP 4: Check tests (llvm)\n${NC}"
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL}; then
+if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100; then
     printf "tests failed!\n"
     exit 1
 fi
