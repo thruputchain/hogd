@@ -10,7 +10,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
-#include "hogd/test_ffi/port_allocator.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -58,7 +57,7 @@ span_type_test(std::span<const std::byte> span_in,
 
 TEST(MockSyscallTest, IntTypeTest)
 {
-  DBContext db_context(PortAllocator::get());
+  DBContext db_context;
 
   SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());
@@ -91,7 +90,7 @@ TEST(MockSyscallTest, IntTypeTest)
 
 TEST(MockSyscallTest, SpanTest)
 {
-  DBContext db_context(PortAllocator::get());
+  DBContext db_context;
 
   SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());

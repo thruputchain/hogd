@@ -22,7 +22,7 @@ namespace hogd {
 // of the database during a test.
 class DBContext {
 public:
-  DBContext(uint32_t db_read_port);
+  DBContext(uint32_t db_read_port = 0);
 
   void advance_new_block(BlockExecutionMode mode =
                              BlockExecutionMode::kBlockExecutionModeProposal);
