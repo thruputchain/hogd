@@ -1,7 +1,6 @@
 // rpc.cc - a high-performance RPC framework that focuses on adaptive batching
 //
 // TODO(abelay): create a Socket class as a cleanup.
-// TODO(abelay): need to think more about error handling when sockets fail.
 
 #include "hogd/rpc/rpc.h"
 
@@ -12,13 +11,18 @@
 
 #include <cassert>
 #include <cerrno>
+#include <cstddef>
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <span>
+#include <stop_token>
+#include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
@@ -72,7 +76,7 @@ sys_accept(int sockfd, sockaddr_in *addr)
 {
   if (!addr)
     return make_errno_status<int>(accept(sockfd, nullptr, nullptr));
-  socklen_t len;
+  socklen_t len; // NOLINT(misc-include-cleaner)
   return make_errno_status<int>(
       accept(sockfd, reinterpret_cast<sockaddr *>(addr), &len));
 }
@@ -178,7 +182,10 @@ ClientFlow::send_worker(const std::stop_token &stoken)
       }
     }
 
-    w.flush();
+    if (ErrnoStatus<void> ret = w.flush(); !ret) {
+      error("client flush failed: {}", ret.error());
+      return;
+    }
   }
 }
 
@@ -244,7 +251,7 @@ RPCClient::dial(std::string_view addr, int flows)
     if (!ret)
       return ret.error();
 
-    ret = sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, int(1));
+    ret = sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, 1);
     if (!ret)
       return ret.error();
     flow_tbl.emplace_back(std::make_unique<rpc_detail::ClientFlow>(File(*fd)));
@@ -262,7 +269,7 @@ RPCServer::create(uint16_t port, RPCHandler handler)
     return accept_fd.error();
 
   ErrnoStatus<void> ret =
-      sys_setsockopt(*accept_fd, SOL_SOCKET, SO_REUSEPORT, int(1));
+      sys_setsockopt(*accept_fd, SOL_SOCKET, SO_REUSEPORT, 1); // NOLINT
   if (!ret)
     return ret.error();
 
@@ -289,8 +296,7 @@ RPCServer::listen()
     ErrnoStatus<int> fd = sys_accept(listener_.get_fd(), nullptr);
     if (!fd)
       return fd.error();
-    ErrnoStatus<void> ret =
-        sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, int(1));
+    ErrnoStatus<void> ret = sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, 1);
     if (!ret)
       return ret.error();
     std::jthread([this, fd = *fd, h = handler_] {
@@ -303,15 +309,15 @@ RPCServer::listen()
 
 void
 RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
-                             RPCHandler handler)
+                             const RPCHandler &handler)
 {
   BufferedReader r(socket);
   BufferedWriter w(socket);
   std::vector<OwningSpan<const std::byte>> requests;
   std::optional<size_t> n;
 
-  register_worker(socket);
-  Defer d([this, &socket] { unregister_worker(socket); });
+  ref->register_worker(socket);
+  Defer d([&ref, &socket] { ref->unregister_worker(socket); });
 
   while (true) {
     // read available requests.
@@ -356,7 +362,10 @@ RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
     }
 
     // flush anything left in the response buffer.
-    w.flush();
+    if (ErrnoStatus<void> ret = w.flush(); !ret) {
+      error("server flush failed: {}", ret.error());
+      return;
+    }
     requests.clear();
   }
 }

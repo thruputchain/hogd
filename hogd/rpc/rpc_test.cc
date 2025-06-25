@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <cerrno>
+#include <cstddef>
 #include <future>
 #include <memory>
-#include <print>
 #include <span>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -76,7 +78,7 @@ TEST_F(RPCTest, SynchronousCalls)
 TEST_F(RPCTest, AsynchronousCalls)
 {
   std::vector<std::string> args;
-  args.reserve(kRPCs); 
+  args.reserve(kRPCs);
   for (size_t i = 0; i < kRPCs; i++) {
     std::string arg(kArgSize, '0');
     rand_(std::span(arg));

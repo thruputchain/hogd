@@ -1,6 +1,7 @@
 // rpc_bench.cc - benchmarks for RPC framework
 
 #include <cstddef>
+#include <memory>
 #include <print>
 #include <span>
 #include <string>
@@ -109,7 +110,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       print_usage();
       return 1;
     }
-    uint16_t port = std::stoi(argv[2], nullptr, 0);
+    uint16_t port = std::stoi(argv[2], nullptr, 0); // NOLINT
     hogd::run_server(port);
     return 0;
   }

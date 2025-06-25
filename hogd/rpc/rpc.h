@@ -12,6 +12,7 @@
 #include <thread>
 #include <utility>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
@@ -105,7 +106,7 @@ public:
                                                         RPCHandler handler);
 
   RPCServer(RPCHandler handler, File &&listener)
-    : handler_(std::move(handler)), listener_(std::move(listener))
+    : listener_(std::move(listener)), handler_(std::move(handler))
   {}
   ~RPCServer() = default;
 
@@ -118,11 +119,11 @@ public:
   void stop();
 
 private:
-  RPCHandler handler_;
-
   std::mutex lock_;
   File listener_;
   std::vector<File *> workers_;
+
+  alignas(kCacheLineSize) RPCHandler handler_;
 
   void register_worker(File &f)
   {
@@ -143,8 +144,8 @@ private:
     }
   }
 
-  void connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
-                         RPCHandler handler);
+  static void connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
+                                const RPCHandler &handler);
 };
 
 } // namespace hogd
