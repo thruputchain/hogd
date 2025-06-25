@@ -237,9 +237,6 @@ private:
   static Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
                                          size_t &idx, Node *&existing_key);
 
-  // Unlocks all nodes from [n] up through the root (inclusive).
-  static void unlock_chain_from(Node *n);
-
   // Computes and writes the hash for [node] only if
   // [should_hash_nodes_on_each_op_] is true.
   void compute_node_hash(Node &node) const;

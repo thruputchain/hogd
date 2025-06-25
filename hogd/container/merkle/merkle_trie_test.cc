@@ -1175,6 +1175,8 @@ TEST(MerkleTrie, Multithread)
 
   // TODO(jhumphri): Release reader locks as we move down the trie.
   // TODO(jhumphri): Try insert and remove at the same time.
+  // TODO(jhumphri): Try multithreaded find, and interleave with insert and
+  // remove operations.
 }
 
 } // namespace hogd
