@@ -25,6 +25,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
@@ -32,7 +33,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "vscode/hogd/hogexec/runtime/syscall_inner.h"
 
 namespace hogd {
 
