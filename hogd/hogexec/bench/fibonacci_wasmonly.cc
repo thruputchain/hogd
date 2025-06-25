@@ -42,19 +42,20 @@ namespace hogd {
 namespace {
 
 struct BenchmarkState {
-  
+
   BenchmarkState(x23::ThreadPool &db_pool) : db_pool_(db_pool) {}
 
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
 
-  x23::ThreadPool& db_pool_;
+  x23::ThreadPool &db_pool_;
   x23::CoroPoll cp_ = x23::CoroPoll(db_pool_);
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 
-  using coord_client_t = DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+  using coord_client_t =
+      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   std::unique_ptr<coord_client_t> coord_client_;
 
@@ -66,16 +67,17 @@ struct BenchmarkState {
                                                              exec_port});
 
     coord_client_ = [&] -> std::unique_ptr<coord_client_t> {
-      auto fd =
-          cp_.tcpconnect("localhost", std::to_string(coord_port))();
+      auto fd = cp_.tcpconnect("localhost", std::to_string(coord_port))();
       if (!fd) {
         throw std::runtime_error("Failed to connect to coord server");
       }
       auto client_config = x23::rpc_stream_logged(cp_, *fd);
-      return std::make_unique<coord_client_t>(client_config.template client<DbCoord1>());
+      return std::make_unique<coord_client_t>(
+          client_config.template client<DbCoord1>());
     }();
 
-    auto r= coord_client_->dbcoord_create_snapshot(0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
+    auto r = coord_client_->dbcoord_create_snapshot(
+        0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
     if (r != DbResult::DbResultOK) {
       throw std::runtime_error("Failed to create snapshot");
     }
@@ -106,7 +108,9 @@ struct BenchmarkState {
       throw std::runtime_error("Failed to commit snapshot");
     }
 
-    auto r3 = coord_client_->dbcoord_create_snapshot(block_number_, block_number_ + 1, BlockExecutionMode::kBlockExecutionModeProposal)();
+    auto r3 = coord_client_->dbcoord_create_snapshot(
+        block_number_, block_number_ + 1,
+        BlockExecutionMode::kBlockExecutionModeProposal)();
     if (r3 != DbResult::DbResultOK) {
       throw std::runtime_error("Failed to create snapshot");
     }
@@ -120,23 +124,20 @@ struct BenchmarkState {
   TransactionID allocate_txid() { return next_tx_id_++; }
 };
 
-void setup_grant_storage_token(
-  InMemoryDatabase &in_memory_db,
-  StorageCostModel const &cost_model,
-  ContractAddress const &address,
-                                 int128_t amount)
+void
+setup_grant_storage_token(InMemoryDatabase &in_memory_db,
+                          StorageCostModel const &cost_model,
+                          ContractAddress const &address, int128_t amount)
 {
-    assert(amount >= 0);
-    assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
+  assert(amount >= 0);
+  assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
 
-    AddressAndKey addrkey = {
-        .address = address,
-        .key =
-            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+  AddressAndKey addrkey = {
+      .address = address,
+      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
 
-    in_memory_db.write_item(
-        addrkey,
-        std::make_shared<const StorageItemWrapper>(amount, &cost_model));
+  in_memory_db.write_item(
+      addrkey, std::make_shared<const StorageItemWrapper>(amount, &cost_model));
 }
 
 void
@@ -165,7 +166,8 @@ setup_benchmark(BenchmarkState &bs, uint32_t exec_port, uint32_t coord_port)
   bs.advance_block();
 }
 
-void run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
+void
+run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
 {
   WorkerPool exec_pool(1);
   exec_pool.adjust_workers(1);
@@ -195,23 +197,27 @@ void run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nf
       auto g = f.get();
       if (!gas_consumed) {
         gas_consumed = g;
-      } else {
+      }
+      else {
         assert(gas_consumed.value() == g);
       }
     }
+    assert(gas_consumed.has_value());
     auto finish_time = std::chrono::steady_clock::now();
-    std::println("time taken: {} ms for {} txs (fib {}), gas consumed: {}",
-                 std::chrono::duration_cast<std::chrono::milliseconds>(
-                     finish_time - start_time)
-                     .count(),
-                 num_txs, nfib, gas_consumed.value());
+    std::println(
+        "time taken: {} ms for {} txs (fib {}), gas consumed: {}",
+        std::chrono::duration_cast<std::chrono::milliseconds>(finish_time -
+                                                              start_time)
+            .count(),
+        num_txs, nfib,
+        gas_consumed.value()); // NOLINT(bugprone-unchecked-optional-access)
   }
 }
 
 void
 run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
               int num_exec_threads, bool do_commit)
-{ 
+{
   WorkerPool exec_pool(num_exec_threads);
   exec_pool.adjust_workers(num_exec_threads);
 
@@ -225,37 +231,41 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
     auto [async, cb] = x23::make_async<void>();
 
     for (int i = 0; i < num_txs; i++) {
-      exec_pool.submit([&bs, &fib_client, &nfib, &remaining, &cb, do_commit]() -> void {
-        auto tx = SignedTransaction{
-            .tx = Transaction{
-                .invocation =
-                    fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX,
-                                                                 nfib)}};
-        auto handler = bs.make_handler(tx);
-        if (!handler.root_invoke().is_root_success()) {
-          throw std::runtime_error("Failed to invoke transaction");
-        }
-        if (do_commit) {
-          if (auto r = handler.try_commit_transaction()(); !r.has_value() || !r.value()) {
-            throw std::runtime_error("foo");
-          }
-        }
-        if (remaining.fetch_sub(1) == 1) {
-          cb();
-        }
-      });
+      exec_pool.submit(
+          [&bs, &fib_client, &nfib, &remaining, &cb, do_commit]() -> void {
+            auto tx = SignedTransaction{
+                .tx = Transaction{
+                    .invocation =
+                        fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX,
+                                                                     nfib)}};
+            auto handler = bs.make_handler(tx);
+            if (!handler.root_invoke().is_root_success()) {
+              throw std::runtime_error("Failed to invoke transaction");
+            }
+            if (do_commit) {
+              if (auto r = handler.try_commit_transaction()();
+                  !r.has_value() || !r.value()) {
+                throw std::runtime_error("foo");
+              }
+            }
+            if (remaining.fetch_sub(1) == 1) {
+              cb();
+            }
+          });
     }
     async();
     auto finish_time = std::chrono::steady_clock::now();
-    std::println("time taken: {} ms for {} txs (fib {}, commit {}) on {} threads",
-                 std::chrono::duration_cast<std::chrono::milliseconds>(
-                     finish_time - start_time)
-                     .count(),
-                 num_txs, nfib, do_commit, num_exec_threads);
+    std::println(
+        "time taken: {} ms for {} txs (fib {}, commit {}) on {} threads",
+        std::chrono::duration_cast<std::chrono::milliseconds>(finish_time -
+                                                              start_time)
+            .count(),
+        num_txs, nfib, do_commit, num_exec_threads);
   }
 }
 
-void run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
+void
+run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 {
   x23::ThreadPool db_pool = x23::ThreadPool(nthreads);
 
@@ -268,7 +278,8 @@ void run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
   in_memory_db.write_contract(sha256(*contract), contract);
   in_memory_db.write_deployment(contract_addr, sha256(*contract));
 
-  setup_grant_storage_token(in_memory_db, cost_model, contract_addr, 1'000'000'000);
+  setup_grant_storage_token(in_memory_db, cost_model, contract_addr,
+                            1'000'000'000);
 
   BlockManager block_manager = BlockManager(0, &in_memory_db);
   DbExecutorServer db_executor_server = DbExecutorServer(&block_manager);
@@ -287,27 +298,42 @@ void run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
   }
 }
 
-void run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
+void
+run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
 {
   x23::ThreadPool db_pool = x23::ThreadPool(1);
   BenchmarkState bs(db_pool);
 
   setup_benchmark(bs, exec_port, coord_port);
 
-
   // strong scaling
-  for (auto nthread : { 1, 4, 16, 64, 128, 256, 512, 2048}) {
+  for (auto nthread : {1, 4, 16, 64, 128, 256, 512, 2048}) {
     run_bench_rep(bs, 10000, 20, nthread, true);
     run_bench_rep(bs, 10000, 20, nthread, false);
   }
   // weak scaling
-  for (auto nthread : { 1, 4, 16, 64, 128}) {
+  for (auto nthread : {1, 4, 16, 64, 128}) {
     run_bench_rep(bs, nthread * 1000, 20, nthread, true);
     run_bench_rep(bs, nthread * 1000, 20, nthread, false);
   }
 
   // measure per tx time
-  for (auto nfib : { 0,1, 2, 5, 8, 10, 12, 15, 18, 20, 22, 25, 28, 30, }) {
+  for (auto nfib : {
+           0,
+           1,
+           2,
+           5,
+           8,
+           10,
+           12,
+           15,
+           18,
+           20,
+           22,
+           25,
+           28,
+           30,
+       }) {
     run_gas_correlation_experiment(bs, 50, nfib);
   }
 }
@@ -331,26 +357,28 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   int opt;
   while ((opt = getopt(argc, argv, "cs")) != -1) {
     switch (opt) {
-      case 'c':
-        run_client = true;
-        break;
-      case 's':
-        run_server = true;
-        break;
-      default:
-        std::println("Usage: {} [-c] [-s]", argv[0]);
-        return 1;
+    case 'c':
+      run_client = true;
+      break;
+    case 's':
+      run_server = true;
+      break;
+    default:
+      std::println("Usage: {} [-c] [-s]", argv[0]);
+      return 1;
     }
   }
 
   if (run_client == run_server) {
-    std::println("Error: Must specify exactly one of -c (client) or -s (server)");
+    std::println(
+        "Error: Must specify exactly one of -c (client) or -s (server)");
     return 1;
   }
 
   if (run_server) {
     hogd::run_fibonacci_server(1, exec_port, coord_port);
-  } else if (run_client) {
+  }
+  else if (run_client) {
     hogd::run_fibonacci_client(exec_port, coord_port);
   }
 
