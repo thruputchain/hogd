@@ -355,6 +355,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   bool run_server = false;
 
   int opt;
+  // NOTLINTNEXTLINE(misc-include-cleaner)
   while ((opt = getopt(argc, argv, "cs")) != -1) {
     switch (opt) {
     case 'c':
