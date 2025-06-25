@@ -100,15 +100,19 @@ TEST_F(RPCTest, AsynchronousCalls)
 
 TEST_F(RPCTest, ManyThreads)
 {
+  constexpr size_t kThreads = 16;
   std::vector<std::jthread> threads;
   threads.reserve(kRPCs);
-  for (size_t i = 0; i < kRPCs; i++) {
+  for (size_t i = 0; i < kThreads; i++) {
     threads.emplace_back([this] {
       std::string args(kArgSize, '0');
-      rand_(std::span(args));
-      std::future<OwningSpan<const std::byte>> ret =
-          client_.call(std::as_bytes(std::span(args)));
-      EXPECT_EQ(ret.get(), std::as_bytes(std::span(args)));
+
+      for (size_t i = 0; i < kRPCs; i++) {
+        rand_(std::span(args));
+        std::future<OwningSpan<const std::byte>> ret =
+            client_.call(std::as_bytes(std::span(args)));
+        EXPECT_EQ(ret.get(), std::as_bytes(std::span(args)));
+      }
     });
   }
 }
