@@ -178,7 +178,7 @@ void run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nf
 
     auto start_time = std::chrono::steady_clock::now();
 
-    for (size_t i = 0; i < num_txs; i++) {
+    for (int i = 0; i < num_txs; i++) {
       auto f = exec_pool.submit([&bs, &fib_client, &nfib]() -> uint64_t {
         auto tx = SignedTransaction{
             .tx = Transaction{
@@ -218,13 +218,13 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
   using fib_client_t = ContractTraitClient<Fibonacci>;
   fib_client_t fib_client(ContractAddress{});
 
-  for (size_t nrep = 0; nrep < 10; nrep++) {
+  for (int nrep = 0; nrep < 10; nrep++) {
 
     auto start_time = std::chrono::steady_clock::now();
     std::atomic<uint32_t> remaining = num_txs;
     auto [async, cb] = x23::make_async<void>();
 
-    for (size_t i = 0; i < num_txs; i++) {
+    for (int i = 0; i < num_txs; i++) {
       exec_pool.submit([&bs, &fib_client, &nfib, &remaining, &cb, do_commit]() -> void {
         auto tx = SignedTransaction{
             .tx = Transaction{

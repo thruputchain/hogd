@@ -153,7 +153,7 @@ bench_fibonacci(benchmark::State &state)
 
   std::vector<SignedTransaction> txs_bench;
   txs_bench.reserve(numtxs);
-  for (size_t i = 0; i < numtxs; i++) {
+  for (int i = 0; i < numtxs; i++) {
     txs_bench.push_back(SignedTransaction{
         .tx = Transaction{.invocation =
                               fib_client.make_invocation<"slow_fibonacci">(
