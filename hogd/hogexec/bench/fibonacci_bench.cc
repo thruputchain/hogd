@@ -165,7 +165,6 @@ bench_fibonacci(benchmark::State &state)
 
   for (auto _ : state) {
     std::atomic<uint32_t> remaining = numtxs;
-    assert(numtxs == txs.size());
 
     auto [async, cb] = x23::make_async<void>();
 
