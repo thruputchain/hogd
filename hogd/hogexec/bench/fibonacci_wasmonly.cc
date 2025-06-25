@@ -47,7 +47,6 @@ struct BenchmarkState {
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
 
-
   x23::ThreadPool& db_pool_;
   x23::CoroPoll cp_ = x23::CoroPoll(db_pool_);
 
@@ -165,12 +164,54 @@ setup_benchmark(BenchmarkState &bs, uint32_t exec_port, uint32_t coord_port)
   bs.advance_block();
 }
 
+void run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
+{
+  WorkerPool exec_pool(1);
+  exec_pool.adjust_workers(1);
+
+  using fib_client_t = ContractTraitClient<Fibonacci>;
+  fib_client_t fib_client(ContractAddress{});
+  std::optional<uint64_t> gas_consumed;
+
+  for (size_t nrep = 0; nrep < 10; nrep++) {
+
+    auto start_time = std::chrono::steady_clock::now();
+
+    for (size_t i = 0; i < num_txs; i++) {
+      auto f = exec_pool.submit([&bs, &fib_client, &nfib]() -> uint64_t {
+        auto tx = SignedTransaction{
+            .tx = Transaction{
+                .invocation =
+                    fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX,
+                                                                 nfib)}};
+        auto handler = bs.make_handler(tx);
+        auto r = handler.root_invoke();
+        if (!r.is_root_success()) {
+          throw std::runtime_error("Failed to invoke transaction");
+        }
+        return r.gas_consumed_;
+      });
+      auto g = f.get();
+      if (!gas_consumed) {
+        gas_consumed = g;
+      } else {
+        assert(gas_consumed.value() == g);
+      }
+    }
+    auto finish_time = std::chrono::steady_clock::now();
+    std::println("time taken: {} ms for {} txs (fib {}), gas consumed: {}",
+                 std::chrono::duration_cast<std::chrono::milliseconds>(
+                     finish_time - start_time)
+                     .count(),
+                 num_txs, nfib, gas_consumed.value());
+  }
+}
+
 void
 run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
-              int num_exec_threads)
+              int num_exec_threads, bool do_commit)
 { 
   WorkerPool exec_pool(num_exec_threads);
-  //auto& exec_pool = WorkerPool::get_default_pool();
   exec_pool.adjust_workers(num_exec_threads);
 
   using fib_client_t = ContractTraitClient<Fibonacci>;
@@ -183,7 +224,7 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
     auto [async, cb] = x23::make_async<void>();
 
     for (size_t i = 0; i < num_txs; i++) {
-      exec_pool.submit([&bs, &fib_client, &nfib, &remaining, &cb]() -> void {
+      exec_pool.submit([&bs, &fib_client, &nfib, &remaining, &cb, do_commit]() -> void {
         auto tx = SignedTransaction{
             .tx = Transaction{
                 .invocation =
@@ -193,9 +234,11 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
         if (!handler.root_invoke().is_root_success()) {
           throw std::runtime_error("Failed to invoke transaction");
         }
-	//if (auto r = handler.try_commit_transaction()(); !r.has_value() || !r.value()) {
-	//	throw std::runtime_error("foo");
-	//}
+        if (do_commit) {
+          if (auto r = handler.try_commit_transaction()(); !r.has_value() || !r.value()) {
+            throw std::runtime_error("foo");
+          }
+        }
         if (remaining.fetch_sub(1) == 1) {
           cb();
         }
@@ -203,11 +246,11 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
     }
     async();
     auto finish_time = std::chrono::steady_clock::now();
-    std::println("time taken: {} ms for {} txs (fib {}) on {} threads",
+    std::println("time taken: {} ms for {} txs (fib {}, commit {}) on {} threads",
                  std::chrono::duration_cast<std::chrono::milliseconds>(
                      finish_time - start_time)
                      .count(),
-                 num_txs, nfib, num_exec_threads);
+                 num_txs, nfib, do_commit, num_exec_threads);
   }
 }
 
@@ -236,7 +279,11 @@ void run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
   std::println("Starting coord server on port {}", coord_port);
   db_coord_server.start_server(coord_port);
 
-  while (true) {}
+  // Wait for a byte from stdin (blocking)
+  char buf;
+  if (read(STDIN_FILENO, &buf, 1) > 0) {
+    std::println("Exiting server on stdin input");
+  }
 }
 
 void run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
@@ -246,8 +293,20 @@ void run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
 
   setup_benchmark(bs, exec_port, coord_port);
 
-  for (auto nthread : { 128, 256, 512, 1024, 2048, 4196}) {
-    run_bench_rep(bs, 100000, 20, nthread);
+  // strong scaling
+  for (auto nthread : { 1, 4, 16, 64, 128, 256, 512, 2048}) {
+    run_bench_rep(bs, 10000, 20, nthread, true);
+    run_bench_rep(bs, 10000, 20, nthread, false);
+  }
+  // weak scaling
+  for (auto nthread : { 1, 4, 16, 64, 128}) {
+    run_bench_rep(bs, nthread * 1000, 20, nthread, true);
+    run_bench_rep(bs, nthread * 1000, 20, nthread, false);
+  }
+
+  // measure per tx time
+  for (auto nfib : { 10, 20, 30, 40 }) {
+    run_gas_correlation_experiment(bs, 100, nfib);
   }
 }
 } // namespace
@@ -255,7 +314,7 @@ void run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
 } // namespace hogd
 
 int
-main(int argc, char *argv[])
+main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
   auto ret = hogd::hogd_init(argc, argv);
   if (ret)
