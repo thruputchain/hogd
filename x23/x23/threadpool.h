@@ -144,7 +144,7 @@ public:
   using Job = CpuHinted<std::coroutine_handle<>>;
 
   const size_t nthreads_;
-  const size_t nbuckets_;
+  const size_t nqueues_;
 
   ThreadPool(size_t nthreads = nproc());
   ~ThreadPool();

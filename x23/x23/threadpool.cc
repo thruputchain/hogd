@@ -1,6 +1,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <print>
 #include <regex>
 #include <unordered_map>
 
@@ -8,14 +9,12 @@
 #include "x23/fileio.h"
 #include "x23/threadpool.h"
 
-#include <print> // XXX
-
 namespace x23 {
 
 ThreadPool::ThreadPool(size_t nthreads)
-  : nthreads_(nthreads), nbuckets_(llc_map.nbuckets_),
-    bucket_nthreads_(new std::atomic_uint[nbuckets_]{}),
-    runqueues_(std::make_unique<Queue[]>(nbuckets_)),
+  : nthreads_(nthreads), nqueues_(llc_map.nbuckets_),
+    bucket_nthreads_(new std::atomic_uint[nqueues_]{}),
+    runqueues_(std::make_unique<Queue[]>(nqueues_)),
     tstate_(std::make_unique<ThreadState[]>(nthreads))
 {
   workers_.reserve(nthreads_);
@@ -28,16 +27,13 @@ ThreadPool::ThreadPool(size_t nthreads)
 
 ThreadPool::~ThreadPool()
 {
-  std::println(stderr, "ThreadPool::~ThreadPool");
   ss_.request_stop();
-  for (unsigned i = 0; i < nbuckets_; ++i) {
+  for (unsigned i = 0; i < nqueues_; ++i) {
     auto ptr = runqueues_[i].q_.take();
     runqueues_[i].qtime_ = 0;
     runqueues_[i].qtime_.notify_all();
   }
-  std::println(stderr, "about to join threads");
   threads_.clear(); // Join all threads before destroying fields
-  std::println(stderr, "joined threads");
 }
 
 void
@@ -51,7 +47,7 @@ ThreadPool::go(const std::vector<Job> &jobs)
     ThreadPool::QPtr ptr;
   };
 
-  std::vector<Q> qs(nbuckets_);
+  std::vector<Q> qs(nqueues_);
   std::vector<unsigned> qnos; // indices i at which qs[i].ptr is locked
   std::vector<unsigned> wake; // buckets that need to be notified
 
@@ -70,16 +66,16 @@ ThreadPool::go(const std::vector<Job> &jobs)
   for (const auto &j : jobs)
     qs[llc_map.bucket(j.cpuhint)].needed = true;
   // add an extra bucket to even out the load
-  auto extra = rr_qno_.fetch_add(1, std::memory_order_relaxed) % nbuckets_;
+  auto extra = rr_qno_.fetch_add(1, std::memory_order_relaxed) % nqueues_;
   qs[extra].needed = true;
 
-  for (unsigned i = 0; i < nbuckets_; ++i)
+  for (unsigned i = 0; i < nqueues_; ++i)
     if (qs[i].needed)
       lock(i);
 
   // make sure we have at least one bucket
   while (qnos.empty())
-    lock((extra = (extra + 1) % nbuckets_));
+    lock((extra = (extra + 1) % nqueues_));
 
   // Index of an "other queue" to check in qnos
   unsigned oq = std::ranges::lower_bound(qnos, extra) - qnos.begin();
@@ -133,13 +129,13 @@ ThreadPool::drain() noexcept
 {
   assert(ThreadPool::my_thread_pool != this);
 
-  std::vector<size_t> backtimes(nthreads_);
-  for (size_t i = 0; i < nthreads_; ++i) {
+  std::vector<size_t> backtimes(nqueues_);
+  for (size_t i = 0; i < nqueues_; ++i) {
     auto ptr = runqueues_[i].q_.take();
     backtimes[i] = ptr->empty() ? kEmpty : ptr->back().qtime;
   }
 
-  for (size_t i = 0; i < nthreads_; ++i)
+  for (size_t i = 0; i < nqueues_; ++i)
     if (backtimes[i] != kEmpty)
       for (;;) {
         uint64_t qt = runqueues_[i].qtime_;
@@ -184,11 +180,11 @@ ThreadPool::Worker::getq() noexcept
       return {.qp = &myq, .ptr = std::move(ptr)};
 
     // Our queue is empty? Pick older job from two random runqueues
-    if (auto nb = pool_->nbuckets_; nb > 1) {
+    if (auto nb = pool_->nqueues_; nb > 1) {
       Queue *qs[2];
       if (nb > 3) {
-        qs[0] = &pool_->runqueues_[rnd(rndseed_) % pool_->nbuckets_];
-        qs[1] = &pool_->runqueues_[rnd(rndseed_) % pool_->nbuckets_];
+        qs[0] = &pool_->runqueues_[rnd(rndseed_) % pool_->nqueues_];
+        qs[1] = &pool_->runqueues_[rnd(rndseed_) % pool_->nqueues_];
       }
       else {
         qs[0] = &pool_->runqueues_[(bucket_ + 1) % nb];
