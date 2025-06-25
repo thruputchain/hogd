@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
@@ -293,6 +294,7 @@ void run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
 
   setup_benchmark(bs, exec_port, coord_port);
 
+/*
   // strong scaling
   for (auto nthread : { 1, 4, 16, 64, 128, 256, 512, 2048}) {
     run_bench_rep(bs, 10000, 20, nthread, true);
@@ -302,11 +304,11 @@ void run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
   for (auto nthread : { 1, 4, 16, 64, 128}) {
     run_bench_rep(bs, nthread * 1000, 20, nthread, true);
     run_bench_rep(bs, nthread * 1000, 20, nthread, false);
-  }
+  } */
 
   // measure per tx time
-  for (auto nfib : { 10, 20, 30, 40 }) {
-    run_gas_correlation_experiment(bs, 100, nfib);
+  for (auto nfib : { 0,1, 2, 5, 8, 10, 12, 15, 18, 20, 22, 25, 28, 30, }) {
+    run_gas_correlation_experiment(bs, 50, nfib);
   }
 }
 } // namespace
