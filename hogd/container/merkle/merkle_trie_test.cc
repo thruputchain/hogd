@@ -1118,21 +1118,22 @@ TEST(MerkleTrie, SingleThread)
 }
 
 // Inserts and removes 2 million KV pairs in total with multiple threads.
-TEST(MerkleTrie, Multithread)
+void
+run_multithread(int num_threads)
 {
   constexpr size_t kNumKVPairs = 2'000'000;
-  constexpr size_t kNumThreads = 8;
-  constexpr size_t kNumKVPairsPerThread = kNumKVPairs / kNumThreads;
+  const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
 
   MerkleTrie trie;
+  // TODO(jhumphri): Fix this.
   // trie.set_should_hash_nodes_on_each_op(false);
 
-  WorkerPool pool(kNumThreads);
+  WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
-  std::vector<std::vector<HexArray>> paths(kNumThreads);
-  for (size_t i = 0; i < kNumThreads; i++) {
-    futures.push_back(pool.submit([i, &trie, &paths] {
-      for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
+  std::vector<std::vector<HexArray>> paths(num_threads);
+  for (size_t i = 0; i < num_threads; i++) {
+    futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
+      for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
         // printf("%zu %zu\n", i, j);
         paths[i].push_back(generate_random_path());
         const std::string value = std::to_string(j);
@@ -1153,16 +1154,16 @@ TEST(MerkleTrie, Multithread)
 
   // trie.generate_all_hashes();
   EXPECT_TRUE(trie.check());
-  for (size_t i = 0; i < kNumThreads; i++) {
-    for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
+  for (size_t i = 0; i < num_threads; i++) {
+    for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
       EXPECT_TRUE(trie.find(paths[i][j]));
     }
   }
 
   // Now remove all of the KV pairs.
-  for (size_t i = 0; i < kNumThreads; i++) {
-    futures.push_back(pool.submit([i, &trie, &paths] {
-      for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
+  for (size_t i = 0; i < num_threads; i++) {
+    futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
+      for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
         // printf("remove %zu %zu\n", i, j);
         CHECK(trie.remove(paths[i][j]));
       }
@@ -1179,6 +1180,31 @@ TEST(MerkleTrie, Multithread)
   // TODO(jhumphri): Try insert and remove at the same time.
   // TODO(jhumphri): Try multithreaded find, and interleave with insert and
   // remove operations.
+}
+
+TEST(MerkleTrie, Multithread1)
+{
+  run_multithread(/*num_threads=*/1);
+}
+
+TEST(MerkleTrie, Multithread2)
+{
+  run_multithread(/*num_threads=*/2);
+}
+
+TEST(MerkleTrie, Multithread4)
+{
+  run_multithread(/*num_threads=*/4);
+}
+
+TEST(MerkleTrie, Multithread8)
+{
+  run_multithread(/*num_threads=*/8);
+}
+
+TEST(MerkleTrie, Multithread16)
+{
+  run_multithread(/*num_threads=*/16);
 }
 
 } // namespace hogd

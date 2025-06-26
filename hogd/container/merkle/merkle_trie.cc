@@ -1324,17 +1324,24 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
 void
 MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
 {
-  if (!should_hash_nodes_on_each_op_) {
-    return;
-  }
-
   CHECK_PTR(locked_through);
   bool locked = true;
   while (true) {
     CHECK_PTR(n);
-    CHECK(n->rw_lock.is_writer_locked_relaxed());
+    if (locked) {
+      CHECK(n->rw_lock.is_writer_locked_relaxed());
+    }
+    else {
+      CHECK(n->rw_lock.is_locked_relaxed());
+    }
+
     if (n == locked_through) {
       locked = false;
+
+      if (!should_hash_nodes_on_each_op_) {
+        n->rw_lock.unlock();
+        return;
+      }
     }
 
     // TODO(jhumphri): We need to lock all of the children before calling
@@ -1344,7 +1351,9 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
     // valid value, it is likely because there is no thread below us in the
     // trie, so we will compute the correct hash for all nodes up through and
     // including the root.
-    n->hash = n->compute_node_hash();
+    if (should_hash_nodes_on_each_op_) {
+      n->hash = n->compute_node_hash();
+    }
 
     // TODO(jhumphri): I think the current writer could produce a stale hash
     // if we return in the if statement below.
@@ -1362,7 +1371,9 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
       return;
     }
     if (!locked) {
-      n->parent->rw_lock.lock_writer();
+      while (!n->parent->rw_lock.try_lock_reader()) {
+        asm volatile("pause");
+      }
     }
 
     Node *parent = n->parent;
