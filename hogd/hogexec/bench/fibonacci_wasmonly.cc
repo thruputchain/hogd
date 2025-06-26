@@ -1,15 +1,18 @@
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <future>
 #include <memory>
 #include <optional>
 #include <print>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 #include "db_coord.hh"
 #include "hogd/base/types.h"
@@ -228,39 +231,41 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
 
     auto start_time = std::chrono::steady_clock::now();
 
-    int ntx_per_thread = num_txs/num_exec_threads;
+    int ntx_per_thread = num_txs / num_exec_threads;
     if (num_txs % num_exec_threads != 0) {
-	    ntx_per_thread++;
+      ntx_per_thread++;
     }
 
-    
     std::vector<std::future<void>> futures;
-    const auto tx = SignedTransaction {
-	    .tx = Transaction{
-		    .invocation = fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX, nfib)}};
+    futures.reserve(num_exec_threads);
+    const auto tx = SignedTransaction{
+        .tx = Transaction{
+            .invocation =
+                fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX,
+                                                             nfib)}};
 
     for (int i = 0; i < num_exec_threads; i++) {
-	int cur_count = std::min(ntx_per_thread, num_txs - (i * ntx_per_thread));
+      int cur_count = std::min(ntx_per_thread, num_txs - (i * ntx_per_thread));
 
-      futures.push_back(exec_pool.submit(
-          [&bs, &tx, do_commit, cur_count]() -> void {
-	  for (int j = 0; j < cur_count; j++) {
-            
-	    auto handler = bs.make_handler(tx);
-            if (!handler.root_invoke().is_root_success()) {
-              throw std::runtime_error("Failed to invoke transaction");
-            }
-            if (do_commit) {
-              if (auto r = handler.try_commit_transaction()();
-                  !r.has_value() || !r.value()) {
-                throw std::runtime_error("foo");
+      futures.emplace_back(
+          exec_pool.submit([&bs, &tx, do_commit, cur_count]() -> void {
+            for (int j = 0; j < cur_count; j++) {
+
+              auto handler = bs.make_handler(tx);
+              if (!handler.root_invoke().is_root_success()) {
+                throw std::runtime_error("Failed to invoke transaction");
+              }
+              if (do_commit) {
+                if (auto r = handler.try_commit_transaction()();
+                    !r.has_value() || !r.value()) {
+                  throw std::runtime_error("foo");
+                }
               }
             }
-	    }
           }));
     }
-    for (auto& f : futures) {
-	    f.wait();
+    for (auto &f : futures) {
+      f.wait();
     }
     auto finish_time = std::chrono::steady_clock::now();
     std::println(

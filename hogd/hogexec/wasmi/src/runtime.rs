@@ -46,7 +46,7 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
 }
 
 // assert that the memory is exported and starts at at most 1 page
-fn check_memory_limit(module : &Module) -> bool {
+fn check_memory_limit(module: &Module) -> bool {
     let export = module.get_export("memory");
     if export.is_none() {
         return false;
@@ -60,7 +60,6 @@ fn check_memory_limit(module : &Module) -> bool {
 }
 
 impl WasmiRuntime {
-
     // Invariant required: the input wasm module must have passed validation.
     fn new(
         bytes: &[u8],
