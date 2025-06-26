@@ -99,7 +99,8 @@ struct BenchmarkState {
     }
     auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
     return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
-                             ProposalModeData{});
+                             ProposalModeData{},
+                             make_hogexec_context(RuntimeEngine::kWasm3));
   }
 
   void advance_block()

@@ -41,12 +41,12 @@ make_hogexec_wasm_context(RuntimeEngine engine)
 }
 
 std::shared_ptr<RuntimeContext>
-make_hogexec_context()
+make_hogexec_context(RuntimeEngine engine)
 {
   return std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
           {ContractType::kWasmi,
-           make_hogexec_wasm_context(RuntimeEngine::kWasmi)},
+           make_hogexec_wasm_context(engine)},
           // TODO(geoff): add hogexec native contracts here
       });
 }
