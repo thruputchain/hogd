@@ -68,11 +68,26 @@ SystemCallHandler::SystemCallHandler(
 InvokeResult
 SystemCallHandler::perform_initial_validation()
 {
+  // TODO(geoff): Adjust if some assumption on the rest of the system changes
+  //
+  // At this point, we do not know the provenance of signed_tx_.  As such,
+  // an attached wasm may or may not have been validated by this point.
+  //
+  // We should validate wasms as they are sent to us from clients (before
+  // broadcasting to other nodes) and we may wish to validate them as they are
+  // broadcast to us from other nodes. But until we have a concrete design of
+  // the coordinator and know what is is and is not doing, we conservatively
+  // validate wasms here.
+  //
+  // If we make the assumption that all wasms are validated by the time they get
+  // to the executor, this check could be removed.
+
   for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
     auto res = runtime_context_->verify_contract(contract);
     // TODO(geoff): gas costs for verifying contracts
     if (!res) {
-      cumulative_invoke_result_.result_ = InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
       return cumulative_invoke_result_;
     }
   }
@@ -83,8 +98,8 @@ InvokeResult
 SystemCallHandler::root_invoke()
 {
   perform_initial_validation();
-  // if validation fails, cumulative_invoke_result_ is set to the appropriate error
-  // and we return it immediately
+  // if validation fails, cumulative_invoke_result_ is set to the appropriate
+  // error and we return it immediately
   if (!cumulative_invoke_result_.is_root_success()) {
     return cumulative_invoke_result_;
   }
@@ -96,12 +111,16 @@ SystemCallHandler::root_invoke()
     return cumulative_invoke_result_;
   }
   if (!runtime.value()) {
-    cumulative_invoke_result_.result_ = InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    cumulative_invoke_result_.result_ =
+        InvokeError{InvokeErrorCode::kInvokeDeterministic};
     return cumulative_invoke_result_;
   }
 
-  GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ > signed_tx_.tx.invocation.gas_limit?
-    signed_tx_.tx.invocation.gas_limit - cumulative_invoke_result_.gas_consumed_ : 0;
+  GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ >
+                                    signed_tx_.tx.invocation.gas_limit
+                                ? signed_tx_.tx.invocation.gas_limit -
+                                      cumulative_invoke_result_.gas_consumed_
+                                : 0;
 
   invocation_frame_stack_.start_frame(
       signed_tx_.tx.invocation.invoked_address,
@@ -132,7 +151,8 @@ SystemCallHandler::root_invoke()
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
     if (!validation_data.validate()) {
-      cumulative_invoke_result_.result_ = InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
       cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
       return cumulative_invoke_result_;
     }

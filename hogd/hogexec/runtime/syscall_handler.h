@@ -29,7 +29,7 @@ class StorageSnapshotCache;
 // Workflow for running a transaction:
 // 0. Start in state kInitial
 // 1. Validate any new wasms.  This can fail (leading to kDeterministicError)
-// 
+//
 
 // Data structure that manages all system calls and state associated with a
 // running transaction.
@@ -155,7 +155,9 @@ private:
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;
-  InvokeResult cumulative_invoke_result_ = InvokeResult{.result_ = InvokeError{InvokeErrorCode::kInvokeNone}, .gas_consumed_ = 0};
+  InvokeResult cumulative_invoke_result_ =
+      InvokeResult{.result_ = InvokeError{InvokeErrorCode::kInvokeNone},
+                   .gas_consumed_ = 0};
   bool transaction_committed_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
