@@ -156,6 +156,8 @@ wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
     m3ApiTrap(m3Err_hogdReturn);
   case kHostValidationFailure:
     m3ApiTrap(m3Err_validationFailure);
+  case kHostAbortTransaction:
+    m3ApiTrap(m3Err_abortTransaction);
   default:
     m3ApiTrap(m3Err_unrecoverableSystemError);
   }
@@ -284,6 +286,10 @@ public:
 
   // should be only called from within Runtime::load()
   [[nodiscard]] bool load_into(IM3Runtime runtime);
+
+  bool has_start_function() const;
+  bool is_memory_exported() const;
+  size_t initial_memory_page_count() const;
 
 private:
   // m_env exists only to extend lifetime of environment

@@ -43,6 +43,16 @@ Wasm3Context::make_new_runtime(Contract const &contract,
     return nullptr;
   }
 
+  if (module->has_start_function()) {
+    return nullptr;
+  }
+  if (!module->is_memory_exported()) {
+    return nullptr;
+  }
+  if (module->initial_memory_page_count() > 1) {
+    return nullptr;
+  }
+
   std::unique_ptr<HostCallContext> host_call_context =
       std::make_unique<HostCallContext>();
   host_call_context->syscall_handler = syscall_handler;

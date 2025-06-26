@@ -17,16 +17,10 @@ TEST_P(InstantiateTest, MissingImportFail)
 
   auto context = make_runtime_context(GetParam());
   auto runtime = context->make_new_runtime(contract, nullptr, true);
-
-  if (engine_has_eager_link_guards(GetParam())) {
-    EXPECT_FALSE(runtime);
-  }
-  else {
-    EXPECT_TRUE(runtime);
-  }
-  EXPECT_FALSE(runtime);
+  EXPECT_EQ(!engine_has_eager_link_guards(GetParam()), !!runtime);
 }
 
+// fails if memory is too big
 TEST_P(InstantiateTest, InstantiateFail)
 {
   Contract contract(ContractType::kWasmi);

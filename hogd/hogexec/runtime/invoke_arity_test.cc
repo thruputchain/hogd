@@ -173,19 +173,19 @@ TEST_P(InvokeArityTests, arity5)
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity6)
+TEST_P(InvokeArityTests, arity6)
 {
   auto res = runtime_->invoke("calltest6", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity7)
+TEST_P(InvokeArityTests, arity7)
 {
   auto res = runtime_->invoke("calltest7", UINT64_MAX);
   EXPECT_TRUE(res.result_);
 }
 
-TEST_F(InvokeArityTests, arity8)
+TEST_P(InvokeArityTests, arity8)
 {
   auto res = runtime_->invoke("calltest8", UINT64_MAX);
   EXPECT_TRUE(res.result_);

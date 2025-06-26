@@ -13,6 +13,7 @@
 
 #include "ffi_enums.hh"
 #include "hogd/hogexec/runtime/status.h"
+#include "m3_env.h"
 #include "wasm3.h"
 
 /*
@@ -157,6 +158,9 @@ Function::m3_err_to_invoke_status(M3Result res)
   if (res == m3Err_validationFailure) {
     return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeValidationFailure};
   }
+  if (res == m3Err_abortTransaction) {
+    return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeAbortTransaction};
+  }
   if (res == m3Err_hogdReturn) {
     return {};
   }
@@ -259,6 +263,27 @@ Module::link_nargs(const char *module_name, const char *function_name,
   return static_link_nargs(m3module_, module_name, function_name,
                            function_pointer, nargs);
 }
+
+bool
+Module::has_start_function() const
+{
+  return m3module_->startFunction != -1;
+}
+
+bool
+Module::is_memory_exported() const
+{
+  return m3module_->memoryExportName != nullptr;
+}
+
+size_t
+Module::initial_memory_page_count() const
+{
+  assert(is_memory_exported());
+
+  return m3module_->memoryInfo.initPages;
+}
+
 
 bool
 Function::find_function(const char *name)
