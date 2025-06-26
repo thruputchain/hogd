@@ -833,7 +833,6 @@ MerkleTrie::remove(const Key &k)
     }
     CHECK_PTR(branch);
     CHECK_EQ(branch->type, Node::Type::kBranch);
-    locked_through = branch;
 
     if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
       // We need to try again. We cannot block on acquiring the writer lock
@@ -849,10 +848,11 @@ MerkleTrie::remove(const Key &k)
       }
       continue;
     }
+    locked_through = branch;
 
     num_children = get_num_children(*branch);
-    if (branch != &root_ &&
-        (num_children == 2 || (num_children == 1 && branch->value))) {
+    if (branch != &root_ && ((num_children == 2 && !branch->value) ||
+                             (num_children == 1 && branch->value))) {
       CHECK_PTR(branch->parent);
 
       // TODO(jhumphri): Try-lock the child here? Then restart the function if
@@ -1035,8 +1035,6 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
     CHECK_EQ(num_children, 1UL);
     CHECK(!branch->value.has_value());
 
-    // TODO(jhumphri): I think this is wrong. We cannot just block on locking
-    // a writer if we are moving down the tree. child->rw_lock.lock_writer();
     CHECK(child->rw_lock.is_writer_locked_relaxed());
 
     if (child->type == Node::Type::kBranch) {

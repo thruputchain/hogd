@@ -1013,6 +1013,8 @@ TEST(MerkleTrie, Stress)
       EXPECT_EQ(it, total.end());
     }
 
+    EXPECT_TRUE(trie.check());
+
     EXPECT_EQ(trie.find(path), nullptr);
 
     seen.clear();
