@@ -116,7 +116,7 @@ SystemCallHandler::root_invoke()
     return cumulative_invoke_result_;
   }
 
-  GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ >
+  GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ <
                                     signed_tx_.tx.invocation.gas_limit
                                 ? signed_tx_.tx.invocation.gas_limit -
                                       cumulative_invoke_result_.gas_consumed_
