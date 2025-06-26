@@ -1120,8 +1120,8 @@ TEST(MerkleTrie, SingleThread)
 // Inserts and removes 2 million KV pairs in total with multiple threads.
 TEST(MerkleTrie, Multithread)
 {
-  constexpr size_t kNumKVPairs = 200'000;
-  constexpr size_t kNumThreads = 2;
+  constexpr size_t kNumKVPairs = 2'000'000;
+  constexpr size_t kNumThreads = 8;
   constexpr size_t kNumKVPairsPerThread = kNumKVPairs / kNumThreads;
 
   MerkleTrie trie;
