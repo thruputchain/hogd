@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "contract.hh"
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -26,10 +25,11 @@ namespace hogd {
 
 class StorageSnapshotCache;
 
-// Workflow for running a transaction:
-// 0. Start in state kInitial
-// 1. Validate any new wasms.  This can fail (leading to kDeterministicError)
-//
+// TODO(geoff): root_invoke() validates any incoming wasm blobs.
+// We may later do that validation preemptively in the coordinator.
+// We may also wish to add checks to make sure that a wasm that's created
+// is actually deployed, and/or put limits on the size of an individual wasm.
+// What's done here is only check well-formedness of the wasm.
 
 // Data structure that manages all system calls and state associated with a
 // running transaction.
