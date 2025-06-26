@@ -1316,6 +1316,12 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
 
     // TODO(jhumphri): I think the current writer could produce a stale hash if
     // we return in the if statement below.
+    //
+    // I think that a writer traveling down the tree needs to defer to a writer
+    // traveling up the tree. The former can restart its work whereas the latter
+    // cannot. If the latter tries to restart its work, it will start at [n]
+    // which may no longer exist if the KV pair in [n] was removed after we
+    // released the lock for [n].
     if (!n->parent || (!locked && !n->parent->rw_lock.try_lock_writer())) {
       // We are conflicting with a writer for [n]. We can stop generating hashes
       // because we know the other thread will generate a hashes for all nodes
