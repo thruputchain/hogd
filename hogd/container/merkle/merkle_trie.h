@@ -182,6 +182,7 @@ public:
 
   // Generates a hash for every node in the tree.
   void generate_all_hashes();
+  void generate_hashes_for_levels(int num_levels);
 
 private:
   // Returns a string representation of [node] and all nodes under it in the

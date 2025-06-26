@@ -1123,19 +1123,41 @@ TEST(MerkleTrie, SingleThread)
 void
 run_multithread(int num_threads)
 {
+  constexpr size_t kInitialSize = 20'000'000;
   constexpr size_t kNumKVPairs = 2'000'000;
   const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
+  CHECK_EQ(kNumKVPairs % num_threads, 0);
 
   MerkleTrie trie;
-  // TODO(jhumphri): Fix this.
-  // trie.set_should_hash_nodes_on_each_op(false);
-
-  WorkerPool pool(num_threads);
-  std::vector<std::future<void>> futures;
   std::vector<std::vector<HexArray>> paths(num_threads);
   {
     std::set<HexArray> generated;
+    trie.set_should_hash_nodes_on_each_op(false);
+
+    printf("Completing initial fill...");
+    fflush(stdout);
+
+    for (size_t i = 0; i < kInitialSize; i++) {
+      HexArray path = generate_random_path();
+      if (generated.count(path)) {
+        i--;
+        continue;
+      }
+      CHECK(generated.insert(path).second);
+      EXPECT_TRUE(trie.insert(path, std::to_string(i)));
+    }
+    EXPECT_EQ(trie.size(), kInitialSize);
+    trie.set_should_hash_nodes_on_each_op(true);
+    trie.generate_all_hashes();
+    EXPECT_TRUE(trie.check());
+
+    printf(" done.\n");
+    printf("Generating paths for threads...");
+    fflush(stdout);
+
     for (size_t i = 0; i < num_threads; i++) {
+      paths[i].reserve(num_kv_pairs_per_thread);
+
       for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
         HexArray path = generate_random_path();
         if (generated.count(path)) {
@@ -1147,7 +1169,11 @@ run_multithread(int num_threads)
       }
     }
   }
-  printf("about to start\n");
+  printf("done.\n");
+  WorkerPool pool(num_threads);
+  std::vector<std::future<void>> futures;
+  printf("Inserting keys...");
+  fflush(stdout);
 
   auto start = std::chrono::steady_clock::now();
   for (size_t i = 0; i < num_threads; i++) {
@@ -1162,40 +1188,41 @@ run_multithread(int num_threads)
   for (std::future<void> &future : futures) {
     future.get();
   }
+
+  trie.generate_hashes_for_levels(/*num_levels=*/2);
   auto end = std::chrono::steady_clock::now();
   auto duration =
       std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-  EXPECT_EQ(trie.size(), kNumKVPairs);
+  EXPECT_EQ(trie.size(), kInitialSize + kNumKVPairs);
+  printf("done. ");
   std::cout << "Elapsed time: " << duration.count() << " ms\n";
 
-  futures.clear();
-
-  // trie.generate_all_hashes();
-  // EXPECT_TRUE(trie.check());
-  // for (size_t i = 0; i < num_threads; i++) {
-  //   for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-  //     EXPECT_TRUE(trie.find(paths[i][j]));
-  //   }
-  // }
+  EXPECT_TRUE(trie.check());
+  for (size_t i = 0; i < num_threads; i++) {
+    for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
+      EXPECT_TRUE(trie.find(paths[i][j]));
+    }
+  }
 
   // Now remove all of the KV pairs.
-  // for (size_t i = 0; i < num_threads; i++) {
-  //   futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths]
-  //   {
-  //     for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-  //       // printf("remove %zu %zu\n", i, j);
-  //       CHECK(trie.remove(paths[i][j]));
-  //     }
-  //   }));
-  // }
-  // for (std::future<void> &future : futures) {
-  //   future.get();
-  // }
+  futures.clear();
+  for (size_t i = 0; i < num_threads; i++) {
+    futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
+      for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
+        // printf("remove %zu %zu\n", i, j);
+        CHECK(trie.remove(paths[i][j]));
+      }
+    }));
+  }
+  for (std::future<void> &future : futures) {
+    future.get();
+  }
 
-  // EXPECT_TRUE(trie.empty());
-  // EXPECT_TRUE(trie.check());
+  trie.generate_hashes_for_levels(/*num_levels=*/2);
 
-  // TODO(jhumphri): Release reader locks as we move down the trie.
+  EXPECT_EQ(trie.size(), kInitialSize);
+  EXPECT_TRUE(trie.check());
+
   // TODO(jhumphri): Try insert and remove at the same time.
   // TODO(jhumphri): Try multithreaded find, and interleave with insert and
   // remove operations.

@@ -1410,6 +1410,22 @@ MerkleTrie::generate_all_hashes()
 }
 
 void
+MerkleTrie::generate_hashes_for_levels(int num_levels)
+{
+  for (Node *child : root_.child) {
+    if (child) {
+      child->rw_lock.lock_writer();
+      child->hash = child->compute_node_hash();
+      child->rw_lock.unlock();
+    }
+  }
+
+  root_.rw_lock.lock_writer();
+  root_.hash = root_.compute_node_hash();
+  root_.rw_lock.unlock();
+}
+
+void
 MerkleTrie::free_all_nodes(Node *root) const
 {
   HexArray prefix;
