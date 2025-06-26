@@ -65,18 +65,39 @@ SystemCallHandler::SystemCallHandler(
 }
 
 InvokeResult
+SystemCallHandler::perform_initial_validation()
+{
+  for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
+    auto res = runtime_context_->verify_contract(contract);
+    // TODO(geoff): gas costs for verifying contracts
+    if (!res) {
+      cumulative_invoke_result_.result_ = InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+      return cumulative_invoke_result_;
+    }
+  }
+  return cumulative_invoke_result_;
+}
+
+InvokeResult
 SystemCallHandler::root_invoke()
 {
+  if (!cumulative_invoke_result_.is_root_success()) {
+    return cumulative_invoke_result_;
+  }
+
   auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
   if (!runtime) {
-    return InvokeResult{.result_ = runtime.error().to_invoke_error(),
-                        .gas_consumed_ = 0};
+    // some system error when resolving the runtime
+    cumulative_invoke_result_.result_ = runtime.error().to_invoke_error();
+    return cumulative_invoke_result_;
   }
   if (!runtime.value()) {
-    return InvokeResult{.result_ =
-                            InvokeError{InvokeErrorCode::kInvokeDeterministic},
-                        .gas_consumed_ = 0};
+    cumulative_invoke_result_.result_ = InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    return cumulative_invoke_result_;
   }
+
+  GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ > signed_tx_.tx.invocation.gas_limit?
+    signed_tx_.tx.invocation.gas_limit - cumulative_invoke_result_.gas_consumed_ : 0;
 
   invocation_frame_stack_.start_frame(
       signed_tx_.tx.invocation.invoked_address,
@@ -85,37 +106,42 @@ SystemCallHandler::root_invoke()
 
   auto res = runtime.value()->invoke(sdk_method_id(
                                          signed_tx_.tx.invocation.entrypoint),
-                                     signed_tx_.tx.invocation.gas_limit);
+                                     available_gas);
+  // finish_status takes res as input and shortcircuits if res is an error
   auto finish_status =
       invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   if (!finish_status.has_value()) {
-    return InvokeResult{.result_ = finish_status.error().to_invoke_error(),
-                        .gas_consumed_ = 0};
+    cumulative_invoke_result_.result_ = finish_status.error().to_invoke_error();
+    cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
+    return cumulative_invoke_result_;
   }
   res = finish_status.value();
+  // should not have gotten here without being in a success state to begin with
+  assert(cumulative_invoke_result_.is_root_success());
+  cumulative_invoke_result_.result_ = res.result_;
+  cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
 
-  if (!res.is_root_success())
-    return res.to_root_error();
+  if (!cumulative_invoke_result_.is_root_success()) {
+    return cumulative_invoke_result_;
+  }
 
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
     if (!validation_data.validate()) {
-      return InvokeResult{.result_ =
-                              InvokeError{
-                                  InvokeErrorCode::kInvokeValidationFailure},
-                          .gas_consumed_ = res.gas_consumed_};
+      cumulative_invoke_result_.result_ = InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+      cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
+      return cumulative_invoke_result_;
     }
   }
 
-  root_invoked_succeeded_ = true;
-  return res;
+  return cumulative_invoke_result_;
 }
 
 x23::Async<SystemStatus<bool>>
 SystemCallHandler::try_commit_transaction()
 {
   assert(!transaction_committed_);
-  if (!root_invoked_succeeded_) {
+  if (!cumulative_invoke_result_.is_root_success()) {
 
     auto st = co_await db_proxy_.abort_transaction();
     if (!st.has_value()) {
@@ -274,7 +300,7 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
   assert(load_contract);
-  return runtime_context_->make_new_runtime(*load_contract, this, true);
+  return runtime_context_->make_new_runtime(*load_contract, this, false);
 }
 
 Calldata const &

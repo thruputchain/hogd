@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -24,6 +25,11 @@
 namespace hogd {
 
 class StorageSnapshotCache;
+
+// Workflow for running a transaction:
+// 0. Start in state kInitial
+// 1. Validate any new wasms.  This can fail (leading to kDeterministicError)
+// 
 
 // Data structure that manages all system calls and state associated with a
 // running transaction.
@@ -51,6 +57,10 @@ public:
   SystemCallHandler &operator=(SystemCallHandler &&ll) = delete;
   SystemCallHandler(const SystemCallHandler &ll) = delete;
   SystemCallHandler &operator=(const SystemCallHandler &ll) = delete;
+
+  // Validate that the transaction can be run safely.
+  // Ensures, for example, that the wasms are valid.
+  InvokeResult perform_initial_validation();
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Starts the invocation that is specified within signed_tx_.
@@ -149,7 +159,7 @@ private:
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;
-  bool root_invoked_succeeded_ = false;
+  InvokeResult cumulative_invoke_result_ = InvokeResult{.result_ = InvokeError{InvokeErrorCode::kInvokeNone}, .gas_consumed_ = 0};
   bool transaction_committed_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
