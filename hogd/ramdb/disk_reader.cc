@@ -5,13 +5,11 @@
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
-#include <charconv>
 #include <format>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -20,8 +18,10 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
 
@@ -87,7 +87,8 @@ inline std::vector<UniqueLoglet>
 LogletBuffer::take_buffer()
 {
   crc_ = 0;
-  buf_.emplace_back(std::move(head_));
+  if (head_)
+    buf_.emplace_back(std::move(head_));
   return std::exchange(buf_, std::vector<UniqueLoglet>());
 }
 
@@ -120,12 +121,21 @@ struct SafeItemHeader {
   uint16_t key_len;
   uint32_t value_len;
   uint64_t lsn;
+  uint64_t _padding_garbage_next_pointer; // Always 0 in stable copies of item.
 
   // returns an ItemHeader if it is valid.
   std::optional<ItemHeader> operator()() const
   {
     if (storage > std::to_underlying(ItemStorage::kCommit))
       return std::nullopt;
+    if (key_len == 0)
+      return std::nullopt;
+    if (sizeof(ItemHeader) + key_len + value_len > kBigItemThreshold)
+      return std::nullopt;
+    if (_padding_garbage_next_pointer != 0) {
+      warn("padding in stored item non-zero");
+      return std::nullopt;
+    }
     ItemHeader hdr(static_cast<ItemStorage>(storage), type, key_len, value_len);
     hdr.lsn = lsn;
     return hdr;
@@ -150,14 +160,13 @@ get_log_files(Directory &dir)
     if (!has_extension(str, "log"))
       continue;
 
-    uint64_t tmp;
-    auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), tmp);
-    if (ec != std::errc()) {
+    std::optional<uint64_t> tmp = parse_integer<uint64_t>(str);
+    if (!tmp) {
       warn("invalid log file name `{}`", str);
       continue;
     }
 
-    lsns.push_back(tmp);
+    lsns.push_back(*tmp);
   }
   std::ranges::sort(lsns);
 
@@ -219,6 +228,8 @@ DiskReader::load_log_file(
     if (!ret) {
       if (ret.error() == ENODATA)
         break;
+
+      debug("error reading log file");
       return to_db_error(ret.error());
     }
 
@@ -228,10 +239,14 @@ DiskReader::load_log_file(
       hdr = *ret;
     }
     else {
+      debug("error validating item header");
       return DBError(DBCode::kCorruption);
     }
-    if (hdr.lsn != cur_lsn)
+    if (hdr.lsn != cur_lsn) {
+      debug("mismatched log file lsn header lsn {}, expected lsn {}", hdr.lsn,
+            cur_lsn);
       return DBError(DBCode::kCorruption);
+    }
 
     // parse the header.
     using enum ItemStorage;

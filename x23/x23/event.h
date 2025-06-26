@@ -18,6 +18,7 @@
 #include <x23/sockio.h>
 #include <x23/testlock.h>
 #include <x23/threadpool.h>
+#include <x23/uiobuf.h>
 #include <x23/vec.h>
 
 #if USE_EPOLL
@@ -29,53 +30,129 @@
 
 namespace x23 {
 
+// Should just fix Async<T>::return_value to take a T instead of a
+// references<T>.  This is a placeholder to deal with
+// std::Async<std::expected<void, E>> until then.
+constexpr struct {
+  template<typename E> constexpr operator std::expected<void, E>() const
+  {
+    return std::expected<void, E>{};
+  }
+} expected_void;
+
+class CoroPoll;
+
 namespace detail {
 
-struct BufferedReader {
-  using Super = std::enable_shared_from_this<BufferedReader>;
-  using Mem = std::array<char, 4092 - sizeof(Super)>;
+template<std::constructible_from T> class OnDemandSharedPtr {
+public:
+  constexpr OnDemandSharedPtr() noexcept = default;
+  OnDemandSharedPtr(OnDemandSharedPtr &&other) noexcept
+  {
+    t_.store(other.t_.exchange(nullptr));
+  }
+  OnDemandSharedPtr &operator=(OnDemandSharedPtr &&other) noexcept
+  {
+    if (this != &other)
+      t_.store(other.t_.exchange(nullptr));
+    return *this;
+  }
 
-  std::uint16_t start_{};
-  std::uint16_t stop_{};
+  std::shared_ptr<T> get()
+  {
+    auto ret = t_.load();
+    if (!ret) {
+      auto buf = std::make_shared<T>();
+      if (t_.compare_exchange_strong(ret, buf))
+        return buf;
+    }
+    return ret;
+  }
+  void reset() { t_.store(nullptr); }
+
+private:
+  atomic_shared_ptr<T> t_;
+};
+
+template<std::size_t StructSize = 4096>
+struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
+  static constexpr size_t kStructSize = StructSize;
+  using PosType = std::conditional_t<
+      kStructSize <= 0xff, std::uint8_t,
+      std::conditional_t<kStructSize <= 0xffff, std::uint16_t,
+                         std::conditional_t<kStructSize <= 0xffffffff,
+                                            std::uint32_t, size_t>>>;
+  using Super = std::enable_shared_from_this<GenReadBuffer>;
+  static constexpr size_t kTrimSize = sizeof(Super) + (2 * sizeof(PosType));
+  static_assert(kStructSize > kTrimSize);
+  using Mem = std::array<char, kStructSize - kTrimSize>;
+
+  PosType start_{};
+  PosType stop_{};
   Mem m_;
 
-  BufferedReader() noexcept = default;
-  BufferedReader(BufferedReader &&) noexcept = delete;
+  GenReadBuffer() noexcept = default;
+  GenReadBuffer(GenReadBuffer &&) noexcept = delete;
 
-  ssize_t operator()(int fd, void *buf, size_t len);
+  ssize_t operator()(int fd, void *buf, size_t len)
+  {
+    if (len == 0)
+      return 0;
+    assert(len <= PTRDIFF_MAX);
+
+    if (size_t buflen = stop_ - start_) {
+      size_t n = std::min(len, buflen);
+      memcpy(buf, m_.data() + start_, n);
+      start_ += n;
+      return n;
+    }
+
+    start_ = stop_ = 0;
+
+    struct iovec iov[2];
+    iov[0].iov_base = buf;
+    iov[0].iov_len = len;
+    iov[1].iov_base = m_.data();
+    iov[1].iov_len = m_.size();
+    auto n = ::readv(fd, iov, 2);
+    if (n <= ptrdiff_t(len))
+      return n;
+    stop_ = n - len;
+    return len;
+  }
+
   std::expected<size_t, Errno> read(BorrowedFd fd, is_bytevec auto *buf,
                                     size_t len)
   {
     return x23::read(fd, buf, len, this);
   }
 };
+using ReadBuffer = GenReadBuffer<4096>;
+
+struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
+  CoroLock write_lock_;
+  BufVec writer_;
+
+  // Returns an error void on success or if the write action has been
+  // deferred.  May return an error if a write fails, but won't if the
+  // buffer is full and a write is already pending.
+  Async<std::expected<void, Errno>> write(CoroPoll &cp, BorrowedFd fd, Buf buf);
+
+private:
+  Detached service(CoroPoll &cp, BorrowedFd fd);
+};
 
 struct BufHolder {
-  atomic_shared_ptr<BufferedReader> reader_;
+  OnDemandSharedPtr<ReadBuffer> reader_;
+  OnDemandSharedPtr<WriteBuffer> writer_;
 
-  BufHolder() noexcept = default;
-  BufHolder(BufHolder &&other) noexcept
+  auto reader() { return reader_.get(); }
+  auto writer() { return writer_.get(); }
+  auto buf_clear()
   {
-    reader_.store(other.reader_.exchange(nullptr));
+    reader_.reset();
+    writer_.reset();
   }
-  BufHolder &operator=(BufHolder &&other) noexcept
-  {
-    if (this != &other)
-      reader_.store(other.reader_.exchange(nullptr));
-    return *this;
-  }
-
-  std::shared_ptr<BufferedReader> reader()
-  {
-    auto ret = reader_.load();
-    if (!ret) {
-      auto buf = std::make_shared<BufferedReader>();
-      if (reader_.compare_exchange_strong(ret, buf))
-        return buf;
-    }
-    return ret;
-  }
-  void buf_clear() { reader_.store(nullptr); }
 };
 
 class CoroPollImpl : public DestroyInhibit {
@@ -139,7 +216,8 @@ protected:
   bool time_to_stop();
   int get_max_fd();
   void wake();
-  std::shared_ptr<BufferedReader> get_reader(BorrowedFd fd);
+  std::shared_ptr<ReadBuffer> get_reader(BorrowedFd fd);
+  std::shared_ptr<WriteBuffer> get_writer(BorrowedFd fd);
 
 private:
   std::stop_source ss_;
@@ -151,9 +229,10 @@ private:
                                                           EPOLLERR,
                                                       EPOLLOUT | EPOLLERR};
 
+  struct FdPtr;
   struct FdState : BufHolder {
-    enum Mode { kFree, kActive, kPoisoned };
-    std::atomic<Mode> mode{kFree};
+    enum Mode { kFree, kActive, kPoisoned, kLocked };
+    std::atomic<Mode> mode_{kFree};
     std::atomic<std::uint32_t> ready{0};
     // callbacks: [0] = reader, [1] = writer
     std::array<std::atomic<WorkItem>, 2> callbacks{};
@@ -169,11 +248,18 @@ private:
       copy_fields(other);
       return *this;
     }
+    Mode mode() const
+    {
+      for (;;) {
+        if (Mode m = mode_; m != kLocked)
+          return m;
+        mode_.wait(kLocked, std::memory_order_relaxed);
+      }
+    }
 
-  private:
     void copy_fields(const FdState &other)
     {
-      mode = other.mode.load();
+      mode_ = other.mode_.load();
       ready = other.ready.load();
       for (size_t i = 0; i < callbacks.size(); ++i)
         callbacks[i] = other.callbacks[i].load();
@@ -196,11 +282,11 @@ private:
   FdPtr getfd(BorrowedFd fd);
 
   static BorrowedFd always_eof();
-  void setmode(const FdPtr &fd, FdState::Mode mode);
+  void setmode(const FdPtr &fd, FdState::Mode mode) noexcept;
   void docb(const FdPtr &fdp, bool write)
   {
     using enum FdState::Mode;
-    FdState::Mode mode = fdp->mode;
+    FdState::Mode mode = fdp->mode();
     if ((fdp->ready & epflags[write]) || mode != kActive)
       if (WorkItem wi = fdp->callbacks[write].exchange(nullptr)) {
         --numcoro_;
@@ -239,6 +325,7 @@ private:
 
 class CoroPoll : public detail::CoroPollImpl {
 public:
+  static constexpr bool kAllowRefPtrConversion = true;
   static inline bool ignore_sigpipe = true;
 
   CoroPoll(ThreadPool &pool);
@@ -254,9 +341,20 @@ public:
   // Write all of data to file descriptor fd.  The coroutine keeps
   // suspending itself until the entirety of data has been written or
   // an error occurs.  Always returns either data.size() or an Errno
-  // other than EAGAIN.
+  // other than EAGAIN.  No synchronization is performed, so calling
+  // this concurrently in two threads will likely lead to a mishmash
+  // of data.
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
                                             BufView data SLOC_PARM);
+
+  // Write data to fd, but return immediately.  If there is an issue
+  // with the file descriptor, it might return an error or it might
+  // return void, depending on whether the buffer is clear and it can
+  // immediately attempt the write.  If there is no problem with the
+  // file descriptor, it will always return void.  Unlike write, it is
+  // safe to call this function concurrently; the writes will be
+  // sequenced one after the other.
+  Async<std::expected<void, Errno>> bgwrite(BorrowedFd fd, Buf data SLOC_PARM);
 
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
@@ -287,14 +385,25 @@ public:
           fcntl(fd, F_SETFD, 1);
       }
 #endif // !HAVE_ACCEPT4
-      if (fd >= 0)
+      if (fd >= 0) {
+        set_nodelay(fd);
         co_return fd;
+      }
       if (Errno err{}; err != EAGAIN)
         co_return err;
       if (auto err = co_await read_wait(lfd))
         co_return err;
     }
     co_return Errno{EBADF};
+  }
+
+  Async<std::expected<void, Errno>> connect(BorrowedFd fd, const sockaddr *sa,
+                                            socklen_t len SLOC_PARM);
+  Async<std::expected<void, Errno>>
+  connect(BorrowedFd fd, const sockaddr_storage *ss SLOC_PARM)
+  {
+    return connect(fd, reinterpret_cast<const sockaddr *>(ss),
+                   sizeof(*ss) X23_IFTRACE(, sloc));
   }
 
   Async<std::expected<int, Errno>> tcpconnect(const sockaddr *sa,

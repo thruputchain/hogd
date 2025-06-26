@@ -1,8 +1,9 @@
+#include <algorithm>
 #include <cstddef>
 #include <format>
 #include <iterator>
 #include <map>
-#include <print>
+#include <optional>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -16,6 +17,8 @@
 
 using namespace x23;
 
+using std::optional;
+using std::string_view;
 using std::string_literals::operator""s;
 
 struct GenRs {
@@ -25,14 +28,39 @@ struct GenRs {
   vector<string> namespaces_;
   vector<string> scopes_;
 
-  constexpr static int INDENT_WIDTH = 4;
+  bool needs_serde_imports = false;
+
+  constexpr static int kIndentWidth = 4;
 
   void process(const vector<Definition> &defs);
 
+  void show_def(const Definition &d) {
+    show_comment(d.comment, true);
+    prtop("\n");
+    visit(
+        [this](const auto &d) { show_def(d); },
+        d);
+  }
   void show_def(const ConstDef &c)
   {
-    show_comment(c.comment, true);
-    prtop("pub const {}: u32 = {};\n", c.id, c.val);
+    string val = c.val;
+    std::ranges::replace(val, '\'', '_');
+
+    string comment = c.comment;
+    string type = "u32";
+
+
+    if (optional<string> remainder = substring_removed(c.comment, kConstU32)) {
+      comment = *remainder;
+      type = "u32";
+    }
+    else if (optional<string> remainder = substring_removed(c.comment, kConstU64)) {
+      comment = *remainder;
+      type = "u64";
+    }
+
+    show_comment(comment, false);
+    prtop("pub const {} : {} = {};\n", c.id, type, val);
   }
   void show_def(const Typedef &d)
   {
@@ -67,16 +95,34 @@ struct GenRs {
   }
   void show_def(const ProgDef &prog);
 
-  void show_decl(const Declaration &d, std::string name_prefix)
+  void show_decl(const Declaration &d, string const& name_prefix)
   {
     if (d.qual == Declaration::kVoid) {
       return;
     }
+
     show_comment(d.comment, false);
-    if (holds_alternative<string>(d.type)) {
-      prtop("pub {}: {},\n", d.id, type_name(d, false));
+
+    if (!d.attrs.empty()) {
+      prtop("{}\n", d.attrs);
+    }
+
+    if (get_opaque_array_size(d)) {
+        // type is a byte array
+
+        if (needs_serde_imports)
+            prtop("#[serde(with = \"serde_arrays\")]\n");
+    }
+
+    auto type_name_str = (holds_alternative<string>(d.type))
+      ? type_name(d, false)
+      : (name_prefix + "_" + type_name(d, false));
+
+    string vis = d.is_private ? "" : "pub ";
+    if (d.id.empty()) {
+      prtop("{}{},\n", vis, type_name_str);
     } else {
-      prtop("pub {}: {},\n", d.id, name_prefix + "_" + type_name(d, false));
+      prtop("{}{}: {},\n", vis, d.id, type_name_str);
     }
   }
 
@@ -99,12 +145,14 @@ struct GenRs {
   static string map_case(const string &);
   static string map_bound(const string &);
   string type_name(const Declaration &d, bool generate, bool in_colon_required_setting = false);
+  // return nullopt unless the type is an opaque array
+  static std::optional<string> get_opaque_array_size(const Declaration &d);
 
   template<typename... Args>
   void prtop(std::format_string<Args...> fmt, Args &&...args)
   {
     if (top_.empty() || top_.back() == '\n')
-      top_ += std::string(INDENT_WIDTH * indent_, ' ');
+      top_ += std::string(kIndentWidth * indent_, ' ');
     top_ += std::vformat(fmt.get(), std::make_format_args(args...));
   }
 
@@ -128,6 +176,14 @@ struct GenRs {
     return ret;
   }
 
+  auto open_paren()
+  {
+    prtop("(\n");
+    auto ret = open_scope(");"s);
+    ++indent_;
+    return ret;
+  }
+
   string join(auto &&v, string with)
   {
     string ret;
@@ -147,19 +203,94 @@ struct GenRs {
     ret += join(scopes_, "::");
     return ret;
   }
+
+  optional<string> substring_removed(const string &str, const string_view sub) {
+      string::size_type i = str.find(sub);
+      if (i != string::npos) {
+          string str2 = string{str};
+          str2.erase(i, sub.length());
+          return str2;
+      }
+      return {};
+  }
+
+  static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
+  static constexpr string_view kSerdeArrays = R"(#[serde(with = "serde_arrays")])";
+  static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
+  static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
+
+  optional<Definition> convert_to_newtype(const Definition &d);
 };
+
+optional<Definition>
+GenRs::convert_to_newtype(const Definition &d)
+{
+  struct NewtypeVisitor {
+    string comment;
+    string attrs;
+
+    // Convert a typedef to a struct with a single field
+    Definition operator() (const Typedef &d)
+    {
+      Declaration inner {
+          .type = d.type,
+          .id = "inner",    // or can leave nameless for a tuple-struct
+          .qual = d.qual,
+          .bound = d.bound,
+          .attrs = attrs,
+          .is_private = true,
+      };
+
+      StructBody t_body { .transparent = true };
+      t_body.push_back(inner);
+
+      Definition ds = StructDecl {
+        .id = d.id,
+        .body = t_body
+      };
+      ds.comment = comment;
+
+      return ds;
+    }
+
+    Definition operator() (const Definition& /*unused*/)
+    {
+      throw std::runtime_error("newtype conversion is only implemented for XDR typedefs");
+    }
+  };
+
+  if (optional<string> remainder = substring_removed(d.comment, kRustNewtype)) {
+    string comment = *remainder;
+    string attrs;
+
+    if (optional<string> remainder = substring_removed(comment, kSerdeArrays)) {
+      comment = *remainder;
+      if (!attrs.empty()) {
+          attrs += "\n";
+      }
+      attrs += kSerdeArrays;
+      needs_serde_imports = true;
+    }
+
+    auto visitor = NewtypeVisitor {
+      .comment = comment,
+      .attrs = attrs
+    };
+    return visit(visitor, d);
+
+  }
+  return {};
+}
 
 void
 GenRs::process(const vector<Definition> &defs)
 {
   for (const auto &d : defs) {
-    show_comment(d.comment, true);
-    visit(
-        [this](const auto &d) {
-          prtop("\n");
-          show_def(d);
-        },
-        d);
+    if (optional<Definition> dn = convert_to_newtype(d)) {
+      show_def(*dn);
+    } else {
+      show_def(d);
+    }
   }
 }
 
@@ -177,14 +308,142 @@ GenRs::show_type(const StructBody &s, string t)
   }
 
   {
-    prtop("#[repr(C)]\n");
-    prtop("#[derive(PartialEq, Debug, Default, Clone)]\n");
+    optional<string> array_size;
+
+    string derive_traits = "PartialEq, Debug, Clone";
+    if (s.transparent) {
+        auto inner = s.front();
+        array_size = get_opaque_array_size(inner);
+
+        if (!(array_size && *array_size == "64")) {
+            // arrays with size over 32 don't implement Default, so we can't
+            // derive it here
+            derive_traits += ", Default";
+        }
+
+        derive_traits += ", Eq, Hash, Copy";
+
+        derive_traits += ", Serialize, Deserialize";
+        needs_serde_imports = true; // for Serialize, Deserialize
+    }
+    prtop("#[derive({})]\n", derive_traits);
     prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
+
+    if (s.transparent)
+        prtop("#[repr(transparent)]\n");
+    else
+        prtop("#[repr(C)]\n");
+
     prtop("pub struct {} ", t);
-    auto _close = open_brace();
-    scopes_.push_back(t);
-    for (const auto &d : s) {
-      show_decl(d, t);
+    {
+        auto _close = (s.size() == 1 && s.front().id.empty())
+          ? open_paren() : open_brace();
+        scopes_.push_back(t);
+
+        for (const auto &d : s) {
+          show_decl(d, t);
+        }
+    }
+
+    if (s.transparent) {
+        // implement some conversion methods
+
+        auto outer_id = t;
+        auto inner = s.front();
+        string inner_type = type_name(inner, false);
+        string inner_access = (inner.id.empty()) ? "0" : inner.id;
+
+        /*
+        impl From<$InnerType> for $OuterType {
+            fn from(_inner: $InnerType) -> Self {
+                Self { $inner_id: _inner } // or Self(_inner)
+            }
+        }
+        */
+        prtop("\nimpl From<{}> for {} {{\n", inner_type, outer_id);
+        prtop("    fn from(_inner: {}) -> Self {{\n", inner_type);
+        if (inner.id.empty())
+            prtop("        Self(_inner)\n");
+        else
+            prtop("        Self {{ {}: _inner }}\n", inner.id);
+        prtop("    }}\n");
+        prtop("}}");
+
+        /*
+        impl $OuterType {
+            pub const fn new(_inner: $InnerType) -> Self {
+                Self { $inner_field: _inner }
+            }
+            pub const fn into_inner(self) -> $InnerType {
+                self.$inner_access
+            }
+        }
+        */
+        prtop(R"(
+impl {0} {{
+    pub fn into_inner(self) -> {1} {{
+        self.{2}
+    }}
+    pub const fn new(_inner: {1}) -> Self {{
+        Self {{ {3} }}
+    }}
+}}
+)", outer_id, inner_type, inner_access, inner.id.empty() ? "_inner" : inner.id + ": _inner");
+
+        /*
+        impl Deref for $OuterType {
+            type Target = $InnerType;
+
+            fn deref(&self) -> &Self::Target {
+                &self.$inner_access
+            }
+        }
+        */
+        prtop("\nimpl Deref for {} {{\n", outer_id);
+        prtop("    type Target = {};\n\n", inner_type);
+        prtop("    fn deref(&self) -> &Self::Target {{\n");
+        prtop("        &self.{}\n", inner_access);
+        prtop("    }}\n");
+        prtop("}}");
+
+        /*
+        impl DerefMut for $OuterType {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.$inner_access
+            }
+        }
+        */
+        prtop("\nimpl DerefMut for {} {{\n", outer_id);
+        prtop("    fn deref_mut(&mut self) -> &mut Self::Target {{\n");
+        prtop("        &mut self.{}\n", inner_access);
+        prtop("    }}\n");
+        prtop("}}");
+
+        if (auto array_size = get_opaque_array_size(inner)) {
+
+            /*
+                impl AsRef<[u8]> for $OuterType {
+                    fn as_ref(&self) -> &[u8] {
+                        self.deref().as_slice()
+                    }
+                }
+
+            */
+            prtop("\nimpl AsRef<[u8]> for {} {{\n", outer_id);
+            prtop("    fn as_ref(&self) -> &[u8] {{\n");
+            prtop("        self.deref().as_slice()\n");
+            prtop("    }}\n");
+            prtop("}}");
+
+            /*
+            prtop("\nimpl AsRef<[u8; {}]> for {} {{\n", *array_size, outer_id);
+            prtop("    fn as_ref(&self) -> &[u8; {}] {{\n", *array_size);
+            prtop("        &self.{}\n", inner_access);
+            prtop("    }}\n");
+            prtop("}}");
+            */
+
+        }
     }
   }
 }
@@ -326,7 +585,7 @@ GenRs::show_type(const UnionBody &b, string t)
         }
       }
     }
-    top_ += std::string(INDENT_WIDTH * indent_, ' ');
+    top_ += std::string(kIndentWidth * indent_, ' ');
     top_ += default_decl;
     top_ += "\n";
   }
@@ -431,6 +690,18 @@ GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
   top_ += "\n\n";
 }
 
+std::optional<string>
+GenRs::get_opaque_array_size(const Declaration &d)
+{
+  if (!holds_alternative<string>(d.type)) {
+    return std::nullopt;
+  }
+  if (d.qual == Declaration::kArray && get<string>(d.type) == "opaque") {
+    return d.bound;
+  }
+  return std::nullopt;
+}
+
 string
 GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_setting) // rust is weird
 {
@@ -490,9 +761,9 @@ gen_rs(vector<Definition> *defs)
 #![allow(unexpected_cfgs)]
 #![allow(unused_variables)]
 
-use core::option::Option;
-
 use crate::*;
+use core::option::Option;
+use core::ops::{Deref, DerefMut};
 
 #[cfg(feature="std")]
 use std::io::{Read, Write};
@@ -501,7 +772,12 @@ use std::io::{Read, Write};
 
   gs.process(*defs);
 
-  return preamble + gs.top_ + R"(
+  std::string serde_imports = gs.needs_serde_imports ? R"(
+use ::serde::{Serialize, Deserialize};
+use ::serde_arrays;
+)" : "";
+
+  return preamble + serde_imports + gs.top_ + R"(
 //
 // XDR internals below this point
 //

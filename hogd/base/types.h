@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 
 namespace hogd {
@@ -20,6 +21,7 @@ using std::uint32_t;
 using std::uint64_t;
 using std::uint8_t;
 using std::uintptr_t;
+using ssize_t = std::make_signed_t<size_t>;
 
 // 128-bit integers (this is a GNU C++ extension supported by Clang and GCC)
 using int128_t = __int128;
@@ -52,12 +54,12 @@ operator""_GiB(unsigned long long int gib)
 // This should make auditing for nondeterminism easier.
 template<typename T> class Nondeterministic {
 public:
-  template<typename... Args>
+  template<typename... Args> requires std::is_constructible_v<T, Args...>
   Nondeterministic(Args &&...args)
     : nondeterministic_value_(std::forward<Args>(args)...)
   {}
 
-  T const &get() { return nondeterministic_value_; }
+  auto &get(this auto &self) { return self.nondeterministic_value_; }
 
 private:
   T nondeterministic_value_;

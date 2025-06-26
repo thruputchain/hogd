@@ -3,6 +3,10 @@ add_subdirectory(base)
 add_subdirectory(container)
 add_subdirectory(crypto)
 add_subdirectory(metrics)
+add_subdirectory(mockdb)
+add_subdirectory(db_interface)
+add_subdirectory(storage_item)
+add_subdirectory(storage_cost)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
 
@@ -11,10 +15,18 @@ add_library(
   hogd
   init.cc
 )
+add_library(hogd_interface INTERFACE)
+target_link_libraries(
+  hogd_interface INTERFACE
+  crypto_interface
+  protocol
+)
+
 target_link_libraries(
   hogd
   base
   crypto
+  hogd_interface
 )
 
 # Additional libraries that are not included by default (i.e., in hogd library)

@@ -18,8 +18,9 @@ pub enum TrampolineErrorEnum {
     OutOfGas = 1,
     Unrecoverable = 2,
     Return = 3,
-    Exit { code: i32 } = 4,
+    Exit = 4,
     ValidationFailure = 5,
+    AbortTransaction = 6,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -53,14 +54,17 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
         }
         x if x == HostFnErrorCode::kHostExit as i32 => {
             Err(Error::host(TrampolineError {
-                error: TrampolineErrorEnum::Exit {
-                    code: result.result,
-                },
+                error: TrampolineErrorEnum::Exit,
             }))
         }
         x if x == HostFnErrorCode::kHostValidationFailure as i32 => {
             Err(Error::host(TrampolineError {
                 error: TrampolineErrorEnum::ValidationFailure,
+            }))
+        }
+        x if x == HostFnErrorCode::kHostAbortTransaction as i32 => {
+            Err(Error::host(TrampolineError {
+                error: TrampolineErrorEnum::AbortTransaction,
             }))
         }
         _ => Err(Error::host(TrampolineError {

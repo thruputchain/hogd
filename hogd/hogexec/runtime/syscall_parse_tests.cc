@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstddef>
 #include <span>
 #include <vector>
 
@@ -27,14 +26,13 @@ TEST(SyscallParseTests, ParsePrimitiveTypes)
     // small output types work as regular pointers
     auto u32_output = SyscallArgParams<uint32_t &>::parse(contract_memory, 2);
     ASSERT_TRUE(u32_output.has_value());
-    EXPECT_EQ(u32_output.get(), 0x05040302);
 
-    u32_output.get() = 0;
+    u32_output.get() = 0x09080706;
   }
-  EXPECT_EQ(memory[2], 0);
-  EXPECT_EQ(memory[3], 0);
-  EXPECT_EQ(memory[4], 0);
-  EXPECT_EQ(memory[5], 0);
+  EXPECT_EQ(memory[2], 0x06);
+  EXPECT_EQ(memory[3], 0x07);
+  EXPECT_EQ(memory[4], 0x08);
+  EXPECT_EQ(memory[5], 0x09);
 
   // larger input types work as regular pointers
   auto int128_inp = SyscallArgParams<int128_t>::parse(contract_memory, 8);

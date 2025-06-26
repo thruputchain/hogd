@@ -39,7 +39,7 @@ do {									\
 %option nodefault
 
 ID	[a-zA-Z_][a-zA-Z_0-9]*
-NUM	[+-]?([0-9]+|0x[0-9a-fA-F]+)
+NUM	[+-]?([0-9'_]+|0x[0-9a-fA-F'_]+)
 BLOCK_COMMENT	^([ \t]*\/\*([^\*]|\*[^\/])*\*\/[ \t]*\n)+
 LINE_COMMENTS	^([ \t]*\/\/.*\n)+
 

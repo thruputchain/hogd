@@ -1,0 +1,5 @@
+if(ENABLE_TEST_CONTRACTS)
+  add_subdirectory(integration_test_contracts)
+else()
+  add_custom_target(all_wasm_contracts)
+endif()

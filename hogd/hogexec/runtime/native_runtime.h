@@ -5,18 +5,26 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string_view>
+#include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
-#include "contract.hh"
+#include "bcs/decode.h"
+#include "bcs/encode.h"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
+struct Contract;
 class SystemCallHandler;
 class NativeRuntime;
 
@@ -47,8 +55,8 @@ class NativeRuntime;
 // runtime pointer, as necessary.
 class NativeContract {
 public:
-  using function_t = std::function<InvokeStatus<int32_t>(SystemCallHandler &,
-                                                         NativeRuntime &)>;
+  using function_t =
+      std::function<InvokeStatus<void>(SystemCallHandler &, NativeRuntime &)>;
 
   NativeContract(std::unordered_map<MethodID, function_t> functions)
     : functions_(std::move(functions))
@@ -59,12 +67,125 @@ public:
   NativeContract(NativeContract const &) = delete;
   NativeContract &operator=(NativeContract const &) = delete;
 
-  InvokeStatus<int32_t> invoke(MethodID method,
-                               SystemCallHandler &syscall_handler,
-                               NativeRuntime &runtime);
+  InvokeStatus<void> invoke(MethodID method, SystemCallHandler &syscall_handler,
+                            NativeRuntime &runtime);
 
 private:
   std::unordered_map<MethodID, function_t> functions_;
+};
+
+namespace detail {
+template<typename T> struct NativeContractArgs;
+
+template<typename T, typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (
+    T::*)(SystemCallHandler &, NativeRuntime &, Args...) const> {
+  using return_t = R;
+  using args_t = std::tuple<Args...>;
+
+  static auto extra_args(SystemCallHandler &handler, NativeRuntime &runtime)
+  {
+    return std::tuple<SystemCallHandler &, NativeRuntime &>{handler, runtime};
+  }
+};
+
+template<typename T, typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (T::*)(SystemCallHandler &, Args...)
+                              const> {
+  using return_t = R;
+  using args_t = std::tuple<Args...>;
+  static auto extra_args(SystemCallHandler &handler, NativeRuntime & /*unused*/)
+  {
+    return std::tuple<SystemCallHandler &>{handler};
+  }
+};
+
+template<typename T, typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (T::*)(NativeRuntime &, Args...)
+                              const> {
+  using return_t = R;
+  using args_t = std::tuple<Args...>;
+  static auto extra_args(SystemCallHandler & /*unused*/, NativeRuntime &runtime)
+  {
+    return std::tuple<NativeRuntime &>{runtime};
+  }
+};
+
+template<typename T, typename R, typename... Args>
+struct NativeContractArgs<InvokeStatus<R> (T::*)(Args...) const> {
+  using return_t = R;
+  using args_t = std::tuple<Args...>;
+
+  static auto extra_args(SystemCallHandler & /*unused*/,
+                         NativeRuntime & /*unused*/)
+  {
+    return std::tuple{};
+  }
+};
+
+} // namespace detail
+
+class NativeContractBuilder {
+public:
+  void add(MethodID id, auto lambda)
+  {
+    using fn_t = decltype(&decltype(lambda)::operator());
+    using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
+    using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
+
+    auto wrapped_f = [f = std::forward<decltype(lambda)>(lambda)](
+                         SystemCallHandler &handler,
+                         NativeRuntime &runtime) -> InvokeStatus<void> {
+      auto args = [&]<size_t... Is>(std::index_sequence<Is...>) {
+        return bcs::decode_from<std::remove_cvref_t<decltype(std::get<Is>(
+            std::declval<args_t>()))>...>(
+            std::as_bytes(std::span(handler.get_calldata())));
+      }(std::make_index_sequence<std::tuple_size_v<args_t>>());
+      if (!args.has_value()) {
+        return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+      }
+
+      // invoke the lambda, and return the error if there is one
+      auto return_value =
+          [&]<size_t... Is>(
+              std::index_sequence<Is...>) -> InvokeStatus<return_t> {
+        auto extra_args =
+            detail::NativeContractArgs<fn_t>::extra_args(handler, runtime);
+        return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
+          return f(std::get<ExtraIs>(extra_args)...,
+                   std::get<Is>(args.value())...);
+        }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>());
+      }(std::make_index_sequence<std::tuple_size_v<args_t>>());
+      if (!return_value.has_value()) {
+        return return_value.error();
+      }
+
+      // otherwise, return the received value
+      if constexpr (!std::is_same_v<return_t, void>) {
+        auto return_buffer =
+            bcs::encode_to<ReturnBuffer, return_t>(return_value.value());
+        if (!return_buffer.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        handler.set_return_buffer(std::move(*return_buffer));
+      }
+      else {
+        handler.set_return_buffer(ReturnBuffer{});
+      }
+      return {};
+    };
+
+    auto [_, inserted] = functions_.emplace(id, std::move(wrapped_f));
+    if (!inserted) {
+      throw std::runtime_error("Method ID already exists");
+    }
+  }
+
+  std::unique_ptr<NativeContract> build();
+
+private:
+  std::unordered_map<MethodID, NativeContract::function_t> functions_;
+  bool built_ = false;
 };
 
 // Context that can instantiate native contracts from a predefined set of
@@ -130,7 +251,7 @@ public:
   std::span<std::byte> get_memory() noexcept override { std::terminate(); }
 
 private:
-  InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
+  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
 
   NativeContract &contract_;
   uint64_t available_gas_ = 0;

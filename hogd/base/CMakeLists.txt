@@ -1,6 +1,6 @@
 # create base module library
 add_library(
-  base
+  base_objects OBJECT
   init.cc
   io.cc
   log.cc
@@ -8,15 +8,13 @@ add_library(
   status.cc
   string.cc
 )
-
 target_link_libraries(
-  base 
+  base_objects
   protocol
 )
+add_library(base STATIC $<TARGET_OBJECTS:base_objects>)
 
-# create base module test binary
-add_executable(
-  base_test
+add_library(base_test_objects OBJECT
   bits_test.cc
   cpputil_test.cc
   io_test.cc
@@ -24,8 +22,20 @@ add_executable(
   status_test.cc
   string_test.cc
   unique_function_test.cc
+  wide_integral_test.cc
   worker_pool_test.cc
 )
+target_link_libraries(
+  base_test_objects
+  GTest::gtest_main
+)
+
+# create base module test binary
+add_executable(
+  base_test
+  $<TARGET_OBJECTS:base_test_objects>
+)
+
 target_link_libraries(
   base_test
   base

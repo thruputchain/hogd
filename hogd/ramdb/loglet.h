@@ -55,10 +55,8 @@ struct ItemHeader {
   uint8_t type;
   uint16_t key_len;
   uint32_t value_len;
-  union {
-    ItemHeader *next{nullptr};
-    uint64_t lsn; // Log Sequence Number
-  };
+  uint64_t lsn; // Log Sequence Number
+  ItemHeader *next{nullptr};
 
   ItemHeader() = default;
   ItemHeader(ItemStorage storage, uint8_t type, uint16_t key_len,

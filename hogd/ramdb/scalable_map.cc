@@ -25,6 +25,7 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
 #include "hogd/ramdb/item_allocator.h"
@@ -139,12 +140,27 @@ ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type,
   return DBError(DBCode::kNotFound);
 }
 
+DBStatus<size_t>
+ScalableMap::get_size(std::span<const std::byte> key)
+{
+  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  for (; *bu != nullptr; bu = &(*bu)->next) {
+    if ((*bu)->get_key() != key)
+      continue;
+
+    return (*bu)->get_value().size();
+  }
+  return DBError(DBCode::kNotFound);
+}
+
 DBStatus<void>
 ScalableMap::put(std::span<const std::byte> key, uint8_t type,
                  std::span<const std::byte> val)
 {
   if (key.size() > std::numeric_limits<uint16_t>::max() ||
-      val.size() > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
+      val.size() > std::numeric_limits<uint32_t>::max() ||
+      sizeof(ItemHeader) + key.size() + val.size() > kBigItemThreshold)
+      [[unlikely]] {
     return DBError(DBCode::kTooBig);
   }
 
@@ -160,9 +176,12 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
   // Write to on-disk log first.
   size_t hash = calculate_hash(key);
   ScopedDiskWrite record = disk_writer_.write_record(hash);
-  DBStatus<void> ret = record.modify(item);
+  DBStatus<uint64_t> ret = record.modify(item);
   if (!ret) [[unlikely]]
     return ret.error();
+
+  const uint64_t new_lsn = *ret;
+  item->lsn = new_lsn;
 
   auto [ul, bu, cnt] = acquire_bucket(hash);
   record.reset();
@@ -171,9 +190,19 @@ ScalableMap::put(std::span<const std::byte> key, uint8_t type,
   // Check if the key already exists.
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
+      // If the item that is about to be overwritten should be included in an
+      // ongoing snapshot, make sure the snapshot gets a copy of the item.
+      // This must be done under the bucket lock because we must ensure the
+      // snapshotter doesn't copy an old value for this key into the snapshot.
+      if (mutation_cb_)
+        mutation_cb_(*bu);
+
       // Is the item size unchanged? Update in place.
       if ((*bu)->get_value().size() == val.size()) {
         (*bu)->type = type;
+        // Updating the LSN for update-in-place ensures that we don't
+        // inadvertently forward this new value into an ongoing snapshot.
+        (*bu)->lsn = new_lsn;
         std::ranges::copy(val, (*bu)->get_value().begin());
         allocator_.free<true>(item);
         return {};
@@ -208,6 +237,11 @@ ScalableMap::remove(std::span<const std::byte> key)
   record.reset();
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
+      // See comment in put(). Forwards the item to an ongoing snapshot
+      // that should include it before removing it.
+      if (mutation_cb_)
+        mutation_cb_(*bu);
+
       unlink(bu);
       counter_dec(cnt);
       break;
@@ -343,17 +377,27 @@ ScalableMap::do_expand()
 }
 
 bool
-ScalableMap::modify_locked(std::span<const std::byte> key,
-                           const std::function<void(ItemHeader **h)> &fn)
+ScalableMap::modify_locked(
+    std::span<const std::byte> key,
+    const std::function<void(ItemHeader **h, size_t hash)> &fn)
 {
-  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  size_t hash = calculate_hash(key);
+  auto [ul, bu, ignore] = acquire_bucket(hash);
   for (; *bu != nullptr; bu = &(*bu)->next) {
     if ((*bu)->get_key() == key) {
-      fn(bu);
+      fn(bu, hash);
       return true;
     }
   }
   return false;
+}
+
+void
+ScalableMap::register_mutation_cb(std::function<void(ItemHeader *)> cb)
+{
+  std::vector<std::unique_lock<std::mutex>> locks{mutexes_.begin(),
+                                                  mutexes_.end()};
+  mutation_cb_ = std::move(cb);
 }
 
 } // namespace hogd

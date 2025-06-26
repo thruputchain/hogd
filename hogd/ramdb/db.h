@@ -50,7 +50,9 @@ public:
                                                 [this] { notify_low_mem(); })),
       pool_(available_parallelism()),
       item_allocator_(*loglet_allocator_, pool_, &map_),
-      disk_writer_(*loglet_allocator_, dir_, write_head_order),
+      disk_writer_(*loglet_allocator_, dir_, "{}.log", kDiskLogFileThreshold,
+                   write_head_order),
+      write_head_order_{write_head_order},
       map_(item_allocator_, disk_writer_, lock_order, bucket_order),
       bg_th_(
           [this](const std::stop_token &stoken) { background_worker(stoken); })
@@ -77,6 +79,9 @@ public:
   DBStatus<void> get_if_type(std::span<const std::byte> key, uint8_t type,
                              std::span<std::byte> val_out);
 
+  // get_size returns the size of the item (if it exists).
+  DBStatus<size_t> get_size(std::span<const std::byte> key);
+
   // put inserts an item.
   DBStatus<void> put(std::span<const std::byte> key, uint8_t type,
                      std::span<const std::byte> val);
@@ -97,7 +102,16 @@ public:
 
   // sync writes pending items to disk. Any calls to put() or remove() performed
   // before this call are guaranteed to be recoverable after a failure.
+  // returns an lsn that can be passed to snapshot() to indicate which
+  // items should be included in a snapshot.
   DBStatus<uint64_t> sync();
+
+  // write all of the state changes that happened at after begin_lsn (which is 0
+  // or an lsn previously returned by sync() but before this call (with
+  // begin_lsn being an lsn previously returned by a different call to sync()
+  // or sync_and_snapshot()).
+  DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
+  sync_and_snapshot(const std::string &path, uint64_t begin_lsn);
 
   // set_active indicates to the database that it is in a state of activity (if
   // yes is true) or inactivity (if yes is false).  When inactive, items should
@@ -123,9 +137,11 @@ private:
   WorkerPool pool_;
   ItemAllocator item_allocator_;
   DiskWriter disk_writer_;
+  int write_head_order_;
   ScalableMap map_;
 
-  std::mutex lock_; // protects cv_, active_, run_expand_, and run_compact_.
+  // protects cv_, active_, run_expand_, and run_compact_.
+  std::mutex lock_;
   std::condition_variable_any cv_;
   bool active_{true};
   bool run_expand_{false};
@@ -136,6 +152,7 @@ private:
 
   // called when memory is low.
   void notify_low_mem();
+
   // background_worker performs periodic background work.
   void background_worker(const std::stop_token &stoken);
 };
@@ -153,6 +170,13 @@ Database::get_if_type(std::span<const std::byte> key, uint8_t type,
 {
   assert(active_);
   return map_.get_if_type(key, type, val_out);
+}
+
+inline DBStatus<size_t>
+Database::get_size(std::span<const std::byte> key)
+{
+  assert(active_);
+  return map_.get_size(key);
 }
 
 inline DBStatus<void>
@@ -190,6 +214,8 @@ Database::get_each_parallel(GetEachCallback fn, size_t width, WorkerPool &pool)
       width, pool);
 }
 
+// Only safe to call while Database instance is quiescent (no ongoing calls to
+// put, get, remove, etc).
 inline DBStatus<uint64_t>
 Database::sync()
 {

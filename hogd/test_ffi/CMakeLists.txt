@@ -27,7 +27,7 @@ target_include_directories(
 target_link_libraries(
   test_ffi
   runtime
-  runtime_test_util
+  db_interface
 )
 
 add_executable(

@@ -4,15 +4,21 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source ${SCRIPT_DIR}/env.sh
 BUILD_DIR=bcheck
+PARALLEL=
+BUILD_PARALLEL=no
 
 print_usage() {
   printf "usage: scripts/check.sh [OPTION]...\n"
   printf -- "-e enable extra checks\n"
+  printf -- "-p run tests in parallel\n"
+  printf -- "-b do builds in parallel\n"
 }
 
-while getopts 'e' flag; do
+while getopts 'epb' flag; do
   case "${flag}" in
     e) EXTRA=yes ;;
+    p) PARALLEL=--parallel ;;
+    b) BUILD_PARALLEL=yes ;;
     *) print_usage
        exit 1 ;;
     esac
@@ -23,6 +29,14 @@ mkdir -p "$BUILD_DIR"
 COLOR='\033[1;34m'
 NC='\033[0m'
 
+# Optionally perform the second build in parallel, in the background;
+# Much of the CI time is bottlenecked on libsodium's configure step (sequential, low CPU usage)
+# and a few late-stage link jobs
+if [ "$BUILD_PARALLEL" = "yes" ]; then
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" > /dev/null 2>&1 &
+  LLVM_BUILD_PID=$!
+fi
+
 printf "${COLOR}STEP 1: Check build (gcc)\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" ; then
     printf "build failed!\n"
@@ -30,19 +44,25 @@ if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" ; t
 fi
 
 printf "${COLOR}\nSTEP 2: Check tests (gcc)\n${NC}"
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/gcc --output-on-failure; then
+if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/gcc --output-on-failure ${PARALLEL} --timeout 100; then
     printf "tests failed!\n"
     exit 1
 fi
 
-printf "${COLOR}STEP 3: Check build (llvm)\n${NC}"
-if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" ; then
-    printf "build failed!\n"
-    exit 1
+if [ "$BUILD_PARALLEL" = "yes" ]; then
+    printf "${COLOR}Waiting for Step 3 (llvm) build to finish...\n${NC}"
+    wait $LLVM_BUILD_PID
+    printf "${COLOR}Step 3 (llvm) build finished\n${NC}"
+else
+    printf "${COLOR}STEP 3: Check build (llvm)\n${NC}"
+    if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" ; then
+        printf "build failed!\n"
+        exit 1
+    fi
 fi
 
 printf "${COLOR}\nSTEP 4: Check tests (llvm)\n${NC}"
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure; then
+if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100; then
     printf "tests failed!\n"
     exit 1
 fi

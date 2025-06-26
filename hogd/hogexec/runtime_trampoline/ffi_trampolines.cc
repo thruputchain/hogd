@@ -7,6 +7,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "syscall.hh"
 
 namespace hogd {
 
@@ -15,17 +16,17 @@ class HostCallContext;
 namespace {
 
 constexpr TrampolineResult
-success(int32_t res)
+success(int32_t result)
 {
-  return TrampolineResult{.result = res,
+  return TrampolineResult{.result = result,
                           .panic = std::to_underlying(
                               HostFnErrorCode::kHostNoneOrRecoverable)};
 }
 
 constexpr TrampolineResult
-host_exit(int32_t res)
+host_exit()
 {
-  return TrampolineResult{.result = res,
+  return TrampolineResult{.result = 1,
                           .panic =
                               std::to_underlying(HostFnErrorCode::kHostExit)};
 }
@@ -43,17 +44,19 @@ unrecoverable()
 }
 
 TrampolineResult
-handle_result(HostFnResult const &res)
+handle_result(HostFnStatus<SyscallErrorCode> const &res)
 {
-  switch (res.first) {
-  case HostFnErrorCode::kHostNoneOrRecoverable:
-    return success(res.second);
+  if (res) {
+    return success(std::to_underlying(res.value()));
+  }
+  switch (res.error().code()) {
   case HostFnErrorCode::kHostOutOfGas:
   case HostFnErrorCode::kHostReturn:
   case HostFnErrorCode::kHostValidationFailure:
-    return error(res.first);
+  case HostFnErrorCode::kHostAbortTransaction:
+    return error(res.error().code());
   case HostFnErrorCode::kHostExit:
-    return host_exit(res.second);
+    return host_exit();
   default:
     return unrecoverable();
   }
@@ -66,8 +69,8 @@ c_call_internal(void *function_pointer, void *host_call_context,
 {
   try {
     auto *user_ctx = reinterpret_cast<HostCallContext *>(host_call_context);
-    auto *ptr = reinterpret_cast<HostFnResult (*)(HostCallContext *, Args...)>(
-        function_pointer);
+    auto *ptr = reinterpret_cast<HostFnStatus<SyscallErrorCode> (*)(
+        HostCallContext *, Args...)>(function_pointer);
 
     return handle_result((*ptr)(user_ctx, args...));
 

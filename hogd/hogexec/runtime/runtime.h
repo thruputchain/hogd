@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <memory>
 #include <optional>
@@ -13,6 +14,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -104,7 +106,7 @@ public:
   // Wasmi unwinds the current invocation and returns a nonzero InvokeError.
   template<std::same_as<uint64_t>... Args>
   bool link_fn(std::string_view module_name, std::string_view fn_name,
-               HostFnResult (*f)(HostCallContext *, Args...))
+               HostFnStatus<SyscallErrorCode> (*f)(HostCallContext *, Args...))
   {
     if (module_name.empty() || fn_name.empty() || (f == nullptr))
       return false;
@@ -130,8 +132,12 @@ private:
 
 // create RuntimeContext with no imported functions
 std::shared_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
-// create RuntimeContext, and initialize with hogexec's imported function(s)
-std::shared_ptr<RuntimeContext> make_hogexec_context(RuntimeEngine engine);
+// create RuntimeContext for running wasm contracts, and initialize with
+// hogexec's imported function(s)
+std::shared_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
+
+// create the type of RuntimeContext that is used within Hogexec
+std::shared_ptr<RuntimeContext> make_hogexec_context();
 
 // Virtual class that abstracts the interface required for an invocable
 // sandbox.  Can be created by an instance of RuntimeContext.
@@ -156,7 +162,7 @@ public:
   method_id_from_name(std::string const &name)
   {
     try {
-      return std::stoul(name, nullptr, 16);
+      return std::stoull(name, nullptr, 16);
     } catch (std::invalid_argument &e) {
       return std::nullopt;
     }
@@ -166,9 +172,9 @@ public:
   // (i.e. x = get_available_gas(); invoke(something); assert(x ==
   // get_available_gas()))
   InvokeResult invoke(std::string_view method_name, uint64_t gas_limit);
-  InvokeResult invoke(MethodID method_id, uint64_t gas_limit)
+  InvokeResult invoke(MethodID entrypoint, uint64_t gas_limit)
   {
-    return invoke(invoke_name(method_id), gas_limit);
+    return invoke(invoke_name(entrypoint), gas_limit);
   }
 
   // Returns FALSE if gas consumption failed.
@@ -194,8 +200,7 @@ public:
   virtual ~Runtime() = default;
 
 protected:
-  virtual InvokeStatus<int32_t>
-  invoke_internal(std::string_view method_name) = 0;
+  virtual InvokeStatus<void> invoke_internal(std::string_view method_name) = 0;
 
   std::unique_ptr<HostCallContext> host_call_context_;
 };

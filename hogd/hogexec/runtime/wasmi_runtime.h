@@ -5,12 +5,13 @@
 #include <span>
 #include <string_view>
 
-#include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 
 namespace hogd {
+
+struct Contract;
 
 // Context shared between WasmiRuntime objects.
 // Guarantee isolation between transactions
@@ -85,7 +86,7 @@ public:
   std::span<std::byte> get_memory() noexcept override;
 
 private:
-  InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
+  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
 
   // manipulated in rust
   void *wasmi_runtime_ptr_;
