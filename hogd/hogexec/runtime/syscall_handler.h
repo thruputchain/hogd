@@ -58,10 +58,6 @@ public:
   SystemCallHandler(const SystemCallHandler &ll) = delete;
   SystemCallHandler &operator=(const SystemCallHandler &ll) = delete;
 
-  // Validate that the transaction can be run safely.
-  // Ensures, for example, that the wasms are valid.
-  InvokeResult perform_initial_validation();
-
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Starts the invocation that is specified within signed_tx_.
   InvokeResult root_invoke();
@@ -163,6 +159,10 @@ private:
   bool transaction_committed_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
+
+  // Validate that the transaction can be run safely.
+  // Ensures, for example, that the wasms are valid.
+  InvokeResult perform_initial_validation();
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at
