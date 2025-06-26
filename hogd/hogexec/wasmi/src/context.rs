@@ -78,7 +78,9 @@ impl WasmiContext {
             Config::default()
                 .consume_fuel(true)
                 .floats(false)
-                .set_stack_limits(stack_limit),
+                .set_stack_limits(stack_limit)
+                .wasm_simd(false)
+                .wasm_relaxed_simd(false),
         );
 
         Self {
