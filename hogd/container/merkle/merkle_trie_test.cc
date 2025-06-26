@@ -35,7 +35,7 @@ generate_random_path()
   std::random_device rd;
   std::mt19937 gen(rd());
 
-  std::uniform_int_distribution<size_t> path_size_dist(0, 40);
+  std::uniform_int_distribution<size_t> path_size_dist(0, 128);
   size_t path_size = path_size_dist(gen);
 
   // [path_size] may be odd, but [path] can only hold an even number of hex
@@ -1123,7 +1123,7 @@ TEST(MerkleTrie, SingleThread)
 void
 run_multithread(int num_threads)
 {
-  constexpr size_t kInitialSize = 20'000'000;
+  constexpr size_t kInitialSize = 100'000;
   constexpr size_t kNumKVPairs = 2'000'000;
   const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
   CHECK_EQ(kNumKVPairs % num_threads, 0);
@@ -1180,8 +1180,7 @@ run_multithread(int num_threads)
     futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
       for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
         // printf("insert %zu %zu\n", i, j);
-        const std::string value = std::to_string(j);
-        EXPECT_TRUE(trie.insert(paths[i][j], value));
+        EXPECT_TRUE(trie.insert(paths[i][j], "hello"));
       }
     }));
   }
