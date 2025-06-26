@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 
@@ -95,7 +96,7 @@ SystemCallHandler::root_invoke()
   res = finish_status.value();
 
   if (!res.is_root_success())
-    return res.to_root_error();
+    return res;
 
   if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
     auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
@@ -138,6 +139,26 @@ SystemCallHandler::try_commit_transaction()
     auto res = co_await db_proxy_.commit_transaction();
     if (!res.has_value()) {
       co_return res.error();
+    }
+
+    std::unordered_set<SHA256Hash> committed_contracts;
+    for (auto const &[addr, hash] :
+         last_frame_.value().new_contract_deployments_) {
+      auto contract_entry = newly_created_contracts_.find(hash);
+      assert(contract_entry != newly_created_contracts_.end());
+
+      auto res = co_await db_proxy_.commit_contract_deploy(addr, hash);
+      if (!res.has_value()) {
+        co_return res.error();
+      }
+      if (committed_contracts.insert(hash).second) {
+        // contract that wasn't already created within the transaction
+        res =
+            co_await db_proxy_.commit_contract_create(*contract_entry->second);
+        if (!res.has_value()) {
+          co_return res.error();
+        }
+      }
     }
     transaction_committed_ = true;
     co_return true;
