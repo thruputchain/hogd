@@ -235,19 +235,18 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
 
     
     std::vector<std::future<void>> futures;
+    const auto tx = SignedTransaction {
+	    .tx = Transaction{
+		    .invocation = fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX, nfib)}};
 
     for (int i = 0; i < num_exec_threads; i++) {
 	int cur_count = std::min(ntx_per_thread, num_txs - (i * ntx_per_thread));
 
       futures.push_back(exec_pool.submit(
-          [&bs, &fib_client, nfib, do_commit, cur_count]() -> void {
+          [&bs, &tx, do_commit, cur_count]() -> void {
 	  for (int j = 0; j < cur_count; j++) {
-            auto tx = SignedTransaction{
-                .tx = Transaction{
-                    .invocation =
-                        fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX,
-                                                                     nfib)}};
-            auto handler = bs.make_handler(tx);
+            
+	    auto handler = bs.make_handler(tx);
             if (!handler.root_invoke().is_root_success()) {
               throw std::runtime_error("Failed to invoke transaction");
             }
