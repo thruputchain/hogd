@@ -227,17 +227,21 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
   for (int nrep = 0; nrep < 10; nrep++) {
 
     auto start_time = std::chrono::steady_clock::now();
-    //std::atomic<uint32_t> remaining = num_txs;
-   // auto [async, cb] = x23::make_async<void>();
 
     int ntx_per_thread = num_txs/num_exec_threads;
-    assert(num_txs % num_exec_threads == 0);
+    if (num_txs % num_exec_threads != 0) {
+	    ntx_per_thread++;
+    }
+
+    
     std::vector<std::future<void>> futures;
 
     for (int i = 0; i < num_exec_threads; i++) {
+	int cur_count = std::min(ntx_per_thread, num_txs - (i * ntx_per_thread));
+
       futures.push_back(exec_pool.submit(
-          [&bs, &fib_client, nfib, do_commit, ntx_per_thread]() -> void {
-	  for (int j = 0; j < ntx_per_thread; j++) {
+          [&bs, &fib_client, nfib, do_commit, cur_count]() -> void {
+	  for (int j = 0; j < cur_count; j++) {
             auto tx = SignedTransaction{
                 .tx = Transaction{
                     .invocation =
