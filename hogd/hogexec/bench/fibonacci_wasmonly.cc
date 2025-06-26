@@ -227,12 +227,17 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
   for (int nrep = 0; nrep < 10; nrep++) {
 
     auto start_time = std::chrono::steady_clock::now();
-    std::atomic<uint32_t> remaining = num_txs;
-    auto [async, cb] = x23::make_async<void>();
+    //std::atomic<uint32_t> remaining = num_txs;
+   // auto [async, cb] = x23::make_async<void>();
 
-    for (int i = 0; i < num_txs; i++) {
-      exec_pool.submit(
-          [&bs, &fib_client, &nfib, &remaining, &cb, do_commit]() -> void {
+    int ntx_per_thread = num_txs/num_exec_threads;
+    assert(num_txs % num_exec_threads == 0);
+    std::vector<std::future<void>> futures;
+
+    for (int i = 0; i < num_exec_threads; i++) {
+      futures.push_back(exec_pool.submit(
+          [&bs, &fib_client, nfib, do_commit, ntx_per_thread]() -> void {
+	  for (int j = 0; j < ntx_per_thread; j++) {
             auto tx = SignedTransaction{
                 .tx = Transaction{
                     .invocation =
@@ -248,16 +253,16 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
                 throw std::runtime_error("foo");
               }
             }
-            if (remaining.fetch_sub(1) == 1) {
-              cb();
-            }
-          });
+	    }
+          }));
     }
-    async();
+    for (auto& f : futures) {
+	    f.wait();
+    }
     auto finish_time = std::chrono::steady_clock::now();
     std::println(
-        "time taken: {} ms for {} txs (fib {}, commit {}) on {} threads",
-        std::chrono::duration_cast<std::chrono::milliseconds>(finish_time -
+        "time taken: {} us for {} txs (fib {}, commit {}) on {} threads",
+        std::chrono::duration_cast<std::chrono::microseconds>(finish_time -
                                                               start_time)
             .count(),
         num_txs, nfib, do_commit, num_exec_threads);
@@ -314,7 +319,7 @@ run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
     run_bench_rep(bs, 10000, 15, nthread, false);
   }
   // weak scaling
-  for (auto nthread : {1, 4, 16, 64, 128}) {
+  for (auto nthread : {64}) {
     run_bench_rep(bs, nthread * 1000, 20, nthread, true);
     run_bench_rep(bs, nthread * 1000, 20, nthread, false);
     run_bench_rep(bs, nthread * 1000, 15, nthread, true);
