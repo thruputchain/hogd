@@ -376,11 +376,12 @@ MerkleTrie::find(const Key &k)
   // TODO(jhumphri): We should hold the writer lock on [node] until the caller
   // indicates they are done accessing the value.
   node->rw_lock.unlock();
-  if (node->parent) {
+  if (node->type == Node::Type::kLeaf) {
+    CHECK_PTR(node->parent);
     node->parent->rw_lock.unlock();
   }
   else {
-    CHECK_EQ(node, &root_);
+    CHECK_EQ(node->type, Node::Type::kBranch);
   }
   return ret;
 }
@@ -840,7 +841,7 @@ MerkleTrie::remove(const Key &k)
       // lock for the nodes above us until we reach the next branch. The next
       // branch is either the parent, or if the parent is an extension, then the
       // grandparent.
-      if (!branch->parent->rw_lock.try_upgrade_to_writer_if_only_one()) {
+      if (!branch->parent->rw_lock.try_lock_writer()) {
         // We do not block on acquiring the writer lock when moving up the trie
         // because we could deadlock with another thread that is acquiring
         // writer locks as it moves down the trie.
@@ -855,8 +856,7 @@ MerkleTrie::remove(const Key &k)
         CHECK_EQ(branch->parent->type, Node::Type::kExtension);
         CHECK_EQ(branch->parent->parent->type, Node::Type::kBranch);
 
-        if (!branch->parent->parent->rw_lock
-                 .try_upgrade_to_writer_if_only_one()) {
+        if (!branch->parent->parent->rw_lock.try_lock_writer()) {
           // As explained above, we do not block on acquiring the writer lock
           // when we move up the trie.
           existing_key->rw_lock.unlock();
@@ -1211,7 +1211,9 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
           // [path] maps to this branch node.
           existing_key = root;
         }
-        prev_root->rw_lock.unlock();
+        if (prev_root) {
+          prev_root->rw_lock.unlock();
+        }
         return root;
       }
 
@@ -1230,7 +1232,9 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
         continue;
       }
       // There is no child, so we have reached the bottom of the trie.
-      prev_root->rw_lock.unlock();
+      if (prev_root) {
+        prev_root->rw_lock.unlock();
+      }
       return root;
       break;
     }
@@ -1293,15 +1297,21 @@ MerkleTrie::generate_hashes_from(Node *n) const
     return;
   }
 
-  while (n) {
+  size_t count = 0;
+  while (true) {
+    printf("tid = %d, iter = %zu\n", gettid(), count++);
+    CHECK_PTR(n);
     CHECK(n->rw_lock.i_am_current_writer());
     n->hash = n->compute_node_hash();
 
-    if (!n->parent->rw_lock.i_am_current_writer() &&
-        !n->parent->rw_lock.try_upgrade_to_writer_if_only_one()) {
+    if (!n->parent || (!n->parent->rw_lock.i_am_current_writer() &&
+                       !n->parent->rw_lock.try_lock_writer())) {
       // We are conflicting with a writer for [n]. We can stop generating hashes
       // because we know the other thread will generate a hashes for all nodes
       // from [n] to the root (inclusive).
+      printf("tid = %d done on iter = %zu\n", gettid(), count);
+      n->rw_lock.unlock();
+      printf("tid = %d exit\n", gettid());
       return;
     }
     Node *parent = n->parent;

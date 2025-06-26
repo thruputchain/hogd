@@ -128,6 +128,7 @@ public:
                                        /*desired=*/kWriterLocked,
                                        /*success=*/std::memory_order_acquire,
                                        /*failure=*/std::memory_order_relaxed)) {
+        printf("expected is %zu\n", expected);
         asm volatile("pause");
         // [expected] is overwritten with the value that was in [lock_] when the
         // cmpxchg was performed. We need to set [expected] back to [kUnlocked].
