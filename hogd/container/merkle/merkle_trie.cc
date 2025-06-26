@@ -481,7 +481,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
 
   size_.fetch_add(1, std::memory_order_relaxed);
   // [generate_hashes_from()] unlocks the node locks we currently hold.
-  generate_hashes_from(to_hash);
+  generate_hashes_from(to_hash, /*locked_through=*/branch);
   return true;
 }
 
@@ -803,6 +803,7 @@ MerkleTrie::remove(const Key &k)
   Node *existing_key;
   Node *branch;
   size_t num_children;
+  Node *locked_through = nullptr;
 
   while (true) {
     idx = 0;
@@ -816,6 +817,7 @@ MerkleTrie::remove(const Key &k)
     }
     CHECK_PTR(branch);
     CHECK_EQ(branch->type, Node::Type::kBranch);
+    locked_through = branch;
 
     if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
       // We need to try again. We cannot block on acquiring the writer lock
@@ -851,6 +853,7 @@ MerkleTrie::remove(const Key &k)
         }
         continue;
       }
+      locked_through = branch->parent;
       if (branch->parent->type != Node::Type::kBranch) {
         CHECK_PTR(branch->parent->parent);
         CHECK_EQ(branch->parent->type, Node::Type::kExtension);
@@ -866,6 +869,7 @@ MerkleTrie::remove(const Key &k)
           branch->parent->rw_lock.unlock();
           continue;
         }
+        locked_through = branch->parent->parent;
       }
     }
     break;
@@ -914,7 +918,7 @@ MerkleTrie::remove(const Key &k)
   size_.fetch_sub(1, std::memory_order_relaxed);
   CHECK_PTR(to_hash);
   // [generate_hashes_from()] unlocks the node locks we currently hold.
-  generate_hashes_from(to_hash);
+  generate_hashes_from(to_hash, locked_through);
   return true;
 }
 
@@ -1199,6 +1203,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       }
 
       root = original_root;
+      prev_root = nullptr;
       idx = original_idx;
       continue;
     }
@@ -1291,27 +1296,30 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
 }
 
 void
-MerkleTrie::generate_hashes_from(Node *n) const
+MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
 {
   if (!should_hash_nodes_on_each_op_) {
     return;
   }
 
-  size_t count = 0;
+  CHECK_PTR(locked_through);
+  bool locked = true;
   while (true) {
-    printf("tid = %d, iter = %zu\n", gettid(), count++);
     CHECK_PTR(n);
-    CHECK(n->rw_lock.i_am_current_writer());
+    CHECK(n->rw_lock.is_writer_locked_relaxed());
+    if (n == locked_through) {
+      locked = false;
+    }
+
     n->hash = n->compute_node_hash();
 
-    if (!n->parent || (!n->parent->rw_lock.i_am_current_writer() &&
-                       !n->parent->rw_lock.try_lock_writer())) {
+    // TODO(jhumphri): I think the current writer could produce a stale hash if
+    // we return if the if statement below.
+    if (!n->parent || (!locked && !n->parent->rw_lock.try_lock_writer())) {
       // We are conflicting with a writer for [n]. We can stop generating hashes
       // because we know the other thread will generate a hashes for all nodes
       // from [n] to the root (inclusive).
-      printf("tid = %d done on iter = %zu\n", gettid(), count);
       n->rw_lock.unlock();
-      printf("tid = %d exit\n", gettid());
       return;
     }
     Node *parent = n->parent;

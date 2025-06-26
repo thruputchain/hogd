@@ -243,7 +243,7 @@ private:
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.
-  void generate_hashes_from(Node *n) const;
+  void generate_hashes_from(Node *n, Node *locked_through) const;
 
   // Frees all of the nodes starting at [root]. Does not free [root_].
   void free_all_nodes(Node *root) const;

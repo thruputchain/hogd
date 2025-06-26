@@ -1131,7 +1131,7 @@ TEST(MerkleTrie, Multithread)
   for (size_t i = 0; i < kNumThreads; i++) {
     futures.push_back(pool.submit([i, &trie, &paths] {
       for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
-        printf("%zu %zu\n", i, j);
+        // printf("%zu %zu\n", i, j);
         paths[i].push_back(generate_random_path());
         const std::string value = std::to_string(j);
         bool insert = trie.insert(paths[i].back(), value);
@@ -1161,7 +1161,7 @@ TEST(MerkleTrie, Multithread)
   for (size_t i = 0; i < kNumThreads; i++) {
     futures.push_back(pool.submit([i, &trie, &paths] {
       for (size_t j = 0; j < kNumKVPairsPerThread; j++) {
-        printf("remove %zu %zu\n", i, j);
+        // printf("remove %zu %zu\n", i, j);
         CHECK(trie.remove(paths[i][j]));
       }
     }));
