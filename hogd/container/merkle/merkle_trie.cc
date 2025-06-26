@@ -1311,10 +1311,11 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
       locked = false;
     }
 
+    // TODO(jhumphri): We need to lock all of the children before calling this.
     n->hash = n->compute_node_hash();
 
     // TODO(jhumphri): I think the current writer could produce a stale hash if
-    // we return if the if statement below.
+    // we return in the if statement below.
     if (!n->parent || (!locked && !n->parent->rw_lock.try_lock_writer())) {
       // We are conflicting with a writer for [n]. We can stop generating hashes
       // because we know the other thread will generate a hashes for all nodes
