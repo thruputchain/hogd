@@ -43,12 +43,17 @@ private:
 
   std::mutex lock_;
   std::condition_variable_any request_cv_;
+  bool connection_failed_{false};
   std::queue<Request> requests_;
   std::queue<Completion> completions_;
 
   File socket_;
   std::jthread sender_;
   std::jthread receiver_;
+
+  static void abort_call(Completion &completion);
+  static void abort_calls(std::queue<Completion> &&completions);
+  void fail();
 
   void send_worker(const std::stop_token &stoken);
   void receive_worker(const std::stop_token &stoken);

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <future>
@@ -38,9 +39,13 @@ protected:
       return OwningSpan(span, [ref = std::move(buf)] mutable {});
     };
 
+    // port number must be unique because of parallel testing
+    static std::atomic<uint16_t> global_port = 8080;
+    uint16_t port = global_port.fetch_add(1);
+
     // set up server listener.
     ErrnoStatus<std::shared_ptr<RPCServer>> server =
-        RPCServer::create(8080, handler);
+        RPCServer::create(port, handler);
     ASSERT_TRUE(server);
     server_ = std::move(*server);
     server_listener_ = std::jthread([this] {
@@ -50,7 +55,8 @@ protected:
     });
 
     // set up client connections.
-    ErrnoStatus<RPCClient> client = RPCClient::dial("127.0.0.1:8080");
+    ErrnoStatus<RPCClient> client =
+        RPCClient::dial("127.0.0.1:" + std::to_string(port));
     ASSERT_TRUE(client);
     client_ = std::move(*client);
   }

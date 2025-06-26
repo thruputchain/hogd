@@ -12,12 +12,14 @@
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
+#include <exception>
 #include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
 #include <span>
+#include <stdexcept>
 #include <stop_token>
 #include <string_view>
 #include <type_traits>
@@ -141,6 +143,31 @@ ClientFlow::~ClientFlow()
     error("could not shutdown socket: {}", ret.error());
 }
 
+inline void
+ClientFlow::abort_call(Completion &completion)
+{
+  completion.set_exception(
+      std::make_exception_ptr(std::runtime_error("network connection lost")));
+}
+
+void
+ClientFlow::abort_calls(std::queue<Completion> &&completions)
+{
+  while (!completions.empty()) {
+    abort_call(completions.front());
+    completions.pop();
+  }
+}
+
+void
+ClientFlow::fail()
+{
+  std::scoped_lock g(lock_);
+  abort_calls(std::move(completions_));
+  connection_failed_ = true;
+  request_cv_.notify_one();
+}
+
 std::future<OwningSpan<const std::byte>>
 ClientFlow::call(std::span<const std::byte> args)
 {
@@ -148,6 +175,10 @@ ClientFlow::call(std::span<const std::byte> args)
   std::future<OwningSpan<const std::byte>> future = promise.get_future();
 
   std::scoped_lock g(lock_);
+  if (connection_failed_) [[unlikely]] {
+    abort_call(promise);
+    return future;
+  }
   requests_.push(args);
   completions_.emplace(std::move(promise));
   request_cv_.notify_one();
@@ -158,6 +189,7 @@ void
 ClientFlow::send_worker(const std::stop_token &stoken)
 {
   BufferedWriter w(socket_);
+
   while (!stoken.stop_requested()) {
     std::queue<Request> requests;
     {
@@ -166,6 +198,8 @@ ClientFlow::send_worker(const std::stop_token &stoken)
       if (stoken.stop_requested()) [[unlikely]]
         return;
       std::swap(requests_, requests);
+      if (connection_failed_) [[unlikely]]
+        return;
     }
 
     while (!requests.empty()) {
@@ -193,6 +227,12 @@ void
 ClientFlow::receive_worker(const std::stop_token &stoken)
 {
   std::queue<Completion> completions;
+  // called when the socket fails.
+  Defer d([this, &completions] {
+    abort_calls(std::move(completions));
+    fail();
+  });
+
   auto take_completion = [this, &completions] {
     if (completions.empty()) {
       std::scoped_lock g(lock_);
