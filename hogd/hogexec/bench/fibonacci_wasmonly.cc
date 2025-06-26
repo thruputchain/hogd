@@ -124,7 +124,10 @@ struct BenchmarkState {
         std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
   }
 
-  TransactionID allocate_txid() { return next_tx_id_++; }
+  TransactionID allocate_txid()
+  {
+    return next_tx_id_.fetch_add(1, std::memory_order_relaxed);
+  }
 };
 
 void
