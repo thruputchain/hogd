@@ -8,16 +8,19 @@ set_source_files_properties(
 
 add_subdirectory(test_util)
 
-add_library(
-  runtime
+add_library(runtime_objects OBJECT
+  contract_trait.cc
   database_proxy.cc
   execution_mode.cc
   invocation_frame.cc
   item_view.cc
   native_runtime.cc
+  multiplexed_context.cc
+  preset_native_token.cc
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
+  snapshot_storage_item.cc
   syscall_bytestring.cc
   syscall_contract.cc
   syscall_crypto.cc
@@ -29,22 +32,47 @@ add_library(
   syscall_nnint.cc
   wasm3_runtime.cc
   wasm3_wrapper.cc
+  syscall_rcq.cc
   wasmi_runtime.cc
 )
 
-add_executable(
-  runtime_test
+target_link_libraries(
+  runtime_objects
+  hogd_interface
+)
+
+add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
+
+add_library(runtime_test_objects OBJECT
+  contract_trait_test.cc
   error_handling_test.cc
   execution_mode_test.cc
+  fibonacci_test.cc
   gas_api_test.cc
+  interleaving_tests.cc
   instantiate_test.cc
   invoke_arity_test.cc
   item_view_test.cc
   memory_access_test.cc
   native_contract_test.cc
+  rcq_test.cc
+  runtime_test.cc
+  snapshot_storage_item_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
+  try_invoke_test.cc
   userctx_test.cc
+)
+
+target_link_libraries(
+  runtime_test_objects
+  GTest::gtest
+  hogd_interface
+)
+
+add_executable(
+  runtime_test
+  $<TARGET_OBJECTS:runtime_test_objects>
 )
 
 target_link_libraries(
@@ -56,20 +84,20 @@ target_link_libraries(
 )
 
 add_dependencies(
-  runtime
+  runtime_objects
   generate_syscall_inner_h
   generate_wasmi_ffi_h
   protocol
 )
 
 target_include_directories(
-  runtime
+  runtime_objects
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 
 target_include_directories(
-  runtime_test
+  runtime_test_objects
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
@@ -78,7 +106,10 @@ target_link_libraries(
   runtime_test
   runtime
   runtime_test_util
-  GTest::gtest_main
+  db_interface
+  storage_cost
+  model_checker
+  GTest::gtest
 )
 gtest_discover_tests(runtime_test)
 
@@ -106,10 +137,25 @@ wat2wasm_target(
   ${CMAKE_CURRENT_BINARY_DIR}/test_set_memory.wasm
 )
 
+wat2wasm_target(
+  test_instantiate_fail_wasm
+  wat/test_instantiate_fail.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_instantiate_fail.wasm
+)
+
+wat2wasm_target(
+  test_instantiate_unexported_memory_wasm
+  wat/test_instantiate_unexported_memory.wat
+  ${CMAKE_CURRENT_BINARY_DIR}/test_instantiate_unexported_memory.wasm
+)
+
 add_dependencies(
   runtime_test
   test_invoke_wasm
   test_error_handling_wasm
   test_invoke_arity_wasm
   test_set_memory_wasm
+  test_instantiate_fail_wasm
+  test_instantiate_unexported_memory_wasm
+  all_wasm_contracts
 )

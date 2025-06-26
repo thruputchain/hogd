@@ -46,10 +46,6 @@ SOFTWARE.
 
 namespace wasm3 {
 
-namespace detail {
-inline thread_local int32_t wasm3_err_code = 0;
-} // namespace detail
-
 namespace {
 bool
 is_nondeterminisic_error(M3Result result)
@@ -144,7 +140,7 @@ static_link_nargs(IM3Module io_module, const char *const i_moduleName,
 
 } // namespace
 
-hogd::InvokeStatus<int32_t>
+hogd::InvokeStatus<void>
 Function::m3_err_to_invoke_status(M3Result res)
 {
   assert(res != m3Err_none);
@@ -156,10 +152,13 @@ Function::m3_err_to_invoke_status(M3Result res)
     return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeUnrecoverable};
   }
   if (res == m3Err_hogdExit) {
-    return hogd::InvokeStatus<int32_t>{detail::wasm3_err_code};
+    return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeDeterministic};
   }
   if (res == m3Err_validationFailure) {
     return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeValidationFailure};
+  }
+  if (res == m3Err_hogdReturn) {
+    return {};
   }
 
   // all other errors

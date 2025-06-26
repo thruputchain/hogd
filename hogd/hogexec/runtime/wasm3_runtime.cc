@@ -76,7 +76,7 @@ Wasm3Runtime::get_memory() noexcept
   return wasm3_runtime_->get_memory();
 }
 
-InvokeStatus<int32_t>
+InvokeStatus<void>
 Wasm3Runtime::invoke_internal(std::string_view method_name)
 {
   // input to find_function has to be null-terminated c-string

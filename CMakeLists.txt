@@ -14,9 +14,14 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 # Enable building test ffi (default: OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
+# Enable the test contracts (default: ON)
+# Defaults to on, but disabled when building native_exec
+# crate (to guard against accidentally recursively cloning the repo)
+option(ENABLE_TEST_CONTRACTS "Enable test contracts" ON)
 
 # Print configuration options
 message(STATUS "ENABLE_TEST_FFI: ${ENABLE_TEST_FFI}")
+message(STATUS "ENABLE_TEST_CONTRACTS: ${ENABLE_TEST_CONTRACTS}")
 
 # Handle configuration options
 if(NOT CMAKE_BUILD_TYPE)
@@ -101,22 +106,39 @@ set(EXTERNAL_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
 set(EXTERNAL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG}")
 endif()
 
+# Related to how dependencies are tracked in ExternalProject_Add_StepTargets
+cmake_policy(SET CMP0114 NEW)
+
+if (CMAKE_BUILD_TYPE STREQUAL "Release")
+  set(LIBSODIUM_C_FLAGS "${EXTERNAL_C_FLAGS} -Wno-unused-function")
+  set(LIBSODIUM_CXX_FLAGS "${EXTERNAL_CXX_FLAGS} -Wno-unused-function")
+else()
+  # Turn on minimal optimization for libsodium, so that FORTIFY_SOURCE is active for both debug and release builds
+  # On the presumption that during debugging, we do want the FORTIFY_SOURCE checks to be active
+  # on the libsodium code.
+  set(LIBSODIUM_C_FLAGS "${EXTERNAL_C_FLAGS} -Wno-unused-function -O1")
+  set(LIBSODIUM_CXX_FLAGS "${EXTERNAL_CXX_FLAGS} -Wno-unused-function -O1")
+endif()
+
 # Enable libsodium
 # --enable-opt sets -march=native and other compiler flags
 # that the libsodium authors deem important
 include(ExternalProject)
 ExternalProject_Add(libsodium_build
     SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libsodium
+    BINARY_DIR ${CMAKE_BINARY_DIR}/libsodium_build
     CONFIGURE_COMMAND
-      ${CMAKE_SOURCE_DIR}/external/libsodium/configure
+      ${CMAKE_SOURCE_DIR}/external/libsodium/configure 
       --prefix=<BINARY_DIR>
       --enable-opt
       --disable-pie
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-      CFLAGS=${EXTERNAL_C_FLAGS} CXXFLAGS=${EXTERNAL_CXX_FLAGS}
+      CFLAGS=${LIBSODIUM_C_FLAGS}
+      CXXFLAGS=${LIBSODIUM_CXX_FLAGS}
     BUILD_COMMAND make -j${N}
     INSTALL_COMMAND "" # Skip installation step
 )
+ExternalProject_Add_StepTargets(libsodium_build configure)
 
 ExternalProject_Get_Property(libsodium_build binary_dir)
 set(LIBSODIUM_PCFILEDIR "${binary_dir}")
@@ -133,7 +155,7 @@ set(LIBSODIUM_LIBRARY
 
 add_library(libsodium STATIC IMPORTED)
 set_target_properties(libsodium PROPERTIES IMPORTED_LOCATION "${LIBSODIUM_LIBRARY}")
-
+add_dependencies(libsodium libsodium-build)
 # Enable x23
 set(X23_MAKE_ALL_DEPEND_ON_TESTS ON)
 add_subdirectory(x23)
@@ -143,6 +165,18 @@ include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)
+
+# Enable bcs-cpp
+add_subdirectory(external/bcs-cpp)
+set(BCS_CPP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/bcs-cpp")
+include_directories(${BCS_CPP_SOURCE_DIR})
+
+# Enable model-checker
+add_subdirectory(external/model-checker)
+set(MODEL_CHECKER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/model-checker")
+include_directories(${MODEL_CHECKER_SOURCE_DIR})
+
+add_subdirectory(test_contracts)
 
 # Finally, enable hogd's own code
 include_directories(${CMAKE_SOURCE_DIR})

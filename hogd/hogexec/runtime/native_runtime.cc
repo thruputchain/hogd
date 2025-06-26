@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 
+#include <cassert>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -7,17 +8,19 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "types.hh"
 
 namespace hogd {
 
-InvokeStatus<int32_t>
+InvokeStatus<void>
 NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
                        NativeRuntime &runtime)
 {
+  // Note: this doesn't build on gcc 15.1; not clear why, but it works on <=14.3
+  // and on gcc main (so presumably it's been fixed for the next release), and
+  // on clang 20.  https://godbolt.org/z/PnxhrahxP
   auto it = functions_.find(method);
   if (it == functions_.end())
     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -43,12 +46,20 @@ NativeContext::make_new_runtime(Contract const &contract,
                                              syscall_handler));
 }
 
+std::unique_ptr<NativeContract>
+NativeContractBuilder::build()
+{
+  assert(!built_);
+  built_ = true;
+  return std::make_unique<NativeContract>(std::move(functions_));
+}
+
 NativeRuntime::NativeRuntime(NativeContract &contract,
                              std::unique_ptr<HostCallContext> host_call_context)
   : Runtime(std::move(host_call_context)), contract_(contract)
 {}
 
-InvokeStatus<int32_t>
+InvokeStatus<void>
 NativeRuntime::invoke_internal(std::string_view method_name)
 {
   auto method_id = Runtime::method_id_from_name(std::string(method_name));

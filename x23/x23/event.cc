@@ -14,36 +14,38 @@
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
 
+#include <print>
+
 namespace x23 {
 
 namespace detail {
 
-ssize_t
-BufferedReader::operator()(int fd, void *buf, size_t len)
+Async<std::expected<void, Errno>>
+WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
 {
-  if (len == 0)
-    return 0;
-  assert(len <= PTRDIFF_MAX);
+  CoroGuard g;
+  co_await g(write_lock_);
+  if (co_await writer_.write_or_append(fd.get(), std::move(buf)))
+    service(cp, fd);
+  co_return expected_void;
+}
 
-  if (size_t buflen = stop_ - start_) {
-    size_t n = std::min(len, buflen);
-    memcpy(buf, m_.data() + start_, n);
-    start_ += n;
-    return n;
+Detached
+WriteBuffer::service(CoroPoll &cp, BorrowedFd fd)
+{
+  // std::println("Write buffering active on fd {}", fd.get());
+  for (;;) {
+    CoroGuard g;
+    co_await g(write_lock_);
+    cp.write_clear(fd);
+    auto res = writer_.write(fd);
+    if (!res.value_or(false)) {
+      // std::println("Write buffering done on fd {}", fd.get());
+      co_return;
+    }
+    g.reset();
+    co_await cp.write_wait(fd);
   }
-
-  start_ = stop_ = 0;
-
-  struct iovec iov[2];
-  iov[0].iov_base = buf;
-  iov[0].iov_len = len;
-  iov[1].iov_base = m_.data();
-  iov[1].iov_len = m_.size();
-  auto n = ::readv(fd, iov, 2);
-  if (n <= ptrdiff_t(len))
-    return n;
-  stop_ = n - len;
-  return len;
 }
 
 } // namespace detail
@@ -89,7 +91,7 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full SLOC_ARG)
         break;
     }
     else if (res.error() == EAGAIN) {
-      if (Errno err = co_await read_wait(fd.get()))
+      if (Errno err = co_await read_wait(fd))
         co_return err;
     }
     else
@@ -117,6 +119,54 @@ CoroPoll::write(BorrowedFd fd, BufView data SLOC_ARG)
   co_return len;
 }
 
+Async<std::expected<void, Errno>>
+CoroPoll::bgwrite(BorrowedFd fd, Buf data SLOC_ARG)
+{
+  auto w = get_writer(fd);
+  if (!w)
+    co_return Errno{EBADF};
+  co_return co_await w->write(*this, fd, std::move(data));
+}
+
+Async<std::expected<void, Errno>>
+CoroPoll::connect(BorrowedFd fd, const sockaddr *sa, socklen_t len SLOC_ARG)
+{
+  if (stop_requested())
+    co_return Errno{EBADF};
+  set_nonblock(fd);
+  set_nodelay(fd);
+
+  int err = 0;
+  write_clear(fd);
+  if (::connect(fd.get(), sa, len) == -1)
+    err = errno;
+
+  for (;;) {
+    if (err == 0)
+      co_return expected_void;
+    if (err != EINPROGRESS)
+      co_return Errno{err};
+
+    co_await write_wait(fd);
+    write_clear(fd);
+
+    len = sizeof(err);
+    if (getsockopt(fd.get(), SOL_SOCKET, SO_ERROR, &err, &len) == -1)
+      Errno{}.raise("SO_ERROR");
+    if (!err) {
+      struct sockaddr peer;
+      len = sizeof(peer);
+      if (getpeername(fd.get(), &peer, &len) == -1) {
+        if (errno != ENOTCONN)
+          Errno{}.raise("getpeername({}) after SO_ERROR 0", fd.get());
+        err = EINPROGRESS;
+      }
+    }
+    else
+      std::println("SO_ERROR: fd {}, err {}", fd.get(), Errno{err});
+  }
+}
+
 Async<std::expected<int, Errno>>
 CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
 {
@@ -125,21 +175,11 @@ CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
   UniqueFd fd{socket(sa->sa_family, SOCK_STREAM, 0)};
   if (!fd)
     co_return Errno{};
-  set_nonblock(fd);
-  write_clear(fd);
-  if (::connect(fd.get(), sa, len) == -1) {
-    Errno err{};
-    if (err != EINPROGRESS)
-      co_return err;
-    if ((err = co_await write_wait(fd.get())))
-      co_return err;
-    struct sockaddr_storage ss;
-    memset(&ss, 0, sizeof(ss));
-    socklen_t len = sizeof(ss);
-    if (getpeername(fd.get(), reinterpret_cast<struct sockaddr *>(&ss), &len))
-      co_return Errno{};
-  }
-  co_return fd.release();
+  auto res = co_await connect(fd, sa, len X23_IFTRACE(, SLOC_VAR));
+  if (res)
+    co_return fd.release();
+  reset(fd);
+  co_return res.error();
 }
 
 Async<std::expected<int, std::system_error>>

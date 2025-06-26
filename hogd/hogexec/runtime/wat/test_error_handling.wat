@@ -3,22 +3,19 @@
   (import "test" "external_call" (func (;0;) (type 0)))
   (import "test" "good_call" (func (;0;) (type 0)))
 
-  (func (export "call1") (result i32)
+  (func (export "call1")
     call 0
-    drop
-    i32.const 0)
+    drop)
 
-  (func (export "call2") (result i32)
+  (func (export "call2")
     call 1
-    drop
-    i32.const 1)
+    drop)
 
-  (func (export "call_then_unreachable") (result i32)
+  (func (export "call_then_unreachable")
     call 0
-    unreachable
-    i32.const 1)
+    unreachable)
 
-  (func (export "spin") (result i32)
+  (func (export "spin")
     (loop $spinloop
       i64.const 1
       i64.const 2
@@ -36,6 +33,9 @@
     i32.wrap_i64
   )
 
-  (func (export "unreachable") (result i32)
+  (func (export "unreachable")
     unreachable)
+
+  (memory 1 1)
+  (export "memory" (memory 0))
 )

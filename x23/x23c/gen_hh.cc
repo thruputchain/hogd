@@ -1,6 +1,13 @@
+#include <cstddef>
+#include <format>
 #include <map>
 #include <ranges>
 #include <set>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <variant>
 
 #include "x23/cleanup.h"
 #include "x23c/defs.h"
@@ -20,7 +27,7 @@ struct Gen {
 
   void show_def(const ConstDef &c)
   {
-    show_comment(c.comment, true);
+    show_comment(c.comment, false);
     prtop("constexpr auto {} = {};\n", c.id, c.val);
   }
   void show_def(const Typedef &d)

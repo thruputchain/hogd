@@ -61,6 +61,7 @@ public:
 
   // returns a loglet with enough space for an item with kv_len.
   Loglet *get(ItemAllocator &allocator, size_t kv_len);
+  void roll_over(ItemAllocator &allocator);
 
 private:
   UniqueLoglet head_;
@@ -121,6 +122,13 @@ public:
   // spent moving items. Returns the bytes that were reclaimed.
   size_t compact(float utilization_thresh);
 
+  // used to steal or return the set of compactible loglets.
+  // used by snapshotting to find loglets and pause compaction on them.
+  std::vector<UniqueLoglet> take_loglets();
+
+  // give_to_compactor makes a full loglet available to the compactor.
+  void give_to_compactor(UniqueLoglet &&ll);
+
 private:
   using CompactionStats = detail::CompactionStats;
 
@@ -140,8 +148,6 @@ private:
 
   // compact_one is a helper function that compacts a single loglet.
   CompactionStats compact_one(UniqueLoglet &&src);
-  // give_to_compactor makes a full loglet available to the compactor.
-  void give_to_compactor(UniqueLoglet &&ll);
 };
 
 template<bool Rewind>
@@ -157,6 +163,17 @@ ItemAllocator::give_to_compactor(UniqueLoglet &&ll)
 {
   std::scoped_lock guard(lock_);
   compactable_loglets_.emplace_back(std::move(ll));
+}
+
+inline std::vector<UniqueLoglet>
+ItemAllocator::take_loglets()
+{
+  std::vector<UniqueLoglet> q{};
+  {
+    std::scoped_lock guard{lock_};
+    std::swap(compactable_loglets_, q);
+  }
+  return q;
 }
 
 } // namespace hogd

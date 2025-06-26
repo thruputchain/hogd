@@ -59,6 +59,9 @@ public:
   DBStatus<void> get_if_type(std::span<const std::byte> key, uint8_t type,
                              std::span<std::byte> val_out);
 
+  // get_size returns the size of the item (if it exists).
+  DBStatus<size_t> get_size(std::span<const std::byte> key);
+
   // put inserts an item. If the item's key already exists, the item will be
   // replaced.
   DBStatus<void> put(std::span<const std::byte> key, uint8_t type,
@@ -83,11 +86,15 @@ public:
 
   // modify_locked finds an item for a given key, and runs fn on it with
   // the bucket lock held. It returns true if the item was found.
+  // hash is passed the hash of the key associated with the item.
   //
   // This method shouldn't normally be called directly, but it is useful for log
   // compaction.
-  bool modify_locked(std::span<const std::byte> key,
-                     const std::function<void(ItemHeader **h)> &fn);
+  bool
+  modify_locked(std::span<const std::byte> key,
+                const std::function<void(ItemHeader **h, size_t hash)> &fn);
+
+  void register_mutation_cb(std::function<void(ItemHeader *)> cb);
 
   // size returns an estimate of the number of elements in the map.
   size_t size() const
@@ -155,6 +162,10 @@ private:
   std::vector<std::atomic<uint16_t>> item_counts_;
   // the buckets for storing items (indexed by hash value).
   std::vector<ItemHeader *> buckets_;
+
+  // A callback triggered before an item is overwritten in put() or
+  // remove(). Used by the snapshotter.
+  std::function<void(ItemHeader *)> mutation_cb_;
 
   // acquire_bucket uses the hash of the key to return the appropriate lock
   // (with it held), bucket, and item counter.

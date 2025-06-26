@@ -1,5 +1,3 @@
-#include "ffi_enums.hh"
-#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <algorithm>
@@ -8,8 +6,10 @@
 #include <span>
 #include <utility>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -21,7 +21,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
                            ContractAddress &output_sender)
 {
-  SyscallStatus<ContractAddress> status = syscall_handler.get_msg_sender();
+  auto status = syscall_handler.get_msg_sender();
   if (!status) {
     return {status.error().code(), 0};
   }
@@ -34,12 +34,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
 syscall_GetCurrentAddress_inner(SystemCallHandler &syscall_handler,
                                 ContractAddress &output_address)
 {
-  SyscallStatus<ContractAddress> status = syscall_handler.get_current_address();
-  if (!status) {
-    return {status.error().code(), 0};
-  }
-
-  output_address = *status;
+  output_address = syscall_handler.get_current_address();
   return {SyscallErrorCode::kNone, 0};
 }
 
@@ -73,12 +68,13 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnResult, GasAmount>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      WrappedGasAmount remaining_gas,
                      const ContractAddress &input_address,
                      MethodID input_method, GasAmount input_gas_limit,
                      std::span<const std::byte> input_calldata,
+                     InvokeFlagSet input_flags,
                      RuntimeMemoryLength &output_return_buffer_len)
 {
   Calldata calldata;
@@ -88,13 +84,13 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
               input_calldata.size());
 
   auto [invoke_res, gas_amount] =
-      syscall_handler.invoke(Invocation(input_address, input_method,
-                                        input_gas_limit, calldata),
-                             remaining_gas.gas_amount_);
+      syscall_handler.invoke(input_address, input_method,
+                             std::min<GasAmount>(input_gas_limit,
+                                                 remaining_gas.gas_amount_),
+                             calldata, input_flags);
 
   // invocation returned successfully
-  if (invoke_res) {
-
+  if (invoke_res && invoke_res.value() == SyscallErrorCode::kNone) {
     auto return_buffer = syscall_handler.get_return_buffer();
     if (return_buffer.has_value()) {
       output_return_buffer_len = (*return_buffer)->size();
@@ -103,13 +99,11 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
       output_return_buffer_len = 0;
     }
 
-    return {{HostFnErrorCode::kHostNoneOrRecoverable,
-             static_cast<int32_t>(*invoke_res)},
-            gas_amount};
+    return {SyscallErrorCode::kNone, gas_amount};
   }
   // Invocation encountered some error
   output_return_buffer_len = 0;
-  return {{invoke_res.error().code(), 0}, gas_amount};
+  return {invoke_res, gas_amount};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
@@ -148,10 +142,10 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
   return {SyscallErrorCode::kNone, 0};
 }
 
-std::pair<HostFnResult, GasAmount>
-syscall_Exit_inner(const int32_t input_code)
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+syscall_Exit_inner()
 {
-  return {{HostFnErrorCode::kHostExit, input_code}, 0};
+  return {HostFnError{HostFnErrorCode::kHostExit}, 0};
 }
 
 } // namespace hogd

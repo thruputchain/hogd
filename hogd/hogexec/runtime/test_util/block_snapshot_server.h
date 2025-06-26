@@ -1,13 +1,17 @@
 #pragma once
 
+#include <set>
+#include <sys/socket.h>
 #include <unordered_map>
+#include <vector>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/event.h"
@@ -20,9 +24,8 @@ namespace hogd {
 //
 // Initialize manually with database snapshot state.
 //
-// Eventually, once the DB is merged in, this will get replaced
-// by a full mock database.  But that code is pending @abelay merging
-// things.
+// Eventually, once the DB is merged in, this may get replaced
+// by a full mock database.
 class BlockSnapshotServer {
 public:
   using rpc_service = DatabaseToExecutorInterfaceV1;
@@ -31,23 +34,23 @@ public:
 
   static x23::Async<void> db_snapshot_read_null();
 
-  static x23::Async<ExpectedStorageCost>
-      try_reserve_delta(BlockID, TransactionID, AddressAndKey, StorageDelta,
-                        StorageItemRPCFlagSet);
-  static x23::Async<void> commit_transaction(BlockID, TransactionID);
-  static x23::Async<void> abort_transaction(BlockID, TransactionID);
+  static x23::Async<RPCError> commit_transaction(BlockID block,
+                                                 TransactionID tx);
+  static x23::Async<RPCError> abort_transaction(BlockID block,
+                                                TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.
-  static x23::Async<RPCError> push_new_subtransaction(BlockID block,
-                                                      TransactionID);
+  static x23::Async<RPCError>
+  try_push_new_subtransaction(BlockID block, TransactionID tx,
+                              StorageDeltaBatch batch);
 
   // Revert one or more subtransactions.
   static x23::Async<RPCError>
   pop_subtransactions(BlockID block, TransactionID tx, uint32_t popcount);
 
-  static x23::Async<void> commit_contract_create(BlockID block,
-                                                 Contract contract);
-  static x23::Async<void>
+  static x23::Async<RPCError> commit_contract_create(BlockID block,
+                                                     Contract contract);
+  static x23::Async<RPCError>
   commit_contract_deploy(BlockID block, ContractAddress const &contract_addr,
                          SHA256Hash const &hash);
 
@@ -58,11 +61,23 @@ public:
   x23::Async<ExpectedDeployment>
   get_deployment(BlockID block, ContractAddress const &contract_address);
 
-  void start_server(uint32_t port_number);
+  x23::Async<ExpectedRetrocausalQueueBlock>
+  get_next_retrocausal_queue_block(BlockID block, AddressAndKey const &addrkey,
+                                   uint64_t search_start_number);
+
+  x23::Async<ExpectedQueueEntry> get_concurrent_retrocausal_queue_entry(
+      BlockID block, AddressAndKey const &addrkey, uint32_t index);
+
+  sockaddr_storage start_server(uint32_t port_number);
 
   // Only used within test setup
-  void setup_create_contract(Contract contract);
+  void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr, SHA256Hash contract_hash);
+  void setup_create_item(AddressAndKey const &addrkey, StorageItemWrapper item);
+  void setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
+                                     QueueEntry entry);
+
+  void setup_ban_item(AddressAndKey const &addrkey);
 
 private:
   BlockID block_id_;
@@ -70,9 +85,15 @@ private:
   x23::ThreadPool pool_ = x23::ThreadPool(2);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
-  x23::MVar<std::unordered_map<AddressAndKey, StorageItem>> items_;
+  x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
   x23::MVar<std::unordered_map<SHA256Hash, Contract>> contracts_;
   x23::MVar<std::unordered_map<ContractAddress, SHA256Hash>> deployments_;
+  x23::MVar<std::unordered_map<AddressAndKey, std::vector<QueueEntry>>>
+      concurrent_rcq_items_;
+
+  // For testing lazy loading:
+  // Creates a set of items that throw an error if they are accessed at all
+  x23::MVar<std::set<AddressAndKey>> blocked_items_;
 };
 
 static_assert(

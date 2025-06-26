@@ -38,19 +38,27 @@ inline Loglet *
 ItemHead::get(ItemAllocator &allocator, size_t kv_len)
 {
   assert(!head_ || allocator_ == &allocator);
-  assert(head_ || allocator_ == nullptr);
 
   // Try to use the current head.
   if (head_ && head_->bytes_left() >= sizeof(ItemHeader) + kv_len) [[likely]]
     return head_.get();
 
-  // Otherwise the head is full or has not yet been allocated. Try to allocate
-  // a new one.
+  // Otherwise the head is full or has not yet been allocated. Allocate
+  // a new one. head_ can be nullptr after this if the compactor is unable
+  // to find free space.
+  roll_over(allocator);
+
+  return head_.get();
+}
+
+inline void
+ItemHead::roll_over(ItemAllocator &allocator)
+{
+  allocator_ = &allocator;
+
   if (head_)
     allocator_->give_to_compactor(std::move(head_));
-  allocator_ = &allocator;
   head_ = make_unique_loglet(allocator_->allocator_, LogletMode::kMemoryItems);
-  return head_.get();
 }
 
 } // namespace detail
@@ -160,13 +168,12 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
 
     // try to move the item to the new loglet.
     [[maybe_unused]] bool found = map_->modify_locked(
-        src_item->get_key(), [this, alloc_loglet, src_item, &bytes_moved,
-                              &stats, &storage](ItemHeader **hptr) mutable {
-          // recheck if the item became dead before the lock was held.
-          if (storage.load(std::memory_order_relaxed) ==
-              ItemStorage::kTombstone) [[unlikely]] {
-            return;
-          }
+        src_item->get_key(),
+        [this, alloc_loglet, src_item, &bytes_moved,
+         &stats](ItemHeader **hptr, size_t /* hash */) mutable {
+          // no need to recheck storage field for tombstone status.
+          // if this item was already removed, modify_locked would not have
+          // triggered this callback.
 
           // initialize the first use of the per-thread loglet.
           static thread_local UniqueLoglet dst;
@@ -194,8 +201,6 @@ ItemAllocator::compact_one(UniqueLoglet &&src)
           stats.live_items++;
           bytes_moved += dst_item->total_bytes();
         });
-    assert(found ||
-           storage.load(std::memory_order_relaxed) == ItemStorage::kTombstone);
   }
 
   stats.loglets_freed++;

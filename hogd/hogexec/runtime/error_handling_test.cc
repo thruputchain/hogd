@@ -11,61 +11,69 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "syscall.hh"
 
 namespace hogd {
 
 namespace {
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 throw_runtime_error(HostCallContext * /*unused*/)
 {
   throw std::runtime_error("bad fn\n");
 }
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 throw_unrecoverable_host_error(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kHostUnrecoverable, 0};
+  return HostFnError{HostFnErrorCode::kHostUnrecoverable};
 }
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 throw_validation_error(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kHostValidationFailure, 0};
+  return HostFnError{HostFnErrorCode::kHostValidationFailure};
 }
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
+throw_abort_transaction(HostCallContext * /*unused*/)
+{
+  return HostFnError{HostFnErrorCode::kHostAbortTransaction};
+}
+
+HostFnStatus<SyscallErrorCode>
 throw_bad_alloc(HostCallContext * /*unused*/)
 {
   throw std::bad_alloc();
 }
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 good_call(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kHostNoneOrRecoverable, 10};
+  return SyscallErrorCode::kNone;
 }
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 exit_call(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kHostExit, 10};
+  return HostFnError{HostFnErrorCode::kHostExit};
 }
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 return_syscall(HostCallContext * /*unused*/)
 {
-  return {HostFnErrorCode::kHostReturn, 0};
+  return HostFnError{HostFnErrorCode::kHostReturn};
 }
 
 // Wasmi doesn't necessarily insert a "consume gas" instruction into its
 // internal bytecode at the end of a call instruction. So if a host function
 // uses all gas, it has to return kOutOfGas.
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 consume_too_much_gas(HostCallContext *context)
 {
   bool _ = context->runtime->consume_gas(context->runtime->get_available_gas());
-  return {HostFnErrorCode::kHostOutOfGas, 0};
+  return HostFnError{HostFnErrorCode::kHostOutOfGas};
 }
 
 namespace {
@@ -73,16 +81,16 @@ Runtime *s_runtime = nullptr;
 bool reentrance_hit = false;
 } // namespace
 
-HostFnResult
+HostFnStatus<SyscallErrorCode>
 reentrance(HostCallContext * /*unused*/)
 {
   reentrance_hit = true;
 
   auto res = s_runtime->invoke("unreachable", UINT64_MAX);
   if (!res.result_.has_value()) {
-    return {HostFnErrorCode::kHostUnrecoverable, 0};
+    return HostFnError{HostFnErrorCode::kHostUnrecoverable};
   }
-  return {HostFnErrorCode::kHostNoneOrRecoverable, 0};
+  return SyscallErrorCode::kNone;
 }
 
 } // namespace
@@ -132,8 +140,7 @@ TEST_P(ErrorHandlingTest, ExitHandling)
 
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
-  EXPECT_TRUE(res.result_);
-  EXPECT_EQ(*res.result_, 10);
+  EXPECT_FALSE(res.is_root_success());
 }
 
 TEST_P(ErrorHandlingTest, HostError)
@@ -141,12 +148,21 @@ TEST_P(ErrorHandlingTest, HostError)
   context_->link_fn("test", "external_call", &throw_unrecoverable_host_error);
   runtime_ = context_->make_new_runtime(contract_, nullptr, true);
 
-  ASSERT_TRUE(!!runtime_);
-
+  ASSERT_TRUE(runtime_);
   auto res = runtime_->invoke("call1", UINT64_MAX);
-
   EXPECT_EQ(res.result_.error(),
             InvokeError{InvokeErrorCode::kInvokeUnrecoverable});
+}
+
+TEST_P(ErrorHandlingTest, AbortTransaction)
+{
+  context_->link_fn("test", "external_call", &throw_abort_transaction);
+  runtime_ = context_->make_new_runtime(contract_, nullptr, true);
+
+  ASSERT_TRUE(runtime_);
+  auto res = runtime_->invoke("call1", UINT64_MAX);
+  EXPECT_EQ(res.result_.error(),
+            InvokeError{InvokeErrorCode::kInvokeAbortTransaction});
 }
 
 TEST_P(ErrorHandlingTest, ValidationError)
@@ -187,7 +203,6 @@ TEST_P(ErrorHandlingTest, WasmError)
   auto res = runtime_->invoke("call1", UINT64_MAX);
 
   EXPECT_TRUE(res.result_);
-  EXPECT_EQ(*res.result_, 0);
 
   res = runtime_->invoke("unreachable", UINT64_MAX);
 
@@ -297,7 +312,7 @@ TEST_P(ErrorHandlingTest, NullLinkHandling)
   EXPECT_TRUE(context_->link_fn("foo", "good_call", &good_call));
   EXPECT_FALSE(context_->link_fn(
       "foo", "bar",
-      static_cast<HostFnResult (*)(HostCallContext *, uint64_t)>(nullptr)));
+      static_cast<HostFnStatus<SyscallErrorCode> (*)(HostCallContext *, uint64_t)>(nullptr)));
 }
 
 TEST_P(ErrorHandlingTest, OutOfGas)

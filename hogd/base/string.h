@@ -5,6 +5,7 @@
 #include <charconv>
 #include <concepts>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -50,5 +51,15 @@ parse_integer(std::string_view str)
     return std::nullopt;
   return ret;
 }
+
+// encode_hex converts binary data into a hexadecimal string.
+std::string encode_hex(std::span<const std::byte> buf);
+// encode_base32 converts binary data into a base32 string.
+std::string encode_base32(std::span<const std::byte> buf);
+// encode_base64 converts binary data into a base64 string.
+std::string encode_base64(std::span<const std::byte> buf);
+// encode_base64_url_safe converts binary data into a base64 string. This
+// version avoids characters that could interfere with URLs.
+std::string encode_base64_url_safe(std::span<const std::byte> buf);
 
 } // namespace hogd

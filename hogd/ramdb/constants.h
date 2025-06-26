@@ -10,6 +10,7 @@ namespace hogd {
 inline constexpr size_t kLogletRegionSize = 2_MiB;
 // The threshold for allocating items with an indirect reference from the log.
 inline constexpr size_t kBigItemThreshold = 64_KiB;
+static_assert(kBigItemThreshold <= kLogletRegionSize);
 // The size of an on-disk log file in bytes before starting a new one.
 inline constexpr size_t kDiskLogFileThreshold = 128_MiB;
 // The min fraction of available memory before compaction is automatically run.

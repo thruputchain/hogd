@@ -57,8 +57,6 @@ struct HostCallContext;
 namespace wasm3 {
 namespace detail {
 
-extern thread_local int32_t wasm3_err_code;
-
 using stack_type = uint64_t *;
 using mem_type = void *;
 
@@ -153,11 +151,9 @@ wrap_fn_return(IM3Runtime rt, IM3ImportContext _ctx, stack_type _sp,
   case kHostOutOfGas:
     m3ApiTrap(m3Err_outOfGasError);
   case kHostExit:
-    wasm3_err_code = result.result;
     m3ApiTrap(m3Err_hogdExit);
   case kHostReturn:
-    wasm3_err_code = 0;
-    m3ApiTrap(m3Err_hogdExit);
+    m3ApiTrap(m3Err_hogdReturn);
   case kHostValidationFailure:
     m3ApiTrap(m3Err_validationFailure);
   default:
@@ -306,7 +302,7 @@ public:
   Function(M3Runtime *m3runtime) : m3runtime_(m3runtime) {}
 
   template<std::same_as<uint64_t>... Args>
-  hogd::InvokeStatus<int32_t> call(Args... args)
+  hogd::InvokeStatus<void> call(Args... args)
   {
     if (!m3func_) {
       return hogd::InvokeError{hogd::InvokeErrorCode::kInvokeDeterministic};
@@ -318,20 +314,14 @@ public:
     if (res != m3Err_none)
       return m3_err_to_invoke_status(res);
 
-    int32_t ret = 0;
-    const void *ret_ptrs[] = {&ret};
-    res = m3_GetResults(m3func_, 1, ret_ptrs);
-
-    if (res != m3Err_none)
-      return m3_err_to_invoke_status(res);
-    return ret;
+    return {};
   }
 
   [[nodiscard]]
   bool find_function(const char *name);
 
 private:
-  static hogd::InvokeStatus<int32_t> m3_err_to_invoke_status(M3Result res);
+  static hogd::InvokeStatus<void> m3_err_to_invoke_status(M3Result res);
 
   // does not own this pointer
   M3Runtime *m3runtime_;

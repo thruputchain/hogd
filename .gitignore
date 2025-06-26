@@ -13,3 +13,7 @@ Testing/**
 [._]*.sw[a-p]
 bcheck/**
 build/**
+/x23/benchmark
+/x23/tests/bench
+metrics_history
+

@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+#include "hogd/base/span.h"
 #include "hogd/base/string.h"
 
 namespace hogd {
@@ -36,6 +37,17 @@ TEST(StringTest, LimitSplitting)
   EXPECT_EQ(tokens[1], "quick");
   EXPECT_EQ(tokens[2], "brown");
   EXPECT_EQ(tokens[3], "fox jumped over the moon");
+}
+
+TEST(StringTest, Encode)
+{
+  std::string test_str("hello world!");
+  EXPECT_EQ(encode_hex(byte_view(test_str.data(), test_str.size())),
+            "68656c6c6f20776f726c6421");
+  EXPECT_EQ(encode_base32(byte_view(test_str.data(), test_str.size())),
+            "NBSWY3DPEB3W64TMMQQQ");
+  EXPECT_EQ(encode_base64(byte_view(test_str.data(), test_str.size())),
+            "aGVsbG8gd29ybGQh");
 }
 
 } // namespace hogd

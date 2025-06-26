@@ -6,11 +6,11 @@ extern "C" {
 
 #include <stdint.h>
 
-// Translation of InvokeStatus<int32_t> into an FFI-safe type.
+// Translation of InvokeStatus<void> into an FFI-safe type.
 // This is the type returned by an invocation to a mocked contract.
 struct ForeignInvokeResult {
-  int32_t result_code;
-  int32_t panic;
+  int32_t panic; // if panic is InvokeErrorCode::kInvokeNone, this is translated
+                 // to an InvokeStatus<void>{}
 };
 
 // FFI-safe type corresponding to the result of a root invocation.
@@ -23,7 +23,7 @@ struct ForeignRootInvokeResult {
 // Type of the function pointer used within a mock contract.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct ForeignInvokeResult (*ForeignEntryPoint)(void *foreign_context,
-                                                        uint32_t method_number);
+                                                        uint64_t method_number);
 
 // Translation of HostFnStatus<SyscallErrorCode> into an FFI-safe type.
 // TODO(geoff): This is identical to TrampolineResult in runtime_trampoline.
@@ -70,6 +70,9 @@ int setup_create_contract(void *context, void *db,
 int setup_deploy_contract(void *db, const uint8_t *deployment_addr,
                           const uint8_t *contract_hash);
 
+void setup_grant_contract_storage_tokens(void *db, const uint8_t *contract_addr,
+                                         int64_t tokens);
+
 void *open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
                            unsigned int signed_tx_len);
 void close_syscall_handler(void *syscall_handler);
@@ -77,10 +80,12 @@ void close_syscall_handler(void *syscall_handler);
 struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
                                                    uint64_t arg1, uint64_t arg2,
                                                    uint64_t arg3, uint64_t arg4,
-                                                   uint64_t arg5,
-                                                   uint64_t arg6);
+                                                   uint64_t arg5, uint64_t arg6,
+                                                   uint64_t arg7);
 
 struct ForeignRootInvokeResult root_invoke(void *syscall_handler);
+
+void enable_syscall_logging();
 
 #ifdef __cplusplus
 }

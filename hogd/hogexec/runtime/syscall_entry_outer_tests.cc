@@ -22,6 +22,8 @@ static_assert(get<4>(offsets) == 10);
 
 static_assert(std::tuple_size<decltype(offsets)>{} == 5);
 
+static_assert(std::tuple_size<decltype(make_offset_seqs<5>())>{} == 0);
+
 } // namespace
 
 } // namespace hogd

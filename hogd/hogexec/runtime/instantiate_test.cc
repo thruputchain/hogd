@@ -24,6 +24,27 @@ TEST_P(InstantiateTest, MissingImportFail)
   else {
     EXPECT_TRUE(runtime);
   }
+  EXPECT_FALSE(runtime);
+}
+
+TEST_P(InstantiateTest, InstantiateFail)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_instantiate_fail.wasm");
+  auto context = make_runtime_context(GetParam());
+  auto runtime = context->make_new_runtime(contract, nullptr, true);
+  EXPECT_FALSE(runtime);
+}
+
+TEST_P(InstantiateTest, InstantiateUnexportedMemory)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_instantiate_unexported_memory.wasm");
+  auto context = make_runtime_context(GetParam());
+  auto runtime = context->make_new_runtime(contract, nullptr, true);
+  EXPECT_FALSE(runtime);
 }
 
 INSTANTIATE_TEST_SUITE_P(AllEngines, InstantiateTest,

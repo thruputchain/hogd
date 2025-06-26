@@ -40,16 +40,24 @@
 #include <algorithm>
 #include <cassert>
 #include <climits>
+#include <compare>
+#include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <format>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <ranges>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include <x23/cleanup.h>
 #include <x23/config.h>
@@ -410,10 +418,10 @@ public:
 
   constexpr decltype(auto) at(this auto &&self, size_type i)
   {
-    if (i >= self->size())
+    if (i >= self.size())
       throw std::out_of_range(std::format("at({}) exceeds size {} in {} Uvec",
-                                          i, self->size(), tname()));
-    return (self->data()[i]);
+                                          i, self.size(), tname()));
+    return (self.data()[i]);
   }
   constexpr decltype(auto) operator[](this auto &&self, size_type i) noexcept
   {
@@ -765,13 +773,15 @@ using Buf = Vec<std::uint8_t>;
 struct BufView : std::span<const std::uint8_t> {
   using super = std::span<const std::uint8_t>;
   BufView() noexcept : super() {}
-  BufView(is_bytespan auto s) noexcept
+  template<typename BS> requires is_bytespan<std::remove_reference_t<BS>>
+  BufView(BS &&s) noexcept
     : super(reinterpret_cast<const std::uint8_t *>(s.data()), s.size())
   {}
   BufView(const void *buf, size_t len) noexcept
     : super(static_cast<const std::uint8_t *>(buf), len)
   {}
-  BufView &operator=(is_bytespan auto s)
+  template<typename BS> requires is_bytespan<std::remove_reference_t<BS>>
+  BufView &operator=(BS &&s)
   {
     super::operator=(
         span{reinterpret_cast<const std::uint8_t *>(s.data()), s.size()});

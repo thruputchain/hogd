@@ -31,12 +31,11 @@ TEST_P(MemoryAccessTest, ReadWrites)
 {
   // assert memory exists
   auto res = runtime_->invoke("size", UINT64_MAX);
-  EXPECT_TRUE(res.result_);
-  EXPECT_EQ(*res.result_, 1);
+  EXPECT_TRUE(res.is_root_success());
 
   res = runtime_->invoke("store", UINT64_MAX);
 
-  EXPECT_TRUE(res.result_);
+  EXPECT_TRUE(res.is_root_success());
 
   // This API for accessing memory directly is not particularly convenient
   // and may be bug prone (i.e. alignment errors, potentally)
@@ -56,9 +55,12 @@ TEST_P(MemoryAccessTest, ReadWrites)
   *reinterpret_cast<uint32_t *>((mem.data()) + 32) = 0xABCDEF01;
 
   res = runtime_->invoke("load", UINT64_MAX);
-
   ASSERT_TRUE(res.result_);
-  EXPECT_EQ(*res.result_, 0xABCDEF01);
+
+  // checks that the loaded result is 0xABCDEF01
+  // EXPECT_EQ(*res.result_, 0xABCDEF01);
+  res = runtime_->invoke("load_expect", UINT64_MAX);
+  ASSERT_TRUE(res.result_);
 }
 
 INSTANTIATE_TEST_SUITE_P(AllEngines, MemoryAccessTest,

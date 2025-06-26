@@ -79,7 +79,7 @@ public:
   std::span<std::byte> get_memory() noexcept override;
 
 private:
-  InvokeStatus<int32_t> invoke_internal(std::string_view method_name) override;
+  InvokeStatus<void> invoke_internal(std::string_view method_name) override;
 
   std::unique_ptr<wasm3::Runtime> wasm3_runtime_;
   uint64_t available_gas_ = 0;

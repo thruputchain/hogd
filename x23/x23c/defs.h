@@ -32,7 +32,9 @@ struct ConstDef {
 
 struct EnumBody : vector<ConstDef> {};
 
-struct StructBody : vector<Declaration> {};
+struct StructBody : vector<Declaration> {
+  bool transparent = false;
+};
 
 struct UnionArm;
 struct UnionBody {
@@ -55,6 +57,8 @@ struct Declaration {
   Qual qual = kScalar;
   string bound;
   string comment;
+  string attrs;
+  bool is_private;
 };
 
 struct UnionArm {

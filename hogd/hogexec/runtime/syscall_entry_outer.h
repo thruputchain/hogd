@@ -1,8 +1,10 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <format>
 #include <span>
 #include <string>
 #include <tuple>
@@ -22,7 +24,6 @@
 #include "syscall_args.hh"
 #include "types.hh"
 #include "x23/format.h"
-#include "x23/utility.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -94,22 +95,50 @@ namespace hogd {
 // and a SHA256Hash& (1 syscall uint64_t input)
 // would produce the index sequence <0, 2>; the first argument takes indices 0
 // and 1, and the second takes index 2.
+
 template<size_t Base, typename Arg, typename... Args>
 constexpr auto
-make_offset_seqs()
+make_offset_seqs_internal()
 {
   if constexpr (sizeof...(Args) == 0) {
     return TupleIndexSequence<Base>{};
   }
   else {
+
     // auto [... tail] =
     //    make_offset_seqs<Base + SyscallArgParams<Arg>::kNumInputs, Args...>();
     // return TupleIndexSequence<Base, tail...>{};
     return []<size_t... Tail>(TupleIndexSequence<Tail...> /*unused*/) {
       return TupleIndexSequence<Base, Tail...>{};
-    }(make_offset_seqs<Base + SyscallArgParams<Arg>::kNumInputs, Args...>());
+    }(make_offset_seqs_internal<Base + SyscallArgParams<Arg>::kNumInputs,
+                                Args...>());
   }
 }
+
+template<size_t Base, typename... Args>
+constexpr auto
+make_offset_seqs()
+{
+  if constexpr (sizeof...(Args) == 0) {
+    return TupleIndexSequence<>{};
+  }
+  else {
+    return make_offset_seqs_internal<Base, Args...>();
+  }
+}
+
+template<size_t I, typename T> struct TypeNum;
+
+template<size_t I, typename Arg, typename... Args>
+requires (I <= sizeof...(Args))
+struct TypeNum<I, std::tuple<Arg, Args...>> {
+  using type = TypeNum<I - 1, std::tuple<Args...>>::type;
+};
+
+template<typename Arg, typename... Args>
+struct TypeNum<0, std::tuple<Arg, Args...>> {
+  using type = Arg;
+};
 
 template<typename Ret, typename... Args> struct SyscallTypeParams {
   using ret_t = Ret;
@@ -118,8 +147,9 @@ template<typename Ret, typename... Args> struct SyscallTypeParams {
   constexpr static auto kArgOffsetIndices = make_offset_seqs<0, Args...>();
   constexpr static size_t kNumArgs = std::tuple_size<args_t>();
 
-  template<size_t I>
-  using arg_i = x23::TypeNum<I, Args...>; // could be Args...[I]
+  template<size_t I> requires (I < sizeof...(Args))
+  using arg_i = TypeNum<I, std::tuple<Args...>>::type;
+
   template<size_t I> constexpr static size_t offset_i()
   {
     // Can ditch access_seq, and just get the following,
@@ -202,31 +232,8 @@ parse_mock(Inputs const &tuple_args)
   }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
 }
 
-constexpr static std::pair<HostFnResult, GasAmount> kFaultResult = {
-    {HostFnErrorCode::kHostNoneOrRecoverable,
-     static_cast<int32_t>(SyscallErrorCode::kFault)},
-    kGenericBadSyscallCost};
-
-// Some syscalls return HostFnStatus<SyscallErrorCode>,
-// and some (e.g. Exit) need a more general form with
-// both a HostFnErrorCode (to tell the runtime what to do)
-// and an error code (to pass to caller runtime, like a regular error code.
-// This function converts the former into the latter.
-inline static std::pair<HostFnErrorCode, int32_t>
-convert_return_t(HostFnStatus<SyscallErrorCode> const &value)
-{
-  if (value) {
-    return {HostFnErrorCode::kHostNoneOrRecoverable,
-            static_cast<int32_t>(*value)};
-  }
-  return {value.error().code(), 0};
-}
-
-inline static std::pair<HostFnErrorCode, int32_t>
-convert_return_t(std::pair<HostFnErrorCode, int32_t> const &value)
-{
-  return value;
-}
+constexpr static std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+    kFaultResult = {SyscallErrorCode::kFault, kGenericBadSyscallCost};
 
 auto
 arg_to_xdr(auto arg)
@@ -280,18 +287,37 @@ make_syscall_output_struct(std::tuple<T...> const &deferenced_args)
   }(std::make_index_sequence<std::tuple_size_v<SyscallOutputType>>{});
 }
 
+inline std::string
+syscall_error_message(HostFnStatus<SyscallErrorCode> status)
+{
+  if (!status.has_value()) {
+    switch (status.error().code()) {
+    case HostFnErrorCode::kHostExit:
+      return "Host Exit (Contract Execution Panic)\n";
+      break;
+    case HostFnErrorCode::kHostReturn:
+      return "Host Return (Contract Execution Success)\n";
+      break;
+    default:
+      return std::format("Host Error ({})\n", x23::show(status.error().code()));
+    }
+  }
+  assert(status.value() != SyscallErrorCode::kNone);
+  return std::format("Syscall Error: {}", x23::show(status.value()));
+}
+
 // Wraps a call to an inner syscall with checks to load syscall arguments
 // from contract memory and check that all accesses into contract memory
 // are well-formed (no OOB).
 template<SyscallNo Syscall, auto InnerSyscallFunc>
-constexpr std::pair<HostFnResult, GasAmount>
+constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
            uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
-           uint64_t arg5)
+           uint64_t arg5, uint64_t arg6)
 {
   auto contract_memory = runtime.get_memory();
 
-  auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5};
+  auto input_args = std::tuple{arg0, arg1, arg2, arg3, arg4, arg5, arg6};
   using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
 
   using SyscallInputType =
@@ -304,7 +330,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
   return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
-             -> std::pair<HostFnResult, GasAmount> {
+             -> std::pair<HostFnStatus<SyscallErrorCode>, GasAmount> {
     // Attempt to load syscall arguments from contract memory.
     auto parsed_args = std::tuple{
         parse<syscall_t::template offset_i<Is>(),
@@ -354,16 +380,14 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
     // Print the output of the syscall.  The outputs in parsed_args should only
     // be written to if the syscall succeeds.
     if (syscall_logfd != -1) {
-      auto [host_fn_code, syscall_code] = convert_return_t(res.first);
       std::string log_string;
-      if (host_fn_code != HostFnErrorCode::kHostNoneOrRecoverable ||
-          syscall_code != 0) {
-        log_string = std::format("Syscall Error: {} {}",
-                                 HostFnErrorCategory{}.message(
-                                     std::to_underlying(host_fn_code)),
-                                 x23::show(SyscallErrorCode(syscall_code)));
+
+      if (!res.first.has_value() ||
+          res.first.value() != SyscallErrorCode::kNone) {
+        log_string = syscall_error_message(res.first);
       }
       else {
+        assert(res.first.value() == SyscallErrorCode::kNone);
         log_string =
             x23::show(make_syscall_output_struct<SyscallInputType,
                                                  SyscallOutputType>(std::tuple{
@@ -373,7 +397,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
       write(syscall_logfd, log_string.c_str(), log_string.size());
     }
 
-    return {convert_return_t(res.first), res.second};
+    return res;
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
 }
 

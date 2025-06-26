@@ -4,6 +4,9 @@
 #include <bit>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
+#include <future>
+#include <latch>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stop_token>
@@ -15,13 +18,16 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_reader.h"
+#include "hogd/ramdb/disk_writer.h"
 #include "hogd/ramdb/loglet.h"
 
 namespace hogd {
@@ -181,8 +187,9 @@ Database::background_worker(const std::stop_token &stoken)
       cv_.wait_for(lock_, stoken, 1s,
                    [this] { return run_expand_ || run_compact_; });
       if (stoken.stop_requested())
-        return;
-      compact = run_compact_;
+        break;
+
+      compact = std::exchange(run_compact_, false);
       run_expand_ = false;
 
       // check if the buckets need to be expanded.
@@ -242,6 +249,128 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   heap_size += (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize;
 
   return heap_size;
+}
+
+DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
+Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
+{
+  DBStatus<uint64_t> ret = sync();
+  if (!ret) [[unlikely]]
+    return ret.error();
+
+  uint64_t end_lsn = *ret;
+  info("begin snapshot from lsn {} -> lsn {} to {}", begin_lsn, end_lsn, path);
+
+  if (begin_lsn > end_lsn) {
+    warn("bad snapshot begin and end lsns {} to {}", begin_lsn, end_lsn);
+    return DBError{DBCode::kTooBig};
+  }
+
+  std::latch setup_latch{1};
+  auto promise = std::make_shared<std::promise<DBStatus<void>>>();
+
+  std::jthread([this, path = std::move(path), begin_lsn, end_lsn, &setup_latch,
+                promise] {
+    debug("snapshot starting in background");
+    ElapsedTimer timer{};
+
+    struct Stats {
+      size_t items;
+      size_t bytes;
+
+      Stats &operator+=(const Stats &stats)
+      {
+        items += stats.items;
+        bytes += stats.bytes;
+        return *this;
+      }
+    };
+
+    PerThread<Stats> perthread_stats{};
+
+    constexpr bool kChunkedSnapshot = false;
+    constexpr size_t kMaxFileSize = kChunkedSnapshot
+                                        ? kDiskLogFileThreshold
+                                        : std::numeric_limits<size_t>::max();
+
+    // only allocate one head for this writer since snapshotting is
+    // single-threaded anyway.
+    DiskWriter snap_writer{*loglet_allocator_, dir_, std::move(path),
+                           kMaxFileSize, 0};
+    snap_writer.init(begin_lsn); // start snap writer bg thread
+
+    auto add_item_to_snapshot = [&snap_writer, &begin_lsn, &end_lsn,
+                                 &stats = perthread_stats](ItemHeader *item) {
+      if (item->lsn < begin_lsn || item->lsn >= end_lsn)
+        return;
+
+      constexpr size_t kHash = 0; // irrelevant; there is only one head
+      ScopedDiskWrite record = snap_writer.write_record(kHash);
+      DBStatus<uint64_t> ret = record.modify(item);
+      if (!ret) [[unlikely]]
+        return;
+      // ret LSN ignored; it is meaningless outside of redo log.
+
+      record.reset();
+
+      stats->items++;
+      stats->bytes += item->total_bytes();
+    };
+
+    // tell map that a snapshot is ongoing.
+    // if put()/remove() runs into an item that is about to be
+    // overwritten that should be part of the snapshot, it triggers
+    // this callback to stuff a copy of the item in the snapshot's
+    // disk-bound loglets.
+    map_.register_mutation_cb(add_item_to_snapshot);
+
+    // disk writer and map are now set up, so unblock snapshot_and_sync()
+    // so it can return to the user and they can resume db operations,
+    // while the snapshot runs in the background.
+    // after line below setup_latch access is undefined behavior.
+    setup_latch.count_down();
+
+    map_.for_each(add_item_to_snapshot);
+
+    // snapshot is done, so we don't care about future put()/remove ops.
+    map_.register_mutation_cb(nullptr);
+
+    Stats stats{};
+    {
+      std::unique_lock ul = perthread_stats.lock_threads();
+      perthread_stats.for_each(ul, [&stats](Stats &s) { stats += s; });
+    }
+
+    double seconds = timer.elapsed();
+    info("snapshot took {:.3f} s (not including disk sync)", seconds);
+    info("...total items snapshot {}", stats.items);
+    info("...total bytes snapshot {}", print_iec_bytes(stats.bytes, true));
+    info("...snapshot rate {}/s", print_iec_bytes(stats.bytes / seconds), true);
+
+    ElapsedTimer snap_sync_timer{};
+
+    DBStatus<uint64_t> ret = snap_writer.sync();
+    if (!ret) [[unlikely]] {
+      warn("snapshot sync failed");
+      promise->set_value(ret.transform([](auto &e) {}));
+      return;
+    }
+
+    info("syncing snapshot file to storage took {:.3f} s",
+         snap_sync_timer.elapsed());
+
+    promise->set_value({});
+  }).detach();
+  // TODO(stutsman): should we keep track of the ongoing snapshot thread so
+  // the DB destructor can await any ongoing snapshots to avoid crashes/UB on DB
+  // shutdown? A problem with doing that is that the stop token would have to be
+  // integrated into map_.for_each.
+
+  // wait for snapshotter thread to get writer initialized and map informed of
+  // snapshot; after that the user can resume db operations.
+  setup_latch.wait();
+
+  return std::make_pair(end_lsn, promise->get_future());
 }
 
 } // namespace hogd

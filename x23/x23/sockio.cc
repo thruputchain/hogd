@@ -1,10 +1,10 @@
 
-#include <sys/socket.h>
 #include <system_error>
 
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 
 #include "x23/sockio.h"
@@ -20,6 +20,14 @@ gai_category()
   };
   static const gai_category_impl cat;
   return (cat);
+}
+
+void
+set_nodelay(BorrowedFd fd, bool on)
+{
+  int val = on;
+  if (setsockopt(fd.get(), IPPROTO_TCP, TCP_NODELAY, &val, sizeof(int)) == -1)
+    Errno{}.raise("TCP_NODELAY");
 }
 
 void
@@ -39,7 +47,7 @@ set_nonblock(BorrowedFd fd, bool on)
 }
 
 UniqueFd
-tcplisten(std::uint16_t port, int backlog)
+stcplisten(std::uint16_t port, int backlog)
 {
   UniqueFd lfd(socket(AF_INET6, SOCK_STREAM, 0));
   if (!lfd)
@@ -68,8 +76,21 @@ tcplisten(std::uint16_t port, int backlog)
 
   if (listen(lfd.get(), backlog) < 0)
     Errno{}.raise("listen");
-  set_nonblock(lfd.get());
   return lfd;
+}
+
+UniqueFd
+tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
+{
+  UniqueFd fd(socket(ss.ss_family, SOCK_STREAM, 0));
+  if (!fd)
+    Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
+  if (prep_fd)
+    prep_fd(fd.get());
+  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss), sizeof(ss)) ==
+      -1)
+    Errno{}.raise("connect({})", HostPort(ss));
+  return fd;
 }
 
 sockaddr_storage
@@ -78,7 +99,7 @@ local_addr(BorrowedFd s)
   sockaddr_storage ss;
   socklen_t len{sizeof(ss)};
   if (getsockname(s.get(), reinterpret_cast<sockaddr *>(&ss), &len) == -1)
-    Errno{}.raise("getsockname");
+    Errno{}.raise("getsockname({})", s.get());
   return ss;
 }
 
@@ -88,7 +109,7 @@ remote_addr(BorrowedFd s)
   sockaddr_storage ss;
   socklen_t len{sizeof(ss)};
   if (getpeername(s.get(), reinterpret_cast<sockaddr *>(&ss), &len) == -1)
-    Errno{}.raise("getsockname");
+    Errno{}.raise("getpeername({})", s.get());
   return ss;
 }
 

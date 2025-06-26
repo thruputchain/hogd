@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use std::slice;
-use wasmi::{Instance, Module, Store, Val};
+use wasmi::{Instance, Module, Store};
 
 use crate::context::WasmiContext;
 use crate::external_call;
@@ -30,7 +30,7 @@ pub struct WasmiRuntime {
 }
 
 fn assert_runtime_not_null(runtime: *const WasmiRuntime) {
-    assert!(runtime != core::ptr::null());
+    debug_assert!(!runtime.is_null());
 }
 
 fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
@@ -39,14 +39,24 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
     // For now, at least, we handle all as deterministic errors.
     match code {
         wasmi::core::TrapCode::OutOfFuel => {
-            return WasmiInvokeResult::error(InvokeErrorCode::kInvokeOutOfGas);
+            WasmiInvokeResult::error(InvokeErrorCode::kInvokeOutOfGas)
         }
-        _ => {
-            return WasmiInvokeResult::error(
-                InvokeErrorCode::kInvokeDeterministic,
-            );
-        }
+        _ => WasmiInvokeResult::error(InvokeErrorCode::kInvokeDeterministic),
     }
+}
+
+// assert that the memory is exported and starts at at most 1 page
+fn check_memory_limit(module: &Module) -> bool {
+    let export = module.get_export("memory");
+    if export.is_none() {
+        return false;
+    }
+    let export_unwrapped = export.unwrap();
+
+    if let wasmi::ExternType::Memory(memory_type) = export_unwrapped {
+        return memory_type.initial_pages() <= 1.into();
+    }
+    return false;
 }
 
 impl WasmiRuntime {
@@ -57,12 +67,15 @@ impl WasmiRuntime {
         userctx: *mut c_void,
     ) -> Option<WasmiRuntime> {
         let module =
-            match unsafe { Module::new_unchecked(&context.engine, &bytes) } {
+            match unsafe { Module::new_unchecked(&context.engine, bytes) } {
                 Ok(m) => m,
                 Err(_) => {
                     return None;
                 }
             };
+        if !check_memory_limit(&module) {
+            return None;
+        }
 
         let mut store = Store::new(&context.engine, userctx);
 
@@ -77,10 +90,7 @@ impl WasmiRuntime {
                 return None;
             }
         };
-        Some(Self {
-            store: store,
-            instance: instance,
-        })
+        Some(Self { store, instance })
     }
 
     fn invoke(&mut self, method: &str) -> WasmiInvokeResult {
@@ -93,32 +103,20 @@ impl WasmiRuntime {
             }
         };
 
-        let mut res = [Val::I32(0)];
+        let mut res = [];
 
         let func_res = func.call(&mut self.store, &[], &mut res);
 
         match func_res {
-            Ok(_) => match res[0].i32() {
-                Some(v) => {
-                    return WasmiInvokeResult::success(v as i32);
-                }
-                _ => {
-                    return WasmiInvokeResult::error(
-                        InvokeErrorCode::kInvokeDeterministic,
-                    );
-                }
-            },
+            Ok(_) => WasmiInvokeResult::success(),
             Err(err) => {
-                match err.as_trap_code() {
-                    Some(trap_code) => {
-                        return handle_trap_code(trap_code);
-                    }
-                    _ => {}
-                };
+                if let Some(trap_code) = err.as_trap_code() {
+                    return handle_trap_code(trap_code);
+                }
                 let my_error = match err
                     .downcast_ref::<external_call::TrampolineError>()
                 {
-                    Some(trampoline_error) => trampoline_error.clone(),
+                    Some(trampoline_error) => trampoline_error,
                     None => {
                         return WasmiInvokeResult::error(
                             InvokeErrorCode::kInvokeUnrecoverable,
@@ -128,35 +126,43 @@ impl WasmiRuntime {
 
                 match my_error.error {
                     external_call::TrampolineErrorEnum::OutOfGas => {
-                        return WasmiInvokeResult::error(
+                        WasmiInvokeResult::error(
                             InvokeErrorCode::kInvokeOutOfGas,
-                        );
+                        )
                     }
                     external_call::TrampolineErrorEnum::Return => {
                         // Return no error code if successful return
-                        return WasmiInvokeResult::success(0);
+                        WasmiInvokeResult::success()
                     }
-                    external_call::TrampolineErrorEnum::Exit { code } => {
-                        return WasmiInvokeResult::success(code);
+                    external_call::TrampolineErrorEnum::Exit => {
+                        WasmiInvokeResult::error(
+                            InvokeErrorCode::kInvokeDeterministic,
+                        )
                     }
                     external_call::TrampolineErrorEnum::ValidationFailure => {
-                        return WasmiInvokeResult::error(
+                        WasmiInvokeResult::error(
                             InvokeErrorCode::kInvokeValidationFailure,
-                        );
+                        )
                     }
-                    _ => {
-                        return WasmiInvokeResult::error(
-                            InvokeErrorCode::kInvokeUnrecoverable,
-                        );
+                    external_call::TrampolineErrorEnum::AbortTransaction => {
+                        WasmiInvokeResult::error(
+                            InvokeErrorCode::kInvokeAbortTransaction,
+                        )
                     }
+                    _ => WasmiInvokeResult::error(
+                        InvokeErrorCode::kInvokeUnrecoverable,
+                    ),
                 }
             }
-        };
+        }
     }
 }
 
+/// # Safety
+/// Caller must have exclusive (non-concurrent) access to the runtime, and runtime must not be a nullptr.
+/// Runtime must have been created by new_wasmi_runtime.
 #[no_mangle]
-pub extern "C" fn wasmi_invoke(
+pub unsafe extern "C" fn wasmi_invoke(
     runtime_void: *mut c_void,
     method_name: *const u8,
     method_name_len: u32,
@@ -166,14 +172,14 @@ pub extern "C" fn wasmi_invoke(
 
     assert_runtime_not_null(runtime);
 
-    if method_name == core::ptr::null() {
+    if method_name.is_null() {
         return WasmiInvokeResult::error(InvokeErrorCode::kInvokeDeterministic);
     }
 
     let method_name_slice =
         unsafe { slice::from_raw_parts(method_name, method_name_len as usize) };
 
-    let string = match std::str::from_utf8(&method_name_slice) {
+    let string = match std::str::from_utf8(method_name_slice) {
         Ok(v) => v,
         _ => {
             return WasmiInvokeResult::error(
@@ -187,37 +193,46 @@ pub extern "C" fn wasmi_invoke(
     r.invoke(string)
 }
 
+/// # Safety
+/// wasmi_context_ptr must not be a nullptr, and must have been created by new_wasmi_context.
+/// userctx can be any (null or non-null) pointer.
+/// bytes must be either null or a valid memory slice.
 #[no_mangle]
-pub extern "C" fn new_wasmi_runtime(
+pub unsafe extern "C" fn new_wasmi_runtime(
     bytes: *const u8,
     bytes_len: u32,
     userctx: *mut c_void,
     wasmi_context_ptr: *const c_void,
 ) -> *mut c_void {
-    if bytes == core::ptr::null() {
+    if bytes.is_null() {
         return core::ptr::null_mut();
     }
 
-    assert!(wasmi_context_ptr != core::ptr::null());
+    debug_assert!(!wasmi_context_ptr.is_null());
 
     let wasmi_context: &WasmiContext = unsafe {
-        &*core::mem::transmute::<_, *mut WasmiContext>(wasmi_context_ptr)
+        &*core::mem::transmute::<*const c_void, *mut WasmiContext>(
+            wasmi_context_ptr,
+        )
     };
 
     let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
 
-    let b = match WasmiRuntime::new(&slice, &wasmi_context, userctx) {
+    let b = match WasmiRuntime::new(slice, wasmi_context, userctx) {
         Some(res) => Box::new(res),
         None => {
             return core::ptr::null_mut();
         }
     };
 
-    return unsafe { core::mem::transmute(Box::into_raw(b)) };
+    unsafe { core::mem::transmute(Box::into_raw(b)) }
 }
 
+/// # Safety
+/// Caller must have exclusive (non-concurrent)access to the runtime, and runtime must not be a nullptr.
+/// Runtime must have been created by new_wasmi_runtime.
 #[no_mangle]
-pub extern "C" fn free_wasmi_runtime(p: *mut c_void) {
+pub unsafe extern "C" fn free_wasmi_runtime(p: *mut c_void) {
     let runtime: *mut WasmiRuntime = unsafe { core::mem::transmute(p) };
 
     assert_runtime_not_null(runtime);
