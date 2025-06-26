@@ -78,9 +78,12 @@ impl WasmiContext {
             Config::default()
                 .consume_fuel(true)
                 .floats(false)
-                .set_stack_limits(stack_limit)
-                .wasm_simd(false)
-                .wasm_relaxed_simd(false),
+                .set_stack_limits(stack_limit),
+
+                // If we upgrade to later wasmi versions, we should disable
+                // simd support (relaxed_simd at least, is apparently not deterministic)
+                // .wasm_simd(false)
+                // .wasm_relaxed_simd(false),
         );
 
         Self {
