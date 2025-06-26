@@ -264,8 +264,14 @@ MerkleTrie::get_proof_by_node(const Key &k)
     const std::vector<std::byte> &encoding = node->get_node_encoding();
     ret.push_back(encoding);
 
+    if (node->parent) {
+      // TODO(jhumphri): This is weird. It should be a reader lock really. Maybe
+      // we should spin on [try_lock_reader()]?
+      node->parent->rw_lock.lock_writer();
+    }
+    Node *parent = node->parent;
     node->rw_lock.unlock();
-    node = node->parent;
+    node = parent;
   }
   return {root_.hash, ret};
 }
@@ -376,13 +382,6 @@ MerkleTrie::find(const Key &k)
   // TODO(jhumphri): We should hold the writer lock on [node] until the caller
   // indicates they are done accessing the value.
   node->rw_lock.unlock();
-  if (node->type == Node::Type::kLeaf) {
-    CHECK_PTR(node->parent);
-    node->parent->rw_lock.unlock();
-  }
-  else {
-    CHECK_EQ(node->type, Node::Type::kBranch);
-  }
   return ret;
 }
 
@@ -393,7 +392,7 @@ MerkleTrie::find_node(const Key &k)
   Node *existing_key = nullptr;
   Node *branch =
       traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
-  if (!existing_key) {
+  if (branch != existing_key) {
     branch->rw_lock.unlock();
   }
   return existing_key;
@@ -461,6 +460,13 @@ MerkleTrie::insert(const Key &k, T &&obj)
         to_hash = insert_handle_leaf(branch->child[branch_idx], k, idx,
                                      std::move(obj));
       }
+      if (!to_hash) {
+        // We could not acquire the locks in one of the [insert_handle*]
+        // functions above, so we need to restart the insert operation.
+        branch->rw_lock.unlock();
+        // TODO(jhumphri): Do not use recursion.
+        return insert(k, std::move(obj));
+      }
     }
     else {
       // There is no child node, so we create a leaf for [key] and place the
@@ -503,7 +509,15 @@ Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
                                     T &&obj)
 {
-  extension->rw_lock.lock_writer();
+  // TODO(jhumphri): I think these are wrong. We cannot just block on locking
+  // a writer if we are moving down the tree.
+  if (!extension->rw_lock.try_lock_writer()) {
+    return nullptr;
+  }
+  if (!extension->child[0]->rw_lock.try_lock_writer()) {
+    extension->rw_lock.unlock();
+    return nullptr;
+  }
 
   CHECK_EQ(extension->type, Node::Type::kExtension);
   CHECK_EQ(extension->parent->type, Node::Type::kBranch);
@@ -532,8 +546,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   // cache some of the node contents since we need them after the node is
   // reused.
   //
-  // [Node] has its copy constructor and copy assignment operator delete, so we
-  // copy the fields individually.
+  // [Node] has its copy constructor and copy assignment operator delete, so
+  // we copy the fields individually.
   Node *const extension_cache_parent = extension->parent;
   const HexArray extension_cache_path = extension->path;
   Node *const extension_cache_child = extension->child[0];
@@ -623,15 +637,14 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   CHECK_LT(diverge_idx, extension_cache_path.size());
   auto second_branch =
       std::to_integer<size_t>(extension_cache_path.get(diverge_idx));
-  extension_cache_child->rw_lock.lock_writer();
   if (diverge_idx < extension_cache_path.size() - 1) {
     extension = Node::create_extension(/*parent=*/branch);
     // The second extension node has a path size larger than 1.
     branch->child[second_branch] = extension;
 
-    // Add 1 to account for the branch node. We are placing the second extension
-    // node as a child of the branch node, so the branch node accounts for 1 hex
-    // digit in the path.
+    // Add 1 to account for the branch node. We are placing the second
+    // extension node as a child of the branch node, so the branch node
+    // accounts for 1 hex digit in the path.
     extension->path =
         extension_cache_path.get_subarray(diverge_idx + 1,
                                           extension_cache_path.size());
@@ -658,8 +671,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 
   // Now we need to place [key_window] into the trie. If [key_window] entirely
   // overlaps with the path in the first extension node, then we place
-  // [key_window] directly into the new branch. Otherwise, we create a leaf node
-  // for [key_window] and add the leaf as a child of the new branch.
+  // [key_window] directly into the new branch. Otherwise, we create a leaf
+  // node for [key_window] and add the leaf as a child of the new branch.
   if (diverge_idx >= key_window.size()) {
     // Place [key_window] directly into the branch.
     CHECK_EQ(diverge_idx, key_window.size());
@@ -681,20 +694,23 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   return leaf;
 }
 
-// We are inserting [k] into the trie, and it conflicts with a leaf node on the
-// same path. This method resolves that conflict.
+// We are inserting [k] into the trie, and it conflicts with a leaf node on
+// the same path. This method resolves that conflict.
 //
 // We create a new branch node and place both [k] and the key in [leaf] as
-// children of this branch. Note that if one of the keys ends on the branch, we
-// place the key directly into the branch node rather than create a leaf for it.
+// children of this branch. Note that if one of the keys ends on the branch,
+// we place the key directly into the branch node rather than create a leaf
+// for it.
 //
 // If [k] and the path in [leaf] have hex digits in common, we also create an
-// extension node with the shared hex digits. We place the new branch node as a
-// child of this extension node.
+// extension node with the shared hex digits. We place the new branch node as
+// a child of this extension node.
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 {
-  CHECK(leaf->rw_lock.try_lock_writer());
+  if (!leaf->rw_lock.try_lock_writer()) {
+    return nullptr;
+  }
 
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
   CHECK_EQ(leaf->parent->type, Node::Type::kBranch);
@@ -710,8 +726,8 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   leaf->parent->child[parent_branch_digit] = branch;
 
   // Check to see if [key_window] and the path in [leaf] have any digits in
-  // common. If they do, we create an extension node with the shared digits, and
-  // then we place the new branch as a child of this new extension node.
+  // common. If they do, we create an extension node with the shared digits,
+  // and then we place the new branch as a child of this new extension node.
   size_t common_range_length =
       get_longest_common_range_length(key_window, 0, leaf->path, 0);
   if (common_range_length) {
@@ -823,10 +839,10 @@ MerkleTrie::remove(const Key &k)
       // We need to try again. We cannot block on acquiring the writer lock
       // because we could deadlock with another thread trying to do the same.
       //
-      // We also cannot drop the lock and then acquire it as the writer because
-      // it is possible that another thread is attempting to remove [k],
-      // acquires the writer lock for [branch] before we do, and then removes
-      // [k].
+      // We also cannot drop the lock and then acquire it as the writer
+      // because it is possible that another thread is attempting to remove
+      // [k], acquires the writer lock for [branch] before we do, and then
+      // removes [k].
       existing_key->rw_lock.unlock();
       if (branch != existing_key) {
         branch->rw_lock.unlock();
@@ -839,36 +855,44 @@ MerkleTrie::remove(const Key &k)
         (num_children == 2 || (num_children == 1 && branch->value))) {
       CHECK_PTR(branch->parent);
 
+      // TODO(jhumphri): Try-lock the child here? Then restart the function if
+      // you cannot lock it with try?
+
       // We are going to remove this branch node below, so acquire the writer
       // lock for the nodes above us until we reach the next branch. The next
-      // branch is either the parent, or if the parent is an extension, then the
-      // grandparent.
-      if (!branch->parent->rw_lock.try_lock_writer()) {
-        // We do not block on acquiring the writer lock when moving up the trie
-        // because we could deadlock with another thread that is acquiring
-        // writer locks as it moves down the trie.
+      // branch is either the parent, or if the parent is an extension, then
+      // the grandparent.
+
+      // Get the node that is the child of [branch], if one exists.
+      Node *child = nullptr;
+      for (size_t i = 0; i < branch->child.size(); i++) {
+        Node *c = branch->child[i];
+        if (c && c != existing_key) {
+          child = c;
+          break;
+        }
+      }
+      if (child && !child->rw_lock.try_lock_writer()) {
+        // We do not block on acquiring the writer lock when moving down the
+        // trie because we could deadlock with another thread that is
+        // acquiring writer locks as it moves up the trie.
         existing_key->rw_lock.unlock();
         if (branch != existing_key) {
           branch->rw_lock.unlock();
         }
         continue;
       }
+
+      // We can block on acquiring the writer lock when moving up the trie.
+      branch->parent->rw_lock.lock_writer();
       locked_through = branch->parent;
+
       if (branch->parent->type != Node::Type::kBranch) {
         CHECK_PTR(branch->parent->parent);
         CHECK_EQ(branch->parent->type, Node::Type::kExtension);
         CHECK_EQ(branch->parent->parent->type, Node::Type::kBranch);
 
-        if (!branch->parent->parent->rw_lock.try_lock_writer()) {
-          // As explained above, we do not block on acquiring the writer lock
-          // when we move up the trie.
-          existing_key->rw_lock.unlock();
-          if (branch != existing_key) {
-            branch->rw_lock.unlock();
-          }
-          branch->parent->rw_lock.unlock();
-          continue;
-        }
+        branch->parent->parent->rw_lock.lock_writer();
         locked_through = branch->parent->parent;
       }
     }
@@ -881,8 +905,8 @@ MerkleTrie::remove(const Key &k)
     branch->value = std::nullopt;
   }
   else {
-    // [existing_key != branch], so we know that the key is a leaf node which is
-    // a child of a branch. Thus, we need to remove this leaf node.
+    // [existing_key != branch], so we know that the key is a leaf node which
+    // is a child of a branch. Thus, we need to remove this leaf node.
     CHECK_EQ(existing_key->type, Node::Type::kLeaf);
 
     auto branch_hex = std::to_integer<size_t>(k.get(idx));
@@ -1011,7 +1035,9 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
     CHECK_EQ(num_children, 1UL);
     CHECK(!branch->value.has_value());
 
-    child->rw_lock.lock_writer();
+    // TODO(jhumphri): I think this is wrong. We cannot just block on locking
+    // a writer if we are moving down the tree. child->rw_lock.lock_writer();
+    CHECK(child->rw_lock.is_writer_locked_relaxed());
 
     if (child->type == Node::Type::kBranch) {
       // The remaining child under [branch] is also a branch. Thus, we can
@@ -1070,11 +1096,12 @@ MerkleTrie::walk(
                     std::is_same_v<NodeType, const Node>,
                 "[NodeType] must be [Node] or [const Node].");
 
-  // We perform a post-order traversal iteratively. We use iteration rather than
-  // recursion to avoid exceeding the stack size when traversing deep trees.
+  // We perform a post-order traversal iteratively. We use iteration rather
+  // than recursion to avoid exceeding the stack size when traversing deep
+  // trees.
 
-  // We use this type along with the data structures below to track when we are
-  // in the tree.
+  // We use this type along with the data structures below to track when we
+  // are in the tree.
   struct CheckInfo {
     // The node we are currently looking at.
     NodeType *node;
@@ -1091,8 +1118,8 @@ MerkleTrie::walk(
     // children have been visited. When this node pushes one of its children
     // onto the stack, the node waits until the child is popped off the stack
     // before pushing the next child. Thus, the node will not enqueue the next
-    // child until a subsequent iteration, and thus we need to track this child
-    // so that the node knows which child to push at that point.
+    // child until a subsequent iteration, and thus we need to track this
+    // child so that the node knows which child to push at that point.
     //
     // We use [next_child_to_visit] to track which child should be pushed next
     // for [node].
@@ -1125,10 +1152,10 @@ MerkleTrie::walk(
       else {
         // Visit the next child.
 
-        // Append the branch path we are taking to [info.path] so that it holds
-        // the path to the child. For example, if [info.next_child_to_visit] is
-        // 0x3, then we know we will next visit the child at index 0x3, so we
-        // append 0x3 to [info.path].
+        // Append the branch path we are taking to [info.path] so that it
+        // holds the path to the child. For example, if
+        // [info.next_child_to_visit] is 0x3, then we know we will next visit
+        // the child at index 0x3, so we append 0x3 to [info.path].
         info.path.append(std::byte(info.next_child_to_visit));
         path.push({.node = info.node->child[info.next_child_to_visit],
                    .parent = info.node,
@@ -1141,8 +1168,8 @@ MerkleTrie::walk(
       }
       break;
     case Node::Type::kExtension:
-      // An extension node always has exactly one child. It is not possible for
-      // an extension node to have no children.
+      // An extension node always has exactly one child. It is not possible
+      // for an extension node to have no children.
       CHECK_LE(info.next_child_to_visit, 1UL);
       if (info.next_child_to_visit == 1) {
         // We have visited the extension node's one child, so now we can visit
@@ -1157,7 +1184,8 @@ MerkleTrie::walk(
                    .parent = info.node,
                    .path = info.path,
                    .next_child_to_visit = 0});
-        // Now change [info.path] back to holding the path to the extenion node.
+        // Now change [info.path] back to holding the path to the extenion
+        // node.
         info.path.remove_from_back(info.node->path.size());
         info.next_child_to_visit++;
         continue;
@@ -1311,30 +1339,40 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
       locked = false;
     }
 
-    // TODO(jhumphri): We need to lock all of the children before calling this.
+    // TODO(jhumphri): We need to lock all of the children before calling
+    // this. Actually, we don't need to lock the children. We can do a relaxed
+    // read to their hash. If we read a corrupted value, then the thread below
+    // us in the trie is about to overwrite our hash anyway. If we read a
+    // valid value, it is likely because there is no thread below us in the
+    // trie, so we will compute the correct hash for all nodes up through and
+    // including the root.
     n->hash = n->compute_node_hash();
 
-    // TODO(jhumphri): I think the current writer could produce a stale hash if
-    // we return in the if statement below.
+    // TODO(jhumphri): I think the current writer could produce a stale hash
+    // if we return in the if statement below.
     //
-    // I think that a writer traveling down the tree needs to defer to a writer
-    // traveling up the tree. The former can restart its work whereas the latter
-    // cannot. If the latter tries to restart its work, it will start at [n]
-    // which may no longer exist if the KV pair in [n] was removed after we
-    // released the lock for [n].
-    if (!n->parent || (!locked && !n->parent->rw_lock.try_lock_writer())) {
-      // We are conflicting with a writer for [n]. We can stop generating hashes
-      // because we know the other thread will generate a hashes for all nodes
-      // from [n] to the root (inclusive).
+    // I think that a writer traveling down the tree needs to defer to a
+    // writer traveling up the tree. The former can restart its work whereas
+    // the latter cannot. If the latter tries to restart its work, it will
+    // start at [n] which may no longer exist if the KV pair in [n] was
+    // removed after we released the lock for [n].
+    if (!n->parent) {
+      // We are conflicting with a writer for [n]. We can stop generating
+      // hashes because we know the other thread will generate a hashes for
+      // all nodes from [n] to the root (inclusive).
       n->rw_lock.unlock();
       return;
     }
+    if (!locked) {
+      n->parent->rw_lock.lock_writer();
+    }
+
     Node *parent = n->parent;
     n->rw_lock.unlock();
-    // It is technically safe to do [n = n->parent] below because a thread needs
-    // to hold both the writer lock for [n] and the writer lock for [n->parent]
-    // in order to overwrite [n->parent], but we still cache [n->parent] in
-    // [parent] to avoid future issues.
+    // It is technically safe to do [n = n->parent] below because a thread
+    // needs to hold both the writer lock for [n] and the writer lock for
+    // [n->parent] in order to overwrite [n->parent], but we still cache
+    // [n->parent] in [parent] to avoid future issues.
     n = parent;
   }
 }
