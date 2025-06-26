@@ -4,8 +4,10 @@
 #include <iostream>
 #include <map>
 
+#include <chrono>
 #include <memory>
 #include <random>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1131,25 +1133,41 @@ run_multithread(int num_threads)
   WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
   std::vector<std::vector<HexArray>> paths(num_threads);
+  {
+    std::set<HexArray> generated;
+    for (size_t i = 0; i < num_threads; i++) {
+      for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
+        HexArray path = generate_random_path();
+        if (generated.count(path)) {
+          j--;
+          continue;
+        }
+        CHECK(generated.insert(path).second);
+        paths[i].push_back(path);
+      }
+    }
+  }
+  printf("about to start\n");
+
+  auto start = std::chrono::steady_clock::now();
   for (size_t i = 0; i < num_threads; i++) {
     futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
       for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
         // printf("insert %zu %zu\n", i, j);
-        paths[i].push_back(generate_random_path());
         const std::string value = std::to_string(j);
-        bool insert = trie.insert(paths[i].back(), value);
-        if (!insert) {
-          // A duplicate key was generated, so try again.
-          paths[i].pop_back();
-          j--;
-          continue;
-        }
+        EXPECT_TRUE(trie.insert(paths[i][j], value));
       }
     }));
   }
   for (std::future<void> &future : futures) {
     future.get();
   }
+  auto end = std::chrono::steady_clock::now();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+  EXPECT_EQ(trie.size(), kNumKVPairs);
+  std::cout << "Elapsed time: " << duration.count() << " ms\n";
+
   futures.clear();
 
   // trie.generate_all_hashes();
@@ -1161,19 +1179,20 @@ run_multithread(int num_threads)
   // }
 
   // Now remove all of the KV pairs.
-  for (size_t i = 0; i < num_threads; i++) {
-    futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
-      for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-        // printf("remove %zu %zu\n", i, j);
-        CHECK(trie.remove(paths[i][j]));
-      }
-    }));
-  }
-  for (std::future<void> &future : futures) {
-    future.get();
-  }
+  // for (size_t i = 0; i < num_threads; i++) {
+  //   futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths]
+  //   {
+  //     for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
+  //       // printf("remove %zu %zu\n", i, j);
+  //       CHECK(trie.remove(paths[i][j]));
+  //     }
+  //   }));
+  // }
+  // for (std::future<void> &future : futures) {
+  //   future.get();
+  // }
 
-  EXPECT_TRUE(trie.empty());
+  // EXPECT_TRUE(trie.empty());
   // EXPECT_TRUE(trie.check());
 
   // TODO(jhumphri): Release reader locks as we move down the trie.

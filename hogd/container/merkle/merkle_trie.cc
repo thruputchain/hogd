@@ -1371,6 +1371,11 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
       return;
     }
     if (!locked) {
+      if (n->parent == &root_ || n->parent->parent == &root_) {
+        // Do not rehash the root.
+        n->rw_lock.unlock();
+        return;
+      }
       while (!n->parent->rw_lock.try_lock_reader()) {
         asm volatile("pause");
       }
