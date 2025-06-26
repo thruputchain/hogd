@@ -310,11 +310,15 @@ run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
   for (auto nthread : {1, 4, 16, 64, 128, 256, 512, 2048}) {
     run_bench_rep(bs, 10000, 20, nthread, true);
     run_bench_rep(bs, 10000, 20, nthread, false);
+    run_bench_rep(bs, 10000, 15, nthread, true);
+    run_bench_rep(bs, 10000, 15, nthread, false);
   }
   // weak scaling
   for (auto nthread : {1, 4, 16, 64, 128}) {
     run_bench_rep(bs, nthread * 1000, 20, nthread, true);
     run_bench_rep(bs, nthread * 1000, 20, nthread, false);
+    run_bench_rep(bs, nthread * 1000, 15, nthread, true);
+    run_bench_rep(bs, nthread * 1000, 15, nthread, false);
   }
 
   // measure per tx time
