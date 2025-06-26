@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <signal.h>
+
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
@@ -128,6 +130,7 @@ TEST_F(RPCTest, ManyThreads)
 int
 main(int argc, char *argv[])
 {
+  signal(SIGPIPE, SIG_IGN);
   int ret = hogd::hogd_init(argc, argv);
   if (ret)
     return ret;
