@@ -143,6 +143,7 @@ private:
   struct NewContractEntry {
     std::shared_ptr<const Contract> contract;
     bool validated = false;
+    bool created = false;
   };
 
   // Searchable map of contracts that are implicitly created by the current

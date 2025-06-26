@@ -136,6 +136,28 @@ SystemCallHandler::try_commit_transaction()
 
   // check if any of the 2pc database operations failed
   if (result) {
+    // commit the contracts that were deployed in this transaction
+    for (auto const &[addr, hash] : last_frame_.value().new_contract_deployments_) {
+      auto res = co_await db_proxy_.commit_contract_deploy(addr, hash);
+      if (!res.has_value()) {
+        co_return res.error();
+      }
+      // commit the associated contract
+      auto contract_entry = newly_created_contracts_.find(hash);
+      // contract should have been validated by now
+      assert(contract_entry != newly_created_contracts_.end());
+      assert(contract_entry->second.validated);
+
+      // skip if contract is already deployed (i.e. deployed twice in a transaction)
+      if (contract_entry->second.created) {
+        continue;
+      }
+      res = co_await db_proxy_.commit_contract_create(*contract_entry->second.contract);
+      if (!res.has_value()) {
+        co_return res.error();
+      }
+      contract_entry->second.created = true;
+    }
     auto res = co_await db_proxy_.commit_transaction();
     if (!res.has_value()) {
       co_return res.error();
