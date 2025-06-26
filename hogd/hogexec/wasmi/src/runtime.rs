@@ -45,7 +45,22 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
     }
 }
 
+// assert that the memory is exported and starts at at most 1 page
+fn check_memory_limit(module : &Module) -> bool {
+    let export = module.get_export("memory");
+    if export.is_none() {
+        return false;
+    }
+    let export_unwrapped = export.unwrap();
+
+    if let wasmi::ExternType::Memory(memory_type) = export_unwrapped {
+        return memory_type.initial_pages() <= 1.into();
+    }
+    return false;
+}
+
 impl WasmiRuntime {
+
     // Invariant required: the input wasm module must have passed validation.
     fn new(
         bytes: &[u8],
@@ -59,6 +74,9 @@ impl WasmiRuntime {
                     return None;
                 }
             };
+        if !check_memory_limit(&module) {
+            return None;
+        }
 
         let mut store = Store::new(&context.engine, userctx);
 
