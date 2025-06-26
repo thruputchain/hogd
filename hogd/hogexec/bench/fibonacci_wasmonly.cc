@@ -91,10 +91,13 @@ struct BenchmarkState {
         std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
   }
 
-  SystemCallHandler make_handler(SignedTransaction const &signed_tx)
+  SystemCallHandler make_handler(SignedTransaction const &signed_tx,
+                                 TransactionID txid = 0)
   {
-    auto proxy =
-        PerTransactionDatabaseProxy(*db_proxy_, block_number_, allocate_txid());
+    if (txid == 0) {
+      txid = allocate_txid();
+    }
+    auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
     return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
                              ProposalModeData{});
   }
@@ -248,24 +251,25 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
                                                              nfib)}};
 
     for (int i = 0; i < num_exec_threads; i++) {
-      int cur_count = std::min(ntx_per_thread, num_txs - (i * ntx_per_thread));
+      int offset = i * ntx_per_thread;
+      int cur_count = std::min(ntx_per_thread, num_txs - (offset));
 
-      futures.emplace_back(
-          exec_pool.submit([&bs, &tx, do_commit, cur_count]() -> void {
-            for (int j = 0; j < cur_count; j++) {
+      futures.emplace_back(exec_pool.submit([&bs, &tx, do_commit, offset,
+                                             cur_count]() -> void {
+        for (int j = 0; j < cur_count; j++) {
 
-              auto handler = bs.make_handler(tx);
-              if (!handler.root_invoke().is_root_success()) {
-                throw std::runtime_error("Failed to invoke transaction");
-              }
-              if (do_commit) {
-                if (auto r = handler.try_commit_transaction()();
-                    !r.has_value() || !r.value()) {
-                  throw std::runtime_error("foo");
-                }
-              }
+          auto handler = bs.make_handler(tx, offset + j);
+          if (!handler.root_invoke().is_root_success()) {
+            throw std::runtime_error("Failed to invoke transaction");
+          }
+          if (do_commit) {
+            if (auto r = handler.try_commit_transaction()();
+                !r.has_value() || !r.value()) {
+              throw std::runtime_error("failed to perform commit operation");
             }
-          }));
+          }
+        }
+      }));
     }
     for (auto &f : futures) {
       f.wait();
