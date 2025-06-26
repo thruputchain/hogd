@@ -284,7 +284,6 @@ Module::initial_memory_page_count() const
   return m3module_->memoryInfo.initPages;
 }
 
-
 bool
 Function::find_function(const char *name)
 {

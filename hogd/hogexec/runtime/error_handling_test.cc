@@ -310,9 +310,9 @@ TEST_P(ErrorHandlingTest, NullLinkHandling)
   EXPECT_FALSE(context_->link_fn("", "good_call", &good_call));
   EXPECT_FALSE(context_->link_fn("test", "", &good_call));
   EXPECT_TRUE(context_->link_fn("foo", "good_call", &good_call));
-  EXPECT_FALSE(context_->link_fn(
-      "foo", "bar",
-      static_cast<HostFnStatus<SyscallErrorCode> (*)(HostCallContext *, uint64_t)>(nullptr)));
+  EXPECT_FALSE(context_->link_fn("foo", "bar",
+                                 static_cast<HostFnStatus<SyscallErrorCode> (*)(
+                                     HostCallContext *, uint64_t)>(nullptr)));
 }
 
 TEST_P(ErrorHandlingTest, OutOfGas)
