@@ -94,13 +94,14 @@ struct BenchmarkState {
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
                                  TransactionID txid = 0)
   {
+    static thread_local std::shared_ptr<RuntimeContext> context = make_hogexec_context(RuntimeEngine::kWasm3);
     if (txid == 0) {
       txid = allocate_txid();
     }
     auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
     return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
                              ProposalModeData{},
-                             make_hogexec_context(RuntimeEngine::kWasm3));
+                             context);
   }
 
   void advance_block()
