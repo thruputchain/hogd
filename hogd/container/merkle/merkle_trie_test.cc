@@ -416,6 +416,7 @@ TEST(MerkleTrie, BranchBranchLeaf)
   EXPECT_EQ(*trie.find(key_c), value_c);
   std::cout << trie << '\n';
 
+  trie.generate_hashes_for_levels(/*num_levels=*/2);
   // We manually observed this root hash previously.
   EXPECT_EQ(
       HexArray(trie.get_root_hash()),
