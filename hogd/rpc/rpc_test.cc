@@ -1,9 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <signal.h>
-
-#include <atomic>
 #include <cerrno>
+#include <csignal>
 #include <cstddef>
 #include <future>
 #include <memory>
