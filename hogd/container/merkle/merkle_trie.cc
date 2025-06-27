@@ -1206,7 +1206,8 @@ MerkleTrie::walk(
       // Append the leaf's path to [info.path] so that the full path is passed
       // to [f].
       info.path.append(info.node->path);
-      f(info.path, *info.node, info.parent);
+      NodeType &n = *info.node;
+      f(info.path, n, info.parent);
       // No need to remove the portion of the path we just appended above
       // because we pop the leaf anyway below, so we do not access the leaf
       // after this point.
@@ -1442,7 +1443,9 @@ MerkleTrie::free_all_nodes(Node *root)
     // [root_] is a [MerkleTrie] class member of type [Node]. It is not a
     // pointer to a [Node] value on the heap, so we cannot free the root node.
     if (&node != &root_) {
-      memset(static_cast<void *>(&node), 0, sizeof(node));
+      // memset'ing the node to 0 instead of doing this causes a sefault. Why?
+      CHECK(!node.rw_lock.is_locked_relaxed());
+      node.clear();
       arena_.free(&node);
     }
   };

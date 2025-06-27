@@ -96,7 +96,7 @@ TEST(Node, CreateBranch)
   EXPECT_EQ(branch->value, std::nullopt);
   expect_children_are_clear(*branch);
 
-  delete branch;
+  arena.free(branch);
 }
 
 TEST(Node, InitBranch)
@@ -125,7 +125,7 @@ TEST(Node, CreateExtension)
   EXPECT_EQ(extension->value, std::nullopt);
   expect_children_are_clear(*extension);
 
-  delete extension;
+  arena.free(extension);
 }
 
 TEST(Node, InitExtension)
@@ -154,7 +154,7 @@ TEST(Node, CreateLeaf)
   EXPECT_EQ(leaf->value, std::nullopt);
   expect_children_are_clear(*leaf);
 
-  delete leaf;
+  arena.free(leaf);
 }
 
 TEST(Node, InitLeaf)
