@@ -1203,9 +1203,6 @@ run_multithread(int num_threads)
   printf("done. ");
   std::cout << "Elapsed time: " << duration.count() << " ms\n";
 
-  trie.PrintStats();
-  return;
-
   EXPECT_TRUE(trie.check());
   for (size_t i = 0; i < num_threads; i++) {
     for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {

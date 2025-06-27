@@ -70,39 +70,6 @@ public:
     return os << trie.str();
   }
 
-  void PrintStats()
-  {
-    printf("Root:\n");
-    root_.rw_lock.PrintStats();
-
-    printf("\n\nLayer 1:\n");
-    std::vector<Node *> layer_2;
-    for (Node *child : root_.child) {
-      if (!child) {
-        continue;
-      }
-
-      child->rw_lock.PrintStats();
-      if (child->type == Node::Type::kBranch) {
-        for (Node *l2_child : child->child) {
-          layer_2.push_back(l2_child);
-        }
-      }
-      else if (child->type == Node::Type::kExtension) {
-        layer_2.push_back(child->child[0]);
-      }
-    }
-
-    printf("\n\nLayer 2:\n");
-    for (Node *child : layer_2) {
-      if (!child) {
-        continue;
-      }
-
-      child->rw_lock.PrintStats();
-    }
-  }
-
   // Basic sanity checks on the trie.
   bool check() { return check_helper(&root_); }
 
