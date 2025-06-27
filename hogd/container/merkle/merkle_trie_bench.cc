@@ -332,8 +332,10 @@ find(benchmark::State &state)
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
 
+  void *cookie;
   for (auto _ : state) {
-    CHECK_PTR(trie.find(paths[0]));
+    CHECK_PTR(trie.find_begin(paths[0], cookie));
+    trie.find_end(cookie);
   }
 }
 BENCHMARK(find)->Unit(benchmark::kNanosecond);

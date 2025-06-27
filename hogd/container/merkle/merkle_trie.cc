@@ -254,26 +254,33 @@ MerkleTrie::get_proof(const Key &k)
 std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
 MerkleTrie::get_proof_by_node(const Key &k)
 {
-  Node *node = find_node(k);
-  if (!node) {
-    return {SHA256Hash(), {}};
-  }
-
   std::vector<std::vector<std::byte>> ret;
-  while (node) {
-    const std::vector<std::byte> &encoding = node->get_node_encoding();
-    ret.push_back(encoding);
 
-    if (node->parent) {
-      // TODO(jhumphri): This is weird. It should be a reader lock really. Maybe
-      // we should spin on [try_lock_reader()]?
-      node->parent->rw_lock.lock_writer();
+  while (true) {
+    Node *node = find_node(k);
+    if (!node) {
+      return {SHA256Hash(), {}};
     }
-    Node *parent = node->parent;
-    node->rw_lock.unlock();
-    node = parent;
+
+    while (node) {
+      node->hash_lock.lock_writer();
+      const std::vector<std::byte> &encoding = node->get_node_encoding();
+      ret.push_back(encoding);
+      node->hash_lock.unlock();
+
+      if (node->parent && !node->parent->rw_lock.try_lock_reader()) {
+        // Need to restart.
+        node->rw_lock.unlock();
+        ret.clear();
+        continue;
+      }
+      // Cache [node->parent] before dropping the lock.
+      Node *parent = node->parent;
+      node->rw_lock.unlock();
+      node = parent;
+    }
+    return {root_.hash, ret};
   }
-  return {root_.hash, ret};
 }
 
 // static
@@ -346,7 +353,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
 }
 
 MerkleTrie::T *
-MerkleTrie::find(const Key &k)
+MerkleTrie::find_begin(const Key &k, void *&cookie)
 {
   Node *node = find_node(k);
   if (!node) {
@@ -379,10 +386,19 @@ MerkleTrie::find(const Key &k)
     break;
   }
 
-  // TODO(jhumphri): We should hold the writer lock on [node] until the caller
-  // indicates they are done accessing the value.
-  node->rw_lock.unlock();
+  // We hold the reader lock on [node] until the caller indicates they are done
+  // accessing the value with [find_end()].
+  cookie = node;
   return ret;
+}
+
+void
+MerkleTrie::find_end(void *cookie)
+{
+  CHECK_PTR(cookie);
+
+  Node *node = static_cast<Node *>(cookie);
+  node->rw_lock.unlock();
 }
 
 Node *
@@ -1403,7 +1419,7 @@ MerkleTrie::generate_all_hashes()
 }
 
 void
-MerkleTrie::generate_hashes_for_levels(int num_levels)
+MerkleTrie::generate_top_level_hashes()
 {
   for (Node *child : root_.child) {
     if (child) {
@@ -1426,8 +1442,8 @@ MerkleTrie::free_all_nodes(Node *root)
     // [root_] is a [MerkleTrie] class member of type [Node]. It is not a
     // pointer to a [Node] value on the heap, so we cannot free the root node.
     if (&node != &root_) {
-      // memset'ing the node to 0 instead of doing this causes a sefault. Why?
       CHECK(!node.rw_lock.is_locked_relaxed());
+      CHECK(!node.hash_lock.is_locked_relaxed());
       node.clear();
       arena_.free(&node);
     }

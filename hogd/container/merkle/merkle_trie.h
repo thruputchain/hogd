@@ -70,7 +70,7 @@ public:
     return os << trie.str();
   }
 
-  // Basic sanity checks on the trie.
+  // Performs basic sanity checks on the trie.
   bool check() { return check_helper(&root_); }
 
   // Returns the hash of the root node in the trie.
@@ -78,13 +78,12 @@ public:
   {
     // It is fine to spin on [try_lock_reader()] because we know the root node
     // is never deleted by a writer.
-    while (!root_.rw_lock.try_lock_reader()) {
-      // TODO(jhumphri): Do not use x86 instructions.
-      asm volatile("pause");
+    while (!root_.hash_lock.try_lock_reader()) {
+      _mm_pause();
     }
 
     SHA256Hash ret = root_.hash;
-    root_.rw_lock.unlock();
+    root_.hash_lock.unlock();
     return ret;
   }
 
@@ -111,12 +110,15 @@ public:
                     const T &value);
 
   // Finds the value for key [k]. If key [k] does not exist in the trie, returns
-  // a nullptr.
+  // a nullptr. If a non-null pointer is returned, you *must* call
+  // [find_end(cookie)] when you are done accessing the value!
   //
-  // We do not guarantee pointer stability for the value. If the trie is mutated
-  // while the caller holds the returned pointer, the pointer may no longer be
-  // valid.
-  T *find(const Key &k);
+  // We guarantee pointer stability for the value.
+  T *find_begin(const Key &k, void *&cookie);
+
+  // You must call this when you are done accessing a value returned by
+  // [find_begin].
+  void find_end(void *cookie);
 
   // Inserts a KV pair with key [k] and value [obj] into the trie. You must pass
   // [obj] to this method with [std::move()].
@@ -181,9 +183,14 @@ public:
     should_hash_nodes_on_each_op_ = to_set;
   }
 
-  // Generates a hash for every node in the tree.
+  // Generates a hash for every node in the trie. If the trie is modified while
+  // this function runs, the behavior is undefined.
   void generate_all_hashes();
-  void generate_hashes_for_levels(int num_levels);
+
+  // We do compute the hashes for the top two levels of nodes in the trie on
+  // each operation that modifies the trie. Rather, to avoid rehashing these
+  // nodes many times, we only hash them once when this function is called.
+  void generate_top_level_hashes();
 
 private:
   // Returns a string representation of [node] and all nodes under it in the
@@ -267,7 +274,7 @@ private:
   // If this is false, nodes are only hashed when [generate_all_hashes()] is
   // called.
   bool should_hash_nodes_on_each_op_ = true;
-
+  // An arena for allocating nodes.
   Arena arena_;
 };
 
