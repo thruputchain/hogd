@@ -36,8 +36,7 @@ public:
   {
     if (ptrs_.empty()) {
       // Allocate another page.
-      char *page = static_cast<char *>(malloc(batch_alloc_size_));
-      memset(page, 0, batch_alloc_size_);
+      char *page = static_cast<char *>(aligned_alloc(64, batch_alloc_size_));
       for (size_t i = 0; i < batch_alloc_size_; i += alloc_size_) {
         ptrs_.push(static_cast<void *>(page + i));
       }
