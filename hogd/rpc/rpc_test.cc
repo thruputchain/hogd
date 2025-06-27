@@ -127,7 +127,7 @@ TEST_F(RPCTest, ManyThreads)
 int
 main(int argc, char *argv[])
 {
-  signal(SIGPIPE, SIG_IGN);
+  signal(SIGPIPE, SIG_IGN); // NOLINT(misc-include-cleaner)
   int ret = hogd::hogd_init(argc, argv);
   if (ret)
     return ret;
