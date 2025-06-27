@@ -1363,7 +1363,7 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
     // including the root.
     if (should_hash_nodes_on_each_op_) {
       n->hash_lock.lock_writer();
-      n->hash = n->compute_node_hash();
+      // n->hash = n->compute_node_hash();
       n->hash_lock.unlock();
     }
 

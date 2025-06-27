@@ -116,6 +116,7 @@ public:
   {
     // TODO(jhumphri): Use unique_ptr<> rather than [new] (here and elsewhere).
     Node *node = static_cast<Node *>(arena.alloc());
+    CHECK_PTR(node);
     node = new (node) Node;
     node->clear();
     node->init_branch(parent);
@@ -125,6 +126,7 @@ public:
   static Node *create_extension(Arena &arena, Node *parent)
   {
     Node *node = static_cast<Node *>(arena.alloc());
+    CHECK_PTR(node);
     node = new (node) Node;
     node->clear();
     node->init_extension(parent);
@@ -134,6 +136,7 @@ public:
   static Node *create_leaf(Arena &arena, Node *parent)
   {
     Node *node = static_cast<Node *>(arena.alloc());
+    CHECK_PTR(node);
     node = new (node) Node;
     node->clear();
     node->init_leaf(parent);

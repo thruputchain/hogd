@@ -1181,7 +1181,7 @@ run_multithread(int num_threads)
   printf("Inserting keys...");
   fflush(stdout);
 
-  // sleep(20);
+  sleep(5);
   auto start = std::chrono::steady_clock::now();
   for (size_t i = 0; i < num_threads; i++) {
     futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
@@ -1202,6 +1202,8 @@ run_multithread(int num_threads)
   EXPECT_EQ(trie.size(), kInitialSize + kNumKVPairs);
   printf("done. ");
   std::cout << "Elapsed time: " << duration.count() << " ms\n";
+
+  trie.PrintStats();
   return;
 
   EXPECT_TRUE(trie.check());
