@@ -58,8 +58,8 @@ public:
   };
 
   Type type;
-  SHA256Hash hash;
-  Node *parent;
+  SHA256Hash hash{};
+  Node *parent = nullptr;
 
   // TODO(jhumphri): Optimize the variables below with a union or different node
   // types.
@@ -71,7 +71,7 @@ public:
   // TODO(jhumphri): Should we be able to place values in extension nodes, too?
   // For example, the [TwoLeavesAndOneBranch] test would produce a more
   // efficient trie if we could do this.
-  std::optional<std::string> value;
+  std::optional<std::string> value = std::nullopt;
 
   // Used by branches and extensions.
   //
@@ -80,7 +80,7 @@ public:
   //
   // For extensions, only the first slot is filled. The other
   // [kMaxNumBranches - 1] slots are unused.
-  std::array<Node *, kMaxNumBranches> child;
+  std::array<Node *, kMaxNumBranches> child = {};
 
   void init_branch(Node *parent)
   {
@@ -103,7 +103,7 @@ public:
   static Node *create_branch(Node *parent)
   {
     Node *node = new Node;
-    node->clear();
+    //node->clear();
     node->init_branch(parent);
     return node;
   }
@@ -111,7 +111,7 @@ public:
   static Node *create_extension(Node *parent)
   {
     Node *node = new Node;
-    node->clear();
+    //node->clear();
     node->init_extension(parent);
     return node;
   }
@@ -119,7 +119,7 @@ public:
   static Node *create_leaf(Node *parent)
   {
     Node *node = new Node;
-    node->clear();
+    //node->clear();
     node->init_leaf(parent);
     return node;
   }
