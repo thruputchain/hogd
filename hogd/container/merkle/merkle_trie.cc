@@ -1362,7 +1362,9 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
     // trie, so we will compute the correct hash for all nodes up through and
     // including the root.
     if (should_hash_nodes_on_each_op_) {
+      n->hash_lock.lock_writer();
       n->hash = n->compute_node_hash();
+      n->hash_lock.unlock();
     }
 
     // TODO(jhumphri): I think the current writer could produce a stale hash
@@ -1405,6 +1407,8 @@ void
 MerkleTrie::compute_node_hash(Node &node) const
 {
   if (should_hash_nodes_on_each_op_) {
+    // We do not need to lock/unlock the [hash_lock] here because
+    // [compute_hash_node] is only called on nodes that we were just created.
     node.hash = node.compute_node_hash();
   }
 }

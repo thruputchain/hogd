@@ -69,6 +69,7 @@ public:
 
   RwLock rw_lock;
   Type type;
+  RwLock hash_lock;
   SHA256Hash hash;
   Node *parent;
 
