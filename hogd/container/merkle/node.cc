@@ -248,7 +248,7 @@ get_leaf_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
 
 } // namespace
 
-std::vector<std::byte>&
+std::vector<std::byte> &
 Node::get_node_encoding(std::vector<std::byte> &to_hash) const
 {
   to_hash.clear();
