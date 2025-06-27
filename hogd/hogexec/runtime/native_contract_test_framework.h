@@ -27,6 +27,7 @@
 #include "types.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/sockio.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -50,6 +51,9 @@ public:
     auto r = block_manager_.get_block_data(block_number_);
     assert(r);
     r->close_block();
+    if (!block_manager_.commit_block(block_number_)) {
+      throw std::runtime_error("advance_block: commit failed");
+    }
 
     [[maybe_unused]] auto r2 =
         block_manager_.add_child(block_number_, block_number_ + 1, mode);
@@ -142,12 +146,12 @@ public:
 private:
   void initialize(BlockExecutionMode mode)
   {
-    constexpr static uint32_t kPortNumber = 10000;
-    db_executor_server_.start_server(kPortNumber);
+    auto addr = db_executor_server_.start_server(0);
+    uint32_t port = x23::get_port(addr);
 
     db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             10000});
+        std::make_unique<DatabaseProxy>(cp_,
+                                        LocalMockDB{.read_port_number_ = port});
     [[maybe_unused]] auto res = block_manager_.add_child(0, 1, mode);
     assert(res);
     block_number_++;

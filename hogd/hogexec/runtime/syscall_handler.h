@@ -25,6 +25,12 @@ namespace hogd {
 
 class StorageSnapshotCache;
 
+// TODO(geoff): root_invoke() validates any incoming wasm blobs.
+// We may later do that validation preemptively in the coordinator.
+// We may also wish to add checks to make sure that a wasm that's created
+// is actually deployed, and/or put limits on the size of an individual wasm.
+// What's done here is only check well-formedness of the wasm.
+
 // Data structure that manages all system calls and state associated with a
 // running transaction.
 // Core components:
@@ -64,8 +70,8 @@ public:
   // Create and run a child call frame.
   // Should be called from within a syscall.
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
-  invoke(Invocation const &invocation, GasAmount gas_limit,
-         InvokeFlagSet flags);
+  invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
+         Calldata calldata, InvokeFlagSet flags);
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -113,6 +119,8 @@ public:
   SystemStatus<SyscallStatus<void>>
   set_nnint(StorageKeyContractData const &storage_key, int128_t set_value,
             int128_t add_value);
+  SystemStatus<SyscallStatus<void>>
+  add_nnint(StorageKeyContractData const &storage_key, int128_t add_value);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
@@ -126,7 +134,7 @@ public:
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
-  SystemStatus<int128_t>
+  SystemStatus<SyscallStatus<int128_t>>
   get_native_token_balance(ContractAddress const &contract_address);
   SystemStatus<SyscallStatus<void>>
   modify_native_token_balance(ContractAddress const &contract_address,
@@ -147,10 +155,15 @@ private:
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;
-  bool root_invoked_succeeded_ = false;
+  InvokeResult cumulative_invoke_result_ =
+      InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool transaction_committed_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
+
+  // Validate that the transaction can be run safely.
+  // Ensures, for example, that the wasms are valid.
+  InvokeResult perform_initial_validation();
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

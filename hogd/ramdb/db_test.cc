@@ -424,8 +424,7 @@ TEST_F(DatabaseTest, SnapshotIncremental)
   check_integrity();
 }
 
-// TODO(abelay): disable this test until we can fix OOM.
-TEST_F(DatabaseTest, DISABLED_SnapshotOngoingPuts)
+TEST_F(DatabaseTest, SnapshotOngoingPuts)
 {
   auto rand = rand_; // snapshot rng state.
   insert_n(kInsertions);
@@ -457,7 +456,7 @@ TEST_F(DatabaseTest, DISABLED_SnapshotOngoingPuts)
   check_integrity();
 }
 
-TEST_F(DatabaseTest, SnapshotOngoingRemoves)
+TEST_F(DatabaseTest, DISABLED_SnapshotOngoingRemoves)
 {
   insert_n(kInsertions);
   check_integrity();

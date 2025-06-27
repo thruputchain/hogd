@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 
-#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <iterator>
@@ -16,25 +15,20 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
-#include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/mvar.h"
 #include "x23/vec.h"
 
 namespace hogd {
 
-InvocationFrame::InvocationFrame(Invocation invocation, InvokeFlagSet flags)
-  : active_invocation_(std::move(invocation)), flags_(flags)
-{
-  if (is_try_invoke()) {
-    try_invoke_frame_count_ = 1;
-  }
-}
+InvocationFrame::InvocationFrame(ContractAddress const &address,
+                                 Calldata &&calldata, InvokeFlagSet flags)
+  : address_(address), calldata_(std::forward<Calldata>(calldata)),
+    flags_(flags)
+{}
 
 void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
@@ -83,7 +77,7 @@ InvocationFrame::log(std::span<const std::byte> message)
   std::span<const uint8_t> m = {reinterpret_cast<const uint8_t *>(
                                     message.data()),
                                 message.size()};
-  logs_.emplace_back(active_invocation_.invoked_address,
+  logs_.emplace_back(address_,
                      x23::Vec<uint8_t, kMaxLogMessageLen>(m.begin(), m.end()));
 }
 
@@ -93,219 +87,36 @@ InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
   to_return_ = std::move(return_buffer);
 }
 
-namespace {
-
-x23::Async<std::optional<Nondeterministic<int128_t>>>
-do_try_reserve_detached(AddressAndKey const &addrkey, ItemView const &item_view,
-                        PerTransactionDatabaseProxy &db_proxy, auto &error,
-                        auto &failed)
-{
-  auto delta = item_view.get_delta();
-  if (delta) {
-    // Try to reserve the delta in the database.
-    auto res = co_await db_proxy.try_reserve_delta(
-        addrkey, *delta, std::to_underlying(StorageItemRPCFlags::kStorageNone));
-
-    if (!res.has_value()) {
-      // System error: store the first error encountered.
-      auto err = error.take();
-      if (!err->has_value()) {
-        *err = res.error();
-      }
-      co_return std::nullopt;
-    }
-    else if (!res.value().has_value()) {
-      // Operation failed (but not a system error): mark as failed.
-      failed = true;
-      co_return std::nullopt;
-    }
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    co_return res.value().value();
-  }
-  co_return 0;
-}
-
-} // namespace
-
 x23::Async<SystemStatus<bool>>
 InvocationFrame::try_acquire_frame_locks(
     PerTransactionDatabaseProxy &db_proxy,
-    std::vector<InvocationFrame> const &parent_frames,
-    StorageSnapshotCache &snapshot_cache)
+    std::vector<InvocationFrame> const &parent_frames)
 {
-  auto [async, cb] = x23::make_async<void>();
-  std::atomic<uint32_t> pending_ops = modified_items_.size();
-  std::atomic<bool> failed = false;
-  x23::MVar<std::optional<SystemError>> error = std::nullopt;
-
-  if (pending_ops == 0) {
-    cb();
-  }
-
-  // We don't want to worry about modifications to modified_items_ while doing
-  // the top-level iteration to create the coroutines.
-  x23::MVar<std::map<ContractAddress, Nondeterministic<int128_t>>>
-      additional_storage_costs;
-
-  for (auto &[addrkey, item_view] : modified_items_) {
-    if (addrkey.key.key_type() ==
-        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
-      // don't pay storage costs for free native token balance entries
-      auto count = pending_ops.fetch_sub(1);
-      if (count == 1) {
-        cb();
-      }
-      continue;
-    }
-
-    [](AddressAndKey const &addrkey, ItemView &item_view, auto &pending_ops,
-       auto &cb, PerTransactionDatabaseProxy &db_proxy, auto &error,
-       auto &failed, auto &additional_storage_costs) -> x23::Detached {
-      co_await db_proxy.coropoll().pool_.bg();
-
-      assert(addrkey.key.key_type() !=
-             StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
-
-      auto cost = co_await do_try_reserve_detached(addrkey, item_view, db_proxy,
-                                                   error, failed);
-
-      if (cost.has_value()) {
-        assert(cost.value().get() >= 0);
-
-        // How much of the current item view's cost is already reflected in the
-        // corresponding item view of this frame
-        // Note: we don't just recompute from 0 because some items might not
-        // have been modified in this frame, but still need to be accounted for
-        // in storage costs.
-        auto prev_cost = item_view.get_locked_storage_cost();
-
-        int128_t marginal = cost.value().get() - prev_cost.get();
-        auto map = additional_storage_costs.take();
-        // TODO(geoff): Conceivably skippable if cost.value().get() == 0.
-        // See note on NativeTokenBalanceItem::get_delta.
-        (*map)[addrkey.address].get() += marginal;
-        item_view.set_locked_storage_cost(cost.value());
-      }
-
-      auto count = pending_ops.fetch_sub(1);
-      if (count == 1) {
-        cb();
-      }
-    }(addrkey, item_view, pending_ops, cb, db_proxy, error, failed,
-                                                     additional_storage_costs);
-  }
-  // wait for all the operations to finish
-  async();
-
-  // check whether some kind of system error occurred
-  {
-    auto err = error.take();
-    if (err->has_value()) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      co_return *(*err);
-    }
-  }
-
-  // check if any of the 2pc database operations failed
-  if (failed) {
-    co_return !failed;
-  }
-
-  // now apply the gathered the storage cost modifications to the items in the
-  // current frame
-  auto map = additional_storage_costs.take();
-  for (auto const &[addr, cost] : *map) {
-    auto addrkey = AddressAndKey{
-        .address = addr,
-        .key =
-            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
-    auto view_status =
-        get_or_add_item_view(addrkey, parent_frames, snapshot_cache);
-
-    if (!view_status.has_value()) {
-      co_return view_status.error();
-    }
-    auto *view = view_status.value();
-    assert(view);
-    auto token_view = [view] {
-      if (auto *unmodified_view = view->get<UnmodifiedItem>()) {
-        return NativeTokenBalanceItem(
-            unmodified_view->base_item_.native_token_balance());
-      }
-      auto const *token_view = view->get<NativeTokenBalanceItem>();
-      assert(token_view);
-      return *token_view;
-    }();
-    token_view.add_nondeterministic_native_token_lock(cost);
-    [[maybe_unused]] auto r = view->set(token_view);
-    assert(r);
-  }
-
-  // now try to reserve the storage costs in the database
-
-  auto [async_storage, cb_storage] = x23::make_async<void>();
-  pending_ops = modified_items_.size();
-  if (pending_ops == 0) {
-    cb_storage();
-  }
 
   for (auto const &[addrkey, item_view] : modified_items_) {
-    if (addrkey.key.key_type() !=
-        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance) {
-      // now we skip all the non-storage-cost entries
-      auto count = pending_ops.fetch_sub(1);
-      if (count == 1) {
-        cb_storage();
-      }
-      continue;
-    }
-
-    [](AddressAndKey const &addrkey, ItemView const &item_view,
-       auto &pending_ops, auto &cb, PerTransactionDatabaseProxy &db_proxy,
-       auto &error, auto &failed) -> x23::Detached {
-      co_await db_proxy.coropoll().pool_.bg();
-
-      assert(addrkey.key.key_type() ==
-             StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
-
-      // storage cost is not paid for these entries; so we just check if the
-      // operation failed, which is handled inside do_try_reserve_detached
-      auto _ = co_await do_try_reserve_detached(addrkey, item_view, db_proxy,
-                                                error, failed);
-
-      auto count = pending_ops.fetch_sub(1);
-      if (count == 1) {
-        cb();
-      }
-    }(addrkey, item_view, pending_ops, cb_storage, db_proxy, error, failed);
-  }
-
-  async_storage();
-  // check whether some kind of system error occurred
-  {
-    auto err = error.take();
-    if (err->has_value()) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      co_return *(*err);
+    auto delta = item_view.get_delta();
+    if (delta) {
+      // TODO(geoff): exclusive write flag not implemented yet
+      db_proxy.add_delta(addrkey, *delta,
+                         std::to_underlying(StorageItemRPCFlags::kStorageNone));
     }
   }
 
-  // check if any of the storage reservation operations failed
-  co_return !failed;
+  auto res = co_await db_proxy.try_push_current_subtransaction();
+  if (!res.has_value()) {
+    co_return res.error();
+  }
+  if (res.value()) {
+    try_invoke_frame_count_++;
+  }
+  co_return res.value();
 }
 
-SystemStatus<void>
-InvocationFrameStack::start_frame(Invocation const &invocation,
-                                  InvokeFlagSet flags)
+void
+InvocationFrameStack::start_frame(ContractAddress const &address,
+                                  Calldata &&calldata, InvokeFlagSet flags)
 {
-  frame_stack_.emplace_back(invocation, flags);
-  if (frame_stack_.back().is_try_invoke()) {
-    auto st = db_proxy_.push_new_subtransaction()();
-    if (!st.has_value()) {
-      return st.error();
-    }
-  }
-  return {};
+  frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags);
 }
 
 SystemStatus<InvokeResult>
@@ -323,8 +134,8 @@ InvocationFrameStack::finish_frame(InvokeResult result,
       // If we're in proposal mode, we need to acquire the frame locks.
       if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         auto acq_res =
-            frame_stack_.back().try_acquire_frame_locks(db_proxy_, frame_stack_,
-                                                        snapshot_cache_)();
+            frame_stack_.back().try_acquire_frame_locks(db_proxy_,
+                                                        frame_stack_)();
         if (!acq_res.has_value()) {
           return acq_res.error();
         }
@@ -405,8 +216,7 @@ InvocationFrameStack::get_msg_sender() const
   return frame_stack_.size() >= 2
              ? std::optional<ContractAddress>{frame_stack_[frame_stack_.size() -
                                                            2]
-                                                  .active_invocation()
-                                                  .invoked_address}
+                                                  .address()}
              : std::nullopt;
 }
 
@@ -433,33 +243,7 @@ InvocationFrame::add_item_view(AddressAndKey const &addrkey, ItemView new_view)
   return &iter->second;
 }
 
-SystemStatus<ItemView *>
-InvocationFrame::get_or_add_item_view(
-    AddressAndKey const &addrkey,
-    std::vector<InvocationFrame> const &parent_frames,
-    StorageSnapshotCache &snapshot_cache)
-{
-  assert(parent_frames.empty() || &parent_frames.back() == this);
-
-  if (auto *view = get_item_view(addrkey)) {
-    return view;
-  }
-
-  for (int32_t i = parent_frames.size() - 2; i >= 0; --i) {
-    auto const &parent_frame = parent_frames[i];
-    if (auto const *view = parent_frame.get_item_view(addrkey)) {
-      return add_item_view(addrkey, *view);
-    }
-  }
-  auto snapshot_item = snapshot_cache.try_get_snapshot_item(addrkey);
-  if (!snapshot_item.has_value()) {
-    return snapshot_item.error();
-  }
-  assert(snapshot_item.value());
-  return add_item_view(addrkey, ItemView(snapshot_item.value()));
-}
-
-SystemStatus<ItemView *>
+ItemView *
 InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
 {
   const int32_t stack_depth = frame_stack_.size();
@@ -483,28 +267,13 @@ InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
     }
   }
 
-  // item view not yet accessed in current transaction; looking up in snapshot
-  auto snapshot_item = snapshot_cache_.try_get_snapshot_item(addrkey);
-  if (!snapshot_item) {
-    return snapshot_item.error();
-  }
-
-  // snapshot_item might be nullptr; this is handled in ItemView
-  return frame_stack_.back().add_item_view(addrkey,
-                                           ItemView(snapshot_item.value()));
+  return frame_stack_.back().add_item_view(addrkey, ItemView());
 }
 
-SystemStatus<ItemView *>
+ItemView *
 InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
 {
-  StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
-  key.contract_data_key() = data_key;
-
-  auto &active_frame = get_active_frame();
-  AddressAndKey addrkey{.address =
-                            active_frame.active_invocation().invoked_address,
-                        .key = key};
-  return get_item_view(addrkey);
+  return get_item_view(get_addrkey(data_key));
 }
 
 } // namespace hogd

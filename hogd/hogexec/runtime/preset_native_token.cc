@@ -69,10 +69,10 @@ make_native_token_contract()
   using trait_t = ContractTraitMeta<NativeTokenTrait>;
 
   // initialize
-  builder.add(trait_t::method_id<"initialize">(), always_error);
+  builder.add(sdk_method_id(trait_t::entrypoint<"initialize">()), always_error);
 
   // transfer
-  builder.add(trait_t::method_id<"transfer">(),
+  builder.add(sdk_method_id(trait_t::entrypoint<"transfer">()),
               [](SystemCallHandler &handler, NativeRuntime &runtime,
                  ContractAddress receiver,
                  int128_t amount) -> InvokeStatus<void> {
@@ -111,7 +111,7 @@ make_native_token_contract()
               });
 
   // transfer_from
-  builder.add(trait_t::method_id<"transfer_from">(),
+  builder.add(sdk_method_id(trait_t::entrypoint<"transfer_from">()),
               [](SystemCallHandler &handler, NativeRuntime &runtime,
                  ContractAddress owner, ContractAddress receiver,
                  int128_t amount) -> InvokeStatus<void> {
@@ -161,7 +161,7 @@ make_native_token_contract()
               });
 
   // adjust_allowance
-  builder.add(trait_t::method_id<"adjust_allowance">(),
+  builder.add(sdk_method_id(trait_t::entrypoint<"adjust_allowance">()),
               [](SystemCallHandler &handler, NativeRuntime &runtime,
                  ContractAddress spender,
                  int128_t amount) -> InvokeStatus<void> {
@@ -185,7 +185,7 @@ make_native_token_contract()
               });
 
   // get_balance_of
-  builder.add(trait_t::method_id<"get_balance_of">(),
+  builder.add(sdk_method_id(trait_t::entrypoint<"get_balance_of">()),
               [](SystemCallHandler &handler, NativeRuntime &runtime,
                  ContractAddress contract_address) -> InvokeStatus<int128_t> {
                 if (!runtime.consume_gas(1)) {
@@ -196,11 +196,14 @@ make_native_token_contract()
                 if (!balance.has_value()) {
                   return balance.error().to_invoke_error();
                 }
-                return *balance;
+                if (!balance.value().has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                return balance.value().value();
               });
 
   // get_balance
-  builder.add(trait_t::method_id<"get_balance">(),
+  builder.add(sdk_method_id(trait_t::entrypoint<"get_balance">()),
               [](SystemCallHandler &handler,
                  NativeRuntime &runtime) -> InvokeStatus<int128_t> {
                 if (!runtime.consume_gas(1)) {
@@ -217,17 +220,20 @@ make_native_token_contract()
                 if (!balance.has_value()) {
                   return balance.error().to_invoke_error();
                 }
-                return *balance;
+                if (!balance.value().has_value()) {
+                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                }
+                return balance.value().value();
               });
 
   // mint
-  builder.add(trait_t::method_id<"mint">(), always_error);
+  builder.add(sdk_method_id(trait_t::entrypoint<"mint">()), always_error);
 
   // burn
-  builder.add(trait_t::method_id<"burn">(), always_error);
+  builder.add(sdk_method_id(trait_t::entrypoint<"burn">()), always_error);
 
   // total_supply
-  builder.add(trait_t::method_id<"total_supply">(),
+  builder.add(sdk_method_id(trait_t::entrypoint<"total_supply">()),
               [](NativeRuntime &runtime) -> InvokeStatus<int128_t> {
                 // TODO(geoff): gas costs
                 if (!runtime.consume_gas(1)) {

@@ -13,7 +13,27 @@ TEST(WasmRuntimeTest, MissingImportFail)
   WasmiContext context;
   auto runtime = context.make_new_runtime(contract, nullptr, true);
 
-  EXPECT_FALSE(!!runtime);
+  EXPECT_FALSE(runtime);
+}
+
+TEST(WasmRuntimeTest, InstantiateFail)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_instantiate_fail.wasm");
+  WasmiContext context;
+  auto runtime = context.make_new_runtime(contract, nullptr, true);
+  EXPECT_FALSE(runtime);
+}
+
+TEST(WasmRuntimeTest, InstantiateUnexportedMemory)
+{
+  Contract contract(ContractType::kWasmi);
+  contract.wasmi_contract() =
+      test::load_wasm_from_file("test_instantiate_unexported_memory.wasm");
+  WasmiContext context;
+  auto runtime = context.make_new_runtime(contract, nullptr, true);
+  EXPECT_FALSE(runtime);
 }
 
 } // namespace hogd

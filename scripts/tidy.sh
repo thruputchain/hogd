@@ -18,8 +18,28 @@ while getopts 'd:' flag; do
     esac
 done
 
+
+# Run clippy
+cd ${ROOT_DIR}/hogd/hogexec/wasmi
+cargo clippy --no-deps &
+CLIPPY_PID=$!
+
+
+
 # Run clang-tidy
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
 xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
 -header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*'
+
+if [ $? -ne 0 ]; then
+  exit 1
+fi
+
+wait $CLIPPY_PID
+CLIPPY_RESULT=$?
+if [ $CLIPPY_RESULT -ne 0 ]; then
+  printf "clippy failed!\n"
+  exit 1
+fi
+

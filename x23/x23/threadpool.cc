@@ -1,4 +1,5 @@
 
+#include <filesystem>
 #include <regex>
 
 #include "x23/fileio.h"
@@ -104,6 +105,42 @@ nproc()
   }
 
   return std::thread::hardware_concurrency();
+}
+
+std::unordered_map<int, int>
+cpu_cache_map(int level)
+try {
+  std::unordered_map<int, int> ret;
+
+  for (const auto &cpudir :
+       std::filesystem::directory_iterator("/sys/devices/system/cpu")) {
+    std::string name = cpudir.path().filename();
+    if (!name.starts_with("cpu"))
+      continue;
+    int cpu, cacheid;
+    try {
+      cpu = stoi(name.substr(3));
+    } catch (...) {
+      continue;
+    }
+    std::filesystem::path idpath =
+        cpudir.path() / "cache" / std::format("index{}", level) / "id";
+    auto idstr = readfile<std::string>(idpath);
+    if (!idstr) {
+      std::println(stderr, "{}: {}", idpath.string(), idstr.error());
+      continue;
+    }
+    try {
+      cacheid = stoi(*idstr);
+    } catch (...) {
+      std::println(stderr, "failed to parse {}", idpath.string());
+      continue;
+    }
+    ret[cpu] = cacheid;
+  }
+  return ret;
+} catch (...) {
+  return {};
 }
 
 } // namespace x23

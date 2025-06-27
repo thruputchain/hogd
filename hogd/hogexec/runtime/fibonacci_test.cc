@@ -156,7 +156,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                 Transaction{
                     .invocation =
                         Invocation{.invoked_address = native_contract_addr,
-                                   .method = 0,
+                                   .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata =
                                        bcs::encode_to<Calldata, uint32_t,
@@ -178,7 +178,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                 Transaction{
                     .invocation =
                         Invocation{.invoked_address = native_contract_addr,
-                                   .method = 0,
+                                   .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata =
                                        bcs::encode_to<Calldata, uint32_t,

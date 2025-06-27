@@ -4,13 +4,13 @@
 #include <optional>
 #include <variant>
 
-#include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -38,6 +38,14 @@ make_nnint128_set_add(int128_t set, int128_t add)
   return out;
 }
 
+StorageDelta
+make_nnint128_add(int128_t add)
+{
+  StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
+  out.nnint_add() = to_xdr(add);
+  return out;
+}
+
 } // namespace
 
 std::optional<StorageDelta>
@@ -59,7 +67,10 @@ BytestringItem::get_delta() const
 StorageDelta
 NNIntItem::get_delta() const
 {
-  return make_nnint128_set_add(base_value_, add_value_);
+  if (base_value_.has_value()) {
+    return make_nnint128_set_add(base_value_.value(), add_value_);
+  }
+  return make_nnint128_add(add_value_);
 }
 
 SyscallStatus<void>
@@ -79,19 +90,21 @@ NNIntItem::validate() const
     // by this item is always valid.
     return {};
   }
+  if (!base_value_.has_value()) {
+    return {};
+  }
 
-  if (base_value_ < 0) {
+  if (base_value_.value() < 0) {
     // cannot subtract from a value that is already negative
     return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
   }
 
-  if (base_value_ >= 0) {
+  if (base_value_.value() >= 0) {
     // base_value_ + add_value_ cannot overflow here,
     // because base_value_ and add_value_ have opposite signs
-    if (base_value_ + add_value_ < 0) {
+    if (*base_value_ + add_value_ < 0) {
       // This would be always rejected by the delta handling logic
-      // in the storage server.  Putting this check here
-      // may simplify some downstream logic.
+      // in the storage server.
       return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
     }
   }
@@ -295,58 +308,6 @@ RetrocausalQueueItem::get_next_self_entry(uint32_t index) const
   return nullptr;
 }
 
-void
-NativeTokenBalanceItem::add_deterministic_native_token_balance(int128_t amount)
-{
-  assert(!integer_add_overflow<int128_t>(native_token_balance_, amount));
-  native_token_balance_ += amount;
-  // validate performs the nonnegative check
-
-  // In no sensible codepath should a user be able to get more of the native
-  // tokens in one place than exist in the entire supply.
-  assert(native_token_balance_ <=
-         int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
-}
-
-void
-NativeTokenBalanceItem::add_nondeterministic_native_token_lock(
-    Nondeterministic<int128_t> const &amount)
-{
-
-  int128_t new_sub = amount.get();
-  assert(new_sub >= 0);
-  assert(new_sub <= int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
-
-  additional_subtract_amount_.get() += new_sub;
-}
-
-StorageDelta
-NativeTokenBalanceItem::get_delta() const
-{
-  assert(additional_subtract_amount_.get() >= 0);
-  int128_t subtract_amount =
-      native_token_balance_ - initial_native_token_balance_;
-  int128_t additional_sub = additional_subtract_amount_.get();
-
-  StorageDelta out(StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd);
-  out.nnint() =
-      NonnegativeInt128SetAddArgs{.set_value =
-                                      to_xdr(initial_native_token_balance_),
-                                  .add_value =
-                                      to_xdr(subtract_amount - additional_sub)};
-  // TODO(geoff):
-  // We could conceivably avoid this delta if out.add_value == 0.
-  // I'm skipping this optimization for now, because that condition
-  // depends on the nondeterministic data in this item,
-  // and I want to limit how that nondeterministic data is incorporated
-  // downstream until we have a full picture the rest of the system. (E.g. --
-  // one failure case would be to have a contract be deleted, which could delete
-  // the corresponding db item --- and that would be a conflict with this delta.
-  // So lets hold off on this optimization until we at least figure out contract
-  // deletion behavior).
-  return out;
-}
-
 StorageDelta
 ReplayCacheItem::get_delta() const
 {
@@ -363,22 +324,21 @@ ReplayCacheItem::get_delta() const
 std::optional<ItemViewType>
 UnmodifiedItem::get_item_type() const
 {
-  return base_item_.type();
+  assert(base_item_.has_value());
+  assert(base_item_.value());
+  return base_item_.value()->type();
 }
 
-void
-ItemView::debug_assert_view_types(SnapshotStorageItem const &base_item,
-                                  ItemViewType item_type)
+SystemStatus<void>
+UnmodifiedItem::load(StorageSnapshotCache &snapshot_cache,
+                     AddressAndKey const &addrkey) const
 {
-  auto const &addrkey = base_item.addrkey();
-  if (item_type == ItemViewType::kNativeTokenBalance) {
-    assert(addrkey.key.key_type() ==
-           StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+  auto r = snapshot_cache.try_get_snapshot_item(addrkey);
+  if (!r.has_value()) {
+    return r.error();
   }
-  else {
-    assert(addrkey.key.key_type() !=
-           StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
-  }
+  base_item_ = r.value();
+  return {};
 }
 
 } // namespace hogd

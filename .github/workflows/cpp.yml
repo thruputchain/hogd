@@ -8,13 +8,13 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
 
-    env:
-      CACHED_PATHS: |
-        bcheck
-    
     steps:
+    - name: Clean up .gitconfig
+      run: |
+        echo "Cleaning up .gitconfig"
+        rm -f /home/hogci/.gitconfig
     - uses: webfactory/ssh-agent@v0.9.1
       with:
         ssh-private-key: |
@@ -26,40 +26,22 @@ jobs:
           ${{ secrets.HOGD_SELF_ACCESS_KEY }}
           ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
           ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+          ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
     - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - name: install llvm
-      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 20 all && sudo apt-get remove clang-18
-    - name: set gcc-14 default
-       # default is 13.2, unfortunately. This makes 14.x work
-      run: sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 14 && sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 14
-    - name: set clang-20 default
-      run: sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 20 && sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 20
     - name: gcc version check
       run: gcc --version
     - name: clang version check
       run: clang --version
-    - name: set clang-tidy
-      run: echo "CLANG_TIDY=run-clang-tidy-20" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
-    - name: install packages
-      run: sudo apt-get install -y git cmake pkg-config wabt
-    - name: install rust nightly
-      run: rustup +nightly target install wasm32-unknown-unknown && rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
-    - name: Install cbindgen
-      run: cargo install --force cbindgen
-    - name: Probe Cache
-      id: cache
-      uses: actions/cache/restore@v4
-      with:
-        path: ${{ env.CACHED_PATHS }}
-        # Cmake should handle rebuilding any changed files across commits
-        # The last number is a version number.  Bump the version number whenever the compiler changes,
-        # to invalidate the cache (or any other time you need to manually clear the cache)
-        key: ${{ runner.os }}-${{ github.ref_name }}-3
+    - name: Add Cargo to PATH
+      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    - name: path check
+      run: echo $PATH
+    - name: cargo version check
+      run: cargo --version
+    - name: set gcc-14 in check
+      run: echo "GCC_CC=gcc-14 GCC_CXX=g++-14" > ./scripts/conf.sh && chmod u+x ./scripts/conf.sh
     - name: check
-      run: ./scripts/check.sh
-    - uses: actions/cache/save@v4
-      with:
-        path: ${{ env.CACHED_PATHS }}
-        key: ${{ steps.cache.outputs.cache-primary-key }}
+      run: ./scripts/check.sh -p -b
+

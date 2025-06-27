@@ -13,13 +13,13 @@
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hogexec/runtime/test_util/queue_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/event.h"
+#include "x23/sockio.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -27,11 +27,11 @@ namespace hogd {
 
 class SnapshotStorageItemTest : public ::testing::Test {
 protected:
-  static constexpr uint32_t kPortNumber = 12345;
   void SetUp() override
   {
-    server_.start_server(kPortNumber);
-    db_proxy_ = std::make_unique<DatabaseProxy>(cp_, LocalMockDB{kPortNumber});
+    auto r = server_.start_server(0);
+    db_proxy_ =
+        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{x23::get_port(r)});
   }
 
   BlockSnapshotServer server_ = BlockSnapshotServer(1);

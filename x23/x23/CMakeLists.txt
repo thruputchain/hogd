@@ -2,9 +2,10 @@ add_library(x23
   ${CMAKE_CURRENT_BINARY_DIR}/config.h
   async.h
   atomicsharedptr.h
+  callsite.h
   cleanup.h
-  corosync.h
   corosync.cc
+  corosync.h
   corotrace.h
   err.h
   event.cc
@@ -17,11 +18,15 @@ add_library(x23
   mvar.h
   refcnt.h
   rpc.cc
+  rpc_common.cc
+  rpc_common.h
   rpc.h
   rpc_msg.x
   serialize.h
-  sockio.h
   sockio.cc
+  sockio.h
+  srpc.cc
+  srpc.h
   testlock.h
   threadpool.cc
   threadpool.h
@@ -30,6 +35,13 @@ add_library(x23
   utility.h
   vec.h
   x23.h
+)
+# Mark the implementation files as headers so they're included in IDE projects
+# and distribution but not compiled separately
+set_source_files_properties(
+    event_impl_poll.cc
+    event_impl_epoll.cc
+    PROPERTIES HEADER_FILE_ONLY TRUE
 )
 
 use_x23(x23)

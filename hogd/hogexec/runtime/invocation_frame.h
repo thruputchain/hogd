@@ -23,12 +23,12 @@ namespace hogd {
 
 class PerTransactionDatabaseProxy;
 struct InvokeResult;
-class StorageSnapshotCache;
 
 // Stores all relevant data structures for one Invocation in a transaction.
 class InvocationFrame {
 public:
-  InvocationFrame(Invocation invocation, InvokeFlagSet flags);
+  InvocationFrame(ContractAddress const &address, Calldata &&calldata,
+                  InvokeFlagSet flags);
 
   // Disable copy construction/assignment but allow move ctor
   InvocationFrame(InvocationFrame const &) = delete;
@@ -38,8 +38,8 @@ public:
   InvocationFrame(InvocationFrame &&) noexcept = default;
   InvocationFrame &operator=(InvocationFrame &&) noexcept = delete;
 
-  // the invocation that started this call frame
-  Invocation const &active_invocation() const { return active_invocation_; }
+  ContractAddress const &address() const { return address_; }
+  Calldata const &calldata() const { return calldata_; }
 
   // new deployments that were created during this (and child) call frames
   std::map<ContractAddress, SHA256Hash> new_contract_deployments_;
@@ -89,18 +89,11 @@ public:
 
   x23::Async<SystemStatus<bool>>
   try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
-                          std::vector<InvocationFrame> const &parent_frames,
-                          StorageSnapshotCache &snapshot_cache);
+                          std::vector<InvocationFrame> const &parent_frames);
 
 private:
-  // creates a new view in the frame, if it does not already exist, based on
-  // parent frames and the snapshot cache.
-  SystemStatus<ItemView *>
-  get_or_add_item_view(AddressAndKey const &addrkey,
-                       std::vector<InvocationFrame> const &parent_frames,
-                       StorageSnapshotCache &snapshot_cache);
-
-  const Invocation active_invocation_;
+  const ContractAddress address_;
+  const Calldata calldata_;
 
   // buffer (bytestring) to return to parent
   ReturnBuffer to_return_;
@@ -123,10 +116,8 @@ class InvocationFrameStack {
 public:
   InvocationFrameStack(
       std::function<void(InvocationFrame &&)> last_frame_action,
-      StorageSnapshotCache &snapshot_cache,
       PerTransactionDatabaseProxy &db_proxy)
-    : last_frame_action_(std::move(last_frame_action)),
-      snapshot_cache_(snapshot_cache), db_proxy_(db_proxy)
+    : last_frame_action_(std::move(last_frame_action)), db_proxy_(db_proxy)
   {}
 
   auto &get_active_frame(this auto &self)
@@ -136,8 +127,8 @@ public:
   }
   bool empty() const { return frame_stack_.empty(); }
 
-  SystemStatus<void> start_frame(Invocation const &invocation,
-                                 InvokeFlagSet flags);
+  void start_frame(ContractAddress const &address, Calldata &&calldata,
+                   InvokeFlagSet flags);
   SystemStatus<InvokeResult>
   finish_frame(InvokeResult result, ExecutionModeData &execution_mode_data);
 
@@ -155,14 +146,19 @@ public:
 
   // Reference invalidated by any other call to get_item_view
   // The returned pointer is never null
-  SystemStatus<ItemView *>
-  get_item_view(StorageKeyContractData const &data_key);
-  SystemStatus<ItemView *> get_item_view(AddressAndKey const &addrkey);
+  ItemView *get_item_view(StorageKeyContractData const &data_key);
+  ItemView *get_item_view(AddressAndKey const &addrkey);
+
+  AddressAndKey get_addrkey(StorageKeyContractData const &data_key) const
+  {
+    StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+    key.contract_data_key() = data_key;
+    return AddressAndKey{.address = get_active_frame().address(), .key = key};
+  }
 
 private:
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &&)> last_frame_action_;
-  StorageSnapshotCache &snapshot_cache_;
   PerTransactionDatabaseProxy &db_proxy_;
 };
 

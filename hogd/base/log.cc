@@ -4,6 +4,8 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+// NOLINTNEXTLINE(misc-include-cleaner)
+#include <ranges>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -65,12 +67,14 @@ do_panic(std::string_view fmt, const std::source_location &loc,
   auto trace = std::stacktrace::current();
   std::format_to(std::back_inserter(buf), "\n{}",
                  ansi_color(Style::kNormal, Color::kGreen));
-  for (const auto &entry : trace) {
+  for (const auto &entry : trace | std::views::drop(2)) {
     std::format_to(std::back_inserter(buf), "{}\n", entry);
   }
   std::format_to(std::back_inserter(buf), "{}", ansi_reset());
 #endif // HAVE_CXX_STACKTRACE
 
+  // If you are segfaulting on the line below, it is likely because you have not
+  // called [log_init()], so [logger] is a [nullptr].
   logger->vlog(LogLevel::kCritical, "{}", loc, std::make_format_args(buf));
   detail::logger->flush();
   // TODO(amb): do more to cleanup safely (e.g., flush to disk?)

@@ -54,6 +54,8 @@ public:
   File(const File &f) = delete;
   File &operator=(const File &f) = delete;
 
+  int get_fd() const { return fd_; }
+
   // read() system call. Returns the number of bytes read if successful, which
   // could be 0 if EOF.
   ErrnoStatus<size_t> read(std::span<std::byte> buf) const;
@@ -161,6 +163,9 @@ public:
   }
   BufferedReader(const BufferedReader &reader) = delete;
   BufferedReader &operator=(const BufferedReader &reader) = delete;
+
+  // size returns the number of bytes currently buffered.
+  size_t size() const { return pos_.size(); }
 
   // read performs buffered reads of a file. Returns the number of bytes read
   // if successful, which could be less than the number requested because only

@@ -4,7 +4,10 @@
 
 #include <atomic>
 #include <cassert>
+#include <mutex>
+#include <utility>
 
+#include <x23/utility.h>
 #include <x23/threadpool.h>
 
 namespace x23 {

@@ -66,18 +66,21 @@ public:
                                          AddressAndKey const &addrkey,
                                          uint32_t index);
 
-  x23::Async<SystemStatus<std::optional<Nondeterministic<int128_t>>>>
-  try_reserve_delta(BlockID block_id, TransactionID tx_id,
-                    AddressAndKey const &addrkey, StorageDelta const &delta,
-                    StorageItemRPCFlagSet flags);
+  x23::Async<SystemStatus<bool>>
+  try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
+                              StorageDeltaBatch const &delta_batch);
 
   x23::Async<SystemStatus<void>> commit_transaction(BlockID block_id,
                                                     TransactionID tx_id);
   x23::Async<SystemStatus<void>> abort_transaction(BlockID block_id,
                                                    TransactionID tx_id);
 
-  x23::Async<SystemStatus<void>> push_new_subtransaction(BlockID block_id,
-                                                         TransactionID tx_id);
+  x23::Async<SystemStatus<void>>
+  commit_contract_create(BlockID block_id, Contract const &contract);
+  x23::Async<SystemStatus<void>>
+  commit_contract_deploy(BlockID block_id, ContractAddress const &addr,
+                         SHA256Hash const &hash);
+
   x23::Async<SystemStatus<void>> pop_subtransactions(BlockID block_id,
                                                      TransactionID tx_id,
                                                      uint32_t count = 1);
@@ -91,6 +94,23 @@ private:
   read_client_t read_client_;
 };
 
+class StorageDeltaBatchBuilder {
+public:
+  // Is responsible for sorting storage deltas appropriately for consumption by
+  // the database.
+  StorageDeltaBatch build();
+
+  void add_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
+                 StorageItemRPCFlagSet flags);
+
+private:
+  std::vector<FlaggedStorageDelta> positive_storage_deltas_;
+  std::vector<FlaggedStorageDelta> negative_storage_deltas_;
+
+  // might be positive or negative; we don't know in executor which is the case
+  std::vector<FlaggedStorageDelta> storage_deltas_;
+};
+
 // A DatabaseProxy that is scoped to a single transaction.
 class PerTransactionDatabaseProxy {
 public:
@@ -99,17 +119,26 @@ public:
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
   {}
 
-  x23::Async<SystemStatus<std::optional<Nondeterministic<int128_t>>>>
-  try_reserve_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
-                    StorageItemRPCFlagSet flags)
+  std::optional<StorageDeltaBatch> current_subtransaction_batch_;
+
+  void add_delta(AddressAndKey const &addrkey, StorageDelta const &delta,
+                 StorageItemRPCFlagSet flags)
   {
-    return db_proxy_.try_reserve_delta(block_id_, tx_id_, addrkey, delta,
-                                       flags);
+    if (!current_subtransaction_batch_builder_) {
+      current_subtransaction_batch_builder_ = StorageDeltaBatchBuilder();
+    }
+    current_subtransaction_batch_builder_->add_delta(addrkey, delta, flags);
   }
 
-  x23::Async<SystemStatus<void>> push_new_subtransaction()
+  x23::Async<SystemStatus<bool>> try_push_current_subtransaction()
   {
-    return db_proxy_.push_new_subtransaction(block_id_, tx_id_);
+    StorageDeltaBatch batch;
+    if (current_subtransaction_batch_builder_) {
+      batch = current_subtransaction_batch_builder_->build();
+      current_subtransaction_batch_builder_ = std::nullopt;
+    }
+
+    return db_proxy_.try_push_new_subtransaction(block_id_, tx_id_, batch);
   }
 
   x23::Async<SystemStatus<void>> pop_subtransactions(uint32_t count)
@@ -119,18 +148,36 @@ public:
 
   x23::Async<SystemStatus<void>> commit_transaction()
   {
+    assert(!current_subtransaction_batch_builder_);
     return db_proxy_.commit_transaction(block_id_, tx_id_);
   }
 
   x23::Async<SystemStatus<void>> abort_transaction()
   {
+    assert(!current_subtransaction_batch_builder_);
     return db_proxy_.abort_transaction(block_id_, tx_id_);
+  }
+
+  x23::Async<SystemStatus<void>>
+  commit_contract_create(Contract const &contract)
+  {
+    assert(!current_subtransaction_batch_builder_);
+    return db_proxy_.commit_contract_create(block_id_, contract);
+  }
+
+  x23::Async<SystemStatus<void>>
+  commit_contract_deploy(ContractAddress const &addr, SHA256Hash const &hash)
+  {
+    assert(!current_subtransaction_batch_builder_);
+    return db_proxy_.commit_contract_deploy(block_id_, addr, hash);
   }
 
   x23::CoroPoll &coropoll() { return db_proxy_.coropoll(); }
 
 private:
   DatabaseProxy &db_proxy_;
+  std::optional<StorageDeltaBatchBuilder>
+      current_subtransaction_batch_builder_ = std::nullopt;
   const BlockID block_id_;
   const TransactionID tx_id_;
 };

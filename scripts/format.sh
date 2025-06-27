@@ -41,6 +41,6 @@ for CARGO_DIR in $CARGO_DIRS; do
     cargo fmt ${CF_FLAGS} --manifest-path=${CARGO_DIR} --message-format human
 done
 
-# xdr format
-find "${CODE_DIR}" -name '*.x' |\
+# xdr format (note: this assumes .clang-format matches that in the protocol directory)
+find "${ROOT_DIR}/protocol" -name '*.x' |\
 xargs ${CLANG_FORMAT} -i ${FFLAGS}

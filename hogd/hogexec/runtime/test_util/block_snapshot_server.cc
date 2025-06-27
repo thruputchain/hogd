@@ -2,16 +2,18 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
+#include <sys/socket.h>
 #include <utility>
 #include <vector>
 
 #include "contract.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -33,6 +35,13 @@ BlockSnapshotServer::get_snapshot_item(BlockID block,
 {
   if (block != block_id_) {
     co_return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+  }
+
+  {
+    auto blocked = blocked_items_.take();
+    if (blocked->contains(addrkey)) {
+      throw std::runtime_error("Blocked item accessed");
+    }
   }
 
   auto m = items_.take();
@@ -95,7 +104,9 @@ BlockSnapshotServer::commit_contract_deploy(BlockID block,
 }
 
 x23::Async<RPCError>
-BlockSnapshotServer::push_new_subtransaction(BlockID block, TransactionID tx)
+BlockSnapshotServer::try_push_new_subtransaction(BlockID block,
+                                                 TransactionID tx,
+                                                 StorageDeltaBatch batch)
 {
   co_return RPCError::kRPCUnimplemented;
 }
@@ -107,14 +118,6 @@ BlockSnapshotServer::pop_subtransactions(BlockID block, TransactionID tx,
   co_return RPCError::kRPCUnimplemented;
 }
 
-x23::Async<ExpectedStorageCost>
-BlockSnapshotServer::try_reserve_delta(BlockID block, TransactionID tx,
-                                       AddressAndKey addrkey,
-                                       StorageDelta delta,
-                                       StorageItemRPCFlagSet flags)
-{
-  co_return ExpectedStorageCost(RPCError::kRPCUnimplemented);
-}
 x23::Async<RPCError>
 BlockSnapshotServer::commit_transaction(BlockID block, TransactionID tx)
 {
@@ -127,7 +130,7 @@ BlockSnapshotServer::abort_transaction(BlockID block, TransactionID tx)
   // unimplemented;
 }
 
-void
+sockaddr_storage
 BlockSnapshotServer::start_server(uint32_t port_number)
 {
   auto lfd = x23::tcplisten(port_number);
@@ -135,6 +138,7 @@ BlockSnapshotServer::start_server(uint32_t port_number)
     perror("listen");
     exit(EXIT_FAILURE);
   }
+  auto out = x23::local_addr(lfd);
 
   [](x23::CoroPoll &cp, BlockSnapshotServer *server,
      x23::UniqueFd lfd) -> x23::Detached {
@@ -143,6 +147,8 @@ BlockSnapshotServer::start_server(uint32_t port_number)
       x23::rpc_stream_logged(cp, *c).server(server);
     }
   }(cp_, this, std::move(lfd));
+
+  return out;
 }
 
 x23::Async<ExpectedRetrocausalQueueBlock>
@@ -217,6 +223,12 @@ BlockSnapshotServer::setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
   else {
     it->second.push_back(entry);
   }
+}
+
+void
+BlockSnapshotServer::setup_ban_item(AddressAndKey const &addrkey)
+{
+  blocked_items_->insert(addrkey);
 }
 
 } // namespace hogd
