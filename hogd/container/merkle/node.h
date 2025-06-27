@@ -103,7 +103,6 @@ public:
   static Node *create_branch(Node *parent)
   {
     Node *node = new Node;
-    //node->clear();
     node->init_branch(parent);
     return node;
   }
@@ -111,7 +110,6 @@ public:
   static Node *create_extension(Node *parent)
   {
     Node *node = new Node;
-    //node->clear();
     node->init_extension(parent);
     return node;
   }
@@ -119,20 +117,21 @@ public:
   static Node *create_leaf(Node *parent)
   {
     Node *node = new Node;
-    //node->clear();
     node->init_leaf(parent);
     return node;
   }
 
   // Returns an encoding of the node as a byte vector.
-  std::vector<std::byte> get_node_encoding() const;
+  std::vector<std::byte>& get_node_encoding(std::vector<std::byte> &to_hash) const;
 
   // This reads a raw node representation from [encodings] starting at index
   // [idx].
   static bool get_node_from_encoding(const std::vector<std::byte> &encodings,
                                      size_t &idx, Node::Raw &node);
 
-  SHA256Hash compute_node_hash() const { return sha256(get_node_encoding()); }
+  SHA256Hash compute_node_hash() const { 
+    static thread_local std::vector<std::byte> to_hash;
+    return sha256(get_node_encoding(to_hash)); }
 
   void clear()
   {

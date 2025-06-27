@@ -256,10 +256,9 @@ MerkleTrie::get_proof_by_node(const Key &k)
   }
 
   std::vector<std::vector<std::byte>> ret;
+  std::vector<std::byte> to_hash;
   while (node) {
-    const std::vector<std::byte> &encoding = node->get_node_encoding();
-    ret.push_back(encoding);
-
+    ret.push_back(node->get_node_encoding(to_hash));
     node = node->parent;
   }
   return {get_root_hash(), ret};

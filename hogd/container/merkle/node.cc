@@ -248,12 +248,12 @@ get_leaf_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
 
 } // namespace
 
-std::vector<std::byte>
-Node::get_node_encoding() const
+std::vector<std::byte>&
+Node::get_node_encoding(std::vector<std::byte> &to_hash) const
 {
+  to_hash.clear();
   // TODO(jhumphri): Optimize. We know the max lengths of the values we need to
   // hash up front.
-  std::vector<std::byte> to_hash;
   to_hash.push_back(static_cast<std::byte>(type));
   switch (type) {
   case Node::Type::kBranch:
