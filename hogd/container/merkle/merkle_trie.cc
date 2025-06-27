@@ -509,8 +509,6 @@ Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
                                     T &&obj)
 {
-  // TODO(jhumphri): I think these are wrong. We cannot just block on locking
-  // a writer if we are moving down the tree.
   if (!extension->rw_lock.try_lock_writer()) {
     return nullptr;
   }
@@ -856,8 +854,7 @@ MerkleTrie::remove(const Key &k)
                              (num_children == 1 && branch->value))) {
       CHECK_PTR(branch->parent);
 
-      // TODO(jhumphri): Try-lock the child here? Then restart the function if
-      // you cannot lock it with try?
+      // TODO(jhumphri): Clean this up.
 
       // We are going to remove this branch node below, so acquire the writer
       // lock for the nodes above us until we reach the next branch. The next
@@ -1354,31 +1351,13 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
       }
     }
 
-    // TODO(jhumphri): We need to lock all of the children before calling
-    // this. Actually, we don't need to lock the children. We can do a relaxed
-    // read to their hash. If we read a corrupted value, then the thread below
-    // us in the trie is about to overwrite our hash anyway. If we read a
-    // valid value, it is likely because there is no thread below us in the
-    // trie, so we will compute the correct hash for all nodes up through and
-    // including the root.
     if (should_hash_nodes_on_each_op_) {
       n->hash_lock.lock_writer();
       // n->hash = n->compute_node_hash();
       n->hash_lock.unlock();
     }
 
-    // TODO(jhumphri): I think the current writer could produce a stale hash
-    // if we return in the if statement below.
-    //
-    // I think that a writer traveling down the tree needs to defer to a
-    // writer traveling up the tree. The former can restart its work whereas
-    // the latter cannot. If the latter tries to restart its work, it will
-    // start at [n] which may no longer exist if the KV pair in [n] was
-    // removed after we released the lock for [n].
     if (!n->parent) {
-      // We are conflicting with a writer for [n]. We can stop generating
-      // hashes because we know the other thread will generate a hashes for
-      // all nodes from [n] to the root (inclusive).
       n->rw_lock.unlock();
       return;
     }
