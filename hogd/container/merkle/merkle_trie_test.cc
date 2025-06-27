@@ -981,6 +981,7 @@ TEST(MerkleTrie, Stress)
     trie.for_each(f);
     EXPECT_EQ(seen, total);
 
+    trie.generate_hashes_for_levels(/*num_levels=*/2);
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
     EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
     EXPECT_EQ(*trie.find(path), value);
@@ -1015,6 +1016,7 @@ TEST(MerkleTrie, Stress)
       EXPECT_EQ(it, total.end());
     }
 
+    trie.generate_hashes_for_levels(/*num_levels=*/2);
     EXPECT_TRUE(trie.check());
 
     EXPECT_EQ(trie.find(path), nullptr);
@@ -1058,6 +1060,7 @@ TEST(MerkleTrie, StressTwo)
     total.insert({path, value});
   }
 
+  trie.generate_hashes_for_levels(/*num_levels=*/2);
   EXPECT_TRUE(trie.check());
   // Check every single KV pair.
   for (const auto &[path, value] : total) {
@@ -1081,6 +1084,7 @@ TEST(MerkleTrie, StressTwo)
     }
   }
 
+  trie.generate_hashes_for_levels(/*num_levels=*/2);
   EXPECT_TRUE(trie.check());
   EXPECT_EQ(trie.size(), 0);
 
@@ -1108,6 +1112,7 @@ TEST(MerkleTrie, SingleThread)
     }
   }
 
+  trie.generate_hashes_for_levels(/*num_levels=*/2);
   EXPECT_TRUE(trie.check());
   for (size_t i = 0; i < kNumKVPairs; i++) {
     EXPECT_TRUE(trie.find(paths[i]));

@@ -23,7 +23,7 @@
 namespace hogd {
 
 // This is a node in a Merkle Patricia trie.
-class Node {
+struct Node {
 public:
   // The maximum number of children of a branch node. The trie branches on a hex
   // digit. There are 16 different hex digits, so we need 16 different child
@@ -194,7 +194,8 @@ private:
   void get_branch_string(std::ostringstream &oss) const;
   void get_extension_string(std::ostringstream &oss) const;
   void get_leaf_string(std::ostringstream &oss) const;
-};
+} __attribute__((aligned(64)));
+
 } // namespace hogd
 
 // We need to define the formatters in the [std] namespace.

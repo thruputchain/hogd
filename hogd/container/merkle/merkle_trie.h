@@ -16,6 +16,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -50,7 +51,7 @@ public:
   using Key = HexArray;
   using T = std::string;
 
-  MerkleTrie() { init_root_node(); }
+  MerkleTrie() : arena_(/*alloc_size=*/sizeof(Node)) { init_root_node(); }
 
   ~MerkleTrie() // NOLINT(bugprone-exception-escape)
   {
@@ -266,6 +267,8 @@ private:
   // If this is false, nodes are only hashed when [generate_all_hashes()] is
   // called.
   bool should_hash_nodes_on_each_op_ = true;
+
+  Arena arena_;
 };
 
 } // namespace hogd
