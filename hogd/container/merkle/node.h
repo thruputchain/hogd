@@ -59,7 +59,7 @@ public:
 
   Type type;
   SHA256Hash hash{};
-  Node *parent = nullptr;
+  Node *parent;
 
   // TODO(jhumphri): Optimize the variables below with a union or different node
   // types.
