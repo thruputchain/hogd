@@ -211,7 +211,7 @@ private:
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
-  static Node *remove_branch(const Key &k, Node *branch, size_t num_children);
+  Node *remove_branch(const Key &k, Node *branch, size_t num_children);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.
@@ -248,7 +248,7 @@ private:
   void generate_hashes_from(Node *n, Node *locked_through) const;
 
   // Frees all of the nodes starting at [root]. Does not free [root_].
-  void free_all_nodes(Node *root) const;
+  void free_all_nodes(Node *root);
 
   // Initializes the root node. The root node is always a branch.
   void init_root_node()

@@ -65,7 +65,7 @@ private:
   const size_t batch_alloc_size_;
 
   // TODO(jhumphri): Use Adam's thread_local implementation.
-  static thread_local std::stack<void *> ptrs_;
+  inline static thread_local std::stack<void *> ptrs_;
 };
 
 } // namespace hogd

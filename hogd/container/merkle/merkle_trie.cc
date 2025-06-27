@@ -471,7 +471,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
     else {
       // There is no child node, so we create a leaf for [key] and place the
       // leaf as a child of the branch.
-      Node *leaf = Node::create_leaf(/*parent=*/branch);
+      Node *leaf = Node::create_leaf(arena_, /*parent=*/branch);
       CHECK(leaf->rw_lock.try_lock_writer());
       // We are going to use the hex character at [idx] in the key to map to
       // the leaf node from the branch node. Thus, we add 1 below as we do not
@@ -582,7 +582,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // First Extension Node: Path is [0x123].
     // Branch Node: A leaf for [key_window] is child [0x4]. The child of
     //              [extension] is child [0x5] in this branch.
-    Node *first = Node::create_extension(/*parent=*/extension_cache_parent);
+    Node *first =
+        Node::create_extension(arena_, /*parent=*/extension_cache_parent);
     CHECK(first->rw_lock.try_lock_writer());
     first->path = key_window.get_subarray(0, diverge_idx);
 
@@ -638,7 +639,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   auto second_branch =
       std::to_integer<size_t>(extension_cache_path.get(diverge_idx));
   if (diverge_idx < extension_cache_path.size() - 1) {
-    extension = Node::create_extension(/*parent=*/branch);
+    extension = Node::create_extension(arena_, /*parent=*/branch);
     // The second extension node has a path size larger than 1.
     branch->child[second_branch] = extension;
 
@@ -681,7 +682,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   }
   // Create new leaf node for [key_window] and add the leaf node as a child of
   // the new branch.
-  Node *leaf = Node::create_leaf(/*parent=*/branch);
+  Node *leaf = Node::create_leaf(arena_, /*parent=*/branch);
   CHECK(leaf->rw_lock.try_lock_writer());
   // Add 1 to account for the branch node. Since we are placing the leaf node
   // for [key_window] as a child of the branch, the branch accounts for 1 hex
@@ -721,7 +722,7 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   Key key_window = k.get_subarray(idx + 1, k.size());
 
   // We create a branch that we will put both keys under.
-  Node *branch = Node::create_branch(/*parent=*/leaf->parent);
+  Node *branch = Node::create_branch(arena_, /*parent=*/leaf->parent);
   CHECK(branch->rw_lock.try_lock_writer());
   leaf->parent->child[parent_branch_digit] = branch;
 
@@ -732,7 +733,7 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
       get_longest_common_range_length(key_window, 0, leaf->path, 0);
   if (common_range_length) {
     size_t diverge_idx = common_range_length;
-    Node *extension = Node::create_extension(/*parent=*/leaf->parent);
+    Node *extension = Node::create_extension(arena_, /*parent=*/leaf->parent);
     CHECK(extension->rw_lock.try_lock_writer());
     extension->path = key_window.get_subarray(0, diverge_idx);
 
@@ -782,7 +783,7 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
     // reusing [leaf]. The [shorter_*] and [longer_*] variables above are
     // references to elements in [leaf], so we cannot overwrite [leaf] until
     // we no longer need those references.
-    Node *shorter_leaf = Node::create_leaf(/*parent=*/branch);
+    Node *shorter_leaf = Node::create_leaf(arena_, /*parent=*/branch);
     // Unlike the other nodes, we do not need to call [shorter_path.get(0)]
     // before writing [shorter_leaf->path] because we are not reusing [leaf].
     // Thus, [shorter_path] will never be a reference to [shorter_leaf->path].
@@ -916,7 +917,10 @@ MerkleTrie::remove(const Key &k)
     // Remove [k]'s leaf as a child of the branch.
     branch->child[branch_hex] = nullptr;
     num_children--;
-    delete existing_key;
+
+    // [existing_key] could be reused by the arena.
+    existing_key->rw_lock.unlock();
+    arena_.free(existing_key);
   }
 
   Node *to_hash = nullptr;
@@ -989,7 +993,9 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
     extension->parent->child[parent_branch_hex] = branch;
     branch->parent = extension->parent;
 
-    delete extension;
+    // [extension] could be reused by the arena.
+    extension->rw_lock.unlock();
+    arena_.free(extension);
   }
   else {
     CHECK_EQ(branch->parent->type, Node::Type::kBranch);
@@ -1071,7 +1077,10 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
       child->path = cur_path;
 
       new_child = child;
-      delete branch;
+
+      // [branch] could be reused by the arena.
+      branch->rw_lock.unlock();
+      arena_.free(branch);
     }
   }
 
@@ -1426,14 +1435,15 @@ MerkleTrie::generate_hashes_for_levels(int num_levels)
 }
 
 void
-MerkleTrie::free_all_nodes(Node *root) const
+MerkleTrie::free_all_nodes(Node *root)
 {
   HexArray prefix;
   auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
     // [root_] is a [MerkleTrie] class member of type [Node]. It is not a
     // pointer to a [Node] value on the heap, so we cannot free the root node.
     if (&node != &root_) {
-      delete &node;
+      memset(static_cast<void *>(&node), 0, sizeof(node));
+      arena_.free(&node);
     }
   };
   walk<Node>(root, prefix, f);

@@ -9,6 +9,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -83,8 +84,9 @@ TEST(Node, Clear)
 
 TEST(Node, CreateBranch)
 {
+  Arena arena(/*alloc_size=*/sizeof(Node));
   Node parent;
-  Node *branch = Node::create_branch(&parent);
+  Node *branch = Node::create_branch(arena, &parent);
 
   EXPECT_EQ(branch->type, Node::Type::kBranch);
   EXPECT_EQ(branch->parent, &parent);
@@ -111,8 +113,9 @@ TEST(Node, InitBranch)
 
 TEST(Node, CreateExtension)
 {
+  Arena arena(/*alloc_size=*/sizeof(Node));
   Node parent;
-  Node *extension = Node::create_extension(&parent);
+  Node *extension = Node::create_extension(arena, &parent);
 
   EXPECT_EQ(extension->type, Node::Type::kExtension);
   EXPECT_EQ(extension->parent, &parent);
@@ -139,8 +142,9 @@ TEST(Node, InitExtension)
 
 TEST(Node, CreateLeaf)
 {
+  Arena arena(/*alloc_size=*/sizeof(Node));
   Node parent;
-  Node *leaf = Node::create_leaf(&parent);
+  Node *leaf = Node::create_leaf(arena, &parent);
 
   EXPECT_EQ(leaf->type, Node::Type::kLeaf);
   EXPECT_EQ(leaf->parent, &parent);
