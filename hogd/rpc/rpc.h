@@ -115,6 +115,10 @@ public:
   {}
   ~RPCServer() = default;
 
+  // get_port returns the network port assigned to the server. This is
+  // especially useful if it was chosen authomatically.
+  ErrnoStatus<uint16_t> get_port() const;
+
   // listen accepts connects and handles RPC requests. This should only be
   // called once at a time. It generally blocks forever if there are no errors.
   ErrnoStatus<void> listen();

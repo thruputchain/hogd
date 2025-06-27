@@ -41,13 +41,10 @@ protected:
       return OwningSpan(span, [ref = std::move(buf)] mutable {});
     };
 
-    // port number must be unique because of parallel testing
-    static std::atomic<uint16_t> global_port = 8080;
-    uint16_t port = global_port.fetch_add(1);
-
     // set up server listener.
+    // WARNING: port is chosen automatically because of parallel testing.
     ErrnoStatus<std::shared_ptr<RPCServer>> server =
-        RPCServer::create(port, handler);
+        RPCServer::create(0, handler);
     ASSERT_TRUE(server);
     server_ = std::move(*server);
     server_listener_ = std::jthread([this] {
@@ -57,8 +54,10 @@ protected:
     });
 
     // set up client connections.
+    ErrnoStatus<uint16_t> port = server_->get_port();
+    ASSERT_TRUE(port);
     ErrnoStatus<RPCClient> client =
-        RPCClient::dial("127.0.0.1:" + std::to_string(port));
+        RPCClient::dial("127.0.0.1:" + std::to_string(*port));
     ASSERT_TRUE(client);
     client_ = std::move(*client);
   }

@@ -111,6 +111,15 @@ sys_shutdown(int sockfd, int how)
   return make_errno_status<void>(shutdown(sockfd, how));
 }
 
+template<typename T> requires std::is_trivially_copyable_v<T>
+inline ErrnoStatus<void>
+sys_getsockname(int sockfd, T &val)
+{
+  socklen_t len = sizeof(val);
+  return make_errno_status<void>(
+      getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
+}
+
 inline ErrnoStatus<size_t>
 read_size(BufferedReader &r)
 {
@@ -327,6 +336,16 @@ RPCServer::create(uint16_t port, RPCHandler handler)
     return ret.error();
 
   return std::make_shared<RPCServer>(std::move(handler), File(*accept_fd));
+}
+
+ErrnoStatus<uint16_t>
+RPCServer::get_port() const
+{
+  sockaddr_in addr;
+  ErrnoStatus<void> ret = sys_getsockname(listener_.get_fd(), addr);
+  if (!ret)
+    return ret.error();
+  return ntohs(addr.sin_port);
 }
 
 ErrnoStatus<void>
