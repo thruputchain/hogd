@@ -215,10 +215,31 @@ private:
   Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
                            T &&obj);
 
+  // Returns true if we will need to remove [branch] after removing a KV pair
+  // that is "under" it.
+  bool will_remove_branch(const Node *branch, size_t num_children);
+
+  // Acquires the locks we need to remove a KV pair. [locked_through] is the
+  // topmost node we acquired a lock for. [num_children] is the number of
+  // children nodes of [branch]. [remaining_child_hex] is the hex digit of child
+  // that will remain (if any) after the remove operation.
+  // We do not need to pass [num_children] and [remaining_child_hex] back to the
+  // calling function per se because the parent function can compute these
+  // itself. However, [remove_grab_locks] needs to compute them in order to
+  // figure out which nodes it needs to lock, so we may as well pass them back
+  // to the parent to save some work.
+  //
+  // If this method is unable to acquire all of the locks we need, it returns
+  // false. Otherwise it returns true.
+  bool remove_grab_locks(Node *branch, Node *existing_key,
+                         Node *&locked_through, size_t &num_children,
+                         std::byte &remaining_child_hex);
+
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
-  Node *remove_branch(const Key &k, Node *branch, size_t num_children);
+  Node *remove_branch(Node *branch, size_t num_children,
+                      std::byte remaining_child_hex);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.

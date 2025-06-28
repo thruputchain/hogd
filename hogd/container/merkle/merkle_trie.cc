@@ -841,13 +841,103 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 }
 
 bool
+MerkleTrie::will_remove_branch(const Node *branch, size_t num_children)
+{
+  // We call this function before removing a KV pair that is "under" the branch.
+  // After this removal, we will need to remove the branch if there are then
+  // fewer than two KV pairs "under" it. So since we have not removed the KV
+  // pair yet, we return true if the branch has fewer than three KV pairs
+  // "under" it.
+  return branch != &root_ && ((num_children == 2 && !branch->value) ||
+                              (num_children == 1 && branch->value));
+}
+
+bool
+MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
+                              Node *&locked_through, size_t &num_children,
+                              std::byte &remaining_child_hex)
+{
+  if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
+    // We need to try again. We are moving down the trie so we cannot block on
+    // acquiring the writer lock.
+    //
+    // We also cannot drop the lock and then acquire it as the writer
+    // because it is possible that another thread is attempting to remove
+    // [k], acquires the writer lock for [branch] before we do, and then
+    // removes [k].
+    existing_key->rw_lock.unlock();
+    // Check whether [k] is in a branch node. If so, then we already unlocked
+    // the branch on the previous line.
+    if (branch != existing_key) {
+      CHECK_EQ(existing_key->type, Node::Type::kLeaf);
+      // [k] is in a leaf node, which we unlocked above. Now unlock the
+      // branch.
+      branch->rw_lock.unlock();
+    }
+    return false;
+  }
+  locked_through = branch;
+
+  // Check if we are going to remove the branch. We do this when the branch
+  // currently has two KV pairs "under it" (i.e., either in the branch or a
+  // child of the branch), as only one KV pair will remain after we remove
+  // [k].
+  num_children = get_num_children(*branch);
+  if (will_remove_branch(branch, num_children)) {
+    // We are going to remove this branch node, so we need to acquire the
+    // writer locks on the remaining child of the branch (if one exists) along
+    // with the writer locks of the nodes above us until we reach the next
+    // branch. The next branch is either the parent, or if the parent is an
+    // extension, then the grandparent.
+    CHECK_PTR(branch->parent);
+
+    // Get the node that is the child of [branch], if one exists.
+    Node *remaining_child = nullptr;
+    for (size_t i = 0; i < branch->child.size(); i++) {
+      Node *c = branch->child[i];
+      if (c && c != existing_key) {
+        remaining_child = c;
+        remaining_child_hex = static_cast<std::byte>(i);
+        break;
+      }
+    }
+    if (remaining_child && !remaining_child->rw_lock.try_lock_writer()) {
+      // We do not block on acquiring the writer lock when moving down the
+      // trie.
+      existing_key->rw_lock.unlock();
+      if (branch != existing_key) {
+        CHECK_EQ(existing_key->type, Node::Type::kLeaf);
+        branch->rw_lock.unlock();
+      }
+      return false;
+    }
+
+    // We can block on acquiring the writer lock when moving up the trie.
+    branch->parent->rw_lock.lock_writer();
+    locked_through = branch->parent;
+
+    if (branch->parent->type != Node::Type::kBranch) {
+      // The parent is not a branch, so we need to lock the grandparent.
+      CHECK_PTR(branch->parent->parent);
+      CHECK_EQ(branch->parent->type, Node::Type::kExtension);
+      CHECK_EQ(branch->parent->parent->type, Node::Type::kBranch);
+
+      branch->parent->parent->rw_lock.lock_writer();
+      locked_through = branch->parent->parent;
+    }
+  }
+  return true;
+}
+
+bool
 MerkleTrie::remove(const Key &k)
 {
   size_t idx;
   Node *existing_key;
   Node *branch;
   size_t num_children;
-  Node *locked_through = nullptr;
+  Node *locked_through;
+  std::byte remaining_child_hex;
 
   while (true) {
     idx = 0;
@@ -862,76 +952,13 @@ MerkleTrie::remove(const Key &k)
     CHECK_PTR(branch);
     CHECK_EQ(branch->type, Node::Type::kBranch);
 
-    if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
-      // We need to try again. We are moving down the trie so we cannot block on
-      // acquiring the writer lock.
-      //
-      // We also cannot drop the lock and then acquire it as the writer
-      // because it is possible that another thread is attempting to remove
-      // [k], acquires the writer lock for [branch] before we do, and then
-      // removes [k].
-      existing_key->rw_lock.unlock();
-      // Check whether [k] is in a branch node. If so, then we already unlocked
-      // the branch on the previous line.
-      if (branch != existing_key) {
-        CHECK_EQ(existing_key->type, Node::Type::kLeaf);
-        // [k] is in a leaf node, which we unlocked above. Now unlock the
-        // branch.
-        branch->rw_lock.unlock();
-      }
-      continue;
+    if (remove_grab_locks(branch, existing_key, locked_through, num_children,
+                          remaining_child_hex)) {
+      break;
     }
-    locked_through = branch;
-
-    // Check if we are going to remove the branch. We do this when the branch
-    // currently has two KV pairs "under it" (i.e., either in the branch or a
-    // child of the branch), as only one KV pair will remain after we remove
-    // [k].
-    num_children = get_num_children(*branch);
-    if (branch != &root_ && ((num_children == 2 && !branch->value) ||
-                             (num_children == 1 && branch->value))) {
-      // We are going to remove this branch node, so we need to acquire the
-      // writer locks on the remaining child of the branch (if one exists) along
-      // with the writer locks of the nodes above us until we reach the next
-      // branch. The next branch is either the parent, or if the parent is an
-      // extension, then the grandparent.
-      CHECK_PTR(branch->parent);
-
-      // Get the node that is the child of [branch], if one exists.
-      Node *child = nullptr;
-      for (Node *c : branch->child) {
-        if (c && c != existing_key) {
-          child = c;
-          break;
-        }
-      }
-      if (child && !child->rw_lock.try_lock_writer()) {
-        // We do not block on acquiring the writer lock when moving down the
-        // trie.
-        existing_key->rw_lock.unlock();
-        if (branch != existing_key) {
-          CHECK_EQ(existing_key->type, Node::Type::kLeaf);
-          branch->rw_lock.unlock();
-        }
-        continue;
-      }
-
-      // We can block on acquiring the writer lock when moving up the trie.
-      branch->parent->rw_lock.lock_writer();
-      locked_through = branch->parent;
-
-      if (branch->parent->type != Node::Type::kBranch) {
-        CHECK_PTR(branch->parent->parent);
-        CHECK_EQ(branch->parent->type, Node::Type::kExtension);
-        CHECK_EQ(branch->parent->parent->type, Node::Type::kBranch);
-
-        branch->parent->parent->rw_lock.lock_writer();
-        locked_through = branch->parent->parent;
-      }
-    }
-    break;
   }
 
+  const bool need_to_remove_branch = will_remove_branch(branch, num_children);
   if (existing_key == branch) {
     // [k] maps to a branch, so clear the branch's value.
     CHECK(branch->value.has_value());
@@ -962,17 +989,17 @@ MerkleTrie::remove(const Key &k)
     // optimization possible.
     to_hash = branch;
   }
-  else if (num_children > 1 || (num_children == 1 && branch->value)) {
+  else if (need_to_remove_branch) {
+    // The branch now has fewer than two KV pairs "under" it, so we can
+    // optimize our trie by removing the branch.
+    to_hash = remove_branch(branch, num_children, remaining_child_hex);
+  }
+  else {
     // The branch has multiple children, or there is exactly one child and
     // there is a value in the branch (so in other words, there are two KV
     // pairs "under" this branch). Thus, as the branch still has at least two
     // KV pairs "under" it, no further optimization is possible.
     to_hash = branch;
-  }
-  else {
-    // The branch now has fewer than two KV pairs "under" it, so we can
-    // optimize our trie by removing the branch.
-    to_hash = remove_branch(k, branch, num_children);
   }
 
   size_.fetch_sub(1, std::memory_order_relaxed);
@@ -987,7 +1014,8 @@ MerkleTrie::remove(const Key &k)
 //
 // static
 Node *
-MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
+MerkleTrie::remove_branch(Node *branch, size_t num_children,
+                          std::byte remaining_child_hex)
 {
   // We should only remove a branch if it has one KV pair "under" it.
   if (num_children) {
@@ -1037,24 +1065,11 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
   }
   CHECK_EQ(branch->parent->type, Node::Type::kBranch);
 
-  // Get the node that is the child of [branch], if one exists.
-  Node *child = nullptr;
-  std::byte child_hex;
-  for (size_t i = 0; i < branch->child.size(); i++) {
-    Node *c = branch->child[i];
-    if (c) {
-      child = c;
-      child_hex = static_cast<std::byte>(i);
-      break;
-    }
-  }
-
   Node *new_child = nullptr;
   // We are going to reuse or free [branch] in the if/else bodies below, so we
   // cache [branch->parent] since we need it at the bottom of the function.
   Node *const branch_parent = branch->parent;
   if (num_children == 0) {
-    CHECK_EQ(child, nullptr);
     CHECK(branch->value.has_value());
 
     // The branch has a value, so place the value in a leaf with path size 0.
@@ -1069,18 +1084,21 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
     new_child->value = std::move(value);
   }
   else {
-    CHECK_PTR(child);
     CHECK_EQ(num_children, 1UL);
     CHECK(!branch->value.has_value());
-    CHECK(child->rw_lock.is_writer_locked_relaxed());
 
-    if (child->type == Node::Type::kBranch) {
+    Node *remaining_child =
+        branch->child[static_cast<size_t>(remaining_child_hex)];
+    CHECK_PTR(remaining_child);
+    CHECK(remaining_child->rw_lock.is_writer_locked_relaxed());
+
+    if (remaining_child->type == Node::Type::kBranch) {
       // The remaining child under [branch] is also a branch. Thus, we can
       // replace [branch] with an extension node. The path in the extension
       // node will be [cur_path] (to account for a possible extension node we
       // removed above) followed by the hex digit in [branch] that the
       // remaining child is under.
-      cur_path.append(child_hex);
+      cur_path.append(remaining_child_hex);
       CHECK_GE(cur_path.size(), 1UL);
       // We reuse the branch node below.
       new_child = branch;
@@ -1088,10 +1106,10 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
       new_child->clear();
       new_child->init_extension(parent);
       new_child->path = cur_path;
-      new_child->child[0] = child;
-      child->parent = new_child;
+      new_child->child[0] = remaining_child;
+      remaining_child->parent = new_child;
 
-      child->rw_lock.unlock();
+      remaining_child->rw_lock.unlock();
     }
     else {
       // The remaining child under [branch] is either an extension node or a
@@ -1099,15 +1117,15 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
       // The prefix will be [cur_path] (to account for a possible extension
       // node we removed above) followed by the hex digit in the branch that
       // the remaining child is under.
-      cur_path.append(child_hex);
+      cur_path.append(remaining_child_hex);
 
-      // Add [child->path] to [cur_path] since we then overwrite [child->path]
-      // entirely with [cur_path]. We want to make sure the existing path in
-      // [child] remains.
-      cur_path.append(child->path);
-      child->path = cur_path;
+      // Add [remaining_child->path] to [cur_path] since we then overwrite
+      // [remaining_child->path] entirely with [cur_path]. We want to make sure
+      // the existing path in [remaining_child] remains.
+      cur_path.append(remaining_child->path);
+      remaining_child->path = cur_path;
 
-      new_child = child;
+      new_child = remaining_child;
 
       // [branch] could be reused by the arena.
       branch->rw_lock.unlock();

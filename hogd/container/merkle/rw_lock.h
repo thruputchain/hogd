@@ -49,7 +49,8 @@ public:
   RwLock(RwLock &&) noexcept = delete;
   RwLock &operator=(RwLock &&) noexcept = delete;
 
-  void lock_reader() {
+  void lock_reader()
+  {
     while (true) {
       int64_t cur;
       if ((cur = lock_.load(std::memory_order_relaxed)) == kWriterLocked) {
@@ -58,8 +59,8 @@ public:
         continue;
       }
       if (!lock_.compare_exchange_weak(/*expected=*/cur, /*desired=*/cur + 1,
-                                      /*success=*/std::memory_order_acquire,
-                                      /*failure=*/std::memory_order_relaxed)) {
+                                       /*success=*/std::memory_order_acquire,
+                                       /*failure=*/std::memory_order_relaxed)) {
         _mm_pause();
         continue;
       }
