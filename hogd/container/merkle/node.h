@@ -226,6 +226,16 @@ template<> struct std::formatter<hogd::Node *> : std::formatter<std::string> {
   }
 };
 
+// Also need to define a formatter for [const Node *].
+template<> struct std::formatter<const hogd::Node *> : std::formatter<std::string> {
+  auto format(const hogd::Node *node, std::format_context &ctx) const
+  {
+    std::ostringstream oss;
+    oss << node;
+    return std::formatter<std::string>::format(oss.str(), ctx);
+  }
+};
+
 template<>
 struct std::formatter<hogd::Node::Type> : std::formatter<std::string> {
   auto format(const hogd::Node::Type &type, std::format_context &ctx) const

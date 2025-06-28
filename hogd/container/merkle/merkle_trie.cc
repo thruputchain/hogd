@@ -740,7 +740,6 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   if (!leaf->rw_lock.try_lock_writer()) {
     return nullptr;
   }
-
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
   CHECK_EQ(leaf->parent->type, Node::Type::kBranch);
 
@@ -864,37 +863,43 @@ MerkleTrie::remove(const Key &k)
     CHECK_EQ(branch->type, Node::Type::kBranch);
 
     if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
-      // We need to try again. We cannot block on acquiring the writer lock
-      // because we could deadlock with another thread trying to do the same.
+      // We need to try again. We are moving down the trie so we cannot block on
+      // acquiring the writer lock.
       //
       // We also cannot drop the lock and then acquire it as the writer
       // because it is possible that another thread is attempting to remove
       // [k], acquires the writer lock for [branch] before we do, and then
       // removes [k].
       existing_key->rw_lock.unlock();
+      // Check whether [k] is in a branch node. If so, then we already unlocked
+      // the branch on the previous line.
       if (branch != existing_key) {
+        CHECK_EQ(existing_key->type, Node::Type::kLeaf);
+        // [k] is in a leaf node, which we unlocked above. Now unlock the
+        // branch.
         branch->rw_lock.unlock();
       }
       continue;
     }
     locked_through = branch;
 
+    // Check if we are going to remove the branch. We do this when the branch
+    // currently has two KV pairs "under it" (i.e., either in the branch or a
+    // child of the branch), as only one KV pair will remain after we remove
+    // [k].
     num_children = get_num_children(*branch);
     if (branch != &root_ && ((num_children == 2 && !branch->value) ||
                              (num_children == 1 && branch->value))) {
+      // We are going to remove this branch node, so we need to acquire the
+      // writer locks on the remaining child of the branch (if one exists) along
+      // with the writer locks of the nodes above us until we reach the next
+      // branch. The next branch is either the parent, or if the parent is an
+      // extension, then the grandparent.
       CHECK_PTR(branch->parent);
-
-      // TODO(jhumphri): Clean this up.
-
-      // We are going to remove this branch node below, so acquire the writer
-      // lock for the nodes above us until we reach the next branch. The next
-      // branch is either the parent, or if the parent is an extension, then
-      // the grandparent.
 
       // Get the node that is the child of [branch], if one exists.
       Node *child = nullptr;
-      for (size_t i = 0; i < branch->child.size(); i++) {
-        Node *c = branch->child[i];
+      for (Node *c : branch->child) {
         if (c && c != existing_key) {
           child = c;
           break;
@@ -902,10 +907,10 @@ MerkleTrie::remove(const Key &k)
       }
       if (child && !child->rw_lock.try_lock_writer()) {
         // We do not block on acquiring the writer lock when moving down the
-        // trie because we could deadlock with another thread that is
-        // acquiring writer locks as it moves up the trie.
+        // trie.
         existing_key->rw_lock.unlock();
         if (branch != existing_key) {
+          CHECK_EQ(existing_key->type, Node::Type::kLeaf);
           branch->rw_lock.unlock();
         }
         continue;
@@ -1067,7 +1072,6 @@ MerkleTrie::remove_branch(const Key & /*k*/, Node *branch, size_t num_children)
     CHECK_PTR(child);
     CHECK_EQ(num_children, 1UL);
     CHECK(!branch->value.has_value());
-
     CHECK(child->rw_lock.is_writer_locked_relaxed());
 
     if (child->type == Node::Type::kBranch) {
@@ -1259,8 +1263,8 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
   Node *prev_root = nullptr;
   while (true) {
     if (!root->rw_lock.try_lock_reader()) {
-      // We are conflicting with a writer that is moving up the trie. We defer
-      // to the writer, so unlock [prev_root] and try again.
+      // We are conflicting with a writer that is moving up the trie, so try
+      // again.
       if (prev_root) {
         prev_root->rw_lock.unlock();
       }
@@ -1274,13 +1278,16 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
     switch (root->type) {
     case Node::Type::kBranch:
     {
+      // We are either going to return [root] or continue moving down the trie,
+      // so we can unlock [prev_root].
+      if (prev_root) {
+        prev_root->rw_lock.unlock();
+      }
+
       if (idx == path.size()) {
         if (root->value) {
           // [path] maps to this branch node.
           existing_key = root;
-        }
-        if (prev_root) {
-          prev_root->rw_lock.unlock();
         }
         return root;
       }
@@ -1292,17 +1299,11 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
         // so continue searching. We add 1 to [idx] since the branch
         // corresponds to one hex digit in the path.
         idx++;
-        if (prev_root) {
-          prev_root->rw_lock.unlock();
-        }
         prev_root = root;
         root = next;
         continue;
       }
       // There is no child, so we have reached the bottom of the trie.
-      if (prev_root) {
-        prev_root->rw_lock.unlock();
-      }
       return root;
       break;
     }
@@ -1361,7 +1362,10 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
 void
 MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
 {
+  // We hold the writer locks for [n] and the nodes above it up through and
+  // including [locked_through].
   CHECK_PTR(locked_through);
+
   bool locked = true;
   while (true) {
     CHECK_PTR(n);
@@ -1373,41 +1377,51 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
     }
 
     if (n == locked_through) {
+      // We have reached [locked_through], so we need to acquire the reader
+      // locks for nodes above us.
       locked = false;
 
       if (!should_hash_nodes_on_each_op_) {
+        // We are not hashing the nodes. Instead, we are using this function to
+        // unlock the nodes up through and including [locked_through]. We have
+        // finished this, so we can return now.
         n->rw_lock.unlock();
         return;
       }
     }
 
     if (should_hash_nodes_on_each_op_) {
+      // We could just be holding the reader lock for this node rather than the
+      // writer lock. Thus, we need to protect the hash with its own lock so
+      // that two threads holding the reader lock for the node cannot race on
+      // writing the hash.
       n->hash_lock.lock_writer();
       n->hash = n->compute_node_hash();
       n->hash_lock.unlock();
     }
 
     if (!n->parent) {
+      // We have reached the root, so we are finished.
+      CHECK_EQ(n, &root_);
       n->rw_lock.unlock();
       return;
     }
+
     if (!locked) {
       if (n->parent == &root_ || n->parent->parent == &root_) {
-        // Do not rehash the root.
+        // Do not rehash the root or the level below it.
         n->rw_lock.unlock();
         return;
       }
-      while (!n->parent->rw_lock.try_lock_reader()) {
-        asm volatile("pause");
-      }
+      n->parent->rw_lock.lock_reader();
     }
 
     Node *parent = n->parent;
     n->rw_lock.unlock();
     // It is technically safe to do [n = n->parent] below because a thread
-    // needs to hold both the writer lock for [n] and the writer lock for
-    // [n->parent] in order to overwrite [n->parent], but we still cache
-    // [n->parent] in [parent] to avoid future issues.
+    // needs to hold both the writer lock for [n] and the writer lock for its
+    // parent in order to overwrite [n->parent], but we still cache [n->parent]
+    // in [parent] to avoid future issues.
     n = parent;
   }
 }
@@ -1435,17 +1449,15 @@ MerkleTrie::generate_all_hashes()
 void
 MerkleTrie::generate_top_level_hashes()
 {
+  // We do not hold any locks for these nodes. It only makes sense to call this
+  // function when there are no other threads mutating the trie. Otherwise, even
+  // before this function returns the hashes we recompute here will be stale.
   for (Node *child : root_.child) {
     if (child) {
-      child->rw_lock.lock_writer();
       child->hash = child->compute_node_hash();
-      child->rw_lock.unlock();
     }
   }
-
-  root_.rw_lock.lock_writer();
   root_.hash = root_.compute_node_hash();
-  root_.rw_lock.unlock();
 }
 
 void

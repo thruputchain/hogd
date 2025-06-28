@@ -49,6 +49,24 @@ public:
   RwLock(RwLock &&) noexcept = delete;
   RwLock &operator=(RwLock &&) noexcept = delete;
 
+  void lock_reader() {
+    while (true) {
+      int64_t cur;
+      if ((cur = lock_.load(std::memory_order_relaxed)) == kWriterLocked) {
+        // The lock is currently held by a writer.
+        _mm_pause();
+        continue;
+      }
+      if (!lock_.compare_exchange_weak(/*expected=*/cur, /*desired=*/cur + 1,
+                                      /*success=*/std::memory_order_acquire,
+                                      /*failure=*/std::memory_order_relaxed)) {
+        _mm_pause();
+        continue;
+      }
+      break;
+    }
+  }
+
   // Tries to acquire the lock in reader mode. Returns false if a writer holds
   // the lock or if a writer is trying to acquire the lock. Otherwise, spins
   // until the lock is acquired in reader mode and returns true.
