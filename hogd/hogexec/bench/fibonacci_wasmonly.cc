@@ -155,26 +155,6 @@ void
 setup_benchmark(BenchmarkState &bs, uint32_t exec_port, uint32_t coord_port)
 {
   bs.initialize(exec_port, coord_port);
-
-  ContractAddress contract_addr{};
-  using fib_client_t = ContractTraitClient<Fibonacci>;
-
-  fib_client_t fib_client(contract_addr);
-
-  auto init_tx = SignedTransaction{
-      .tx = Transaction{
-          .invocation = fib_client.make_invocation<"initialize">(UINT64_MAX)}};
-
-  auto init_handler = bs.make_handler(init_tx);
-  if (auto res = init_handler.root_invoke(); !res.is_root_success()) {
-    throw std::runtime_error("Failed to initialize fibonacci contract");
-  }
-  if (auto r = init_handler.try_commit_transaction()();
-      !r.has_value() || !r.value()) {
-    throw std::runtime_error("Failed to commit transaction");
-  }
-
-  bs.advance_block();
 }
 
 void

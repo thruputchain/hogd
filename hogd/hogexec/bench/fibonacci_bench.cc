@@ -139,17 +139,6 @@ bench_fibonacci(benchmark::State &state)
   fib_client_t fib_client(contract_addr);
 
   assert(bs.context_);
-  auto init = bs.context_->propose_transaction(
-      SignedTransaction{
-          .tx = Transaction{.invocation =
-                                fib_client.make_invocation<"initialize">(
-                                    UINT64_MAX)}},
-      bs.allocate_txid())();
-  if (init.result() != ExecResult::ExecResultOK) {
-    throw std::runtime_error("Failed to initialize fibonacci contract");
-  }
-
-  bs.advance_block();
 
   std::vector<SignedTransaction> txs_bench;
   txs_bench.reserve(numtxs);
