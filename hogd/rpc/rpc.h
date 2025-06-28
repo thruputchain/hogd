@@ -96,8 +96,8 @@ public:
     // out a little more cache affinity while spreading load across flows.
     unsigned int core;
 #ifdef __APPLE__
-    // there isn't a getcpu on macos, so we just default to cpu 0
-    core = 0;
+    // there isn't a getcpu on macos, so we just default thread id
+    core = std::hash<std::thread::id>()(std::this_thread::get_id());
 #else
     getcpu(&core, nullptr);
 #endif
