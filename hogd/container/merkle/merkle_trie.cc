@@ -420,6 +420,11 @@ MerkleTrie::insert(const Key &k, T &&obj)
   size_t idx;
   Node *existing_key;
   Node *branch;
+  Node *to_hash = nullptr;
+
+  // We spin until we acquire the writer lock on the lowest branch node for [k].
+  // We are moving down the trie, so we cannot block on acquiring the writer
+  // lock; instead, we need to try again if we cannot acquire it.
   while (true) {
     idx = 0;
     existing_key = nullptr;
@@ -428,76 +433,82 @@ MerkleTrie::insert(const Key &k, T &&obj)
     if (existing_key) {
       // [k] already exists in the trie, so we cannot insert it.
       existing_key->rw_lock.unlock();
+      // Check whether [k] is in a branch node. If so, then we already unlocked
+      // the branch on the previous line.
       if (branch != existing_key) {
+        CHECK_EQ(existing_key->type, Node::Type::kLeaf);
+        // [k] is in a leaf node, which we unlocked above. Now unlock the
+        // branch.
         branch->rw_lock.unlock();
       }
       return false;
     }
-    if (branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
-      break;
+    // Try to acquire the writer lock on the branch.
+    if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
+      // We need to try again. We are moving down the trie so we cannot block on
+      // acquiring the writer lock.
+      //
+      // We also cannot drop the lock and then acquire it as the writer because
+      // it is possible that another thread is attempting to insert [k],
+      // acquires the writer lock for [branch] before we do, and then inserts
+      // [k].
+      branch->rw_lock.unlock();
+      continue;
     }
-    // We need to try again. We cannot block on acquiring the writer lock
-    // because we could deadlock with another thread trying to do the same.
-    //
-    // We also cannot drop the lock and then acquire it as the writer because it
-    // is possible that another thread is attempting to insert [k], acquires the
-    // writer lock for [branch] before we do, and then inserts [k].
-    branch->rw_lock.unlock();
-  }
-  CHECK_PTR(branch);
-  CHECK_EQ(branch->type, Node::Type::kBranch);
-  CHECK_LE(idx, k.size());
+    CHECK_PTR(branch);
+    CHECK_EQ(branch->type, Node::Type::kBranch);
+    CHECK_LE(idx, k.size());
 
-  Node *to_hash = nullptr;
-  if (idx == k.size()) {
-    // The key maps to a branch node, so we should add the value directly into
-    // the branch node.
-    CHECK(!branch->value.has_value());
-    branch->value = std::move(obj);
-    to_hash = branch;
-  }
-  else {
-    // The key does not map to an existing node. We must next check the branch
-    // to see if it has any children on the path corresponding to the key. If
-    // so, we need to handle the children, such as by splitting part an
-    // extension node. If there are no children, we can create a leaf node for
-    // the key and add it as a child of the branch.
-    auto branch_idx = std::to_integer<size_t>(k.get(idx));
-    if (branch->child[branch_idx]) {
-      // There is already a child node. [TraverseToLowestBranch] returns the
-      // lowest branch node in the trie on [key]'s path, so the child node is
-      // either an extension node or a leaf node.
-      if (branch->child[branch_idx]->type == Node::Type::kExtension) {
-        to_hash = insert_handle_extension(branch->child[branch_idx], k, idx,
-                                          std::move(obj));
-      }
-      else {
-        CHECK_EQ(branch->child[branch_idx]->type, Node::Type::kLeaf);
-        to_hash = insert_handle_leaf(branch->child[branch_idx], k, idx,
-                                     std::move(obj));
-      }
-      if (!to_hash) {
-        // We could not acquire the locks in one of the [insert_handle*]
-        // functions above, so we need to restart the insert operation.
-        branch->rw_lock.unlock();
-        // TODO(jhumphri): Do not use recursion.
-        return insert(k, std::move(obj));
-      }
+    if (idx == k.size()) {
+      // The key maps to a branch node, so we should add the value directly into
+      // the branch node.
+      CHECK(!branch->value.has_value());
+      branch->value = std::move(obj);
+      to_hash = branch;
     }
     else {
-      // There is no child node, so we create a leaf for [key] and place the
-      // leaf as a child of the branch.
-      Node *leaf = Node::create_leaf(arena_, /*parent=*/branch);
-      CHECK(leaf->rw_lock.try_lock_writer());
-      // We are going to use the hex character at [idx] in the key to map to
-      // the leaf node from the branch node. Thus, we add 1 below as we do not
-      // want to include this character in the path that is stored in the leaf
-      // node.
-      leaf->path = k.get_subarray(idx + 1, k.size());
-      leaf->value = std::move(obj);
-      branch->child[branch_idx] = leaf;
-      to_hash = leaf;
+      // The key does not map to an existing node. We must next check the branch
+      // to see if it has any children on the path corresponding to the key. If
+      // so, we need to handle the children, such as by splitting part an
+      // extension node. If there are no children, we can create a leaf node for
+      // the key and add it as a child of the branch.
+      auto branch_idx = std::to_integer<size_t>(k.get(idx));
+      if (branch->child[branch_idx]) {
+        // There is already a child node. [TraverseToLowestBranch] returns the
+        // lowest branch node in the trie on [key]'s path, so the child node is
+        // either an extension node or a leaf node.
+        if (branch->child[branch_idx]->type == Node::Type::kExtension) {
+          to_hash = insert_handle_extension(branch->child[branch_idx], k, idx,
+                                            std::move(obj));
+        }
+        else {
+          CHECK_EQ(branch->child[branch_idx]->type, Node::Type::kLeaf);
+          to_hash = insert_handle_leaf(branch->child[branch_idx], k, idx,
+                                       std::move(obj));
+        }
+        if (!to_hash) {
+          // We could not acquire the locks in one of the [insert_handle*]
+          // functions above, so we need to restart the insert operation.
+          branch->rw_lock.unlock();
+          continue;
+        }
+      }
+      else {
+        // There is no child node, so we create a leaf for [key] and place the
+        // leaf as a child of the branch.
+        Node *leaf = Node::create_leaf(arena_, /*parent=*/branch);
+        CHECK(leaf->rw_lock.try_lock_writer());
+        // We are going to use the hex character at [idx] in the key to map to
+        // the leaf node from the branch node. Thus, we add 1 below as we do not
+        // want to include this character in the path that is stored in the leaf
+        // node.
+        leaf->path = k.get_subarray(idx + 1, k.size());
+        leaf->value = std::move(obj);
+        branch->child[branch_idx] = leaf;
+        to_hash = leaf;
+      }
     }
+    break;
   }
   CHECK_PTR(to_hash);
 
@@ -525,6 +536,8 @@ Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
                                     T &&obj)
 {
+  // We need to lock the extension node and its child. We are moving down the
+  // trie, so we cannot block on acquiring these locks.
   if (!extension->rw_lock.try_lock_writer()) {
     return nullptr;
   }
@@ -532,7 +545,6 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     extension->rw_lock.unlock();
     return nullptr;
   }
-
   CHECK_EQ(extension->type, Node::Type::kExtension);
   CHECK_EQ(extension->parent->type, Node::Type::kBranch);
   CHECK(!extension->path.empty());
@@ -723,6 +735,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 {
+  // We need to acquire the writer lock on this leaf. We are moving down the
+  // trie, so we cannot block on acquiring this lock.
   if (!leaf->rw_lock.try_lock_writer()) {
     return nullptr;
   }
