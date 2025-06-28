@@ -28,19 +28,19 @@ namespace hogd {
 // work. For example, we currently do not free any memory that we allocate.
 //
 // Example:
-// Arena arena(/*alloc_size=*/64);
+// Arena<Node> arena;
 //
-// void *ptr = arena.alloc();
+// Node *ptr = arena.alloc();
 // CHECK_PTR(ptr);
 //
 // arena.free(ptr);
-class Arena {
+template<typename T> class Arena {
 public:
-  // Creates an arena that allocates memory for objects of size [alloc_size].
-  Arena(size_t alloc_size)
-    : alloc_size_(alloc_size), batch_alloc_size_(alloc_size * kBatchSize)
+  // Creates an arena that allocates memory for T objects.
+  Arena() : batch_alloc_size_(sizeof(T) * kBatchSize)
   {
-    CHECK_GT(alloc_size_, 0);
+    CHECK_EQ(batch_alloc_size_ % sizeof(T), 0);
+    CHECK_GT(batch_alloc_size_, 0);
   }
 
   // Disable copy and move.
@@ -50,7 +50,7 @@ public:
   Arena &operator=(Arena &&) noexcept = delete;
 
   // Allocates a new memory region.
-  void *alloc()
+  T *alloc()
   {
     if (ptrs_.empty()) {
       // When we need to malloc more memory, we malloc enough memory to hold a
@@ -58,21 +58,22 @@ public:
       // malloc overhead.
       char *batch =
           static_cast<char *>(aligned_alloc(kCacheLineSize, batch_alloc_size_));
-      for (size_t i = 0; i < batch_alloc_size_; i += alloc_size_) {
-        ptrs_.push(static_cast<void *>(batch + i));
+      for (size_t i = 0; i < batch_alloc_size_; i += sizeof(T)) {
+        ptrs_.push(reinterpret_cast<T *>(batch + i));
       }
     }
-    void *ret = ptrs_.top();
+    T *ret = new (ptrs_.top()) T;
     ptrs_.pop();
     return ret;
   }
 
   // Frees a memory region. [ptr] must have been returne by [alloc()]
   // previously. The behavior is undefined if not.
-  void free(void *ptr)
+  void free(T *ptr)
   {
     CHECK_PTR(ptr);
 
+    ptr->~T();
     ptrs_.push(ptr);
   }
 
@@ -81,14 +82,12 @@ private:
   // The number of objects we allocate when we call malloc. By allocating a
   // batch of objects, we amortize the malloc overhead.
   static constexpr size_t kBatchSize = 64;
-  // The size of the objects the arena will allocate.
-  const size_t alloc_size_;
   // The size of the batch the arena allocates with malloc.
   const size_t batch_alloc_size_;
 
   // TODO(jhumphri): Use Adam's thread_local implementation.
   // Tracks the objects allocated by the arena.
-  inline static thread_local std::stack<void *> ptrs_;
+  inline static thread_local std::stack<T *> ptrs_;
 };
 
 } // namespace hogd

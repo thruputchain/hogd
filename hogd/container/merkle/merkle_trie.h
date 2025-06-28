@@ -51,7 +51,7 @@ public:
   using Key = HexArray;
   using T = std::string;
 
-  MerkleTrie() : arena_(/*alloc_size=*/sizeof(Node)) { init_root_node(); }
+  MerkleTrie() { init_root_node(); }
 
   ~MerkleTrie() // NOLINT(bugprone-exception-escape)
   {
@@ -275,7 +275,7 @@ private:
   // called.
   bool should_hash_nodes_on_each_op_ = true;
   // An arena for allocating nodes.
-  Arena arena_;
+  Arena<Node> arena_;
 };
 
 } // namespace hogd

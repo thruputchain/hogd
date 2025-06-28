@@ -84,7 +84,7 @@ TEST(Node, Clear)
 
 TEST(Node, CreateBranch)
 {
-  Arena arena(/*alloc_size=*/sizeof(Node));
+  Arena<Node> arena;
   Node parent;
   Node *branch = Node::create_branch(arena, &parent);
 
@@ -113,7 +113,7 @@ TEST(Node, InitBranch)
 
 TEST(Node, CreateExtension)
 {
-  Arena arena(/*alloc_size=*/sizeof(Node));
+  Arena<Node> arena;
   Node parent;
   Node *extension = Node::create_extension(arena, &parent);
 
@@ -142,7 +142,7 @@ TEST(Node, InitExtension)
 
 TEST(Node, CreateLeaf)
 {
-  Arena arena(/*alloc_size=*/sizeof(Node));
+  Arena<Node> arena;
   Node parent;
   Node *leaf = Node::create_leaf(arena, &parent);
 

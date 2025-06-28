@@ -112,32 +112,32 @@ public:
     this->parent = parent;
   }
 
-  static Node *create_branch(Arena &arena, Node *parent)
+  static Node *create_branch(Arena<Node> &arena, Node *parent)
   {
     // TODO(jhumphri): Use unique_ptr<> rather than [new] (here and elsewhere).
-    Node *node = static_cast<Node *>(arena.alloc());
+    Node *node = arena.alloc();
     CHECK_PTR(node);
-    node = new (node) Node;
+
     node->clear();
     node->init_branch(parent);
     return node;
   }
 
-  static Node *create_extension(Arena &arena, Node *parent)
+  static Node *create_extension(Arena<Node> &arena, Node *parent)
   {
-    Node *node = static_cast<Node *>(arena.alloc());
+    Node *node = arena.alloc();
     CHECK_PTR(node);
-    node = new (node) Node;
+
     node->clear();
     node->init_extension(parent);
     return node;
   }
 
-  static Node *create_leaf(Arena &arena, Node *parent)
+  static Node *create_leaf(Arena<Node> &arena, Node *parent)
   {
-    Node *node = static_cast<Node *>(arena.alloc());
+    Node *node = arena.alloc();
     CHECK_PTR(node);
-    node = new (node) Node;
+
     node->clear();
     node->init_leaf(parent);
     return node;
