@@ -1,0 +1,2 @@
+[alias]
+b = "build --target wasm32-unknown-unknown"
