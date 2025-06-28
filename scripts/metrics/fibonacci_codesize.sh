@@ -7,7 +7,7 @@ fi
 
 BUILD_DIR=$1
 
-FILE="$BUILD_DIR/test_contracts/integration_test_contracts/fibonacci.wasm"
+FILE="$BUILD_DIR/test_contracts/fibonacci.wasm"
 if [ ! -f "$FILE" ]; then
     echo "File not found: $FILE"
     exit 2

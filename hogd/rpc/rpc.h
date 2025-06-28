@@ -1,16 +1,19 @@
 #pragma once
 
-#include <sched.h>
-
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <sched.h>
+#include <span>
+#include <stop_token>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
@@ -92,7 +95,12 @@ public:
     // NOTE: getcpu is vDSO, so it's very fast. We use it to hopefully squeeze
     // out a little more cache affinity while spreading load across flows.
     unsigned int core;
+#ifdef __APPLE__
+    // there isn't a getcpu on macos, so we just default thread id
+    core = std::hash<std::thread::id>()(std::this_thread::get_id());
+#else
     getcpu(&core, nullptr);
+#endif
     return flows_[core % flows_.size()]->call(args);
   }
 
