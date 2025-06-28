@@ -174,6 +174,24 @@ check_leaf(const Node &leaf)
   return ret;
 }
 
+// [traverse_to_lowest_branch] returns the lowest branch along with an existing
+// key if one exists. If the key is in a leaf node, then the key's node and the
+// branch node are different. However, if the key is in a branch node, then the
+// key's node and the branch node are the same node.
+//
+// This function unlocks both nodes if they are different and unlocks a single
+// node if they are the same. Importantly, in the latter case, we do not unlock
+// the same node twice.
+void
+unlock_both(Node &branch, Node &existing_key)
+{
+  existing_key.rw_lock.unlock();
+  if (&branch != &existing_key) {
+    CHECK_EQ(existing_key.type, Node::Type::kLeaf);
+    branch.rw_lock.unlock();
+  }
+}
+
 } // namespace
 
 // static
@@ -432,15 +450,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
     branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
     if (existing_key) {
       // [k] already exists in the trie, so we cannot insert it.
-      existing_key->rw_lock.unlock();
-      // Check whether [k] is in a branch node. If so, then we already unlocked
-      // the branch on the previous line.
-      if (branch != existing_key) {
-        CHECK_EQ(existing_key->type, Node::Type::kLeaf);
-        // [k] is in a leaf node, which we unlocked above. Now unlock the
-        // branch.
-        branch->rw_lock.unlock();
-      }
+      unlock_both(*branch, *existing_key);
       return false;
     }
     // Try to acquire the writer lock on the branch.
@@ -865,21 +875,13 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
     // because it is possible that another thread is attempting to remove
     // [k], acquires the writer lock for [branch] before we do, and then
     // removes [k].
-    existing_key->rw_lock.unlock();
-    // Check whether [k] is in a branch node. If so, then we already unlocked
-    // the branch on the previous line.
-    if (branch != existing_key) {
-      CHECK_EQ(existing_key->type, Node::Type::kLeaf);
-      // [k] is in a leaf node, which we unlocked above. Now unlock the
-      // branch.
-      branch->rw_lock.unlock();
-    }
+    unlock_both(*branch, *existing_key);
     return false;
   }
   locked_through = branch;
 
   // Check if we are going to remove the branch. We do this when the branch
-  // currently has two KV pairs "under it" (i.e., either in the branch or a
+  // currently has two KV pairs "under" it (i.e., either in the branch or a
   // child of the branch), as only one KV pair will remain after we remove
   // [k].
   num_children = get_num_children(*branch);
@@ -904,11 +906,7 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
     if (remaining_child && !remaining_child->rw_lock.try_lock_writer()) {
       // We do not block on acquiring the writer lock when moving down the
       // trie.
-      existing_key->rw_lock.unlock();
-      if (branch != existing_key) {
-        CHECK_EQ(existing_key->type, Node::Type::kLeaf);
-        branch->rw_lock.unlock();
-      }
+      unlock_both(*branch, *existing_key);
       return false;
     }
 
