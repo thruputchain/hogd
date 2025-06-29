@@ -342,7 +342,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
     if (!((SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
                std::get<Is>(parsed_args)) &&
            ...))) {
-      if (auto* stats = handler.get_transaction_stats()) {
+      if (auto *stats = handler.get_transaction_stats()) {
         stats->syscall_fault_count++;
       }
       return kFaultResult;
