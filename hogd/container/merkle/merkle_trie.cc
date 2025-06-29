@@ -483,24 +483,35 @@ MerkleTrie::insert(const Key &k, T &&obj)
       // extension node. If there are no children, we can create a leaf node for
       // the key and add it as a child of the branch.
       auto branch_idx = std::to_integer<size_t>(k.get(idx));
-      if (branch->child[branch_idx]) {
+      Node *next = branch->child[branch_idx];
+      if (next) {
         // There is already a child node. [TraverseToLowestBranch] returns the
         // lowest branch node in the trie on [key]'s path, so the child node is
         // either an extension node or a leaf node.
-        if (branch->child[branch_idx]->type == Node::Type::kExtension) {
-          to_hash = insert_handle_extension(branch->child[branch_idx], k, idx,
-                                            std::move(obj));
+        if (next->type == Node::Type::kExtension) {
+          // We need to lock the extension node and its child. We are moving
+          // down the trie, so we cannot block on acquiring these locks.
+          if (!next->rw_lock.try_lock_writer()) {
+            branch->rw_lock.unlock();
+            continue;
+          }
+          if (!next->child[0]->rw_lock.try_lock_writer()) {
+            next->rw_lock.unlock();
+            branch->rw_lock.unlock();
+            continue;
+          }
+          to_hash = insert_handle_extension(next, k, idx, std::move(obj));
         }
         else {
-          CHECK_EQ(branch->child[branch_idx]->type, Node::Type::kLeaf);
-          to_hash = insert_handle_leaf(branch->child[branch_idx], k, idx,
-                                       std::move(obj));
-        }
-        if (!to_hash) {
-          // We could not acquire the locks in one of the [insert_handle*]
-          // functions above, so we need to restart the insert operation.
-          branch->rw_lock.unlock();
-          continue;
+          CHECK_EQ(next->type, Node::Type::kLeaf);
+
+          // We need to acquire the writer lock on this leaf. We are moving down
+          // the trie, so we cannot block on acquiring this lock.
+          if (!next->rw_lock.try_lock_writer()) {
+            branch->rw_lock.unlock();
+            continue;
+          }
+          to_hash = insert_handle_leaf(next, k, idx, std::move(obj));
         }
       }
       else {
@@ -546,15 +557,8 @@ Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
                                     T &&obj)
 {
-  // We need to lock the extension node and its child. We are moving down the
-  // trie, so we cannot block on acquiring these locks.
-  if (!extension->rw_lock.try_lock_writer()) {
-    return nullptr;
-  }
-  if (!extension->child[0]->rw_lock.try_lock_writer()) {
-    extension->rw_lock.unlock();
-    return nullptr;
-  }
+  CHECK(extension->rw_lock.is_writer_locked_relaxed());
+  CHECK(extension->child[0]->rw_lock.is_writer_locked_relaxed());
   CHECK_EQ(extension->type, Node::Type::kExtension);
   CHECK_EQ(extension->parent->type, Node::Type::kBranch);
   CHECK(!extension->path.empty());
@@ -742,11 +746,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 {
-  // We need to acquire the writer lock on this leaf. We are moving down the
-  // trie, so we cannot block on acquiring this lock.
-  if (!leaf->rw_lock.try_lock_writer()) {
-    return nullptr;
-  }
+  CHECK(leaf->rw_lock.is_writer_locked_relaxed());
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
   CHECK_EQ(leaf->parent->type, Node::Type::kBranch);
 
