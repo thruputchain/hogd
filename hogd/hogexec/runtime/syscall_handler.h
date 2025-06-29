@@ -74,13 +74,12 @@ public:
   invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
          Calldata calldata, InvokeFlagSet flags);
 
-  void enable_transaction_stats() {
+  void enable_transaction_stats()
+  {
     stats_ = std::make_unique<TransactionStats>();
   }
 
-  auto* get_transaction_stats(this auto& self) {
-    return self.stats_.get();
-  }
+  auto *get_transaction_stats(this auto &self) { return self.stats_.get(); }
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
