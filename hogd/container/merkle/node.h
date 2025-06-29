@@ -9,11 +9,11 @@
 #include <format>
 #include <optional>
 #include <ostream>
-#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"

@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <functional>
 
@@ -118,7 +119,7 @@ public:
 
   // You must call this when you are done accessing a value returned by
   // [find_begin].
-  void find_end(void *cookie);
+  static void find_end(void *cookie);
 
   // Inserts a KV pair with key [k] and value [obj] into the trie. You must pass
   // [obj] to this method with [std::move()].

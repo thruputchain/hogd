@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <gtest/gtest.h>
@@ -5,7 +6,6 @@
 #include <optional>
 
 #include <string>
-#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"

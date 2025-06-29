@@ -2,25 +2,14 @@
 
 #pragma once
 
-#include <algorithm>
-#include <array>
-#include <atomic>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 
-#include <format>
-#include <iomanip>
-#include <ios>
-#include <iterator>
-#include <ostream>
-#include <sstream>
 #include <stack>
-#include <string>
-#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "types.hh"
 
 namespace hogd {
 

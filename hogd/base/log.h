@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <unistd.h>
+
 #include <atomic>
 #include <chrono>
 #include <format>
@@ -9,7 +11,6 @@
 #include <memory>
 #include <source_location>
 #include <string_view>
-#include <thread>
 #include <type_traits>
 #include <utility>
 

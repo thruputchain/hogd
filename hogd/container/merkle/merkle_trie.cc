@@ -1,5 +1,6 @@
 #include "hogd/container/merkle/merkle_trie.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstring>
 
@@ -408,6 +409,7 @@ MerkleTrie::find_begin(const Key &k, void *&cookie)
   return ret;
 }
 
+// static
 void
 MerkleTrie::find_end(void *cookie)
 {

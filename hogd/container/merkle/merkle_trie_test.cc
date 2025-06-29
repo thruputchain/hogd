@@ -1,11 +1,13 @@
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
+#include <future>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <map>
 
-#include <chrono>
 #include <memory>
+#include <print>
 #include <random>
 #include <set>
 #include <string>
@@ -104,7 +106,7 @@ TEST(MerkleTrie, EmptyKeyFind)
   EXPECT_TRUE(trie.insert(key, value));
   void *cookie;
   EXPECT_EQ(*trie.find_begin(key, cookie), value);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 }
 
 TEST(MerkleTrie, EmptyKeyRemove)
@@ -174,7 +176,7 @@ TEST(MerkleTrie, EmptyValueFind)
   EXPECT_TRUE(trie.insert(key, value));
   void *cookie;
   EXPECT_EQ(*trie.find_begin(key, cookie), value);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 }
 
 TEST(MerkleTrie, EmptyValueRemove)
@@ -199,7 +201,7 @@ TEST(MerkleTrie, EvenSizeKey)
   EXPECT_TRUE(trie.insert(key, value));
   void *cookie;
   EXPECT_EQ(*trie.find_begin(key, cookie), value);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 }
 
 TEST(MerkleTrie, OddSizeKey)
@@ -211,7 +213,7 @@ TEST(MerkleTrie, OddSizeKey)
   EXPECT_TRUE(trie.insert(key, value));
   void *cookie;
   EXPECT_EQ(*trie.find_begin(key, cookie), value);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 }
 
 TEST(MerkleTrie, EvenAndOddSizedKeys)
@@ -228,10 +230,10 @@ TEST(MerkleTrie, EvenAndOddSizedKeys)
 
   void *cookie;
   EXPECT_EQ(*trie.find_begin(even_key, cookie), even_value);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 
   EXPECT_EQ(*trie.find_begin(odd_key, cookie), odd_value);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 }
 
 // This tests that [insert()] fails when attempting to insert a duplicate key.
@@ -248,7 +250,7 @@ TEST(MerkleTrie, InsertDuplicateKey)
 
   void *cookie;
   EXPECT_EQ(*trie.find_begin(key, cookie), value);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 }
 
 // This tests that [remove()] fails when attempting to remove a key that is not
@@ -293,16 +295,16 @@ TEST(MerkleTrie, TwoLeavesFind)
   EXPECT_TRUE(trie.insert(key_a, value_a));
   void *cookie;
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
 
   HexArray key_b("1223");
   std::string value_b = "hello again";
   EXPECT_TRUE(trie.insert(key_b, value_b));
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
   EXPECT_EQ(trie.find_begin(HexArray("123456"), cookie), nullptr);
 }
@@ -367,7 +369,7 @@ TEST(MerkleTrie, BranchAndLeafFind)
   EXPECT_TRUE(trie.insert(key_a, value_a));
   void *cookie;
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
 
   HexArray key_b("123456");
@@ -375,9 +377,9 @@ TEST(MerkleTrie, BranchAndLeafFind)
   EXPECT_TRUE(trie.insert(key_b, value_b));
   std::cout << trie << '\n';
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
   EXPECT_EQ(trie.find_begin(HexArray("12345678"), cookie), nullptr);
 }
@@ -422,7 +424,7 @@ TEST(MerkleTrie, BranchBranchLeaf)
   EXPECT_TRUE(trie.insert(key_a, value_a));
   void *cookie;
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
   std::cout << trie << '\n';
 
@@ -430,20 +432,20 @@ TEST(MerkleTrie, BranchBranchLeaf)
   std::string value_b = "hello again";
   EXPECT_TRUE(trie.insert(key_b, value_b));
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   std::cout << trie << '\n';
 
   HexArray key_c("76");
   std::string value_c = "hello three";
   EXPECT_TRUE(trie.insert(key_c, value_c));
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(*trie.find_begin(key_c, cookie), value_c);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   std::cout << trie << '\n';
 
   trie.generate_top_level_hashes();
@@ -496,16 +498,16 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
   EXPECT_TRUE(trie.insert(key_a, value_a));
   void *cookie;
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
   EXPECT_TRUE(trie.insert(key_b, value_b));
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
   EXPECT_EQ(trie.find_begin(HexArray("12345678"), cookie), nullptr);
 
@@ -513,11 +515,11 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
   std::string value_c = "hello three";
   EXPECT_TRUE(trie.insert(key_c, value_c));
   EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(*trie.find_begin(key_c, cookie), value_c);
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
   EXPECT_EQ(trie.find_begin(HexArray("12abcd"), cookie), nullptr);
   EXPECT_EQ(trie.find_begin(HexArray("12345678"), cookie), nullptr);
@@ -1024,7 +1026,7 @@ TEST(MerkleTrie, Stress)
     EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
     void *cookie;
     EXPECT_EQ(*trie.find_begin(path, cookie), value);
-    trie.find_end(cookie);
+    hogd::MerkleTrie::find_end(cookie);
 
     EXPECT_TRUE(trie.check());
   }
@@ -1036,7 +1038,7 @@ TEST(MerkleTrie, Stress)
 
     void *cookie;
     EXPECT_EQ(*trie.find_begin(path, cookie), value);
-    trie.find_end(cookie);
+    hogd::MerkleTrie::find_end(cookie);
   }
 
   // Remove all KV pairs.
@@ -1112,7 +1114,7 @@ TEST(MerkleTrie, StressTwo)
 
     void *cookie;
     EXPECT_EQ(*trie.find_begin(path, cookie), value);
-    trie.find_end(cookie);
+    hogd::MerkleTrie::find_end(cookie);
   }
 
   // Remove all KV pairs.
@@ -1138,6 +1140,8 @@ TEST(MerkleTrie, StressTwo)
   EXPECT_EQ(seen, total);
 }
 
+namespace {
+
 // Inserts and removes ~200,000 KV pairs with [num_threads] threads.
 void
 run_multithread(size_t num_threads)
@@ -1155,12 +1159,12 @@ run_multithread(size_t num_threads)
     std::set<HexArray> generated;
     trie.set_should_hash_nodes_on_each_op(false);
 
-    printf("Completing initial fill...");
+    std::print("Completing initial fill...");
     fflush(stdout);
 
     for (size_t i = 0; i < kInitialSize; i++) {
       HexArray path = generate_random_path();
-      if (generated.count(path)) {
+      if (generated.contains(path)) {
         i--;
         continue;
       }
@@ -1172,8 +1176,8 @@ run_multithread(size_t num_threads)
     trie.generate_all_hashes();
     EXPECT_TRUE(trie.check());
 
-    printf(" done.\n");
-    printf("Generating paths for threads...");
+    std::println(" done.");
+    std::print("Generating paths for threads...");
     fflush(stdout);
 
     for (size_t i = 0; i < num_threads; i++) {
@@ -1181,7 +1185,7 @@ run_multithread(size_t num_threads)
 
       for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
         HexArray path = generate_random_path();
-        if (generated.count(path)) {
+        if (generated.contains(path)) {
           j--;
           continue;
         }
@@ -1190,19 +1194,20 @@ run_multithread(size_t num_threads)
       }
     }
   }
-  printf(" done.\n");
+  std::println(" done.");
   WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
-  printf("Inserting keys...");
+  std::print("Inserting keys...");
   fflush(stdout);
 
+  futures.reserve(num_threads);
   for (size_t i = 0; i < num_threads; i++) {
     futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
       void *cookie;
       for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
         EXPECT_TRUE(trie.insert(paths[i][j], "hello"));
         EXPECT_EQ(*trie.find_begin(paths[i][j], cookie), "hello");
-        trie.find_end(cookie);
+        hogd::MerkleTrie::find_end(cookie);
         EXPECT_TRUE(trie.remove(paths[i][j]));
       }
     }));
@@ -1212,11 +1217,13 @@ run_multithread(size_t num_threads)
   }
 
   trie.generate_top_level_hashes();
-  printf(" done.\n");
+  std::println(" done.");
 
   EXPECT_EQ(trie.size(), kInitialSize);
   EXPECT_TRUE(trie.check());
 }
+
+} // namespace
 
 TEST(MerkleTrie, Multithread1)
 {

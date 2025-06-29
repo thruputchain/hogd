@@ -1,13 +1,19 @@
 #include <benchmark/benchmark.h>
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
+#include <future>
 #include <memory>
+#include <print>
 #include <random>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
@@ -335,7 +341,7 @@ find(benchmark::State &state)
   void *cookie;
   for (auto _ : state) {
     CHECK_PTR(trie.find_begin(paths[0], cookie));
-    trie.find_end(cookie);
+    hogd::MerkleTrie::find_end(cookie);
   }
 }
 BENCHMARK(find)->Unit(benchmark::kNanosecond);
@@ -451,12 +457,12 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
     std::set<HexArray> generated;
     trie.set_should_hash_nodes_on_each_op(false);
 
-    printf("Completing initial fill...");
+    std::print("Completing initial fill...");
     fflush(stdout);
 
     for (size_t i = 0; i < kLargeNumKVPairs; i++) {
       HexArray path = generate_64_byte_path();
-      if (generated.count(path)) {
+      if (generated.contains(path)) {
         i--;
         continue;
       }
@@ -468,8 +474,8 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
     trie.generate_all_hashes();
     CHECK(trie.check());
 
-    printf(" done.\n");
-    printf("Generating paths for threads...");
+    std::println(" done.");
+    std::print("Generating paths for threads...");
     fflush(stdout);
 
     for (size_t i = 0; i < num_threads; i++) {
@@ -477,7 +483,7 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
 
       for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
         HexArray path = generate_64_byte_path();
-        if (generated.count(path)) {
+        if (generated.contains(path)) {
           j--;
           continue;
         }
@@ -486,10 +492,10 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
       }
     }
   }
-  printf(" done.\n");
+  std::println(" done.");
   WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
-  printf("Inserting keys...");
+  std::print("Inserting keys...");
   fflush(stdout);
 
   for (auto _ : state) {
@@ -508,7 +514,7 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
     trie.generate_top_level_hashes();
   }
 
-  printf(" done.\n");
+  std::println(" done.");
   CHECK_EQ(trie.size(), kLargeNumKVPairs + kNumKVPairs);
 }
 

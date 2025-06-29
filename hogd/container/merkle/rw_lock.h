@@ -5,24 +5,12 @@
 
 #include <immintrin.h>
 
-#include <algorithm>
-#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstring>
 
-#include <format>
-#include <iomanip>
-#include <ios>
-#include <iterator>
-#include <ostream>
-#include <sstream>
-#include <string>
-#include <vector>
-
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -52,8 +40,8 @@ public:
   void lock_reader()
   {
     while (true) {
-      int64_t cur;
-      if ((cur = lock_.load(std::memory_order_relaxed)) == kWriterLocked) {
+      int64_t cur = lock_.load(std::memory_order_relaxed);
+      if (cur == kWriterLocked) {
         // The lock is currently held by a writer.
         _mm_pause();
         continue;
@@ -80,8 +68,8 @@ public:
         return false;
       }
 
-      int64_t cur;
-      if ((cur = lock_.load(std::memory_order_relaxed)) == kWriterLocked) {
+      int64_t cur = lock_.load(std::memory_order_relaxed);
+      if (cur == kWriterLocked) {
         // The lock is currently held by a writer.
         return false;
       }
