@@ -300,6 +300,75 @@ private:
   Arena<Node> arena_;
 };
 
+class MerkleTriePrefix {
+public:
+  MerkleTriePrefix() = default;
+
+  bool insert(const MerkleTrie::Key &k, MerkleTrie::T &&obj)
+  {
+    CHECK_GT(k.size(), 1);
+
+    size_t index = static_cast<size_t>(k.get(0));
+    MerkleTrie::Key k_no_prefix = k.get_subarray(1, k.size());
+    return tries_[index].insert(k_no_prefix, std::move(obj));
+  }
+
+  bool insert(const MerkleTrie::Key &k, const MerkleTrie::T &obj)
+  {
+    return insert(k, MerkleTrie::T(obj));
+  }
+
+  void set_should_hash_nodes_on_each_op(bool to_set)
+  {
+    for (MerkleTrie &trie : tries_) {
+      trie.set_should_hash_nodes_on_each_op(to_set);
+    }
+  }
+
+  void generate_top_level_hashes()
+  {
+    for (MerkleTrie &trie : tries_) {
+      trie.generate_top_level_hashes();
+    }
+  }
+
+  void generate_all_hashes()
+  {
+    for (MerkleTrie &trie : tries_) {
+      trie.generate_all_hashes();
+    }
+  }
+
+  bool check()
+  {
+    bool ret = true;
+    for (MerkleTrie &trie : tries_) {
+      ret = trie.check() && ret;
+    }
+    return ret;
+  }
+
+  size_t size()
+  {
+    size_t count = 0;
+    for (MerkleTrie &trie : tries_) {
+      count += trie.size();
+    }
+    return count;
+  }
+
+  bool empty() { return !size(); }
+
+private:
+  static constexpr size_t kPrefixSize = 1;
+  static_assert(kPrefixSize);
+
+  static constexpr size_t kNumTries = 16;
+  static_assert(kNumTries == 1 << (4 * kPrefixSize));
+
+  std::array<MerkleTrie, kNumTries> tries_;
+};
+
 } // namespace hogd
 
 // We need to define the formatter in the [std] namespace.

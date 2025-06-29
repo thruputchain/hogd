@@ -199,7 +199,7 @@ public:
       // If the size is odd, zero out the last 4 bits to ensure we consistently
       // return the same array. Otherwise, we could end up returning garbage in
       // the last 4 bits, which could vary between invocations of
-      // [ToByteArray()].
+      // [to_byte_vector()].
       ret.back() &= std::byte{0xF0};
     }
     return ret;

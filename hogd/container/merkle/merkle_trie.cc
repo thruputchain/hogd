@@ -1404,7 +1404,7 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
       // that two threads holding the reader lock for the node cannot race on
       // writing the hash.
       n->hash_lock.lock_writer();
-      n->hash = n->compute_node_hash();
+      // n->hash = n->compute_node_hash();
       n->hash_lock.unlock();
     }
 
