@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <functional>
 
@@ -16,6 +17,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -57,11 +59,11 @@ public:
     free_all_nodes(&root_);
   }
 
-  // Disable copy and support move.
+  // Disable copy and move.
   MerkleTrie(const MerkleTrie &) = delete;
   MerkleTrie &operator=(const MerkleTrie &) = delete;
-  MerkleTrie(MerkleTrie &&) noexcept = default;
-  MerkleTrie &operator=(MerkleTrie &&) noexcept = default;
+  MerkleTrie(MerkleTrie &&) noexcept = delete;
+  MerkleTrie &operator=(MerkleTrie &&) noexcept = delete;
 
   std::string str() const;
   friend std::ostream &operator<<(std::ostream &os, const MerkleTrie &trie)
@@ -69,11 +71,22 @@ public:
     return os << trie.str();
   }
 
-  // Basic sanity checks on the trie.
+  // Performs basic sanity checks on the trie.
   bool check() { return check_helper(&root_); }
 
   // Returns the hash of the root node in the trie.
-  SHA256Hash get_root_hash() const { return root_.hash; }
+  SHA256Hash get_root_hash()
+  {
+    // It is fine to spin on [try_lock_reader()] because we know the root node
+    // is never deleted by a writer.
+    while (!root_.hash_lock.try_lock_reader()) {
+      _mm_pause();
+    }
+
+    SHA256Hash ret = root_.hash;
+    root_.hash_lock.unlock();
+    return ret;
+  }
 
   // Returns a proof that the KV pair with key [k] is in the trie.
   std::pair<SHA256Hash, std::vector<std::byte>> get_proof(const Key &k);
@@ -98,8 +111,15 @@ public:
                     const T &value);
 
   // Finds the value for key [k]. If key [k] does not exist in the trie, returns
-  // a nullptr.
-  T *find(const Key &k);
+  // a nullptr. If a non-null pointer is returned, you *must* call
+  // [find_end(cookie)] when you are done accessing the value!
+  //
+  // We guarantee pointer stability for the value.
+  T *find_begin(const Key &k, void *&cookie);
+
+  // You must call this when you are done accessing a value returned by
+  // [find_begin].
+  static void find_end(void *cookie);
 
   // Inserts a KV pair with key [k] and value [obj] into the trie. You must pass
   // [obj] to this method with [std::move()].
@@ -112,10 +132,10 @@ public:
   bool remove(const Key &k);
 
   // Returns the number of KV pairs in the trie.
-  size_t size() const { return size_; }
+  size_t size() const { return size_.load(std::memory_order_relaxed); }
 
   // Returns true when there are no KV pairs in the trie.
-  bool empty() const { return size_ == 0; }
+  bool empty() const { return size() == 0; }
 
   // Removes all KV pairs from the trie.
   void clear()
@@ -164,8 +184,14 @@ public:
     should_hash_nodes_on_each_op_ = to_set;
   }
 
-  // Generates a hash for every node in the tree.
+  // Generates a hash for every node in the trie. If the trie is modified while
+  // this function runs, the behavior is undefined.
   void generate_all_hashes();
+
+  // We do compute the hashes for the top two levels of nodes in the trie on
+  // each operation that modifies the trie. Rather, to avoid rehashing these
+  // nodes many times, we only hash them once when this function is called.
+  void generate_top_level_hashes();
 
 private:
   // Returns a string representation of [node] and all nodes under it in the
@@ -190,10 +216,31 @@ private:
   Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
                            T &&obj);
 
+  // Returns true if we will need to remove [branch] after removing a KV pair
+  // that is "under" it.
+  bool will_remove_branch(const Node *branch, size_t num_children);
+
+  // Acquires the locks we need to remove a KV pair. [locked_through] is the
+  // topmost node we acquired a lock for. [num_children] is the number of
+  // children nodes of [branch]. [remaining_child_hex] is the hex digit of child
+  // that will remain (if any) after the remove operation.
+  // We do not need to pass [num_children] and [remaining_child_hex] back to the
+  // calling function per se because the parent function can compute these
+  // itself. However, [remove_grab_locks] needs to compute them in order to
+  // figure out which nodes it needs to lock, so we may as well pass them back
+  // to the parent to save some work.
+  //
+  // If this method is unable to acquire all of the locks we need, it returns
+  // false. Otherwise it returns true.
+  bool remove_grab_locks(Node *branch, Node *existing_key,
+                         Node *&locked_through, size_t &num_children,
+                         std::byte &remaining_child_hex);
+
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
-  static Node *remove_branch(const Key &k, Node *branch, size_t num_children);
+  Node *remove_branch(Node *branch, size_t num_children,
+                      std::byte remaining_child_hex);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.
@@ -227,28 +274,30 @@ private:
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.
-  void generate_hashes_from(Node *n) const;
+  void generate_hashes_from(Node *n, Node *locked_through) const;
 
   // Frees all of the nodes starting at [root]. Does not free [root_].
-  void free_all_nodes(Node *root) const;
+  void free_all_nodes(Node *root);
 
   // Initializes the root node. The root node is always a branch.
   void init_root_node()
   {
     root_.clear();
     root_.init_branch(/*parent=*/nullptr);
-    generate_hashes_from(&root_);
+    compute_node_hash(root_);
   }
 
   // The root node in the trie. The root node always exists and is always a
   // branch.
   Node root_;
   // The number of KV pairs in the trie.
-  size_t size_ = 0;
+  std::atomic<size_t> size_ = 0;
   // If this is true, nodes are hashed on every [insert()/remove()] operation.
   // If this is false, nodes are only hashed when [generate_all_hashes()] is
   // called.
   bool should_hash_nodes_on_each_op_ = true;
+  // An arena for allocating nodes.
+  Arena<Node> arena_;
 };
 
 } // namespace hogd

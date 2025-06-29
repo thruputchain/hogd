@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <gtest/gtest.h>
@@ -5,10 +6,10 @@
 #include <optional>
 
 #include <string>
-#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -83,8 +84,9 @@ TEST(Node, Clear)
 
 TEST(Node, CreateBranch)
 {
+  Arena<Node> arena;
   Node parent;
-  Node *branch = Node::create_branch(&parent);
+  Node *branch = Node::create_branch(arena, &parent);
 
   EXPECT_EQ(branch->type, Node::Type::kBranch);
   EXPECT_EQ(branch->parent, &parent);
@@ -94,7 +96,7 @@ TEST(Node, CreateBranch)
   EXPECT_EQ(branch->value, std::nullopt);
   expect_children_are_clear(*branch);
 
-  delete branch;
+  arena.free(branch);
 }
 
 TEST(Node, InitBranch)
@@ -111,8 +113,9 @@ TEST(Node, InitBranch)
 
 TEST(Node, CreateExtension)
 {
+  Arena<Node> arena;
   Node parent;
-  Node *extension = Node::create_extension(&parent);
+  Node *extension = Node::create_extension(arena, &parent);
 
   EXPECT_EQ(extension->type, Node::Type::kExtension);
   EXPECT_EQ(extension->parent, &parent);
@@ -122,7 +125,7 @@ TEST(Node, CreateExtension)
   EXPECT_EQ(extension->value, std::nullopt);
   expect_children_are_clear(*extension);
 
-  delete extension;
+  arena.free(extension);
 }
 
 TEST(Node, InitExtension)
@@ -139,8 +142,9 @@ TEST(Node, InitExtension)
 
 TEST(Node, CreateLeaf)
 {
+  Arena<Node> arena;
   Node parent;
-  Node *leaf = Node::create_leaf(&parent);
+  Node *leaf = Node::create_leaf(arena, &parent);
 
   EXPECT_EQ(leaf->type, Node::Type::kLeaf);
   EXPECT_EQ(leaf->parent, &parent);
@@ -150,7 +154,7 @@ TEST(Node, CreateLeaf)
   EXPECT_EQ(leaf->value, std::nullopt);
   expect_children_are_clear(*leaf);
 
-  delete leaf;
+  arena.free(leaf);
 }
 
 TEST(Node, InitLeaf)
@@ -172,7 +176,7 @@ TEST(Node, HashBranch)
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  std::vector<Node> children(Node::kMaxNumBranches, Node{});
+  std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
     Node &child = children[i];
     size_t digit = i % 10;
@@ -194,7 +198,7 @@ TEST(Node, HashBranchSomeNullptr)
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
   branch.value = "hello";
-  std::vector<Node> children(Node::kMaxNumBranches, Node{});
+  std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
     if (i % 2) {
       Node &child = children[i];
@@ -239,9 +243,9 @@ TEST(Node, HashExtension)
          extension.hash.size() * sizeof(extension.hash[0]));
   extension.path = HexArray("00010203");
 
-  static Node child{
-      .hash = hash_from_string(
-          "1111111111111111111111111111111111111111111111111111111111111111")};
+  static Node child;
+  child.hash = hash_from_string(
+      "1111111111111111111111111111111111111111111111111111111111111111");
   extension.child[0] = &child;
 
   SHA256Hash hash = extension.compute_node_hash();

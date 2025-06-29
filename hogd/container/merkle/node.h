@@ -13,15 +13,18 @@
 #include <string>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/container/merkle/rw_lock.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {
 
 // This is a node in a Merkle Patricia trie.
-class Node {
+struct Node {
 public:
   // The maximum number of children of a branch node. The trie branches on a hex
   // digit. There are 16 different hex digits, so we need 16 different child
@@ -57,7 +60,16 @@ public:
     std::array<SHA256Hash, kMaxNumBranches> child_hashes;
   };
 
+  Node() = default;
+  // Disable copy and move.
+  Node(const Node &) = delete;
+  Node &operator=(const Node &) = delete;
+  Node(Node &&) noexcept = delete;
+  Node &operator=(Node &&) noexcept = delete;
+
+  RwLock rw_lock;
   Type type;
+  RwLock hash_lock;
   SHA256Hash hash;
   Node *parent;
 
@@ -100,25 +112,32 @@ public:
     this->parent = parent;
   }
 
-  static Node *create_branch(Node *parent)
+  static Node *create_branch(Arena<Node> &arena, Node *parent)
   {
-    Node *node = new Node;
+    // TODO(jhumphri): Use unique_ptr<> rather than [new] (here and elsewhere).
+    Node *node = arena.alloc();
+    CHECK_PTR(node);
+
     node->clear();
     node->init_branch(parent);
     return node;
   }
 
-  static Node *create_extension(Node *parent)
+  static Node *create_extension(Arena<Node> &arena, Node *parent)
   {
-    Node *node = new Node;
+    Node *node = arena.alloc();
+    CHECK_PTR(node);
+
     node->clear();
     node->init_extension(parent);
     return node;
   }
 
-  static Node *create_leaf(Node *parent)
+  static Node *create_leaf(Arena<Node> &arena, Node *parent)
   {
-    Node *node = new Node;
+    Node *node = arena.alloc();
+    CHECK_PTR(node);
+
     node->clear();
     node->init_leaf(parent);
     return node;
@@ -183,7 +202,8 @@ private:
   void get_branch_string(std::ostringstream &oss) const;
   void get_extension_string(std::ostringstream &oss) const;
   void get_leaf_string(std::ostringstream &oss) const;
-};
+} __attribute__((aligned(64)));
+
 } // namespace hogd
 
 // We need to define the formatters in the [std] namespace.
@@ -198,6 +218,17 @@ template<> struct std::formatter<hogd::Node> : std::formatter<std::string> {
 
 // Also need to define a formatter for [Node *], not just [Node].
 template<> struct std::formatter<hogd::Node *> : std::formatter<std::string> {
+  auto format(const hogd::Node *node, std::format_context &ctx) const
+  {
+    std::ostringstream oss;
+    oss << node;
+    return std::formatter<std::string>::format(oss.str(), ctx);
+  }
+};
+
+// Also need to define a formatter for [const Node *].
+template<>
+struct std::formatter<const hogd::Node *> : std::formatter<std::string> {
   auto format(const hogd::Node *node, std::format_context &ctx) const
   {
     std::ostringstream oss;
