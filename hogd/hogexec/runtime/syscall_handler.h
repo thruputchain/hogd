@@ -25,6 +25,12 @@ namespace hogd {
 
 class StorageSnapshotCache;
 
+// TODO(geoff): root_invoke() validates any incoming wasm blobs.
+// We may later do that validation preemptively in the coordinator.
+// We may also wish to add checks to make sure that a wasm that's created
+// is actually deployed, and/or put limits on the size of an individual wasm.
+// What's done here is only check well-formedness of the wasm.
+
 // Data structure that manages all system calls and state associated with a
 // running transaction.
 // Core components:
@@ -149,10 +155,15 @@ private:
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;
-  bool root_invoked_succeeded_ = false;
+  InvokeResult cumulative_invoke_result_ =
+      InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool transaction_committed_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
+
+  // Validate that the transaction can be run safely.
+  // Ensures, for example, that the wasms are valid.
+  InvokeResult perform_initial_validation();
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

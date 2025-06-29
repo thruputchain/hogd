@@ -2,11 +2,18 @@
 
 #pragma once
 
+#include <cassert>
+#include <concepts>
+#include <condition_variable>
 #include <coroutine>
+#include <cstddef>
+#include <functional>
+#include <memory>
 #include <queue>
 #include <ranges>
 #include <stop_token>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -14,6 +21,7 @@
 #include <x23/cleanup.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 
 namespace x23 {

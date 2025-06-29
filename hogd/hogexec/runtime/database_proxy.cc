@@ -243,6 +243,23 @@ DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
   co_return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
+x23::Async<SystemStatus<void>>
+DatabaseProxy::commit_contract_create(BlockID block_id,
+                                      Contract const &contract)
+{
+  auto res = co_await read_client_.commit_contract_create(block_id, contract);
+  co_return to_system_error_code<VoidMarker{}>(res, [] {});
+}
+
+x23::Async<SystemStatus<void>>
+DatabaseProxy::commit_contract_deploy(BlockID block_id,
+                                      ContractAddress const &addr,
+                                      SHA256Hash const &hash)
+{
+  auto res = co_await read_client_.commit_contract_deploy(block_id, addr, hash);
+  co_return to_system_error_code<VoidMarker{}>(res, [] {});
+}
+
 x23::Async<SystemStatus<bool>>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,

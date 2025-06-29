@@ -75,6 +75,12 @@ public:
   x23::Async<SystemStatus<void>> abort_transaction(BlockID block_id,
                                                    TransactionID tx_id);
 
+  x23::Async<SystemStatus<void>>
+  commit_contract_create(BlockID block_id, Contract const &contract);
+  x23::Async<SystemStatus<void>>
+  commit_contract_deploy(BlockID block_id, ContractAddress const &addr,
+                         SHA256Hash const &hash);
+
   x23::Async<SystemStatus<void>> pop_subtransactions(BlockID block_id,
                                                      TransactionID tx_id,
                                                      uint32_t count = 1);
@@ -150,6 +156,20 @@ public:
   {
     assert(!current_subtransaction_batch_builder_);
     return db_proxy_.abort_transaction(block_id_, tx_id_);
+  }
+
+  x23::Async<SystemStatus<void>>
+  commit_contract_create(Contract const &contract)
+  {
+    assert(!current_subtransaction_batch_builder_);
+    return db_proxy_.commit_contract_create(block_id_, contract);
+  }
+
+  x23::Async<SystemStatus<void>>
+  commit_contract_deploy(ContractAddress const &addr, SHA256Hash const &hash)
+  {
+    assert(!current_subtransaction_batch_builder_);
+    return db_proxy_.commit_contract_deploy(block_id_, addr, hash);
   }
 
   x23::CoroPoll &coropoll() { return db_proxy_.coropoll(); }

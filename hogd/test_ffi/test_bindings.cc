@@ -21,7 +21,6 @@
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
-#include "hogd/test_ffi/port_allocator.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -36,7 +35,7 @@ DBContext *
 make_new_db() noexcept
 {
   try {
-    return new DBContext(PortAllocator::get());
+    return new DBContext();
   } catch (std::exception const &e) {
     std::println("error creating db context: {}", e.what());
     return nullptr;

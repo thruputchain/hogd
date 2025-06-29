@@ -144,7 +144,6 @@ struct InvokeResult {
 
   constexpr bool is_root_success() const { return is_frame_success(); }
 
-  InvokeResult to_root_error() const;
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> to_host_fn_result() const;
 };
 
