@@ -9,6 +9,7 @@
 #include <stack>
 
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
@@ -42,7 +43,7 @@ public:
   // Allocates a new memory region.
   T *alloc()
   {
-    if (ptrs_.empty()) {
+    if (ptrs_->empty()) {
       // When we need to malloc more memory, we malloc enough memory to hold a
       // batch of objects rather than just a single object. This amortizes the
       // malloc overhead.
@@ -50,11 +51,11 @@ public:
           static_cast<char *>(aligned_alloc(kCacheLineSize, batch_alloc_size_));
       CHECK_PTR(batch);
       for (size_t i = 0; i < batch_alloc_size_; i += sizeof(T)) {
-        ptrs_.push(reinterpret_cast<T *>(batch + i));
+        ptrs_->push(reinterpret_cast<T *>(batch + i));
       }
     }
-    T *ret = new (ptrs_.top()) T;
-    ptrs_.pop();
+    T *ret = new (ptrs_->top()) T;
+    ptrs_->pop();
     return ret;
   }
 
@@ -65,7 +66,7 @@ public:
     CHECK_PTR(ptr);
 
     ptr->~T();
-    ptrs_.push(ptr);
+    ptrs_->push(ptr);
   }
 
 private:
@@ -76,9 +77,8 @@ private:
   // The size of the batch the arena allocates with malloc.
   const size_t batch_alloc_size_;
 
-  // TODO(jhumphri): Use Adam's thread_local implementation.
   // Tracks the objects allocated by the arena.
-  inline static thread_local std::stack<T *> ptrs_;
+  PerThread<std::stack<T *>> ptrs_;
 };
 
 } // namespace hogd
