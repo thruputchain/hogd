@@ -56,7 +56,7 @@ fn check_memory_limit(module: &Module) -> bool {
     if let wasmi::ExternType::Memory(memory_type) = export_unwrapped {
         return memory_type.initial_pages() <= 1.into();
     }
-    return false;
+    false;
 }
 
 impl WasmiRuntime {
