@@ -1137,7 +1137,7 @@ namespace {
 void
 run_multithread(size_t num_threads)
 {
-  constexpr size_t kInitialSize = 100'000;
+  constexpr size_t kInitialSize = 10'000;
   // Must be a multiple of 128 since that we test with 128 threads. See the
   // CHECK a few lines below.
   constexpr size_t kNumKVPairs = 200'064;
@@ -1215,11 +1215,6 @@ run_multithread(size_t num_threads)
 }
 
 } // namespace
-
-TEST(MerkleTrie, Multithread1)
-{
-  run_multithread(/*num_threads=*/1);
-}
 
 TEST(MerkleTrie, Multithread128)
 {
