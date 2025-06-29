@@ -31,6 +31,7 @@ add_library(runtime_objects OBJECT
   syscall_log.cc
   syscall_nnint.cc
   syscall_rcq.cc
+  transaction_stats.cc
   wasmi_runtime.cc
 )
 

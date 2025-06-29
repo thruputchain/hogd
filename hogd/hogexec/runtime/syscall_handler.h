@@ -15,6 +15,7 @@
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/transaction_stats.h"
 #include "retrocausal_queue.hh"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -72,6 +73,13 @@ public:
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
   invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
          Calldata calldata, InvokeFlagSet flags);
+
+  void enable_transaction_stats()
+  {
+    stats_ = std::make_unique<TransactionStats>();
+  }
+
+  auto *get_transaction_stats(this auto &self) { return self.stats_.get(); }
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -152,6 +160,8 @@ private:
       newly_created_contracts_;
 
   ExecutionModeData execution_mode_data_;
+
+  std::unique_ptr<TransactionStats> stats_ = nullptr;
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;

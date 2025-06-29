@@ -456,6 +456,8 @@ namespace hogd {{
 enum SyscallNo {{
 {enumdecls}}};
 
+const kSyscallCount = {len(syscalls)};
+
 enum SyscallErrorCode {{{error_enumdecls}}};
 
 }} // namespace hogd
