@@ -93,8 +93,8 @@ check_branch(const Node &branch)
     ret = false;
   }
   if (!branch.value && num_children == 1) {
-    // Check if this is the root node. The root node is a branch that is
-    // allowed to have no children.
+    // Check if this is the root node. The root node is a branch that is allowed
+    // to have no children.
     if (!is_root) {
       std::println("Branch node has no value and only one child");
       ret = false;
@@ -365,8 +365,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
     return false;
   }
 
-  // Check that we verified the entire key and that the root hash matches
-  // up.
+  // Check that we verified the entire key and that the root hash matches up.
   return verified_key_size == k.size() && node.hash == root_hash;
 }
 
@@ -384,8 +383,7 @@ MerkleTrie::find_begin(const Key &k, void *&cookie)
     // Check if the branch has a value.
     if (node->value) {
       // Get the [T] out of the [std::optional<T>] with the dereference
-      // operator.
-      T &value = *node->value;
+      operator.T & value = * node->value;
       ret = &value;
     }
     break;
@@ -393,8 +391,7 @@ MerkleTrie::find_begin(const Key &k, void *&cookie)
   {
     // A leaf must always have a value.
     CHECK(node->value.has_value());
-    // Get the [T] out of the [std::optional<T>] with the dereference
-    // operator.
+    // Get the [T] out of the [std::optional<T>] with the dereference operator.
     T &value = *node->value; // NOLINT(bugprone-unchecked-optional-access)
     ret = &value;
     break;
@@ -533,8 +530,8 @@ MerkleTrie::insert(const Key &k, T &&obj)
 //
 // Example:
 // We are inserting [k = 0x1234] into the trie and it conflicts with an
-// extension node with path [0x256]. In this case, we will replace the
-// extension node with the following:
+// extension node with path [0x256]. In this case, we will replace the extension
+// node with the following:
 //
 // First Extension Node: Path is [0x2] with child c. Child is the branch node
 //                       below.
@@ -559,9 +556,9 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   CHECK_EQ(extension->parent->type, Node::Type::kBranch);
   CHECK(!extension->path.empty());
 
-  // [key_window] holds the portion of [k] that we are currently looking at.
-  // In other words, we omit the prefix of [k] that corresponds to the nodes
-  // in the trie we have already visited.
+  // [key_window] holds the portion of [k] that we are currently looking at. In
+  // other words, we omit the prefix of [k] that corresponds to the nodes in the
+  // trie we have already visited.
   //
   // We add 1 since one of the digits will be included in the
   // [extension->parent] node, which is always a branch node.
@@ -574,24 +571,23 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   // We are going to create a new branch node, with a leaf for [key_window] as
   // one child and the existing subtree as the other child.
   //
-  // See the comments below. It is possible that we place [key_window]
-  // directly into the branch. It is also possible that we omit part of the
-  // existing subtree, too.
+  // See the comments below. It is possible that we place [key_window] directly
+  // into the branch. It is also possible that we omit part of the existing
+  // subtree, too.
   Node *branch = nullptr;
-  // We are going to reuse [extension] in the if/else bodies below, so we
-  // cache some of the node contents since we need them after the node is
-  // reused.
+  // We are going to reuse [extension] in the if/else bodies below, so we cache
+  // some of the node contents since we need them after the node is reused.
   //
-  // [Node] has its copy constructor and copy assignment operator delete, so
-  // we copy the fields individually.
+  // [Node] has its copy constructor and copy assignment operator delete, so we
+  // copy the fields individually.
   Node *const extension_cache_parent = extension->parent;
   const HexArray extension_cache_path = extension->path;
   Node *const extension_cache_child = extension->child[0];
 
   auto parent_branch_hex = std::to_integer<size_t>(k.get(idx));
   if (common_range_length) {
-    // [key_window] and the extension node have a common range, so we are
-    // going to break the extension node into two extension nodes:
+    // [key_window] and the extension node have a common range, so we are going
+    // to break the extension node into two extension nodes:
     //
     // 1. The first extension node will have the path that is present in both
     // [key_window] and the existing extension node.
@@ -600,8 +596,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // [key_window]. This extension node will be a child of the new branch.
     //
     // Example:
-    // If [key_window] has path [0x12ab] and [extension->path] is [0x1234],
-    // then the following nodes will be created:
+    // If [key_window] has path [0x12ab] and [extension->path] is [0x1234], then
+    // the following nodes will be created:
     //
     // First Extension Node: Path is [0x12].
     // Branch Node: A leaf for [key_window] is child [0xa] and the second
@@ -609,11 +605,10 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // Second Extension Node: Path is [0x4].
     // Leaf Node: Path is [0xb].
     //
-    // Note that the second extension node may have a path length of 1, in
-    // which case we will omit the second extension node and add its child
-    // directly as a child of the new branch. Example: If [key_window] has
-    // path [0x1234] and [extension->path] is [0x1235], then the following
-    // nodes will be created:
+    // Note that the second extension node may have a path length of 1, in which
+    // case we will omit the second extension node and add its child directly as
+    // a child of the new branch. Example: If [key_window] has path [0x1234] and
+    // [extension->path] is [0x1235], then the following nodes will be created:
     //
     // First Extension Node: Path is [0x123].
     // Branch Node: A leaf for [key_window] is child [0x4]. The child of
@@ -646,10 +641,10 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // If [key_window] is [0x1abc], then the nodes for [key_window] will
     // correspond to child [0x1] in the branch.
     //
-    // In this case, we create a new branch and place that branch as child
-    // [0x1] of the branch node mentioned above. Then we place the extension
-    // node as one child of this new branch and we create a leaf node for
-    // [key_window] and place the leaf as the other child of the new branch.
+    // In this case, we create a new branch and place that branch as child [0x1]
+    // of the branch node mentioned above. Then we place the extension node as
+    // one child of this new branch and we create a leaf node for [key_window]
+    // and place the leaf as the other child of the new branch.
     //
     // Note that we reuse [extension] below.
     branch = extension;
@@ -679,9 +674,9 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // The second extension node has a path size larger than 1.
     branch->child[second_branch] = extension;
 
-    // Add 1 to account for the branch node. We are placing the second
-    // extension node as a child of the branch node, so the branch node
-    // accounts for 1 hex digit in the path.
+    // Add 1 to account for the branch node. We are placing the second extension
+    // node as a child of the branch node, so the branch node accounts for 1 hex
+    // digit in the path.
     extension->path =
         extension_cache_path.get_subarray(diverge_idx + 1,
                                           extension_cache_path.size());
@@ -708,8 +703,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 
   // Now we need to place [key_window] into the trie. If [key_window] entirely
   // overlaps with the path in the first extension node, then we place
-  // [key_window] directly into the new branch. Otherwise, we create a leaf
-  // node for [key_window] and add the leaf as a child of the new branch.
+  // [key_window] directly into the new branch. Otherwise, we create a leaf node
+  // for [key_window] and add the leaf as a child of the new branch.
   if (diverge_idx >= key_window.size()) {
     // Place [key_window] directly into the branch.
     CHECK_EQ(diverge_idx, key_window.size());
@@ -731,17 +726,16 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   return leaf;
 }
 
-// We are inserting [k] into the trie, and it conflicts with a leaf node on
-// the same path. This method resolves that conflict.
+// We are inserting [k] into the trie, and it conflicts with a leaf node on the
+// same path. This method resolves that conflict.
 //
 // We create a new branch node and place both [k] and the key in [leaf] as
-// children of this branch. Note that if one of the keys ends on the branch,
-// we place the key directly into the branch node rather than create a leaf
-// for it.
+// children of this branch. Note that if one of the keys ends on the branch, we
+// place the key directly into the branch node rather than create a leaf for it.
 //
 // If [k] and the path in [leaf] have hex digits in common, we also create an
-// extension node with the shared hex digits. We place the new branch node as
-// a child of this extension node.
+// extension node with the shared hex digits. We place the new branch node as a
+// child of this extension node.
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
 {
@@ -764,8 +758,8 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   leaf->parent->child[parent_branch_digit] = branch;
 
   // Check to see if [key_window] and the path in [leaf] have any digits in
-  // common. If they do, we create an extension node with the shared digits,
-  // and then we place the new branch as a child of this new extension node.
+  // common. If they do, we create an extension node with the shared digits, and
+  // then we place the new branch as a child of this new extension node.
   size_t common_range_length =
       get_longest_common_range_length(key_window, 0, leaf->path, 0);
   if (common_range_length) {
@@ -802,8 +796,8 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
           : obj;
 
   if (shorter_path.empty()) {
-    // The shorter key's remaining path is empty, so we should place the
-    // shorter key directly into the branch.
+    // The shorter key's remaining path is empty, so we should place the shorter
+    // key directly into the branch.
     branch->value = std::move(shorter_value);
   }
   else {
@@ -816,16 +810,15 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
     // Shorter key's leaf node. Note that we reuse [leaf] for the longer node
     // below, so we allocate a new node here.
     //
-    // Note that I am deliberately allocating a new node first *before*
-    // reusing [leaf]. The [shorter_*] and [longer_*] variables above are
-    // references to elements in [leaf], so we cannot overwrite [leaf] until
-    // we no longer need those references.
+    // Note that I am deliberately allocating a new node first *before* reusing
+    // [leaf]. The [shorter_*] and [longer_*] variables above are references to
+    // elements in [leaf], so we cannot overwrite [leaf] until we no longer need
+    // those references.
     Node *shorter_leaf = Node::create_leaf(arena_, /*parent=*/branch);
     // Unlike the other nodes, we do not need to call [shorter_path.get(0)]
     // before writing [shorter_leaf->path] because we are not reusing [leaf].
-    // Thus, [shorter_path] will never be a reference to [shorter_leaf->path].
-    // I still call it first though to match the style of the node creation
-    // below.
+    // Thus, [shorter_path] will never be a reference to [shorter_leaf->path]. I
+    // still call it first though to match the style of the node creation below.
     auto branch_hex = std::to_integer<size_t>(shorter_path.get(0));
     branch->child[branch_hex] = shorter_leaf;
     shorter_leaf->path = shorter_path.get_subarray(1, shorter_path.size());
@@ -836,11 +829,11 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
     compute_node_hash(*shorter_leaf);
   }
 
-  // Now we place the longer key into a leaf node that is a child of the
-  // branch. Note that we reuse [leaf] rather than allocate a new node.
+  // Now we place the longer key into a leaf node that is a child of the branch.
+  // Note that we reuse [leaf] rather than allocate a new node.
   //
-  // We overwrite [leaf->path] below, so we need call [longer_path.get(0)]
-  // first as [longer_path] may be a reference to [leaf->path].
+  // We overwrite [leaf->path] below, so we need call [longer_path.get(0)] first
+  // as [longer_path] may be a reference to [leaf->path].
   auto branch_hex = std::to_integer<size_t>(longer_path.get(0));
   branch->child[branch_hex] = leaf;
   leaf->path = longer_path.get_subarray(1, longer_path.size());
@@ -871,10 +864,9 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
     // We need to try again. We are moving down the trie so we cannot block on
     // acquiring the writer lock.
     //
-    // We also cannot drop the lock and then acquire it as the writer
-    // because it is possible that another thread is attempting to remove
-    // [k], acquires the writer lock for [branch] before we do, and then
-    // removes [k].
+    // We also cannot drop the lock and then acquire it as the writer because it
+    // is possible that another thread is attempting to remove [k], acquires the
+    // writer lock for [branch] before we do, and then removes [k].
     unlock_both(*branch, *existing_key);
     return false;
   }
@@ -882,8 +874,7 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
 
   // Check if we are going to remove the branch. We do this when the branch
   // currently has two KV pairs "under" it (i.e., either in the branch or a
-  // child of the branch), as only one KV pair will remain after we remove
-  // [k].
+  // child of the branch), as only one KV pair will remain after we remove [k].
   num_children = get_num_children(*branch);
   if (will_remove_branch(branch, num_children)) {
     // We are going to remove this branch node, so we need to acquire the
@@ -904,8 +895,7 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
       }
     }
     if (remaining_child && !remaining_child->rw_lock.try_lock_writer()) {
-      // We do not block on acquiring the writer lock when moving down the
-      // trie.
+      // We do not block on acquiring the writer lock when moving down the trie.
       unlock_both(*branch, *existing_key);
       return false;
     }
@@ -963,8 +953,8 @@ MerkleTrie::remove(const Key &k)
     branch->value = std::nullopt;
   }
   else {
-    // [existing_key != branch], so we know that the key is a leaf node which
-    // is a child of a branch. Thus, we need to remove this leaf node.
+    // [existing_key != branch], so we know that the key is a leaf node which is
+    // a child of a branch. Thus, we need to remove this leaf node.
     CHECK_EQ(existing_key->type, Node::Type::kLeaf);
 
     auto branch_hex = std::to_integer<size_t>(k.get(idx));
@@ -988,15 +978,15 @@ MerkleTrie::remove(const Key &k)
     to_hash = branch;
   }
   else if (need_to_remove_branch) {
-    // The branch now has fewer than two KV pairs "under" it, so we can
-    // optimize our trie by removing the branch.
+    // The branch now has fewer than two KV pairs "under" it, so we can optimize
+    // our trie by removing the branch.
     to_hash = remove_branch(branch, num_children, remaining_child_hex);
   }
   else {
-    // The branch has multiple children, or there is exactly one child and
-    // there is a value in the branch (so in other words, there are two KV
-    // pairs "under" this branch). Thus, as the branch still has at least two
-    // KV pairs "under" it, no further optimization is possible.
+    // The branch has multiple children, or there is exactly one child and there
+    // is a value in the branch (so in other words, there are two KV pairs
+    // "under" this branch). Thus, as the branch still has at least two KV pairs
+    // "under" it, no further optimization is possible.
     to_hash = branch;
   }
 
@@ -1025,16 +1015,16 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
   // We should not remove the root node.
   CHECK_PTR(branch->parent);
 
-  // It is possible that the branch's parent is an extension node. In this
-  // case, we need to remove the extension node, too, and then we need to add
-  // the extension node's path as a prefix to the child in the branch. We use
+  // It is possible that the branch's parent is an extension node. In this case,
+  // we need to remove the extension node, too, and then we need to add the
+  // extension node's path as a prefix to the child in the branch. We use
   // [cur_path] to hold the extension node's path (if needed).
   HexArray cur_path;
 
   // This is the hex digit in the parent branch that corresponds to the path
-  // that [k] is on. We are removing [branch] from the trie, so we need to
-  // know this hex digit so that we know which of the parent branch's child
-  // pointers to update.
+  // that [k] is on. We are removing [branch] from the trie, so we need to know
+  // this hex digit so that we know which of the parent branch's child pointers
+  // to update.
   size_t parent_branch_hex;
 
   // Check if the branch's parent is an extension node.
@@ -1057,8 +1047,8 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
   }
   else {
     CHECK_EQ(branch->parent->type, Node::Type::kBranch);
-    // The branch's parent is the parent branch itself. Thus, we use [branch]
-    // to set [parent_branch_hex].
+    // The branch's parent is the parent branch itself. Thus, we use [branch] to
+    // set [parent_branch_hex].
     CHECK(branch_get_child_index(*branch->parent, branch, parent_branch_hex));
   }
   CHECK_EQ(branch->parent->type, Node::Type::kBranch);
@@ -1092,10 +1082,10 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
 
     if (remaining_child->type == Node::Type::kBranch) {
       // The remaining child under [branch] is also a branch. Thus, we can
-      // replace [branch] with an extension node. The path in the extension
-      // node will be [cur_path] (to account for a possible extension node we
-      // removed above) followed by the hex digit in [branch] that the
-      // remaining child is under.
+      // replace [branch] with an extension node. The path in the extension node
+      // will be [cur_path] (to account for a possible extension node we removed
+      // above) followed by the hex digit in [branch] that the remaining child
+      // is under.
       cur_path.append(remaining_child_hex);
       CHECK_GE(cur_path.size(), 1UL);
       // We reuse the branch node below.
@@ -1112,9 +1102,9 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
     else {
       // The remaining child under [branch] is either an extension node or a
       // leaf node. Either way, we will add a prefix to the path in the node.
-      // The prefix will be [cur_path] (to account for a possible extension
-      // node we removed above) followed by the hex digit in the branch that
-      // the remaining child is under.
+      // The prefix will be [cur_path] (to account for a possible extension node
+      // we removed above) followed by the hex digit in the branch that the
+      // remaining child is under.
       cur_path.append(remaining_child_hex);
 
       // Add [remaining_child->path] to [cur_path] since we then overwrite
@@ -1150,12 +1140,11 @@ MerkleTrie::walk(
                     std::is_same_v<NodeType, const Node>,
                 "[NodeType] must be [Node] or [const Node].");
 
-  // We perform a post-order traversal iteratively. We use iteration rather
-  // than recursion to avoid exceeding the stack size when traversing deep
-  // trees.
+  // We perform a post-order traversal iteratively. We use iteration rather than
+  // recursion to avoid exceeding the stack size when traversing deep tries.
 
-  // We use this type along with the data structures below to track when we
-  // are in the tree.
+  // We use this type along with the data structures below to track where we are
+  // in the trie.
   struct CheckInfo {
     // The node we are currently looking at.
     NodeType *node;
@@ -1172,8 +1161,8 @@ MerkleTrie::walk(
     // children have been visited. When this node pushes one of its children
     // onto the stack, the node waits until the child is popped off the stack
     // before pushing the next child. Thus, the node will not enqueue the next
-    // child until a subsequent iteration, and thus we need to track this
-    // child so that the node knows which child to push at that point.
+    // child until a subsequent iteration, and thus we need to track this child
+    // so that the node knows which child to push at that point.
     //
     // We use [next_child_to_visit] to track which child should be pushed next
     // for [node].
@@ -1206,10 +1195,10 @@ MerkleTrie::walk(
       else {
         // Visit the next child.
 
-        // Append the branch path we are taking to [info.path] so that it
-        // holds the path to the child. For example, if
-        // [info.next_child_to_visit] is 0x3, then we know we will next visit
-        // the child at index 0x3, so we append 0x3 to [info.path].
+        // Append the branch path we are taking to [info.path] so that it holds
+        // the path to the child. For example, if [info.next_child_to_visit] is
+        // 0x3, then we know we will next visit the child at index 0x3, so we
+        // append 0x3 to [info.path].
         info.path.append(std::byte(info.next_child_to_visit));
         path.push({.node = info.node->child[info.next_child_to_visit],
                    .parent = info.node,
@@ -1222,8 +1211,8 @@ MerkleTrie::walk(
       }
       break;
     case Node::Type::kExtension:
-      // An extension node always has exactly one child. It is not possible
-      // for an extension node to have no children.
+      // An extension node always has exactly one child. It is not possible for
+      // an extension node to have no children.
       CHECK_LE(info.next_child_to_visit, 1UL);
       if (info.next_child_to_visit == 1) {
         // We have visited the extension node's one child, so now we can visit
@@ -1238,7 +1227,7 @@ MerkleTrie::walk(
                    .parent = info.node,
                    .path = info.path,
                    .next_child_to_visit = 0});
-        // Now change [info.path] back to holding the path to the extenion
+        // Now change [info.path] back to holding the path to the extension
         // node.
         info.path.remove_from_back(info.node->path.size());
         info.next_child_to_visit++;
@@ -1311,9 +1300,9 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       auto branch_hex = std::to_integer<size_t>(path.get(idx));
       Node *next = root->child[branch_hex];
       if (next) {
-        // There is a child that corresponds to the next hex digit in [path],
-        // so continue searching. We add 1 to [idx] since the branch
-        // corresponds to one hex digit in the path.
+        // There is a child that corresponds to the next hex digit in [path], so
+        // continue searching. We add 1 to [idx] since the branch corresponds to
+        // one hex digit in the path.
         idx++;
         prev_root = root;
         root = next;
@@ -1325,9 +1314,9 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
     }
     case Node::Type::kExtension:
     {
-      // We check [idx + root->path.size() <= path.size()]. Note that when
-      // these two values are equal, the path maps to the child node, which is
-      // always a branch.
+      // We check [idx + root->path.size() <= path.size()]. Note that when these
+      // two values are equal, the path maps to the child node, which is always
+      // a branch.
       if (idx + root->path.size() <= path.size() &&
           path.get_subarray(idx, idx + root->path.size()) == root->path) {
         idx += root->path.size();
@@ -1343,8 +1332,8 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       // down the trie.
       //
       // We are going to return the parent node, which is always a branch, so
-      // subtract 1 from [idx] since the branch corresponds to one hex digit
-      // in the path.
+      // subtract 1 from [idx] since the branch corresponds to one hex digit in
+      // the path.
       idx--;
       root->rw_lock.unlock();
       return prev_root;
@@ -1359,8 +1348,8 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
         root->rw_lock.unlock();
       }
       // We are going to return the parent node, which is always a branch, so
-      // subtract 1 from [idx] since the branch corresponds to one hex digit
-      // in the path.
+      // subtract 1 from [idx] since the branch corresponds to one hex digit in
+      // the path.
       idx--;
       return prev_root;
       break;
@@ -1379,8 +1368,7 @@ void
 MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
 {
   // We hold the writer locks for [n] and the nodes above it up through and
-  // including [locked_through].
-  CHECK_PTR(locked_through);
+  including[locked_through].CHECK_PTR(locked_through);
 
   bool locked = true;
   while (true) {
@@ -1434,10 +1422,10 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
 
     Node *parent = n->parent;
     n->rw_lock.unlock();
-    // It is technically safe to do [n = n->parent] below because a thread
-    // needs to hold both the writer lock for [n] and the writer lock for its
-    // parent in order to overwrite [n->parent], but we still cache [n->parent]
-    // in [parent] to avoid future issues.
+    // It is technically safe to do [n = n->parent] below because a thread needs
+    // to hold both the writer lock for [n] and the writer lock for its parent
+    // in order to overwrite [n->parent], but we still cache [n->parent] in
+    // [parent] to avoid future issues.
     n = parent;
   }
 }
