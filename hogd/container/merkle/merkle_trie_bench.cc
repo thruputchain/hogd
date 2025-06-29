@@ -437,6 +437,139 @@ hash_parallel_128_threads(benchmark::State &state)
 }
 BENCHMARK(hash_parallel_128_threads)->Unit(benchmark::kMillisecond);
 
+// Inserts and removes 2 million KV pairs in total with multiple threads. The
+// trie has an initial size of 20 million.
+void
+run_multithread_insert(benchmark::State &state, int num_threads)
+{
+  const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
+  CHECK_EQ(kNumKVPairs % num_threads, 0);
+
+  MerkleTrie trie;
+  std::vector<std::vector<HexArray>> paths(num_threads);
+  {
+    std::set<HexArray> generated;
+    trie.set_should_hash_nodes_on_each_op(false);
+
+    printf("Completing initial fill...");
+    fflush(stdout);
+
+    for (size_t i = 0; i < kLargeNumKVPairs; i++) {
+      HexArray path = generate_64_byte_path();
+      if (generated.count(path)) {
+        i--;
+        continue;
+      }
+      CHECK(generated.insert(path).second);
+      CHECK(trie.insert(path, std::to_string(i)));
+    }
+    CHECK_EQ(trie.size(), kLargeNumKVPairs);
+    trie.set_should_hash_nodes_on_each_op(true);
+    trie.generate_all_hashes();
+    CHECK(trie.check());
+
+    printf(" done.\n");
+    printf("Generating paths for threads...");
+    fflush(stdout);
+
+    for (size_t i = 0; i < num_threads; i++) {
+      paths[i].reserve(num_kv_pairs_per_thread);
+
+      for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
+        HexArray path = generate_64_byte_path();
+        if (generated.count(path)) {
+          j--;
+          continue;
+        }
+        CHECK(generated.insert(path).second);
+        paths[i].push_back(path);
+      }
+    }
+  }
+  printf(" done.\n");
+  WorkerPool pool(num_threads);
+  std::vector<std::future<void>> futures;
+  printf("Inserting keys...");
+  fflush(stdout);
+
+  for (auto _ : state) {
+    for (size_t i = 0; i < num_threads; i++) {
+      futures.push_back(
+          pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
+            for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
+              CHECK(trie.insert(paths[i][j], "hello"));
+            }
+          }));
+    }
+    for (std::future<void> &future : futures) {
+      future.get();
+    }
+
+    trie.generate_top_level_hashes();
+  }
+
+  printf(" done.\n");
+  CHECK_EQ(trie.size(), kLargeNumKVPairs + kNumKVPairs);
+}
+
+void
+insert_with_1_thread(benchmark::State &state)
+{
+  run_multithread_insert(state, /*num_threads=*/1);
+}
+BENCHMARK(insert_with_1_thread)->Iterations(1)->Unit(benchmark::kMillisecond);
+
+void
+insert_with_2_threads(benchmark::State &state)
+{
+  run_multithread_insert(state, /*num_threads=*/2);
+}
+BENCHMARK(insert_with_2_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+
+void
+insert_with_4_threads(benchmark::State &state)
+{
+  run_multithread_insert(state, /*num_threads=*/4);
+}
+BENCHMARK(insert_with_4_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+
+void
+insert_with_8_threads(benchmark::State &state)
+{
+  run_multithread_insert(state, /*num_threads=*/8);
+}
+BENCHMARK(insert_with_8_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+
+void
+insert_with_16_threads(benchmark::State &state)
+{
+  run_multithread_insert(state, /*num_threads=*/16);
+}
+BENCHMARK(insert_with_16_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+
+void
+insert_with_32_threads(benchmark::State &state)
+{
+  run_multithread_insert(state, /*num_threads=*/32);
+}
+BENCHMARK(insert_with_32_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+
+void
+insert_with_64_threads(benchmark::State &state)
+{
+  run_multithread_insert(state, /*num_threads=*/64);
+}
+BENCHMARK(insert_with_64_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+
+void
+insert_with_128_threads(benchmark::State &state)
+{
+  run_multithread_insert(state, /*num_threads=*/128);
+}
+BENCHMARK(insert_with_128_threads)
+    ->Iterations(1)
+    ->Unit(benchmark::kMillisecond);
+
 struct Init {
   Init()
   {

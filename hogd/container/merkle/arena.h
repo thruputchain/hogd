@@ -26,6 +26,7 @@ namespace hogd {
 
 // An arena. This has a very simple implementation right now and needs more
 // work. For example, we currently do not free any memory that we allocate.
+// TODO(jhumphri): Make the arena production ready.
 //
 // Example:
 // Arena<Node> arena;
@@ -37,7 +38,7 @@ namespace hogd {
 template<typename T> class Arena {
 public:
   // Creates an arena that allocates memory for T objects.
-  Arena() : batch_alloc_size_(sizeof(T) * kBatchSize)
+  Arena() : batch_alloc_size_(kBatchSize * sizeof(T))
   {
     CHECK_EQ(batch_alloc_size_ % sizeof(T), 0);
     CHECK_GT(batch_alloc_size_, 0);
@@ -58,6 +59,7 @@ public:
       // malloc overhead.
       char *batch =
           static_cast<char *>(aligned_alloc(kCacheLineSize, batch_alloc_size_));
+      CHECK_PTR(batch);
       for (size_t i = 0; i < batch_alloc_size_; i += sizeof(T)) {
         ptrs_.push(reinterpret_cast<T *>(batch + i));
       }

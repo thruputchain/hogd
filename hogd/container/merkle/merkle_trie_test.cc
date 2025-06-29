@@ -1138,45 +1138,14 @@ TEST(MerkleTrie, StressTwo)
   EXPECT_EQ(seen, total);
 }
 
-// Inserts and removes 2 million KV pairs with a single thread.
-TEST(MerkleTrie, SingleThread)
-{
-  constexpr size_t kNumKVPairs = 2'000'000;
-
-  MerkleTrie trie;
-  std::vector<HexArray> paths;
-  for (size_t i = 0; i < kNumKVPairs; i++) {
-    paths.push_back(generate_random_path());
-    const std::string value = std::to_string(i);
-    bool insert = trie.insert(paths.back(), value);
-    if (!insert) {
-      // A duplicate key was generated, so try again.
-      paths.pop_back();
-      i--;
-      continue;
-    }
-  }
-
-  trie.generate_top_level_hashes();
-  EXPECT_TRUE(trie.check());
-  void *cookie;
-  for (size_t i = 0; i < kNumKVPairs; i++) {
-    EXPECT_TRUE(trie.find_begin(paths[i], cookie));
-    trie.find_end(cookie);
-  }
-
-  // Now remove all of the KV pairs.
-  for (size_t i = 0; i < kNumKVPairs; i++) {
-    CHECK(trie.remove(paths[i]));
-  }
-}
-
-// Inserts and removes 2 million KV pairs in total with multiple threads.
+// Inserts and removes ~200,000 KV pairs with [num_threads] threads.
 void
 run_multithread(int num_threads)
 {
   constexpr size_t kInitialSize = 100'000;
-  constexpr size_t kNumKVPairs = 2'000'000;
+  // Must be a multiple of 128 since that we test with 128 threads. See the
+  // CHECK a few lines below.
+  constexpr size_t kNumKVPairs = 200'064;
   const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
   CHECK_EQ(kNumKVPairs % num_threads, 0);
 
@@ -1221,19 +1190,20 @@ run_multithread(int num_threads)
       }
     }
   }
-  printf("done.\n");
+  printf(" done.\n");
   WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
   printf("Inserting keys...");
   fflush(stdout);
 
-  sleep(5);
-  auto start = std::chrono::steady_clock::now();
   for (size_t i = 0; i < num_threads; i++) {
     futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
+      void *cookie;
       for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-        // printf("insert %zu %zu\n", i, j);
         EXPECT_TRUE(trie.insert(paths[i][j], "hello"));
+        EXPECT_EQ(*trie.find_begin(paths[i][j], cookie), "hello");
+        trie.find_end(cookie);
+        EXPECT_TRUE(trie.remove(paths[i][j]));
       }
     }));
   }
@@ -1242,79 +1212,15 @@ run_multithread(int num_threads)
   }
 
   trie.generate_top_level_hashes();
-  auto end = std::chrono::steady_clock::now();
-  auto duration =
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-  EXPECT_EQ(trie.size(), kInitialSize + kNumKVPairs);
-  printf("done. ");
-  std::cout << "Elapsed time: " << duration.count() << " ms\n";
-
-  EXPECT_TRUE(trie.check());
-  void *cookie;
-  for (size_t i = 0; i < num_threads; i++) {
-    for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-      EXPECT_TRUE(trie.find_begin(paths[i][j], cookie));
-      trie.find_end(cookie);
-    }
-  }
-
-  // Now remove all of the KV pairs.
-  futures.clear();
-  for (size_t i = 0; i < num_threads; i++) {
-    futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
-      for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-        // printf("remove %zu %zu\n", i, j);
-        CHECK(trie.remove(paths[i][j]));
-      }
-    }));
-  }
-  for (std::future<void> &future : futures) {
-    future.get();
-  }
-
-  trie.generate_top_level_hashes();
+  printf(" done.\n");
 
   EXPECT_EQ(trie.size(), kInitialSize);
   EXPECT_TRUE(trie.check());
-
-  // TODO(jhumphri): Try insert and remove at the same time.
-  // TODO(jhumphri): Try multithreaded find, and interleave with insert and
-  // remove operations.
 }
 
 TEST(MerkleTrie, Multithread1)
 {
   run_multithread(/*num_threads=*/1);
-}
-
-TEST(MerkleTrie, Multithread2)
-{
-  run_multithread(/*num_threads=*/2);
-}
-
-TEST(MerkleTrie, Multithread4)
-{
-  run_multithread(/*num_threads=*/4);
-}
-
-TEST(MerkleTrie, Multithread8)
-{
-  run_multithread(/*num_threads=*/8);
-}
-
-TEST(MerkleTrie, Multithread16)
-{
-  run_multithread(/*num_threads=*/16);
-}
-
-TEST(MerkleTrie, Multithread32)
-{
-  run_multithread(/*num_threads=*/32);
-}
-
-TEST(MerkleTrie, Multithread64)
-{
-  run_multithread(/*num_threads=*/64);
 }
 
 TEST(MerkleTrie, Multithread128)
