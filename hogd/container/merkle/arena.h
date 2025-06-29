@@ -40,8 +40,8 @@ public:
   // Creates an arena that allocates memory for T objects.
   Arena() : batch_alloc_size_(kBatchSize * sizeof(T))
   {
-    CHECK_EQ(batch_alloc_size_ % sizeof(T), 0);
-    CHECK_GT(batch_alloc_size_, 0);
+    CHECK_EQ(batch_alloc_size_ % sizeof(T), 0UL);
+    CHECK_GT(batch_alloc_size_, 0UL);
   }
 
   // Disable copy and move.

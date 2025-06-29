@@ -1140,14 +1140,14 @@ TEST(MerkleTrie, StressTwo)
 
 // Inserts and removes ~200,000 KV pairs with [num_threads] threads.
 void
-run_multithread(int num_threads)
+run_multithread(size_t num_threads)
 {
   constexpr size_t kInitialSize = 100'000;
   // Must be a multiple of 128 since that we test with 128 threads. See the
   // CHECK a few lines below.
   constexpr size_t kNumKVPairs = 200'064;
   const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
-  CHECK_EQ(kNumKVPairs % num_threads, 0);
+  CHECK_EQ(kNumKVPairs % num_threads, 0UL);
 
   MerkleTrie trie;
   std::vector<std::vector<HexArray>> paths(num_threads);

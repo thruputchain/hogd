@@ -383,7 +383,8 @@ MerkleTrie::find_begin(const Key &k, void *&cookie)
     // Check if the branch has a value.
     if (node->value) {
       // Get the [T] out of the [std::optional<T>] with the dereference
-      operator.T & value = * node->value;
+      // operator.
+      T &value = *node->value;
       ret = &value;
     }
     break;
@@ -1368,7 +1369,8 @@ void
 MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
 {
   // We hold the writer locks for [n] and the nodes above it up through and
-  including[locked_through].CHECK_PTR(locked_through);
+  // including [locked_through].
+  CHECK_PTR(locked_through);
 
   bool locked = true;
   while (true) {

@@ -383,7 +383,7 @@ prove(benchmark::State &state)
 BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
 
 void
-hash_parallel(benchmark::State &state, int num_threads)
+hash_parallel(benchmark::State &state, size_t num_threads)
 {
   constexpr size_t kTotalHashes = 16'425'387;
   // Branches with no value have an encoding size of 522 bytes, so we use this
@@ -440,10 +440,10 @@ BENCHMARK(hash_parallel_128_threads)->Unit(benchmark::kMillisecond);
 // Inserts and removes 2 million KV pairs in total with multiple threads. The
 // trie has an initial size of 20 million.
 void
-run_multithread_insert(benchmark::State &state, int num_threads)
+run_multithread_insert(benchmark::State &state, size_t num_threads)
 {
   const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
-  CHECK_EQ(kNumKVPairs % num_threads, 0);
+  CHECK_EQ(kNumKVPairs % num_threads, 0UL);
 
   MerkleTrie trie;
   std::vector<std::vector<HexArray>> paths(num_threads);
