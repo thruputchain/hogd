@@ -15,6 +15,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
+#include "hogd/container/merkle/sha256.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
@@ -328,7 +329,7 @@ Node::get_node_from_encoding(const std::vector<std::byte> &encodings,
     const std::vector<std::byte> node_encodings(encodings.begin() +
                                                     original_idx,
                                                 encodings.begin() + idx);
-    node.hash = sha256(node_encodings);
+    node.hash = Sha256::GetSha256(node_encodings);
   }
   return ret;
 }

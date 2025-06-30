@@ -1,3 +1,5 @@
+find_package(OpenSSL REQUIRED)
+
 # create container module test binaries
 add_executable(
   hex_array_test
@@ -21,6 +23,8 @@ target_link_libraries(
   base
   hogd
   GTest::gtest_main
+  OpenSSL::SSL
+  OpenSSL::Crypto
 )
 gtest_discover_tests(node_test)
 
@@ -35,8 +39,22 @@ target_link_libraries(
   base
   hogd
   GTest::gtest_main
+  OpenSSL::SSL
+  OpenSSL::Crypto
 )
 gtest_discover_tests(merkle_trie_test)
 
-add_executable(merkle_trie_bench merkle_trie_bench.cc merkle_trie.cc node.cc)
-target_link_libraries(merkle_trie_bench base hogd benchmark::benchmark)
+add_executable(
+  merkle_trie_bench
+  merkle_trie_bench.cc
+  merkle_trie.cc
+  node.cc
+)
+target_link_libraries(
+  merkle_trie_bench
+  base
+  hogd
+  benchmark::benchmark
+  OpenSSL::SSL
+  OpenSSL::Crypto
+)

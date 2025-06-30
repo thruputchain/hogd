@@ -18,6 +18,7 @@
 #include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/rw_lock.h"
+#include "hogd/container/merkle/sha256.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
@@ -151,7 +152,10 @@ public:
   static bool get_node_from_encoding(const std::vector<std::byte> &encodings,
                                      size_t &idx, Node::Raw &node);
 
-  SHA256Hash compute_node_hash() const { return sha256(get_node_encoding()); }
+  SHA256Hash compute_node_hash() const
+  {
+    return Sha256::GetSha256(get_node_encoding());
+  }
 
   void clear()
   {

@@ -1,4 +1,5 @@
 #include <benchmark/benchmark.h>
+#include <openssl/provider.h>
 
 #include <cstddef>
 #include <cstdio>
@@ -16,6 +17,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/merkle/sha256.h"
 #include "hogd/crypto/crypto.h"
 
 namespace hogd {
@@ -423,11 +425,52 @@ hash_parallel(benchmark::State &state, size_t num_threads)
 }
 
 void
+hash_parallel_openssl(benchmark::State &state, size_t num_threads)
+{
+  constexpr size_t kTotalHashes = 16'425'387;
+  // Branches with no value have an encoding size of 522 bytes, so we use this
+  // as an example. Note that branches and leaves with long values can exceed
+  // this size.
+  constexpr size_t kHashSize = 522;
+  const size_t per_thread_iterations = kTotalHashes / num_threads;
+
+  std::vector<std::byte> init(kHashSize);
+  for (size_t i = 0; i < kHashSize; i++) {
+    init[i] = std::byte(i);
+  }
+  std::vector<std::vector<std::byte>> to_hash(num_threads, init);
+
+  WorkerPool pool(num_threads);
+  std::vector<std::future<void>> futures(num_threads);
+
+  for (auto _ : state) {
+    for (size_t i = 0; i < num_threads; i++) {
+      futures[i] = pool.submit([per_thread_iterations, i, &to_hash] {
+        for (size_t j = 0; j < per_thread_iterations; j++) {
+          Sha256::GetSha256(to_hash[i]);
+          to_hash[i][0] = std::byte(static_cast<uint8_t>(to_hash[i][0]) + 1);
+        }
+      });
+    }
+    for (std::future<void> &future : futures) {
+      future.get();
+    }
+  }
+}
+
+void
 hash_parallel_1_thread(benchmark::State &state)
 {
   hash_parallel(state, /*num_threads=*/1);
 }
 BENCHMARK(hash_parallel_1_thread)->Unit(benchmark::kMillisecond);
+
+void
+hash_parallel_1_thread_openssl(benchmark::State &state)
+{
+  hash_parallel_openssl(state, /*num_threads=*/1);
+}
+BENCHMARK(hash_parallel_1_thread_openssl)->Unit(benchmark::kMillisecond);
 
 void
 hash_parallel_64_threads(benchmark::State &state)

@@ -20,6 +20,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
+#include "hogd/container/merkle/sha256.h"
 #include "hogd/crypto/crypto.h"
 #include "types.hh"
 
@@ -662,7 +663,8 @@ TEST(MerkleTrie, Prove)
 
   {
     // Try using the hash of an internal node as the root hash.
-    SHA256Hash different_root_hash = sha256(node_encodings_by_node[1]);
+    SHA256Hash different_root_hash =
+        Sha256::GetSha256(node_encodings_by_node[1]);
     EXPECT_FALSE(
         MerkleTrie::prove(different_root_hash, node_encodings, key_b, value_b));
   }
@@ -795,7 +797,8 @@ TEST(MerkleTrie, Prove)
       // find matching branch.
       branch_begin_idx = idx + node_encodings_by_node[node_idx].size() -
                          (Node::kMaxNumBranches * sizeof(SHA256Hash));
-      SHA256Hash to_find = sha256(node_encodings_by_node[node_idx - 1]);
+      SHA256Hash to_find =
+          Sha256::GetSha256(node_encodings_by_node[node_idx - 1]);
       for (size_t i = 0; i < Node::kMaxNumBranches; i++) {
         auto *to_compare = reinterpret_cast<SHA256Hash *>(
             &copy[branch_begin_idx + (i * sizeof(SHA256Hash))]);
