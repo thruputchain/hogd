@@ -185,8 +185,7 @@ public:
 
   void to_byte_vector(std::vector<std::byte> &v) const
   {
-    std::copy_n(backing_store_.begin(), (size_ + 1) / 2,
-                std::back_inserter(v));
+    std::copy_n(backing_store_.begin(), (size_ + 1) / 2, std::back_inserter(v));
     if (size_ % 2) {
       // If the size is odd, zero out the last 4 bits to ensure we consistently
       // return the same array. Otherwise, we could end up returning garbage in

@@ -318,6 +318,15 @@ public:
     return insert(k, MerkleTrie::T(obj));
   }
 
+  bool remove(const MerkleTrie::Key &k)
+  {
+    CHECK_GT(k.size(), 1);
+
+    size_t index = static_cast<size_t>(k.get(0));
+    MerkleTrie::Key k_no_prefix = k.get_subarray(1, k.size());
+    return tries_[index].remove(k_no_prefix);
+  }
+
   void set_should_hash_nodes_on_each_op(bool to_set)
   {
     for (MerkleTrie &trie : tries_) {
