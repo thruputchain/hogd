@@ -145,7 +145,7 @@ public:
   }
 
   // Returns an encoding of the node as a byte vector.
-  std::vector<std::byte> get_node_encoding() const;
+  std::vector<std::byte> &get_node_encoding() const;
 
   // This reads a raw node representation from [encodings] starting at index
   // [idx].

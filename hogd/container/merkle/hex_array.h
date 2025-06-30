@@ -165,12 +165,7 @@ public:
   // TODO(jhumphri): Optimize this.
   void append(const HexArray &to_append)
   {
-    CHECK_LE(size_ + to_append.size(), kMaxNumHexDigits);
-
-    for (size_t i = 0; i < to_append.size(); i++) {
-      set_helper(size_ + i, to_append.get(i));
-    }
-    size_ += to_append.size();
+    append_helper(*this, to_append, /*start=*/0, /*end=*/to_append.size());
   }
 
   void remove_from_back(size_t to_remove)
@@ -184,9 +179,7 @@ public:
     CHECK_LE(start, size_);
     CHECK_LE(end, size_);
     HexArray h;
-    for (size_t i = start; i < end; i++) {
-      h.append(get(i));
-    }
+    append_helper(h, *this, start, end);
     return h;
   }
 
@@ -233,6 +226,37 @@ private:
       backing_store_[idx / 2] &= std::byte{0xF0};
       backing_store_[idx / 2] |= (b & std::byte{0x0F});
     }
+  }
+
+  static void append_helper(HexArray &append_to, const HexArray &to_append,
+                            size_t start, size_t end)
+  {
+    if (end == start) {
+      return;
+    }
+
+    CHECK_GT(end, start);
+    size_t append_size = end - start;
+    CHECK_LE(append_to.size_ + append_size, kMaxNumHexDigits);
+
+    if (start % 2) {
+      append_to.set_helper(append_to.size_, to_append.get(start));
+      start++;
+      append_size--;
+      append_to.size_++;
+    }
+
+    if (append_to.size_ % 2 == 0) {
+      memcpy(&append_to.backing_store_[append_to.size_ / 2],
+             to_append.backing_store_.data() + (start / 2),
+             (append_size + 1) / 2);
+    }
+    else {
+      for (size_t i = 0; i < append_size; i++) {
+        append_to.set_helper(append_to.size_ + i, to_append.get(i + start));
+      }
+    }
+    append_to.size_ += append_size;
   }
 
   std::array<std::byte, kMaxNumHexDigits> backing_store_;
