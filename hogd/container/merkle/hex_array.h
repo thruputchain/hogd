@@ -183,18 +183,23 @@ public:
     return h;
   }
 
-  std::vector<std::byte> to_byte_vector() const
+  void to_byte_vector(std::vector<std::byte> &v) const
   {
-    std::vector<std::byte> ret;
     std::copy_n(backing_store_.begin(), (size_ + 1) / 2,
-                std::back_inserter(ret));
+                std::back_inserter(v));
     if (size_ % 2) {
       // If the size is odd, zero out the last 4 bits to ensure we consistently
       // return the same array. Otherwise, we could end up returning garbage in
       // the last 4 bits, which could vary between invocations of
       // [to_byte_vector()].
-      ret.back() &= std::byte{0xF0};
+      v.back() &= std::byte{0xF0};
     }
+  }
+
+  std::vector<std::byte> to_byte_vector() const
+  {
+    std::vector<std::byte> ret;
+    to_byte_vector(ret);
     return ret;
   }
 

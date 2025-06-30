@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/sha256.h"
@@ -92,8 +93,7 @@ get_path_encoding(std::vector<std::byte> &encoding, const HexArray &path)
 {
   size_to_bytes(path.size(), encoding);
 
-  const std::vector<std::byte> path_bytes = path.to_byte_vector();
-  encoding.insert(encoding.end(), path_bytes.begin(), path_bytes.end());
+  path.to_byte_vector(encoding);
 }
 
 void
@@ -242,24 +242,22 @@ get_leaf_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
 std::vector<std::byte> &
 Node::get_node_encoding() const
 {
-  // TODO(jhumphri): Optimize. We know the max lengths of the values we need to
-  // hash up front.
-  static thread_local std::vector<std::byte> to_hash;
-  to_hash.clear();
+  static PerThread<std::vector<std::byte>> to_hash;
+  to_hash->clear();
 
-  to_hash.push_back(static_cast<std::byte>(type));
+  to_hash->push_back(static_cast<std::byte>(type));
   switch (type) {
   case Node::Type::kBranch:
-    get_branch_encoding(to_hash);
+    get_branch_encoding(*to_hash);
     break;
   case Node::Type::kExtension:
-    get_extension_encoding(to_hash);
+    get_extension_encoding(*to_hash);
     break;
   case Node::Type::kLeaf:
-    get_leaf_encoding(to_hash);
+    get_leaf_encoding(*to_hash);
     break;
   }
-  return to_hash;
+  return *to_hash;
 }
 
 void
