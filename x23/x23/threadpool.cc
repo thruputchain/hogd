@@ -18,6 +18,7 @@ ThreadPool::ThreadPool(size_t nthreads)
     runqueues_(std::make_unique<Queue[]>(nqueues_)),
     tstate_(std::make_unique<ThreadState[]>(nthreads))
 {
+  fastclock::get_ns();		// Calibrate the clock early
   workers_.reserve(nthreads_);
   threads_.reserve(nthreads_);
   for (size_t i = 0; i < nthreads_; ++i) {
