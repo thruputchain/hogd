@@ -498,8 +498,6 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
   std::print("Inserting keys...");
   fflush(stdout);
 
-  sleep(10);
-
   for (auto _ : state) {
     for (size_t i = 0; i < num_threads; i++) {
       futures.push_back(
