@@ -159,7 +159,6 @@ public:
     size_++;
   }
 
-  // TODO(jhumphri): Optimize this.
   void append(const HexArray &to_append)
   {
     append_helper(*this, to_append, /*start=*/0, /*end=*/to_append.size());
