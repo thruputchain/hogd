@@ -125,7 +125,7 @@ class SharedLock : public TestLock {
     }
   };
 
-  auto nshared() const { return map_.nbuckets_; }
+  size_t nshared() const { return map_.nbuckets_; }
 
 public:
   const CpuMap &map_;
