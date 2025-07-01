@@ -1,16 +1,11 @@
 #include "hogd/container/merkle/node.h"
 
-#include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstring>
-#include <format>
 
-#include <iterator>
 #include <optional>
 #include <sstream>
 #include <string>
-#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"

@@ -1,8 +1,7 @@
 #include <cstddef>
 #include <gtest/gtest.h>
 
-#include <memory>
-#include <vector>
+#include <string>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"

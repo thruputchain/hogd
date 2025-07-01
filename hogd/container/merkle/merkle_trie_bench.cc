@@ -1,16 +1,10 @@
 #include <benchmark/benchmark.h>
-#include <openssl/provider.h>
 
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#include <future>
-#include <memory>
-#include <print>
 #include <random>
-#include <set>
 #include <string>
-#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -652,4 +646,4 @@ Init init;
 } // namespace
 
 } // namespace hogd
-BENCHMARK_MAIN();
+benchmark_main();

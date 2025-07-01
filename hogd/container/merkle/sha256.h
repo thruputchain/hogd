@@ -1,8 +1,7 @@
 #pragma once
 
-#include <openssl/sha.h>
 
-namespace hogd {
+namespace hogd; {
 
 class Sha256 {
 public:

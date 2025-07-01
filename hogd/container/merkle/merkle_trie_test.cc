@@ -1,18 +1,13 @@
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <future>
 #include <gtest/gtest.h>
 #include <iostream>
-#include <map>
 
-#include <memory>
-#include <print>
 #include <random>
-#include <set>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -598,7 +593,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
 // TODO(jhumphri): Clean this up further.
 // This tests generating a proof and verifying a proof.
 template<typename T>
-void
+static void
 prove(T &trie)
 {
   HexArray key_a("1234");
@@ -879,7 +874,7 @@ TEST(MerkleTriePrefix, Prove)
 // Test that we cannot prove a KV pair with an empty key and value is in an
 // empty trie.
 template<typename T>
-void
+static void
 prove_empty_trie(T &trie)
 {
   HexArray key;
@@ -926,7 +921,7 @@ TEST(MerkleTrie, ProveEmptyKVPair)
 // Also check that after removign it, we cannot prove a KV pair with an empty
 // key and value is in the trie.
 template<typename T>
-void
+static void
 prove_after_removing_key(T &trie)
 {
   HexArray key("1234");
@@ -1077,7 +1072,7 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
 // and [find_begin()] return expected values. This test also performs an
 // integrity check on the trie after each operation with [check()].
 template<typename T>
-void
+static void
 stress(T &trie, bool allow_empty)
 {
   constexpr size_t kNumIterations = 100;
@@ -1177,7 +1172,7 @@ TEST(MerkleTriePrefix, Stress)
 // This is a much larger number of KV pairs than in the [MerkleTrie::Stress]
 // test, but we perform fewer checks to reduce test runtime.
 template<typename T>
-void
+static void
 stress_two(T &trie, bool allow_empty)
 {
   constexpr size_t kNumIterations = 5'000;
