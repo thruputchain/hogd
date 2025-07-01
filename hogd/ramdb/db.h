@@ -52,7 +52,6 @@ public:
       item_allocator_(*loglet_allocator_, pool_, &map_),
       disk_writer_(*loglet_allocator_, dir_, "{}.log", kDiskLogFileThreshold,
                    write_head_order),
-      write_head_order_{write_head_order},
       map_(item_allocator_, disk_writer_, lock_order, bucket_order),
       bg_th_(
           [this](const std::stop_token &stoken) { background_worker(stoken); })
@@ -137,7 +136,6 @@ private:
   WorkerPool pool_;
   ItemAllocator item_allocator_;
   DiskWriter disk_writer_;
-  int write_head_order_;
   ScalableMap map_;
 
   // protects cv_, active_, run_expand_, and run_compact_.
