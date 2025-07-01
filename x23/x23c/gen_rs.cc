@@ -107,11 +107,12 @@ struct GenRs {
       prtop("{}\n", d.attrs);
     }
 
-    if (get_opaque_array_size(d)) {
+    if (auto array_size = get_opaque_array_size(d)) {
         // type is a byte array
-
         if (needs_serde_imports)
             prtop("#[serde(with = \"serde_arrays\")]\n");
+    } else if (d.qual == Declaration::kVec && get<string>(d.type) == "opaque") {
+        // type is a byte vector
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
@@ -324,6 +325,7 @@ GenRs::show_type(const StructBody &s, string t)
         derive_traits += ", Eq, Hash, Copy";
 
         derive_traits += ", Serialize, Deserialize";
+        derive_traits += ", ReadXDR, WriteXDR";
         needs_serde_imports = true; // for Serialize, Deserialize
     }
     prtop("#[derive({})]\n", derive_traits);
@@ -521,7 +523,7 @@ GenRs::show_type(const UnionBody &b, string t)
     };
   {
     prtop("#[repr(i32)]\n");
-    prtop("#[derive(PartialEq, Debug, Clone)]\n");
+    prtop("#[derive(PartialEq, Debug, Clone, ReadXDR, WriteXDR)]\n");
     prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
     prtop("pub enum {} ", t);
     auto _close = open_brace();
@@ -735,13 +737,22 @@ GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_set
     return std::format("[{}; {}]", tname, d.bound);
   case kVec:
     if (in_colon_required_setting) {
-      if (tname == "string"s)
+      if (tname == "string"s) {
         return std::format("BytesM::<{}>", map_bound(d.bound));
-      return std::format("VecM::<{}, {}>", tname, map_bound(d.bound));
+      } else {
+        if (d.bound.empty())
+          return std::format("Vec::<{}>", tname);
+        return std::format("VecM::<{}, {}>", tname, map_bound(d.bound));
+      }
+    } else {
+      if (tname == "string"s) {
+        return std::format("BytesM<{}>", map_bound(d.bound));
+      } else {
+        if (d.bound.empty())
+          return std::format("Vec<{}>", tname);
+        return std::format("VecM<{}, {}>", tname, map_bound(d.bound));
+      }
     }
-    if (tname == "string"s)
-      return std::format("BytesM<{}>", map_bound(d.bound));
-    return std::format("VecM<{}, {}>", tname, map_bound(d.bound));
   default:
     return {}; // suppress warnings
   }
@@ -775,6 +786,7 @@ use std::io::{Read, Write};
   std::string serde_imports = gs.needs_serde_imports ? R"(
 use ::serde::{Serialize, Deserialize};
 use ::serde_arrays;
+use ::xdrs::{ReadXDR, WriteXDR};
 )" : "";
 
   return preamble + serde_imports + gs.top_ + R"(
