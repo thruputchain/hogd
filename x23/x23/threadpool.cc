@@ -185,7 +185,7 @@ ThreadPool::Worker::checkcpu() noexcept
 ThreadPool::QPtr
 ThreadPool::Worker::getq() noexcept
 {
-  for (;;) {
+  for (unsigned count = 0;; ++count) {
     checkcpu();
     auto ptr = pool_->runqueues_[bucket_].take();
     if (!ptr->q.empty())
@@ -204,15 +204,15 @@ ThreadPool::Worker::getq() noexcept
       }
 
       uint64_t qt[2]{pool_->runqueues_[qns[0]].qtime(),
-		     pool_->runqueues_[qns[1]].qtime()};
+                     pool_->runqueues_[qns[1]].qtime()};
       auto i = unsigned{qt[1] < qt[0]};
       // Don't bother with mutex if probably empty
       if (qt[i] != kEmpty) {
-	ptr.reset();
-	ptr = pool_->runqueues_[qns[i]].take();
-	if (!ptr->q.empty())
-	  return ptr;
-	continue;
+        ptr.reset();
+        ptr = pool_->runqueues_[qns[i]].take();
+        if (!ptr->q.empty())
+          return ptr;
+        continue;
       }
     }
 
@@ -220,7 +220,11 @@ ThreadPool::Worker::getq() noexcept
       assert(ptr->q.empty());
       return {};
     }
-    ptr.wait(ptr->nonempty);
+    if (count < 8)
+      ptr.with_lock([d = (std::chrono::microseconds(8<<count)),
+                     &cv = ptr->nonempty](auto &ul) { cv.wait_for(ul, d); });
+    else
+      ptr.wait(ptr->nonempty);
   }
 }
 

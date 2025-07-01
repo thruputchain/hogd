@@ -71,6 +71,14 @@ public:
       c.wait(ul);
     }
 
+    void with_lock(auto &&f)
+      requires requires (std::unique_lock<Lock> ul) { f(ul); }
+    {
+      std::unique_lock ul(mv_->m_, std::adopt_lock);
+      Defer _rel([&ul] { ul.release(); });
+      f(ul);
+    }
+
     MVar *get_mvar() const { return mv_; }
 
   private:
@@ -183,6 +191,14 @@ public:
       std::unique_lock ul(mv_->m_, std::adopt_lock);
       Defer _rel([&ul] { ul.release(); });
       c.wait(ul);
+    }
+
+    void with_lock(auto &&f)
+      requires requires (std::unique_lock<Lock> ul) { f(ul); }
+    {
+      std::unique_lock ul(mv_->m_, std::adopt_lock);
+      Defer _rel([&ul] { ul.release(); });
+      f(ul);
     }
 
     MVar *get_mvar() const { return mv_; }
