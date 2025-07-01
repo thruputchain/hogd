@@ -478,7 +478,7 @@ private:
 
   std::pair<size_t, HexArray> get_prefix(const MerkleTrie::Key &k)
   {
-    CHECK_GE(k.size(), 1);
+    CHECK_GT(k.size(), 0UL);
 
     size_t index = static_cast<size_t>(k.get(0));
     MerkleTrie::Key k_no_prefix = k.get_subarray(1, k.size());
