@@ -144,9 +144,9 @@ public:
   }
 
   // Executes [func] on each element.
-  template<typename F> void for_each(F func)
+  template<typename F>
+  void for_each(F func, const HexArray &root_prefix = HexArray())
   {
-    HexArray prefix;
     auto f = [&func](const HexArray &path, Node &node, Node * /*parent*/) {
       switch (node.type) {
       case Node::Type::kBranch:
@@ -159,7 +159,7 @@ public:
         break;
       }
     };
-    walk<Node>(&root_, prefix, f);
+    walk<Node>(&root_, root_prefix, f);
   }
 
   // If called with true, nodes are hashed on every [insert()/remove()]
@@ -321,17 +321,16 @@ public:
 
     Node root;
     root.init_branch(/*parent=*/nullptr);
-    root.value = k.get_subarray(0, 1).str();
     for (size_t i = 0; i < tries_.size(); i++) {
       root.child[i] = &tries_[i].root_;
       if (i == index) {
         tries_[i].root_.parent = &root;
       }
     }
-    std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> ret =
-        tries_[index].get_proof_by_node(k_no_prefix);
+    std::vector<std::vector<std::byte>> proof =
+        tries_[index].get_proof_by_node(k_no_prefix).second;
     tries_[index].root_.parent = nullptr;
-    return ret;
+    return {root.compute_node_hash(), proof};
   }
 
   static bool prove(const SHA256Hash &root_hash,
@@ -392,8 +391,10 @@ public:
 
   template<typename F> void for_each(F func)
   {
-    for (MerkleTrie &trie : tries_) {
-      trie.for_each(func);
+    for (size_t i = 0; i < tries_.size(); i++) {
+      HexArray prefix;
+      prefix.append(std::byte(i));
+      tries_[i].for_each(func, prefix);
     }
   }
 
@@ -447,7 +448,7 @@ private:
 
   std::pair<size_t, HexArray> get_prefix(const MerkleTrie::Key &k)
   {
-    CHECK_GT(k.size(), 1);
+    CHECK_GE(k.size(), 1);
 
     size_t index = static_cast<size_t>(k.get(0));
     MerkleTrie::Key k_no_prefix = k.get_subarray(1, k.size());

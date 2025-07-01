@@ -283,6 +283,7 @@ MerkleTrie::get_proof_by_node(const Key &k)
 
     while (node) {
       node->hash_lock.lock_writer();
+      // TODO(jhumphri): Need to hold lock on child hash.
       const std::vector<std::byte> &encoding = node->get_node_encoding();
       ret.push_back(encoding);
       node->hash_lock.unlock();
