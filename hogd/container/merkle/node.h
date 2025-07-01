@@ -81,9 +81,6 @@ public:
   HexArray path;
 
   // Used by branches and leaves.
-  // TODO(jhumphri): Should we be able to place values in extension nodes, too?
-  // For example, the [TwoLeavesAndOneBranch] test would produce a more
-  // efficient trie if we could do this.
   std::optional<std::string> value;
 
   // Used by branches and extensions.

@@ -46,9 +46,6 @@ public:
 
   HexArray(const std::string &s)
   {
-    // TODO(jhumphri): Gracefully handle this rather than crashing. This is
-    // mostly a concern for when we verify a proof--we do not want an incorrect
-    // path that is too long to crash the node.
     CHECK_LE(s.size(), kMaxNumHexDigits);
 
     init();

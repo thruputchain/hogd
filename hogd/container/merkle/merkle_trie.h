@@ -22,8 +22,6 @@
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
 
-// TODO(jhumphri): Support template types. For now, the keys are [HexArray]'s
-// and the values are strings.
 namespace hogd {
 
 // This is a Merkle Patricia Trie. It holds KV pairs and can efficiently
