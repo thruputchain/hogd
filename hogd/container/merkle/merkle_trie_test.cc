@@ -157,6 +157,21 @@ TEST(MerkleTrie, EmptyKeyRemoveChild)
   std::cout << trie << '\n';
 }
 
+// Tests that [MerkleTriePrefix] does not work with empty keys.
+TEST(MerkleTriePrefix, EmptyKey)
+{
+  MerkleTriePrefix trie;
+
+  HexArray key;
+  std::string value = "hello";
+  EXPECT_FALSE(trie.insert(key, value));
+  void *cookie;
+  EXPECT_EQ(trie.find_begin(key, cookie), nullptr);
+  EXPECT_FALSE(trie.remove(key));
+  EXPECT_TRUE(trie.get_proof(key).second.empty());
+  EXPECT_TRUE(trie.get_proof_by_node(key).second.empty());
+}
+
 // These tests add an empty value to the trie.
 TEST(MerkleTrie, EmptyValue)
 {
@@ -582,10 +597,10 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
 
 // TODO(jhumphri): Clean this up further.
 // This tests generating a proof and verifying a proof.
-TEST(MerkleTrie, Prove)
+template<typename T>
+void
+prove(T &trie)
 {
-  MerkleTrie trie;
-
   HexArray key_a("1234");
   std::string value_a = "hello";
   EXPECT_TRUE(trie.insert(key_a, value_a));
@@ -608,10 +623,6 @@ TEST(MerkleTrie, Prove)
   // is flattened from a 2D vector into a 1D vector.
   std::vector<std::byte> node_encodings_by_node_flat;
   for (const std::vector<std::byte> &node_encoding : node_encodings_by_node) {
-    for (std::byte b : node_encoding) {
-      printf("%02x", b);
-    }
-    printf("\n");
     node_encodings_by_node_flat.insert(node_encodings_by_node_flat.end(),
                                        node_encoding.begin(),
                                        node_encoding.end());
@@ -620,7 +631,6 @@ TEST(MerkleTrie, Prove)
 
   // [key_b/value_b] is in the trie, so we should be able to prove it.
   EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
-  printf("done\n");
 
   // None of these pairs are in the trie, so we should not be able to prove
   // them.
@@ -854,16 +864,40 @@ TEST(MerkleTrie, Prove)
   }
 }
 
-// Test that we cannot prove a KV pair with an empty key and value is in an
-// empty trie.
-TEST(MerkleTrie, ProveEmptyTrie)
+TEST(MerkleTrie, Prove)
 {
   MerkleTrie trie;
+  prove(trie);
+}
 
+TEST(MerkleTriePrefix, Prove)
+{
+  MerkleTriePrefix trie;
+  prove(trie);
+}
+
+// Test that we cannot prove a KV pair with an empty key and value is in an
+// empty trie.
+template<typename T>
+void
+prove_empty_trie(T &trie)
+{
   HexArray key;
   std::string value;
   const auto &[root_hash, node_encodings] = trie.get_proof(key);
   EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
+}
+
+TEST(MerkleTrie, ProveEmptyTrie)
+{
+  MerkleTrie trie;
+  prove_empty_trie(trie);
+}
+
+TEST(MerkleTriePrefix, ProveEmptyTrie)
+{
+  MerkleTriePrefix trie;
+  prove_empty_trie(trie);
 }
 
 // Test that we can prove a KV pair with an empty key and value is in the trie,
@@ -891,10 +925,10 @@ TEST(MerkleTrie, ProveEmptyKVPair)
 // Test that we can no longer prove a KV pair is in the trie after removing it.
 // Also check that after removign it, we cannot prove a KV pair with an empty
 // key and value is in the trie.
-TEST(MerkleTrie, ProveAfterRemovingKey)
+template<typename T>
+void
+prove_after_removing_key(T &trie)
 {
-  MerkleTrie trie;
-
   HexArray key("1234");
   std::string value = "hello";
   EXPECT_TRUE(trie.insert(key, value));
@@ -911,6 +945,18 @@ TEST(MerkleTrie, ProveAfterRemovingKey)
     const auto &[root_hash, node_encodings] = trie.get_proof(key);
     EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
   }
+}
+
+TEST(MerkleTrie, ProveAfterRemovingKey)
+{
+  MerkleTrie trie;
+  prove_after_removing_key(trie);
+}
+
+TEST(MerkleTriePrefix, ProveAfterRemovingKey)
+{
+  MerkleTriePrefix trie;
+  prove_after_removing_key(trie);
 }
 
 // This tests that when we change each byte in the proof to every possible byte
@@ -944,6 +990,43 @@ TEST(MerkleTrie, ProveAllByteVariations)
           MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
     }
     node_encodings[i] = cur;
+  }
+  EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
+}
+
+// [MerkleTriePrefix] includes an additional branch node in the proof than in
+// [MerkleTrie]. Since we already test [MerkleTrie] above, we just change the
+// bytes in the extra branch node in this test to reduce test runtime.
+TEST(MerkleTriePrefix, ProveAllByteVariations)
+{
+  MerkleTriePrefix trie;
+
+  HexArray key_a("12");
+  std::string value_a = "a1";
+  EXPECT_TRUE(trie.insert(key_a, value_a));
+
+  HexArray key_b("123");
+  std::string value_b = "b2";
+  EXPECT_TRUE(trie.insert(key_b, value_b));
+
+  auto [_, node_encodings_by_node] = trie.get_proof_by_node(key_b);
+  auto [root_hash, node_encodings] = trie.get_proof(key_b);
+  for (size_t i = 0; i < node_encodings_by_node[0].size(); i++) {
+    size_t idx = node_encodings.size() - i - 1;
+    const std::byte cur = node_encodings[idx];
+    for (size_t j = 0; j <= 0xFF; j++) {
+      auto to_set = std::byte(j);
+      if (to_set == cur) {
+        // Make sure we do not set the byte to its current value in
+        // [node_encodings] as [MerkleTrie::prove()] will then return true
+        // below.
+        continue;
+      }
+      node_encodings[idx] = to_set;
+      EXPECT_FALSE(
+          MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
+    }
+    node_encodings[idx] = cur;
   }
   EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
 }

@@ -283,7 +283,9 @@ MerkleTrie::get_proof_by_node(const Key &k)
 
     while (node) {
       node->hash_lock.lock_writer();
-      // TODO(jhumphri): Need to hold lock on child hash.
+      // TODO(jhumphri): Need to hold lock on child hash. Maybe we should just
+      // require this function be called when no other threads are accessing the
+      // trie?
       const std::vector<std::byte> &encoding = node->get_node_encoding();
       ret.push_back(encoding);
       node->hash_lock.unlock();
