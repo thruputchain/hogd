@@ -1,8 +1,15 @@
 #include "hogd/container/merkle/merkle_trie.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstring>
-
+#include <optional>
+#include <print>
+#include <sstream>
+#include <stack>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"

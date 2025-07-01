@@ -1,18 +1,22 @@
 #include "hogd/container/merkle/node.h"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstring>
 
+#include <format>
+#include <iterator>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/sha256.h"
-#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {
@@ -314,7 +318,7 @@ Node::get_node_from_encoding(const std::vector<std::byte> &encodings,
     const std::vector<std::byte> node_encodings(encodings.begin() +
                                                     original_idx,
                                                 encodings.begin() + idx);
-    node.hash = Sha256::GetSha256(node_encodings);
+    node.hash = Sha256::get_sha256(node_encodings);
   }
   return ret;
 }

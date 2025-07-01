@@ -19,7 +19,6 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/rw_lock.h"
 #include "hogd/container/merkle/sha256.h"
-#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {
@@ -151,7 +150,7 @@ public:
 
   SHA256Hash compute_node_hash() const
   {
-    return Sha256::GetSha256(get_node_encoding());
+    return Sha256::get_sha256(get_node_encoding());
   }
 
   void clear()

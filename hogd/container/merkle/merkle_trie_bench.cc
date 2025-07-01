@@ -3,8 +3,13 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <future>
+#include <memory>
+#include <print>
 #include <random>
+#include <set>
 #include <string>
+#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -441,7 +446,7 @@ hash_parallel_openssl(benchmark::State &state, size_t num_threads)
     for (size_t i = 0; i < num_threads; i++) {
       futures[i] = pool.submit([per_thread_iterations, i, &to_hash] {
         for (size_t j = 0; j < per_thread_iterations; j++) {
-          Sha256::GetSha256(to_hash[i]);
+          Sha256::get_sha256(to_hash[i]);
           to_hash[i][0] = std::byte(static_cast<uint8_t>(to_hash[i][0]) + 1);
         }
       });
@@ -646,4 +651,5 @@ Init init;
 } // namespace
 
 } // namespace hogd
-benchmark_main();
+
+BENCHMARK_MAIN();

@@ -1,14 +1,16 @@
 #pragma once
 
+#include <cstddef>
+#include <openssl/sha.h> // NOLINT(misc-include-cleaner)
 
-namespace hogd; {
+namespace hogd {
 
 class Sha256 {
 public:
   static constexpr size_t kSha256Size = 32;
 
   static std::array<unsigned char, kSha256Size>
-  GetSha256(const std::vector<std::byte> &data)
+  get_sha256(const std::vector<std::byte> &data)
   {
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 

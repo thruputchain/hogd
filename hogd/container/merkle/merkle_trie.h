@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <functional>
@@ -14,9 +15,7 @@
 #include <vector>
 
 #include "hogd/base/log.h"
-#include "hogd/base/os.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
@@ -467,20 +466,20 @@ public:
     return count;
   }
 
-  bool empty() { return !size(); }
+  bool empty() { return size() == 0u; }
 
 private:
   static constexpr size_t kPrefixSize = 1;
-  static_assert(kPrefixSize);
+  static_assert(kPrefixSize != 0u);
 
   static constexpr size_t kNumTries = 16;
   static_assert(kNumTries == 1 << (4 * kPrefixSize));
 
-  std::pair<size_t, HexArray> get_prefix(const MerkleTrie::Key &k)
+  static std::pair<size_t, HexArray> get_prefix(const MerkleTrie::Key &k)
   {
     CHECK_GT(k.size(), 0UL);
 
-    size_t index = static_cast<size_t>(k.get(0));
+    auto index = static_cast<size_t>(k.get(0));
     MerkleTrie::Key k_no_prefix = k.get_subarray(1, k.size());
     return {index, k_no_prefix};
   }
