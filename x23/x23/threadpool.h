@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <coroutine>
 #include <deque>
 #include <stop_token>
@@ -219,8 +220,14 @@ public:
     return std::move(async);
   }
 
-  static inline const CpuMap core_map = make_cpu_map("topology/core_id");
-  static inline const CpuMap llc_map = make_llc_map();
+  static inline const CpuMap &core_map = [] -> const CpuMap & {
+    static const auto map = make_cpu_map("topology/core_id");
+    return (map);
+  }();
+  static inline const CpuMap &llc_map = [] -> const CpuMap & {
+    static const auto map = make_llc_map();
+    return (map);
+  }();
 
   // Return once every thread in the threadpool has been suspended at
   // least once.  It is an error to call this funciton from within the
@@ -240,6 +247,8 @@ public:
   // If you are executing in a thread pool, return the pool.
   // Otherwise return NULL.
   static ThreadPool *get_thread_pool() { return my_thread_pool; }
+
+  /*
   // If you are executing in a thread pool, return a unique thread
   // identifier in [0, nthreads_].  Otherwise return -1.
   static ptrdiff_t get_thread_no()
@@ -260,6 +269,7 @@ public:
     size_t i = hasher(std::this_thread::get_id());
     return first_non_pool + i % (nbuckets - first_non_pool);
   }
+  */
 
   class SuspendCount {
   public:
@@ -319,7 +329,9 @@ private:
   // Timestamp for empty queues
   static constexpr uint64_t kEmpty = std::numeric_limits<uint64_t>::max();
 
-  // Number of threads currently running in each bucket
+  // Number of threads currently associated with each runqueue.  We
+  // assume threads don't migrade that often, so we can pack these
+  // integers densely without undue cache interference.
   std::unique_ptr<std::atomic_uint[]> queue_nthreads_;
   unsigned queue_nthreads(int qn)
   {
@@ -330,21 +342,37 @@ private:
     Job job;        // Job to run
     uint64_t qtime; // Time job was placed in queue
   };
-  struct Queue {
-    // qtime of oldest Job at front of queue, or kEmpty if empty
-    std::atomic<uint64_t> qtime_{kEmpty};
-    std::atomic_bool wake_on_qtime_increase_{false};
-    MVar<std::deque<QueueItem>> q_;
-
+  struct QueueState {
+    std::deque<QueueItem> q;
+    bool need_consumed_signal{false};
+    std::condition_variable nonempty;
+    std::condition_variable consumed;
+  };
+  using QPtr = MVar<QueueState>::Ptr;
+  struct RunQueue : public MVar<QueueState> {
+    // qtime of oldest Job at back of queue, or kEmpty if empty.  Kept
+    // outside the queue state in its own cache line so it can be
+    // checked approximately without acquiring the mutex.
+    std::atomic_uint64_t qtime_{kEmpty};
     uint64_t qtime() const { return qtime_.load(std::memory_order_relaxed); }
-  };
-  using QPtr = decltype(Queue::q_)::Ptr;
-  struct LockedQueue {
-    int qno;
-    QPtr ptr;
+    static void set_qtime(const QPtr &ptr, uint64_t newqt)
+    {
+      auto *rq = static_cast<RunQueue *>(ptr.get_mvar());
+      rq->qtime_.store(newqt, std::memory_order_relaxed);
+    }
   };
 
-  std::unique_ptr<Queue[]> runqueues_;
+  std::unique_ptr<RunQueue[]> runqueues_;
+
+  // Return which queue a QPtr references, or -1 if none
+  int qno(const QPtr &ptr) const
+  {
+    if (!ptr)
+      return -1;
+    auto ret = static_cast<RunQueue *>(ptr.get_mvar()) - runqueues_.get();
+    assert(ret >= 0 && ret < nqueues_);
+    return ret;
+  }
 
   class Worker {
   public:
@@ -361,8 +389,8 @@ private:
     int bucket_;
 
     void checkcpu() noexcept;
-    LockedQueue getq() noexcept;
-    std::coroutine_handle<> qpop(LockedQueue &ptr);
+    QPtr getq() noexcept;
+    std::coroutine_handle<> qpop(QPtr &ptr);
   };
 
   struct alignas(hardware_destructive_interference_size) ThreadState {
@@ -390,7 +418,7 @@ private:
     return seed = x;
   }
 
-  void qselect(LockedQueue *lq, unsigned cpuhint);
+  void qselect(QPtr *lq, unsigned cpuhint);
 };
 
 } // namespace x23

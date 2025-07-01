@@ -1,5 +1,6 @@
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <memory>
 #include <print>
@@ -15,10 +16,10 @@ namespace x23 {
 ThreadPool::ThreadPool(size_t nthreads)
   : nthreads_(nthreads), nqueues_(llc_map.nbuckets_),
     queue_nthreads_(new std::atomic_uint[nqueues_]{}),
-    runqueues_(std::make_unique<Queue[]>(nqueues_)),
+    runqueues_(std::make_unique<RunQueue[]>(nqueues_)),
     tstate_(std::make_unique<ThreadState[]>(nthreads))
 {
-  fastclock::get_ns();		// Calibrate the clock early
+  fastclock::get_ns(); // Calibrate the clock early
   workers_.reserve(nthreads_);
   threads_.reserve(nthreads_);
   for (size_t i = 0; i < nthreads_; ++i) {
@@ -31,9 +32,9 @@ ThreadPool::~ThreadPool()
 {
   ss_.request_stop();
   for (unsigned i = 0; i < nqueues_; ++i) {
-    auto ptr = runqueues_[i].q_.take();
+    auto ptr = runqueues_[i].take();
     runqueues_[i].qtime_ = 0;
-    runqueues_[i].qtime_.notify_all();
+    ptr->nonempty.notify_all();
   }
   threads_.clear(); // Join all threads before destroying fields
 }
@@ -45,42 +46,43 @@ ThreadPool::~ThreadPool()
 // older than the random queue, pick the random queue instead.  Only
 // return queues that have at least one thread after they are locked.
 void
-ThreadPool::qselect(ThreadPool::LockedQueue *lq, unsigned cpuhint)
+ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
 {
   if (nqueues_ == 1) {
-    if (!lq->ptr)
-      lq->ptr = runqueues_[0].q_.take();
+    if (!*lq)
+      *lq = runqueues_[0].take();
     return;
   }
 
   int affinity_queue = llc_map.bucket(cpuhint);
-  if (lq->ptr && lq->qno == affinity_queue)
+  if (qno(*lq) == affinity_queue)
     return;
 
   static thread_local uint64_t seed{
-      (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xffffff) |
-      fastclock::get_ns() << 32};
+      (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xffffffff) |
+      1UL << 20 | fastclock::get_ns() << 32};
 
   for (;;) {
-    lq->ptr.reset();
+    lq->reset();
     int other_queue = rnd(seed) % (nqueues_ - 1);
     other_queue += int{other_queue >= affinity_queue};
+    int target_queue;
 
     if (queue_nthreads(affinity_queue)) {
       if (queue_nthreads(other_queue))
-	lq->qno = (runqueues_[affinity_queue].qtime() >
-		   runqueues_[other_queue].qtime() - 10'000)
-	  ? affinity_queue
-	  : other_queue;
+        target_queue = (runqueues_[affinity_queue].qtime() >
+                        runqueues_[other_queue].qtime() - 10'000)
+                           ? affinity_queue
+                           : other_queue;
       else
-        lq->qno = affinity_queue;
+        target_queue = affinity_queue;
     }
     else
-      for (lq->qno = other_queue; !queue_nthreads(lq->qno);
-           lq->qno = (lq->qno + 1) % nqueues_)
-	;
-    lq->ptr = runqueues_[lq->qno].q_.take();
-    if (queue_nthreads(lq->qno))
+      for (target_queue = other_queue; !queue_nthreads(target_queue);
+           target_queue = (target_queue + 1) % nqueues_)
+        ;
+    *lq = runqueues_[target_queue].take();
+    if (queue_nthreads(target_queue))
       return;
   }
 }
@@ -96,14 +98,14 @@ ThreadPool::go(std::vector<Job> &&jobs)
 
   uint64_t now = fastclock::get_ns();
 
-  LockedQueue lq;
+  QPtr lq;
   for (auto &j : jobs) {
     qselect(&lq, j.cpuhint);
-    bool wasempty = lq.ptr->empty();
-    lq.ptr->emplace_back(j, now);
+    bool wasempty = lq->q.empty();
+    lq->q.emplace_back(j, now);
     if (wasempty) {
-      runqueues_[lq.qno].qtime_ = now;
-      runqueues_[lq.qno].qtime_.notify_all();
+      RunQueue::set_qtime(lq, now);
+      lq->nonempty.notify_all();
     }
   }
 }
@@ -129,28 +131,33 @@ ThreadPool::drain() noexcept
 {
   assert(ThreadPool::my_thread_pool != this);
 
+  // Get the timestamp of the newest (back) job in each runqueue
   std::vector<size_t> backtimes(nqueues_);
   for (size_t i = 0; i < nqueues_; ++i) {
-    auto ptr = runqueues_[i].q_.take();
-    backtimes[i] = ptr->empty() ? kEmpty : ptr->back().qtime;
+    auto ptr = runqueues_[i].take();
+    backtimes[i] = ptr->q.empty() ? kEmpty : ptr->q.back().qtime;
   }
 
+  // Loop until the oldest (front) job in each runqueue is newer than
+  // the newest job in that queue at the time we started the drain.
   for (size_t i = 0; i < nqueues_; ++i)
     if (backtimes[i] != kEmpty)
       for (;;) {
-        uint64_t qt = runqueues_[i].qtime_;
-        if (qt > backtimes[i])
+        auto ptr = runqueues_[i].take();
+        if (ptr->q.empty() || ptr->q.front().qtime > backtimes[i])
           break;
-        runqueues_[i].wake_on_qtime_increase_ = true;
-        runqueues_[i].qtime_.wait(qt);
+        ptr->need_consumed_signal = true;
+        ptr.wait(ptr->consumed);
       }
 
+  // Now also wait for all running threads to yield, since some of
+  // those might still have been enqueued before drain was called.
   quiesce();
 }
 
 ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno) noexcept
   : pool_(pool), threadno_(threadno),
-    rndseed_(fastclock::get_ns() << 20 ^ threadno)
+    rndseed_(fastclock::get_ns() << 21 | (threadno & 0xfffff))
 {}
 
 void
@@ -164,7 +171,7 @@ ThreadPool::Worker::checkcpu() noexcept
   // The last thread in a bucket can't leave if the queue is non-empty
   unsigned zero = 0;
   if (pool_->queue_nthreads_[bucket_].fetch_sub(1) > 1 ||
-      pool_->runqueues_[bucket_].q_->empty() ||
+      pool_->runqueues_[bucket_]->q.empty() ||
       // Oops the queue is not empty after we set the thread count to
       // zero.  We have to increase the thread count again to keep
       // servicing the queue.  But if we fail to increase the counter,
@@ -175,72 +182,77 @@ ThreadPool::Worker::checkcpu() noexcept
         1, std::memory_order_relaxed);
 }
 
-ThreadPool::LockedQueue
+ThreadPool::QPtr
 ThreadPool::Worker::getq() noexcept
 {
   for (;;) {
     checkcpu();
-    auto &myq = pool_->runqueues_[bucket_];
-    if (auto ptr = myq.q_.take(); !ptr->empty())
-      return {.qno = bucket_, .ptr = std::move(ptr)};
+    auto ptr = pool_->runqueues_[bucket_].take();
+    if (!ptr->q.empty())
+      return ptr;
 
     // Our queue is empty? Pick older job from two random runqueues
     if (auto nb = pool_->nqueues_; nb > 1) {
-      Queue *qs[2];
+      int qns[2];
       if (nb > 3) {
-        qs[0] = &pool_->runqueues_[rnd(rndseed_) % pool_->nqueues_];
-        qs[1] = &pool_->runqueues_[rnd(rndseed_) % pool_->nqueues_];
+        qns[0] = rnd(rndseed_) % nb;
+        qns[1] = rnd(rndseed_) % nb;
       }
       else {
-        qs[0] = &pool_->runqueues_[(bucket_ + 1) % nb];
-        qs[1] = &pool_->runqueues_[(bucket_ + 2) % nb];
+        qns[0] = (bucket_ + 1) % nb;
+        qns[1] = (bucket_ + 2) % nb;
       }
 
-      uint64_t qt[2]{qs[0]->qtime(), qs[1]->qtime()};
-      int i = unsigned{qt[1] < qt[0]};
-      if (qt[i] != kEmpty) // Don't bother with mutex if probably empty
-        if (auto ptr = qs[i]->q_.take(); !ptr->empty())
-          return {.qno = i, .ptr = std::move(ptr)};
+      uint64_t qt[2]{pool_->runqueues_[qns[0]].qtime(),
+		     pool_->runqueues_[qns[1]].qtime()};
+      auto i = unsigned{qt[1] < qt[0]};
+      // Don't bother with mutex if probably empty
+      if (qt[i] != kEmpty) {
+	ptr.reset();
+	ptr = pool_->runqueues_[qns[i]].take();
+	if (!ptr->q.empty())
+	  return ptr;
+	continue;
+      }
     }
 
-    if (pool_->ss_.stop_requested())
-      return {.qno = -1, .ptr = {}};
-    myq.qtime_.wait(kEmpty);
+    if (pool_->ss_.stop_requested()) {
+      assert(ptr->q.empty());
+      return {};
+    }
+    ptr.wait(ptr->nonempty);
   }
 }
 
 std::coroutine_handle<>
-ThreadPool::Worker::qpop(LockedQueue &lq)
+ThreadPool::Worker::qpop(QPtr &ptr)
 {
-  assert(!lq.ptr->empty());
+  assert(!ptr->q.empty());
 
-  auto mycore = core_map.bucket(cpu_);
-  const auto qi = lq.ptr->front();
-  const auto qt = lq.ptr->front().qtime;
+  const auto mycore = core_map.bucket(cpu_);
+  const auto qi = ptr->q.front();
+  const auto qt = qi.qtime;
 
   if (core_map.bucket(qi.job.cpuhint) != mycore) {
     // Try to find work on the same core without going forward more
-    // than 5 microseconds.
-    for (auto it = lq.ptr->begin() + 1;
-         it != lq.ptr->end() && it->qtime < qt + 5'000; ++it)
-      if (core_map.bucket(it->job.cpuhint) != mycore) {
+    // than 5 microseconds from the oldest job.
+    for (auto it = ptr->q.begin() + 1;
+         it != ptr->q.end() && it->qtime < qt + 5'000; ++it)
+      if (core_map.bucket(it->job.cpuhint) == mycore) {
         auto ret = it->job.value;
-        lq.ptr->erase(it);
+        ptr->q.erase(it);
         return ret;
       }
   }
 
-  lq.ptr->pop_front();
-
-  uint64_t nqt = lq.ptr->empty() ? kEmpty : lq.ptr->front().qtime;
-  if (nqt != qt) {
-    auto &q = pool_->runqueues_[lq.qno];
-    q.qtime_.store(kEmpty, std::memory_order_relaxed);
-    if (q.wake_on_qtime_increase_) {
-      q.wake_on_qtime_increase_ = false;
-      q.qtime_.notify_all();
-    }
-  };
+  ptr->q.pop_front();
+  bool empty = ptr->q.empty();
+  if (empty)
+    RunQueue::set_qtime(ptr, kEmpty);
+  if (ptr->need_consumed_signal && (empty || ptr->q.front().qtime > qt)) {
+    ptr->need_consumed_signal = false;
+    ptr->consumed.notify_all();
+  }
 
   return qi.job.value;
 }
@@ -263,11 +275,11 @@ ThreadPool::Worker::work()
       ts.count_.notify_all();
     }
 
-    auto lq = getq();
-    if (!lq.ptr)
+    auto ptr = getq();
+    if (!ptr)
       return;
-    auto task = qpop(lq);
-    lq.ptr.reset();
+    auto task = qpop(ptr);
+    ptr.reset();
 
     ts.count_ = count++;
     task();

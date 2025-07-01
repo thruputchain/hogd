@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cassert>
 
+#include <x23/refcnt.h>
 #include <x23/threadpool.h>
 
 namespace x23 {
@@ -96,18 +97,19 @@ class SharedLock : public TestLock {
   struct alignas(hardware_destructive_interference_size) Inhibitor {
     std::atomic_uint count{0};
     std::atomic_bool want_wake{false};
+    TestLock *tl; // Could get away without, but we have a whole cache line
 
-    void inc(TestLock *tl) noexcept
+    void incref() noexcept
     {
       for (;;) {
         count.fetch_add(1);
         if (!tl->busy())
           return;
-        dec();
+        decref();
         tl->block_until_free();
       }
     }
-    void dec() noexcept
+    void decref() noexcept
     {
       if (count.fetch_sub(1) == 1 && want_wake.load()) {
         want_wake = false;
@@ -123,19 +125,26 @@ class SharedLock : public TestLock {
     }
   };
 
-public:
-  const unsigned nshared_;
+  auto nshared() const { return map_.nbuckets_; }
 
-  explicit SharedLock(unsigned nshared = 1) noexcept
-    : nshared_(nshared), inhibitors_(new Inhibitor[nshared_])
+public:
+  const CpuMap &map_;
+
+  explicit SharedLock(const CpuMap &map = ThreadPool::llc_map)
+    : map_(map), inhibitors_(std::make_unique<Inhibitor[]>(nshared()))
   {
-    assert(nshared);
+    assert(nshared() > 0);
+    for (size_t i = 0; i < nshared(); ++i)
+      inhibitors_[i].tl = this;
   }
-  ~SharedLock() { delete[] inhibitors_; }
+  ~SharedLock()
+  {
+    assert(inhibitors_.get());
+  }
 
   void block_while_inhibited() noexcept
   {
-    for (size_t i = 0; i < nshared_; ++i)
+    for (size_t i = 0; i < nshared(); ++i)
       inhibitors_[i].block();
   }
 
@@ -144,39 +153,16 @@ public:
   // instead of providing an explicit unlock method, return a Holder
   // that remembers in which thread the lock was acquired and releases
   // it on destruction.
-  class [[nodiscard]] SharedHolder {
+  class [[nodiscard]] SharedHolder : private RefPtr<Inhibitor> {
+    using super = RefPtr<Inhibitor>;
   public:
-    SharedHolder() noexcept = default;
+    SharedHolder() noexcept : super(nullptr) {}
     SharedHolder(SharedLock &sl) noexcept
-      : inh_(&sl.inhibitors_[ThreadPool::bucket_index(sl.nshared_)])
-    {
-      inh_->inc(&sl);
-    }
-    SharedHolder(SharedHolder &&other) noexcept
-      : inh_(std::exchange(other.inh_, nullptr))
-    {}
-    ~SharedHolder() { reset(); }
-
-    SharedHolder &operator=(SharedHolder &&other) noexcept
-    {
-      if (&other != this) {
-	reset();
-	inh_ = std::exchange(other.inh_, nullptr);
-      }
-      return *this;
-    }
-
-    // Release the lock immediately (if Holder contains one)
-    void reset() noexcept
-    {
-      if (inh_) {
-        inh_->dec();
-        inh_ = nullptr;
-      }
-    }
-
-  private:
-    struct Inhibitor *inh_{};
+      : super(sl.inhibitors_[sl.map_.bucket()]) {}
+    SharedHolder(SharedHolder &&) noexcept = default;
+    using super::operator=;
+    using super::reset;
+    friend detail::RefOps<super>;
   };
 
   // Don't call it lock_shared() because the interface is different
@@ -184,7 +170,7 @@ public:
   SharedHolder hold_shared() noexcept { return *this; }
 
 protected:
-  Inhibitor *inhibitors_;
+  std::unique_ptr<Inhibitor[]> inhibitors_;
 };
 
 } // namespace x23

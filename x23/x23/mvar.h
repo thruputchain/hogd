@@ -71,6 +71,8 @@ public:
       c.wait(ul);
     }
 
+    MVar *get_mvar() const { return mv_; }
+
   private:
     MVar *mv_{};
   };
@@ -182,6 +184,8 @@ public:
       Defer _rel([&ul] { ul.release(); });
       c.wait(ul);
     }
+
+    MVar *get_mvar() const { return mv_; }
 
   private:
     MVar *mv_{};
