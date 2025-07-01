@@ -291,6 +291,36 @@ private:
   Arena<Node> arena_;
 };
 
+// This is an optimization for the [MerkleTrie]. It exposes the same exact API,
+// except empty keys are not allowed.
+//
+// When using the [MerkleTrie] with multithreading, the root node is under heavy
+// contention since all threads must acquire the reader lock on it before they
+// can look at any other nodes. This leads to performance degradation.
+//
+// [MerkleTriePrefix] removes this contention. It creates a root "node", where
+// each of the child point to a different [MerkleTrie]. This root "node" is
+// never modified, so there is no need to acquire a reader lock to access it.
+// Each [MerkleTrie] represents a prefix of one hex digit. For example, the
+// [MerkleTrie] that is child [0xa] holds all keys that start with [0xa].
+//
+// Example: (This is exactly the same as the example for [MerkleTrie] above.)
+// MerkleTriePrefix trie;
+//
+// HexArray key("1234");
+// std::string value = "hello";
+// trie.insert(key, value);
+//
+// std::pair<SHA256Hash, std::vector<std::byte>> proof = trie.get_proof();
+//
+// This returns true:
+// trie.prove(proof.first, proof.second, key, value);
+//
+// This returns false:
+// HexArray different_key("12");
+// trie.prove(proof.first, proof.second, different_key, value);
+//
+// trie.remove(key);
 class MerkleTriePrefix {
 public:
   MerkleTriePrefix() = default;
