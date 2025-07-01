@@ -466,11 +466,11 @@ public:
     return count;
   }
 
-  bool empty() { return size() == 0u; }
+  bool empty() { return size() == 0U; }
 
 private:
   static constexpr size_t kPrefixSize = 1;
-  static_assert(kPrefixSize != 0u);
+  static_assert(kPrefixSize != 0U);
 
   static constexpr size_t kNumTries = 16;
   static_assert(kNumTries == 1 << (4 * kPrefixSize));

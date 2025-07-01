@@ -1,7 +1,10 @@
 #pragma once
 
-#include <cstddef>
 #include <openssl/sha.h> // NOLINT(misc-include-cleaner)
+
+#include <array>
+#include <cstddef>
+#include <vector>
 
 namespace hogd {
 

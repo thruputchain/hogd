@@ -594,10 +594,12 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
   std::cout << trie << '\n';
 }
 
+namespace {
+
 // TODO(jhumphri): Clean this up further.
 // This tests generating a proof and verifying a proof.
 template<typename T>
-static void
+void
 prove(T &trie)
 {
   HexArray key_a("1234");
@@ -863,6 +865,8 @@ prove(T &trie)
   }
 }
 
+} // namespace
+
 TEST(MerkleTrie, Prove)
 {
   MerkleTrie trie;
@@ -875,10 +879,12 @@ TEST(MerkleTriePrefix, Prove)
   prove(trie);
 }
 
+namespace {
+
 // Test that we cannot prove a KV pair with an empty key and value is in an
 // empty trie.
 template<typename T>
-static void
+void
 prove_empty_trie(T &trie)
 {
   HexArray key;
@@ -886,6 +892,8 @@ prove_empty_trie(T &trie)
   const auto &[root_hash, node_encodings] = trie.get_proof(key);
   EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
 }
+
+} // namespace
 
 TEST(MerkleTrie, ProveEmptyTrie)
 {
@@ -921,11 +929,13 @@ TEST(MerkleTrie, ProveEmptyKVPair)
   }
 }
 
+namespace {
+
 // Test that we can no longer prove a KV pair is in the trie after removing it.
 // Also check that after removign it, we cannot prove a KV pair with an empty
 // key and value is in the trie.
 template<typename T>
-static void
+void
 prove_after_removing_key(T &trie)
 {
   HexArray key("1234");
@@ -945,6 +955,8 @@ prove_after_removing_key(T &trie)
     EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
   }
 }
+
+} // namespace
 
 TEST(MerkleTrie, ProveAfterRemovingKey)
 {
@@ -1070,13 +1082,15 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
   EXPECT_EQ(seen, expected);
 }
 
+namespace {
+
 // This test stresses the Merkle trie. It randomly generates 100 different KV
 // pairs, places them into the trie, and then removes them from the trie. After
 // each operation, this test checks that [for_each()], [get_proof()], [prove()],
 // and [find_begin()] return expected values. This test also performs an
 // integrity check on the trie after each operation with [check()].
 template<typename T>
-static void
+void
 stress(T &trie, bool allow_empty)
 {
   constexpr size_t kNumIterations = 100;
@@ -1158,6 +1172,8 @@ stress(T &trie, bool allow_empty)
   }
 }
 
+} // namespace
+
 TEST(MerkleTrie, Stress)
 {
   MerkleTrie trie;
@@ -1170,13 +1186,15 @@ TEST(MerkleTriePrefix, Stress)
   stress(trie, /*allow_empty=*/false);
 }
 
+namespace {
+
 // This test first adds 5,000 KV pairs to the trie, then proves each KV pair in
 // the trie, then removes all KV pairs.
 //
 // This is a much larger number of KV pairs than in the [MerkleTrie::Stress]
 // test, but we perform fewer checks to reduce test runtime.
 template<typename T>
-static void
+void
 stress_two(T &trie, bool allow_empty)
 {
   constexpr size_t kNumIterations = 5'000;
@@ -1236,6 +1254,8 @@ stress_two(T &trie, bool allow_empty)
   trie.for_each(f);
   EXPECT_EQ(seen, total);
 }
+
+} // namespace
 
 TEST(MerkleTrie, StressTwo)
 {
