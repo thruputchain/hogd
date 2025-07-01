@@ -4,8 +4,8 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <iostream>
-#include <map>
 
+#include <map>
 #include <memory>
 #include <print>
 #include <random>
@@ -20,7 +20,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
-#include "hogd/crypto/crypto.h"
+#include "hogd/container/merkle/sha256.h"
 #include "types.hh"
 
 namespace hogd {
@@ -32,12 +32,13 @@ namespace {
 
 // Generates a random path with anywhere from 0 to 40 hex digits (inclusive).
 HexArray
-generate_random_path()
+generate_random_path(bool allow_empty)
 {
   std::random_device rd;
   std::mt19937 gen(rd());
 
-  std::uniform_int_distribution<size_t> path_size_dist(0, 128);
+  std::uniform_int_distribution<size_t> path_size_dist(allow_empty ? 0 : 1,
+                                                       128);
   size_t path_size = path_size_dist(gen);
 
   // [path_size] may be odd, but [path] can only hold an even number of hex
@@ -153,6 +154,21 @@ TEST(MerkleTrie, EmptyKeyRemoveChild)
   std::cout << trie << '\n';
   EXPECT_TRUE(trie.remove(key_b));
   std::cout << trie << '\n';
+}
+
+// Tests that [MerkleTriePrefix] does not work with empty keys.
+TEST(MerkleTriePrefix, EmptyKey)
+{
+  MerkleTriePrefix trie;
+
+  HexArray key;
+  std::string value = "hello";
+  EXPECT_FALSE(trie.insert(key, value));
+  void *cookie;
+  EXPECT_EQ(trie.find_begin(key, cookie), nullptr);
+  EXPECT_FALSE(trie.remove(key));
+  EXPECT_TRUE(trie.get_proof(key).second.empty());
+  EXPECT_TRUE(trie.get_proof_by_node(key).second.empty());
 }
 
 // These tests add an empty value to the trie.
@@ -578,12 +594,14 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
   std::cout << trie << '\n';
 }
 
+namespace {
+
 // TODO(jhumphri): Clean this up further.
 // This tests generating a proof and verifying a proof.
-TEST(MerkleTrie, Prove)
+template<typename T>
+void
+prove(T &trie)
 {
-  MerkleTrie trie;
-
   HexArray key_a("1234");
   std::string value_a = "hello";
   EXPECT_TRUE(trie.insert(key_a, value_a));
@@ -596,6 +614,7 @@ TEST(MerkleTrie, Prove)
   std::string value_c = "hello three";
   EXPECT_TRUE(trie.insert(key_c, value_c));
 
+  trie.generate_top_level_hashes();
   const auto &[root_hash, node_encodings] = trie.get_proof(key_b);
   const auto &[root_hash_by_node, node_encodings_by_node] =
       trie.get_proof_by_node(key_b);
@@ -662,7 +681,8 @@ TEST(MerkleTrie, Prove)
 
   {
     // Try using the hash of an internal node as the root hash.
-    SHA256Hash different_root_hash = sha256(node_encodings_by_node[1]);
+    SHA256Hash different_root_hash =
+        Sha256::get_sha256(node_encodings_by_node[1]);
     EXPECT_FALSE(
         MerkleTrie::prove(different_root_hash, node_encodings, key_b, value_b));
   }
@@ -795,7 +815,8 @@ TEST(MerkleTrie, Prove)
       // find matching branch.
       branch_begin_idx = idx + node_encodings_by_node[node_idx].size() -
                          (Node::kMaxNumBranches * sizeof(SHA256Hash));
-      SHA256Hash to_find = sha256(node_encodings_by_node[node_idx - 1]);
+      SHA256Hash to_find =
+          Sha256::get_sha256(node_encodings_by_node[node_idx - 1]);
       for (size_t i = 0; i < Node::kMaxNumBranches; i++) {
         auto *to_compare = reinterpret_cast<SHA256Hash *>(
             &copy[branch_begin_idx + (i * sizeof(SHA256Hash))]);
@@ -844,16 +865,46 @@ TEST(MerkleTrie, Prove)
   }
 }
 
-// Test that we cannot prove a KV pair with an empty key and value is in an
-// empty trie.
-TEST(MerkleTrie, ProveEmptyTrie)
+} // namespace
+
+TEST(MerkleTrie, Prove)
 {
   MerkleTrie trie;
+  prove(trie);
+}
 
+TEST(MerkleTriePrefix, Prove)
+{
+  MerkleTriePrefix trie;
+  prove(trie);
+}
+
+namespace {
+
+// Test that we cannot prove a KV pair with an empty key and value is in an
+// empty trie.
+template<typename T>
+void
+prove_empty_trie(T &trie)
+{
   HexArray key;
   std::string value;
   const auto &[root_hash, node_encodings] = trie.get_proof(key);
   EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
+}
+
+} // namespace
+
+TEST(MerkleTrie, ProveEmptyTrie)
+{
+  MerkleTrie trie;
+  prove_empty_trie(trie);
+}
+
+TEST(MerkleTriePrefix, ProveEmptyTrie)
+{
+  MerkleTriePrefix trie;
+  prove_empty_trie(trie);
 }
 
 // Test that we can prove a KV pair with an empty key and value is in the trie,
@@ -878,13 +929,15 @@ TEST(MerkleTrie, ProveEmptyKVPair)
   }
 }
 
+namespace {
+
 // Test that we can no longer prove a KV pair is in the trie after removing it.
 // Also check that after removign it, we cannot prove a KV pair with an empty
 // key and value is in the trie.
-TEST(MerkleTrie, ProveAfterRemovingKey)
+template<typename T>
+void
+prove_after_removing_key(T &trie)
 {
-  MerkleTrie trie;
-
   HexArray key("1234");
   std::string value = "hello";
   EXPECT_TRUE(trie.insert(key, value));
@@ -901,6 +954,20 @@ TEST(MerkleTrie, ProveAfterRemovingKey)
     const auto &[root_hash, node_encodings] = trie.get_proof(key);
     EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
   }
+}
+
+} // namespace
+
+TEST(MerkleTrie, ProveAfterRemovingKey)
+{
+  MerkleTrie trie;
+  prove_after_removing_key(trie);
+}
+
+TEST(MerkleTriePrefix, ProveAfterRemovingKey)
+{
+  MerkleTriePrefix trie;
+  prove_after_removing_key(trie);
 }
 
 // This tests that when we change each byte in the proof to every possible byte
@@ -934,6 +1001,43 @@ TEST(MerkleTrie, ProveAllByteVariations)
           MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
     }
     node_encodings[i] = cur;
+  }
+  EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
+}
+
+// [MerkleTriePrefix] includes an additional branch node in the proof than in
+// [MerkleTrie]. Since we already test [MerkleTrie] above, we just change the
+// bytes in the extra branch node in this test to reduce test runtime.
+TEST(MerkleTriePrefix, ProveAllByteVariations)
+{
+  MerkleTriePrefix trie;
+
+  HexArray key_a("12");
+  std::string value_a = "a1";
+  EXPECT_TRUE(trie.insert(key_a, value_a));
+
+  HexArray key_b("123");
+  std::string value_b = "b2";
+  EXPECT_TRUE(trie.insert(key_b, value_b));
+
+  auto [_, node_encodings_by_node] = trie.get_proof_by_node(key_b);
+  auto [root_hash, node_encodings] = trie.get_proof(key_b);
+  for (size_t i = 0; i < node_encodings_by_node[0].size(); i++) {
+    size_t idx = node_encodings.size() - i - 1;
+    const std::byte cur = node_encodings[idx];
+    for (size_t j = 0; j <= 0xFF; j++) {
+      auto to_set = std::byte(j);
+      if (to_set == cur) {
+        // Make sure we do not set the byte to its current value in
+        // [node_encodings] as [MerkleTrie::prove()] will then return true
+        // below.
+        continue;
+      }
+      node_encodings[idx] = to_set;
+      EXPECT_FALSE(
+          MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
+    }
+    node_encodings[idx] = cur;
   }
   EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
 }
@@ -978,15 +1082,18 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
   EXPECT_EQ(seen, expected);
 }
 
+namespace {
+
 // This test stresses the Merkle trie. It randomly generates 100 different KV
 // pairs, places them into the trie, and then removes them from the trie. After
 // each operation, this test checks that [for_each()], [get_proof()], [prove()],
 // and [find_begin()] return expected values. This test also performs an
 // integrity check on the trie after each operation with [check()].
-TEST(MerkleTrie, Stress)
+template<typename T>
+void
+stress(T &trie, bool allow_empty)
 {
   constexpr size_t kNumIterations = 100;
-  MerkleTrie trie;
 
   std::map<HexArray, std::string> total;
   std::map<HexArray, std::string> seen;
@@ -996,7 +1103,7 @@ TEST(MerkleTrie, Stress)
 
   // Insert the KV pairs.
   for (size_t i = 0; i < kNumIterations; i++) {
-    HexArray path = generate_random_path();
+    HexArray path = generate_random_path(allow_empty);
     const std::string value = std::to_string(i);
     bool insert = trie.insert(path, value);
     EXPECT_EQ(insert, !total.contains(path));
@@ -1065,15 +1172,32 @@ TEST(MerkleTrie, Stress)
   }
 }
 
+} // namespace
+
+TEST(MerkleTrie, Stress)
+{
+  MerkleTrie trie;
+  stress(trie, /*allow_empty=*/true);
+}
+
+TEST(MerkleTriePrefix, Stress)
+{
+  MerkleTriePrefix trie;
+  stress(trie, /*allow_empty=*/false);
+}
+
+namespace {
+
 // This test first adds 5,000 KV pairs to the trie, then proves each KV pair in
 // the trie, then removes all KV pairs.
 //
 // This is a much larger number of KV pairs than in the [MerkleTrie::Stress]
 // test, but we perform fewer checks to reduce test runtime.
-TEST(MerkleTrie, StressTwo)
+template<typename T>
+void
+stress_two(T &trie, bool allow_empty)
 {
   constexpr size_t kNumIterations = 5'000;
-  MerkleTrie trie;
 
   std::map<HexArray, std::string> total;
   std::map<HexArray, std::string> seen;
@@ -1083,7 +1207,7 @@ TEST(MerkleTrie, StressTwo)
 
   // Insert the KV pairs.
   for (size_t i = 0; i < kNumIterations; i++) {
-    HexArray path = generate_random_path();
+    HexArray path = generate_random_path(allow_empty);
     const std::string value = std::to_string(i);
     bool insert = trie.insert(path, value);
     EXPECT_EQ(insert, !total.contains(path));
@@ -1131,6 +1255,20 @@ TEST(MerkleTrie, StressTwo)
   EXPECT_EQ(seen, total);
 }
 
+} // namespace
+
+TEST(MerkleTrie, StressTwo)
+{
+  MerkleTrie trie;
+  stress_two(trie, /*allow_empty=*/true);
+}
+
+TEST(MerkleTriePrefix, StressTwo)
+{
+  MerkleTriePrefix trie;
+  stress_two(trie, /*allow_empty=*/false);
+}
+
 namespace {
 
 // Inserts and removes ~200,000 KV pairs with [num_threads] threads.
@@ -1144,7 +1282,7 @@ run_multithread(size_t num_threads)
   const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
   CHECK_EQ(kNumKVPairs % num_threads, 0UL);
 
-  MerkleTrie trie;
+  MerkleTriePrefix trie;
   std::vector<std::vector<HexArray>> paths(num_threads);
   {
     std::set<HexArray> generated;
@@ -1154,7 +1292,7 @@ run_multithread(size_t num_threads)
     fflush(stdout);
 
     for (size_t i = 0; i < kInitialSize; i++) {
-      HexArray path = generate_random_path();
+      HexArray path = generate_random_path(/*allow_empty=*/false);
       if (generated.contains(path)) {
         i--;
         continue;
@@ -1175,7 +1313,7 @@ run_multithread(size_t num_threads)
       paths[i].reserve(num_kv_pairs_per_thread);
 
       for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-        HexArray path = generate_random_path();
+        HexArray path = generate_random_path(/*allow_empty=*/false);
         if (generated.contains(path)) {
           j--;
           continue;
@@ -1216,7 +1354,7 @@ run_multithread(size_t num_threads)
 
 } // namespace
 
-TEST(MerkleTrie, Multithread128)
+TEST(MerkleTriePrefix, Multithread128)
 {
   run_multithread(/*num_threads=*/128);
 }

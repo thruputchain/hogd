@@ -4,8 +4,8 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
-#include <format>
 
+#include <format>
 #include <iterator>
 #include <optional>
 #include <sstream>
@@ -13,9 +13,10 @@
 #include <vector>
 
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
-#include "hogd/crypto/crypto.h"
+#include "hogd/container/merkle/sha256.h"
 #include "types.hh"
 
 namespace hogd {
@@ -28,16 +29,12 @@ cast_char_to_byte(unsigned char ch)
   return std::byte(ch);
 }
 
-std::vector<std::byte>
-size_to_bytes(size_t s)
+void
+size_to_bytes(size_t s, std::vector<std::byte> &append_to)
 {
-  std::vector<std::byte> ret;
-  ret.reserve(sizeof(size_t));
-
   for (size_t i = 0; i < sizeof(size_t); i++) {
-    ret.push_back(std::byte((s >> (8 * i)) & 0xFF));
+    append_to.push_back(std::byte((s >> (8 * i)) & 0xFF));
   }
-  return ret;
 }
 
 void
@@ -82,10 +79,8 @@ get_value_encoding(std::vector<std::byte> &encoding,
   std::byte value_present_byte = value ? std::byte{0x01} : std::byte{0x00};
   encoding.push_back(value_present_byte);
 
-  std::vector<std::byte> value_size_bytes =
-      size_to_bytes(value ? value->size() : 0);
-  encoding.insert(encoding.end(), value_size_bytes.begin(),
-                  value_size_bytes.end());
+  size_to_bytes(value ? value->size() : 0, encoding);
+
   if (value) {
     const std::string &v = *value;
     std::ranges::transform(v, std::back_inserter(encoding), cast_char_to_byte);
@@ -95,12 +90,9 @@ get_value_encoding(std::vector<std::byte> &encoding,
 void
 get_path_encoding(std::vector<std::byte> &encoding, const HexArray &path)
 {
-  std::vector<std::byte> path_size_bytes = size_to_bytes(path.size());
-  encoding.insert(encoding.end(), path_size_bytes.begin(),
-                  path_size_bytes.end());
+  size_to_bytes(path.size(), encoding);
 
-  const std::vector<std::byte> path_bytes = path.to_byte_vector();
-  encoding.insert(encoding.end(), path_bytes.begin(), path_bytes.end());
+  path.to_byte_vector(encoding);
 }
 
 void
@@ -108,17 +100,15 @@ get_child_encoding(std::vector<std::byte> &encoding,
                    const std::array<Node *, Node::kMaxNumBranches> children,
                    size_t num_children)
 {
-  static constexpr std::array<std::byte, 32> kNullptr = {};
-
+  size_t cur_size = encoding.size();
+  encoding.insert(encoding.end(), num_children * Sha256::kSha256Size,
+                  std::byte{0x0});
   for (size_t i = 0; i < num_children; i++) {
     Node *child = children[i];
     if (child) {
-      std::ranges::transform(child->hash, std::back_inserter(encoding),
-                             cast_char_to_byte);
+      memcpy(&encoding[cur_size], &child->hash, Sha256::kSha256Size);
     }
-    else {
-      encoding.insert(encoding.end(), kNullptr.begin(), kNullptr.end());
-    }
+    cur_size += Sha256::kSha256Size;
   }
 }
 
@@ -248,25 +238,25 @@ get_leaf_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
 
 } // namespace
 
-std::vector<std::byte>
+std::vector<std::byte> &
 Node::get_node_encoding() const
 {
-  // TODO(jhumphri): Optimize. We know the max lengths of the values we need to
-  // hash up front.
-  std::vector<std::byte> to_hash;
-  to_hash.push_back(static_cast<std::byte>(type));
+  static PerThread<std::vector<std::byte>> to_hash;
+  to_hash->clear();
+
+  to_hash->push_back(static_cast<std::byte>(type));
   switch (type) {
   case Node::Type::kBranch:
-    get_branch_encoding(to_hash);
+    get_branch_encoding(*to_hash);
     break;
   case Node::Type::kExtension:
-    get_extension_encoding(to_hash);
+    get_extension_encoding(*to_hash);
     break;
   case Node::Type::kLeaf:
-    get_leaf_encoding(to_hash);
+    get_leaf_encoding(*to_hash);
     break;
   }
-  return to_hash;
+  return *to_hash;
 }
 
 void
@@ -328,7 +318,7 @@ Node::get_node_from_encoding(const std::vector<std::byte> &encodings,
     const std::vector<std::byte> node_encodings(encodings.begin() +
                                                     original_idx,
                                                 encodings.begin() + idx);
-    node.hash = sha256(node_encodings);
+    node.hash = Sha256::get_sha256(node_encodings);
   }
   return ret;
 }

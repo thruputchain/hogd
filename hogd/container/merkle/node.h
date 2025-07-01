@@ -18,7 +18,7 @@
 #include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/rw_lock.h"
-#include "hogd/crypto/crypto.h"
+#include "hogd/container/merkle/sha256.h"
 #include "types.hh"
 
 namespace hogd {
@@ -80,9 +80,6 @@ public:
   HexArray path;
 
   // Used by branches and leaves.
-  // TODO(jhumphri): Should we be able to place values in extension nodes, too?
-  // For example, the [TwoLeavesAndOneBranch] test would produce a more
-  // efficient trie if we could do this.
   std::optional<std::string> value;
 
   // Used by branches and extensions.
@@ -144,14 +141,17 @@ public:
   }
 
   // Returns an encoding of the node as a byte vector.
-  std::vector<std::byte> get_node_encoding() const;
+  std::vector<std::byte> &get_node_encoding() const;
 
   // This reads a raw node representation from [encodings] starting at index
   // [idx].
   static bool get_node_from_encoding(const std::vector<std::byte> &encodings,
                                      size_t &idx, Node::Raw &node);
 
-  SHA256Hash compute_node_hash() const { return sha256(get_node_encoding()); }
+  SHA256Hash compute_node_hash() const
+  {
+    return Sha256::get_sha256(get_node_encoding());
+  }
 
   void clear()
   {

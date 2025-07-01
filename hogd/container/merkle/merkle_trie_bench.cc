@@ -16,6 +16,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/merkle/sha256.h"
 #include "hogd/crypto/crypto.h"
 
 namespace hogd {
@@ -423,11 +424,52 @@ hash_parallel(benchmark::State &state, size_t num_threads)
 }
 
 void
+hash_parallel_openssl(benchmark::State &state, size_t num_threads)
+{
+  constexpr size_t kTotalHashes = 16'425'387;
+  // Branches with no value have an encoding size of 522 bytes, so we use this
+  // as an example. Note that branches and leaves with long values can exceed
+  // this size.
+  constexpr size_t kHashSize = 522;
+  const size_t per_thread_iterations = kTotalHashes / num_threads;
+
+  std::vector<std::byte> init(kHashSize);
+  for (size_t i = 0; i < kHashSize; i++) {
+    init[i] = std::byte(i);
+  }
+  std::vector<std::vector<std::byte>> to_hash(num_threads, init);
+
+  WorkerPool pool(num_threads);
+  std::vector<std::future<void>> futures(num_threads);
+
+  for (auto _ : state) {
+    for (size_t i = 0; i < num_threads; i++) {
+      futures[i] = pool.submit([per_thread_iterations, i, &to_hash] {
+        for (size_t j = 0; j < per_thread_iterations; j++) {
+          Sha256::get_sha256(to_hash[i]);
+          to_hash[i][0] = std::byte(static_cast<uint8_t>(to_hash[i][0]) + 1);
+        }
+      });
+    }
+    for (std::future<void> &future : futures) {
+      future.get();
+    }
+  }
+}
+
+void
 hash_parallel_1_thread(benchmark::State &state)
 {
   hash_parallel(state, /*num_threads=*/1);
 }
 BENCHMARK(hash_parallel_1_thread)->Unit(benchmark::kMillisecond);
+
+void
+hash_parallel_1_thread_openssl(benchmark::State &state)
+{
+  hash_parallel_openssl(state, /*num_threads=*/1);
+}
+BENCHMARK(hash_parallel_1_thread_openssl)->Unit(benchmark::kMillisecond);
 
 void
 hash_parallel_64_threads(benchmark::State &state)
@@ -451,7 +493,7 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
   const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
   CHECK_EQ(kNumKVPairs % num_threads, 0UL);
 
-  MerkleTrie trie;
+  MerkleTriePrefix trie;
   std::vector<std::vector<HexArray>> paths(num_threads);
   {
     std::set<HexArray> generated;
@@ -495,6 +537,7 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
   std::println(" done.");
   WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
+  futures.reserve(num_threads);
   std::print("Inserting keys...");
   fflush(stdout);
 
@@ -512,10 +555,30 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
     }
 
     trie.generate_top_level_hashes();
+
+    state.PauseTiming();
+    CHECK_EQ(trie.size(), kLargeNumKVPairs + kNumKVPairs);
+
+    futures.clear();
+    for (size_t i = 0; i < num_threads; i++) {
+      futures.push_back(
+          pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
+            for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
+              CHECK(trie.remove(paths[i][j]));
+            }
+          }));
+    }
+    for (std::future<void> &future : futures) {
+      future.get();
+    }
+    futures.clear();
+
+    CHECK_EQ(trie.size(), kLargeNumKVPairs);
+    state.ResumeTiming();
   }
 
   std::println(" done.");
-  CHECK_EQ(trie.size(), kLargeNumKVPairs + kNumKVPairs);
+  CHECK_EQ(trie.size(), kLargeNumKVPairs);
 }
 
 void
@@ -523,58 +586,56 @@ insert_with_1_thread(benchmark::State &state)
 {
   run_multithread_insert(state, /*num_threads=*/1);
 }
-BENCHMARK(insert_with_1_thread)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(insert_with_1_thread)->Unit(benchmark::kMillisecond);
 
 void
 insert_with_2_threads(benchmark::State &state)
 {
   run_multithread_insert(state, /*num_threads=*/2);
 }
-BENCHMARK(insert_with_2_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(insert_with_2_threads)->Unit(benchmark::kMillisecond);
 
 void
 insert_with_4_threads(benchmark::State &state)
 {
   run_multithread_insert(state, /*num_threads=*/4);
 }
-BENCHMARK(insert_with_4_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(insert_with_4_threads)->Unit(benchmark::kMillisecond);
 
 void
 insert_with_8_threads(benchmark::State &state)
 {
   run_multithread_insert(state, /*num_threads=*/8);
 }
-BENCHMARK(insert_with_8_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(insert_with_8_threads)->Unit(benchmark::kMillisecond);
 
 void
 insert_with_16_threads(benchmark::State &state)
 {
   run_multithread_insert(state, /*num_threads=*/16);
 }
-BENCHMARK(insert_with_16_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(insert_with_16_threads)->Unit(benchmark::kMillisecond);
 
 void
 insert_with_32_threads(benchmark::State &state)
 {
   run_multithread_insert(state, /*num_threads=*/32);
 }
-BENCHMARK(insert_with_32_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(insert_with_32_threads)->Unit(benchmark::kMillisecond);
 
 void
 insert_with_64_threads(benchmark::State &state)
 {
   run_multithread_insert(state, /*num_threads=*/64);
 }
-BENCHMARK(insert_with_64_threads)->Iterations(1)->Unit(benchmark::kMillisecond);
+BENCHMARK(insert_with_64_threads)->Unit(benchmark::kMillisecond);
 
 void
 insert_with_128_threads(benchmark::State &state)
 {
   run_multithread_insert(state, /*num_threads=*/128);
 }
-BENCHMARK(insert_with_128_threads)
-    ->Iterations(1)
-    ->Unit(benchmark::kMillisecond);
+BENCHMARK(insert_with_128_threads)->Unit(benchmark::kMillisecond);
 
 struct Init {
   Init()
@@ -590,4 +651,5 @@ Init init;
 } // namespace
 
 } // namespace hogd
+
 BENCHMARK_MAIN();

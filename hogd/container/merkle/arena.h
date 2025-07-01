@@ -73,7 +73,7 @@ private:
   static constexpr size_t kCacheLineSize = 64;
   // The number of objects we allocate when we call malloc. By allocating a
   // batch of objects, we amortize the malloc overhead.
-  static constexpr size_t kBatchSize = 64;
+  static constexpr size_t kBatchSize = 512;
   // The size of the batch the arena allocates with malloc.
   const size_t batch_alloc_size_;
 

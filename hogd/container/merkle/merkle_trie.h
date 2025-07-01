@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <functional>
@@ -14,16 +15,12 @@
 #include <vector>
 
 #include "hogd/base/log.h"
-#include "hogd/base/os.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
 
-// TODO(jhumphri): Support template types. For now, the keys are [HexArray]'s
-// and the values are strings.
 namespace hogd {
 
 // This is a Merkle Patricia Trie. It holds KV pairs and can efficiently
@@ -146,9 +143,9 @@ public:
   }
 
   // Executes [func] on each element.
-  template<typename F> void for_each(F func)
+  template<typename F>
+  void for_each(F func, const HexArray &root_prefix = HexArray())
   {
-    HexArray prefix;
     auto f = [&func](const HexArray &path, Node &node, Node * /*parent*/) {
       switch (node.type) {
       case Node::Type::kBranch:
@@ -161,16 +158,7 @@ public:
         break;
       }
     };
-    walk<Node>(&root_, prefix, f);
-  }
-
-  // Executes [func] in parallel on each element using a WorkerPool.
-  template<typename F>
-  void for_each_parallel(F /*func*/,
-                         size_t /*width*/ = kDefaultParallelRangeWidth,
-                         WorkerPool & /*pool*/ = WorkerPool::get_default_pool())
-  {
-    CHECK(false);
+    walk<Node>(&root_, root_prefix, f);
   }
 
   // If called with true, nodes are hashed on every [insert()/remove()]
@@ -287,6 +275,8 @@ private:
     compute_node_hash(root_);
   }
 
+  friend class MerkleTriePrefix;
+
   // The root node in the trie. The root node always exists and is always a
   // branch.
   Node root_;
@@ -298,6 +288,203 @@ private:
   bool should_hash_nodes_on_each_op_ = true;
   // An arena for allocating nodes.
   Arena<Node> arena_;
+};
+
+// This is an optimization for the [MerkleTrie]. It exposes the same exact API,
+// except empty keys are not allowed.
+//
+// When using the [MerkleTrie] with multithreading, the root node is under heavy
+// contention since all threads must acquire the reader lock on it before they
+// can look at any other nodes. This leads to performance degradation.
+//
+// [MerkleTriePrefix] removes this contention. It creates a root "node", where
+// each of the child point to a different [MerkleTrie]. This root "node" is
+// never modified, so there is no need to acquire a reader lock to access it.
+// Each [MerkleTrie] represents a prefix of one hex digit. For example, the
+// [MerkleTrie] that is child [0xa] holds all keys that start with [0xa].
+//
+// Example: (This is exactly the same as the example for [MerkleTrie] above.)
+// MerkleTriePrefix trie;
+//
+// HexArray key("1234");
+// std::string value = "hello";
+// trie.insert(key, value);
+//
+// std::pair<SHA256Hash, std::vector<std::byte>> proof = trie.get_proof();
+//
+// This returns true:
+// trie.prove(proof.first, proof.second, key, value);
+//
+// This returns false:
+// HexArray different_key("12");
+// trie.prove(proof.first, proof.second, different_key, value);
+//
+// trie.remove(key);
+class MerkleTriePrefix {
+public:
+  MerkleTriePrefix() = default;
+
+  std::pair<SHA256Hash, std::vector<std::byte>>
+  get_proof(const MerkleTrie::Key &k)
+  {
+    const std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> &proof =
+        get_proof_by_node(k);
+    std::pair<SHA256Hash, std::vector<std::byte>> ret;
+    ret.first = proof.first;
+    // Combine all of the node encodings into a single vector of bytes.
+    for (const std::vector<std::byte> &node_encoding : proof.second) {
+      ret.second.insert(ret.second.end(), node_encoding.begin(),
+                        node_encoding.end());
+    }
+    return ret;
+  }
+
+  std::pair<SHA256Hash, std::vector<std::vector<std::byte>>>
+  get_proof_by_node(const MerkleTrie::Key &k)
+  {
+    if (k.empty()) {
+      // We do not support empty keys.
+      return {SHA256Hash(), {}};
+    }
+    const auto &[index, k_no_prefix] = get_prefix(k);
+
+    Node root;
+    root.init_branch(/*parent=*/nullptr);
+    for (size_t i = 0; i < tries_.size(); i++) {
+      root.child[i] = &tries_[i].root_;
+      if (i == index) {
+        tries_[i].root_.parent = &root;
+      }
+    }
+    std::vector<std::vector<std::byte>> proof =
+        tries_[index].get_proof_by_node(k_no_prefix).second;
+    tries_[index].root_.parent = nullptr;
+    return {root.compute_node_hash(), proof};
+  }
+
+  static bool prove(const SHA256Hash &root_hash,
+                    const std::vector<std::byte> &encodings,
+                    const MerkleTrie::Key &k, const MerkleTrie::T &value)
+  {
+    return MerkleTrie::prove(root_hash, encodings, k, value);
+  }
+
+  MerkleTrie::T *find_begin(const MerkleTrie::Key &k, void *&cookie)
+  {
+    if (k.empty()) {
+      // We do not support empty keys.
+      return nullptr;
+    }
+
+    const auto &[index, k_no_prefix] = get_prefix(k);
+    return tries_[index].find_begin(k_no_prefix, cookie);
+  }
+
+  // You must call this when you are done accessing a value returned by
+  // [find_begin].
+  static void find_end(void *cookie) { MerkleTrie::find_end(cookie); }
+
+  bool insert(const MerkleTrie::Key &k, MerkleTrie::T &&obj)
+  {
+    if (k.empty()) {
+      // We do not support empty keys.
+      return false;
+    }
+
+    const auto &[index, k_no_prefix] = get_prefix(k);
+    return tries_[index].insert(k_no_prefix, std::move(obj));
+  }
+
+  bool insert(const MerkleTrie::Key &k, const MerkleTrie::T &obj)
+  {
+    return insert(k, MerkleTrie::T(obj));
+  }
+
+  bool remove(const MerkleTrie::Key &k)
+  {
+    if (k.empty()) {
+      // We do not support empty keys.
+      return false;
+    }
+
+    const auto &[index, k_no_prefix] = get_prefix(k);
+    return tries_[index].remove(k_no_prefix);
+  }
+
+  void clear()
+  {
+    for (MerkleTrie &trie : tries_) {
+      trie.clear();
+    }
+  }
+
+  template<typename F> void for_each(F func)
+  {
+    for (size_t i = 0; i < tries_.size(); i++) {
+      HexArray prefix;
+      prefix.append(std::byte(i));
+      tries_[i].for_each(func, prefix);
+    }
+  }
+
+  void set_should_hash_nodes_on_each_op(bool to_set)
+  {
+    for (MerkleTrie &trie : tries_) {
+      trie.set_should_hash_nodes_on_each_op(to_set);
+    }
+  }
+
+  void generate_top_level_hashes()
+  {
+    for (MerkleTrie &trie : tries_) {
+      trie.generate_top_level_hashes();
+    }
+  }
+
+  void generate_all_hashes()
+  {
+    for (MerkleTrie &trie : tries_) {
+      trie.generate_all_hashes();
+    }
+  }
+
+  bool check()
+  {
+    bool ret = true;
+    for (MerkleTrie &trie : tries_) {
+      ret = trie.check() && ret;
+    }
+    return ret;
+  }
+
+  size_t size()
+  {
+    size_t count = 0;
+    for (MerkleTrie &trie : tries_) {
+      count += trie.size();
+    }
+    return count;
+  }
+
+  bool empty() { return size() == 0U; }
+
+private:
+  static constexpr size_t kPrefixSize = 1;
+  static_assert(kPrefixSize != 0U);
+
+  static constexpr size_t kNumTries = 16;
+  static_assert(kNumTries == 1 << (4 * kPrefixSize));
+
+  static std::pair<size_t, HexArray> get_prefix(const MerkleTrie::Key &k)
+  {
+    CHECK_GT(k.size(), 0UL);
+
+    auto index = static_cast<size_t>(k.get(0));
+    MerkleTrie::Key k_no_prefix = k.get_subarray(1, k.size());
+    return {index, k_no_prefix};
+  }
+
+  std::array<MerkleTrie, kNumTries> tries_;
 };
 
 } // namespace hogd
