@@ -39,7 +39,7 @@ TEST(LibCryptoSHA256, BasicUsage)
   EXPECT_NE(LibCrypto::sha256(a), LibCrypto::sha256(b));
 }
 
-TEST(LibCryptoSHA512_256, BasicUsage)
+TEST(LibCryptoSHA512256, BasicUsage)
 {
   std::vector<uint8_t> a = {0, 1, 2, 3};
   std::vector<uint8_t> a_same = {0, 1, 2, 3};
