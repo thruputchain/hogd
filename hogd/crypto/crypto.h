@@ -55,10 +55,12 @@ sha256(const T &value)
   return sha256(buf);
 }
 
-inline std::array<unsigned char, BLAKE3_OUT_LEN>
+using Blake3Hash = std::array<unsigned char, BLAKE3_OUT_LEN>;
+
+inline Blake3Hash
 blake3(x23::is_bytespan auto buf)
 {
-  std::array<unsigned char, BLAKE3_OUT_LEN> out;
+  Blake3Hash out;
   blake3_hasher hasher;
   blake3_hasher_init(&hasher);
   blake3_hasher_update(&hasher, buf.data(), buf.size());
@@ -67,7 +69,7 @@ blake3(x23::is_bytespan auto buf)
 }
 
 template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
-inline std::array<unsigned char, BLAKE3_OUT_LEN>
+inline Blake3Hash
 blake3(const T &value)
 {
   auto buf = x23::serialize(value);
