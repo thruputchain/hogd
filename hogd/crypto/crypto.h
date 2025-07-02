@@ -80,6 +80,8 @@ class LibCrypto {
 public:
   static SHA256Hash sha256(x23::is_bytespan auto buf)
   {
+    // TODO(jhumphri): Try the EVP_Q_digest one-shot function to see if it does
+    // reference counting.
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     SHA256Hash out;
     SHA256_CTX ctx;
