@@ -30,7 +30,6 @@ foo(HostCallContext *ctx, uint64_t value)
 
 class UserContextTest : public ::testing::TestWithParam<RuntimeEngine> {};
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_P(UserContextTest, CheckCtxCorrect)
 {
   Contract contract(ContractType::kWasmi);
