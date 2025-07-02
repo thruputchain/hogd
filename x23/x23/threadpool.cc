@@ -49,8 +49,7 @@ void
 ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
 {
   if (nqueues_ == 1) {
-    if (!*lq)
-      *lq = runqueues_[0].take();
+    relock(*lq, 0);
     return;
   }
 
@@ -64,8 +63,7 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
 
   for (;;) {
     lq->reset();
-    int other_queue = rnd(seed) % (nqueues_ - 1);
-    other_queue += int{other_queue >= affinity_queue};
+    int other_queue = rnd_skip(seed, nqueues_, affinity_queue);
     int target_queue;
 
     if (queue_nthreads(affinity_queue)) {
@@ -161,17 +159,19 @@ ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno) noexcept
 {}
 
 void
-ThreadPool::Worker::checkcpu() noexcept
+ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
 {
+  Defer _relock{[this, &ptr] { pool_->relock(ptr, bucket_); }};
+
   cpu_ = cpuid();
   auto newbucket = llc_map.bucket(cpu_);
   if (newbucket == bucket_)
     return;
 
-  // The last thread in a bucket can't leave if the queue is non-empty
   unsigned zero = 0;
+  // The last thread in a bucket can only leave if the queue is empty
   if (pool_->queue_nthreads_[bucket_].fetch_sub(1) > 1 ||
-      pool_->runqueues_[bucket_]->q.empty() ||
+      (pool_->relock(ptr, bucket_), !ptr->q.empty()) ||
       // Oops the queue is not empty after we set the thread count to
       // zero.  We have to increase the thread count again to keep
       // servicing the queue.  But if we fail to increase the counter,
@@ -185,46 +185,54 @@ ThreadPool::Worker::checkcpu() noexcept
 ThreadPool::QPtr
 ThreadPool::Worker::getq() noexcept
 {
-  for (unsigned count = 0;; ++count) {
-    checkcpu();
-    auto ptr = pool_->runqueues_[bucket_].take();
+  using std::chrono::microseconds;
+  static constexpr auto kTimeouts = std::array{
+      microseconds(10),
+      microseconds(100),
+      microseconds(1000),
+  };
+  const auto nqueues = pool_->nqueues_;
+
+  QPtr ptr;
+  for (unsigned count = 0;;) {
+    lock_affinity_queue(ptr);
     if (!ptr->q.empty())
       return ptr;
-
-    // Our queue is empty? Pick older job from two random runqueues
-    if (auto nb = pool_->nqueues_; nb > 1) {
-      int qns[2];
-      if (nb > 3) {
-        qns[0] = rnd(rndseed_) % nb;
-        qns[1] = rnd(rndseed_) % nb;
-      }
-      else {
-        qns[0] = (bucket_ + 1) % nb;
-        qns[1] = (bucket_ + 2) % nb;
-      }
-
-      uint64_t qt[2]{pool_->runqueues_[qns[0]].qtime(),
-                     pool_->runqueues_[qns[1]].qtime()};
-      auto i = unsigned{qt[1] < qt[0]};
-      // Don't bother with mutex if probably empty
-      if (qt[i] != kEmpty) {
-        ptr.reset();
-        ptr = pool_->runqueues_[qns[i]].take();
-        if (!ptr->q.empty())
-          return ptr;
-        continue;
-      }
-    }
-
-    if (pool_->ss_.stop_requested()) {
-      assert(ptr->q.empty());
+    if (pool_->ss_.stop_requested())
       return {};
-    }
-    if (count < 8)
-      ptr.with_lock([d = (std::chrono::microseconds(8<<count)),
-                     &cv = ptr->nonempty](auto &ul) { cv.wait_for(ul, d); });
-    else
+    if (count >= kTimeouts.size() || nqueues == 1) {
       ptr.wait(ptr->nonempty);
+      continue;
+    }
+
+    // Wait a little bit, and if we timeout try work stealing
+    auto delay = kTimeouts[count++];
+    if (delay.count() != 0 && ptr.with_lock([&ptr, delay](auto &ul) {
+          return ptr->nonempty.wait_for(ul, delay);
+        }) == std::cv_status::no_timeout)
+      continue;
+
+    // Pick two random other runqueues
+    std::array<int, 2> qn;
+    if (nqueues > 3)
+      for (int &n : qn)
+        n = rnd_skip(rndseed_, nqueues, bucket_);
+    else
+      for (size_t i = 0; i < qn.size(); ++i)
+        qn[i] = (bucket_ + i + 1) % nqueues;
+
+    // Find queue with older job at front
+    std::array<uint64_t, qn.size()> qt;
+    for (size_t i = 0; i < qn.size(); ++i)
+      qt[i] = pool_->runqueues_[qn[i]].qtime();
+    auto i = unsigned{qt[1] < qt[0]};
+
+    // Don't bother with mutex if probably empty
+    if (qt[i] != kEmpty) {
+      pool_->relock(ptr, qn[i]);
+      if (!ptr->q.empty())
+	return ptr;
+    }
   }
 }
 

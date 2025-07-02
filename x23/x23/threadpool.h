@@ -248,29 +248,6 @@ public:
   // Otherwise return NULL.
   static ThreadPool *get_thread_pool() { return my_thread_pool; }
 
-  /*
-  // If you are executing in a thread pool, return a unique thread
-  // identifier in [0, nthreads_].  Otherwise return -1.
-  static ptrdiff_t get_thread_no()
-  {
-    return my_thread_pool ? my_thread_no : -1;
-  }
-
-  // A bucket index for the current thread.  Within a ThreadPool, if
-  // nbuckets is at least the size of the ThreadPool, each thread will
-  // have a unique bucket index.  Outside a ThreadPool, this just
-  // hashes the thread id, but the result will always be at least
-  // first_non_pool.
-  static size_t bucket_index(size_t nbuckets, size_t first_non_pool = 0)
-  {
-    if (my_thread_pool)
-      return my_thread_no % nbuckets;
-    constexpr std::hash<std::thread::id> hasher;
-    size_t i = hasher(std::this_thread::get_id());
-    return first_non_pool + i % (nbuckets - first_non_pool);
-  }
-  */
-
   class SuspendCount {
   public:
     SuspendCount() noexcept = default;
@@ -374,6 +351,17 @@ private:
     return ret;
   }
 
+  // Lock queue number n if it isn't already locked.  First unlocks
+  // the previously locked queue (if any) to avoid deadlock.
+  void relock(QPtr &ptr, int n)
+  {
+    assert(n >= 0 && n < nqueues_);
+    if (qno(ptr) != n) {
+      ptr.reset();
+      ptr = runqueues_[n].take();
+    }
+  }
+
   class Worker {
   public:
     Worker(ThreadPool *pool, size_t threadno) noexcept;
@@ -388,7 +376,7 @@ private:
     int cpu_;
     int bucket_;
 
-    void checkcpu() noexcept;
+    void lock_affinity_queue(QPtr &ptr) noexcept;
     QPtr getq() noexcept;
     std::coroutine_handle<> qpop(QPtr &ptr);
   };
@@ -416,6 +404,13 @@ private:
     x ^= x >> 7;
     x ^= x << 17;
     return seed = x;
+  }
+  // Pick a number in [0,..,skip-1,skip+1,..max)
+  static uint64_t rnd_skip(uint64_t &seed, uint64_t max, uint64_t skip)
+  {
+    uint64_t r = rnd(seed) % (max-1);
+    r += (r >= skip);
+    return r;
   }
 
   void qselect(QPtr *lq, unsigned cpuhint);
