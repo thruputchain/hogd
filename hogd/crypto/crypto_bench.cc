@@ -41,16 +41,21 @@ BENCHMARK(bm_sha256)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 void
 bm_libcrypto_sha256(benchmark::State &state)
 {
-  bench_hash(state, [](std::span<std::byte> buf) { return LibCrypto::sha256(buf); });
+  bench_hash(state,
+             [](std::span<std::byte> buf) { return LibCrypto::sha256(buf); });
 }
 BENCHMARK(bm_libcrypto_sha256)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 
 void
 bm_libcrypto_sha512_256(benchmark::State &state)
 {
-  bench_hash(state, [](std::span<std::byte> buf) { return LibCrypto::sha512_256(buf); });
+  bench_hash(state, [](std::span<std::byte> buf) {
+    return LibCrypto::sha512_256(buf);
+  });
 }
-BENCHMARK(bm_libcrypto_sha512_256)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
+BENCHMARK(bm_libcrypto_sha512_256)
+    ->RangeMultiplier(2)
+    ->Range(kMin, kMax); // NOLINT
 
 void
 bm_crc32c(benchmark::State &state)
