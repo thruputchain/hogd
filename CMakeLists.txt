@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(hogd CXX)
+project(hogd C CXX)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.18)
 

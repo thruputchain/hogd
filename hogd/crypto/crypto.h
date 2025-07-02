@@ -5,6 +5,10 @@
 #include <openssl/sha.h> // NOLINT(misc-include-cleaner)
 #include <sodium.h>
 
+extern "C" {
+#include "blake3.h"
+}
+
 #include <array>
 #include <cassert>
 #include <span>
@@ -49,6 +53,25 @@ sha256(const T &value)
 {
   auto buf = x23::serialize(value);
   return sha256(buf);
+}
+
+inline std::array<unsigned char, BLAKE3_OUT_LEN>
+blake3(x23::is_bytespan auto buf)
+{
+  std::array<unsigned char, BLAKE3_OUT_LEN> out;
+  blake3_hasher hasher;
+  blake3_hasher_init(&hasher);
+  blake3_hasher_update(&hasher, buf.data(), buf.size());
+  blake3_hasher_finalize(&hasher, out.data(), sizeof(out));
+  return out;
+}
+
+template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
+inline std::array<unsigned char, BLAKE3_OUT_LEN>
+blake3(const T &value)
+{
+  auto buf = x23::serialize(value);
+  return blake3(buf);
 }
 
 class LibCrypto {

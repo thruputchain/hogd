@@ -7,6 +7,7 @@ target_link_libraries(crypto_interface
   INTERFACE
   protocol
   crc32c
+  blake3
 )
 
 add_library(crypto_objects OBJECT crypto.cc)
@@ -26,6 +27,7 @@ target_link_libraries(
   crc32c
   OpenSSL::SSL
   OpenSSL::Crypto
+  blake3
 )
 
 add_library(crypto_test_objects OBJECT crypto_test.cc)
