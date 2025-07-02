@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <openssl/sha.h> // NOLINT(misc-include-cleaner)
 #include <sodium.h>
 
 #include <array>
@@ -49,6 +50,50 @@ sha256(const T &value)
   auto buf = x23::serialize(value);
   return sha256(buf);
 }
+
+class LibCrypto {
+public:
+  static SHA256Hash sha256(x23::is_bytespan auto buf)
+  {
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    SHA256Hash out;
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+    SHA256_Update(&ctx, buf.data(), buf.size());
+    SHA256_Final(out.data(), &ctx);
+
+    return out;
+  }
+
+  template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
+  SHA256Hash sha256(const T &value)
+  {
+    auto buf = x23::serialize(value);
+    return sha256(buf);
+  }
+
+  static SHA256Hash sha512_256(x23::is_bytespan auto buf)
+  {
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    std::array<unsigned char, 64> tmp;
+    SHA512_CTX ctx;
+
+    SHA512_Init(&ctx);
+    SHA512_Update(&ctx, buf.data(), buf.size());
+    SHA512_Final(tmp.data(), &ctx);
+
+    SHA256Hash out;
+    memcpy(out.data(), tmp.data(), out.size());
+    return out;
+  }
+
+  template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
+  SHA256Hash sha512_256(const T &value)
+  {
+    auto buf = x23::serialize(value);
+    return sha512_256(buf);
+  }
+};
 
 // SipHash24Key is the secret key used by SipHash24.
 using SipHash24Key = std::array<uint8_t, 16>;
