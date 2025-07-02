@@ -353,7 +353,7 @@ private:
     if (!ptr)
       return -1;
     auto ret = static_cast<RunQueue *>(ptr.get_mvar()) - runqueues_.get();
-    assert(ret >= 0 && ret < nqueues_);
+    assert(size_t(ret) < nqueues_);
     return ret;
   }
 
@@ -361,7 +361,7 @@ private:
   // the previously locked queue (if any) to avoid deadlock.
   void relock(QPtr &ptr, int n)
   {
-    assert(n >= 0 && n < nqueues_);
+    assert(size_t(n) < nqueues_);
     if (qno(ptr) != n) {
       ptr.reset();
       ptr = runqueues_[n].take();
