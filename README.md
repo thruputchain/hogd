@@ -56,8 +56,7 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
 
     * `cmake -B build`
     * `CXXFLAGS=-ggdb cmake -B debug-build`
-    * `cmake -B clang-build -DCMAKE_C_COMPILER=clang \
-       -DCMAKE_CXX_COMPILER=clang++`
+    * `cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`
 
 1. Build the system by running `make` in the build directory, E.g.:
 
