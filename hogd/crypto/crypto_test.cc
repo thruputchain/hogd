@@ -20,6 +20,35 @@ TEST(SHA256, BasicUsage)
   EXPECT_NE(sha256(a), sha256(b));
 }
 
+TEST(LibCryptoSHA256, CheckEquivalent)
+{
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
+
+  EXPECT_EQ(sha256(a), LibCrypto::sha256(a));
+  EXPECT_EQ(sha256(b), LibCrypto::sha256(b));
+}
+
+TEST(LibCryptoSHA256, BasicUsage)
+{
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> a_same = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
+
+  EXPECT_EQ(LibCrypto::sha256(a), LibCrypto::sha256(a_same));
+  EXPECT_NE(LibCrypto::sha256(a), LibCrypto::sha256(b));
+}
+
+TEST(LibCryptoSHA512_256, BasicUsage)
+{
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> a_same = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
+
+  EXPECT_EQ(LibCrypto::sha512_256(a), LibCrypto::sha512_256(a_same));
+  EXPECT_NE(LibCrypto::sha512_256(a), LibCrypto::sha512_256(b));
+}
+
 TEST(CRC32C, BasicUsage)
 {
   std::vector<uint8_t> a = {0, 1, 2, 3};

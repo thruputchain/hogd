@@ -17,12 +17,15 @@ add_library(
   $<TARGET_OBJECTS:crypto_objects>
 )
 
+find_package(OpenSSL REQUIRED)
 add_dependencies(crypto libsodium_build)
 target_link_libraries(
   crypto
   protocol
   libsodium
   crc32c
+  OpenSSL::SSL
+  OpenSSL::Crypto
 )
 
 add_library(crypto_test_objects OBJECT crypto_test.cc)

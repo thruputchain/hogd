@@ -75,7 +75,7 @@ public:
   static SHA256Hash sha512_256(x23::is_bytespan auto buf)
   {
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    std::array<unsigned char, 64> tmp;
+    std::array<unsigned char, 2 * sizeof(SHA256Hash)> tmp;
     SHA512_CTX ctx;
 
     SHA512_Init(&ctx);
