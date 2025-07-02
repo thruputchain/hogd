@@ -88,6 +88,9 @@ option(CRC32C_USE_GLOG "" OFF)
 option(CRC32C_INSTALL "" OFF)
 add_subdirectory(external/crc32c)
 
+# Enable blake3
+add_subdirectory(external/blake3/c)
+
 # Detect number of cores - only needed for make-based ExternalProject
 include(ProcessorCount)
 ProcessorCount(N)
