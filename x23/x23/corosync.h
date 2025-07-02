@@ -43,15 +43,15 @@
 //
 // A CoroSharedLock<> csl is an RCU-like type derived from CoroLock.
 // You can lock it exclusively with a CoroGuard just like a CoroLock,
-// except the exclusive lock operation drains the threadpool (which is
-// expensive, but CoroSharedLock is optimized for acquiring shared
+// except the exclusive lock operation quiesces the threadpool (which
+// is expensive, but CoroSharedLock is optimized for acquiring shared
 // locks and rarely needing the exclusive lock).
 //
 //    auto shared_holder = co_await csl.coro_lock_shared();
 //
 // Returns when there is no exclusive locker.  Since exclusive lockers
-// drain the thread pool, the lock is effectively held in shared mode
-// until the coroutine is suspended.  shared_holder panics if the
+// quiesce the thread pool, the lock is effectively held in shared
+// mode until the coroutine is suspended.  shared_holder panics if the
 // coroutine has been suspended before it is destroyed.  (If it
 // doesn't go out of scope, you can call shared_holder.reset() when
 // you are done holding the shared lock.)
@@ -349,7 +349,7 @@ public:
 
   void block_while_inhibited()
   {
-    pool_.drain();
+    pool_.quiesce();
     if constexpr (requires { this->ExLock::block_while_inhibited(); })
       this->ExLock::block_while_inhibited();
   }
