@@ -142,7 +142,8 @@ std::shared_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
 std::shared_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
 
 // create the type of RuntimeContext that is used within Hogexec
-std::shared_ptr<RuntimeContext> make_hogexec_context(RuntimeEngine engine = RuntimeEngine::kWasmi);
+std::shared_ptr<RuntimeContext>
+make_hogexec_context(RuntimeEngine engine = RuntimeEngine::kWasmi);
 
 // Virtual class that abstracts the interface required for an invocable
 // sandbox.  Can be created by an instance of RuntimeContext.
