@@ -35,4 +35,7 @@
 
   (func (export "unreachable")
     unreachable)
+
+  (memory 1 1)
+  (export "memory" (memory 0))
 )

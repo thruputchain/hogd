@@ -12,6 +12,7 @@
 #include "x23/vec.h"
 #include "x23/x23.h"
 #include <crc32c/crc32c.h>
+#include <utility>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
@@ -108,6 +109,33 @@ ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,
                                              reinterpret_cast<const uint8_t *>(
                                                  msg.data()),
                                              msg.size(), publickey.data()) == 0;
+}
+
+// ed25519_keygen generates a new ed25519 keypair.
+inline std::pair<Ed25519PublicKey, Ed25519SecretKey>
+ed25519_keygen()
+{
+  Ed25519PublicKey pk;
+  Ed25519SecretKey sk;
+  static_assert(sizeof(Ed25519PublicKey) == crypto_sign_ed25519_PUBLICKEYBYTES);
+  static_assert(sizeof(Ed25519SecretKey) == crypto_sign_ed25519_SECRETKEYBYTES);
+  [[maybe_unused]] int ret = crypto_sign_ed25519_keypair(pk.data(), sk.data());
+  // this libsodium call cannot fail (V1.20).
+  assert(ret == 0);
+  return {pk, sk};
+}
+
+// ed25519_sign signs a message with a secret key.
+inline Ed25519Signature
+ed25519_sign(const Ed25519SecretKey &sk, x23::is_bytespan auto msg)
+{
+  Ed25519Signature sig;
+  [[maybe_unused]]
+  int ret = crypto_sign_ed25519_detached(sig.data(), nullptr, msg.data(),
+                                         msg.size(), sk.data());
+  // this libsodium call cannot fail (V1.20).
+  assert(ret == 0);
+  return sig;
 }
 
 // crc32c calculates the CRC32C of buf.

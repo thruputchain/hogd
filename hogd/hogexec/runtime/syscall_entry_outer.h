@@ -20,6 +20,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "syscall_args.hh"
 #include "types.hh"
@@ -341,6 +342,9 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
     if (!((SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
                std::get<Is>(parsed_args)) &&
            ...))) {
+      if (auto *stats = handler.get_transaction_stats()) {
+        stats->syscall_fault_count++;
+      }
       return kFaultResult;
     }
 

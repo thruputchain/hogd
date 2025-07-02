@@ -53,22 +53,6 @@ TEST_F(FibonacciTest, FibonacciCalls)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx =
-                Transaction{.invocation = client.make_invocation<"initialize">(
-                                UINT64_MAX)}},
-        wasm_runtime_context_);
-    auto res = handler.root_invoke();
-    ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction()();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
-  }
-
-  advance_block();
-
-  {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
             .tx = Transaction{.invocation = client.make_invocation<"fibonacci">(
                                   UINT64_MAX, 5U)}},
         wasm_runtime_context_);
@@ -131,22 +115,6 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
           {ContractType::kWasmi, wasm_runtime_context_}});
 
   fib_client_t client(fib_contract_addr);
-
-  {
-    auto handler = make_new_system_call_handler(
-        SignedTransaction{
-            .tx =
-                Transaction{.invocation = client.make_invocation<"initialize">(
-                                UINT64_MAX)}},
-        multiplexed_context);
-    auto res = handler.root_invoke();
-    ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction()();
-    ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
-  }
-
-  advance_block();
 
   {
     // fibonacci(10) = 55

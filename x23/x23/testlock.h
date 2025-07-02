@@ -4,6 +4,8 @@
 
 #include <atomic>
 #include <cassert>
+#include <mutex>
+#include <utility>
 
 #include <x23/refcnt.h>
 #include <x23/threadpool.h>

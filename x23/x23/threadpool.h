@@ -2,11 +2,17 @@
 
 #pragma once
 
-#include <atomic>
+#include <cassert>
+#include <concepts>
+#include <condition_variable>
 #include <coroutine>
+#include <cstddef>
 #include <deque>
+#include <functional>
+#include <memory>
 #include <stop_token>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include <x23/async.h>
@@ -14,7 +20,7 @@
 #include <x23/config.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
-#include <x23/uiobuf.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 
 #if HAVE_SCHED_GETCPU
