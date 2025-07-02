@@ -33,6 +33,7 @@ add_library(runtime_objects OBJECT
   wasm3_runtime.cc
   wasm3_wrapper.cc
   syscall_rcq.cc
+  transaction_stats.cc
   wasmi_runtime.cc
 )
 

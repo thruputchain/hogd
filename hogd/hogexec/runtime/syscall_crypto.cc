@@ -7,6 +7,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "types.hh"
 
@@ -15,10 +16,15 @@ namespace hogd {
 // Computes the SHA256 hash of the input buffer and returns the gas cost
 // Returns: Status code and gas cost for the operation
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_SHA256_inner(std::span<const std::byte> input_buffer,
+syscall_SHA256_inner(SystemCallHandler &handler,
+                     std::span<const std::byte> input_buffer,
                      SHA256Hash &output_hash)
 {
   output_hash = sha256(input_buffer);
+
+  if (auto *stats = handler.get_transaction_stats()) {
+    stats->sha256_total_bytes_processed += input_buffer.size();
+  }
   return {SyscallErrorCode::kNone, SHA256HashCost(input_buffer.size())};
 };
 
