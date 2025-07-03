@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <thread>
@@ -9,6 +10,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
 #include "hogd/ramdb/item_allocator.h"
@@ -31,13 +33,14 @@ public:
 
   // open opens a database at path.
   static DBStatus<std::unique_ptr<Database>>
-  open(const std::string &path, size_t heap_size, int bucket_order = 0);
+  open(std::string_view path, size_t heap_size, int bucket_order = 0,
+       size_t log_file_size_threshold = kDiskLogFileThreshold);
 
   // open_lsn opens a database at path and loads only up to a specific LSN.
-  static DBStatus<std::unique_ptr<Database>> open_lsn(const std::string &path,
-                                                      uint64_t lsn,
-                                                      size_t heap_size,
-                                                      int bucket_order = 0);
+  static DBStatus<std::unique_ptr<Database>>
+  open_lsn(std::string_view path, uint64_t lsn, size_t heap_size,
+           int bucket_order = 0,
+           size_t log_file_size_threshold = kDiskLogFileThreshold);
 
   // check checks the integrity of a database. It returns the highest valid LSN.
   static DBStatus<uint64_t> check(const std::string &path, size_t heap_size);
@@ -50,8 +53,8 @@ public:
                                                 [this] { notify_low_mem(); })),
       pool_(available_parallelism()),
       item_allocator_(*loglet_allocator_, pool_, &map_),
-      disk_writer_(*loglet_allocator_, dir_, "{}.log", kDiskLogFileThreshold,
-                   write_head_order),
+      disk_writer_(*loglet_allocator_, dir_, write_head_order,
+                   [this] { notify_wal_grew(); }),
       map_(item_allocator_, disk_writer_, lock_order, bucket_order),
       bg_th_(
           [this](const std::stop_token &stoken) { background_worker(stoken); })
@@ -110,7 +113,7 @@ public:
   // begin_lsn being an lsn previously returned by a different call to sync()
   // or sync_and_snapshot()).
   DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
-  sync_and_snapshot(const std::string &path, uint64_t begin_lsn);
+  sync_and_snapshot(uint64_t begin_lsn);
 
   // set_active indicates to the database that it is in a state of activity (if
   // yes is true) or inactivity (if yes is false).  When inactive, items should
@@ -138,12 +141,16 @@ private:
   DiskWriter disk_writer_;
   ScalableMap map_;
 
-  // protects cv_, active_, run_expand_, and run_compact_.
+  // protects cv_, active_, run_expand_, run_compact_, and run_disk_cleanup_.
   std::mutex lock_;
   std::condition_variable_any cv_;
   bool active_{true};
   bool run_expand_{false};
   bool run_compact_{false};
+  bool run_disk_cleanup_{false};
+
+  std::atomic<bool> cleanup_running_{false};
+  std::jthread cleanup_th_;
 
   // runs background_worker().
   std::jthread bg_th_;
@@ -151,9 +158,33 @@ private:
   // called when memory is low.
   void notify_low_mem();
 
+  // called when a new wal file is created; may trigger snapshots/cleanup.
+  void notify_wal_grew();
+
   // background_worker performs periodic background work.
   void background_worker(const std::stop_token &stoken);
+
+  static DBStatus<std::unique_ptr<Database>>
+  open_internal(std::string_view path, std::optional<uint64_t> lsn,
+                size_t heap_size, int bucket_order,
+                size_t log_file_size_threshold);
 };
+
+inline DBStatus<std::unique_ptr<Database>>
+Database::open(std::string_view path, size_t heap_size, int bucket_order,
+               size_t log_file_size_threshold)
+{
+  return open_internal(path, std::nullopt, heap_size, bucket_order,
+                       log_file_size_threshold);
+}
+
+inline DBStatus<std::unique_ptr<Database>>
+Database::open_lsn(std::string_view path, uint64_t lsn, size_t heap_size,
+                   int bucket_order, size_t log_file_size_threshold)
+{
+  return open_internal(path, {lsn}, heap_size, bucket_order,
+                       log_file_size_threshold);
+}
 
 inline DBStatus<DBItem>
 Database::get(std::span<const std::byte> key)

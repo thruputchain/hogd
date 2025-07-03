@@ -12,6 +12,7 @@
 #include <span>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -50,9 +51,12 @@ DiskWriter::create_next_file()
 }
 
 void
-DiskWriter::init(uint64_t lsn)
+DiskWriter::init(uint64_t lsn, std::string_view filename_format,
+                 size_t log_file_size_threshold)
 {
   cur_lsn_ = synced_lsn_ = lsn;
+  filename_format_ = filename_format;
+  file_size_threshold_ = log_file_size_threshold;
   writer_th_ = std::jthread(
       [this](const std::stop_token &stoken) { write_worker(stoken); });
 }
@@ -137,6 +141,8 @@ DiskWriter::write_worker(const std::stop_token &stoken)
             return;
           }
           w = BufferedWriter(*f);
+          if (wal_grew_observer_)
+            wal_grew_observer_();
         }
         continue;
       }
@@ -235,7 +241,7 @@ ScopedDiskWrite::get_loglet(size_t kv_len)
 }
 
 DBStatus<uint64_t>
-ScopedDiskWrite::modify(ItemHeader *src)
+ScopedDiskWrite::modify(ItemHeader *src, bool use_src_lsn)
 {
   assert(ul_.owns_lock());
 
@@ -247,7 +253,9 @@ ScopedDiskWrite::modify(ItemHeader *src)
   // append the modification record.
   ItemHeader *dst = ll->clone(src);
   assert(dst != nullptr);
-  dst->lsn = w_.cur_lsn_;
+  // use wal lsn for put()s; keep src lsn during snapshot.
+  if (!use_src_lsn)
+    dst->lsn = w_.cur_lsn_;
   dst->next = nullptr;
   std::ranges::copy(src->get_key_and_value(), dst->get_key_and_value().begin());
   return {dst->lsn};
