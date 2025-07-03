@@ -4,7 +4,10 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstddef>
+#include <cstdint>
 #include <random>
+#include <span>
 #include <type_traits>
 
 namespace hogd {

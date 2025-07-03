@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <concepts>
+#include <cstddef>
 #include <string_view>
 #include <type_traits>
 #include <typeinfo>

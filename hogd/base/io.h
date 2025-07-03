@@ -2,21 +2,25 @@
 
 #pragma once
 
+#include <cerrno>
 #include <fcntl.h>
+#include <iterator>
+#include <optional>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/status.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 
