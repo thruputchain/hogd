@@ -52,6 +52,10 @@ fi
 if [ "$BUILD_PARALLEL" = "yes" ]; then
     printf "${COLOR}Waiting for Step 3 (llvm) build to finish...\n${NC}"
     wait $LLVM_BUILD_PID
+    if [ $? -ne 0 ]; then
+        printf "llvm build failed!\n"
+        exit 1
+    fi
     printf "${COLOR}Step 3 (llvm) build finished\n${NC}"
 else
     printf "${COLOR}STEP 3: Check build (llvm)\n${NC}"

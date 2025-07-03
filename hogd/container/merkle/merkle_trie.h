@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/arena.h"
@@ -77,7 +78,7 @@ public:
     // It is fine to spin on [try_lock_reader()] because we know the root node
     // is never deleted by a writer.
     while (!root_.hash_lock.try_lock_reader()) {
-      _mm_pause();
+      cpu_relax();
     }
 
     SHA256Hash ret = root_.hash;
