@@ -81,6 +81,10 @@ class LibCrypto {
 public:
   static SHA256Hash sha256(x23::is_bytespan auto buf)
   {
+    // We need to directly use lower-level functions in OpenSSL even though they
+    // are deprecated. The public API (i.e., the [EVP_*] functions) do reference
+    // counting and acquire locks, which limits parallelism and also harms
+    // single-thread performance.
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     SHA256Hash out;
     SHA256_CTX ctx;
@@ -100,6 +104,10 @@ public:
 
   static SHA256Hash sha512_256(x23::is_bytespan auto buf)
   {
+    // We need to directly use lower-level functions in OpenSSL even though they
+    // are deprecated. The public API (i.e., the [EVP_*] functions) do reference
+    // counting and acquire locks, which limits parallelism and also harms
+    // single-thread performance.
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     std::array<unsigned char, 2 * sizeof(SHA256Hash)> tmp;
     SHA512_CTX ctx;
