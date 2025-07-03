@@ -268,7 +268,9 @@ format_arg(T &&t)
 }
 
 #ifdef __APPLE__
-inline auto gettid() {
+inline auto
+gettid()
+{
   return std::this_thread::get_id();
 }
 #endif
