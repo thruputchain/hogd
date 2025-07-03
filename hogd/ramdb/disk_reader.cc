@@ -462,8 +462,9 @@ DiskReader::cleanup(const Directory &dir)
     needed_wal_files = needed_wal_files.subspan(1);
   }
 
-  needed.insert_range(needed_wal_files |
-                      std::views::transform(&FileMetadata::path_));
+  for (auto &&f :
+       needed_wal_files | std::views::transform(&FileMetadata::path_))
+    needed.insert(f);
 
   for (auto &file : *files) {
     if (needed.contains(file.path_))
