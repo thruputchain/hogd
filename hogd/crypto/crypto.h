@@ -124,8 +124,8 @@ public:
   {
     SHA256Hash out;
     [[maybe_unused]]
-    int written = EVP_Q_digest(nullptr, "SHA3-256", nullptr, buf.data(), buf.size(),
-                               out.data(), nullptr);
+    int written = EVP_Q_digest(nullptr, "SHA3-256", nullptr, buf.data(),
+                               buf.size(), out.data(), nullptr);
     assert(written == sizeof(SHA256Hash));
     return out;
   }
@@ -134,8 +134,8 @@ public:
   {
     SHA256Hash out;
     [[maybe_unused]]
-    int written = EVP_Q_digest(nullptr, "KECCAK-256", nullptr, buf.data(), buf.size(),
-                               out.data(), nullptr);
+    int written = EVP_Q_digest(nullptr, "KECCAK-256", nullptr, buf.data(),
+                               buf.size(), out.data(), nullptr);
     assert(written == sizeof(SHA256Hash));
     return out;
   }
