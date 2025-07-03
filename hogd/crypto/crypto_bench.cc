@@ -58,6 +58,27 @@ BENCHMARK(bm_libcrypto_sha512_256)
     ->Range(kMin, kMax); // NOLINT
 
 void
+bm_libcrypto_sha3_256(benchmark::State &state)
+{
+  bench_hash(state,
+             [](std::span<std::byte> buf) { return LibCrypto::sha3_256(buf); });
+}
+BENCHMARK(bm_libcrypto_sha3_256)
+    ->RangeMultiplier(2)
+    ->Range(kMin, kMax); // NOLINT
+
+void
+bm_libcrypto_keccak256(benchmark::State &state)
+{
+  bench_hash(state, [](std::span<std::byte> buf) {
+    return LibCrypto::keccak256(buf);
+  });
+}
+BENCHMARK(bm_libcrypto_keccak256)
+    ->RangeMultiplier(2)
+    ->Range(kMin, kMax); // NOLINT
+
+void
 bm_blake3(benchmark::State &state)
 {
   bench_hash(state, [](std::span<std::byte> buf) { return blake3(buf); });

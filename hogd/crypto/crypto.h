@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <openssl/evp.h>
 #include <openssl/sha.h> // NOLINT(misc-include-cleaner)
 #include <sodium.h>
 
@@ -80,8 +81,6 @@ class LibCrypto {
 public:
   static SHA256Hash sha256(x23::is_bytespan auto buf)
   {
-    // TODO(jhumphri): Try the EVP_Q_digest one-shot function to see if it does
-    // reference counting.
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     SHA256Hash out;
     SHA256_CTX ctx;
@@ -119,6 +118,26 @@ public:
   {
     auto buf = x23::serialize(value);
     return sha512_256(buf);
+  }
+
+  static SHA256Hash sha3_256(x23::is_bytespan auto buf)
+  {
+    SHA256Hash out;
+    [[maybe_unused]]
+    int written = EVP_Q_digest(NULL, "SHA3-256", NULL, buf.data(), buf.size(),
+                               out.data(), NULL);
+    assert(written == sizeof(SHA256Hash));
+    return out;
+  }
+
+  static SHA256Hash keccak256(x23::is_bytespan auto buf)
+  {
+    SHA256Hash out;
+    [[maybe_unused]]
+    int written = EVP_Q_digest(NULL, "KECCAK-256", NULL, buf.data(), buf.size(),
+                               out.data(), NULL);
+    assert(written == sizeof(SHA256Hash));
+    return out;
   }
 };
 
