@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <openssl/evp.h>
 #include <openssl/sha.h> // NOLINT(misc-include-cleaner)
 #include <sodium.h>
 
@@ -56,27 +55,6 @@ sha256(const T &value)
   return sha256(buf);
 }
 
-using Blake3Hash = std::array<unsigned char, BLAKE3_OUT_LEN>;
-
-inline Blake3Hash
-blake3(x23::is_bytespan auto buf)
-{
-  Blake3Hash out;
-  blake3_hasher hasher;
-  blake3_hasher_init(&hasher);
-  blake3_hasher_update(&hasher, buf.data(), buf.size());
-  blake3_hasher_finalize(&hasher, out.data(), sizeof(out));
-  return out;
-}
-
-template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
-inline Blake3Hash
-blake3(const T &value)
-{
-  auto buf = x23::serialize(value);
-  return blake3(buf);
-}
-
 class LibCrypto {
 public:
   static SHA256Hash sha256(x23::is_bytespan auto buf)
@@ -101,53 +79,28 @@ public:
     auto buf = x23::serialize(value);
     return sha256(buf);
   }
-
-  static SHA256Hash sha512_256(x23::is_bytespan auto buf)
-  {
-    // We need to directly use lower-level functions in OpenSSL even though they
-    // are deprecated. The public API (i.e., the [EVP_*] functions) do reference
-    // counting and acquire locks, which limits parallelism and also harms
-    // single-thread performance.
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    std::array<unsigned char, 2 * sizeof(SHA256Hash)> tmp;
-    SHA512_CTX ctx;
-
-    SHA512_Init(&ctx);
-    SHA512_Update(&ctx, buf.data(), buf.size());
-    SHA512_Final(tmp.data(), &ctx);
-
-    SHA256Hash out;
-    memcpy(out.data(), tmp.data(), out.size());
-    return out;
-  }
-
-  template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
-  SHA256Hash sha512_256(const T &value)
-  {
-    auto buf = x23::serialize(value);
-    return sha512_256(buf);
-  }
-
-  static SHA256Hash sha3_256(x23::is_bytespan auto buf)
-  {
-    SHA256Hash out;
-    [[maybe_unused]]
-    int written = EVP_Q_digest(nullptr, "SHA3-256", nullptr, buf.data(),
-                               buf.size(), out.data(), nullptr);
-    assert(written == sizeof(SHA256Hash));
-    return out;
-  }
-
-  static SHA256Hash keccak256(x23::is_bytespan auto buf)
-  {
-    SHA256Hash out;
-    [[maybe_unused]]
-    int written = EVP_Q_digest(nullptr, "KECCAK-256", nullptr, buf.data(),
-                               buf.size(), out.data(), nullptr);
-    assert(written == sizeof(SHA256Hash));
-    return out;
-  }
 };
+
+using Blake3Hash = std::array<unsigned char, BLAKE3_OUT_LEN>;
+
+inline Blake3Hash
+blake3(x23::is_bytespan auto buf)
+{
+  Blake3Hash out;
+  blake3_hasher hasher;
+  blake3_hasher_init(&hasher);
+  blake3_hasher_update(&hasher, buf.data(), buf.size());
+  blake3_hasher_finalize(&hasher, out.data(), sizeof(out));
+  return out;
+}
+
+template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
+inline Blake3Hash
+blake3(const T &value)
+{
+  auto buf = x23::serialize(value);
+  return blake3(buf);
+}
 
 // SipHash24Key is the secret key used by SipHash24.
 using SipHash24Key = std::array<uint8_t, 16>;
