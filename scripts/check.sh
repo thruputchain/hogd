@@ -35,6 +35,8 @@ NC='\033[0m'
 if [ "$BUILD_PARALLEL" = "yes" ]; then
   ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" > /dev/null 2>&1 &
   LLVM_BUILD_PID=$!
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -f "-Werror" > /dev/null 2>&1 &
+  GCC_RELEASE_BUILD_PID=$!
 fi
 
 printf "${COLOR}STEP 1: Check build (gcc)\n${NC}"
@@ -84,12 +86,28 @@ if ! ${SCRIPT_DIR}/format.sh -c; then
 fi
 printf "Format checking passed.\n"
 
+if [ "$BUILD_PARALLEL" = "yes" ]; then
+    printf "${COLOR}Waiting for Step 7 (gcc_release) build to finish...\n${NC}"
+    wait $GCC_RELEASE_BUILD_PID
+    if [ $? -ne 0 ]; then
+        printf "gcc_release build failed!\n"
+        exit 1
+    fi
+    printf "${COLOR}Step 7 (gcc_release) build finished\n${NC}"
+else
+    printf "${COLOR}\nSTEP 7: Check release build (gcc)\n${NC}"
+    if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -f "-Werror" ; then
+        printf "build failed!\n"
+        exit 1
+    fi
+fi
+
 if [ -z ${EXTRA+x} ]; then
     printf "${COLOR}\nAll checks passed!\n${NC}"
     exit 0
 fi
 
-printf "${COLOR}\nSTEP 7: Check tsan\n${NC}"
+printf "${COLOR}\nSTEP 8: Check tsan\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_tsan -t Debug -c clang -f "-Werror -fsanitize=thread" ; then
     printf "tsan build failed!\n"
     exit 1
@@ -99,7 +117,7 @@ if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_tsan --output-on-failure; th
     exit 1
 fi
 
-printf "${COLOR}\nSTEP 8: Check asan\n${NC}"
+printf "${COLOR}\nSTEP 9: Check asan\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_asan -t Debug -c clang -f "-Werror -fsanitize=address" ; then
     printf "asan build failed!\n"
     exit 1
@@ -110,7 +128,7 @@ if ! ASAN_OPTIONS=alloc_dealloc_mismatch=0 ctest --test-dir ${ROOT_DIR}/${BUILD_
     exit 1
 fi
 
-printf "${COLOR}\nSTEP 9: Check ubsan\n${NC}"
+printf "${COLOR}\nSTEP 10: Check ubsan\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm_ubsan -t Debug -c clang -f "-Werror -fsanitize=undefined" ; then
     printf "ubsan build failed!\n"
     exit 1
