@@ -275,8 +275,8 @@ run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 
   auto contract = test::load_test_contract("fibonacci.wasm");
 
-  in_memory_db.write_contract(sha256(*contract), contract);
-  in_memory_db.write_deployment(contract_addr, sha256(*contract));
+  in_memory_db.write_contract(LibCrypto::sha256(*contract), contract);
+  in_memory_db.write_deployment(contract_addr, LibCrypto::sha256(*contract));
 
   setup_grant_storage_token(in_memory_db, cost_model, contract_addr,
                             1'000'000'000);

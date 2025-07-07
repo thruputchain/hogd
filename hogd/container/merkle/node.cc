@@ -16,7 +16,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
-#include "hogd/container/merkle/sha256.h"
+#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {
@@ -101,14 +101,14 @@ get_child_encoding(std::vector<std::byte> &encoding,
                    size_t num_children)
 {
   size_t cur_size = encoding.size();
-  encoding.insert(encoding.end(), num_children * Sha256::kSha256Size,
+  encoding.insert(encoding.end(), num_children * sizeof(SHA256Hash),
                   std::byte{0x0});
   for (size_t i = 0; i < num_children; i++) {
     Node *child = children[i];
     if (child) {
-      memcpy(&encoding[cur_size], &child->hash, Sha256::kSha256Size);
+      memcpy(&encoding[cur_size], &child->hash, sizeof(SHA256Hash));
     }
-    cur_size += Sha256::kSha256Size;
+    cur_size += sizeof(SHA256Hash);
   }
 }
 
@@ -318,7 +318,7 @@ Node::get_node_from_encoding(const std::vector<std::byte> &encodings,
     const std::vector<std::byte> node_encodings(encodings.begin() +
                                                     original_idx,
                                                 encodings.begin() + idx);
-    node.hash = Sha256::get_sha256(node_encodings);
+    node.hash = LibCrypto::sha256(node_encodings);
   }
   return ret;
 }

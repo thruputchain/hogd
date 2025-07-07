@@ -16,8 +16,37 @@ TEST(SHA256, BasicUsage)
   std::vector<uint8_t> a_same = {0, 1, 2, 3};
   std::vector<uint8_t> b = {3, 2, 1, 0};
 
-  EXPECT_EQ(sha256(a), sha256(a_same));
-  EXPECT_NE(sha256(a), sha256(b));
+  EXPECT_EQ(sha256_slow(a), sha256_slow(a_same));
+  EXPECT_NE(sha256_slow(a), sha256_slow(b));
+}
+
+TEST(LibCryptoSHA256, CheckEquivalent)
+{
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
+
+  EXPECT_EQ(sha256_slow(a), LibCrypto::sha256(a));
+  EXPECT_EQ(sha256_slow(b), LibCrypto::sha256(b));
+}
+
+TEST(LibCryptoSHA256, BasicUsage)
+{
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> a_same = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
+
+  EXPECT_EQ(LibCrypto::sha256(a), LibCrypto::sha256(a_same));
+  EXPECT_NE(LibCrypto::sha256(a), LibCrypto::sha256(b));
+}
+
+TEST(Blake3, BasicUsage)
+{
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> a_same = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
+
+  EXPECT_EQ(blake3(a), blake3(a_same));
+  EXPECT_NE(blake3(a), blake3(b));
 }
 
 TEST(CRC32C, BasicUsage)

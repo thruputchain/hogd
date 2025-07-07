@@ -140,8 +140,9 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
-  in_memory_db_.write_deployment(ContractAddress{}, sha256(*contract_0));
+  in_memory_db_.write_contract(LibCrypto::sha256(*contract_0), contract_0);
+  in_memory_db_.write_deployment(ContractAddress{},
+                                 LibCrypto::sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
@@ -212,8 +213,9 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
-  in_memory_db_.write_deployment(ContractAddress{}, sha256(*contract_0));
+  in_memory_db_.write_contract(LibCrypto::sha256(*contract_0), contract_0);
+  in_memory_db_.write_deployment(ContractAddress{},
+                                 LibCrypto::sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
@@ -346,11 +348,12 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
+  in_memory_db_.write_contract(LibCrypto::sha256(*contract_0), contract_0);
 
   // Test case 1: sequential good try invokes
   // Invoke method 2, starting with a clean contract deployment
-  in_memory_db_.write_deployment(make_contract_address(1), sha256(*contract_0));
+  in_memory_db_.write_deployment(make_contract_address(1),
+                                 LibCrypto::sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(make_contract_address(1), 1'000'000'000);
@@ -387,7 +390,8 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
 
   // Test case 2: unwinding a frame that contains a try_invoke
   // Invoke method 3, starting with a clean contract deployment
-  in_memory_db_.write_deployment(make_contract_address(2), sha256(*contract_0));
+  in_memory_db_.write_deployment(make_contract_address(2),
+                                 LibCrypto::sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(make_contract_address(2), 1'000'000'000);
@@ -418,7 +422,8 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
 
   // Test case 3: bad try_invoke followed by a good
   // Invoke method 4, starting with a clean contract deployment
-  in_memory_db_.write_deployment(make_contract_address(3), sha256(*contract_0));
+  in_memory_db_.write_deployment(make_contract_address(3),
+                                 LibCrypto::sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(make_contract_address(3), 1'000'000'000);
@@ -580,12 +585,14 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
       std::make_shared<NativeContext>(std::move(contract_map));
 
   auto contract_template = make_native_contract(0); // native_id = 0
-  in_memory_db_.write_contract(sha256(*contract_template), contract_template);
+  in_memory_db_.write_contract(LibCrypto::sha256(*contract_template),
+                               contract_template);
 
   // Test case 1:
   // Test that try invoke can acquire an exclusive lock.
   ContractAddress tc1_addr = make_contract_address(30); // Using a new address
-  in_memory_db_.write_deployment(tc1_addr, sha256(*contract_template));
+  in_memory_db_.write_deployment(tc1_addr,
+                                 LibCrypto::sha256(*contract_template));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(tc1_addr, 1'000'000'000);
@@ -669,7 +676,8 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   // Then, invoke method 1 with parameters [false, true].  This should succeed.
   // Commit the second transaction.
   ContractAddress tc2_addr = make_contract_address(31); // New address for TC2
-  in_memory_db_.write_deployment(tc2_addr, sha256(*contract_template));
+  in_memory_db_.write_deployment(tc2_addr,
+                                 LibCrypto::sha256(*contract_template));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(tc2_addr, 1'000'000'000);
@@ -810,8 +818,8 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
 
   // Deploy contract and grant exactly enough storage tokens for one write
   auto contract = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  in_memory_db_.write_contract(LibCrypto::sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, LibCrypto::sha256(*contract));
   setup_grant_storage_token(contract_addr, one_write_cost);
 
   // Single transaction: invoke method 2 (root)
@@ -963,8 +971,8 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
   // Deploy contract and grant exactly enough storage tokens for two and a half
   // writes
   auto contract = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  in_memory_db_.write_contract(LibCrypto::sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, LibCrypto::sha256(*contract));
   setup_grant_storage_token(contract_addr, total_tokens);
 
   // Single transaction: invoke method 3 (root)
@@ -1130,8 +1138,8 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
   // Deploy contract and grant exactly enough storage tokens for the first two
   // updates
   auto contract = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  in_memory_db_.write_contract(LibCrypto::sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, LibCrypto::sha256(*contract));
   setup_grant_storage_token(contract_addr, total_tokens);
 
   // Single transaction: invoke method 3 (root)
@@ -1250,8 +1258,8 @@ TEST_F(TryInvokeTest, CostChangeDecreaseSuccessCase)
 
   // Deploy contract and grant enough storage tokens for the long write
   auto contract = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  in_memory_db_.write_contract(LibCrypto::sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, LibCrypto::sha256(*contract));
   setup_grant_storage_token(contract_addr, total_tokens);
 
   // Single transaction: invoke method 2 (root)
@@ -1395,8 +1403,8 @@ TEST_F(TryInvokeTest, CostChangeDecreaseFailCase)
 
   // Deploy contract and grant enough storage tokens for the long write
   auto contract = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  in_memory_db_.write_contract(LibCrypto::sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, LibCrypto::sha256(*contract));
   setup_grant_storage_token(contract_addr, total_tokens);
 
   // Single transaction: invoke method 3 (root)
@@ -1529,19 +1537,22 @@ TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   // Deploy contracts
   auto sender_contract_xdr = make_native_contract(kSenderNativeId);
-  in_memory_db_.write_contract(sha256(*sender_contract_xdr),
+  in_memory_db_.write_contract(LibCrypto::sha256(*sender_contract_xdr),
                                sender_contract_xdr);
-  in_memory_db_.write_deployment(sender_addr, sha256(*sender_contract_xdr));
+  in_memory_db_.write_deployment(sender_addr,
+                                 LibCrypto::sha256(*sender_contract_xdr));
 
   auto receiver_contract_xdr = make_native_contract(kReceiverNativeId);
-  in_memory_db_.write_contract(sha256(*receiver_contract_xdr),
+  in_memory_db_.write_contract(LibCrypto::sha256(*receiver_contract_xdr),
                                receiver_contract_xdr);
-  in_memory_db_.write_deployment(receiver_addr, sha256(*receiver_contract_xdr));
+  in_memory_db_.write_deployment(receiver_addr,
+                                 LibCrypto::sha256(*receiver_contract_xdr));
 
   auto token_contract_xdr = make_native_contract(kTokenNativeId);
-  in_memory_db_.write_contract(sha256(*token_contract_xdr), token_contract_xdr);
+  in_memory_db_.write_contract(LibCrypto::sha256(*token_contract_xdr),
+                               token_contract_xdr);
   in_memory_db_.write_deployment(token_contract_addr,
-                                 sha256(*token_contract_xdr));
+                                 LibCrypto::sha256(*token_contract_xdr));
 
   // Grant initial tokens to sender
   setup_grant_storage_token(sender_addr, write_cost);
@@ -1673,8 +1684,10 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 
   // Deploy contracts
   auto test_contract_xdr = make_native_contract(kTestContractId);
-  in_memory_db_.write_contract(sha256(*test_contract_xdr), test_contract_xdr);
-  in_memory_db_.write_deployment(ContractAddress{}, sha256(*test_contract_xdr));
+  in_memory_db_.write_contract(LibCrypto::sha256(*test_contract_xdr),
+                               test_contract_xdr);
+  in_memory_db_.write_deployment(ContractAddress{},
+                                 LibCrypto::sha256(*test_contract_xdr));
 
   // Grant initial tokens to test contract
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);
@@ -1929,15 +1942,16 @@ TEST_F(TryInvokeTest, InvokeErrorHandling)
 
   // Deploy contracts
   auto error_contract_xdr = make_native_contract(kErrorContractId);
-  in_memory_db_.write_contract(sha256(*error_contract_xdr), error_contract_xdr);
+  in_memory_db_.write_contract(LibCrypto::sha256(*error_contract_xdr),
+                               error_contract_xdr);
   in_memory_db_.write_deployment(error_contract_addr,
-                                 sha256(*error_contract_xdr));
+                                 LibCrypto::sha256(*error_contract_xdr));
 
   auto caller_contract_xdr = make_native_contract(kCallerContractId);
-  in_memory_db_.write_contract(sha256(*caller_contract_xdr),
+  in_memory_db_.write_contract(LibCrypto::sha256(*caller_contract_xdr),
                                caller_contract_xdr);
   in_memory_db_.write_deployment(caller_contract_addr,
-                                 sha256(*caller_contract_xdr));
+                                 LibCrypto::sha256(*caller_contract_xdr));
 
   // Grant tokens to both contracts
   setup_grant_storage_token(error_contract_addr, 1'000'000'000);
