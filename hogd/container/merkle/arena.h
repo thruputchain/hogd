@@ -11,6 +11,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/rw_lock.h"
 
 namespace hogd {
 
@@ -44,6 +45,10 @@ public:
   T *alloc()
   {
     if (ptrs_->empty()) {
+      grab_ptrs_from_global_stack();
+    }
+    // [ptrs_] can still be empty if [global_ptrs_] is empty.
+    if (ptrs_->empty()) {
       // When we need to malloc more memory, we malloc enough memory to hold a
       // batch of objects rather than just a single object. This amortizes the
       // malloc overhead.
@@ -67,6 +72,20 @@ public:
 
     ptr->~T();
     ptrs_->push(ptr);
+
+    if (ptrs_->size() >= kBatchSizeToSpillToGlobalStack) {
+      spill_ptrs_to_global_stack();
+    }
+  }
+
+  size_t local_stack_size() const { return ptrs_->size(); }
+
+  size_t global_stack_size()
+  {
+    global_lock_.lock_writer();
+    size_t ret = global_ptrs_.size();
+    global_lock_.unlock();
+    return ret;
   }
 
 private:
@@ -74,11 +93,46 @@ private:
   // The number of objects we allocate when we call malloc. By allocating a
   // batch of objects, we amortize the malloc overhead.
   static constexpr size_t kBatchSize = 512;
+  static constexpr size_t kBatchSizeToSpillToGlobalStack = kBatchSize * 2;
   // The size of the batch the arena allocates with malloc.
   const size_t batch_alloc_size_;
 
+  void grab_ptrs_from_global_stack()
+  {
+    if (!global_ptrs_empty_.load(std::memory_order_relaxed)) {
+      global_lock_.lock_writer();
+      for (size_t i = 0; i < kBatchSize && !global_ptrs_.empty(); i++) {
+        ptrs_->push(global_ptrs_.top());
+        global_ptrs_.pop();
+      }
+      if (global_ptrs_.empty() &&
+          !global_ptrs_empty_.load(std::memory_order_relaxed)) {
+        global_ptrs_empty_.store(true, std::memory_order_relaxed);
+      }
+      global_lock_.unlock();
+    }
+  }
+
+  void spill_ptrs_to_global_stack()
+  {
+    global_lock_.lock_writer();
+    while (ptrs_->size() > kBatchSize) {
+      global_ptrs_.push(ptrs_->top());
+      ptrs_->pop();
+    }
+    if (!global_ptrs_.empty() &&
+        global_ptrs_empty_.load(std::memory_order_relaxed)) {
+      global_ptrs_empty_.store(false, std::memory_order_relaxed);
+    }
+    global_lock_.unlock();
+  }
+
   // Tracks the objects allocated by the arena.
   PerThread<std::stack<T *>> ptrs_;
+  // A global stack shared by all threads.
+  RwLock global_lock_;
+  std::atomic<bool> global_ptrs_empty_ = true;
+  std::stack<T *> global_ptrs_;
 };
 
 } // namespace hogd
