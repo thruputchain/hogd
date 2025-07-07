@@ -2,7 +2,12 @@
 
 #pragma once
 
+#include <openssl/sha.h> // NOLINT(misc-include-cleaner)
 #include <sodium.h>
+
+extern "C" {
+#include "blake3.h"
+}
 
 #include <array>
 #include <cassert>
@@ -30,7 +35,7 @@ read_random(x23::is_bytespan auto buf)
 
 // sha256 returns the SHA256 hash of buf.
 inline SHA256Hash
-sha256(x23::is_bytespan auto buf)
+sha256_slow(x23::is_bytespan auto buf)
 {
   SHA256Hash out;
   [[maybe_unused]]
@@ -44,10 +49,57 @@ sha256(x23::is_bytespan auto buf)
 
 template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
 inline SHA256Hash
-sha256(const T &value)
+sha256_slow(const T &value)
 {
   auto buf = x23::serialize(value);
-  return sha256(buf);
+  return sha256_slow(buf);
+}
+
+class LibCrypto {
+public:
+  static SHA256Hash sha256(x23::is_bytespan auto buf)
+  {
+    // We need to directly use lower-level functions in OpenSSL even though they
+    // are deprecated. The public API (i.e., the [EVP_*] functions) do reference
+    // counting and acquire locks, which limits parallelism and also harms
+    // single-thread performance.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    SHA256Hash out;
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+    SHA256_Update(&ctx, buf.data(), buf.size());
+    SHA256_Final(out.data(), &ctx);
+
+    return out;
+  }
+
+  template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
+  static SHA256Hash sha256(const T &value)
+  {
+    auto buf = x23::serialize(value);
+    return sha256(buf);
+  }
+};
+
+using Blake3Hash = std::array<unsigned char, BLAKE3_OUT_LEN>;
+
+inline Blake3Hash
+blake3(x23::is_bytespan auto buf)
+{
+  Blake3Hash out;
+  blake3_hasher hasher;
+  blake3_hasher_init(&hasher);
+  blake3_hasher_update(&hasher, buf.data(), buf.size());
+  blake3_hasher_finalize(&hasher, out.data(), sizeof(out));
+  return out;
+}
+
+template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
+inline Blake3Hash
+blake3(const T &value)
+{
+  auto buf = x23::serialize(value);
+  return blake3(buf);
 }
 
 // SipHash24Key is the secret key used by SipHash24.

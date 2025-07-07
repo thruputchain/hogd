@@ -16,7 +16,6 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/container/merkle/sha256.h"
 #include "hogd/crypto/crypto.h"
 
 namespace hogd {
@@ -412,7 +411,7 @@ hash_parallel(benchmark::State &state, size_t num_threads)
     for (size_t i = 0; i < num_threads; i++) {
       futures[i] = pool.submit([per_thread_iterations, i, &to_hash] {
         for (size_t j = 0; j < per_thread_iterations; j++) {
-          sha256(to_hash[i]);
+          sha256_slow(to_hash[i]);
           to_hash[i][0] = std::byte(static_cast<uint8_t>(to_hash[i][0]) + 1);
         }
       });
@@ -446,7 +445,7 @@ hash_parallel_openssl(benchmark::State &state, size_t num_threads)
     for (size_t i = 0; i < num_threads; i++) {
       futures[i] = pool.submit([per_thread_iterations, i, &to_hash] {
         for (size_t j = 0; j < per_thread_iterations; j++) {
-          Sha256::get_sha256(to_hash[i]);
+          LibCrypto::sha256(to_hash[i]);
           to_hash[i][0] = std::byte(static_cast<uint8_t>(to_hash[i][0]) + 1);
         }
       });

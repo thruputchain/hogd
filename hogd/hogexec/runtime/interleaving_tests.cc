@@ -79,8 +79,10 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
   // Deploy contracts
   auto test_contract_xdr = make_native_contract(kTestContractId);
-  in_memory_db_.write_contract(sha256(*test_contract_xdr), test_contract_xdr);
-  in_memory_db_.write_deployment(ContractAddress{}, sha256(*test_contract_xdr));
+  in_memory_db_.write_contract(LibCrypto::sha256(*test_contract_xdr),
+                               test_contract_xdr);
+  in_memory_db_.write_deployment(ContractAddress{},
+                                 LibCrypto::sha256(*test_contract_xdr));
 
   // Grant initial tokens to test contract
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);

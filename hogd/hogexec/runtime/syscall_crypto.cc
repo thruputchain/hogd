@@ -20,7 +20,7 @@ syscall_SHA256_inner(SystemCallHandler &handler,
                      std::span<const std::byte> input_buffer,
                      SHA256Hash &output_hash)
 {
-  output_hash = sha256(input_buffer);
+  output_hash = LibCrypto::sha256(input_buffer);
 
   if (auto *stats = handler.get_transaction_stats()) {
     stats->sha256_total_bytes_processed += input_buffer.size();
