@@ -33,9 +33,11 @@ NC='\033[0m'
 # Much of the CI time is bottlenecked on libsodium's configure step (sequential, low CPU usage)
 # and a few late-stage link jobs
 if [ "$BUILD_PARALLEL" = "yes" ]; then
-  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" > /dev/null 2>&1 &
+  LLVM_LOG=${BUILD_DIR}/llvm_build.log
+  GCC_RELEASE_LOG=${BUILD_DIR}/gcc_release_build.log
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" > "$LLVM_LOG" 2>&1 &
   LLVM_BUILD_PID=$!
-  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -f "-Werror" > /dev/null 2>&1 &
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -f "-Werror" > "$GCC_RELEASE_LOG" 2>&1 &
   GCC_RELEASE_BUILD_PID=$!
 fi
 
@@ -54,8 +56,12 @@ fi
 if [ "$BUILD_PARALLEL" = "yes" ]; then
     printf "${COLOR}Waiting for Step 3 (llvm) build to finish...\n${NC}"
     wait $LLVM_BUILD_PID
-    if [ $? -ne 0 ]; then
+    LLVM_STATUS=$?
+    if [ $LLVM_STATUS -ne 0 ]; then
         printf "llvm build failed!\n"
+        printf "\n===== llvm build log =====\n"
+        cat "$LLVM_LOG"
+        printf "===== end llvm build log =====\n\n"
         exit 1
     fi
     printf "${COLOR}Step 3 (llvm) build finished\n${NC}"
@@ -89,8 +95,12 @@ printf "Format checking passed.\n"
 if [ "$BUILD_PARALLEL" = "yes" ]; then
     printf "${COLOR}Waiting for Step 7 (gcc_release) build to finish...\n${NC}"
     wait $GCC_RELEASE_BUILD_PID
-    if [ $? -ne 0 ]; then
+    GCC_RELEASE_STATUS=$?
+    if [ $GCC_RELEASE_STATUS -ne 0 ]; then
         printf "gcc_release build failed!\n"
+        printf "\n===== gcc_release build log =====\n"
+        cat "$GCC_RELEASE_LOG"
+        printf "===== end gcc_release build log =====\n\n"
         exit 1
     fi
     printf "${COLOR}Step 7 (gcc_release) build finished\n${NC}"
