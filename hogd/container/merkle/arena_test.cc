@@ -1,19 +1,16 @@
-#include <array>
 #include <cstddef>
 #include <cstring>
+#include <future>
 #include <gtest/gtest.h>
 #include <memory>
-#include <optional>
 
-#include <string>
+#include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/arena.h"
-#include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -103,6 +100,7 @@ TEST(Arena, Multithread)
   WorkerPool pool(kNumThreads);
   Arena<Node> arena;
   std::vector<std::future<void>> futures;
+  futures.reserve(kNumThreads);
   for (size_t i = 0; i < kNumThreads; i++) {
     futures.push_back(pool.submit([&arena] {
       std::vector<Node *> ptrs;
