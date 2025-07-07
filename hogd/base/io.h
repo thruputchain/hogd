@@ -223,7 +223,14 @@ private:
   // read_from_buffer reads from the currently buffered data.
   size_t read_from_buffer(std::span<std::byte> dst);
   // refill performs a read on the file to refill the buffered data.
-  ErrnoStatus<void> refill();
+  ErrnoStatus<void> refill()
+  {
+    ErrnoStatus<size_t> ret = in_->read(buf_);
+    if (!ret)
+      return ret.error();
+    pos_ = std::span(buf_.begin(), *ret);
+    return {};
+  }
 
   // peak_delim scans the buffer until it finds delim or reaches the end. It
   // returns the number of bytes scanned including delim if delim was found. It

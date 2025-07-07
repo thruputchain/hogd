@@ -400,16 +400,6 @@ BufferedReader::read_from_buffer(std::span<std::byte> dst)
   return n;
 }
 
-inline ErrnoStatus<void>
-BufferedReader::refill()
-{
-  ErrnoStatus<size_t> ret = in_->read(buf_);
-  if (!ret)
-    return ret.error();
-  pos_ = std::span(buf_.begin(), *ret);
-  return {};
-}
-
 inline std::optional<size_t>
 BufferedReader::peek_delim(char delim) const
 {
