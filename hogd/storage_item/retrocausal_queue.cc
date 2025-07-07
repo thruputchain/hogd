@@ -12,6 +12,21 @@
 
 namespace hogd {
 
+namespace {
+bool
+parent_block_assert(
+    std::map<uint64_t, std::shared_ptr<const BlockState>> const &parent_blocks,
+    uint64_t cur_block_number)
+{
+  for (auto const &[block_number, _] : parent_blocks) {
+    if (block_number == cur_block_number) {
+      return false;
+    }
+  }
+  return true;
+}
+} // namespace
+
 RetrocausalQueue::RetrocausalQueue(
     RetrocausalQueue const &parent,
     RetrocausalQueuePastBlockConsumeDelta const &consume_delta,
@@ -22,9 +37,8 @@ RetrocausalQueue::RetrocausalQueue(
     consumed_size_(parent.consumed_size_)
 {
   if constexpr (is_debug_build()) {
-    for (auto const &[block_number, _] : parent.blocks_) {
-      assert(block_number != current_round_block.block_number);
-    }
+    assert(
+        parent_block_assert(parent.blocks_, current_round_block.block_number));
   }
 
   assert(consume_delta.max_fully_consumed_block_number !=
