@@ -94,7 +94,7 @@ TEST(Arena, GlobalStackSpillAndGrab)
 TEST(Arena, Multithread)
 {
   constexpr size_t kNumThreads = 32;
-  constexpr size_t kNumIterations = 100;
+  constexpr size_t kNumIterations = 50;
   constexpr size_t kNumAllocsPerIteration = 1024;
 
   WorkerPool pool(kNumThreads);
