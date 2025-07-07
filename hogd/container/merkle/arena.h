@@ -96,8 +96,8 @@ public:
 
 private:
   static constexpr size_t kCacheLineSize = 64;
-  // Once a local stack grows to this size, it spills pointers to the global
-  // stack on the next call to [free()].
+  // Once a local stack grows to this size on a call to [free()], it spills
+  // pointers to the global stack.
   static constexpr size_t kBatchSizeToSpillToGlobalStack = kBatchSize * 2;
   // The size of the batch the arena allocates with malloc.
   const size_t batch_alloc_size_;
