@@ -15,7 +15,7 @@ namespace hogd {
 namespace {
 bool
 parent_block_assert(
-    std::map<uint64_t, std::shared_ptr<const BlockState>> const &parent_blocks,
+    auto const &parent_blocks,
     uint64_t cur_block_number)
 {
   for (auto const &[block_number, _] : parent_blocks) {
