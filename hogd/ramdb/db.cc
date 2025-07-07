@@ -188,6 +188,7 @@ Database::background_worker(const std::stop_token &stoken)
     }
 
     if (disk_cleanup) {
+      return;
       info("triggering disk cleanup due to wal growth");
       if (cleanup_running_.load(std::memory_order_acquire)) {
         info("cleanup already running; skipping");

@@ -25,6 +25,16 @@ target_link_libraries(
   ramdb
 )
 
+# Build the db_crash_test executable
+add_executable(
+  db_crash_test
+  db_crash_test.cc
+)
+target_link_libraries(
+  db_crash_test
+  ramdb
+)
+
 # create test binary
 add_executable(
   db_test

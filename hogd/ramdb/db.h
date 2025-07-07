@@ -130,6 +130,8 @@ public:
   static size_t estimate_heap_size(size_t n, size_t key_size,
                                    size_t value_size);
 
+  uint64_t get_synced_lsn() { return disk_writer_.get_synced_lsn(); }
+
 private:
   // the directory that stores this database.
   Directory dir_;
