@@ -14,16 +14,12 @@ namespace hogd {
 
 namespace {
 bool
-parent_block_assert(
-    auto const &parent_blocks,
-    uint64_t cur_block_number)
+parent_block_assert(auto const &parent_blocks, uint64_t cur_block_number)
 {
-  for (auto const &[block_number, _] : parent_blocks) {
-    if (block_number == cur_block_number) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(parent_blocks,
+                             [cur_block_number](auto const &block) {
+                               return block.first != cur_block_number;
+                             });
 }
 } // namespace
 
