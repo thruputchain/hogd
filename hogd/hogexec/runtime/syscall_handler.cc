@@ -52,7 +52,7 @@ SystemCallHandler::SystemCallHandler(
       std::unordered_map<SHA256Hash, std::shared_ptr<const Contract>> contracts;
 
       for (auto const &contract : signed_tx_.tx.contracts_to_deploy) {
-        contracts.emplace(sha256(contract),
+        contracts.emplace(LibCrypto::sha256(contract),
                           std::make_shared<const Contract>(contract));
       }
       return contracts;
@@ -232,7 +232,7 @@ SystemCallHandler::get_current_address() const
 SHA256Hash
 SystemCallHandler::get_source_tx_hash() const
 {
-  return sha256(signed_tx_.tx);
+  return LibCrypto::sha256(signed_tx_.tx);
 }
 
 SyscallStatus<ContractAddress>
@@ -379,9 +379,10 @@ SystemCallHandler::static_get_deploy_address(ContractAddress const &sender,
                                              SHA256Hash const &nonce,
                                              SHA256Hash const &contract_hash)
 {
-  return sha256(ContractDeploymentHashPreimage{.deployer_address = sender,
-                                               .nonce = nonce,
-                                               .contract_hash = contract_hash});
+  return LibCrypto::sha256(
+      ContractDeploymentHashPreimage{.deployer_address = sender,
+                                     .nonce = nonce,
+                                     .contract_hash = contract_hash});
 }
 
 SystemStatus<SyscallStatus<ContractAddress>>

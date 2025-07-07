@@ -389,6 +389,23 @@ BufferedReader::read_string(char delim)
   return buf;
 }
 
+ErrnoStatus<void>
+BufferedReader::skip(size_t n)
+{
+  while (true) {
+    if (n <= pos_.size()) {
+      pos_ = pos_.subspan(n);
+      return {};
+    }
+
+    n -= pos_.size();
+
+    ErrnoStatus<void> ret = refill();
+    if (!ret)
+      return ret.error();
+  }
+}
+
 inline size_t
 BufferedReader::read_from_buffer(std::span<std::byte> dst)
 {
