@@ -1,5 +1,6 @@
 #include "hogd/storage_item/retrocausal_queue.h"
 
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <memory>
