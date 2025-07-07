@@ -17,7 +17,9 @@ namespace hogd {
 
 // An arena. This has a very simple implementation right now and needs more
 // work. For example, we currently do not free any memory that we allocate.
-// TODO(jhumphri): Make the arena production ready.
+// TODO(jhumphri): Make the arena production ready. Specifically, we cannot
+// allow the global stack to grow unbounded--we need to free pointers back to
+// the memory subsystem at some point.
 //
 // Example:
 // Arena<Node> arena;
@@ -28,6 +30,10 @@ namespace hogd {
 // arena.free(ptr);
 template<typename T> class Arena {
 public:
+  // The number of objects we allocate when we call malloc. By allocating a
+  // batch of objects, we amortize the malloc overhead.
+  static constexpr size_t kBatchSize = 512;
+
   // Creates an arena that allocates memory for T objects.
   Arena() : batch_alloc_size_(kBatchSize * sizeof(T))
   {
@@ -90,13 +96,13 @@ public:
 
 private:
   static constexpr size_t kCacheLineSize = 64;
-  // The number of objects we allocate when we call malloc. By allocating a
-  // batch of objects, we amortize the malloc overhead.
-  static constexpr size_t kBatchSize = 512;
+  // Once a local stack grows to this size, it spills pointers to the global
+  // stack on the next call to [free()].
   static constexpr size_t kBatchSizeToSpillToGlobalStack = kBatchSize * 2;
   // The size of the batch the arena allocates with malloc.
   const size_t batch_alloc_size_;
 
+  // Tries to grab pointers from the global stack.
   void grab_ptrs_from_global_stack()
   {
     if (!global_ptrs_empty_.load(std::memory_order_relaxed)) {
@@ -113,6 +119,7 @@ private:
     }
   }
 
+  // Spills an excess of pointers to the global stack.
   void spill_ptrs_to_global_stack()
   {
     global_lock_.lock_writer();
@@ -130,9 +137,9 @@ private:
   // Tracks the objects allocated by the arena.
   PerThread<std::stack<T *>> ptrs_;
   // A global stack shared by all threads.
+  std::stack<T *> global_ptrs_;
   RwLock global_lock_;
   std::atomic<bool> global_ptrs_empty_ = true;
-  std::stack<T *> global_ptrs_;
 };
 
 } // namespace hogd
