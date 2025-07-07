@@ -35,7 +35,7 @@ read_random(x23::is_bytespan auto buf)
 
 // sha256 returns the SHA256 hash of buf.
 inline SHA256Hash
-sha256(x23::is_bytespan auto buf)
+sha256_slow(x23::is_bytespan auto buf)
 {
   SHA256Hash out;
   [[maybe_unused]]
@@ -49,10 +49,10 @@ sha256(x23::is_bytespan auto buf)
 
 template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
 inline SHA256Hash
-sha256(const T &value)
+sha256_slow(const T &value)
 {
   auto buf = x23::serialize(value);
-  return sha256(buf);
+  return sha256_slow(buf);
 }
 
 class LibCrypto {
@@ -74,7 +74,7 @@ public:
   }
 
   template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
-  SHA256Hash sha256(const T &value)
+  static SHA256Hash sha256(const T &value)
   {
     auto buf = x23::serialize(value);
     return sha256(buf);

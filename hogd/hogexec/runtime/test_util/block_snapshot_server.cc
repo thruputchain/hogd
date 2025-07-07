@@ -194,7 +194,7 @@ BlockSnapshotServer::get_concurrent_retrocausal_queue_entry(
 void
 BlockSnapshotServer::setup_create_contract(Contract const &contract)
 {
-  auto h = sha256(contract);
+  auto h = LibCrypto::sha256(contract);
   contracts_->emplace(h, contract);
 }
 void

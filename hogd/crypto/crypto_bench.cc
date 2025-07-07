@@ -34,7 +34,7 @@ bench_hash(benchmark::State &state, Func hash_fn)
 void
 bm_sha256(benchmark::State &state)
 {
-  bench_hash(state, [](std::span<std::byte> buf) { return sha256(buf); });
+  bench_hash(state, [](std::span<std::byte> buf) { return sha256_slow(buf); });
 }
 BENCHMARK(bm_sha256)->RangeMultiplier(2)->Range(kMin, kMax); // NOLINT
 

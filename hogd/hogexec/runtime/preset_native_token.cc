@@ -32,7 +32,7 @@ allowance_key(ContractAddress owner, ContractAddress spender)
 {
   auto data = bcs::encode_to(owner, spender);
   assert(data);
-  return sha256(data.value());
+  return LibCrypto::sha256(data.value());
 }
 
 SystemStatus<bool>
