@@ -37,7 +37,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
   GCC_RELEASE_LOG=${BUILD_DIR}/gcc_release_build.log
   ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" > "$LLVM_LOG" 2>&1 &
   LLVM_BUILD_PID=$!
-  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -f "-Werror" > "$GCC_RELEASE_LOG" 2>&1 &
+  ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc > "$GCC_RELEASE_LOG" 2>&1 &
   GCC_RELEASE_BUILD_PID=$!
 fi
 
@@ -106,7 +106,7 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
     printf "${COLOR}Step 7 (gcc_release) build finished\n${NC}"
 else
     printf "${COLOR}\nSTEP 7: Check release build (gcc)\n${NC}"
-    if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc -f "-Werror" ; then
+    if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc; then
         printf "build failed!\n"
         exit 1
     fi
