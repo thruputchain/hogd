@@ -12,6 +12,19 @@ target_link_libraries(
 gtest_discover_tests(hex_array_test)
 
 add_executable(
+  arena_test
+  arena_test.cc
+  node.cc
+)
+target_link_libraries(
+  arena_test
+  base
+  hogd
+  GTest::gtest_main
+)
+gtest_discover_tests(arena_test)
+
+add_executable(
   node_test
   node_test.cc
   node.cc
