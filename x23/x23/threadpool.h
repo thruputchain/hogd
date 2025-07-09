@@ -110,10 +110,10 @@ struct CpuMap {
   int bucket(int n = cpuid()) const noexcept
   {
 #if HAVE_SCHED_GETCPU
-    if (n < nbuckets_) [[likely]]
+    if (size_t(n) < map_.size()) [[likely]]
       return map_[n];
 #endif // HAVE_SCHED_GETCPU
-    return map_[n % nbuckets_];
+    return map_[size_t(n) % map_.size()];
   }
   CpuMap(Vec<int> map) noexcept
     : map_(std::move(map)), nbuckets_(1 + std::ranges::max(map_))

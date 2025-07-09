@@ -60,8 +60,7 @@ private:
   static void calibrate()
   {
     if (calibration_lock.test_and_set()) {
-      if (calibrated.load(std::memory_order_relaxed))
-        calibrated.wait(false);
+      calibrated.wait(false);
       return;
     }
 

@@ -14,6 +14,7 @@ main()
 
   std::println("{} total buckets", cpumap.nbuckets_);
 
-  std::println("currently running on {} -> {}", x23::cpuid(),
-               cpumap.bucket());
+  int cpuid = x23::cpuid();
+  std::println("currently running on {} -> {}", cpuid,
+               cpumap.bucket(cpuid));
 }

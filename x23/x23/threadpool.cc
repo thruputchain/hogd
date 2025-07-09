@@ -42,9 +42,11 @@ ThreadPool::~ThreadPool()
 // Find and lock a runqueue for a job with cpuhint.  If the "affinity
 // queue" corresponding to cpuhint's LLC is already locked, just keep
 // the same queue and return.  Otherwise, pick another random queue
-// and if the tail of the affinity queue is at least 10 microseconds
-// older than the random queue, pick the random queue instead.  Only
-// return queues that have at least one thread after they are locked.
+// and if the oldest job in the random queue is more than 10
+// microseconds older than the oldest job in the affinity queue, then
+// select the random queue instead of the affinity queue.  Only
+// returns a queue that has at least one thread after it has been
+// locked.
 void
 ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
 {
