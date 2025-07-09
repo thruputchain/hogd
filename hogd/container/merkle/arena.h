@@ -97,6 +97,7 @@ public:
   }
 
 private:
+  static constexpr size_t kCacheLineSize = 64;
   // Once a local stack grows to this size on a call to [free()], it spills
   // pointers to the global stack.
   static constexpr size_t kBatchSizeToSpillToGlobalStack = kBatchSize * 2;

@@ -31,7 +31,12 @@ target_link_libraries(
 )
 
 add_library(crypto_test_objects OBJECT crypto_test.cc)
-target_link_libraries(crypto_test_objects crypto_interface GTest::gtest_main)
+target_link_libraries(
+  crypto_test_objects 
+  crypto_interface
+  OpenSSL::SSL
+  OpenSSL::Crypto
+  GTest::gtest_main)
 
 # create crypto module test binary
 add_executable(
