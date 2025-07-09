@@ -15,10 +15,46 @@
 
 namespace hogd {
 
-inline HogDBStatus<void>
-NNInt128::commit(HogDatabase &db, const ItemKey &key) const
+namespace {
+
+HogDBStatus<void>
+update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key,
+                       const std::string &value)
 {
-  return write_nnint128(db, key, value());
+  HexArray k(key.get_address().as_bytes());
+  if (!trie.insert(k, value)) {
+    void *cookie;
+    std::string *v = trie.find_begin(k, cookie);
+    if (!v) {
+      return HogDBError(HogDBCode::kInternal);
+    }
+    trie.find_end(cookie);
+  }
+  return {};
+}
+
+HogDBStatus<void>
+remove_kv_pair_from_trie(MerkleTriePrefix &trie, const ItemKey &key)
+{
+  HexArray k(key.get_address().as_bytes());
+  if (!trie.remove(k)) {
+    return HogDBError(HogDBCode::kNotFound);
+  }
+  return {};
+}
+
+} // namespace
+
+inline HogDBStatus<void>
+NNInt128::commit(HogDatabase &db, MerkleTriePrefix &trie,
+                 const ItemKey &key) const
+{
+  HogDBStatus<void> ret = write_nnint128(db, key, value());
+  if (ret) {
+    // TODO(jhumphri): Pass in correct value.
+    ret = update_kv_pair_in_trie(trie, key, "FIX");
+  }
+  return ret;
 }
 
 inline bool
@@ -100,15 +136,26 @@ NNInt128::undo_merge(const NNInt128 &nnint)
 }
 
 inline HogDBStatus<void>
-Bytes::commit(HogDatabase &db, const ItemKey &key) const
+Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
 {
-  return write_bytes(db, key, std::as_bytes(std::span(buf_)));
+  HogDBStatus<void> ret = write_bytes(db, key, std::as_bytes(std::span(buf_)));
+  if (ret) {
+    // TODO(jhumphri): Pass in correct value.
+    ret = update_kv_pair_in_trie(trie, key, "FIX");
+  }
+  return ret;
 }
 
 inline HogDBStatus<void>
-Deletion::commit(HogDatabase &db, const ItemKey &key)
+Deletion::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key)
 {
-  return remove_item(db, key);
+  HogDBStatus<void> ret = remove_item(db, key);
+  if (ret) {
+    ret = remove_kv_pair_from_trie(trie, key);
+    // TODO(jhumphri): If [ret] is an error, do we need to remove the item from
+    // the db?
+  }
+  return ret;
 }
 
 namespace {
@@ -119,12 +166,12 @@ concept is_monostate = std::same_as<std::decay_t<T>, std::monostate>;
 } // namespace
 
 HogDBStatus<void>
-ItemChange::commit(HogDatabase &db, ItemKey key) const
+ItemChange::commit(HogDatabase &db, MerkleTriePrefix &trie, ItemKey key) const
 {
   return std::visit(
-      [&db, &key](auto &arg) -> HogDBStatus<void> {
+      [&db, &trie, &key](auto &arg) -> HogDBStatus<void> {
         if constexpr (!is_monostate<decltype(arg)>)
-          return arg.commit(db, key);
+          return arg.commit(db, trie, key);
         return {};
       },
       type_);

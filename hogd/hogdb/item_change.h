@@ -28,6 +28,7 @@
 
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
@@ -38,22 +39,22 @@ namespace hogd {
 // tracks a change to a DB item. Each class that implements this concept is an
 // item type.
 template<typename T>
-concept is_item =
-    requires(T t, HogDatabase &db, const ItemKey &key, const T &arg) {
-      // applies the change to the ramdb.
-      { t.commit(db, key) } -> std::same_as<HogDBStatus<void>>;
-      // makes the change's reservation at least as restrictive as arg. However,
-      // does not merge the value change in arg. Returns true if narrowing was
-      // successful.
-      { t.narrow(arg) } -> std::same_as<bool>;
-      // merges the change and reservation in arg (will fail if there is a
-      // conflict).
-      { t.merge(arg) } -> std::same_as<HogDBStatus<void>>;
-      // reverts the change and reservation in arg that was previously merged.
-      { t.undo_merge(arg) } -> std::same_as<void>;
-      // returns the size in bytes of storage required in ramdb.
-      { t.storage_size() } -> std::same_as<size_t>;
-    };
+concept is_item = requires(T t, HogDatabase &db, MerkleTriePrefix &trie,
+                           const ItemKey &key, const T &arg) {
+  // applies the change to the ramdb.
+  { t.commit(db, trie, key) } -> std::same_as<HogDBStatus<void>>;
+  // makes the change's reservation at least as restrictive as arg. However,
+  // does not merge the value change in arg. Returns true if narrowing was
+  // successful.
+  { t.narrow(arg) } -> std::same_as<bool>;
+  // merges the change and reservation in arg (will fail if there is a
+  // conflict).
+  { t.merge(arg) } -> std::same_as<HogDBStatus<void>>;
+  // reverts the change and reservation in arg that was previously merged.
+  { t.undo_merge(arg) } -> std::same_as<void>;
+  // returns the size in bytes of storage required in ramdb.
+  { t.storage_size() } -> std::same_as<size_t>;
+};
 
 // NNInt128 commutes with other NNInt128's if base + minus >= 0 && base +
 // plus does not overflow. The item's value at commit time is base + delta.
@@ -68,7 +69,8 @@ public:
     minus_ = delta_;
   }
 
-  HogDBStatus<void> commit(HogDatabase &db, const ItemKey &key) const;
+  HogDBStatus<void> commit(HogDatabase &db, MerkleTriePrefix &trie,
+                           const ItemKey &key) const;
   bool narrow(const NNInt128 &nnint);
   HogDBStatus<void> merge(const NNInt128 &nnint);
   void undo_merge(const NNInt128 &nnint);
@@ -106,7 +108,8 @@ struct Bytes {
 public:
   Bytes(std::span<const std::byte> buf) : buf_(buf.begin(), buf.end()) {}
 
-  HogDBStatus<void> commit(HogDatabase &db, const ItemKey &key) const;
+  HogDBStatus<void> commit(HogDatabase &db, MerkleTriePrefix &trie,
+                           const ItemKey &key) const;
   bool narrow(const Bytes &bytes) { return buf_ == bytes.buf_; }
   HogDBStatus<void> merge(const Bytes &bytes)
   {
@@ -134,7 +137,8 @@ static_assert(is_item<Bytes>);
 // Deletion's to the same item.
 class Deletion {
 public:
-  static HogDBStatus<void> commit(HogDatabase &db, const ItemKey &key);
+  static HogDBStatus<void> commit(HogDatabase &db, MerkleTriePrefix &trie,
+                                  const ItemKey &key);
   static bool narrow(const Deletion & /*del*/) { return true; }
   static HogDBStatus<void> merge(const Deletion & /*del*/) { return {}; }
   static void undo_merge(const Deletion &del) {}
@@ -163,7 +167,8 @@ public:
   void set_snapshot_cost(size_t val) { snapshot_cost_ = val; }
 
   // commit applies the item's changes to the ramdb.
-  HogDBStatus<void> commit(HogDatabase &db, ItemKey key) const;
+  HogDBStatus<void> commit(HogDatabase &db, MerkleTriePrefix &trie,
+                           ItemKey key) const;
 
   // narrow combines the reservation of a change into this one.
   void narrow(const ItemChange &change);
