@@ -39,9 +39,10 @@ size_to_bytes(size_t s, std::vector<std::byte> &append_to)
 
 void
 get_value_string(std::ostringstream &oss,
-                 const std::optional<std::string> &value)
+                 const std::optional<SHA256Hash> &value_hash)
 {
-  oss << std::format("Value: [{}]\n", value ? *value : "<empty>");
+  oss << std::format("Value: [{}]\n",
+                     value_hash ? HexArray(*value_hash).str() : "<empty>");
 }
 
 void
@@ -74,16 +75,14 @@ get_child_string(std::ostringstream &oss, size_t child_idx,
 
 void
 get_value_encoding(std::vector<std::byte> &encoding,
-                   const std::optional<std::string> &value)
+                   const std::optional<SHA256Hash> &value_hash)
 {
-  std::byte value_present_byte = value ? std::byte{0x01} : std::byte{0x00};
+  std::byte value_present_byte = value_hash ? std::byte{0x01} : std::byte{0x00};
   encoding.push_back(value_present_byte);
 
-  size_to_bytes(value ? value->size() : 0, encoding);
-
-  if (value) {
-    const std::string &v = *value;
-    std::ranges::transform(v, std::back_inserter(encoding), cast_char_to_byte);
+  if (value_hash) {
+    std::ranges::transform(*value_hash, std::back_inserter(encoding),
+                           cast_char_to_byte);
   }
 }
 
@@ -123,23 +122,17 @@ get_value_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
   bool value_present = static_cast<unsigned char>(encodings[idx]) != 0U;
   idx += kValuePresentSize;
 
-  if (idx + sizeof(size_t) > encodings.size()) {
-    return false;
-  }
-  auto value_size = static_cast<size_t>(encodings[idx]);
-  idx += sizeof(size_t);
-
-  if (idx + value_size > encodings.size()) {
-    return false;
-  }
   if (value_present) {
-    node.value = std::string(reinterpret_cast<const char *>(&encodings[idx]),
-                             value_size);
+    if (idx + sizeof(SHA256Hash) > encodings.size()) {
+      return false;
+    }
+    node.value_hash = SHA256Hash();
+    memcpy(&(*node.value_hash), &encodings[idx], sizeof(SHA256Hash));
+    idx += sizeof(SHA256Hash);
   }
   else {
-    node.value = std::nullopt;
+    node.value_hash = std::nullopt;
   }
-  idx += value_size;
 
   return true;
 }
@@ -264,7 +257,7 @@ Node::get_branch_encoding(std::vector<std::byte> &encoding) const
 {
   CHECK_EQ(type, Node::Type::kBranch);
 
-  get_value_encoding(encoding, value);
+  get_value_encoding(encoding, value_hash);
   get_child_encoding(encoding, child, /*num_children=*/kMaxNumBranches);
 }
 
@@ -283,7 +276,7 @@ Node::get_leaf_encoding(std::vector<std::byte> &encoding) const
   CHECK_EQ(type, Node::Type::kLeaf);
 
   get_path_encoding(encoding, path);
-  get_value_encoding(encoding, value);
+  get_value_encoding(encoding, value_hash);
 }
 
 bool
@@ -352,7 +345,7 @@ Node::get_branch_string(std::ostringstream &oss) const
 {
   CHECK_EQ(type, Node::Type::kBranch);
 
-  get_value_string(oss, value);
+  get_value_string(oss, value_hash);
   for (size_t i = 0; i < child.size(); i++) {
     get_child_string(oss, i, child);
   }
@@ -373,7 +366,7 @@ Node::get_leaf_string(std::ostringstream &oss) const
   CHECK_EQ(type, Node::Type::kLeaf);
 
   get_path_string(oss, path);
-  get_value_string(oss, value);
+  get_value_string(oss, value_hash);
 }
 
 } // namespace hogd

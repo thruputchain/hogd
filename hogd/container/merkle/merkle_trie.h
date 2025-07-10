@@ -108,12 +108,12 @@ public:
                     const std::vector<std::byte> &encodings, const Key &k,
                     const T &value);
 
-  // Finds the value for key [k]. If key [k] does not exist in the trie, returns
-  // a nullptr. If a non-null pointer is returned, you *must* call
-  // [find_end(cookie)] when you are done accessing the value!
+  // Finds the value hash for key [k]. If key [k] does not exist in the trie,
+  // returns a nullptr. If true is returned, you *must* call [find_end(cookie)]
+  // when you are done accessing the value hash!
   //
-  // We guarantee pointer stability for the value.
-  T *find_begin(const Key &k, void *&cookie);
+  // We guarantee pointer stability for the value hash.
+  bool find_begin(const Key &k, SHA256Hash *&value_hash, void *&cookie);
 
   // You must call this when you are done accessing a value returned by
   // [find_begin].
@@ -151,8 +151,8 @@ public:
       switch (node.type) {
       case Node::Type::kBranch:
       case Node::Type::kLeaf:
-        if (node.value) {
-          func({path, *node.value});
+        if (node.value_hash) {
+          func({path, *node.value_hash});
         }
         break;
       default:
@@ -370,15 +370,16 @@ public:
     return MerkleTrie::prove(root_hash, encodings, k, value);
   }
 
-  MerkleTrie::T *find_begin(const MerkleTrie::Key &k, void *&cookie)
+  bool find_begin(const MerkleTrie::Key &k, SHA256Hash *&value_hash,
+                  void *&cookie)
   {
     if (k.empty()) {
       // We do not support empty keys.
-      return nullptr;
+      return false;
     }
 
     const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index].find_begin(k_no_prefix, cookie);
+    return tries_[index].find_begin(k_no_prefix, value_hash, cookie);
   }
 
   // You must call this when you are done accessing a value returned by

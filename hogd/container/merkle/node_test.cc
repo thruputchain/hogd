@@ -67,7 +67,8 @@ TEST(Node, Clear)
   node.hash[0] = 0x01;
   node.parent = &node; // We just want the [parent] pointer to be non-NULL.
   node.path = HexArray("01");
-  node.value = "hello";
+  node.value_hash = SHA256Hash();
+  node.value_hash->at(0) = 0xFF;
   // Similarly, we just want a couple of the child pointers to be non-NULL.
   node.child[0] = &node;
   node.child[Node::kMaxNumBranches - 1] = &node;
@@ -78,7 +79,7 @@ TEST(Node, Clear)
   expect_hash_is_clear(node);
   EXPECT_EQ(node.parent, nullptr);
   EXPECT_TRUE(node.path.empty());
-  EXPECT_EQ(node.value, std::nullopt);
+  EXPECT_EQ(node.value_hash, std::nullopt);
   expect_children_are_clear(node);
 }
 
@@ -93,7 +94,7 @@ TEST(Node, CreateBranch)
 
   expect_hash_is_clear(*branch);
   EXPECT_TRUE(branch->path.empty());
-  EXPECT_EQ(branch->value, std::nullopt);
+  EXPECT_EQ(branch->value_hash, std::nullopt);
   expect_children_are_clear(*branch);
 
   arena.free(branch);
@@ -122,7 +123,7 @@ TEST(Node, CreateExtension)
 
   expect_hash_is_clear(*extension);
   EXPECT_TRUE(extension->path.empty());
-  EXPECT_EQ(extension->value, std::nullopt);
+  EXPECT_EQ(extension->value_hash, std::nullopt);
   expect_children_are_clear(*extension);
 
   arena.free(extension);
@@ -151,7 +152,7 @@ TEST(Node, CreateLeaf)
 
   expect_hash_is_clear(*leaf);
   EXPECT_TRUE(leaf->path.empty());
-  EXPECT_EQ(leaf->value, std::nullopt);
+  EXPECT_EQ(leaf->value_hash, std::nullopt);
   expect_children_are_clear(*leaf);
 
   arena.free(leaf);
@@ -175,7 +176,8 @@ TEST(Node, HashBranch)
   Node branch;
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
-  branch.value = "hello";
+  branch.value_hash = SHA256Hash();
+  branch.value_hash->at(0) = 0xFF;
   std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
     Node &child = children[i];
@@ -186,7 +188,7 @@ TEST(Node, HashBranch)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "20b58e07d23b8c60f45291cfb51f3b266ac2e21afe18f31a1dbc22e76446c137");
+      "b817711d9a331bc95daf80ed68be9056c1d186b2a312b39312b4e0eccf43111c");
   EXPECT_EQ(hash, expected);
 }
 
@@ -197,7 +199,8 @@ TEST(Node, HashBranchSomeNullptr)
   Node branch;
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
-  branch.value = "hello";
+  branch.value_hash = SHA256Hash();
+  branch.value_hash->at(0) = 0xFF;
   std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
     if (i % 2) {
@@ -213,7 +216,7 @@ TEST(Node, HashBranchSomeNullptr)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "e237972b80de6f517ee566152092fef04a3d877adba234b7689420f80f2cdf46");
+      "2d18826abe1140d6765485d7e1fb6ffd36d5806f4c8d30005a2a72fffa603553");
   EXPECT_EQ(hash, expected);
 }
 
@@ -223,14 +226,15 @@ TEST(Node, HashBranchAllNullptr)
   Node branch;
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
-  branch.value = "hello";
+  branch.value_hash = SHA256Hash();
+  branch.value_hash->at(0) = 0xFF;
   memset(static_cast<void *>(branch.child.data()), 0,
          branch.child.size() *
              sizeof(branch.child[0])); // NOLINT(bugprone-sizeof-expression)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "e37f280ee5188cc892334bbfa5b456dc652c8d1c9b550a2fb8a9160095fe624e");
+      "5584b1de3f5cf388c00a706619518b443a5cb6199cd0207b8b983068a584d89c");
   EXPECT_EQ(hash, expected);
 }
 
@@ -261,11 +265,12 @@ TEST(Node, HashLeaf)
   leaf.type = Node::Type::kLeaf;
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
   leaf.path = HexArray("00010203");
-  leaf.value = "hello";
+  leaf.value_hash = SHA256Hash();
+  leaf.value_hash->at(0) = 0xFF;
 
   SHA256Hash hash = leaf.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "b8b1748d26a2919e0692c2bb970ccd1216b680f866c9a504bb173019ec1b0888");
+      "7e7dac6030735a4abea721534ce38b97f63cf230bfef391e4328099d3bc24e3d");
   EXPECT_EQ(hash, expected);
 }
 
