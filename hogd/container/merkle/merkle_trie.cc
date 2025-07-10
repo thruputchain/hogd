@@ -5,6 +5,7 @@
 #include <cstring>
 #include <optional>
 #include <print>
+#include <span>
 #include <sstream>
 #include <stack>
 #include <string>
@@ -308,7 +309,7 @@ MerkleTrie::get_proof_by_node(const Key &k)
 bool
 MerkleTrie::prove(const SHA256Hash &root_hash,
                   const std::vector<std::byte> &encodings, const Key &k,
-                  const T &value)
+                  const std::span<std::byte> &value)
 {
   Node::Raw node;
   memset(&node.hash, 0, sizeof(node.hash));
@@ -337,7 +338,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
       else {
         // We could start on a branch if the value is directly inside the
         // branch.
-        ok = node.value_hash && (*node.value_hash == LibCrypto::sha256(value));
+        ok = node.value_hash && (*node.value_hash == sha256(value));
       }
       break;
     case Node::Type::kExtension:
@@ -348,8 +349,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
     case Node::Type::kLeaf:
       ok = (num_nodes == 0U);
       verified_key_size += node.path.size();
-      ok = ok && node.value_hash &&
-           (*node.value_hash == LibCrypto::sha256(value));
+      ok = ok && node.value_hash && (*node.value_hash == sha256(value));
       break;
 
     default:
@@ -436,7 +436,7 @@ MerkleTrie::find_node(const Key &k)
 }
 
 bool
-MerkleTrie::insert(const Key &k, T &&obj)
+MerkleTrie::insert(const Key &k, std::span<std::byte> &&obj)
 {
   size_t idx;
   Node *existing_key;
@@ -476,7 +476,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
       CHECK(!branch->value_hash.has_value());
-      branch->value_hash = LibCrypto::sha256(obj);
+      branch->value_hash = sha256(obj);
       to_hash = branch;
     }
     else {
@@ -527,7 +527,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
         // want to include this character in the path that is stored in the leaf
         // node.
         leaf->path = k.get_subarray(idx + 1, k.size());
-        leaf->value_hash = LibCrypto::sha256(obj);
+        leaf->value_hash = sha256(obj);
         branch->child[branch_idx] = leaf;
         to_hash = leaf;
       }
@@ -558,7 +558,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
 // Second Extension Node: Path is [0x6]. The child is c.
 Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
-                                    T &&obj)
+                                    std::span<std::byte> &&obj)
 {
   CHECK(extension->rw_lock.is_writer_locked_relaxed());
   CHECK(extension->child[0]->rw_lock.is_writer_locked_relaxed());
@@ -718,7 +718,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   if (diverge_idx >= key_window.size()) {
     // Place [key_window] directly into the branch.
     CHECK_EQ(diverge_idx, key_window.size());
-    branch->value_hash = LibCrypto::sha256(obj);
+    branch->value_hash = sha256(obj);
     return branch;
   }
   // Create new leaf node for [key_window] and add the leaf node as a child of
@@ -729,7 +729,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   // for [key_window] as a child of the branch, the branch accounts for 1 hex
   // digit in the path.
   leaf->path = key_window.get_subarray(diverge_idx + 1, key_window.size());
-  leaf->value_hash = LibCrypto::sha256(obj);
+  leaf->value_hash = sha256(obj);
 
   auto leaf_branch = std::to_integer<size_t>(key_window.get(diverge_idx));
   branch->child[leaf_branch] = leaf;
@@ -747,7 +747,8 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 // extension node with the shared hex digits. We place the new branch node as a
 // child of this extension node.
 Node *
-MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
+MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
+                               std::span<std::byte> &&obj)
 {
   CHECK(leaf->rw_lock.is_writer_locked_relaxed());
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
@@ -790,7 +791,7 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   const bool key_shorter = key_window.size() <= leaf->path.size();
   const Key &shorter_path = key_shorter ? key_window : leaf->path;
   const Key &longer_path = key_shorter ? leaf->path : key_window;
-  SHA256Hash obj_hash = LibCrypto::sha256(obj);
+  SHA256Hash obj_hash = sha256(obj);
   SHA256Hash &&shorter_value =
       key_shorter
           ? obj_hash

@@ -129,9 +129,8 @@ bench_fibonacci(benchmark::State &state)
   auto contract = test::load_test_contract("fibonacci.wasm");
   ContractAddress contract_addr{};
 
-  bs.in_memory_db_.write_contract(LibCrypto::sha256(*contract), contract);
-  bs.in_memory_db_.write_deployment(contract_addr,
-                                    LibCrypto::sha256(*contract));
+  bs.in_memory_db_.write_contract(sha256(*contract), contract);
+  bs.in_memory_db_.write_deployment(contract_addr, sha256(*contract));
 
   bs.setup_grant_storage_token(contract_addr, 1'000'000'000);
 
