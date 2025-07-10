@@ -1382,7 +1382,7 @@ run_multithread(size_t num_threads)
   WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
-  constexpr std::string kValue = "hello";
+  const std::string kValue = "hello";
   std::print("Inserting keys...");
   fflush(stdout);
 
