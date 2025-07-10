@@ -56,7 +56,7 @@ public:
     Type type;
     SHA256Hash hash;
     HexArray path;
-    std::optional<std::string> value;
+    std::optional<SHA256Hash> value_hash;
     std::array<SHA256Hash, kMaxNumBranches> child_hashes;
   };
 
@@ -80,7 +80,7 @@ public:
   HexArray path;
 
   // Used by branches and leaves.
-  std::optional<std::string> value;
+  std::optional<SHA256Hash> value_hash;
 
   // Used by branches and extensions.
   //
@@ -155,13 +155,10 @@ public:
 
   void clear()
   {
-    // [Node] is not a trivally copyable type (due to the [std::string] in the
-    // [value] field), so we cannot just memset() it to all zeroes. Instead, we
-    // assign each field individually.
     memset(&hash, 0, sizeof(hash));
     parent = nullptr;
     path.clear();
-    value = std::nullopt;
+    value_hash = std::nullopt;
     memset(static_cast<void *>(child.data()), 0,
            child.size() *
                sizeof(child[0])); // NOLINT(bugprone-sizeof-expression)
