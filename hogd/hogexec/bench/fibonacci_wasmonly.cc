@@ -381,7 +381,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   if (run_server) {
-    hogd::run_fibonacci_server(5, exec_port, coord_port);
+    hogd::run_fibonacci_server(1, exec_port, coord_port);
   }
   else if (run_client) {
     hogd::run_fibonacci_client(exec_port, coord_port);
