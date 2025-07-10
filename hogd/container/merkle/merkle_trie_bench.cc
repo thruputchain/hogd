@@ -17,6 +17,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
+#include "types.hh"
 
 namespace hogd {
 
