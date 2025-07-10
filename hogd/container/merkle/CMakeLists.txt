@@ -1,4 +1,15 @@
-# create container module test binaries
+add_library(
+  merkle
+  node.cc
+  merkle_trie.cc
+)
+target_link_libraries(
+  merkle
+  base
+  crypto
+  hogd
+)
+
 add_executable(
   hex_array_test
   hex_array_test.cc
@@ -14,12 +25,12 @@ gtest_discover_tests(hex_array_test)
 add_executable(
   arena_test
   arena_test.cc
-  node.cc
 )
 target_link_libraries(
   arena_test
   base
   hogd
+  merkle
   GTest::gtest_main
 )
 gtest_discover_tests(arena_test)
@@ -27,12 +38,12 @@ gtest_discover_tests(arena_test)
 add_executable(
   node_test
   node_test.cc
-  node.cc
 )
 target_link_libraries(
   node_test
   base
   hogd
+  merkle
   GTest::gtest_main
 )
 gtest_discover_tests(node_test)
@@ -40,13 +51,12 @@ gtest_discover_tests(node_test)
 add_executable(
   merkle_trie_test
   merkle_trie_test.cc
-  merkle_trie.cc
-  node.cc
 )
 target_link_libraries(
   merkle_trie_test
   base
   hogd
+  merkle
   GTest::gtest_main
 )
 gtest_discover_tests(merkle_trie_test)
@@ -54,12 +64,9 @@ gtest_discover_tests(merkle_trie_test)
 add_executable(
   merkle_trie_bench
   merkle_trie_bench.cc
-  merkle_trie.cc
-  node.cc
 )
 target_link_libraries(
   merkle_trie_bench
-  base
-  hogd
+  merkle
   benchmark::benchmark
 )

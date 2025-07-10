@@ -59,7 +59,11 @@ public:
     size_ = s.size();
   }
 
-  HexArray(const std::vector<std::byte> &bytes)
+  template<typename T>
+  HexArray(const T &bytes) requires requires {
+    bytes.size();
+    bytes.data();
+  }
   {
     CHECK_LE(bytes.size(), kArrayLength);
 
