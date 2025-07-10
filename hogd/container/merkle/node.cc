@@ -126,6 +126,7 @@ get_value_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
     if (idx + sizeof(SHA256Hash) > encodings.size()) {
       return false;
     }
+    node.value_hash = SHA256Hash();
     memcpy(&(*node.value_hash), &encodings[idx], sizeof(SHA256Hash));
     idx += sizeof(SHA256Hash);
   }

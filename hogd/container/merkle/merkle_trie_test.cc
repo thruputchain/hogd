@@ -1382,19 +1382,19 @@ run_multithread(size_t num_threads)
   WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
-  const std::string kValue = "hello";
+  std::string value = "hello";
   std::print("Inserting keys...");
   fflush(stdout);
 
   for (size_t i = 0; i < num_threads; i++) {
     futures.push_back(
-        pool.submit([i, num_kv_pairs_per_thread, &trie, &paths, &kValue] {
+        pool.submit([i, num_kv_pairs_per_thread, &trie, &paths, &value] {
           SHA256Hash *value_hash;
           void *cookie;
           for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-            EXPECT_TRUE(trie.insert(paths[i][j], kValue));
+            EXPECT_TRUE(trie.insert(paths[i][j], value));
             EXPECT_TRUE(trie.find_begin(paths[i][j], value_hash, cookie));
-            EXPECT_EQ(*value_hash, LibCrypto::sha256(kValue));
+            EXPECT_EQ(*value_hash, LibCrypto::sha256(value));
             hogd::MerkleTrie::find_end(cookie);
             EXPECT_TRUE(trie.remove(paths[i][j]));
           }

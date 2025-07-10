@@ -67,6 +67,7 @@ TEST(Node, Clear)
   node.hash[0] = 0x01;
   node.parent = &node; // We just want the [parent] pointer to be non-NULL.
   node.path = HexArray("01");
+  node.value_hash = SHA256Hash();
   node.value_hash->at(0) = 0xFF;
   // Similarly, we just want a couple of the child pointers to be non-NULL.
   node.child[0] = &node;
@@ -175,6 +176,7 @@ TEST(Node, HashBranch)
   Node branch;
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
+  branch.value_hash = SHA256Hash();
   branch.value_hash->at(0) = 0xFF;
   std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
@@ -186,7 +188,7 @@ TEST(Node, HashBranch)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "48afd06c118a42e4236395b7911ae8b681419caf2d086b411aa94f3e77f427d6");
+      "b817711d9a331bc95daf80ed68be9056c1d186b2a312b39312b4e0eccf43111c");
   EXPECT_EQ(hash, expected);
 }
 
@@ -197,6 +199,7 @@ TEST(Node, HashBranchSomeNullptr)
   Node branch;
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
+  branch.value_hash = SHA256Hash();
   branch.value_hash->at(0) = 0xFF;
   std::array<Node, Node::kMaxNumBranches> children;
   for (size_t i = 0; i < children.size(); i++) {
@@ -213,7 +216,7 @@ TEST(Node, HashBranchSomeNullptr)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "0a28f7c1360801d44d5c9d385febd59395cf1163aa4b5fa42e7cf1f29be96bac");
+      "2d18826abe1140d6765485d7e1fb6ffd36d5806f4c8d30005a2a72fffa603553");
   EXPECT_EQ(hash, expected);
 }
 
@@ -223,6 +226,7 @@ TEST(Node, HashBranchAllNullptr)
   Node branch;
   branch.type = Node::Type::kBranch;
   memset(branch.hash.data(), 0, branch.hash.size() * sizeof(branch.hash[0]));
+  branch.value_hash = SHA256Hash();
   branch.value_hash->at(0) = 0xFF;
   memset(static_cast<void *>(branch.child.data()), 0,
          branch.child.size() *
@@ -230,7 +234,7 @@ TEST(Node, HashBranchAllNullptr)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "b66c1df618413564ae90bca8231bdbb4b9d7195d5e39cecdd1b7613dbb64e71d");
+      "5584b1de3f5cf388c00a706619518b443a5cb6199cd0207b8b983068a584d89c");
   EXPECT_EQ(hash, expected);
 }
 
@@ -261,11 +265,12 @@ TEST(Node, HashLeaf)
   leaf.type = Node::Type::kLeaf;
   memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
   leaf.path = HexArray("00010203");
+  leaf.value_hash = SHA256Hash();
   leaf.value_hash->at(0) = 0xFF;
 
   SHA256Hash hash = leaf.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "ed3ac3d6cd7cd4ef5ad752f301434359123c83fdfd63d204b60d874ce8842d30");
+      "7e7dac6030735a4abea721534ce38b97f63cf230bfef391e4328099d3bc24e3d");
   EXPECT_EQ(hash, expected);
 }
 
