@@ -10,7 +10,6 @@ target_link_libraries(
   hogdb
   ramdb
   hogd
-  merkle
 )
 
 # Build the backend database (hogdb) executable
