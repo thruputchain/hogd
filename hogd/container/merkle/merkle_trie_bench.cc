@@ -338,7 +338,7 @@ find(benchmark::State &state)
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
 
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   for (auto _ : state) {
     CHECK(trie.find_begin(paths[0], value_hash, cookie));

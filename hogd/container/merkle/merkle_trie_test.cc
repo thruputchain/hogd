@@ -105,10 +105,10 @@ TEST(MerkleTrie, EmptyKeyFind)
   HexArray key;
   std::string value = "hello";
   EXPECT_TRUE(trie.insert(key, value));
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -166,7 +166,7 @@ TEST(MerkleTriePrefix, EmptyKey)
   HexArray key;
   std::string value = "hello";
   EXPECT_FALSE(trie.insert(key, value));
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_FALSE(trie.find_begin(key, value_hash, cookie));
   EXPECT_FALSE(trie.remove(key));
@@ -193,10 +193,10 @@ TEST(MerkleTrie, EmptyValueFind)
   HexArray key("1");
   std::string value;
   EXPECT_TRUE(trie.insert(key, value));
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -220,10 +220,10 @@ TEST(MerkleTrie, EvenSizeKey)
   HexArray key("01");
   std::string value = "hello";
   EXPECT_TRUE(trie.insert(key, value));
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -234,10 +234,10 @@ TEST(MerkleTrie, OddSizeKey)
   HexArray key("012");
   std::string value = "hello";
   EXPECT_TRUE(trie.insert(key, value));
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -253,14 +253,14 @@ TEST(MerkleTrie, EvenAndOddSizedKeys)
   std::string odd_value = "hello";
   EXPECT_TRUE(trie.insert(odd_key, odd_value));
 
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(even_key, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(even_value));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(even_value));
   hogd::MerkleTrie::find_end(cookie);
 
   EXPECT_TRUE(trie.find_begin(odd_key, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(odd_value));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(odd_value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -276,10 +276,10 @@ TEST(MerkleTrie, InsertDuplicateKey)
   // Attempt to insert the same key again.
   EXPECT_FALSE(trie.insert(key, "hello again"));
 
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -323,10 +323,10 @@ TEST(MerkleTrie, TwoLeavesFind)
   HexArray key_a("1234");
   std::string value_a = "hello";
   EXPECT_TRUE(trie.insert(key_a, value_a));
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
 
@@ -334,10 +334,10 @@ TEST(MerkleTrie, TwoLeavesFind)
   std::string value_b = "hello again";
   EXPECT_TRUE(trie.insert(key_b, value_b));
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_b));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
   EXPECT_FALSE(trie.find_begin(HexArray("123456"), value_hash, cookie));
@@ -401,10 +401,10 @@ TEST(MerkleTrie, BranchAndLeafFind)
   HexArray key_a("1234");
   std::string value_a = "hello";
   EXPECT_TRUE(trie.insert(key_a, value_a));
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
 
@@ -413,10 +413,10 @@ TEST(MerkleTrie, BranchAndLeafFind)
   EXPECT_TRUE(trie.insert(key_b, value_b));
   std::cout << trie << '\n';
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_b));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
   EXPECT_FALSE(trie.find_begin(HexArray("12345678"), value_hash, cookie));
@@ -440,7 +440,7 @@ TEST(MerkleTrie, DoNotfindBranchValue)
   // [std::nullopt]). Check that we can properly detect this and return
   // [nullptr] rather than mistakenly return an empty string or something
   // similar.
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_FALSE(trie.find_begin(HexArray("1234"), value_hash, cookie));
 }
@@ -461,10 +461,10 @@ TEST(MerkleTrie, BranchBranchLeaf)
   HexArray key_a("76c772");
   std::string value_a = "hello";
   EXPECT_TRUE(trie.insert(key_a, value_a));
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
   std::cout << trie << '\n';
@@ -473,10 +473,10 @@ TEST(MerkleTrie, BranchBranchLeaf)
   std::string value_b = "hello again";
   EXPECT_TRUE(trie.insert(key_b, value_b));
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_b));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
   std::cout << trie << '\n';
 
@@ -484,13 +484,13 @@ TEST(MerkleTrie, BranchBranchLeaf)
   std::string value_c = "hello three";
   EXPECT_TRUE(trie.insert(key_c, value_c));
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_b));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_TRUE(trie.find_begin(key_c, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_c));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_c));
   hogd::MerkleTrie::find_end(cookie);
   std::cout << trie << '\n';
 
@@ -542,10 +542,10 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
   HexArray key_a("1234");
   std::string value_a = "hello";
   EXPECT_TRUE(trie.insert(key_a, value_a));
-  SHA256Hash value_hash;
+  SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
 
@@ -553,10 +553,10 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
   std::string value_b = "hello again";
   EXPECT_TRUE(trie.insert(key_b, value_b));
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_b));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
   EXPECT_FALSE(trie.find_begin(HexArray("12345678"), value_hash, cookie));
@@ -565,13 +565,13 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
   std::string value_c = "hello three";
   EXPECT_TRUE(trie.insert(key_c, value_c));
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_a));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_b));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_TRUE(trie.find_begin(key_c, value_hash, cookie));
-  EXPECT_EQ(value_hash, LibCrypto::sha256(value_c));
+  EXPECT_EQ(*value_hash, LibCrypto::sha256(value_c));
   hogd::MerkleTrie::find_end(cookie);
   EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
   EXPECT_FALSE(trie.find_begin(HexArray("12abcd"), value_hash, cookie));
@@ -1164,10 +1164,10 @@ stress(T &trie, bool allow_empty)
     trie.generate_top_level_hashes();
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
     EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
-    SHA256Hash value_hash;
+    SHA256Hash *value_hash;
     void *cookie;
     EXPECT_TRUE(trie.find_begin(path, value_hash, cookie));
-    EXPECT_EQ(value_hash, LibCrypto::sha256(value));
+    EXPECT_EQ(*value_hash, LibCrypto::sha256(value));
     hogd::MerkleTrie::find_end(cookie);
 
     EXPECT_TRUE(trie.check());
@@ -1178,10 +1178,10 @@ stress(T &trie, bool allow_empty)
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
     EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
 
-    SHA256Hash value_hash;
+    SHA256Hash *value_hash;
     void *cookie;
     EXPECT_TRUE(trie.find_begin(path, value_hash, cookie));
-    EXPECT_EQ(value_hash, LibCrypto::sha256(value));
+    EXPECT_EQ(*value_hash, LibCrypto::sha256(value));
     hogd::MerkleTrie::find_end(cookie);
   }
 
@@ -1207,7 +1207,7 @@ stress(T &trie, bool allow_empty)
     trie.generate_top_level_hashes();
     EXPECT_TRUE(trie.check());
 
-    SHA256Hash value_hash;
+    SHA256Hash *value_hash;
     void *cookie;
     EXPECT_FALSE(trie.find_begin(path, value_hash, cookie));
 
@@ -1277,10 +1277,10 @@ stress_two(T &trie, bool allow_empty)
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
     EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
 
-    SHA256Hash value_hash;
+    SHA256Hash *value_hash;
     void *cookie;
     EXPECT_TRUE(trie.find_begin(path, value_hash, cookie));
-    EXPECT_EQ(value_hash, LibCrypto::sha256(value));
+    EXPECT_EQ(*value_hash, LibCrypto::sha256(value));
     hogd::MerkleTrie::find_end(cookie);
   }
 
@@ -1389,12 +1389,12 @@ run_multithread(size_t num_threads)
   for (size_t i = 0; i < num_threads; i++) {
     futures.push_back(
         pool.submit([i, num_kv_pairs_per_thread, &trie, &paths, &kValue] {
-          SHA256Hash value_hash;
+          SHA256Hash *value_hash;
           void *cookie;
           for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
             EXPECT_TRUE(trie.insert(paths[i][j], kValue));
             EXPECT_TRUE(trie.find_begin(paths[i][j], value_hash, cookie));
-            EXPECT_EQ(value_hash, LibCrypto::sha256(kValue));
+            EXPECT_EQ(*value_hash, LibCrypto::sha256(kValue));
             hogd::MerkleTrie::find_end(cookie);
             EXPECT_TRUE(trie.remove(paths[i][j]));
           }

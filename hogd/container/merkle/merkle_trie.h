@@ -108,12 +108,12 @@ public:
                     const std::vector<std::byte> &encodings, const Key &k,
                     const T &value);
 
-  // Finds the value for key [k]. If key [k] does not exist in the trie, returns
-  // a nullptr. If a non-null pointer is returned, you *must* call
-  // [find_end(cookie)] when you are done accessing the value!
+  // Finds the value hash for key [k]. If key [k] does not exist in the trie,
+  // returns a nullptr. If true is returned, you *must* call [find_end(cookie)]
+  // when you are done accessing the value hash!
   //
-  // We guarantee pointer stability for the value.
-  bool find_begin(const Key &k, SHA256Hash &value_hash, void *&cookie);
+  // We guarantee pointer stability for the value hash.
+  bool find_begin(const Key &k, SHA256Hash *&value_hash, void *&cookie);
 
   // You must call this when you are done accessing a value returned by
   // [find_begin].
@@ -370,7 +370,7 @@ public:
     return MerkleTrie::prove(root_hash, encodings, k, value);
   }
 
-  bool find_begin(const MerkleTrie::Key &k, SHA256Hash &value_hash,
+  bool find_begin(const MerkleTrie::Key &k, SHA256Hash *&value_hash,
                   void *&cookie)
   {
     if (k.empty()) {

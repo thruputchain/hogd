@@ -372,7 +372,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
 }
 
 bool
-MerkleTrie::find_begin(const Key &k, SHA256Hash &value_hash, void *&cookie)
+MerkleTrie::find_begin(const Key &k, SHA256Hash *&value_hash, void *&cookie)
 {
   Node *node = find_node(k);
   if (!node) {
@@ -383,15 +383,20 @@ MerkleTrie::find_begin(const Key &k, SHA256Hash &value_hash, void *&cookie)
   case Node::Type::kBranch:
     // Check if the branch has a value.
     if (node->value_hash) {
-      value_hash = *node->value_hash;
+      // Get the hash out of the [std::optional<T>] with the dereference
+      // operator.
+      SHA256Hash &hash_ptr = *node->value_hash;
+      value_hash = &hash_ptr;
     }
     break;
   case Node::Type::kLeaf:
   {
     // A leaf must always have a value.
     CHECK(node->value_hash.has_value());
-    value_hash =
+    // Get the hash out of the [std::optional<T>] with the dereference operator.
+    SHA256Hash &hash_ptr =
         *node->value_hash; // NOLINT(bugprone-unchecked-optional-access)
+    value_hash = &hash_ptr;
     break;
   }
   default:
