@@ -25,7 +25,7 @@ sdk_entrypoint_derivation(std::string_view identifier_name,
                                        .vers = {identifier_version.begin(),
                                                 identifier_version.end()}};
 
-  auto h = LibCrypto::sha256(preimage);
+  auto h = sha256(preimage);
 
   uint16_t method_id_byteswapped = std::byteswap(method_id);
 

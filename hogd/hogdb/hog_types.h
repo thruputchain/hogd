@@ -54,7 +54,7 @@ private:
 [[nodiscard]] inline Address
 make_address(std::string_view str)
 {
-  return Address(LibCrypto::sha256(byte_view(str.data(), str.size())));
+  return Address(sha256(byte_view(str.data(), str.size())));
 }
 
 [[nodiscard]] constexpr Address
@@ -107,7 +107,7 @@ private:
 [[nodiscard]] inline ItemKey
 make_item_key(const Address &addr, std::string_view str)
 {
-  return ItemKey(addr, LibCrypto::sha256(byte_view(str.data(), str.size())));
+  return ItemKey(addr, sha256(byte_view(str.data(), str.size())));
 }
 
 [[nodiscard]] constexpr ItemKey
