@@ -75,7 +75,10 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   auto invoke_res = co_await async;
 
   if (!invoke_res.is_root_success()) {
-    co_await proxy.abort_transaction();
+    auto st = proxy.abort_transaction();
+    if (!st.has_value()) {
+      co_return ExecProposeResult(make_exec_result(st.error().code()));
+    }
     assert(!invoke_res.result_.has_value());
 
     auto out =
@@ -125,7 +128,10 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
   auto invoke_res = co_await async;
 
   if (!invoke_res.is_root_success()) {
-    co_await proxy.abort_transaction();
+    auto st = proxy.abort_transaction();
+    if (!st.has_value()) {
+      co_return make_exec_result(st.error().code());
+    }
     assert(!invoke_res.result_.has_value());
     co_return make_exec_result(invoke_res.result_.error().code());
   }

@@ -275,7 +275,7 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     }
   }
 
-  auto h = sha256(contract);
+  auto h = hogd::LibCrypto::sha256(contract);
 
   db_cast->get_base_db().write_contract(h, std::make_shared<hogd::Contract>(
                                                std::move(contract)));

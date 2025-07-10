@@ -79,7 +79,7 @@ public:
   std::optional<StorageItem>
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
-    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey)();
+    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);
     if (!r.has_value()) {
       throw std::runtime_error("lookup_storage_item_from_db: db lookup failed");
     }

@@ -167,7 +167,7 @@ SystemCallHandler::try_commit_transaction()
   assert(!transaction_committed_);
   if (!cumulative_invoke_result_.is_root_success()) {
 
-    auto st = co_await db_proxy_.abort_transaction();
+    auto st = db_proxy_.abort_transaction();
     if (!st.has_value()) {
       co_return st.error();
     }
@@ -185,7 +185,7 @@ SystemCallHandler::try_commit_transaction()
 
   // check if any of the 2pc database operations failed
   if (result) {
-    auto res = co_await db_proxy_.commit_transaction();
+    auto res = db_proxy_.commit_transaction();
     if (!res.has_value()) {
       co_return res.error();
     }
@@ -196,14 +196,13 @@ SystemCallHandler::try_commit_transaction()
       auto contract_entry = newly_created_contracts_.find(hash);
       assert(contract_entry != newly_created_contracts_.end());
 
-      auto res = co_await db_proxy_.commit_contract_deploy(addr, hash);
+      auto res = db_proxy_.commit_contract_deploy(addr, hash);
       if (!res.has_value()) {
         co_return res.error();
       }
       if (committed_contracts.insert(hash).second) {
         // contract that wasn't already created within the transaction
-        res =
-            co_await db_proxy_.commit_contract_create(*contract_entry->second);
+        res = db_proxy_.commit_contract_create(*contract_entry->second);
         if (!res.has_value()) {
           co_return res.error();
         }
@@ -213,7 +212,7 @@ SystemCallHandler::try_commit_transaction()
     co_return true;
   }
 
-  auto res = co_await db_proxy_.abort_transaction();
+  auto res = db_proxy_.abort_transaction();
   if (!res.has_value()) {
     co_return res.error();
   }
