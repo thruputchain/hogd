@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <bit>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
 #include <format>
@@ -244,15 +243,12 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   heap_size += (heap_size / kLogletRegionSize + 1) * kBigItemThreshold;
   heap_size = align_up(heap_size, kLogletRegionSize);
 
-  // determine number of cores.
-  size_t cores = std::jthread::hardware_concurrency();
-  int cores_order = std::countr_zero(std::bit_ceil(cores));
-
-  // add the compactor overhead.
-  heap_size += cores * kLogletRegionSize * 2;
+  // need two loglets per compactor thread and one loglet per worker thread.
+  heap_size += available_parallelism() * kLogletRegionSize * 3;
 
   // add disk buffering overhead.
-  heap_size += (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize;
+  heap_size +=
+      (1UL << scalable_shard_order(kBaseWriteHeadOrder)) * kLogletRegionSize;
 
   return heap_size;
 }
