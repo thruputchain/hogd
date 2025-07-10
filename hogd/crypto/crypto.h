@@ -2,12 +2,12 @@
 
 #pragma once
 
-#include <openssl/sha.h> // NOLINT(misc-include-cleaner)
-#include <sodium.h>
-
 extern "C" {
 #include "blake3.h"
 }
+
+#include <openssl/sha.h> // NOLINT(misc-include-cleaner)
+#include <sodium.h>
 
 #include <array>
 #include <cassert>
