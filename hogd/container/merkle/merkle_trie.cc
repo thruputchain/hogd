@@ -15,6 +15,7 @@
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
+#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {
