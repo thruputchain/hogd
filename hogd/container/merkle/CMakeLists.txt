@@ -37,29 +37,29 @@ target_link_libraries(
 )
 gtest_discover_tests(node_test)
 
-# add_executable(
-#   merkle_trie_test
-#   merkle_trie_test.cc
-#   merkle_trie.cc
-#   node.cc
-# )
-# target_link_libraries(
-#   merkle_trie_test
-#   base
-#   hogd
-#   GTest::gtest_main
-# )
-# gtest_discover_tests(merkle_trie_test)
-#
-# add_executable(
-#   merkle_trie_bench
-#   merkle_trie_bench.cc
-#   merkle_trie.cc
-#   node.cc
-# )
-# target_link_libraries(
-#   merkle_trie_bench
-#   base
-#   hogd
-#   benchmark::benchmark
-# )
+add_executable(
+  merkle_trie_test
+  merkle_trie_test.cc
+  merkle_trie.cc
+  node.cc
+)
+target_link_libraries(
+  merkle_trie_test
+  base
+  hogd
+  GTest::gtest_main
+)
+gtest_discover_tests(merkle_trie_test)
+
+add_executable(
+  merkle_trie_bench
+  merkle_trie_bench.cc
+  merkle_trie.cc
+  node.cc
+)
+target_link_libraries(
+  merkle_trie_bench
+  base
+  hogd
+  benchmark::benchmark
+)

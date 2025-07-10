@@ -91,7 +91,7 @@ check_branch(const Node &branch)
     std::println("Branch node has no children");
     ret = false;
   }
-  if (!branch.value && num_children == 1) {
+  if (!branch.value_hash && num_children == 1) {
     // Check if this is the root node. The root node is a branch that is allowed
     // to have no children.
     if (!is_root) {
@@ -114,7 +114,7 @@ bool
 check_extension(const Node &extension)
 {
   bool ret = true;
-  if (extension.value) {
+  if (extension.value_hash) {
     std::println("Unexpected value in extension");
     ret = false;
   }
@@ -161,7 +161,7 @@ check_leaf(const Node &leaf)
   }
   // A path in the leaf node may or may not be empty, so we do not check its
   // size.
-  if (!leaf.value) {
+  if (!leaf.value_hash) {
     std::println("Unexpected empty value in leaf");
     ret = false;
   }
@@ -336,7 +336,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
       else {
         // We could start on a branch if the value is directly inside the
         // branch.
-        ok = (node.value == value);
+        ok = (node.value_hash == LibCrypto::sha256(value));
       }
       break;
     case Node::Type::kExtension:
@@ -347,7 +347,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
     case Node::Type::kLeaf:
       ok = (num_nodes == 0U);
       verified_key_size += node.path.size();
-      ok = ok && (node.value == value);
+      ok = ok && (node.value_hash == LibCrypto::sha256(value));
       break;
 
     default:
@@ -371,32 +371,27 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
   return verified_key_size == k.size() && node.hash == root_hash;
 }
 
-MerkleTrie::T *
-MerkleTrie::find_begin(const Key &k, void *&cookie)
+bool
+MerkleTrie::find_begin(const Key &k, SHA256Hash &value_hash, void *&cookie)
 {
   Node *node = find_node(k);
   if (!node) {
-    return nullptr;
+    return false;
   }
 
-  T *ret = nullptr;
   switch (node->type) {
   case Node::Type::kBranch:
     // Check if the branch has a value.
-    if (node->value) {
-      // Get the [T] out of the [std::optional<T>] with the dereference
-      // operator.
-      T &value = *node->value;
-      ret = &value;
+    if (node->value_hash) {
+      value_hash = *node->value_hash;
     }
     break;
   case Node::Type::kLeaf:
   {
     // A leaf must always have a value.
-    CHECK(node->value.has_value());
-    // Get the [T] out of the [std::optional<T>] with the dereference operator.
-    T &value = *node->value; // NOLINT(bugprone-unchecked-optional-access)
-    ret = &value;
+    CHECK(node->value_hash.has_value());
+    value_hash =
+        *node->value_hash; // NOLINT(bugprone-unchecked-optional-access)
     break;
   }
   default:
@@ -407,7 +402,7 @@ MerkleTrie::find_begin(const Key &k, void *&cookie)
   // We hold the reader lock on [node] until the caller indicates they are done
   // accessing the value with [find_end()].
   cookie = node;
-  return ret;
+  return true;
 }
 
 // static
@@ -473,8 +468,8 @@ MerkleTrie::insert(const Key &k, T &&obj)
     if (idx == k.size()) {
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
-      CHECK(!branch->value.has_value());
-      branch->value = std::move(obj);
+      CHECK(!branch->value_hash.has_value());
+      branch->value_hash = LibCrypto::sha256(obj);
       to_hash = branch;
     }
     else {
@@ -525,7 +520,7 @@ MerkleTrie::insert(const Key &k, T &&obj)
         // want to include this character in the path that is stored in the leaf
         // node.
         leaf->path = k.get_subarray(idx + 1, k.size());
-        leaf->value = std::move(obj);
+        leaf->value_hash = LibCrypto::sha256(obj);
         branch->child[branch_idx] = leaf;
         to_hash = leaf;
       }
@@ -716,7 +711,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   if (diverge_idx >= key_window.size()) {
     // Place [key_window] directly into the branch.
     CHECK_EQ(diverge_idx, key_window.size());
-    branch->value = std::move(obj);
+    branch->value_hash = LibCrypto::sha256(obj);
     return branch;
   }
   // Create new leaf node for [key_window] and add the leaf node as a child of
@@ -727,7 +722,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   // for [key_window] as a child of the branch, the branch accounts for 1 hex
   // digit in the path.
   leaf->path = key_window.get_subarray(diverge_idx + 1, key_window.size());
-  leaf->value = std::move(obj);
+  leaf->value_hash = LibCrypto::sha256(obj);
 
   auto leaf_branch = std::to_integer<size_t>(key_window.get(diverge_idx));
   branch->child[leaf_branch] = leaf;
@@ -788,21 +783,22 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   const bool key_shorter = key_window.size() <= leaf->path.size();
   const Key &shorter_path = key_shorter ? key_window : leaf->path;
   const Key &longer_path = key_shorter ? leaf->path : key_window;
-  T &&shorter_value =
+  SHA256Hash obj_hash = LibCrypto::sha256(obj);
+  SHA256Hash &&shorter_value =
       key_shorter
-          ? obj
+          ? obj_hash
           : std::move(
-                *leaf->value); // NOLINT(bugprone-unchecked-optional-access)
-  T &&longer_value =
+                *leaf->value_hash); // NOLINT(bugprone-unchecked-optional-access)
+  SHA256Hash &&longer_value =
       key_shorter
           ? std::move(
-                *leaf->value) // NOLINT(bugprone-unchecked-optional-access)
-          : obj;
+                *leaf->value_hash) // NOLINT(bugprone-unchecked-optional-access)
+          : obj_hash;
 
   if (shorter_path.empty()) {
     // The shorter key's remaining path is empty, so we should place the shorter
     // key directly into the branch.
-    branch->value = std::move(shorter_value);
+    branch->value_hash = std::move(shorter_value);
   }
   else {
     CHECK(!longer_path.empty());
@@ -826,7 +822,7 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
     auto branch_hex = std::to_integer<size_t>(shorter_path.get(0));
     branch->child[branch_hex] = shorter_leaf;
     shorter_leaf->path = shorter_path.get_subarray(1, shorter_path.size());
-    shorter_leaf->value = std::move(shorter_value);
+    shorter_leaf->value_hash = std::move(shorter_value);
     // We hash this leaf here, and then in the parent function, we hash all
     // nodes on the path from the leaf *created below* to the root. Note that
     // this leaf is not on that path, so we must hash it here.
@@ -841,7 +837,7 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx, T &&obj)
   auto branch_hex = std::to_integer<size_t>(longer_path.get(0));
   branch->child[branch_hex] = leaf;
   leaf->path = longer_path.get_subarray(1, longer_path.size());
-  leaf->value = std::move(longer_value);
+  leaf->value_hash = std::move(longer_value);
   leaf->parent = branch;
 
   return leaf;
@@ -855,8 +851,8 @@ MerkleTrie::will_remove_branch(const Node *branch, size_t num_children)
   // fewer than two KV pairs "under" it. So since we have not removed the KV
   // pair yet, we return true if the branch has fewer than three KV pairs
   // "under" it.
-  return branch != &root_ && ((num_children == 2 && !branch->value) ||
-                              (num_children == 1 && branch->value));
+  return branch != &root_ && ((num_children == 2 && !branch->value_hash) ||
+                              (num_children == 1 && branch->value_hash));
 }
 
 bool
@@ -953,8 +949,8 @@ MerkleTrie::remove(const Key &k)
   const bool need_to_remove_branch = will_remove_branch(branch, num_children);
   if (existing_key == branch) {
     // [k] maps to a branch, so clear the branch's value.
-    CHECK(branch->value.has_value());
-    branch->value = std::nullopt;
+    CHECK(branch->value_hash.has_value());
+    branch->value_hash = std::nullopt;
   }
   else {
     // [existing_key != branch], so we know that the key is a leaf node which is
@@ -1014,7 +1010,7 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
     CHECK_EQ(num_children, 1UL);
   }
   else {
-    CHECK(branch->value.has_value());
+    CHECK(branch->value_hash.has_value());
   }
   // We should not remove the root node.
   CHECK_PTR(branch->parent);
@@ -1062,22 +1058,22 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
   // cache [branch->parent] since we need it at the bottom of the function.
   Node *const branch_parent = branch->parent;
   if (num_children == 0) {
-    CHECK(branch->value.has_value());
+    CHECK(branch->value_hash.has_value());
 
     // The branch has a value, so place the value in a leaf with path size 0.
     //
     // We reuse the branch node below.
-    std::optional<T> value = std::move(branch->value);
+    std::optional<SHA256Hash> value_hash = std::move(branch->value_hash);
     Node *parent = branch->parent;
     new_child = branch;
     new_child->clear();
     new_child->init_leaf(parent);
     new_child->path = cur_path;
-    new_child->value = std::move(value);
+    new_child->value_hash = std::move(value_hash);
   }
   else {
     CHECK_EQ(num_children, 1UL);
-    CHECK(!branch->value.has_value());
+    CHECK(!branch->value_hash.has_value());
 
     Node *remaining_child =
         branch->child[static_cast<size_t>(remaining_child_hex)];
@@ -1294,7 +1290,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       }
 
       if (idx == path.size()) {
-        if (root->value) {
+        if (root->value_hash) {
           // [path] maps to this branch node.
           existing_key = root;
         }
