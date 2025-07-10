@@ -68,9 +68,12 @@ insert_two_million(benchmark::State &state)
   MerkleTrie trie;
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (auto _ : state) {
     for (const auto &path : paths) {
-      CHECK(trie.insert(path, "hello"));
+      CHECK(trie.insert(path, value_span));
     }
   }
 }
@@ -86,9 +89,12 @@ generate_all_hashes_two_million(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (auto _ : state) {
     for (const auto &path : paths) {
-      CHECK(trie.insert(path, "hello"));
+      CHECK(trie.insert(path, value_span));
     }
     trie.generate_all_hashes();
     trie.set_should_hash_nodes_on_each_op(true);
@@ -108,9 +114,12 @@ insert_two_million_no_hash(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (auto _ : state) {
     for (const auto &path : paths) {
-      CHECK(trie.insert(path, "hello"));
+      CHECK(trie.insert(path, value_span));
     }
   }
 }
@@ -125,8 +134,11 @@ insert_two_million_hash_once_at_end(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   for (auto _ : state) {
     trie.generate_all_hashes();
@@ -143,8 +155,11 @@ incremental_insert(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
@@ -152,7 +167,7 @@ incremental_insert(benchmark::State &state)
   paths = precompute_paths(/*num_paths=*/kAdditionalPaths);
   size_t counter = 0;
   for (auto _ : state) {
-    CHECK(trie.insert(paths[counter++], "hello"));
+    CHECK(trie.insert(paths[counter++], value_span));
   }
 }
 BENCHMARK(incremental_insert)
@@ -169,8 +184,11 @@ insert_when_already_large(benchmark::State &state)
 
   std::vector<HexArray> paths =
       precompute_paths(/*num_paths=*/kLargeNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
@@ -178,7 +196,7 @@ insert_when_already_large(benchmark::State &state)
   paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (auto _ : state) {
     for (const auto &path : paths) {
-      CHECK(trie.insert(path, "hello"));
+      CHECK(trie.insert(path, value_span));
     }
   }
 }
@@ -195,13 +213,16 @@ generate_all_hashes_incremental_insert(benchmark::State &state)
 
   std::vector<HexArray> paths =
       precompute_paths(/*num_paths=*/kLargeNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
 
   paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   for (auto _ : state) {
     trie.generate_all_hashes();
@@ -219,14 +240,17 @@ insert_when_already_large_no_hash(benchmark::State &state)
 
   std::vector<HexArray> paths =
       precompute_paths(/*num_paths=*/kLargeNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
 
   paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (auto _ : state) {
     for (const auto &path : paths) {
-      CHECK(trie.insert(path, "hello"));
+      CHECK(trie.insert(path, value_span));
     }
   }
 }
@@ -246,15 +270,18 @@ insert_when_already_large_hash_once_at_end(benchmark::State &state)
 
   std::vector<HexArray> paths =
       precompute_paths(/*num_paths=*/kLargeNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   trie.generate_all_hashes();
 
   paths = precompute_paths(/*num_paths=*/kNumKVPairs);
   for (auto _ : state) {
     for (const auto &path : paths) {
-      CHECK(trie.insert(path, "hello"));
+      CHECK(trie.insert(path, value_span));
     }
     trie.generate_all_hashes();
   }
@@ -271,8 +298,11 @@ remove_two_million(benchmark::State &state)
   MerkleTrie trie;
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   for (auto _ : state) {
     for (const auto &path : paths) {
@@ -290,8 +320,11 @@ remove_two_million_no_hash(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   for (auto _ : state) {
     for (const auto &path : paths) {
@@ -311,8 +344,11 @@ remove_two_million_hash_once_at_end(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   for (auto _ : state) {
     for (const auto &path : paths) {
@@ -333,8 +369,11 @@ find(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
@@ -356,8 +395,11 @@ get_proof(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
@@ -377,15 +419,18 @@ prove(benchmark::State &state)
   trie.set_should_hash_nodes_on_each_op(false);
 
   std::vector<HexArray> paths = precompute_paths(/*num_paths=*/kNumKVPairs);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   for (const auto &path : paths) {
-    CHECK(trie.insert(path, "hello"));
+    CHECK(trie.insert(path, value_span));
   }
   trie.generate_all_hashes();
   trie.set_should_hash_nodes_on_each_op(true);
 
   const auto &pair = trie.get_proof(paths[0]);
   for (auto _ : state) {
-    CHECK(trie.prove(pair.first, pair.second, paths[0], "hello"));
+    CHECK(trie.prove(pair.first, pair.second, paths[0], value_span));
   }
 }
 BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
@@ -510,7 +555,11 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
         continue;
       }
       CHECK(generated.insert(path).second);
-      CHECK(trie.insert(path, std::to_string(i)));
+      std::string value = std::to_string(i);
+      std::span<std::byte> value_span{reinterpret_cast<std::byte *>(
+                                          value.data()),
+                                      value.size()};
+      CHECK(trie.insert(path, value_span));
     }
     CHECK_EQ(trie.size(), kLargeNumKVPairs);
     trie.set_should_hash_nodes_on_each_op(true);
@@ -539,15 +588,18 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
   WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   std::print("Inserting keys...");
   fflush(stdout);
 
   for (auto _ : state) {
     for (size_t i = 0; i < num_threads; i++) {
       futures.push_back(
-          pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
+          pool.submit([i, num_kv_pairs_per_thread, &trie, &paths, &value_span] {
             for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-              CHECK(trie.insert(paths[i][j], "hello"));
+              CHECK(trie.insert(paths[i][j], value_span));
             }
           }));
     }
