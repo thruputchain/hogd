@@ -348,8 +348,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
     case Node::Type::kLeaf:
       ok = (num_nodes == 0U);
       verified_key_size += node.path.size();
-      ok = ok && node.value_hash &&
-           (*node.value_hash == sha256(value));
+      ok = ok && node.value_hash && (*node.value_hash == sha256(value));
       break;
 
     default:

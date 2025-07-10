@@ -590,8 +590,7 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
   std::string value_a = "hello";
   EXPECT_TRUE(trie.insert(key_a, value_a));
   trie.for_each(f);
-  std::map<HexArray, SHA256Hash> expected = {
-      {key_a, sha256(value_a)}};
+  std::map<HexArray, SHA256Hash> expected = {{key_a, sha256(value_a)}};
   EXPECT_EQ(seen, expected);
 
   HexArray key_b("123456");
@@ -1112,10 +1111,9 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
     for_each_func(seen, pair);
   };
   trie.for_each(f);
-  std::map<HexArray, SHA256Hash> expected = {
-      {key_a, sha256(value_a)},
-      {key_b, sha256(value_b)},
-      {key_c, sha256(value_c)}};
+  std::map<HexArray, SHA256Hash> expected = {{key_a, sha256(value_a)},
+                                             {key_b, sha256(value_b)},
+                                             {key_c, sha256(value_c)}};
   EXPECT_EQ(seen, expected);
 }
 
