@@ -8,6 +8,7 @@
 #include <format>
 #include <memory>
 #include <optional>
+#include <print>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -264,8 +265,13 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch)
 {
+  auto ts = std::chrono::steady_clock::now();
   auto res =
       read_client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
+  auto te = std::chrono::steady_clock::now();
+  std::println("try_push_new_subtransaction took {}us",
+               std::chrono::duration_cast<std::chrono::microseconds>(te - ts)
+                   .count());
   return to_system_error_code<false>(res, [] { return true; });
 }
 
