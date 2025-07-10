@@ -220,7 +220,7 @@ void
 StorageView::commit_contract_create(Contract const &contract)
 {
   assert(!closed_);
-  auto hash = LibCrypto::sha256(contract);
+  auto hash = sha256(contract);
   contract_creates_->emplace(hash, std::make_shared<const Contract>(contract));
 }
 

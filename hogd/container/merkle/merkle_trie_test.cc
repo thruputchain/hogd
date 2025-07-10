@@ -681,8 +681,7 @@ prove(T &trie)
 
   {
     // Try using the hash of an internal node as the root hash.
-    SHA256Hash different_root_hash =
-        LibCrypto::sha256(node_encodings_by_node[1]);
+    SHA256Hash different_root_hash = sha256(node_encodings_by_node[1]);
     EXPECT_FALSE(
         MerkleTrie::prove(different_root_hash, node_encodings, key_b, value_b));
   }
@@ -815,8 +814,7 @@ prove(T &trie)
       // find matching branch.
       branch_begin_idx = idx + node_encodings_by_node[node_idx].size() -
                          (Node::kMaxNumBranches * sizeof(SHA256Hash));
-      SHA256Hash to_find =
-          LibCrypto::sha256(node_encodings_by_node[node_idx - 1]);
+      SHA256Hash to_find = sha256(node_encodings_by_node[node_idx - 1]);
       for (size_t i = 0; i < Node::kMaxNumBranches; i++) {
         auto *to_compare = reinterpret_cast<SHA256Hash *>(
             &copy[branch_begin_idx + (i * sizeof(SHA256Hash))]);

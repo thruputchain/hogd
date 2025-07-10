@@ -43,8 +43,8 @@ TEST_F(FibonacciTest, FibonacciCalls)
 {
   auto contract = test::load_test_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_contract(LibCrypto::sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, LibCrypto::sha256(*contract));
+  in_memory_db_.write_contract(sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   using fib_client_t = ContractTraitClient<Fibonacci>;
@@ -70,9 +70,8 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   // deploy the fibonacci contract
   auto contract = test::load_test_contract("fibonacci.wasm");
   auto fib_contract_addr = make_contract_address(0);
-  in_memory_db_.write_contract(LibCrypto::sha256(*contract), contract);
-  in_memory_db_.write_deployment(fib_contract_addr,
-                                 LibCrypto::sha256(*contract));
+  in_memory_db_.write_contract(sha256(*contract), contract);
+  in_memory_db_.write_deployment(fib_contract_addr, sha256(*contract));
   setup_grant_storage_token(fib_contract_addr, 1'000'000'000);
 
   using fib_client_t = ContractTraitClient<Fibonacci>;
@@ -105,10 +104,10 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   // deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(LibCrypto::sha256(*native_contract_xdr),
+  in_memory_db_.write_contract(sha256(*native_contract_xdr),
                                native_contract_xdr);
   in_memory_db_.write_deployment(native_contract_addr,
-                                 LibCrypto::sha256(*native_contract_xdr));
+                                 sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{

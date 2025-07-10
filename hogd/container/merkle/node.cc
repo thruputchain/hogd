@@ -318,7 +318,7 @@ Node::get_node_from_encoding(const std::vector<std::byte> &encodings,
     const std::vector<std::byte> node_encodings(encodings.begin() +
                                                     original_idx,
                                                 encodings.begin() + idx);
-    node.hash = LibCrypto::sha256(node_encodings);
+    node.hash = sha256(node_encodings);
   }
   return ret;
 }

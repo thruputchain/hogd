@@ -209,8 +209,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
   contract.native_contract_id() = 0;
 
   snapshot_server_.setup_create_contract(contract);
-  snapshot_server_.setup_create_deployment(address,
-                                           LibCrypto::sha256(contract));
+  snapshot_server_.setup_create_deployment(address, sha256(contract));
 
   SystemCallHandler handler(
       SignedTransaction{
@@ -289,8 +288,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
   contract.native_contract_id() = 0;
 
   snapshot_server_.setup_create_contract(contract);
-  snapshot_server_.setup_create_deployment(address,
-                                           LibCrypto::sha256(contract));
+  snapshot_server_.setup_create_deployment(address, sha256(contract));
   snapshot_server_.setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
@@ -357,8 +355,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   contract.native_contract_id() = 0;
 
   snapshot_server_.setup_create_contract(contract);
-  snapshot_server_.setup_create_deployment(address,
-                                           LibCrypto::sha256(contract));
+  snapshot_server_.setup_create_deployment(address, sha256(contract));
   snapshot_server_.setup_ban_item(
       AddressAndKey{.address = address, .key = bad_full_key});
 
