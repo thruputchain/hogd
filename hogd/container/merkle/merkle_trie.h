@@ -9,6 +9,7 @@
 
 #include <format>
 #include <ostream>
+#include <span>
 #include <sstream>
 #include <string>
 #include <utility>

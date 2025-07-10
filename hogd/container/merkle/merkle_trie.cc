@@ -5,6 +5,7 @@
 #include <cstring>
 #include <optional>
 #include <print>
+#include <span>
 #include <sstream>
 #include <stack>
 #include <string>
