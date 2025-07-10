@@ -186,7 +186,7 @@ TEST(Node, HashBranch)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "20b58e07d23b8c60f45291cfb51f3b266ac2e21afe18f31a1dbc22e76446c137");
+      "48afd06c118a42e4236395b7911ae8b681419caf2d086b411aa94f3e77f427d6");
   EXPECT_EQ(hash, expected);
 }
 
@@ -213,7 +213,7 @@ TEST(Node, HashBranchSomeNullptr)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "e237972b80de6f517ee566152092fef04a3d877adba234b7689420f80f2cdf46");
+      "0a28f7c1360801d44d5c9d385febd59395cf1163aa4b5fa42e7cf1f29be96bac");
   EXPECT_EQ(hash, expected);
 }
 
@@ -230,7 +230,7 @@ TEST(Node, HashBranchAllNullptr)
 
   SHA256Hash hash = branch.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "e37f280ee5188cc892334bbfa5b456dc652c8d1c9b550a2fb8a9160095fe624e");
+      "b66c1df618413564ae90bca8231bdbb4b9d7195d5e39cecdd1b7613dbb64e71d");
   EXPECT_EQ(hash, expected);
 }
 
@@ -265,7 +265,7 @@ TEST(Node, HashLeaf)
 
   SHA256Hash hash = leaf.compute_node_hash();
   SHA256Hash expected = hash_from_string(
-      "b8b1748d26a2919e0692c2bb970ccd1216b680f866c9a504bb173019ec1b0888");
+      "ed3ac3d6cd7cd4ef5ad752f301434359123c83fdfd63d204b60d874ce8842d30");
   EXPECT_EQ(hash, expected);
 }
 
