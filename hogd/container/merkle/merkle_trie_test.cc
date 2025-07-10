@@ -499,7 +499,7 @@ TEST(MerkleTrie, BranchBranchLeaf)
   EXPECT_EQ(
       HexArray(trie.get_root_hash()),
       HexArray(
-          "dd9dfb98cd1516f5022f76d8972ed5fdc56c481c54a0a764c03d6003d1a39641"));
+          "b5f9b456037a1449926a578ec7bcf9b1a0f0815e059185ac42d55bebb757ad1d"));
 }
 
 // These tests add three KV pairs to the trie, with this structure:

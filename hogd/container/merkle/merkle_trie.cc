@@ -336,7 +336,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
       else {
         // We could start on a branch if the value is directly inside the
         // branch.
-        ok = (node.value_hash == LibCrypto::sha256(value));
+        ok = (*node.value_hash == LibCrypto::sha256(value));
       }
       break;
     case Node::Type::kExtension:
@@ -347,7 +347,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
     case Node::Type::kLeaf:
       ok = (num_nodes == 0U);
       verified_key_size += node.path.size();
-      ok = ok && (node.value_hash == LibCrypto::sha256(value));
+      ok = ok && (*node.value_hash == LibCrypto::sha256(value));
       break;
 
     default:
