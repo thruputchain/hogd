@@ -79,12 +79,18 @@ x23::Async<RPCError>
 DbExecutorServer::try_push_new_subtransaction(BlockID block, TransactionID tx,
                                               StorageDeltaBatch batch)
 {
+  constexpr static int kThreshold = 100;
+  auto ts_begin = std::chrono::steady_clock::now();
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
     co_return RPCError::kRPCBadBlockID;
   }
 
+  auto ts_postget = std::chrono::steady_clock::now();
+
   block_data->push_subtransaction(tx);
+
+  auto ts_postpush = std::chrono::steady_clock::now();
 
   for (auto const &delta : batch) {
     if (!try_reserve_delta(block_data.get(), tx, delta.addrkey, delta.delta,
@@ -94,6 +100,21 @@ DbExecutorServer::try_push_new_subtransaction(BlockID block, TransactionID tx,
     }
   }
 
+  auto ts_posttry = std::chrono::steady_clock::now();
+
+  if (ts_postget - ts_begin > std::chrono::microseconds(kThreshold)) {
+    auto get_time = std::chrono::duration_cast<std::chrono::microseconds>(
+                        ts_postget - ts_begin)
+                        .count();
+    auto push_time = std::chrono::duration_cast<std::chrono::microseconds>(
+                         ts_postpush - ts_postget)
+                         .count();
+    auto try_time = std::chrono::duration_cast<std::chrono::microseconds>(
+                        ts_posttry - ts_postpush)
+                        .count();
+    std::println("try_push_new_subtransaction took {}us for get, {}us for push, {}us for try",
+                 get_time, push_time, try_time);
+  }
   co_return RPCError::kRPCNone;
 }
 
