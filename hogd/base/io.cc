@@ -214,8 +214,11 @@ File::close()
     return {};
 
   ErrnoStatus<void> ret = sys_close(fd_);
-  if (!ret)
+  if (!ret) {
     error("could not close fd {}: {}", fd_, ret.error());
+    return ret.error();
+  }
+
   fd_ = kInvalidFD;
   return {};
 }
