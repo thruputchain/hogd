@@ -183,16 +183,6 @@ File::open_temporary()
   return File(fd);
 }
 
-File::~File()
-{
-  if (fd_ == kInvalidFD)
-    return;
-
-  ErrnoStatus<void> ret = sys_close(fd_);
-  if (!ret)
-    error("could not close fd {}: {}", fd_, ret.error());
-}
-
 ErrnoStatus<size_t>
 File::read(std::span<std::byte> buf) const
 {
@@ -215,6 +205,22 @@ ErrnoStatus<void>
 File::sync() const
 {
   return sys_fsync(fd_);
+}
+
+ErrnoStatus<void>
+File::close()
+{
+  if (fd_ == kInvalidFD)
+    return {};
+
+  ErrnoStatus<void> ret = sys_close(fd_);
+  if (!ret) {
+    error("could not close fd {}: {}", fd_, ret.error());
+    return ret.error();
+  }
+
+  fd_ = kInvalidFD;
+  return {};
 }
 
 ErrnoStatus<Directory>

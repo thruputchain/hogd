@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 
@@ -46,12 +47,17 @@ public:
 
   File() = default;
   explicit File(int fd) : fd_(fd) {}
-  ~File();
+  ~File() { std::ignore = close(); }
 
   // Enable move; disable copy.
-  File(File &&f) noexcept : fd_{std::exchange(f.fd_, kInvalidFD)} {}
+  File(File &&f) noexcept
+  {
+    std::ignore = close();
+    fd_ = std::exchange(f.fd_, kInvalidFD);
+  }
   File &operator=(File &&f) noexcept
   {
+    std::ignore = close();
     fd_ = std::exchange(f.fd_, kInvalidFD);
     return *this;
   }
@@ -70,6 +76,9 @@ public:
   ErrnoStatus<off_t> lseek(off_t offset, int whence) const;
   // sync flushes all modified file data to the storage device.
   ErrnoStatus<void> sync() const;
+
+  // close closes the file.
+  ErrnoStatus<void> close();
 
 private:
   int fd_{kInvalidFD};

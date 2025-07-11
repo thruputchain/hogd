@@ -7,7 +7,6 @@
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <sched.h>
 #include <span>
 #include <stop_token>
 #include <string_view>
@@ -90,19 +89,8 @@ public:
 
   // call invokes an RPC on the server. A future allows the caller to wait for
   // a response.
-  std::future<OwningSpan<const std::byte>> call(std::span<const std::byte> args)
-  {
-    // NOTE: getcpu is vDSO, so it's very fast. We use it to hopefully squeeze
-    // out a little more cache affinity while spreading load across flows.
-    unsigned int core;
-#ifdef __APPLE__
-    // there isn't a getcpu on macos, so we just default thread id
-    core = std::hash<std::thread::id>()(std::this_thread::get_id());
-#else
-    getcpu(&core, nullptr);
-#endif
-    return flows_[core % flows_.size()]->call(args);
-  }
+  std::future<OwningSpan<const std::byte>>
+  call(std::span<const std::byte> args);
 
 private:
   std::vector<std::unique_ptr<rpc_detail::ClientFlow>> flows_;
@@ -118,14 +106,14 @@ public:
   static ErrnoStatus<std::shared_ptr<RPCServer>> create(uint16_t port,
                                                         RPCHandler handler);
 
-  RPCServer(RPCHandler handler, File &&listener)
-    : listener_(std::move(listener)), handler_(std::move(handler))
+  RPCServer(uint16_t port, RPCHandler handler, File &&listener)
+    : port_(port), listener_(std::move(listener)), handler_(std::move(handler))
   {}
   ~RPCServer() = default;
 
   // get_port returns the network port assigned to the server. This is
   // especially useful if it was chosen authomatically.
-  ErrnoStatus<uint16_t> get_port() const;
+  uint16_t get_port() const { return port_; }
 
   // listen accepts connects and handles RPC requests. This should only be
   // called once at a time. It generally blocks forever if there are no errors.
@@ -136,6 +124,7 @@ public:
   void stop();
 
 private:
+  const uint16_t port_;
   std::mutex lock_;
   File listener_;
   std::vector<File *> workers_;
