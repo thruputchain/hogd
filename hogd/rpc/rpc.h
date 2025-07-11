@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstring>
+#include <expected>
 #include <format>
 #include <functional>
 #include <future>
@@ -12,7 +13,9 @@
 #include <queue>
 #include <span>
 #include <stop_token>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -177,7 +180,7 @@ struct RPCCallHeader {
   }
 };
 
-enum RPCReponseError : uint32_t {
+enum class RPCReponseErrorCode : uint32_t {
   // The RPC call was successfully passed to the server.
   // This does not mean that the RPC-specific internal logic
   // succeeds.  Rather, this merely means that the RPC call
@@ -193,25 +196,34 @@ enum RPCReponseError : uint32_t {
   // TODO(geoff): other errors
 };
 
+class RPCResponseErrorCategory : public std::error_category {
+public:
+  const char *name() const noexcept override { return "rpc response"; }
+  std::string message(int code) const override;
+};
+
+using RPCResponseError =
+    EnumError<RPCReponseErrorCode, RPCResponseErrorCategory>;
+
+// Enable comparisons between RPCReponseErrorCode and std::error_code.
+inline bool
+operator==(const RPCReponseErrorCode &lhs, const std::error_code &rhs)
+{
+  return RPCResponseError{lhs} == rhs;
+}
+
+template<typename T> using RpcStatus = std::expected<T, RPCResponseError>;
+
 } // namespace hogd
 
 namespace std {
 
-template<> struct formatter<hogd::RPCReponseError> : formatter<string_view> {
-  auto format(hogd::RPCReponseError error, format_context &ctx) const
+template<>
+struct formatter<hogd::RPCReponseErrorCode> : formatter<string_view> {
+  auto format(hogd::RPCReponseErrorCode error, format_context &ctx) const
   {
-    string_view name = "Unknown RPCResponseError";
-    switch (error) {
-    case hogd::RPCReponseError::kRpcOk:
-      name = "kRpcOk";
-      break;
-    case hogd::RPCReponseError::kRpcInvalidArgument:
-      name = "kRpcInvalidArgument";
-      break;
-    case hogd::RPCReponseError::kRpcUnknownMethod:
-      name = "kRpcUnknownMethod";
-      break;
-    }
+    static hogd::RPCResponseErrorCategory category;
+    auto name = category.message(static_cast<int>(error));
     return formatter<string_view>::format(name, ctx);
   }
 };
@@ -221,7 +233,7 @@ template<> struct formatter<hogd::RPCReponseError> : formatter<string_view> {
 namespace hogd {
 
 struct RPCResponseHeader {
-  RPCReponseError error;
+  RPCReponseErrorCode error;
 };
 
 inline x23::Buf
@@ -286,7 +298,7 @@ rpc_client_call(RPCClient &client, auto &&...args)
     }
     RPCResponseHeader response_header;
     std::memcpy(&response_header, res.data(), sizeof(RPCResponseHeader));
-    if (response_header.error != RPCReponseError::kRpcOk) {
+    if (response_header.error != RPCReponseErrorCode::kRpcOk) {
       error("RPC error: {}", response_header.error);
       return SystemStatus<return_type>{
           SystemError{SystemErrorCode::kAbortTransaction}};
@@ -300,6 +312,24 @@ rpc_client_call(RPCClient &client, auto &&...args)
     return SystemStatus<return_type>{
         SystemError{SystemErrorCode::kUnrecoverable}};
   }
+}
+
+// Returns the method number and the arg span if the header is valid, otherwise
+// an error.
+inline RpcStatus<std::pair<uint32_t, std::span<const std::byte>>>
+rpc_server_parse_and_strip_header(std::span<const std::byte> args)
+{
+  RPCCallHeader header;
+  if (args.size() < sizeof(header)) {
+    return RPCResponseError{RPCReponseErrorCode::kRpcInvalidArgument};
+  }
+  std::memcpy(&header, args.data(), sizeof(header));
+  if (!header.validate()) {
+    // TODO(geoff): We may want to distinguish between invalid header and
+    // invalid method
+    return RPCResponseError{RPCReponseErrorCode::kRpcInvalidArgument};
+  }
+  return std::pair{header.method, args.subspan(sizeof(header))};
 }
 
 // Template has both the method number and the name, which are checked against
@@ -318,13 +348,13 @@ rpc_server_dispatch_method(auto &server, std::span<const std::byte> args)
   } catch (const x23::XdrException &e) {
     error("x23 deserialization error: {}", e.what());
     return vec_as_bytes(response_header_to_buf(
-        RPCResponseHeader{RPCReponseError::kRpcInvalidArgument}));
+        RPCResponseHeader{RPCReponseErrorCode::kRpcInvalidArgument}));
   }
 
   auto res = meta::dispatch(server, a);
 
   auto buf_out =
-      response_header_to_buf(RPCResponseHeader{RPCReponseError::kRpcOk});
+      response_header_to_buf(RPCResponseHeader{RPCReponseErrorCode::kRpcOk});
   x23::serialize_to(&buf_out, res);
   return vec_as_bytes(buf_out);
 }

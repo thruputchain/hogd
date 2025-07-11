@@ -466,4 +466,19 @@ RPCServer::stop()
   }
 }
 
+std::string
+RPCResponseErrorCategory::message(int code) const
+{
+  switch (static_cast<RPCReponseErrorCode>(code)) {
+  case RPCReponseErrorCode::kRpcOk:
+    return "kRpcOk";
+  case RPCReponseErrorCode::kRpcInvalidArgument:
+    return "kRpcInvalidArgument";
+  case RPCReponseErrorCode::kRpcUnknownMethod:
+    return "kRpcUnknownMethod";
+  default:
+    return "Unknown RPCResponseError";
+  }
+}
+
 } // namespace hogd

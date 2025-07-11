@@ -31,24 +31,18 @@ requires is_DatabaseToExecutorInterfaceV1<Server *, std::type_identity_t>
 OwningSpan<const std::byte>
 handle_db_executor_rpc_request(Server &server, std::span<const std::byte> args)
 {
-  RPCCallHeader header;
-  if (args.size() < sizeof(header)) {
+  auto header_result = rpc_server_parse_and_strip_header(args);
+  if (!header_result) {
     return vec_as_bytes(response_header_to_buf(
-        RPCResponseHeader{RPCReponseError::kRpcInvalidArgument}));
+        RPCResponseHeader{RPCReponseErrorCode::kRpcInvalidArgument}));
   }
-  std::memcpy(&header, args.data(), sizeof(header));
-  if (!header.validate()) {
-    return vec_as_bytes(response_header_to_buf(
-        RPCResponseHeader{RPCReponseError::kRpcInvalidArgument}));
-  }
-
-  auto arg_span = args.subspan(sizeof(header));
+  auto [method, arg_span] = header_result.value();
 
   // TODO(geoff): figure out a convenient way to automate this
   // static constexpr std::array<std::uint32_t, 11> valid_procnos{
   //    0, 1, 2, 3, 100, 101, 102, 200, 201, 202, 203
   //};
-  switch (header.method) {
+  switch (method) {
   case 0:
     return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 0,
                                       "try_push_new_subtransaction">(server,
@@ -89,7 +83,7 @@ handle_db_executor_rpc_request(Server &server, std::span<const std::byte> args)
                                       "get_deployment">(server, arg_span);
   default:
     return vec_as_bytes(response_header_to_buf(
-        RPCResponseHeader{RPCReponseError::kRpcUnknownMethod}));
+        RPCResponseHeader{RPCReponseErrorCode::kRpcUnknownMethod}));
   }
 }
 
