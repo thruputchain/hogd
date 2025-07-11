@@ -19,16 +19,17 @@ namespace {
 
 HogDBStatus<void>
 update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key,
-                       const std::string &value)
+                       const std::span<std::byte> &value)
 {
   HexArray k(key.get_address().as_bytes());
   if (!trie.insert(k, value)) {
-    void *cookie;
-    std::string *v = trie.find_begin(k, cookie);
-    if (!v) {
-      return HogDBError(HogDBCode::kInternal);
-    }
-    trie.find_end(cookie);
+    // TODO(jhumphri): Update the value if the key already exists.
+    // void *cookie;
+    // std::string *v = trie.find_begin(k, cookie);
+    // if (!v) {
+    //   return HogDBError(HogDBCode::kInternal);
+    // }
+    // trie.find_end(cookie);
   }
   return {};
 }
@@ -49,10 +50,12 @@ inline HogDBStatus<void>
 NNInt128::commit(HogDatabase &db, MerkleTriePrefix &trie,
                  const ItemKey &key) const
 {
-  HogDBStatus<void> ret = write_nnint128(db, key, value());
+  int128_t v = value();
+  HogDBStatus<void> ret = write_nnint128(db, key, v);
   if (ret) {
-    // TODO(jhumphri): Pass in correct value.
-    ret = update_kv_pair_in_trie(trie, key, "FIX");
+    std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&v),
+                                    sizeof(v));
+    ret = update_kv_pair_in_trie(trie, key, value_span);
   }
   return ret;
 }
@@ -138,10 +141,10 @@ NNInt128::undo_merge(const NNInt128 &nnint)
 inline HogDBStatus<void>
 Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
 {
-  HogDBStatus<void> ret = write_bytes(db, key, std::as_bytes(std::span(buf_)));
+  std::span<const std::byte> v = std::as_bytes(std::span(buf_));
+  HogDBStatus<void> ret = write_bytes(db, key, v);
   if (ret) {
-    // TODO(jhumphri): Pass in correct value.
-    ret = update_kv_pair_in_trie(trie, key, "FIX");
+    ret = update_kv_pair_in_trie(trie, key, v);
   }
   return ret;
 }
