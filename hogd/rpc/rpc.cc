@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sched.h>
+#include <string>
 #include <sys/socket.h>
 
 #include <cassert>
@@ -451,13 +452,32 @@ void
 RPCServer::stop()
 {
   std::scoped_lock guard(lock_);
-  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RD); !ret) {
+  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RDWR);
+      !ret) {
     error("could not shutdown listener socket: {}", ret.error());
   }
+  // mac compat: call close() on the listener fd
+  if (ErrnoStatus<void> ret = listener_.close(); !ret)
+    error("could not close listener socket: {}", ret.error());
 
   for (File *f : workers_) {
     if (ErrnoStatus<void> ret = sys_shutdown(f->get_fd(), SHUT_RD); !ret)
       error("could not shutdown worker socket: {}", ret.error());
+  }
+}
+
+std::string
+RPCResponseErrorCategory::message(int code) const
+{
+  switch (static_cast<RPCReponseErrorCode>(code)) {
+  case RPCReponseErrorCode::kRpcOk:
+    return "kRpcOk";
+  case RPCReponseErrorCode::kRpcInvalidArgument:
+    return "kRpcInvalidArgument";
+  case RPCReponseErrorCode::kRpcUnknownMethod:
+    return "kRpcUnknownMethod";
+  default:
+    return "Unknown RPCResponseError";
   }
 }
 

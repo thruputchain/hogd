@@ -12,8 +12,6 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
-#include "x23/event.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -47,12 +45,10 @@ public:
   BlockID get_current_block_id() const { return current_block_id_; }
 
 private:
-  x23::ThreadPool pool_;
-  x23::CoroPoll cp_;
   BlockID current_block_id_ = 0;
   InMemoryDatabase db_;
   BlockManager block_manager_;
-  DbExecutorServer executor_server_;
+  RPCDbExecutorServer executor_server_;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_ = nullptr;
   std::atomic<TransactionID> current_tx_id_ = 0;

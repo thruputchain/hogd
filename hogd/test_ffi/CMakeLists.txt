@@ -38,7 +38,7 @@ add_executable(
 target_link_libraries(
   test_ffi_test
   test_ffi
-  GTest::gtest_main
+  GTest::gtest
 )
 gtest_discover_tests(test_ffi_test)
 

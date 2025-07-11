@@ -1,16 +1,14 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 
 #include <cassert>
-#include <chrono>
 #include <concepts>
-#include <cstdio>
+#include <cstddef>
+#include <cstring>
 #include <exception>
-#include <format>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -21,61 +19,27 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/rpc/rpc.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/async.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
 namespace {
 
-std::optional<DatabaseToExecutorInterfaceV1::client<
-    x23::RpcStream<x23::RpcLogger>::ClientRef>>
-connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
-{
-  auto fd =
-      cp.tcpconnect("localhost", std::to_string(local_db.read_port_number_))();
-  if (!fd) {
-    return std::nullopt;
-  }
-  auto client_config = x23::rpc_stream_logged(cp, *fd);
-  return client_config.template client<DatabaseToExecutorInterfaceV1>();
-}
-
-std::optional<DatabaseToExecutorInterfaceV1::client<
-    x23::RpcStream<x23::RpcLogger>::ClientRef>>
-connect_to_db_shard(x23::CoroPoll &cp, ShardCard const &shard)
-{
-  x23::HostPort host_addr;
-  if (!host_addr.parse(std::string(shard.address))) {
-    throw std::runtime_error("Failed to parse shard address");
-  }
-  auto addr = host_addr.to_addr();
-  if (!addr) {
-    throw std::runtime_error("Failed to parse shard address");
-  }
-  auto fd = cp.tcpconnect(&addr.value())();
-  if (!fd) {
-    return std::nullopt;
-  }
-  auto client_config = x23::rpc_stream_logged(cp, *fd);
-  return client_config.template client<DatabaseToExecutorInterfaceV1>();
-}
 struct VoidMarker {};
 
 template<auto NullValue>
 constexpr auto
-to_system_error_code(auto err, auto &&f)
+to_system_error_code(auto sys_err, auto &&f)
 {
-  constexpr bool kHasReturnType = requires { f(std::move(get<1>(err))); };
+  constexpr bool kHasReturnType =
+      requires { f(std::move(get<1>(sys_err.value()))); };
   auto type_lambda = [&] {
     if constexpr (kHasReturnType) {
-      return f(std::move(get<1>(err)));
+      return f(std::move(get<1>(sys_err.value())));
     }
     else if constexpr (std::same_as<decltype(f()), void>) {
       return;
@@ -88,6 +52,12 @@ to_system_error_code(auto err, auto &&f)
   using ret_t = decltype(type_lambda());
 
   return [&] -> SystemStatus<ret_t> {
+    if (!sys_err.has_value()) [[unlikely]] {
+      return SystemStatus<ret_t>{sys_err.error()};
+    }
+
+    auto err = sys_err.value();
+
     RPCError err_code;
     if constexpr (kHasReturnType) {
       err_code = err.error();
@@ -139,143 +109,150 @@ to_system_error_code(auto err, auto &&f)
 
 } // namespace
 
-DatabaseProxy::DatabaseProxy(x23::CoroPoll &cp,
-                             DatabaseIdentifier db_identifier)
-  : cp_(cp), read_client_([&] {
+DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
+  : client_([&] -> RPCClient {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
-
-        auto out = connect_to_local_mock_database(cp, mock_db);
-
-        while (!out) {
-          perror(std::format("connect to local mock db read server localhost "
-                             "port {} failed, "
-                             "retrying...",
-                             mock_db.read_port_number_)
-                     .c_str());
-          std::this_thread::sleep_for(std::chrono::milliseconds(500));
-          out = connect_to_local_mock_database(cp, mock_db);
+        auto res = RPCClient::dial("127.0.0.1:" +
+                                   std::to_string(mock_db.read_port_number_));
+        if (!res) {
+          throw std::runtime_error("Failed to connect to local mock database");
         }
-        return *out;
+        return std::move(*res);
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
-        if (sharded_db.shards_.size() == 1) {
-          auto out = connect_to_db_shard(cp, sharded_db.shards_[0]);
-          while (!out) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            out = connect_to_db_shard(cp, sharded_db.shards_[0]);
-          }
-          return *out;
+        assert(!sharded_db.shards_.empty());
+        auto res = RPCClient::dial(sharded_db.shards_[0].address);
+        if (!res) {
+          throw std::runtime_error("Failed to connect to database shard");
         }
-        // unimplemented shard count
-        std::terminate(); // TODO(geoff): unimplemented
+        return std::move(*res);
       }
-      // unknown database specification type
       std::terminate();
     }())
 {}
 
-x23::Async<SystemStatus<std::optional<StorageItem>>>
+SystemStatus<std::optional<StorageItem>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
-  auto res = co_await read_client_.get_snapshot_item(block_id, addrkey);
-  co_return to_system_error_code<std::nullopt>(res, [](StorageItem &&x) {
+  auto res =
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 100, "get_snapshot_item">(
+          client_, block_id, addrkey);
+  return to_system_error_code<std::nullopt>(res, [](StorageItem &&x) {
     return std::make_optional<StorageItem>(std::move(x));
   });
 }
 
-x23::Async<SystemStatus<std::shared_ptr<const Contract>>>
+SystemStatus<std::shared_ptr<const Contract>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
-  auto res = co_await read_client_.get_contract(block_id, contract_hash);
-  co_return to_system_error_code<nullptr>(res, [](const Contract &x) {
+  auto res =
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 202, "get_contract">(
+          client_, block_id, contract_hash);
+  return to_system_error_code<nullptr>(res, [](const Contract &x) {
     return std::make_shared<const Contract>(x);
   });
 }
 
-x23::Async<SystemStatus<std::optional<SHA256Hash>>>
+SystemStatus<std::optional<SHA256Hash>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
-  auto res = co_await read_client_.get_deployment(block_id, addr);
-  co_return to_system_error_code<std::nullopt>(res, [](SHA256Hash &&x) {
+  auto res =
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 203, "get_deployment">(
+          client_, block_id, addr);
+  return to_system_error_code<std::nullopt>(res, [](SHA256Hash &&x) {
     return std::make_optional<SHA256Hash>(std::move(x));
   });
 }
 
-x23::Async<SystemStatus<std::optional<RetrocausalQueueBlock>>>
+SystemStatus<std::optional<RetrocausalQueueBlock>>
 DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
                                                 AddressAndKey const &addrkey,
                                                 uint64_t search_start_number)
 {
-  auto res = co_await read_client_.get_next_retrocausal_queue_block(
-      block_id, addrkey, search_start_number);
-  co_return to_system_error_code<std::nullopt>(
-      res, [](RetrocausalQueueBlock &&x) {
-        return std::make_optional<RetrocausalQueueBlock>(std::move(x));
-      });
+  auto res =
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 101,
+                      "get_next_retrocausal_queue_block">(client_, block_id,
+                                                          addrkey,
+                                                          search_start_number);
+  return to_system_error_code<std::nullopt>(res, [](RetrocausalQueueBlock &&x) {
+    return std::make_optional<RetrocausalQueueBlock>(std::move(x));
+  });
 }
 
-x23::Async<SystemStatus<std::optional<QueueEntry>>>
+SystemStatus<std::optional<QueueEntry>>
 DatabaseProxy::get_concurrent_retrocausal_queue_entry(
     BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
 {
   auto res =
-      co_await read_client_.get_concurrent_retrocausal_queue_entry(block_id,
-                                                                   addrkey,
-                                                                   index);
-  co_return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 102,
+                      "get_concurrent_retrocausal_queue_entry">(client_,
+                                                                block_id,
+                                                                addrkey, index);
+  return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
     return std::make_optional<QueueEntry>(std::move(x));
   });
 }
 
-x23::Async<SystemStatus<void>>
+SystemStatus<void>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
 {
-  auto res = co_await read_client_.commit_transaction(block_id, tx_id);
-  co_return to_system_error_code<VoidMarker{}>(res, [] {});
+  auto res =
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 1, "commit_transaction">(
+          client_, block_id, tx_id);
+  return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
-x23::Async<SystemStatus<void>>
+SystemStatus<void>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
-  auto res = co_await read_client_.abort_transaction(block_id, tx_id);
-  co_return to_system_error_code<VoidMarker{}>(res, [] {});
+  auto res =
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 2, "abort_transaction">(
+          client_, block_id, tx_id);
+  return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
-x23::Async<SystemStatus<void>>
+SystemStatus<void>
 DatabaseProxy::commit_contract_create(BlockID block_id,
                                       Contract const &contract)
 {
-  auto res = co_await read_client_.commit_contract_create(block_id, contract);
-  co_return to_system_error_code<VoidMarker{}>(res, [] {});
+  auto res =
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 200,
+                      "commit_contract_create">(client_, block_id, contract);
+  return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
-x23::Async<SystemStatus<void>>
+SystemStatus<void>
 DatabaseProxy::commit_contract_deploy(BlockID block_id,
                                       ContractAddress const &addr,
                                       SHA256Hash const &hash)
 {
-  auto res = co_await read_client_.commit_contract_deploy(block_id, addr, hash);
-  co_return to_system_error_code<VoidMarker{}>(res, [] {});
+  auto res =
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 201,
+                      "commit_contract_deploy">(client_, block_id, addr, hash);
+  return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
-x23::Async<SystemStatus<bool>>
+SystemStatus<bool>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch)
 {
-  auto res = co_await read_client_.try_push_new_subtransaction(block_id, tx_id,
-                                                               delta_batch);
-  co_return to_system_error_code<false>(res, [] { return true; });
+  auto res = rpc_client_call<DatabaseToExecutorInterfaceV1, 0,
+                             "try_push_new_subtransaction">(client_, block_id,
+                                                            tx_id, delta_batch);
+  return to_system_error_code<false>(res, [] { return true; });
 }
 
-x23::Async<SystemStatus<void>>
+SystemStatus<void>
 DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
-  auto res = co_await read_client_.pop_subtransactions(block_id, tx_id, count);
-  co_return to_system_error_code<VoidMarker{}>(res, [] {});
+  auto res =
+      rpc_client_call<DatabaseToExecutorInterfaceV1, 3, "pop_subtransactions">(
+          client_, block_id, tx_id, count);
+  return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
 StorageDeltaBatch

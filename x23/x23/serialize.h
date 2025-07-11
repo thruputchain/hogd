@@ -2,8 +2,11 @@
 
 #pragma once
 
+#include "x23/vec.h"
 #include <algorithm>
 #include <bit>
+#include <concepts>
+#include <cstdint>
 #include <utility>
 
 #include <x23/utility.h>
@@ -502,7 +505,7 @@ deserialize_from(Xout *out, BufType &&buf)
   detail::Deserializer d(buf);
   d.go<true>(*out);
   d.check();
-  return d.p - buf.data();
+  return d.p - reinterpret_cast<const std::uint8_t *>(buf.data());
 }
 
 template<is_xdr_type Xout, std::convertible_to<BufView> BufType>
