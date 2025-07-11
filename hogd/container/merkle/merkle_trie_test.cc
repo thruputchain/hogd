@@ -755,6 +755,66 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
   std::cout << trie << '\n';
 }
 
+// Tests [insert_or_update()].
+TEST(MerkleTrie, InsertOrUpdate)
+{
+  MerkleTrie trie;
+
+  HexArray key_a("1234");
+  std::string value_a = "hello";
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
+
+  HexArray key_b("123456");
+  std::string value_b = "hello again";
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
+
+  HexArray key_c("12ab");
+  std::string value_c = "hello three";
+  std::span<std::byte> value_c_span{reinterpret_cast<std::byte *>(
+                                        value_c.data()),
+                                    value_c.size()};
+  trie.insert_or_update(key_c, value_c_span);
+  SHA256Hash *value_hash;
+  void *cookie;
+  EXPECT_TRUE(trie.find_begin(key_c, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_c));
+  trie.find_end(cookie);
+
+  // [key_a] is in a branch node.
+  std::string new_value_a = "hello four";
+  std::span<std::byte> new_value_a_span{reinterpret_cast<std::byte *>(
+                                            new_value_a.data()),
+                                        new_value_a.size()};
+  EXPECT_FALSE(trie.insert(key_a, new_value_a_span));
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
+  trie.find_end(cookie);
+  trie.insert_or_update(key_a, new_value_a_span);
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(new_value_a));
+  trie.find_end(cookie);
+
+  // [key_b] is in a leaf node.
+  std::string new_value_b = "hello five";
+  std::span<std::byte> new_value_b_span{reinterpret_cast<std::byte *>(
+                                            new_value_b.data()),
+                                        new_value_b.size()};
+  EXPECT_FALSE(trie.insert(key_b, new_value_b_span));
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_b));
+  trie.find_end(cookie);
+  trie.insert_or_update(key_b, new_value_b_span);
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(new_value_b));
+  trie.find_end(cookie);
+}
+
 namespace {
 
 // TODO(jhumphri): Clean this up further.

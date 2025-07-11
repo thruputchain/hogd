@@ -455,9 +455,17 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
     if (existing_key) {
       // [k] already exists in the trie, so we cannot insert it.
       if (update) {
+        if (!existing_key->rw_lock.try_upgrade_to_writer_if_only_one()) {
+          unlock_both(*branch, *existing_key);
+          continue;
+        }
+        if (branch != existing_key) {
+          branch->rw_lock.unlock();
+        }
         existing_key->value_hash = sha256(obj);
-        to_hash = existing_key;
-        break;
+        // [generate_hashes_from()] unlocks the node locks we currently hold.
+        generate_hashes_from(existing_key, /*locked_through=*/existing_key);
+        return true;
       }
       else {
         unlock_both(*branch, *existing_key);
