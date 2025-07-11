@@ -1,10 +1,9 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 
 #include <cassert>
-#include <chrono>
 #include <concepts>
 #include <cstddef>
-#include <cstdio>
+#include <cstring>
 #include <exception>
 #include <format>
 #include <memory>
@@ -12,7 +11,6 @@
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -29,49 +27,13 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/async.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
 #include "x23/serialize.h"
-#include "x23/sockio.h"
 #include "x23/vec.h"
 
 namespace hogd {
 
 namespace {
 
-std::optional<DatabaseToExecutorInterfaceV1::client<
-    x23::RpcStream<x23::RpcLogger>::ClientRef>>
-connect_to_local_mock_database(x23::CoroPoll &cp, LocalMockDB local_db)
-{
-  auto fd =
-      cp.tcpconnect("localhost", std::to_string(local_db.read_port_number_))();
-  if (!fd) {
-    return std::nullopt;
-  }
-  auto client_config = x23::rpc_stream_logged(cp, *fd);
-  return client_config.template client<DatabaseToExecutorInterfaceV1>();
-}
-
-std::optional<DatabaseToExecutorInterfaceV1::client<
-    x23::RpcStream<x23::RpcLogger>::ClientRef>>
-connect_to_db_shard(x23::CoroPoll &cp, ShardCard const &shard)
-{
-  x23::HostPort host_addr;
-  if (!host_addr.parse(std::string(shard.address))) {
-    throw std::runtime_error("Failed to parse shard address");
-  }
-  auto addr = host_addr.to_addr();
-  if (!addr) {
-    throw std::runtime_error("Failed to parse shard address");
-  }
-  auto fd = cp.tcpconnect(&addr.value())();
-  if (!fd) {
-    return std::nullopt;
-  }
-  auto client_config = x23::rpc_stream_logged(cp, *fd);
-  return client_config.template client<DatabaseToExecutorInterfaceV1>();
-}
 struct VoidMarker {};
 
 template<auto NullValue>
@@ -210,7 +172,6 @@ client_call(RPCClient &client, auto &&...args)
 
     return SystemStatus<return_type>{std::move(ret)};
   } catch (const x23::XdrException &e) {
-    std::println("de/serialization failed: {}", e.what());
     return SystemStatus<return_type>{
         SystemError{SystemErrorCode::kUnrecoverable}};
   }
