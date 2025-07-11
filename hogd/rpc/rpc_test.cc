@@ -52,10 +52,8 @@ protected:
     });
 
     // set up client connections.
-    ErrnoStatus<uint16_t> port = server_->get_port();
-    ASSERT_TRUE(port);
     ErrnoStatus<RPCClient> client =
-        RPCClient::dial("127.0.0.1:" + std::to_string(*port));
+        RPCClient::dial("127.0.0.1:" + std::to_string(server_->get_port()));
     ASSERT_TRUE(client);
     client_ = std::move(*client);
   }

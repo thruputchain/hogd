@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sched.h>
 #include <sys/socket.h>
 
 #include <cassert>
@@ -310,18 +311,35 @@ RPCClient::dial(std::string_view addr, int flows)
   return RPCClient(std::move(flow_tbl));
 }
 
+std::future<OwningSpan<const std::byte>>
+RPCClient::call(std::span<const std::byte> args)
+{
+  unsigned int core;
+#if defined(__linux__)
+  // NOTE: getcpu() is vDSO, so it's very fast. We use it to hopefully squeeze
+  // out a little more cache affinity while spreading load across flows.
+  getcpu(&core, nullptr);
+#else
+  // getcpu() isn't available outside of Linux, so we rely on thread ID
+  // instead.
+  core = std::hash<std::thread::id>()(std::this_thread::get_id());
+#endif
+  return flows_[core % flows_.size()]->call(args);
+}
+
 ErrnoStatus<std::shared_ptr<RPCServer>>
 RPCServer::create(uint16_t port, RPCHandler handler)
 {
+  // create the listener socket.
   ErrnoStatus<int> accept_fd = sys_socket(AF_INET, SOCK_STREAM, 0);
   if (!accept_fd)
     return accept_fd.error();
-
   ErrnoStatus<void> ret =
       sys_setsockopt(*accept_fd, SOL_SOCKET, SO_REUSEPORT, 1); // NOLINT
   if (!ret)
     return ret.error();
 
+  // bind the address to the socket.
   sockaddr_in saddr;
   saddr.sin_family = AF_INET;
   saddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -330,22 +348,22 @@ RPCServer::create(uint16_t port, RPCHandler handler)
   if (!ret)
     return ret.error();
 
+  // retrieve the port number if it was assigned automatically.
+  if (port == 0) {
+    ErrnoStatus<void> ret = sys_getsockname(*accept_fd, saddr);
+    if (!ret)
+      return ret.error();
+    port = ntohs(saddr.sin_port);
+  }
+
+  // enable listening.
   constexpr int kAcceptBacklog = 1024;
   ret = sys_listen(*accept_fd, kAcceptBacklog);
   if (!ret)
     return ret.error();
 
-  return std::make_shared<RPCServer>(std::move(handler), File(*accept_fd));
-}
-
-ErrnoStatus<uint16_t>
-RPCServer::get_port() const
-{
-  sockaddr_in addr;
-  ErrnoStatus<void> ret = sys_getsockname(listener_.get_fd(), addr);
-  if (!ret)
-    return ret.error();
-  return ntohs(addr.sin_port);
+  return std::make_shared<RPCServer>(port, std::move(handler),
+                                     File(*accept_fd));
 }
 
 ErrnoStatus<void>
