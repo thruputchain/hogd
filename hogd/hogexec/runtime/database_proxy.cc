@@ -78,7 +78,8 @@ template<auto NullValue>
 constexpr auto
 to_system_error_code(auto sys_err, auto &&f)
 {
-  constexpr bool kHasReturnType = requires { f(std::move(get<1>(sys_err.value()))); };
+  constexpr bool kHasReturnType =
+      requires { f(std::move(get<1>(sys_err.value()))); };
   auto type_lambda = [&] {
     if constexpr (kHasReturnType) {
       return f(std::move(get<1>(sys_err.value())));
@@ -153,59 +154,69 @@ to_system_error_code(auto sys_err, auto &&f)
 
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
   : client_([&] -> RPCClient {
-    if (std::holds_alternative<LocalMockDB>(db_identifier)) {
-      auto mock_db = std::get<LocalMockDB>(db_identifier);
-      auto res = RPCClient::dial("127.0.0.1:" + std::to_string(mock_db.read_port_number_));
-      if (!res) {
-        throw std::runtime_error("Failed to connect to local mock database");
+      if (std::holds_alternative<LocalMockDB>(db_identifier)) {
+        auto mock_db = std::get<LocalMockDB>(db_identifier);
+        auto res = RPCClient::dial("127.0.0.1:" +
+                                   std::to_string(mock_db.read_port_number_));
+        if (!res) {
+          throw std::runtime_error("Failed to connect to local mock database");
+        }
+        return std::move(*res);
       }
-      return std::move(*res);
-    }
-    if (std::holds_alternative<ShardedDB>(db_identifier)) {
-      auto sharded_db = std::get<ShardedDB>(db_identifier);
-      auto res = RPCClient::dial(sharded_db.shards_[0].address);
-      if (!res) {
-        throw std::runtime_error("Failed to connect to sharded database");
+      if (std::holds_alternative<ShardedDB>(db_identifier)) {
+        auto sharded_db = std::get<ShardedDB>(db_identifier);
+        auto res = RPCClient::dial(sharded_db.shards_[0].address);
+        if (!res) {
+          throw std::runtime_error("Failed to connect to sharded database");
+        }
+        return std::move(*res);
       }
-      return std::move(*res);
-    }
-    std::terminate();
-  }())
+      std::terminate();
+    }())
 {}
 
 namespace {
 template<uint32_t Method, StringLiteral Name>
-auto client_call(RPCClient &client, auto &&...args) {
-  static_assert(Name.get() == DatabaseToExecutorInterfaceV1::proc_meta<Method>::proc_name, "Method name mismatch");
-  
-  using return_type = DatabaseToExecutorInterfaceV1::proc_meta<Method>::return_type;
+auto
+client_call(RPCClient &client, auto &&...args)
+{
+  static_assert(Name.get() ==
+                    DatabaseToExecutorInterfaceV1::proc_meta<Method>::proc_name,
+                "Method name mismatch");
 
-try {
-  x23::Buf buf(4, 0);
-  uint32_t method = Method;
-  std::memcpy(buf.data(), &method, sizeof(method));
-  (x23::serialize_to(&buf, std::forward<decltype(args)>(args)), ...);
-  
-  auto future = client.call(std::as_bytes(std::span(buf)));
-  future.wait();
-  assert(future.valid());
-  auto res = future.get();
-  if (!res) {
-    return SystemStatus<return_type>{SystemError{SystemErrorCode::kAbortTransaction}};
+  using return_type =
+      DatabaseToExecutorInterfaceV1::proc_meta<Method>::return_type;
+
+  try {
+    x23::Buf buf(4, 0);
+    uint32_t method = Method;
+    std::memcpy(buf.data(), &method, sizeof(method));
+    (x23::serialize_to(&buf, std::forward<decltype(args)>(args)), ...);
+
+    auto future = client.call(std::as_bytes(std::span(buf)));
+    future.wait();
+    assert(future.valid());
+    auto res = future.get();
+    if (!res) {
+      return SystemStatus<return_type>{
+          SystemError{SystemErrorCode::kAbortTransaction}};
+    }
+    return_type ret;
+    // TODO(geoff): better casting
+    x23::deserialize(&ret,
+                     std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
+                                                  res.data()),
+                                              res.size()));
+
+    return SystemStatus<return_type>{std::move(ret)};
+  } catch (const x23::XdrException &e) {
+    std::println("de/serialization failed: {}", e.what());
+    return SystemStatus<return_type>{
+        SystemError{SystemErrorCode::kUnrecoverable}};
   }
-  return_type ret;
-  // TODO(geoff): better casting
-  x23::deserialize(&ret, std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(res.data()), res.size()));
-
-  return SystemStatus<return_type>{std::move(ret)};
-}
-catch (const x23::XdrException &e) {
-  std::println("de/serialization failed: {}", e.what());
-  return SystemStatus<return_type>{SystemError{SystemErrorCode::kUnrecoverable}};
-}
 }
 
-}
+} // namespace
 
 SystemStatus<std::optional<StorageItem>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
@@ -239,18 +250,21 @@ DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
                                                 AddressAndKey const &addrkey,
                                                 uint64_t search_start_number)
 {
-  auto res = client_call<101, "get_next_retrocausal_queue_block">(client_, block_id, addrkey, search_start_number);
-  return to_system_error_code<std::nullopt>(
-      res, [](RetrocausalQueueBlock &&x) {
-        return std::make_optional<RetrocausalQueueBlock>(std::move(x));
-      });
+  auto res =
+      client_call<101, "get_next_retrocausal_queue_block">(client_, block_id,
+                                                           addrkey,
+                                                           search_start_number);
+  return to_system_error_code<std::nullopt>(res, [](RetrocausalQueueBlock &&x) {
+    return std::make_optional<RetrocausalQueueBlock>(std::move(x));
+  });
 }
 
 SystemStatus<std::optional<QueueEntry>>
 DatabaseProxy::get_concurrent_retrocausal_queue_entry(
     BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
 {
-  auto res = client_call<102, "get_concurrent_retrocausal_queue_entry">(client_, block_id, addrkey, index);
+  auto res = client_call<102, "get_concurrent_retrocausal_queue_entry">(
+      client_, block_id, addrkey, index);
   return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
     return std::make_optional<QueueEntry>(std::move(x));
   });
@@ -274,7 +288,8 @@ SystemStatus<void>
 DatabaseProxy::commit_contract_create(BlockID block_id,
                                       Contract const &contract)
 {
-  auto res = client_call<200, "commit_contract_create">(client_, block_id, contract);
+  auto res =
+      client_call<200, "commit_contract_create">(client_, block_id, contract);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
@@ -283,7 +298,8 @@ DatabaseProxy::commit_contract_deploy(BlockID block_id,
                                       ContractAddress const &addr,
                                       SHA256Hash const &hash)
 {
-  auto res = client_call<201, "commit_contract_deploy">(client_, block_id, addr, hash);
+  auto res =
+      client_call<201, "commit_contract_deploy">(client_, block_id, addr, hash);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
@@ -292,7 +308,8 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch)
 {
-  auto res = client_call<0, "try_push_new_subtransaction">(client_, block_id, tx_id, delta_batch);
+  auto res = client_call<0, "try_push_new_subtransaction">(client_, block_id,
+                                                           tx_id, delta_batch);
   return to_system_error_code<false>(res, [] { return true; });
 }
 
@@ -300,7 +317,8 @@ SystemStatus<void>
 DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
-  auto res = client_call<3, "pop_subtransactions">(client_, block_id, tx_id, count);
+  auto res =
+      client_call<3, "pop_subtransactions">(client_, block_id, tx_id, count);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 

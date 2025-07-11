@@ -18,9 +18,6 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/event.h"
-#include "x23/sockio.h"
-#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -29,15 +26,11 @@ class SnapshotStorageItemTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    auto r = server_.start_server(0);
-    db_proxy_ =
-        std::make_unique<DatabaseProxy>(LocalMockDB{x23::get_port(r)});
+    db_proxy_ = std::make_unique<DatabaseProxy>(
+        LocalMockDB{.read_port_number_ = server_.port()});
   }
 
   BlockSnapshotServer server_ = BlockSnapshotServer(1);
-
-  x23::ThreadPool pool_ = x23::ThreadPool(2);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
 

@@ -47,14 +47,14 @@ protected:
     server_ = std::move(*server);
     server_listener_ = std::jthread([this] {
       if (ErrnoStatus<void> ret = server_->listen(); !ret) {
-        #ifdef __APPLE__
+#ifdef __APPLE__
         if (ret.error() != ENOTCONN && ret.error() != ECONNABORTED) {
           FAIL() << "unexpected error: " << ret.error();
         }
 
-        #else
+#else
         EXPECT_EQ(ret.error(), EINVAL);
-        #endif
+#endif
       }
     });
 

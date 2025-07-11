@@ -145,9 +145,9 @@ string_as_bytes(std::string str)
 inline OwningSpan<const std::byte>
 vec_as_bytes(x23::Buf buf)
 {
-  std::span<const std::byte> span = {
-      reinterpret_cast<const std::byte *>(buf.data()),
-      buf.size()};
+  std::span<const std::byte> span = {reinterpret_cast<const std::byte *>(
+                                         buf.data()),
+                                     buf.size()};
   return OwningSpan(span, [ref = std::move(buf)] mutable {});
 }
 

@@ -26,71 +26,11 @@
 
 namespace hogd {
 
-namespace {
-template<uint32_t Method> 
-OwningSpan<const std::byte> dispatch_request(SyncDBExecutorServer& server, std::span<const std::byte> args)
-{
-  using meta = DatabaseToExecutorInterfaceV1::proc_meta<Method>;
-  typename meta::arg_type a;
-  // TODO(geoff): fix the type conversion
-  x23::deserialize(&a, std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(args.data()), args.size()));
-  auto res = meta::dispatch(server, a);
-  return vec_as_bytes(x23::serialize(res));
-}
-}
-
-OwningSpan<const std::byte>
-handle_adam_rpc_request(SyncDBExecutorServer& server, std::span<const std::byte> args)
-{
-  uint32_t method;
-  if (args.size() < sizeof(method)) {
-    std::println("args too small: {}", args.size());
-    return OwningSpan<const std::byte>();
-  }
-  std::memcpy(&method, args.data(), sizeof(method));
-
-  // TODO(geoff): figure out a convenient way to automate this
-  // static constexpr std::array<std::uint32_t, 11> valid_procnos{
-  //    0, 1, 2, 3, 100, 101, 102, 200, 201, 202, 203
-  //};
-  try {
-  switch (method) {
-    case 0:
-      return dispatch_request<0>(server, args.subspan(sizeof(method)));
-    case 1:
-      return dispatch_request<1>(server, args.subspan(sizeof(method)));
-    case 2:
-      return dispatch_request<2>(server, args.subspan(sizeof(method)));
-    case 3:
-      return dispatch_request<3>(server, args.subspan(sizeof(method)));
-    case 100:
-      return dispatch_request<100>(server, args.subspan(sizeof(method)));
-    case 101:
-      return dispatch_request<101>(server, args.subspan(sizeof(method)));
-    case 102:
-      return dispatch_request<102>(server, args.subspan(sizeof(method)));
-    case 200:
-      return dispatch_request<200>(server, args.subspan(sizeof(method)));
-    case 201:
-      return dispatch_request<201>(server, args.subspan(sizeof(method)));
-    case 202:
-      return dispatch_request<202>(server, args.subspan(sizeof(method)));
-    case 203:
-      return dispatch_request<203>(server, args.subspan(sizeof(method)));
-    default:
-      std::println("unknown method: {}", method);
-      return OwningSpan<const std::byte>();
-  }
-  } catch (const x23::XdrException &e) {
-    std::println("xdr exception in server: {}", e.what());
-    return OwningSpan<const std::byte>();
-  }
-}
-
 // SyncDBExecutorServer implementations
 
 bool
-SyncDBExecutorServer::try_reserve_delta(BlockState *block_state, TransactionID tx,
+SyncDBExecutorServer::try_reserve_delta(BlockState *block_state,
+                                        TransactionID tx,
                                         AddressAndKey const &addrkey,
                                         StorageDelta const &delta,
                                         StorageItemRPCFlagSet flags)
@@ -123,8 +63,8 @@ SyncDBExecutorServer::abort_transaction(BlockID block, TransactionID tx)
 }
 
 RPCError
-SyncDBExecutorServer::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                                  StorageDeltaBatch const& batch)
+SyncDBExecutorServer::try_push_new_subtransaction(
+    BlockID block, TransactionID tx, StorageDeltaBatch const &batch)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -158,7 +98,8 @@ SyncDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
 }
 
 ExpectedStorageItem
-SyncDBExecutorServer::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
+SyncDBExecutorServer::get_snapshot_item(BlockID block,
+                                        AddressAndKey const &addrkey)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -178,7 +119,8 @@ SyncDBExecutorServer::get_snapshot_item(BlockID block, AddressAndKey const &addr
 }
 
 RPCError
-SyncDBExecutorServer::commit_contract_create(BlockID block, Contract const& contract)
+SyncDBExecutorServer::commit_contract_create(BlockID block,
+                                             Contract const &contract)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -204,7 +146,8 @@ SyncDBExecutorServer::commit_contract_deploy(BlockID block,
 }
 
 ExpectedContract
-SyncDBExecutorServer::get_contract(BlockID block, SHA256Hash const &contract_hash)
+SyncDBExecutorServer::get_contract(BlockID block,
+                                   SHA256Hash const &contract_hash)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -245,9 +188,8 @@ SyncDBExecutorServer::get_deployment(BlockID block,
 }
 
 ExpectedRetrocausalQueueBlock
-SyncDBExecutorServer::get_next_retrocausal_queue_block(BlockID block,
-                                                       AddressAndKey const &addrkey,
-                                                       uint64_t search_start_number)
+SyncDBExecutorServer::get_next_retrocausal_queue_block(
+    BlockID block, AddressAndKey const &addrkey, uint64_t search_start_number)
 {
   auto block_data = block_manager_->get_block_data(block);
   if (!block_data) {
@@ -352,7 +294,8 @@ DbExecutorServer::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 }
 
 x23::Async<RPCError>
-DbExecutorServer::commit_contract_create(BlockID block, Contract const& contract)
+DbExecutorServer::commit_contract_create(BlockID block,
+                                         Contract const &contract)
 {
   co_return sync_server_.commit_contract_create(block, contract);
 }
@@ -383,14 +326,16 @@ DbExecutorServer::get_next_retrocausal_queue_block(BlockID block,
                                                    AddressAndKey const &addrkey,
                                                    uint64_t search_start_number)
 {
-  co_return sync_server_.get_next_retrocausal_queue_block(block, addrkey, search_start_number);
+  co_return sync_server_.get_next_retrocausal_queue_block(block, addrkey,
+                                                          search_start_number);
 }
 
 x23::Async<ExpectedQueueEntry>
 DbExecutorServer::get_concurrent_retrocausal_queue_entry(
     BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
-  co_return sync_server_.get_concurrent_retrocausal_queue_entry(block, addrkey, index);
+  co_return sync_server_.get_concurrent_retrocausal_queue_entry(block, addrkey,
+                                                                index);
 }
 
 } // namespace hogd

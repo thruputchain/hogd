@@ -202,8 +202,7 @@ SystemCallHandler::try_commit_transaction()
       }
       if (committed_contracts.insert(hash).second) {
         // contract that wasn't already created within the transaction
-        res =
-            db_proxy_.commit_contract_create(*contract_entry->second);
+        res = db_proxy_.commit_contract_create(*contract_entry->second);
         if (!res.has_value()) {
           co_return res.error();
         }

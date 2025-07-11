@@ -167,7 +167,8 @@ private:
   BlockID block_number_ = 0;
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
-  AdamRPCDbExecutorServer db_executor_server_ = AdamRPCDbExecutorServer(&block_manager_, 0);
+  AdamRPCDbExecutorServer db_executor_server_ =
+      AdamRPCDbExecutorServer(&block_manager_, 0);
 };
 
 } // namespace hogd

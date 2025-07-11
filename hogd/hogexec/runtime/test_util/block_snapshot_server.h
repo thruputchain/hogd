@@ -9,14 +9,13 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/db_interface/db_executor_server.h"
+#include "hogd/rpc/rpc.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "types.hh"
-#include "x23/async.h"
-#include "x23/event.h"
 #include "x23/mvar.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -28,47 +27,56 @@ namespace hogd {
 // by a full mock database.
 class BlockSnapshotServer {
 public:
-  using rpc_service = DatabaseToExecutorInterfaceV1;
+  BlockSnapshotServer(BlockID block_id, uint32_t port = 0) : block_id_(block_id)
+  {
+    auto res = RPCServer::create(
+        port,
+        [this](std::span<const std::byte> args) -> OwningSpan<const std::byte> {
+          return handle_db_executor_rpc_request(*this, args);
+        });
+    if (!res) {
+      throw std::runtime_error("Failed to create RPC server");
+    }
+    rpc_server_ = std::move(*res);
+    server_listener_ = std::jthread([this] {
+      if (ErrnoStatus<void> ret = rpc_server_->listen(); !ret) {
+        error("Database to executor server listen failed: {}", ret.error());
+      }
+    });
+  }
 
-  BlockSnapshotServer(BlockID block_id) : block_id_(block_id) {}
+  ~BlockSnapshotServer() { rpc_server_->stop(); }
 
-  static x23::Async<void> db_snapshot_read_null();
+  static void db_snapshot_read_null();
 
-  static x23::Async<RPCError> commit_transaction(BlockID block,
-                                                 TransactionID tx);
-  static x23::Async<RPCError> abort_transaction(BlockID block,
-                                                TransactionID tx);
+  static RPCError commit_transaction(BlockID block, TransactionID tx);
+  static RPCError abort_transaction(BlockID block, TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.
-  static x23::Async<RPCError>
-  try_push_new_subtransaction(BlockID block, TransactionID tx,
-                              StorageDeltaBatch batch);
+  static RPCError try_push_new_subtransaction(BlockID block, TransactionID tx,
+                                              StorageDeltaBatch batch);
 
   // Revert one or more subtransactions.
-  static x23::Async<RPCError>
-  pop_subtransactions(BlockID block, TransactionID tx, uint32_t popcount);
+  static RPCError pop_subtransactions(BlockID block, TransactionID tx,
+                                      uint32_t popcount);
 
-  static x23::Async<RPCError> commit_contract_create(BlockID block,
-                                                     Contract contract);
-  static x23::Async<RPCError>
-  commit_contract_deploy(BlockID block, ContractAddress const &contract_addr,
-                         SHA256Hash const &hash);
+  static RPCError commit_contract_create(BlockID block, Contract contract);
+  static RPCError commit_contract_deploy(BlockID block,
+                                         ContractAddress const &contract_addr,
+                                         SHA256Hash const &hash);
 
-  x23::Async<ExpectedStorageItem>
-  get_snapshot_item(BlockID block, AddressAndKey const &addrkey);
-  x23::Async<ExpectedContract> get_contract(BlockID block,
-                                            SHA256Hash const &contract_hash);
-  x23::Async<ExpectedDeployment>
-  get_deployment(BlockID block, ContractAddress const &contract_address);
+  ExpectedStorageItem get_snapshot_item(BlockID block,
+                                        AddressAndKey const &addrkey);
+  ExpectedContract get_contract(BlockID block, SHA256Hash const &contract_hash);
+  ExpectedDeployment get_deployment(BlockID block,
+                                    ContractAddress const &contract_address);
 
-  x23::Async<ExpectedRetrocausalQueueBlock>
+  ExpectedRetrocausalQueueBlock
   get_next_retrocausal_queue_block(BlockID block, AddressAndKey const &addrkey,
                                    uint64_t search_start_number);
 
-  x23::Async<ExpectedQueueEntry> get_concurrent_retrocausal_queue_entry(
+  ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
-
-  sockaddr_storage start_server(uint32_t port_number);
 
   // Only used within test setup
   void setup_create_contract(Contract const &contract);
@@ -79,11 +87,13 @@ public:
 
   void setup_ban_item(AddressAndKey const &addrkey);
 
-private:
-  BlockID block_id_;
+  uint32_t port() const { return rpc_server_->get_port(); }
 
-  x23::ThreadPool pool_ = x23::ThreadPool(2);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
+private:
+  std::shared_ptr<RPCServer> rpc_server_;
+  std::jthread server_listener_;
+
+  BlockID block_id_;
 
   x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
   x23::MVar<std::unordered_map<SHA256Hash, Contract>> contracts_;
@@ -96,7 +106,7 @@ private:
   x23::MVar<std::set<AddressAndKey>> blocked_items_;
 };
 
-static_assert(
-    is_DatabaseToExecutorInterfaceV1<BlockSnapshotServer *, x23::Async>);
+static_assert(is_DatabaseToExecutorInterfaceV1<BlockSnapshotServer *,
+                                               std::type_identity_t>);
 
 } // namespace hogd

@@ -20,8 +20,7 @@ DBContext::DBContext(uint32_t db_read_port)
   auto addr = executor_server_.start_server(db_read_port);
   uint32_t port = x23::get_port(addr);
   db_proxy_ =
-      std::make_unique<DatabaseProxy>(
-                                      LocalMockDB{.read_port_number_ = port});
+      std::make_unique<DatabaseProxy>(LocalMockDB{.read_port_number_ = port});
 
   advance_new_block();
 }

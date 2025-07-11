@@ -62,34 +62,31 @@ public:
 
   SystemStatus<std::optional<RetrocausalQueueBlock>>
   get_next_retrocausal_queue_block(BlockID block_id,
-                                  AddressAndKey const &addrkey,
-                                  uint64_t search_start_number);
+                                   AddressAndKey const &addrkey,
+                                   uint64_t search_start_number);
 
   SystemStatus<std::optional<QueueEntry>>
   get_concurrent_retrocausal_queue_entry(BlockID block_id,
-                                       AddressAndKey const &addrkey,
-                                       uint32_t index);
+                                         AddressAndKey const &addrkey,
+                                         uint32_t index);
 
   SystemStatus<bool>
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
-                             StorageDeltaBatch const &delta_batch);
+                              StorageDeltaBatch const &delta_batch);
 
-  SystemStatus<void> commit_transaction(BlockID block_id,
-                                      TransactionID tx_id);
+  SystemStatus<void> commit_transaction(BlockID block_id, TransactionID tx_id);
 
-  SystemStatus<void> abort_transaction(BlockID block_id,
-                                     TransactionID tx_id);
+  SystemStatus<void> abort_transaction(BlockID block_id, TransactionID tx_id);
 
-  SystemStatus<void>
-  commit_contract_create(BlockID block_id, Contract const &contract);
+  SystemStatus<void> commit_contract_create(BlockID block_id,
+                                            Contract const &contract);
 
-  SystemStatus<void>
-  commit_contract_deploy(BlockID block_id, ContractAddress const &addr,
-                        SHA256Hash const &hash);
+  SystemStatus<void> commit_contract_deploy(BlockID block_id,
+                                            ContractAddress const &addr,
+                                            SHA256Hash const &hash);
 
-  SystemStatus<void> pop_subtransactions(BlockID block_id,
-                                       TransactionID tx_id,
-                                       uint32_t count);
+  SystemStatus<void> pop_subtransactions(BlockID block_id, TransactionID tx_id,
+                                         uint32_t count);
 
 private:
   RPCClient client_;
@@ -159,15 +156,14 @@ public:
     return db_proxy_.abort_transaction(block_id_, tx_id_);
   }
 
-  SystemStatus<void>
-  commit_contract_create(Contract const &contract)
+  SystemStatus<void> commit_contract_create(Contract const &contract)
   {
     assert(!current_subtransaction_batch_builder_);
     return db_proxy_.commit_contract_create(block_id_, contract);
   }
 
-  SystemStatus<void>
-  commit_contract_deploy(ContractAddress const &addr, SHA256Hash const &hash)
+  SystemStatus<void> commit_contract_deploy(ContractAddress const &addr,
+                                            SHA256Hash const &hash)
   {
     assert(!current_subtransaction_batch_builder_);
     return db_proxy_.commit_contract_deploy(block_id_, addr, hash);

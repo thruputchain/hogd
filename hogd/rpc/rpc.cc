@@ -302,7 +302,6 @@ RPCClient::dial(std::string_view addr, int flows)
     ErrnoStatus<void> ret = sys_connect(*fd, saddr);
     if (!ret)
       return ret.error();
-    
 
     ret = sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, 1);
     if (!ret)
@@ -454,7 +453,8 @@ void
 RPCServer::stop()
 {
   std::scoped_lock guard(lock_);
-  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RDWR); !ret) {
+  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RDWR);
+      !ret) {
     error("could not shutdown listener socket: {}", ret.error());
   }
   // mac compat: call close() on the listener fd

@@ -16,6 +16,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
+#include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
@@ -31,9 +32,22 @@ namespace hogd {
 
 namespace {
 
+void
+lazy_init()
+{
+  static std::mutex init_mutex;
+  std::lock_guard lock(init_mutex);
+  static bool initialized = false;
+  if (!initialized) {
+    hogd_init(0, nullptr);
+    initialized = true;
+  }
+}
+
 DBContext *
 make_new_db() noexcept
 {
+  lazy_init();
   try {
     return new DBContext();
   } catch (std::exception const &e) {
@@ -60,6 +74,7 @@ advance_new_block(void *db) noexcept
 void *
 open_runtime_context() noexcept
 {
+  lazy_init();
   std::shared_ptr<hogd::MockRuntimeContext> *out;
   try {
     out = new std::shared_ptr<hogd::MockRuntimeContext>();
