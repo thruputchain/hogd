@@ -52,7 +52,8 @@ struct BenchmarkState {
   std::unique_ptr<DatabaseProxy> db_proxy_;
   BlockID block_number_ = 0;
 
-  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
+  RPCDbExecutorServer db_executor_server_ =
+      RPCDbExecutorServer(&block_manager_, 0);
 
   std::unique_ptr<ExecutorContext> context_;
 
@@ -62,11 +63,8 @@ struct BenchmarkState {
 
   void initialize()
   {
-    constexpr static uint32_t kPortNumber = 10000;
-    db_executor_server_.start_server(kPortNumber);
-
     db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = kPortNumber});
+        LocalMockDB{.read_port_number_ = db_executor_server_.port()});
 
     [[maybe_unused]] auto res = block_manager_.add_child(
         0, 1, BlockExecutionMode::kBlockExecutionModeProposal);

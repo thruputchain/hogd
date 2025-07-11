@@ -282,8 +282,8 @@ run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 
   BlockManager block_manager = BlockManager(0, &in_memory_db);
   std::println("Starting executor server on port {}", exec_port);
-  AdamRPCDbExecutorServer db_executor_server =
-      AdamRPCDbExecutorServer(&block_manager, exec_port);
+  RPCDbExecutorServer db_executor_server =
+      RPCDbExecutorServer(&block_manager, exec_port);
 
   DbCoordServer db_coord_server = DbCoordServer(&block_manager);
   std::println("Starting coord server on port {}", coord_port);

@@ -3,7 +3,6 @@
 #include <cassert>
 #include <condition_variable>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <format>
 #include <functional>
@@ -306,6 +305,7 @@ rpc_client_call(RPCClient &client, auto &&...args)
 // Template has both the method number and the name, which are checked against
 // each other at compile time; this makes it easier to catch errors as rpc
 // definitions evolve.
+// The input arg span must already have the RPCCallHeader stripped off.
 template<typename Interface, uint32_t Method, StringLiteral Name>
 requires is_rpc_method<Interface, Method, Name>
 OwningSpan<const std::byte>
@@ -314,7 +314,7 @@ rpc_server_dispatch_method(auto &server, std::span<const std::byte> args)
   using meta = Interface::template proc_meta<Method>;
   typename meta::arg_type a;
   try {
-    x23::deserialize(&a, args.subspan(sizeof(RPCCallHeader)));
+    x23::deserialize(&a, args);
   } catch (const x23::XdrException &e) {
     error("x23 deserialization error: {}", e.what());
     return vec_as_bytes(response_header_to_buf(
@@ -322,7 +322,11 @@ rpc_server_dispatch_method(auto &server, std::span<const std::byte> args)
   }
 
   auto res = meta::dispatch(server, a);
-  return vec_as_bytes(x23::serialize(res));
+
+  auto buf_out =
+      response_header_to_buf(RPCResponseHeader{RPCReponseError::kRpcOk});
+  x23::serialize_to(&buf_out, res);
+  return vec_as_bytes(buf_out);
 }
 
 } // namespace hogd
