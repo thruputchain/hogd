@@ -467,10 +467,8 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
         generate_hashes_from(existing_key, /*locked_through=*/existing_key);
         return true;
       }
-      else {
-        unlock_both(*branch, *existing_key);
-        return false;
-      }
+      unlock_both(*branch, *existing_key);
+      return false;
     }
     // Try to acquire the writer lock on the branch.
     if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {

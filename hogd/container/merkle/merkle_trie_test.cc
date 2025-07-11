@@ -784,7 +784,7 @@ TEST(MerkleTrie, InsertOrUpdate)
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key_c, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(value_c));
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 
   // [key_a] is in a branch node.
   std::string new_value_a = "hello four";
@@ -794,11 +794,11 @@ TEST(MerkleTrie, InsertOrUpdate)
   EXPECT_FALSE(trie.insert(key_a, new_value_a_span));
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(value_a));
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   trie.insert_or_update(key_a, new_value_a_span);
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(new_value_a));
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 
   // [key_b] is in a leaf node.
   std::string new_value_b = "hello five";
@@ -808,11 +808,11 @@ TEST(MerkleTrie, InsertOrUpdate)
   EXPECT_FALSE(trie.insert(key_b, new_value_b_span));
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(value_b));
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
   trie.insert_or_update(key_b, new_value_b_span);
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(new_value_b));
-  trie.find_end(cookie);
+  hogd::MerkleTrie::find_end(cookie);
 }
 
 namespace {
