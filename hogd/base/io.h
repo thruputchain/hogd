@@ -47,16 +47,17 @@ public:
 
   File() = default;
   explicit File(int fd) : fd_(fd) {}
-  ~File();
+  ~File() { std::ignore = close(); }
 
   // Enable move; disable copy.
-  File(File &&f) noexcept : fd_{std::exchange(f.fd_, kInvalidFD)} {}
+  File(File &&f) noexcept
+  {
+    std::ignore = close();
+    fd_ = std::exchange(f.fd_, kInvalidFD);
+  }
   File &operator=(File &&f) noexcept
   {
-    if (fd_ != kInvalidFD) {
-      if (ErrnoStatus<void> ret = close(); !ret)
-        error("could not close fd {}: {}", fd_, ret.error());
-    }
+    std::ignore = close();
     fd_ = std::exchange(f.fd_, kInvalidFD);
     return *this;
   }
