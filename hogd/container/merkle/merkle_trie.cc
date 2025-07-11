@@ -309,7 +309,7 @@ MerkleTrie::get_proof_by_node(const Key &k)
 bool
 MerkleTrie::prove(const SHA256Hash &root_hash,
                   const std::vector<std::byte> &encodings, const Key &k,
-                  const std::span<std::byte> &value)
+                  const std::span<const std::byte> &value)
 {
   Node::Raw node;
   memset(&node.hash, 0, sizeof(node.hash));
@@ -436,7 +436,7 @@ MerkleTrie::find_node(const Key &k)
 }
 
 bool
-MerkleTrie::insert(const Key &k, std::span<std::byte> &&obj)
+MerkleTrie::insert(const Key &k, std::span<const std::byte> &&obj)
 {
   size_t idx;
   Node *existing_key;
@@ -558,7 +558,7 @@ MerkleTrie::insert(const Key &k, std::span<std::byte> &&obj)
 // Second Extension Node: Path is [0x6]. The child is c.
 Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
-                                    std::span<std::byte> &&obj)
+                                    std::span<const std::byte> &&obj)
 {
   CHECK(extension->rw_lock.is_writer_locked_relaxed());
   CHECK(extension->child[0]->rw_lock.is_writer_locked_relaxed());
@@ -748,7 +748,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 // child of this extension node.
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
-                               std::span<std::byte> &&obj)
+                               std::span<const std::byte> &&obj)
 {
   CHECK(leaf->rw_lock.is_writer_locked_relaxed());
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
