@@ -97,9 +97,9 @@ BlockSnapshotServer::commit_contract_deploy(BlockID /*unused*/,
 }
 
 RPCError
-BlockSnapshotServer::try_push_new_subtransaction(BlockID /*unused*/,
-                                                 TransactionID /*unused*/,
-                                                 StorageDeltaBatch const& /*unused*/)
+BlockSnapshotServer::try_push_new_subtransaction(
+    BlockID /*unused*/, TransactionID /*unused*/,
+    StorageDeltaBatch const & /*unused*/)
 {
   return RPCError::kRPCUnimplemented;
 }
