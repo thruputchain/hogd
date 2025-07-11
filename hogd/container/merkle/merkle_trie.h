@@ -119,15 +119,15 @@ public:
   // [find_begin].
   static void find_end(void *cookie);
 
-  // Inserts a KV pair with key [k] and value [obj] into the trie. You must pass
-  // [obj] to this method with [std::move()].
-  bool insert(const Key &k, std::span<const std::byte> &&obj);
-  // Inserts a KV pair with key [k] and value [obj] into the trie. This method
-  // copies [obj] rather than move it as the method above does.
-  bool insert(const Key &k, const std::span<const std::byte> &obj)
-  {
-    return insert(k, std::span<const std::byte>(obj));
-  }
+  // Inserts a KV pair with key [k] and value [obj] into the trie. Fails if the
+  // key already exists in the trie. Returns true on success and false on
+  // failure.
+  bool insert(const Key &k, const std::span<const std::byte> &obj);
+
+  // Inserts a KV pair with key [k] and value [obj] into the trie. If the key
+  // already exists, the value in the trie is updated. Returns true on success
+  // and false on failure.
+  bool insert_or_update(const Key &k, const std::span<const std::byte> &obj);
 
   // Removes the KV pair for key [k] from the trie.
   bool remove(const Key &k);
@@ -196,17 +196,26 @@ private:
   // Finds the node for key [k]. Returns nullptr if [k] is not in the trie.
   Node *find_node(const Key &k);
 
+  // Inserts key [k] with value [obj]. If [update] is true, the value is updated
+  // in the trie if the key already exists. Otherwise, if [update] is false, if
+  // the key already exists in the trie then the insert fails.
+  //
+  // Returns true on success and false on failure.
+  bool insert_helper(const Key &k, const std::span<const std::byte> &obj,
+                     bool update);
+
   // Helper function for [insert()]. When we add a KV pair and there is an
   // extension node below the lowest branch for that pair, we need to handle the
   // extension node and its subtree.
   Node *insert_handle_extension(Node *current_extension, const Key &k,
-                                size_t idx, std::span<const std::byte> &&obj);
+                                size_t idx,
+                                const std::span<const std::byte> &obj);
 
   // Helper function for [insert()]. When we add a KV pair and there is a leaf
   // node below the lowest branch for that pair, we need to handle the leaf
   // node.
   Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
-                           std::span<const std::byte> &&obj);
+                           const std::span<const std::byte> &obj);
 
   // Returns true if we will need to remove [branch] after removing a KV pair
   // that is "under" it.
@@ -390,7 +399,7 @@ public:
   // [find_begin].
   static void find_end(void *cookie) { MerkleTrie::find_end(cookie); }
 
-  bool insert(const MerkleTrie::Key &k, std::span<const std::byte> &&obj)
+  bool insert(const MerkleTrie::Key &k, const std::span<const std::byte> &obj)
   {
     if (k.empty()) {
       // We do not support empty keys.
@@ -398,12 +407,19 @@ public:
     }
 
     const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index].insert(k_no_prefix, std::move(obj));
+    return tries_[index].insert(k_no_prefix, obj);
   }
 
-  bool insert(const MerkleTrie::Key &k, const std::span<const std::byte> &obj)
+  bool insert_or_update(const MerkleTrie::Key &k,
+                        const std::span<const std::byte> &obj)
   {
-    return insert(k, std::span<const std::byte>(obj));
+    if (k.empty()) {
+      // We do not support empty keys.
+      return false;
+    }
+
+    const auto &[index, k_no_prefix] = get_prefix(k);
+    return tries_[index].insert_or_update(k_no_prefix, obj);
   }
 
   bool remove(const MerkleTrie::Key &k)
