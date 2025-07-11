@@ -1,12 +1,22 @@
 #pragma once
 
+#include <cstddef>
+#include <memory>
 #include <set>
+#include <span>
+#include <stdexcept>
 #include <sys/socket.h>
+#include <thread>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/log.h"
+#include "hogd/base/span.h"
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/db_interface/db_executor_server.h"
@@ -23,8 +33,8 @@ namespace hogd {
 //
 // Initialize manually with database snapshot state.
 //
-// Eventually, once the DB is merged in, this may get replaced
-// by a full mock database.
+// Not a full mock database; extra test logic (as in the lazy loading tests)
+// is implemented here.
 class BlockSnapshotServer {
 public:
   BlockSnapshotServer(BlockID block_id, uint32_t port = 0) : block_id_(block_id)

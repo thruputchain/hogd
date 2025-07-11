@@ -1,11 +1,9 @@
 #include "hogd/db_interface/db_executor_server.h"
 
 #include <cstddef>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sys/socket.h>
-#include <utility>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
@@ -14,11 +12,6 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/async.h"
-#include "x23/cleanup.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -234,104 +227,6 @@ SyncDBExecutorServer::get_concurrent_retrocausal_queue_entry(
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   out.queue_entry() = *entry.get();
   return out;
-}
-
-sockaddr_storage
-DbExecutorServer::start_server(uint32_t port_number)
-{
-  auto lfd = x23::tcplisten(port_number);
-  if (!lfd) {
-    perror("listen");
-    exit(EXIT_FAILURE);
-  }
-  auto out = x23::local_addr(lfd);
-
-  [](x23::CoroPoll &cp, DbExecutorServer *server,
-     x23::UniqueFd lfd) -> x23::Detached {
-    co_await cp.pool_.bg();
-    while (auto c = co_await cp.accept(lfd)) {
-      x23::rpc_stream_logged(cp, *c).server(server);
-    }
-  }(cp_, this, std::move(lfd));
-
-  return out;
-}
-
-x23::Async<RPCError>
-DbExecutorServer::commit_transaction(BlockID block, TransactionID tx)
-{
-  co_return sync_server_.commit_transaction(block, tx);
-}
-
-x23::Async<RPCError>
-DbExecutorServer::abort_transaction(BlockID block, TransactionID tx)
-{
-  co_return sync_server_.abort_transaction(block, tx);
-}
-
-x23::Async<RPCError>
-DbExecutorServer::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                              StorageDeltaBatch batch)
-{
-  co_return sync_server_.try_push_new_subtransaction(block, tx, batch);
-}
-
-x23::Async<RPCError>
-DbExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
-                                      uint32_t popcount)
-{
-  co_return sync_server_.pop_subtransactions(block, tx, popcount);
-}
-
-x23::Async<ExpectedStorageItem>
-DbExecutorServer::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
-{
-  co_return sync_server_.get_snapshot_item(block, addrkey);
-}
-
-x23::Async<RPCError>
-DbExecutorServer::commit_contract_create(BlockID block,
-                                         Contract const &contract)
-{
-  co_return sync_server_.commit_contract_create(block, contract);
-}
-
-x23::Async<RPCError>
-DbExecutorServer::commit_contract_deploy(BlockID block,
-                                         ContractAddress const &addr,
-                                         SHA256Hash const &hash)
-{
-  co_return sync_server_.commit_contract_deploy(block, addr, hash);
-}
-
-x23::Async<ExpectedContract>
-DbExecutorServer::get_contract(BlockID block, SHA256Hash const &contract_hash)
-{
-  co_return sync_server_.get_contract(block, contract_hash);
-}
-
-x23::Async<ExpectedDeployment>
-DbExecutorServer::get_deployment(BlockID block,
-                                 ContractAddress const &contract_address)
-{
-  co_return sync_server_.get_deployment(block, contract_address);
-}
-
-x23::Async<ExpectedRetrocausalQueueBlock>
-DbExecutorServer::get_next_retrocausal_queue_block(BlockID block,
-                                                   AddressAndKey const &addrkey,
-                                                   uint64_t search_start_number)
-{
-  co_return sync_server_.get_next_retrocausal_queue_block(block, addrkey,
-                                                          search_start_number);
-}
-
-x23::Async<ExpectedQueueEntry>
-DbExecutorServer::get_concurrent_retrocausal_queue_entry(
-    BlockID block, AddressAndKey const &addrkey, uint32_t index)
-{
-  co_return sync_server_.get_concurrent_retrocausal_queue_entry(block, addrkey,
-                                                                index);
 }
 
 } // namespace hogd

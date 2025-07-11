@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -21,9 +22,12 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/status.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -190,6 +194,33 @@ enum RPCReponseError : uint32_t {
   // TODO(geoff): other errors
 };
 
+} // namespace hogd
+
+namespace std {
+
+template<> struct formatter<hogd::RPCReponseError> : formatter<string_view> {
+  auto format(hogd::RPCReponseError error, format_context &ctx) const
+  {
+    string_view name = "Unknown RPCResponseError";
+    switch (error) {
+    case hogd::RPCReponseError::kRpcOk:
+      name = "kRpcOk";
+      break;
+    case hogd::RPCReponseError::kRpcInvalidArgument:
+      name = "kRpcInvalidArgument";
+      break;
+    case hogd::RPCReponseError::kRpcUnknownMethod:
+      name = "kRpcUnknownMethod";
+      break;
+    }
+    return formatter<string_view>::format(name, ctx);
+  }
+};
+
+} // namespace std
+
+namespace hogd {
+
 struct RPCResponseHeader {
   RPCReponseError error;
 };
@@ -231,27 +262,67 @@ concept is_rpc_method =
     detail::is_valid_rpc_method<Interface, Method>() &&
     Interface::template proc_meta<Method>::proc_name == Name.get();
 
-} // namespace hogd
+template<typename Interface, uint32_t Method, StringLiteral Name>
+requires is_rpc_method<Interface, Method, Name>
+auto
+rpc_client_call(RPCClient &client, auto &&...args)
+{
+  using return_type = Interface::template proc_meta<Method>::return_type;
 
-namespace std {
+  try {
+    x23::Buf buf(sizeof(RPCCallHeader));
+    RPCCallHeader header{.method = Method};
+    std::memcpy(buf.data(), &header, sizeof(RPCCallHeader));
 
-template<> struct formatter<hogd::RPCReponseError> : formatter<string_view> {
-  auto format(hogd::RPCReponseError error, format_context &ctx) const
-  {
-    string_view name = "Unknown RPCResponseError";
-    switch (error) {
-    case hogd::RPCReponseError::kRpcOk:
-      name = "kRpcOk";
-      break;
-    case hogd::RPCReponseError::kRpcInvalidArgument:
-      name = "kRpcInvalidArgument";
-      break;
-    case hogd::RPCReponseError::kRpcUnknownMethod:
-      name = "kRpcUnknownMethod";
-      break;
+    (x23::serialize_to(&buf, std::forward<decltype(args)>(args)), ...);
+
+    auto future = client.call(std::as_bytes(std::span(buf)));
+    future.wait();
+    assert(future.valid());
+    auto res = future.get();
+    if (res.size() < sizeof(RPCResponseHeader)) {
+      error("RPC error: response too small: size = {}", res.size());
+      return SystemStatus<return_type>{
+          SystemError{SystemErrorCode::kUnrecoverable}};
     }
-    return formatter<string_view>::format(name, ctx);
-  }
-};
+    RPCResponseHeader response_header;
+    std::memcpy(&response_header, res.data(), sizeof(RPCResponseHeader));
+    if (response_header.error != RPCReponseError::kRpcOk) {
+      error("RPC error: {}", response_header.error);
+      return SystemStatus<return_type>{
+          SystemError{SystemErrorCode::kAbortTransaction}};
+    }
 
-} // namespace std
+    return_type ret;
+    x23::deserialize(&ret, res.subspan(sizeof(RPCResponseHeader)));
+    return SystemStatus<return_type>{std::move(ret)};
+  } catch (const x23::XdrException &e) {
+    error("x23 serialization error: {}", e.what());
+    return SystemStatus<return_type>{
+        SystemError{SystemErrorCode::kUnrecoverable}};
+  }
+}
+
+// Template has both the method number and the name, which are checked against
+// each other at compile time; this makes it easier to catch errors as rpc
+// definitions evolve.
+template<typename Interface, uint32_t Method, StringLiteral Name>
+requires is_rpc_method<Interface, Method, Name>
+OwningSpan<const std::byte>
+rpc_server_dispatch_method(auto &server, std::span<const std::byte> args)
+{
+  using meta = Interface::template proc_meta<Method>;
+  typename meta::arg_type a;
+  try {
+    x23::deserialize(&a, args.subspan(sizeof(RPCCallHeader)));
+  } catch (const x23::XdrException &e) {
+    error("x23 deserialization error: {}", e.what());
+    return vec_as_bytes(response_header_to_buf(
+        RPCResponseHeader{RPCReponseError::kRpcInvalidArgument}));
+  }
+
+  auto res = meta::dispatch(server, a);
+  return vec_as_bytes(x23::serialize(res));
+}
+
+} // namespace hogd
