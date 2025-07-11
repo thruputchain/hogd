@@ -517,7 +517,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
             branch->rw_lock.unlock();
             continue;
           }
-          to_hash = insert_handle_extension(next, k, idx, std::move(obj));
+          to_hash = insert_handle_extension(next, k, idx, obj);
         }
         else {
           CHECK_EQ(next->type, Node::Type::kLeaf);
@@ -528,7 +528,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
             branch->rw_lock.unlock();
             continue;
           }
-          to_hash = insert_handle_leaf(next, k, idx, std::move(obj));
+          to_hash = insert_handle_leaf(next, k, idx, obj);
         }
       }
       else {
@@ -562,11 +562,12 @@ MerkleTrie::insert(const Key &k, const std::span<const std::byte> &obj)
   return insert_helper(k, obj, /*update=*/false);
 }
 
-void
+bool
 MerkleTrie::insert_or_update(const Key &k,
                              const std::span<const std::byte> &obj)
 {
   CHECK(insert_helper(k, obj, /*update=*/true));
+  return true;
 }
 
 // We are inserting [k] into the trie, and it conflicts with an extension node

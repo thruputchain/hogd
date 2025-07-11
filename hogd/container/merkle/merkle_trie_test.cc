@@ -779,7 +779,7 @@ TEST(MerkleTrie, InsertOrUpdate)
   std::span<std::byte> value_c_span{reinterpret_cast<std::byte *>(
                                         value_c.data()),
                                     value_c.size()};
-  trie.insert_or_update(key_c, value_c_span);
+  EXPECT_TRUE(trie.insert_or_update(key_c, value_c_span));
   SHA256Hash *value_hash;
   void *cookie;
   EXPECT_TRUE(trie.find_begin(key_c, value_hash, cookie));
@@ -795,7 +795,7 @@ TEST(MerkleTrie, InsertOrUpdate)
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  trie.insert_or_update(key_a, new_value_a_span);
+  EXPECT_TRUE(trie.insert_or_update(key_a, new_value_a_span));
   EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(new_value_a));
   hogd::MerkleTrie::find_end(cookie);
@@ -809,7 +809,7 @@ TEST(MerkleTrie, InsertOrUpdate)
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
-  trie.insert_or_update(key_b, new_value_b_span);
+  EXPECT_TRUE(trie.insert_or_update(key_b, new_value_b_span));
   EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
   EXPECT_EQ(*value_hash, sha256(new_value_b));
   hogd::MerkleTrie::find_end(cookie);

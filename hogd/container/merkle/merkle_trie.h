@@ -125,8 +125,9 @@ public:
   bool insert(const Key &k, const std::span<const std::byte> &obj);
 
   // Inserts a KV pair with key [k] and value [obj] into the trie. If the key
-  // already exists, the value in the trie is updated.
-  void insert_or_update(const Key &k, const std::span<const std::byte> &obj);
+  // already exists, the value in the trie is updated. Returns true on success
+  // and false on failure.
+  bool insert_or_update(const Key &k, const std::span<const std::byte> &obj);
 
   // Removes the KV pair for key [k] from the trie.
   bool remove(const Key &k);
@@ -406,7 +407,19 @@ public:
     }
 
     const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index].insert(k_no_prefix, std::move(obj));
+    return tries_[index].insert(k_no_prefix, obj);
+  }
+
+  bool insert_or_update(const MerkleTrie::Key &k,
+                        const std::span<const std::byte> &obj)
+  {
+    if (k.empty()) {
+      // We do not support empty keys.
+      return false;
+    }
+
+    const auto &[index, k_no_prefix] = get_prefix(k);
+    return tries_[index].insert_or_update(k_no_prefix, obj);
   }
 
   bool remove(const MerkleTrie::Key &k)
