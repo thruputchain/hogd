@@ -22,14 +22,8 @@ update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key,
                        const std::span<const std::byte> &value)
 {
   HexArray k(key.get_address().as_bytes());
-  if (!trie.insert(k, value)) {
-    // TODO(jhumphri): Update the value if the key already exists.
-    // void *cookie;
-    // std::string *v = trie.find_begin(k, cookie);
-    // if (!v) {
-    //   return HogDBError(HogDBCode::kInternal);
-    // }
-    // trie.find_end(cookie);
+  if (!trie.insert_or_update(k, value)) {
+    return HogDBError(HogDBCode::kInternal);
   }
   return {};
 }
