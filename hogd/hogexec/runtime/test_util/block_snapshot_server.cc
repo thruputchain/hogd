@@ -2,7 +2,6 @@
 
 #include <cstdlib>
 #include <stdexcept>
-#include <sys/socket.h>
 #include <utility>
 #include <vector>
 
@@ -100,7 +99,7 @@ BlockSnapshotServer::commit_contract_deploy(BlockID /*unused*/,
 RPCError
 BlockSnapshotServer::try_push_new_subtransaction(BlockID /*unused*/,
                                                  TransactionID /*unused*/,
-                                                 StorageDeltaBatch /*unused*/)
+                                                 StorageDeltaBatch const& /*unused*/)
 {
   return RPCError::kRPCUnimplemented;
 }
