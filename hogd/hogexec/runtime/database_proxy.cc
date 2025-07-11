@@ -18,6 +18,7 @@
 #include "coord.hh"
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -126,9 +127,10 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
+        assert(sharded_db.shards_.size() > 0);
         auto res = RPCClient::dial(sharded_db.shards_[0].address);
         if (!res) {
-          throw std::runtime_error("Failed to connect to sharded database");
+          throw std::runtime_error("Failed to connect to database shard");
         }
         return std::move(*res);
       }
@@ -138,6 +140,7 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
 
 namespace {
 template<uint32_t Method, StringLiteral Name>
+requires is_rpc_method<DatabaseToExecutorInterfaceV1, Method, Name>
 auto
 client_call(RPCClient &client, auto &&...args)
 {
@@ -149,28 +152,34 @@ client_call(RPCClient &client, auto &&...args)
       DatabaseToExecutorInterfaceV1::proc_meta<Method>::return_type;
 
   try {
-    x23::Buf buf(4, 0);
-    uint32_t method = Method;
-    std::memcpy(buf.data(), &method, sizeof(method));
+    x23::Buf buf(sizeof(RPCCallHeader));
+    RPCCallHeader header{.method = Method};
+    std::memcpy(buf.data(), &header, sizeof(RPCCallHeader));
+
     (x23::serialize_to(&buf, std::forward<decltype(args)>(args)), ...);
 
     auto future = client.call(std::as_bytes(std::span(buf)));
     future.wait();
     assert(future.valid());
     auto res = future.get();
-    if (!res) {
+    if (res.size() < sizeof(RPCResponseHeader)) {
+      error("RPC error: response too small: {}", res.size());
+      return SystemStatus<return_type>{
+          SystemError{SystemErrorCode::kUnrecoverable}};
+    }
+    RPCResponseHeader response_header;
+    std::memcpy(&response_header, res.data(), sizeof(RPCResponseHeader));
+    if (response_header.error != RPCReponseError::kRpcOk) {
+      error("RPC error: {}", response_header.error);
       return SystemStatus<return_type>{
           SystemError{SystemErrorCode::kAbortTransaction}};
     }
-    return_type ret;
-    // TODO(geoff): better casting
-    x23::deserialize(&ret,
-                     std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
-                                                  res.data()),
-                                              res.size()));
 
+    return_type ret;
+    x23::deserialize(&ret, res.subspan(sizeof(RPCResponseHeader)));
     return SystemStatus<return_type>{std::move(ret)};
   } catch (const x23::XdrException &e) {
+    error("x23 serialization error: {}", e.what());
     return SystemStatus<return_type>{
         SystemError{SystemErrorCode::kUnrecoverable}};
   }

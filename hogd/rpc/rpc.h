@@ -2,6 +2,9 @@
 
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <format>
 #include <functional>
 #include <future>
 #include <memory>
@@ -11,14 +14,17 @@
 #include <stop_token>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/cpputil.h"
 #include "hogd/base/io.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -154,4 +160,98 @@ private:
                                 const RPCHandler &handler);
 };
 
+// The leading bytes of an RPC message within hogd.
+struct RPCCallHeader {
+  uint32_t method;
+  // TODO(geoff): Other fields; perhaps a service id or hogd version number
+
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  constexpr bool validate() const
+  {
+    // TODO(geoff): validation of hogd version number goes here,
+    // along with any other validation logic
+    return true;
+  }
+};
+
+enum RPCReponseError : uint32_t {
+  // The RPC call was successfully passed to the server.
+  // This does not mean that the RPC-specific internal logic
+  // succeeds.  Rather, this merely means that the RPC call
+  // is successfully passed to the server and that arguments
+  // are properly parsed for the specified method.
+  kRpcOk = 0,
+  // The RPC byte buffer was not able to be parsed into the
+  // arguments for the specified method.
+  kRpcInvalidArgument = 1,
+  // Unknown method
+  kRpcUnknownMethod = 2,
+
+  // TODO(geoff): other errors
+};
+
+struct RPCResponseHeader {
+  RPCReponseError error;
+};
+
+inline x23::Buf
+response_header_to_buf(RPCResponseHeader header)
+{
+  x23::Buf bytes(sizeof(RPCResponseHeader));
+  std::memcpy(bytes.data(), &header, sizeof(RPCResponseHeader));
+  return bytes;
+}
+
+static_assert(std::is_trivially_copyable_v<RPCCallHeader>,
+              "RPCCallHeader must be trivially copyable");
+static_assert(std::is_trivially_copyable_v<RPCResponseHeader>,
+              "RPCResponseHeader must be trivially copyable");
+
+namespace detail {
+
+template<typename Interface, uint32_t Method, size_t Index = 0>
+constexpr bool
+is_valid_rpc_method()
+{
+  if constexpr (Index >= Interface::valid_procnos.size()) {
+    return false;
+  }
+  else if constexpr (Interface::valid_procnos[Index] == Method) {
+    return true;
+  }
+  else {
+    return is_valid_rpc_method<Interface, Method, Index + 1>();
+  }
+}
+
+} // namespace detail
+
+template<typename Interface, uint32_t Method, StringLiteral Name>
+concept is_rpc_method =
+    detail::is_valid_rpc_method<Interface, Method>() &&
+    Interface::template proc_meta<Method>::proc_name == Name.get();
+
 } // namespace hogd
+
+namespace std {
+
+template<> struct formatter<hogd::RPCReponseError> : formatter<string_view> {
+  auto format(hogd::RPCReponseError error, format_context &ctx) const
+  {
+    string_view name = "Unknown RPCResponseError";
+    switch (error) {
+    case hogd::RPCReponseError::kRpcOk:
+      name = "kRpcOk";
+      break;
+    case hogd::RPCReponseError::kRpcInvalidArgument:
+      name = "kRpcInvalidArgument";
+      break;
+    case hogd::RPCReponseError::kRpcUnknownMethod:
+      name = "kRpcUnknownMethod";
+      break;
+    }
+    return formatter<string_view>::format(name, ctx);
+  }
+};
+
+} // namespace std

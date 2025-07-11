@@ -69,52 +69,54 @@ requires is_DatabaseToExecutorInterfaceV1<Server *, std::type_identity_t>
 OwningSpan<const std::byte>
 handle_db_executor_rpc_request(Server &server, std::span<const std::byte> args)
 {
-  uint32_t method;
-  if (args.size() < sizeof(method)) {
-    return OwningSpan<const std::byte>();
+  RPCCallHeader header;
+  if (args.size() < sizeof(header)) {
+    return vec_as_bytes(response_header_to_buf(
+        RPCResponseHeader{RPCReponseError::kRpcInvalidArgument}));
   }
-  std::memcpy(&method, args.data(), sizeof(method));
+  std::memcpy(&header, args.data(), sizeof(header));
+  if (!header.validate()) {
+    return vec_as_bytes(response_header_to_buf(
+        RPCResponseHeader{RPCReponseError::kRpcInvalidArgument}));
+  }
+
+  auto arg_span = args.subspan(sizeof(header));
 
   // TODO(geoff): figure out a convenient way to automate this
   // static constexpr std::array<std::uint32_t, 11> valid_procnos{
   //    0, 1, 2, 3, 100, 101, 102, 200, 201, 202, 203
   //};
   try {
-    switch (method) {
+    switch (header.method) {
     case 0:
-      return dispatch_request<Server, 0>(server, args.subspan(sizeof(method)));
+      return dispatch_request<Server, 0>(server, arg_span);
     case 1:
-      return dispatch_request<Server, 1>(server, args.subspan(sizeof(method)));
+      return dispatch_request<Server, 1>(server, arg_span);
     case 2:
-      return dispatch_request<Server, 2>(server, args.subspan(sizeof(method)));
+      return dispatch_request<Server, 2>(server, arg_span);
     case 3:
-      return dispatch_request<Server, 3>(server, args.subspan(sizeof(method)));
+      return dispatch_request<Server, 3>(server, arg_span);
     case 100:
-      return dispatch_request<Server, 100>(server,
-                                           args.subspan(sizeof(method)));
+      return dispatch_request<Server, 100>(server, arg_span);
     case 101:
-      return dispatch_request<Server, 101>(server,
-                                           args.subspan(sizeof(method)));
+      return dispatch_request<Server, 101>(server, arg_span);
     case 102:
-      return dispatch_request<Server, 102>(server,
-                                           args.subspan(sizeof(method)));
+      return dispatch_request<Server, 102>(server, arg_span);
     case 200:
-      return dispatch_request<Server, 200>(server,
-                                           args.subspan(sizeof(method)));
+      return dispatch_request<Server, 200>(server, arg_span);
     case 201:
-      return dispatch_request<Server, 201>(server,
-                                           args.subspan(sizeof(method)));
+      return dispatch_request<Server, 201>(server, arg_span);
     case 202:
-      return dispatch_request<Server, 202>(server,
-                                           args.subspan(sizeof(method)));
+      return dispatch_request<Server, 202>(server, arg_span);
     case 203:
-      return dispatch_request<Server, 203>(server,
-                                           args.subspan(sizeof(method)));
+      return dispatch_request<Server, 203>(server, arg_span);
     default:
-      return OwningSpan<const std::byte>();
+      return vec_as_bytes(response_header_to_buf(
+          RPCResponseHeader{RPCReponseError::kRpcUnknownMethod}));
     }
   } catch (const x23::XdrException &e) {
-    return OwningSpan<const std::byte>();
+    return vec_as_bytes(response_header_to_buf(
+        RPCResponseHeader{RPCReponseError::kRpcInvalidArgument}));
   }
 }
 
