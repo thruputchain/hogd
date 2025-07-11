@@ -50,6 +50,8 @@ NNInt128::commit(HogDatabase &db, MerkleTriePrefix &trie,
     std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&v),
                                     sizeof(v));
     ret = update_kv_pair_in_trie(trie, key, value_span);
+    // TODO(jhumphri): If [ret] is an error, do we need to remove the item from
+    // the db?
   }
   return ret;
 }
@@ -139,6 +141,8 @@ Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
   HogDBStatus<void> ret = write_bytes(db, key, v);
   if (ret) {
     ret = update_kv_pair_in_trie(trie, key, v);
+    // TODO(jhumphri): If [ret] is an error, do we need to remove the item from
+    // the db?
   }
   return ret;
 }
@@ -149,7 +153,7 @@ Deletion::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key)
   HogDBStatus<void> ret = remove_item(db, key);
   if (ret) {
     ret = remove_kv_pair_from_trie(trie, key);
-    // TODO(jhumphri): If [ret] is an error, do we need to remove the item from
+    // TODO(jhumphri): If [ret] is an error, do we need to add the item back to
     // the db?
   }
   return ret;
