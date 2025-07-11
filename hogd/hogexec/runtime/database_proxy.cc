@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstring>
 #include <exception>
-#include <format>
 #include <memory>
 #include <optional>
 #include <span>

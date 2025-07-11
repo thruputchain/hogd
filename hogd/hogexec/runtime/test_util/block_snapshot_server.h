@@ -60,7 +60,8 @@ public:
   static RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                       uint32_t popcount);
 
-  static RPCError commit_contract_create(BlockID block, Contract contract);
+  static RPCError commit_contract_create(BlockID block,
+                                         Contract const &contract);
   static RPCError commit_contract_deploy(BlockID block,
                                          ContractAddress const &contract_addr,
                                          SHA256Hash const &hash);

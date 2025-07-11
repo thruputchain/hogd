@@ -4,13 +4,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <span>
 #include <sys/socket.h>
 #include <utility>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
-#include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_state.h"
 #include "rpc_types.hh"
@@ -20,9 +18,7 @@
 #include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
-#include "x23/serialize.h"
 #include "x23/sockio.h"
-#include "x23/vec.h"
 
 namespace hogd {
 

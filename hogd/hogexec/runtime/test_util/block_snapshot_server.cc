@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 
-#include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
 #include <sys/socket.h>
@@ -15,11 +14,6 @@
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "types.hh"
-#include "x23/async.h"
-#include "x23/cleanup.h"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -90,15 +84,15 @@ BlockSnapshotServer::get_deployment(BlockID block,
 
 RPCError
 BlockSnapshotServer::commit_contract_create(BlockID /*unused*/,
-                                            Contract /*unused*/)
+                                            Contract const & /*unused*/)
 {
   return RPCError::kRPCUnimplemented; // unimplemented
 }
 
 RPCError
-BlockSnapshotServer::commit_contract_deploy(BlockID block,
-                                            ContractAddress const &addr,
-                                            SHA256Hash const &hash)
+BlockSnapshotServer::commit_contract_deploy(BlockID /*unused*/,
+                                            ContractAddress const & /*unused*/,
+                                            SHA256Hash const & /*unused*/)
 {
   return RPCError::kRPCUnimplemented; // unimplemented
 }

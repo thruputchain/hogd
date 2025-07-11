@@ -26,9 +26,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/event.h"
-#include "x23/sockio.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
