@@ -19,7 +19,7 @@ namespace {
 
 HogDBStatus<void>
 update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key,
-                       const std::span<std::byte> &value)
+                       const std::span<const std::byte> &value)
 {
   HexArray k(key.get_address().as_bytes());
   if (!trie.insert(k, value)) {
