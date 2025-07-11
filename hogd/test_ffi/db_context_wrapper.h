@@ -12,8 +12,6 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
-#include "x23/event.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
