@@ -18,14 +18,15 @@
 #pragma once
 
 #include <cassert>
-#include <memory>
+#include <concepts>
+#include <cstddef>
 #include <optional>
 #include <span>
-#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"

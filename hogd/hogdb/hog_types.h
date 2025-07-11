@@ -5,8 +5,11 @@
 #include <algorithm>
 #include <array>
 #include <concepts>
+#include <cstddef>
 #include <format>
+#include <functional>
 #include <span>
+#include <string_view>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/span.h"

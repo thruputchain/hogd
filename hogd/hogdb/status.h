@@ -6,6 +6,9 @@
 #pragma once
 
 #include <cassert>
+#include <system_error>
+#include <string>
+#include <expected>
 #include <utility>
 
 #include "hogd/base/status.h"

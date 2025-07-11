@@ -3,12 +3,15 @@
 #include <algorithm>
 #include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <span>
 #include <type_traits>
 #include <variant>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/container/merkle/hex_array.h"
 #include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"

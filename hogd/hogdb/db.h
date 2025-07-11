@@ -4,8 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <span>
 #include <utility>
@@ -16,6 +16,7 @@
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
+#include "types.hh"
 
 namespace hogd {
 
