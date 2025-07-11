@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include <sys/socket.h>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"

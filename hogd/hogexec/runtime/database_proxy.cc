@@ -7,7 +7,6 @@
 #include <exception>
 #include <memory>
 #include <optional>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -17,8 +16,6 @@
 #include "contract.hh"
 #include "coord.hh"
 #include "executor_to_db_rpc.hh"
-#include "hogd/base/cpputil.h"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -27,8 +24,6 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/serialize.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -127,7 +122,7 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
-        assert(sharded_db.shards_.size() > 0);
+        assert(!sharded_db.shards_.empty());
         auto res = RPCClient::dial(sharded_db.shards_[0].address);
         if (!res) {
           throw std::runtime_error("Failed to connect to database shard");
