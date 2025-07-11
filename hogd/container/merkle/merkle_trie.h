@@ -106,7 +106,7 @@ public:
   // element.
   static bool prove(const SHA256Hash &root_hash,
                     const std::vector<std::byte> &encodings, const Key &k,
-                    const std::span<std::byte> &value);
+                    const std::span<const std::byte> &value);
 
   // Finds the value hash for key [k]. If key [k] does not exist in the trie,
   // returns a nullptr. If true is returned, you *must* call [find_end(cookie)]
@@ -121,12 +121,12 @@ public:
 
   // Inserts a KV pair with key [k] and value [obj] into the trie. You must pass
   // [obj] to this method with [std::move()].
-  bool insert(const Key &k, std::span<std::byte> &&obj);
+  bool insert(const Key &k, std::span<const std::byte> &&obj);
   // Inserts a KV pair with key [k] and value [obj] into the trie. This method
   // copies [obj] rather than move it as the method above does.
-  bool insert(const Key &k, const std::span<std::byte> &obj)
+  bool insert(const Key &k, const std::span<const std::byte> &obj)
   {
-    return insert(k, std::span<std::byte>(obj));
+    return insert(k, std::span<const std::byte>(obj));
   }
 
   // Removes the KV pair for key [k] from the trie.
@@ -200,13 +200,13 @@ private:
   // extension node below the lowest branch for that pair, we need to handle the
   // extension node and its subtree.
   Node *insert_handle_extension(Node *current_extension, const Key &k,
-                                size_t idx, std::span<std::byte> &&obj);
+                                size_t idx, std::span<const std::byte> &&obj);
 
   // Helper function for [insert()]. When we add a KV pair and there is a leaf
   // node below the lowest branch for that pair, we need to handle the leaf
   // node.
   Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
-                           std::span<std::byte> &&obj);
+                           std::span<const std::byte> &&obj);
 
   // Returns true if we will need to remove [branch] after removing a KV pair
   // that is "under" it.
@@ -368,7 +368,8 @@ public:
 
   static bool prove(const SHA256Hash &root_hash,
                     const std::vector<std::byte> &encodings,
-                    const MerkleTrie::Key &k, const std::span<std::byte> &value)
+                    const MerkleTrie::Key &k,
+                    const std::span<const std::byte> &value)
   {
     return MerkleTrie::prove(root_hash, encodings, k, value);
   }
@@ -389,7 +390,7 @@ public:
   // [find_begin].
   static void find_end(void *cookie) { MerkleTrie::find_end(cookie); }
 
-  bool insert(const MerkleTrie::Key &k, std::span<std::byte> &&obj)
+  bool insert(const MerkleTrie::Key &k, std::span<const std::byte> &&obj)
   {
     if (k.empty()) {
       // We do not support empty keys.
@@ -400,9 +401,9 @@ public:
     return tries_[index].insert(k_no_prefix, std::move(obj));
   }
 
-  bool insert(const MerkleTrie::Key &k, const std::span<std::byte> &obj)
+  bool insert(const MerkleTrie::Key &k, const std::span<const std::byte> &obj)
   {
-    return insert(k, std::span<std::byte>(obj));
+    return insert(k, std::span<const std::byte>(obj));
   }
 
   bool remove(const MerkleTrie::Key &k)
