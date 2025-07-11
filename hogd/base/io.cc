@@ -217,6 +217,14 @@ File::sync() const
   return sys_fsync(fd_);
 }
 
+ErrnoStatus<void>
+File::close()
+{
+  auto r = sys_close(fd_);
+  fd_ = kInvalidFD;
+  return r;
+}
+
 ErrnoStatus<Directory>
 Directory::open(std::string_view path, bool create, mode_t mode)
 {
