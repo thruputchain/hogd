@@ -66,7 +66,7 @@ struct BenchmarkState {
   {
 
     db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
+        std::make_unique<DatabaseProxy>(LocalMockDB{.read_port_number_ =
                                                              exec_port});
 
     coord_client_ = [&] -> std::unique_ptr<coord_client_t> {

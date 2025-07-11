@@ -22,7 +22,7 @@ namespace hogd {
 std::unique_ptr<DatabaseProxy>
 ExecCoordServer::connect_to_database(DatabaseIdentifier identifier)
 {
-  return std::make_unique<DatabaseProxy>(cp_, std::move(identifier));
+  return std::make_unique<DatabaseProxy>(std::move(identifier));
 }
 
 void

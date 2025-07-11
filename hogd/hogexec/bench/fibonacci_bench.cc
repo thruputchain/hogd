@@ -66,7 +66,7 @@ struct BenchmarkState {
     db_executor_server_.start_server(kPortNumber);
 
     db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
+        std::make_unique<DatabaseProxy>(LocalMockDB{.read_port_number_ =
                                                              kPortNumber});
 
     [[maybe_unused]] auto res = block_manager_.add_child(

@@ -71,6 +71,9 @@ public:
   // sync flushes all modified file data to the storage device.
   ErrnoStatus<void> sync() const;
 
+  // close closes the file.
+  ErrnoStatus<void> close();
+
 private:
   int fd_{kInvalidFD};
 };

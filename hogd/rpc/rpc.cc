@@ -7,7 +7,9 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <print>
 #include <sched.h>
+#include <string>
 #include <sys/socket.h>
 
 #include <cassert>
@@ -156,6 +158,7 @@ ClientFlow::~ClientFlow()
 inline void
 ClientFlow::abort_call(Completion &completion)
 {
+  std::println("aborting call");
   completion.set_exception(
       std::make_exception_ptr(std::runtime_error("network connection lost")));
 }
@@ -172,6 +175,7 @@ ClientFlow::abort_calls(std::queue<Completion> &&completions)
 void
 ClientFlow::fail()
 {
+  std::println("failing");
   std::scoped_lock g(lock_);
   abort_calls(std::move(completions_));
   connection_failed_ = true;
@@ -186,6 +190,7 @@ ClientFlow::call(std::span<const std::byte> args)
 
   std::scoped_lock g(lock_);
   if (connection_failed_) [[unlikely]] {
+    std::println("connection failed");
     abort_call(promise);
     return future;
   }
@@ -239,6 +244,7 @@ ClientFlow::receive_worker(const std::stop_token &stoken)
   std::queue<Completion> completions;
   // called when the socket fails.
   Defer d([this, &completions] {
+    std::println("shutting down receive worker");
     abort_calls(std::move(completions));
     fail();
   });
@@ -261,16 +267,21 @@ ClientFlow::receive_worker(const std::stop_token &stoken)
     if (!n) {
       if (n.error() != ENODATA)
         warn("client read size failed: {}", n.error());
+      std::println("client read size failed: {}", n.error());
       return;
     }
     ErrnoStatus<OwningSpan<const std::byte>> bytes = read_bytes(r, *n);
     if (!bytes) {
       if (bytes.error() != ENODATA)
         warn("client read bytes failed: {}", bytes.error());
+      std::println("client read bytes failed: {}", bytes.error());
       return;
     }
+    std::println("client read bytes succeeded");
     take_completion().set_value(std::move(*bytes));
   }
+
+  std::println("start receive worker shutting down from stop token");
 }
 
 } // namespace rpc_detail
@@ -300,6 +311,7 @@ RPCClient::dial(std::string_view addr, int flows)
     ErrnoStatus<void> ret = sys_connect(*fd, saddr);
     if (!ret)
       return ret.error();
+    
 
     ret = sys_setsockopt(*fd, IPPROTO_TCP, TCP_NODELAY, 1);
     if (!ret)
@@ -451,11 +463,16 @@ void
 RPCServer::stop()
 {
   std::scoped_lock guard(lock_);
-  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RD); !ret) {
+  std::println("shutting down rpc server fd = {}", listener_.get_fd());
+  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RDWR); !ret) {
     error("could not shutdown listener socket: {}", ret.error());
   }
+  // mac compat: call close() on the listener fd
+  if (ErrnoStatus<void> ret = listener_.close(); !ret)
+    error("could not close listener socket: {}", ret.error());
 
   for (File *f : workers_) {
+    std::println("shutting down rpc server worker fd = {}", f->get_fd());
     if (ErrnoStatus<void> ret = sys_shutdown(f->get_fd(), SHUT_RD); !ret)
       error("could not shutdown worker socket: {}", ret.error());
   }

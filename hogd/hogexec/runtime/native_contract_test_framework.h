@@ -25,10 +25,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/event.h"
 #include "x23/rpc.h"
-#include "x23/sockio.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -79,7 +76,7 @@ public:
   std::optional<StorageItem>
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
-    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey)();
+    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);
     if (!r.has_value()) {
       throw std::runtime_error("lookup_storage_item_from_db: db lookup failed");
     }
@@ -146,12 +143,10 @@ public:
 private:
   void initialize(BlockExecutionMode mode)
   {
-    auto addr = db_executor_server_.start_server(0);
-    uint32_t port = x23::get_port(addr);
+    uint32_t port = db_executor_server_.port();
 
     db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_,
-                                        LocalMockDB{.read_port_number_ = port});
+        std::make_unique<DatabaseProxy>(LocalMockDB{.read_port_number_ = port});
     [[maybe_unused]] auto res = block_manager_.add_child(0, 1, mode);
     assert(res);
     block_number_++;
@@ -167,15 +162,12 @@ private:
                                        allocate_txid());
   }
 
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
   TransactionID next_tx_id_ = 0;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   BlockID block_number_ = 0;
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
-  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
+  AdamRPCDbExecutorServer db_executor_server_ = AdamRPCDbExecutorServer(&block_manager_, 0);
 };
 
 } // namespace hogd

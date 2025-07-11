@@ -29,7 +29,7 @@ protected:
   {
     auto r = server_.start_server(0);
     db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{x23::get_port(r)});
+        std::make_unique<DatabaseProxy>(LocalMockDB{x23::get_port(r)});
   }
 
   BlockSnapshotServer server_ = BlockSnapshotServer(1);
