@@ -436,7 +436,8 @@ MerkleTrie::find_node(const Key &k)
 }
 
 bool
-MerkleTrie::insert(const Key &k, std::span<const std::byte> &&obj)
+MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
+                          bool update)
 {
   size_t idx;
   Node *existing_key;
@@ -453,8 +454,15 @@ MerkleTrie::insert(const Key &k, std::span<const std::byte> &&obj)
     branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key);
     if (existing_key) {
       // [k] already exists in the trie, so we cannot insert it.
-      unlock_both(*branch, *existing_key);
-      return false;
+      if (update) {
+        existing_key->value_hash = sha256(obj);
+        to_hash = existing_key;
+        break;
+      }
+      else {
+        unlock_both(*branch, *existing_key);
+        return false;
+      }
     }
     // Try to acquire the writer lock on the branch.
     if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
@@ -542,6 +550,19 @@ MerkleTrie::insert(const Key &k, std::span<const std::byte> &&obj)
   return true;
 }
 
+bool
+MerkleTrie::insert(const Key &k, const std::span<const std::byte> &obj)
+{
+  return insert_helper(k, obj, /*update=*/false);
+}
+
+void
+MerkleTrie::insert_or_update(const Key &k,
+                             const std::span<const std::byte> &obj)
+{
+  CHECK(insert_helper(k, obj, /*update=*/true));
+}
+
 // We are inserting [k] into the trie, and it conflicts with an extension node
 // on the same path. This method resolves that conflict.
 //
@@ -558,7 +579,7 @@ MerkleTrie::insert(const Key &k, std::span<const std::byte> &&obj)
 // Second Extension Node: Path is [0x6]. The child is c.
 Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
-                                    std::span<const std::byte> &&obj)
+                                    const std::span<const std::byte> &obj)
 {
   CHECK(extension->rw_lock.is_writer_locked_relaxed());
   CHECK(extension->child[0]->rw_lock.is_writer_locked_relaxed());
@@ -748,7 +769,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 // child of this extension node.
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
-                               std::span<const std::byte> &&obj)
+                               const std::span<const std::byte> &obj)
 {
   CHECK(leaf->rw_lock.is_writer_locked_relaxed());
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
