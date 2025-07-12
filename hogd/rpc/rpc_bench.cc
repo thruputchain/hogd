@@ -61,7 +61,7 @@ run_client(std::string_view addr, int conns, int threads, int n)
     workers.emplace_back([&c = *client, n] {
       std::vector<std::byte> args(kArgSize);
       for (int i = 0; i < n; ++i)
-        c.call(std::span(args)).wait();
+        c.call(std::span(args));
     });
   }
   for (std::jthread &th : workers)

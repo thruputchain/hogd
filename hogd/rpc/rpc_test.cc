@@ -79,9 +79,9 @@ TEST_F(RPCTest, SynchronousCalls)
 
   for (size_t i = 0; i < kRPCs; i++) {
     rand_(std::span(args));
-    std::future<OwningSpan<const std::byte>> ret =
+    OwningSpan<const std::byte> ret =
         client_.call(std::as_bytes(std::span(args)));
-    EXPECT_EQ(ret.get(), std::as_bytes(std::span(args)));
+    EXPECT_EQ(ret, std::as_bytes(std::span(args)));
   }
 }
 
@@ -99,7 +99,7 @@ TEST_F(RPCTest, AsynchronousCalls)
   std::vector<std::future<OwningSpan<const std::byte>>> futures;
   futures.reserve(kRPCs);
   for (size_t i = 0; i < kRPCs; i++) {
-    futures.emplace_back(client_.call(std::as_bytes(std::span(args[i]))));
+    futures.emplace_back(client_.call_async(std::as_bytes(std::span(args[i]))));
   }
 
   // check results.
@@ -119,9 +119,9 @@ TEST_F(RPCTest, ManyThreads)
 
       for (size_t i = 0; i < kRPCs; i++) {
         rand_(std::span(args));
-        std::future<OwningSpan<const std::byte>> ret =
+        OwningSpan<const std::byte> ret =
             client_.call(std::as_bytes(std::span(args)));
-        EXPECT_EQ(ret.get(), std::as_bytes(std::span(args)));
+        EXPECT_EQ(ret, std::as_bytes(std::span(args)));
       }
     });
   }

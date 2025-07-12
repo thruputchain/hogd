@@ -313,7 +313,7 @@ RPCClient::dial(std::string_view addr, int flows)
 }
 
 std::future<OwningSpan<const std::byte>>
-RPCClient::call(std::span<const std::byte> args)
+RPCClient::call_async(std::span<const std::byte> args)
 {
   unsigned int core;
 #if defined(__linux__)

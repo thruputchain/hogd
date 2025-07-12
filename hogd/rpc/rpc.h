@@ -99,10 +99,16 @@ public:
   RPCClient(const RPCClient &c) = delete;
   RPCClient &operator=(const RPCClient &c) = delete;
 
-  // call invokes an RPC on the server. A future allows the caller to wait for
-  // a response.
+  // call_async asynchronously invokes an RPC on the server. A future allows
+  // the caller to wait for a response.
   std::future<OwningSpan<const std::byte>>
-  call(std::span<const std::byte> args);
+  call_async(std::span<const std::byte> args);
+
+  // call synchronously invokes an RPC on the server.
+  OwningSpan<const std::byte> call(std::span<const std::byte> args)
+  {
+    return call_async(args).get();
+  }
 
 private:
   std::vector<std::unique_ptr<rpc_detail::ClientFlow>> flows_;
@@ -287,10 +293,8 @@ rpc_client_call(RPCClient &client, auto &&...args)
 
     (x23::serialize_to(&buf, std::forward<decltype(args)>(args)), ...);
 
-    auto future = client.call(std::as_bytes(std::span(buf)));
-    future.wait();
-    assert(future.valid());
-    auto res = future.get();
+    OwningSpan<const std::byte> res =
+        client.call(std::as_bytes(std::span(buf)));
     if (res.size() < sizeof(RPCResponseHeader)) {
       error("RPC error: response too small: size = {}", res.size());
       return SystemStatus<return_type>{
