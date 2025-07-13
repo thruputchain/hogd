@@ -38,48 +38,53 @@ handle_db_executor_rpc_request(Server &server, std::span<const std::byte> args)
   }
   auto [method, arg_span] = header_result.value();
 
-  // TODO(geoff): figure out a convenient way to automate this
-  // static constexpr std::array<std::uint32_t, 11> valid_procnos{
-  //    0, 1, 2, 3, 100, 101, 102, 200, 201, 202, 203
-  //};
   switch (method) {
-  case 0:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 0,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
+                             "try_push_new_subtransaction">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "try_push_new_subtransaction">(server,
                                                                      arg_span);
-  case 1:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 1,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
+                             "commit_transaction">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "commit_transaction">(server, arg_span);
-  case 2:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 2,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
+                             "abort_transaction">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "abort_transaction">(server, arg_span);
-  case 3:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 3,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
+                             "pop_subtransactions">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "pop_subtransactions">(server, arg_span);
-  case 100:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 100,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
+                             "get_snapshot_item">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "get_snapshot_item">(server, arg_span);
-  case 101:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 101,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
+                             "get_next_retrocausal_queue_block">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "get_next_retrocausal_queue_block">(
         server, arg_span);
-  case 102:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 102,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
+                             "get_concurrent_retrocausal_queue_entry">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "get_concurrent_retrocausal_queue_entry">(
         server, arg_span);
-  case 200:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 200,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
+                             "commit_contract_create">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "commit_contract_create">(server,
                                                                 arg_span);
-  case 201:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 201,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
+                             "commit_contract_deploy">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "commit_contract_deploy">(server,
                                                                 arg_span);
-  case 202:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 202,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1, "get_contract">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "get_contract">(server, arg_span);
-  case 203:
-    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1, 203,
+  case get_rpc_method_number<DatabaseToExecutorInterfaceV1, "get_deployment">():
+    return rpc_server_dispatch_method<DatabaseToExecutorInterfaceV1,
                                       "get_deployment">(server, arg_span);
   default:
     return vec_as_bytes(response_header_to_buf(
