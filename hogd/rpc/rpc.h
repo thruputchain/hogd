@@ -8,6 +8,7 @@
 #include <format>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -255,40 +256,48 @@ static_assert(std::is_trivially_copyable_v<RPCCallHeader>,
 static_assert(std::is_trivially_copyable_v<RPCResponseHeader>,
               "RPCResponseHeader must be trivially copyable");
 
-namespace detail {
-
-template<typename Interface, uint32_t Method, size_t Index = 0>
+template<typename Interface, StringLiteral Name, size_t Index = 0>
 constexpr bool
-is_valid_rpc_method()
+is_rpc_method()
 {
   if constexpr (Index >= Interface::valid_procnos.size()) {
     return false;
   }
-  else if constexpr (Interface::valid_procnos[Index] == Method) {
+  else if constexpr (Interface::template proc_meta<
+                         Interface::valid_procnos[Index]>::proc_name ==
+                     Name.get()) {
     return true;
   }
   else {
-    return is_valid_rpc_method<Interface, Method, Index + 1>();
+    return is_rpc_method<Interface, Name, Index + 1>();
   }
 }
 
-} // namespace detail
+template<typename Interface, StringLiteral Name, size_t Index = 0>
+requires (is_rpc_method<Interface, Name, Index>())
+constexpr uint32_t
+get_rpc_method_number()
+{
+  if constexpr (Interface::template proc_meta<
+                    Interface::valid_procnos[Index]>::proc_name == Name.get()) {
+    return Interface::valid_procnos[Index];
+  }
+  else {
+    return get_rpc_method_number<Interface, Name, Index + 1>();
+  }
+}
 
-template<typename Interface, uint32_t Method, StringLiteral Name>
-concept is_rpc_method =
-    detail::is_valid_rpc_method<Interface, Method>() &&
-    Interface::template proc_meta<Method>::proc_name == Name.get();
-
-template<typename Interface, uint32_t Method, StringLiteral Name>
-requires is_rpc_method<Interface, Method, Name>
+template<typename Interface, StringLiteral Name>
+requires (is_rpc_method<Interface, Name>())
 auto
 rpc_client_call(RPCClient &client, auto &&...args)
 {
-  using return_type = Interface::template proc_meta<Method>::return_type;
+  constexpr uint32_t kMethod = get_rpc_method_number<Interface, Name>();
+  using return_type = Interface::template proc_meta<kMethod>::return_type;
 
   try {
     x23::Buf buf(sizeof(RPCCallHeader));
-    RPCCallHeader header{.method = Method};
+    RPCCallHeader header{.method = kMethod};
     std::memcpy(buf.data(), &header, sizeof(RPCCallHeader));
 
     (x23::serialize_to(&buf, std::forward<decltype(args)>(args)), ...);
@@ -340,12 +349,13 @@ rpc_server_parse_and_strip_header(std::span<const std::byte> args)
 // each other at compile time; this makes it easier to catch errors as rpc
 // definitions evolve.
 // The input arg span must already have the RPCCallHeader stripped off.
-template<typename Interface, uint32_t Method, StringLiteral Name>
-requires is_rpc_method<Interface, Method, Name>
+template<typename Interface, StringLiteral Name>
+requires (is_rpc_method<Interface, Name>())
 OwningSpan<const std::byte>
 rpc_server_dispatch_method(auto &server, std::span<const std::byte> args)
 {
-  using meta = Interface::template proc_meta<Method>;
+  constexpr uint32_t kMethod = get_rpc_method_number<Interface, Name>();
+  using meta = Interface::template proc_meta<kMethod>;
   typename meta::arg_type a;
   try {
     x23::deserialize(&a, args);

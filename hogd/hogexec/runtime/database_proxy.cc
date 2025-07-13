@@ -137,7 +137,7 @@ SystemStatus<std::optional<StorageItem>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 {
   auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 100, "get_snapshot_item">(
+      rpc_client_call<DatabaseToExecutorInterfaceV1, "get_snapshot_item">(
           client_, block_id, addrkey);
   return to_system_error_code<std::nullopt>(res, [](StorageItem &&x) {
     return std::make_optional<StorageItem>(std::move(x));
@@ -147,9 +147,8 @@ DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)
 SystemStatus<std::shared_ptr<const Contract>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
-  auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 202, "get_contract">(
-          client_, block_id, contract_hash);
+  auto res = rpc_client_call<DatabaseToExecutorInterfaceV1, "get_contract">(
+      client_, block_id, contract_hash);
   return to_system_error_code<nullptr>(res, [](const Contract &x) {
     return std::make_shared<const Contract>(x);
   });
@@ -159,8 +158,9 @@ SystemStatus<std::optional<SHA256Hash>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
   auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 203, "get_deployment">(
-          client_, block_id, addr);
+      rpc_client_call<DatabaseToExecutorInterfaceV1, "get_deployment">(client_,
+                                                                       block_id,
+                                                                       addr);
   return to_system_error_code<std::nullopt>(res, [](SHA256Hash &&x) {
     return std::make_optional<SHA256Hash>(std::move(x));
   });
@@ -172,7 +172,7 @@ DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
                                                 uint64_t search_start_number)
 {
   auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 101,
+      rpc_client_call<DatabaseToExecutorInterfaceV1,
                       "get_next_retrocausal_queue_block">(client_, block_id,
                                                           addrkey,
                                                           search_start_number);
@@ -186,7 +186,7 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(
     BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
 {
   auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 102,
+      rpc_client_call<DatabaseToExecutorInterfaceV1,
                       "get_concurrent_retrocausal_queue_entry">(client_,
                                                                 block_id,
                                                                 addrkey, index);
@@ -199,7 +199,7 @@ SystemStatus<void>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id)
 {
   auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 1, "commit_transaction">(
+      rpc_client_call<DatabaseToExecutorInterfaceV1, "commit_transaction">(
           client_, block_id, tx_id);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
@@ -208,7 +208,7 @@ SystemStatus<void>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
   auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 2, "abort_transaction">(
+      rpc_client_call<DatabaseToExecutorInterfaceV1, "abort_transaction">(
           client_, block_id, tx_id);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
@@ -218,8 +218,8 @@ DatabaseProxy::commit_contract_create(BlockID block_id,
                                       Contract const &contract)
 {
   auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 200,
-                      "commit_contract_create">(client_, block_id, contract);
+      rpc_client_call<DatabaseToExecutorInterfaceV1, "commit_contract_create">(
+          client_, block_id, contract);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
@@ -229,8 +229,8 @@ DatabaseProxy::commit_contract_deploy(BlockID block_id,
                                       SHA256Hash const &hash)
 {
   auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 201,
-                      "commit_contract_deploy">(client_, block_id, addr, hash);
+      rpc_client_call<DatabaseToExecutorInterfaceV1, "commit_contract_deploy">(
+          client_, block_id, addr, hash);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
 
@@ -239,7 +239,7 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch)
 {
-  auto res = rpc_client_call<DatabaseToExecutorInterfaceV1, 0,
+  auto res = rpc_client_call<DatabaseToExecutorInterfaceV1,
                              "try_push_new_subtransaction">(client_, block_id,
                                                             tx_id, delta_batch);
   return to_system_error_code<false>(res, [] { return true; });
@@ -250,7 +250,7 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
   auto res =
-      rpc_client_call<DatabaseToExecutorInterfaceV1, 3, "pop_subtransactions">(
+      rpc_client_call<DatabaseToExecutorInterfaceV1, "pop_subtransactions">(
           client_, block_id, tx_id, count);
   return to_system_error_code<VoidMarker{}>(res, [] {});
 }
