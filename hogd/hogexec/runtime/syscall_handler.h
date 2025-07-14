@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/transaction_stats.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "retrocausal_queue.hh"
 #include "syscall.hh"
 #include "transaction.hh"

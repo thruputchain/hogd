@@ -27,6 +27,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/init.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -62,9 +63,10 @@ struct BenchmarkState {
 
   std::unique_ptr<coord_client_t> coord_client_;
 
+  WasmiModuleCache module_cache_ = WasmiModuleCache(10);
+
   void initialize(uint32_t exec_port, uint32_t coord_port)
   {
-
     db_proxy_ = std::make_unique<DatabaseProxy>(
         LocalMockDB{.read_port_number_ = exec_port});
 
