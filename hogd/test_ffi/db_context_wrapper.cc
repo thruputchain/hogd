@@ -12,14 +12,12 @@
 namespace hogd {
 
 DBContext::DBContext(uint32_t db_read_port)
-  : pool_(2), cp_(pool_), block_manager_(current_block_id_, &db_),
-    executor_server_(&block_manager_), db_proxy_(nullptr),
+  : block_manager_(current_block_id_, &db_),
+    executor_server_(&block_manager_, db_read_port), db_proxy_(nullptr),
     snapshot_cache_(nullptr)
 {
-  executor_server_.start_server(db_read_port);
-  db_proxy_ =
-      std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                           db_read_port});
+  db_proxy_ = std::make_unique<DatabaseProxy>(
+      LocalMockDB{.read_port_number_ = executor_server_.port()});
 
   advance_new_block();
 }

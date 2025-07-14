@@ -1,19 +1,12 @@
 #pragma once
 
 #include <cassert>
-#include <concepts>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
-#include <exception>
-#include <format>
 #include <limits>
 #include <memory>
-#include <optional>
-#include <span>
 #include <string>
 #include <tuple>
-#include <type_traits>
 #include <unistd.h>
 #include <utility>
 

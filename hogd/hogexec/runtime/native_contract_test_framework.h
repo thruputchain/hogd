@@ -18,7 +18,6 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/test_util/port_allocator.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
@@ -26,9 +25,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/event.h"
 #include "x23/rpc.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -79,7 +76,7 @@ public:
   std::optional<StorageItem>
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
-    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey)();
+    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);
     if (!r.has_value()) {
       throw std::runtime_error("lookup_storage_item_from_db: db lookup failed");
     }
@@ -146,12 +143,10 @@ public:
 private:
   void initialize(BlockExecutionMode mode)
   {
-    assert(port_.port_ >= kMinTestPort);
-    db_executor_server_.start_server(port_.port_);
+    uint32_t port = db_executor_server_.port();
 
     db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             port_.port_});
+        std::make_unique<DatabaseProxy>(LocalMockDB{.read_port_number_ = port});
     [[maybe_unused]] auto res = block_manager_.add_child(0, 1, mode);
     assert(res);
     block_number_++;
@@ -167,17 +162,13 @@ private:
                                        allocate_txid());
   }
 
-  TemporaryPort port_;
-
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
-
   TransactionID next_tx_id_ = 0;
   std::unique_ptr<DatabaseProxy> db_proxy_;
   BlockID block_number_ = 0;
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
-  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
+  RPCDbExecutorServer db_executor_server_ =
+      RPCDbExecutorServer(&block_manager_, 0);
 };
 
 } // namespace hogd

@@ -57,7 +57,7 @@ InvocationFrame::mark_frame_as_failed(
     PerTransactionDatabaseProxy &db_proxy) const
 {
   if (try_invoke_frame_count_ > 0) {
-    auto st = db_proxy.pop_subtransactions(try_invoke_frame_count_)();
+    auto st = db_proxy.pop_subtransactions(try_invoke_frame_count_);
     if (!st.has_value()) {
       return st.error();
     }
@@ -102,7 +102,7 @@ InvocationFrame::try_acquire_frame_locks(
     }
   }
 
-  auto res = co_await db_proxy.try_push_current_subtransaction();
+  auto res = db_proxy.try_push_current_subtransaction();
   if (!res.has_value()) {
     co_return res.error();
   }

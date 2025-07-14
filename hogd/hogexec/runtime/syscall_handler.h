@@ -9,12 +9,13 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/invocation_frame.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/transaction_stats.h"
 #include "retrocausal_queue.hh"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -24,6 +25,12 @@
 namespace hogd {
 
 class StorageSnapshotCache;
+
+// TODO(geoff): root_invoke() validates any incoming wasm blobs.
+// We may later do that validation preemptively in the coordinator.
+// We may also wish to add checks to make sure that a wasm that's created
+// is actually deployed, and/or put limits on the size of an individual wasm.
+// What's done here is only check well-formedness of the wasm.
 
 // Data structure that manages all system calls and state associated with a
 // running transaction.
@@ -66,6 +73,13 @@ public:
   std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
   invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
          Calldata calldata, InvokeFlagSet flags);
+
+  void enable_transaction_stats()
+  {
+    stats_ = std::make_unique<TransactionStats>();
+  }
+
+  auto *get_transaction_stats(this auto &self) { return self.stats_.get(); }
 
   // syscall methods: can only be called when call_frame_stack_ is nonempty
   // (i.e. while at least one invoke() is running)
@@ -147,12 +161,19 @@ private:
 
   ExecutionModeData execution_mode_data_;
 
+  std::unique_ptr<TransactionStats> stats_ = nullptr;
+
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;
-  bool root_invoked_succeeded_ = false;
+  InvokeResult cumulative_invoke_result_ =
+      InvokeResult{.result_ = {}, .gas_consumed_ = 0};
   bool transaction_committed_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
+
+  // Validate that the transaction can be run safely.
+  // Ensures, for example, that the wasms are valid.
+  InvokeResult perform_initial_validation();
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

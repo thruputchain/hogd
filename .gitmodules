@@ -25,3 +25,6 @@
 [submodule "external/model-checker"]
 	path = external/model-checker
 	url = https://github.com/gramseyer/model-checker.git
+[submodule "external/blake3"]
+	path = external/blake3
+	url = https://github.com/BLAKE3-team/BLAKE3.git

@@ -41,6 +41,20 @@ fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
     }
 }
 
+// assert that the memory is exported and starts at at most 1 page
+fn check_memory_limit(module: &Module) -> bool {
+    let export = module.get_export("memory");
+    if export.is_none() {
+        return false;
+    }
+    let export_unwrapped = export.unwrap();
+
+    if let wasmi::ExternType::Memory(memory_type) = export_unwrapped {
+        return memory_type.initial_pages() <= 1.into();
+    }
+    false
+}
+
 impl WasmiRuntime {
     // Invariant required: the input wasm module must have passed validation.
     fn new(
@@ -49,6 +63,7 @@ impl WasmiRuntime {
         context: &WasmiContext,
         userctx: *mut c_void,
     ) -> Option<WasmiRuntime> {
+
         let module = if !context.module_cache.is_null() {
             if let Some(module) = unsafe { &*context.module_cache }.get(hash) {
                 module
@@ -56,13 +71,20 @@ impl WasmiRuntime {
                 let module =
                     unsafe { Module::new_unchecked(&context.engine, bytes) }
                         .ok()?;
+                if !check_memory_limit(&module) {
+                    return None;
+                }
                 unsafe { &*context.module_cache }.put(hash, &module);
                 module
             }
         } else {
-            unsafe { Module::new_unchecked(&context.engine, bytes) }.ok()?
+            let module = unsafe { Module::new_unchecked(&context.engine, bytes) }.ok()?;
+            if !check_memory_limit(&module) {
+                return None;
+            }
+            module
         };
-
+        
         let mut store = Store::new(module.engine(), userctx);
 
         let instance = match context.linker.instantiate(&mut store, &module) {
