@@ -281,9 +281,13 @@ load_log_file(
         (target_lsn && hdr.lsn >= *target_lsn);
 
     if (skip) {
-      ErrnoStatus ret = r.skip(hdr.key_len + hdr.value_len);
+      size_t to_skip = hdr.key_len + hdr.value_len;
+      ErrnoStatus<size_t> ret = r.skip(to_skip);
       if (!ret)
-        return ret.transform_error(to_db_error);
+        return {to_db_error(ret.error())};
+      // hit eof while trying to skip
+      if (*ret < to_skip)
+        break;
       continue;
     }
 
