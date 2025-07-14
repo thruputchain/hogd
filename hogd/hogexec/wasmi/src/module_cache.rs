@@ -5,6 +5,7 @@ use wasmi::Module;
 use core::ffi::c_void;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
+use std::rc::Rc;
 
 type SHA256Hash = [u8; 32];
 
@@ -36,16 +37,16 @@ impl ModuleCache {
 pub unsafe extern "C" fn new_wasmi_module_cache(
     capacity: usize,
 ) -> *mut c_void {
-    let b = Box::new(ModuleCache::new(capacity));
+    let b = Box::new(Rc::new(ModuleCache::new(capacity)));
     let ptr = Box::into_raw(b);
     core::mem::transmute(ptr)
 }
 
 /// # Safety
-/// ptr must be a pointer to a ModuleCache, which was produced by new_wasmi_module_cache.
+/// ptr must be a pointer to an Rc<ModuleCache>, which was produced by new_wasmi_module_cache.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmi_module_cache(ptr: *mut c_void) {
     unsafe {
-        drop(Box::from_raw(ptr as *mut ModuleCache));
+        drop(Box::from_raw(ptr as *mut Rc<ModuleCache>));
     }
 }

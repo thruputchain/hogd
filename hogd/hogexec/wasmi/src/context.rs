@@ -3,6 +3,7 @@ use wasmi::{Caller, Config, Engine, Error, Linker, Module, StackLimits};
 use core::ffi::c_void;
 use core::slice;
 use core::str::Utf8Error;
+use std::rc::Rc;
 
 use crate::external_call;
 use crate::module_cache;
@@ -53,7 +54,7 @@ use crate::module_cache::ModuleCache;
 pub struct WasmiContext {
     pub engine: Engine,
     pub linker: Linker<*mut c_void>,
-    pub module_cache: *mut ModuleCache,
+    pub module_cache: Option<Rc<ModuleCache>>,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -75,7 +76,7 @@ fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
 }
 
 impl WasmiContext {
-    fn new(module_cache: *mut ModuleCache) -> WasmiContext {
+    fn new(module_cache: Option<Rc<ModuleCache>>) -> WasmiContext {
         let stack_limit = StackLimits::default();
 
         let engine = Engine::new(
@@ -482,13 +483,17 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 /// module_cache is threadsafe, so it can be safely shared across threads.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_context(
-    module_cache: *mut c_void,
+    module_cache: *const c_void,
 ) -> *mut c_void {
-    let b = Box::new(WasmiContext::new(unsafe {
-        core::mem::transmute::<*mut c_void, *mut module_cache::ModuleCache>(
-            module_cache,
-        )
-    }));
+    let b = if module_cache.is_null() {
+        Box::new(WasmiContext::new(None))
+    } else {
+        Box::new(WasmiContext::new(unsafe {
+            Some((*core::mem::transmute::<*const c_void, *const Rc<module_cache::ModuleCache>>(
+                module_cache,
+            )).clone())
+        }))
+    };
 
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }

@@ -8,6 +8,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -93,10 +94,18 @@ private:
   void *wasmi_runtime_ptr_;
 };
 
+// Can be used across multiple WasmiContexts and across multiple transactions.
+// MUST NOT BE USED WITH CompilationMode::Lazy or CompilationMode::LazyTranslation in Wasmi!!!
 class WasmiModuleCache {
 public:
   WasmiModuleCache(size_t capacity);
   ~WasmiModuleCache();
+
+  // Disable copy and move
+  WasmiModuleCache(WasmiModuleCache const &) = delete;
+  WasmiModuleCache &operator=(WasmiModuleCache const &) = delete;
+  WasmiModuleCache(WasmiModuleCache &&) = delete;
+  WasmiModuleCache &operator=(WasmiModuleCache &&) = delete;
 
 private:
   void *wasmi_module_cache_ptr_;
