@@ -136,9 +136,7 @@ WasmiRuntime::~WasmiRuntime()
 
 WasmiModuleCache::WasmiModuleCache(size_t capacity)
   : wasmi_module_cache_ptr_(new_wasmi_module_cache(capacity))
-{
-  std::println("WasmiModuleCache::WasmiModuleCache: ptr = {:p}", wasmi_module_cache_ptr_);
-}
+{}
 
 WasmiModuleCache::~WasmiModuleCache()
 {
