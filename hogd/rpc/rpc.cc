@@ -394,7 +394,8 @@ RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
   std::vector<OwningSpan<const std::byte>> requests;
   std::optional<size_t> n;
 
-  ref->register_worker(socket);
+  if (!ref->register_worker(socket))
+    return; // already closing server
   Defer d([&ref, &socket] { ref->unregister_worker(socket); });
 
   while (true) {
@@ -452,6 +453,7 @@ void
 RPCServer::stop()
 {
   std::scoped_lock guard(lock_);
+  closing_ = true;
   if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RDWR);
       !ret) {
     error("could not shutdown listener socket: {}", ret.error());

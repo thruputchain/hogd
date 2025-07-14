@@ -145,15 +145,19 @@ public:
 private:
   const uint16_t port_;
   std::mutex lock_;
+  bool closing_{false};
   File listener_;
   std::vector<File *> workers_;
 
   alignas(kCacheLineSize) RPCHandler handler_;
 
-  void register_worker(File &f)
+  bool register_worker(File &f)
   {
     std::scoped_lock guard(lock_);
+    if (closing_)
+      return false;
     workers_.push_back(&f);
+    return true;
   }
 
   void unregister_worker(File &f)
