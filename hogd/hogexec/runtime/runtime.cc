@@ -18,7 +18,7 @@ namespace hogd {
 std::shared_ptr<RuntimeContext>
 make_runtime_context(RuntimeEngine engine)
 {
-  static WasmiModuleCache module_cache = WasmiModuleCache(10);
+  static thread_local WasmiModuleCache module_cache = WasmiModuleCache(10);
 
   switch (engine) {
   case RuntimeEngine::kWasmi:
