@@ -32,16 +32,21 @@ syscall_SHA256_inner(SystemCallHandler &handler,
 // public key Returns: Status code indicating if verification succeeded and gas
 // cost
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_VerifySignature_inner(Signature const &signature,
-                              PublicKey const &public_key,
+syscall_VerifySignature_inner(CryptographicScheme scheme,
+                              std::span<const std::byte> signature,
+                              std::span<const std::byte> public_key,
                               std::span<const std::byte> message)
 {
-  if (public_key.scheme() != signature.scheme()) {
-    return {SyscallErrorCode::kInvalidSyscallInput, 0};
-  }
-  switch (public_key.scheme()) {
+
+  switch (scheme) {
   case CryptographicScheme::Ed25519:
-    if (!ed25519_verify(public_key.ed25519(), signature.ed25519(), message)) {
+    if (public_key.size() != sizeof(Ed25519PublicKey) ||
+        signature.size() != sizeof(Ed25519Signature)) {
+      return {SyscallErrorCode::kInvalidSyscallInput, 0};
+    }
+    if (!ed25519_verify(public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
+                        signature.subspan<0, sizeof(Ed25519Signature)>(),
+                        message)) {
       return {SyscallErrorCode::kInvalidSyscallInput, 0};
     }
     return {SyscallErrorCode::kNone, 0};

@@ -55,6 +55,22 @@ struct SyscallArgParams<T> {
   constexpr static T deref(T value) { return value; }
 };
 
+// primitive type enum values
+template<typename T> requires (std::is_enum_v<T> && sizeof(T) <= 8)
+struct SyscallArgParams<T> {
+  constexpr static size_t kNumInputs = 1;
+  constexpr static T parse(std::span<std::byte> /*unused*/, uint64_t input)
+  {
+    return static_cast<T>(input);
+  }
+  constexpr static T parse_mock(uint64_t input)
+  {
+    return static_cast<T>(input);
+  }
+  constexpr static bool validate(T /*unused*/) { return true; }
+  constexpr static T deref(T value) { return value; }
+};
+
 // Input types that can be passed by value but not within a uint64
 template<typename T> requires (sizeof(T) > 8) && std::is_trivially_copyable_v<T>
 struct SyscallArgParams<T> {
