@@ -63,7 +63,6 @@ impl WasmiRuntime {
         context: &WasmiContext,
         userctx: *mut c_void,
     ) -> Option<WasmiRuntime> {
-
         let module = if !context.module_cache.is_null() {
             if let Some(module) = unsafe { &*context.module_cache }.get(hash) {
                 module
@@ -78,13 +77,15 @@ impl WasmiRuntime {
                 module
             }
         } else {
-            let module = unsafe { Module::new_unchecked(&context.engine, bytes) }.ok()?;
+            let module =
+                unsafe { Module::new_unchecked(&context.engine, bytes) }
+                    .ok()?;
             if !check_memory_limit(&module) {
                 return None;
             }
             module
         };
-        
+
         let mut store = Store::new(module.engine(), userctx);
 
         let instance = match context.linker.instantiate(&mut store, &module) {
