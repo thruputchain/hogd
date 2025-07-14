@@ -95,7 +95,8 @@ private:
 };
 
 // Can be used across multiple WasmiContexts and across multiple transactions.
-// MUST NOT BE USED WITH CompilationMode::Lazy or CompilationMode::LazyTranslation in Wasmi!!!
+// MUST NOT BE USED WITH CompilationMode::Lazy or
+// CompilationMode::LazyTranslation in Wasmi!!!
 class WasmiModuleCache {
 public:
   WasmiModuleCache(size_t capacity);

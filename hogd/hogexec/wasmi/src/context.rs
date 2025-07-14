@@ -3,10 +3,9 @@ use wasmi::{Caller, Config, Engine, Error, Linker, Module, StackLimits};
 use core::ffi::c_void;
 use core::slice;
 use core::str::Utf8Error;
-use std::rc::Rc;
 
 use crate::external_call;
-use crate::module_cache;
+use crate::module_cache::ModuleCacheRef;
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -49,12 +48,10 @@ use crate::module_cache;
 // but not for eager compilation and validation (unclear why this choice was made).  If a module cache is used,
 // we must use CompilationMode::Eager.
 
-use crate::module_cache::ModuleCache;
-
 pub struct WasmiContext {
     pub engine: Engine,
     pub linker: Linker<*mut c_void>,
-    pub module_cache: Option<Rc<ModuleCache>>,
+    pub module_cache: Option<ModuleCacheRef>,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -76,7 +73,7 @@ fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
 }
 
 impl WasmiContext {
-    fn new(module_cache: Option<Rc<ModuleCache>>) -> WasmiContext {
+    fn new(module_cache: Option<ModuleCacheRef>) -> WasmiContext {
         let stack_limit = StackLimits::default();
 
         let engine = Engine::new(
@@ -489,9 +486,12 @@ pub unsafe extern "C" fn new_wasmi_context(
         Box::new(WasmiContext::new(None))
     } else {
         Box::new(WasmiContext::new(unsafe {
-            Some((*core::mem::transmute::<*const c_void, *const Rc<module_cache::ModuleCache>>(
-                module_cache,
-            )).clone())
+            Some(
+                (*core::mem::transmute::<*const c_void, *const ModuleCacheRef>(
+                    module_cache,
+                ))
+                .clone(),
+            )
         }))
     };
 
