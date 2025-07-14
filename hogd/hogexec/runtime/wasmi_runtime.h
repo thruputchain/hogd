@@ -14,6 +14,29 @@ namespace hogd {
 
 struct Contract;
 
+// Cache wasm modules across multiple contexts.
+// Can be used across multiple WasmiContexts and across multiple transactions.
+//
+// === WARNINGS ===
+// MUST OUTLIVE ANY WasmiContexts that use it.
+// MUST NOT BE USED WITH CompilationMode::Lazy or
+// CompilationMode::LazyTranslation in Wasmi!!!
+class WasmiModuleCache {
+public:
+  WasmiModuleCache(size_t capacity);
+  ~WasmiModuleCache();
+
+  // Disable copy and move
+  WasmiModuleCache(WasmiModuleCache const &) = delete;
+  WasmiModuleCache &operator=(WasmiModuleCache const &) = delete;
+  WasmiModuleCache(WasmiModuleCache &&) = delete;
+  WasmiModuleCache &operator=(WasmiModuleCache &&) = delete;
+
+private:
+  void *wasmi_module_cache_ptr_;
+};
+
+
 // Context shared between WasmiRuntime objects.
 // Guarantee isolation between transactions
 // by starting each transaction with a separate
@@ -47,7 +70,9 @@ struct Contract;
 // are destroyed.
 class WasmiContext : public RuntimeContext {
 public:
-  WasmiContext();
+  // module_cache can be nullptr, in which case no module cache is used.
+  // module_cache must outlive this WasmiContext.
+  WasmiContext(WasmiModuleCache *module_cache = nullptr);
 
   // wrapper around a manual drop call on the rust side
   ~WasmiContext() override;
@@ -92,24 +117,6 @@ private:
 
   // manipulated in rust
   void *wasmi_runtime_ptr_;
-};
-
-// Can be used across multiple WasmiContexts and across multiple transactions.
-// MUST NOT BE USED WITH CompilationMode::Lazy or
-// CompilationMode::LazyTranslation in Wasmi!!!
-class WasmiModuleCache {
-public:
-  WasmiModuleCache(size_t capacity);
-  ~WasmiModuleCache();
-
-  // Disable copy and move
-  WasmiModuleCache(WasmiModuleCache const &) = delete;
-  WasmiModuleCache &operator=(WasmiModuleCache const &) = delete;
-  WasmiModuleCache(WasmiModuleCache &&) = delete;
-  WasmiModuleCache &operator=(WasmiModuleCache &&) = delete;
-
-private:
-  void *wasmi_module_cache_ptr_;
 };
 
 } // namespace hogd
