@@ -18,12 +18,14 @@
 namespace hogd {
 
 WasmiContext::WasmiContext(WasmiModuleCache *module_cache)
-  : wasmi_context_ptr_(new_wasmi_context(module_cache))
+  : wasmi_context_ptr_(new_wasmi_context(module_cache ? module_cache->get_inner() : nullptr))
 {}
 
 WasmiContext::~WasmiContext()
 {
-  free_wasmi_context(wasmi_context_ptr_);
+  if (wasmi_context_ptr_ != nullptr) {
+    free_wasmi_context(wasmi_context_ptr_);
+  }
 }
 
 std::unique_ptr<Runtime>
@@ -134,11 +136,15 @@ WasmiRuntime::~WasmiRuntime()
 
 WasmiModuleCache::WasmiModuleCache(size_t capacity)
   : wasmi_module_cache_ptr_(new_wasmi_module_cache(capacity))
-{}
+{
+  std::println("WasmiModuleCache::WasmiModuleCache: ptr = {:p}", wasmi_module_cache_ptr_);
+}
 
 WasmiModuleCache::~WasmiModuleCache()
 {
-  free_wasmi_module_cache(wasmi_module_cache_ptr_);
+  if (wasmi_module_cache_ptr_ != nullptr) {
+    free_wasmi_module_cache(wasmi_module_cache_ptr_);
+  }
 }
 
 } // namespace hogd

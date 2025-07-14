@@ -1,6 +1,6 @@
 use lru::LruCache;
 
-use wasmi::Module;
+use wasmi::{Linker, Module};
 
 use core::ffi::c_void;
 use std::num::NonZeroUsize;
@@ -8,8 +8,14 @@ use std::sync::Mutex;
 
 type SHA256Hash = [u8; 32];
 
+#[derive(Clone)]
+pub struct ModuleCacheEntry {
+    pub module: Module,
+    pub linker: Linker<*mut c_void>,
+}
+
 pub struct ModuleCache {
-    cache: Mutex<LruCache<SHA256Hash, Module>>,
+    cache: Mutex<LruCache<SHA256Hash, ModuleCacheEntry>>,
 }
 
 impl ModuleCache {
@@ -21,12 +27,12 @@ impl ModuleCache {
         }
     }
 
-    pub fn get(&self, hash: &SHA256Hash) -> Option<Module> {
+    pub fn get(&self, hash: &SHA256Hash) -> Option<ModuleCacheEntry> {
         self.cache.lock().unwrap().get(hash).cloned()
     }
 
-    pub fn put(&self, hash: &SHA256Hash, module: &Module) {
-        self.cache.lock().unwrap().put(*hash, module.clone());
+    pub fn put(&self, hash: &SHA256Hash, module: &Module, linker: &Linker<*mut c_void>) {
+        self.cache.lock().unwrap().put(*hash, ModuleCacheEntry { module: module.clone(), linker: linker.clone() });
     }
 }
 
@@ -45,6 +51,7 @@ pub unsafe extern "C" fn new_wasmi_module_cache(
 /// ptr must be a pointer to an ModuleCache, which was produced by new_wasmi_module_cache.
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmi_module_cache(ptr: *mut c_void) {
+    debug_assert!(!ptr.is_null());
     unsafe {
         drop(Box::from_raw(ptr as *mut ModuleCache));
     }
