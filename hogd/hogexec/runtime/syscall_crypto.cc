@@ -1,13 +1,12 @@
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <concepts>
 #include <cstddef>
-#include <limits>
 #include <span>
 #include <type_traits>
 #include <utility>
 
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -41,7 +40,8 @@ syscall_VerifySignature_inner(int32_t scheme,
                               std::span<const std::byte> public_key,
                               std::span<const std::byte> message)
 {
-  static_assert(std::same_as<decltype(scheme), std::underlying_type_t<CryptographicScheme>>);
+  static_assert(std::same_as<decltype(scheme),
+                             std::underlying_type_t<CryptographicScheme>>);
 
   switch (static_cast<CryptographicScheme>(scheme)) {
   case CryptographicScheme::Ed25519:
