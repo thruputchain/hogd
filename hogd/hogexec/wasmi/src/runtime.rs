@@ -63,8 +63,7 @@ impl WasmiRuntime {
         context: &WasmiContext,
         userctx: *mut c_void,
     ) -> Option<WasmiRuntime> {
-        let module = if !context.module_cache.is_null() {
-            let module_cache_inner = unsafe { &*context.module_cache };
+        let module = if let Some(module_cache_inner) = &context.module_cache {
             if let Some(module) = module_cache_inner.get(hash) {
                 module
             } else {

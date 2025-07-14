@@ -48,10 +48,10 @@ use crate::module_cache::ModuleCache;
 // but not for eager compilation and validation (unclear why this choice was made).  If a module cache is used,
 // we must use CompilationMode::Eager.
 
-pub struct WasmiContext {
+pub struct WasmiContext<'a> {
     pub engine: Engine,
     pub linker: Linker<*mut c_void>,
-    pub module_cache: *const ModuleCache,
+    pub module_cache: Option<&'a ModuleCache>,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -72,8 +72,8 @@ fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
     }
 }
 
-impl WasmiContext {
-    fn new(module_cache: *const ModuleCache) -> WasmiContext {
+impl<'a> WasmiContext<'a> {
+    fn new(module_cache: Option<&'a ModuleCache>) -> WasmiContext<'a> {
         let stack_limit = StackLimits::default();
 
         let engine = Engine::new(
@@ -478,17 +478,18 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 /// # Safety
 /// module_cache can be nullptr, in which case no module cache is used.
 /// module_cache is threadsafe, so it can be safely shared across threads.
+/// module_cache must outlive WasmiContext.
 #[no_mangle]
 pub unsafe extern "C" fn new_wasmi_context(
     module_cache: *const c_void,
 ) -> *mut c_void {
     let b = if module_cache.is_null() {
-        Box::new(WasmiContext::new(core::ptr::null()))
+        Box::new(WasmiContext::new(None))
     } else {
         Box::new(WasmiContext::new(unsafe {
-            core::mem::transmute::<*const c_void, *const ModuleCache>(
+            Some(&*(core::mem::transmute::<*const c_void, *const ModuleCache>(
                 module_cache,
-            )
+            )))
         }))
     };
 
