@@ -7,21 +7,17 @@ from yaml import CLoader as Loader, CDumper as Dumper
 import argparse
 import os
 
-# Map from c++ to xdr typenames
-cpp_to_xdr_typenames = {
-  "int32_t" : "int",
-  "uint32_t" : "unsigned int",
-  "int64_t" : "hyper",
-  "uint64_t" : "unsigned hyper"
-}
+def load_cpp_to_rust_map(spec):
+  cpp_to_rust_typenames = {}
+  for type_mapping in spec["type_mappings"]:
+    cpp_to_rust_typenames[type_mapping["base_name"]] = type_mapping["rust_name"]
+  return cpp_to_rust_typenames
 
-# map from c++ to rust typenames
-cpp_to_rust_typenames = {
-  "int32_t" : "i32",
-  "uint32_t" : "u32",
-  "int64_t" : "i64",
-  "uint64_t" : "u64"
-}
+def load_cpp_to_xdr_map(spec):
+  cpp_to_xdr_typenames = {}
+  for type_mapping in spec["type_mappings"]:
+    cpp_to_xdr_typenames[type_mapping["base_name"]] = type_mapping["xdr_name"]
+  return cpp_to_xdr_typenames
 
 """
 Each syscall generates a
@@ -124,17 +120,6 @@ span_argument: bool
   Passed into c++ as a std::span<{const}std::byte>.
 
   Mutually exclusive with typename or primitive_type.
-
-custom_parsing: bool
-  required: no
-    default: no
-  description: Some input argument types require parsing in ways that don't 
-  quite fit into one of the above options. These we support with a custom 
-  parsing option.
-
-custom_args_required: int
-  required: only if custom_parsing is true
-  description: The number of arguments passed to the custom parsing handler.
 """
 
 """
@@ -180,14 +165,6 @@ def gen_validate_arg(inp, *, is_input):
     if optional:
       raise Exception("optional primitive_type is unimplemented");
     return 1, f"{typename} {arg_name}"
-
-  if "custom_parsing" in inp and inp["custom_parsing"] and is_input:
-    if optional:
-      raise Exception("optional parsing is a strict subset of custom parsing--don't use both")
-    num_args = inp["custom_args_required"]
-
-    return num_args, f"{const}{typename}& {arg_name}"
-  #endif custom_parsing
 
   if optional:
     return 1, f"{const}{typename}* {arg_name}"
@@ -254,7 +231,6 @@ def gen_inner(syscall, syscall_input_count):
 
 def gen_frame(syscall, syscall_input_count):
   return gen_inner_outer(syscall, syscall_input_count)[1]
-
 
 def gen_syscall_table_entry(syscall):
   name = syscall["name"]
@@ -586,6 +562,9 @@ args = parser.parse_args()
 
 spec_full = yaml.load(open(args.syscall_yaml, 'r').read(), Loader=Loader)
 spec = spec_full["syscalls"]
+
+cpp_to_rust_typenames = load_cpp_to_rust_map(spec_full)
+cpp_to_xdr_typenames = load_cpp_to_xdr_map(spec_full)
 
 os.makedirs(args.output_dir, exist_ok=True)
 
