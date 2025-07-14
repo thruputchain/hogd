@@ -1,7 +1,11 @@
+#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
+#include <concepts>
 #include <cstddef>
+#include <limits>
 #include <span>
+#include <type_traits>
 #include <utility>
 
 #include "hogd/crypto/crypto.h"
@@ -29,16 +33,17 @@ syscall_SHA256_inner(SystemCallHandler &handler,
 };
 
 // Verifies a cryptographic signature against a message using the provided
-// public key Returns: Status code indicating if verification succeeded and gas
-// cost
+// public key
+// Returns: Status code indicating if verification succeeded and gas cost
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_VerifySignature_inner(CryptographicScheme scheme,
+syscall_VerifySignature_inner(int32_t scheme,
                               std::span<const std::byte> signature,
                               std::span<const std::byte> public_key,
                               std::span<const std::byte> message)
 {
+  static_assert(std::same_as<decltype(scheme), std::underlying_type_t<CryptographicScheme>>);
 
-  switch (scheme) {
+  switch (static_cast<CryptographicScheme>(scheme)) {
   case CryptographicScheme::Ed25519:
     if (public_key.size() != sizeof(Ed25519PublicKey) ||
         signature.size() != sizeof(Ed25519Signature)) {
