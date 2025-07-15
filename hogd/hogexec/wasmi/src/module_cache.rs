@@ -4,7 +4,6 @@ use wasmi::{Linker, Module};
 
 use core::ffi::c_void;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
 
 type SHA256Hash = [u8; 32];
 
@@ -14,30 +13,29 @@ pub struct ModuleCacheEntry {
     pub linker: Linker<*mut c_void>,
 }
 
+// Module cache is NOT threadsafe, and shoult NOT be shared across threads.
 pub struct ModuleCache {
-    cache: Mutex<LruCache<SHA256Hash, ModuleCacheEntry>>,
+    cache: LruCache<SHA256Hash, ModuleCacheEntry>,
 }
 
 impl ModuleCache {
     pub fn new(capacity: usize) -> Self {
         Self {
-            cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(capacity).unwrap(),
-            )),
+            cache: LruCache::new(NonZeroUsize::new(capacity).unwrap()),
         }
     }
 
-    pub fn get(&self, hash: &SHA256Hash) -> Option<ModuleCacheEntry> {
-        self.cache.lock().unwrap().get(hash).cloned()
+    pub fn get(&mut self, hash: &SHA256Hash) -> Option<ModuleCacheEntry> {
+        self.cache.get(hash).cloned()
     }
 
     pub fn put(
-        &self,
+        &mut self,
         hash: &SHA256Hash,
         module: &Module,
         linker: &Linker<*mut c_void>,
     ) {
-        self.cache.lock().unwrap().put(
+        self.cache.put(
             *hash,
             ModuleCacheEntry {
                 module: module.clone(),

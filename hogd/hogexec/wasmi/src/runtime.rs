@@ -60,33 +60,33 @@ impl WasmiRuntime {
     fn new(
         bytes: &[u8],
         hash: &[u8; 32],
-        context: &WasmiContext,
+        context: &mut WasmiContext,
         userctx: *mut c_void,
     ) -> Option<WasmiRuntime> {
-        let (module, linker) = if let Some(module_cache_inner) =
-            &context.module_cache
-        {
-            if let Some(module) = module_cache_inner.get(hash) {
+        let (module, linker) = if context.has_module_cache() {
+            if let Some(module) = context.get_cached_module(hash) {
                 (module.module, module.linker)
             } else {
+                let linker = context.new_linker();
                 let module =
-                    unsafe { Module::new_unchecked(&context.engine, bytes) }
+                    unsafe { Module::new_unchecked(&linker.engine(), bytes) }
                         .ok()?;
                 if !check_memory_limit(&module) {
                     return None;
                 }
-                module_cache_inner.put(hash, &module, &context.linker);
-                (module, context.linker.clone())
+                context.put_cached_module(hash, &module, &linker);
+                (module, linker)
             }
         } else {
+            let linker = context.new_linker();
             let module =
-                unsafe { Module::new_unchecked(&context.engine, bytes) }
+                unsafe { Module::new_unchecked(&linker.engine(), bytes) }
                     .ok()?;
 
             if !check_memory_limit(&module) {
                 return None;
             }
-            (module, context.linker.clone())
+            (module, linker)
         };
 
         let mut store = Store::new(module.engine(), userctx);
@@ -178,7 +178,7 @@ pub unsafe extern "C" fn new_wasmi_runtime(
     bytes_len: u32,
     hash: *const u8, // 32 bytes
     userctx: *mut c_void,
-    wasmi_context_ptr: *const c_void,
+    wasmi_context_ptr: *mut c_void,
 ) -> *mut c_void {
     if bytes.is_null() {
         return core::ptr::null_mut();
@@ -188,8 +188,8 @@ pub unsafe extern "C" fn new_wasmi_runtime(
 
     let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };
 
-    let wasmi_context: &WasmiContext = unsafe {
-        &*core::mem::transmute::<*const c_void, *mut WasmiContext>(
+    let wasmi_context: &mut WasmiContext = unsafe {
+        &mut *core::mem::transmute::<*mut c_void, *mut WasmiContext>(
             wasmi_context_ptr,
         )
     };
