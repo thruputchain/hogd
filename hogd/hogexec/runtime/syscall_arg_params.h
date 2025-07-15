@@ -10,7 +10,6 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
-#include "types.hh"
 
 namespace hogd {
 
