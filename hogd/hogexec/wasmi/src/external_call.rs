@@ -12,20 +12,9 @@ use wasmi::Error;
 use crate::ffi_enums::{HostFnErrorCode, InvokeErrorCode};
 use crate::invoke_result::WasmiInvokeResult;
 
-#[repr(u8)]
-#[derive(Clone, Copy, Debug)]
-pub enum TrampolineErrorEnum {
-    OutOfGas = 1,
-    Unrecoverable = 2,
-    Return = 3,
-    Exit = 4,
-    ValidationFailure = 5,
-    AbortTransaction = 6,
-}
-
 #[derive(Debug, Copy, Clone)]
 pub struct TrampolineError {
-    pub error: TrampolineErrorEnum,
+    pub error: HostFnErrorCode,
 }
 
 impl fmt::Display for TrampolineError {
@@ -34,22 +23,25 @@ impl fmt::Display for TrampolineError {
     }
 }
 
-impl HostError for TrampolineError {}
-
 impl TrampolineError {
+    // if a TrampolineError gets thrown within the wasmi invocation,
+    // this error is caught at the root of the invocation and converted to an InvokeResult.
     pub fn to_wasmi_invoke_result(self) -> WasmiInvokeResult {
+        debug_assert!(self.error != HostFnErrorCode::kHostNoneOrRecoverable);
         match self.error {
-            TrampolineErrorEnum::OutOfGas => {
+            HostFnErrorCode::kHostOutOfGas => {
                 WasmiInvokeResult::error(InvokeErrorCode::kInvokeOutOfGas)
             }
-            TrampolineErrorEnum::Return => WasmiInvokeResult::success(),
-            TrampolineErrorEnum::Exit => {
+            HostFnErrorCode::kHostReturn => WasmiInvokeResult::success(),
+            HostFnErrorCode::kHostExit => {
                 WasmiInvokeResult::error(InvokeErrorCode::kInvokeDeterministic)
             }
-            TrampolineErrorEnum::ValidationFailure => WasmiInvokeResult::error(
-                InvokeErrorCode::kInvokeValidationFailure,
-            ),
-            TrampolineErrorEnum::AbortTransaction => WasmiInvokeResult::error(
+            HostFnErrorCode::kHostValidationFailure => {
+                WasmiInvokeResult::error(
+                    InvokeErrorCode::kInvokeValidationFailure,
+                )
+            }
+            HostFnErrorCode::kHostAbortTransaction => WasmiInvokeResult::error(
                 InvokeErrorCode::kInvokeAbortTransaction,
             ),
             _ => {
@@ -59,6 +51,8 @@ impl TrampolineError {
     }
 }
 
+impl HostError for TrampolineError {}
+
 // This is annoying, but I'm not sure how better to deal with this
 pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
     match result.panic {
@@ -67,31 +61,31 @@ pub fn handle_trampoline_error(result: TrampolineResult) -> Result<i32, Error> {
         }
         x if x == HostFnErrorCode::kHostOutOfGas as i32 => {
             Err(Error::host(TrampolineError {
-                error: TrampolineErrorEnum::OutOfGas,
+                error: HostFnErrorCode::kHostOutOfGas,
             }))
         }
         x if x == HostFnErrorCode::kHostReturn as i32 => {
             Err(Error::host(TrampolineError {
-                error: TrampolineErrorEnum::Return,
+                error: HostFnErrorCode::kHostReturn,
             }))
         }
         x if x == HostFnErrorCode::kHostExit as i32 => {
             Err(Error::host(TrampolineError {
-                error: TrampolineErrorEnum::Exit,
+                error: HostFnErrorCode::kHostExit,
             }))
         }
         x if x == HostFnErrorCode::kHostValidationFailure as i32 => {
             Err(Error::host(TrampolineError {
-                error: TrampolineErrorEnum::ValidationFailure,
+                error: HostFnErrorCode::kHostValidationFailure,
             }))
         }
         x if x == HostFnErrorCode::kHostAbortTransaction as i32 => {
             Err(Error::host(TrampolineError {
-                error: TrampolineErrorEnum::AbortTransaction,
+                error: HostFnErrorCode::kHostAbortTransaction,
             }))
         }
         _ => Err(Error::host(TrampolineError {
-            error: TrampolineErrorEnum::Unrecoverable,
+            error: HostFnErrorCode::kHostUnrecoverable,
         })),
     }
 }
