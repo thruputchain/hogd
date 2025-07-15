@@ -102,7 +102,8 @@ TEST_F(NativeContractTest, BasicInstantiate)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  auto runtime = runtime_context_->make_new_runtime(contract, &handler, true);
+  auto runtime = runtime_context_->make_new_runtime(contract, sha256(contract),
+                                                    &handler, true);
 
   auto res = runtime->invoke(0, UINT64_MAX);
 

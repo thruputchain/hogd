@@ -5,13 +5,12 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+use core::fmt;
 use wasmi::core::HostError;
 use wasmi::Error;
 
 use crate::ffi_enums::{HostFnErrorCode, InvokeErrorCode};
 use crate::invoke_result::WasmiInvokeResult;
-
-use core::fmt;
 
 #[derive(Debug, Copy, Clone)]
 pub struct TrampolineError {

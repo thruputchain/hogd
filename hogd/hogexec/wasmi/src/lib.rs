@@ -5,6 +5,7 @@ mod external_call;
 #[rustfmt::skip]
 pub mod ffi_enums;
 pub mod invoke_result;
+pub mod module_cache;
 pub mod runtime;
 
 use crate::runtime::WasmiRuntime;

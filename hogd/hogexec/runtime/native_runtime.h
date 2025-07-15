@@ -200,6 +200,7 @@ public:
   ~NativeContext() override = default;
 
   std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
+                                            SHA256Hash const &hash,
                                             SystemCallHandler *syscall_handler,
                                             bool do_contract_verify) override;
 

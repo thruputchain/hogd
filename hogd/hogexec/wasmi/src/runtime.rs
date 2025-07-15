@@ -59,33 +59,42 @@ impl WasmiRuntime {
     // Invariant required: the input wasm module must have passed validation.
     fn new(
         bytes: &[u8],
-        context: &WasmiContext,
+        hash: &[u8; 32],
+        context: &mut WasmiContext,
         userctx: *mut c_void,
     ) -> Option<WasmiRuntime> {
-        let module =
-            match unsafe { Module::new_unchecked(&context.engine, bytes) } {
-                Ok(m) => m,
-                Err(_) => {
+        let (module, linker) = if context.has_module_cache() {
+            if let Some(module) = context.get_cached_module(hash) {
+                (module.module, module.linker)
+            } else {
+                let linker = context.linker();
+                let module =
+                    unsafe { Module::new_unchecked(linker.engine(), bytes) }
+                        .ok()?;
+                if !check_memory_limit(&module) {
                     return None;
                 }
-            };
-        if !check_memory_limit(&module) {
-            return None;
-        }
+                context.put_cached_module(hash, &module, &linker);
+                (module, linker)
+            }
+        } else {
+            let linker = context.linker();
+            let module =
+                unsafe { Module::new_unchecked(linker.engine(), bytes) }
+                    .ok()?;
 
-        let mut store = Store::new(&context.engine, userctx);
-
-        let instance = match context.linker.instantiate(&mut store, &module) {
-            Ok(inst_pre) => match inst_pre.ensure_no_start(&mut store) {
-                Ok(inst) => inst,
-                Err(_) => {
-                    return None;
-                }
-            },
-            Err(_) => {
+            if !check_memory_limit(&module) {
                 return None;
             }
+            (module, linker)
         };
+
+        let mut store = Store::new(module.engine(), userctx);
+        let instance = linker
+            .instantiate(&mut store, &module)
+            .ok()?
+            .ensure_no_start(&mut store)
+            .ok()?;
         Some(Self { store, instance })
     }
 
@@ -99,26 +108,23 @@ impl WasmiRuntime {
             }
         };
 
-        let mut res = [];
-        let func_res = func.call(&mut self.store, &[], &mut res);
-
-        match func_res {
+        match func.call(&mut self.store, &[], &mut []) {
             Ok(_) => WasmiInvokeResult::success(),
             Err(err) => {
                 if let Some(trap_code) = err.as_trap_code() {
                     return handle_trap_code(trap_code);
                 }
-                let my_error = match err
-                    .downcast_ref::<external_call::TrampolineError>()
-                {
-                    Some(trampoline_error) => trampoline_error,
-                    None => {
-                        return WasmiInvokeResult::error(
-                            InvokeErrorCode::kInvokeUnrecoverable,
-                        );
-                    }
-                };
-                my_error.to_wasmi_invoke_result()
+                err.downcast_ref::<external_call::TrampolineError>()
+                    .map_or_else(
+                        || {
+                            WasmiInvokeResult::error(
+                                InvokeErrorCode::kInvokeUnrecoverable,
+                            )
+                        },
+                        |trampoline_error| {
+                            trampoline_error.to_wasmi_invoke_result()
+                        },
+                    )
             }
         }
     }
@@ -135,7 +141,6 @@ pub unsafe extern "C" fn wasmi_invoke(
 ) -> WasmiInvokeResult {
     let runtime: *mut WasmiRuntime =
         unsafe { core::mem::transmute(runtime_void) };
-
     debug_assert!(!runtime.is_null());
 
     if method_name.is_null() {
@@ -167,24 +172,27 @@ pub unsafe extern "C" fn wasmi_invoke(
 pub unsafe extern "C" fn new_wasmi_runtime(
     bytes: *const u8,
     bytes_len: u32,
+    hash: *const u8, // 32 bytes
     userctx: *mut c_void,
-    wasmi_context_ptr: *const c_void,
+    wasmi_context_ptr: *mut c_void,
 ) -> *mut c_void {
     if bytes.is_null() {
         return core::ptr::null_mut();
     }
-
+    debug_assert!(!hash.is_null());
     debug_assert!(!wasmi_context_ptr.is_null());
 
-    let wasmi_context: &WasmiContext = unsafe {
-        &*core::mem::transmute::<*const c_void, *mut WasmiContext>(
+    let hash_slice: &[u8; 32] = unsafe { &*(hash as *const [u8; 32]) };
+
+    let wasmi_context: &mut WasmiContext = unsafe {
+        &mut *core::mem::transmute::<*mut c_void, *mut WasmiContext>(
             wasmi_context_ptr,
         )
     };
 
     let slice = unsafe { slice::from_raw_parts(bytes, bytes_len as usize) };
 
-    let b = match WasmiRuntime::new(slice, wasmi_context, userctx) {
+    let b = match WasmiRuntime::new(slice, hash_slice, wasmi_context, userctx) {
         Some(res) => Box::new(res),
         None => {
             return core::ptr::null_mut();
