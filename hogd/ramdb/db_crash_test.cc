@@ -36,8 +36,7 @@ constexpr size_t kPuts = 16 * kKeys;
 constexpr size_t kValueSize = 128;
 constexpr size_t kBatchSize = 16384;
 constexpr size_t kIters = 128;
-//constexpr size_t kSyncsPerSnapshot = 16;
-constexpr size_t kSyncsPerSnapshot = 1024 * 1024;
+constexpr size_t kSyncsPerSnapshot = 16;
 constexpr auto kDurationBetweenCrashes = std::chrono::duration<double>{5};
 
 constexpr bool kRemoveAllFilesAtStart = false;
@@ -93,6 +92,7 @@ struct Shared {
   uint64_t synced_lsn;
   size_t recovery_count;
   std::atomic<size_t> watchdog;
+  std::atomic<bool> starting_up;
 };
 
 uint64_t extract_put_seqnum(std::span<const std::byte> value) {
@@ -109,13 +109,14 @@ ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
 
   info("checking that the results of puts [{}, {}) have expected values", start, end);
 
+  std::vector<uint64_t> missing_keys{};
   bool failure = false;
   for (size_t i = start; i < end; i++) {
     shared.watchdog++;
     uint64_t key = i % kKeys;
     DBStatus<DBItem> ret = db.get(byte_view(key));
     if (!ret) [[unlikely]] {
-      error("expected key {} with value {}; found nothing", key, i);
+      missing_keys.push_back(key);
       failure = true;
       continue;
     }
@@ -132,13 +133,42 @@ ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
     }
   }
 
+  std::ranges::sort(missing_keys);
+  std::print("Missing keys: ");
+  uint64_t prev = kKeys;
+  bool last_skipped = false;
+  for (uint64_t key : missing_keys) {
+    if (prev + 1 == key) {
+      last_skipped = true;
+    } else {
+      if (last_skipped)
+        std::print(" ... ");
+      std::print("{}", key);
+      last_skipped = false;
+    }
+    prev = key;
+  }
+  if (last_skipped)
+    std::print(" ... {}", prev);
+  std::println();
+
   if (failure)
     panic("unexpected state after recovery");
+}
+
+size_t
+db_size(hogd::Database &db)
+{
+  size_t size = 0;
+  db.get_each([&size](std::span<const std::byte>, uint8_t, std::span<const std::byte>) { size++; });
+  return size;
 }
 
 void
 do_child(std::string_view path, Shared *shared)
 {
+  shared->starting_up = true;
+
   auto db = make_db(path, kKeys, kValueSize);
   warn("DB RECOVERED SYNCED_LSN IS {}", db->get_synced_lsn());
 
@@ -149,6 +179,8 @@ do_child(std::string_view path, Shared *shared)
   info("resuming put()s at {}; {} SUCCESSFUL RECOVERIES", left_off_put,
        shared->recovery_count);
   shared->recovery_count++;
+
+  shared->starting_up = false;
 
   for (size_t put = left_off_put; put < kPuts; put++) {
     shared->watchdog++;
@@ -161,6 +193,7 @@ do_child(std::string_view path, Shared *shared)
     if (put && (put % kBatchSize == 0)) {
       uint64_t lsn;
       if (shared->synced_lsn && (shared->synced_lsn % kSyncsPerSnapshot == 0)) {
+        info("DATABASE SIZE JUST BEFORE SNAPSHOT: {}", db_size(*db));
         auto ret = db->sync_and_snapshot(0);
         if (!ret) [[unlikely]]
           fail(ret.error());
@@ -228,6 +261,9 @@ dead:
     error("child exited with status {}; exiting", exit_status);
     std::exit(exit_status);
   }
+
+  if (shared->starting_up)
+    panic("child didn't make it through startup before injected crash; exiting testing");
 
   info("restarting child");
 }
