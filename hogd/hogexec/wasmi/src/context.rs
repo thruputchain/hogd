@@ -1,4 +1,6 @@
-use wasmi::{Caller, Config, Engine, Error, Linker, Module, StackLimits};
+use wasmi::{
+    Caller, CompilationMode, Config, Engine, Error, Linker, Module, StackLimits,
+};
 
 use core::ffi::c_void;
 use core::slice;
@@ -156,8 +158,15 @@ impl<'a> WasmiContext<'a> {
             Config::default()
                 .consume_fuel(true)
                 .floats(false)
-                .set_stack_limits(StackLimits::default()),
+                .set_stack_limits(StackLimits::default())
+                // MUST BE EAGER
+                // This warning is in ALL CAPITALS because if we change that
+                // we will have NONDETERMINISM in gas measurements
+                // and THAT WOULD BE BAD if we have the module cache enabled
+                .compilation_mode(CompilationMode::Eager),
         )
+        // WARNING:
+        // Caching is INCOMPATIBLE with wasmi's lazy compilation.
         // If we upgrade to later wasmi versions, we should disable
         // simd support (relaxed_simd at least, is apparently not deterministic)
         // .wasm_simd(false)
