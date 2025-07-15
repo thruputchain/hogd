@@ -29,10 +29,6 @@ pub struct WasmiRuntime {
     pub instance: Instance,
 }
 
-fn assert_runtime_not_null(runtime: *const WasmiRuntime) {
-    debug_assert!(!runtime.is_null());
-}
-
 fn handle_trap_code(code: wasmi::core::TrapCode) -> WasmiInvokeResult {
     // all of the wasmi trap codes, in version 0.36,
     // are raised deterministically.
@@ -104,7 +100,6 @@ impl WasmiRuntime {
         };
 
         let mut res = [];
-
         let func_res = func.call(&mut self.store, &[], &mut res);
 
         match func_res {
@@ -123,36 +118,7 @@ impl WasmiRuntime {
                         );
                     }
                 };
-
-                match my_error.error {
-                    external_call::TrampolineErrorEnum::OutOfGas => {
-                        WasmiInvokeResult::error(
-                            InvokeErrorCode::kInvokeOutOfGas,
-                        )
-                    }
-                    external_call::TrampolineErrorEnum::Return => {
-                        // Return no error code if successful return
-                        WasmiInvokeResult::success()
-                    }
-                    external_call::TrampolineErrorEnum::Exit => {
-                        WasmiInvokeResult::error(
-                            InvokeErrorCode::kInvokeDeterministic,
-                        )
-                    }
-                    external_call::TrampolineErrorEnum::ValidationFailure => {
-                        WasmiInvokeResult::error(
-                            InvokeErrorCode::kInvokeValidationFailure,
-                        )
-                    }
-                    external_call::TrampolineErrorEnum::AbortTransaction => {
-                        WasmiInvokeResult::error(
-                            InvokeErrorCode::kInvokeAbortTransaction,
-                        )
-                    }
-                    _ => WasmiInvokeResult::error(
-                        InvokeErrorCode::kInvokeUnrecoverable,
-                    ),
-                }
+                my_error.to_wasmi_invoke_result()
             }
         }
     }
@@ -170,7 +136,7 @@ pub unsafe extern "C" fn wasmi_invoke(
     let runtime: *mut WasmiRuntime =
         unsafe { core::mem::transmute(runtime_void) };
 
-    assert_runtime_not_null(runtime);
+    debug_assert!(!runtime.is_null());
 
     if method_name.is_null() {
         return WasmiInvokeResult::error(InvokeErrorCode::kInvokeDeterministic);
@@ -234,8 +200,7 @@ pub unsafe extern "C" fn new_wasmi_runtime(
 #[no_mangle]
 pub unsafe extern "C" fn free_wasmi_runtime(p: *mut c_void) {
     let runtime: *mut WasmiRuntime = unsafe { core::mem::transmute(p) };
-
-    assert_runtime_not_null(runtime);
+    debug_assert!(!runtime.is_null());
 
     unsafe { drop(Box::from_raw(runtime)) };
 }

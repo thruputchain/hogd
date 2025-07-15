@@ -452,7 +452,7 @@ void
 GenRs::show_type(const EnumBody &e, string t)
 {
   prtop(R"(
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 #[cfg_attr(feature="std", derive(ReadXdrEnum,WriteXdrEnum))]
 #[repr(i32)]
 pub enum {} )", t);
