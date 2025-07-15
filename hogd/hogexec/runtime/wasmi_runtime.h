@@ -32,14 +32,11 @@ public:
   WasmiModuleCache(WasmiModuleCache &&) = delete;
   WasmiModuleCache &operator=(WasmiModuleCache &&) = delete;
 
-  void* get_inner() const {
-    return wasmi_module_cache_ptr_;
-  }
+  void *get_inner() const { return wasmi_module_cache_ptr_; }
 
 private:
   void *wasmi_module_cache_ptr_ = nullptr;
 };
-
 
 // Context shared between WasmiRuntime objects.
 // Guarantee isolation between transactions

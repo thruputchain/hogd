@@ -31,8 +31,19 @@ impl ModuleCache {
         self.cache.lock().unwrap().get(hash).cloned()
     }
 
-    pub fn put(&self, hash: &SHA256Hash, module: &Module, linker: &Linker<*mut c_void>) {
-        self.cache.lock().unwrap().put(*hash, ModuleCacheEntry { module: module.clone(), linker: linker.clone() });
+    pub fn put(
+        &self,
+        hash: &SHA256Hash,
+        module: &Module,
+        linker: &Linker<*mut c_void>,
+    ) {
+        self.cache.lock().unwrap().put(
+            *hash,
+            ModuleCacheEntry {
+                module: module.clone(),
+                linker: linker.clone(),
+            },
+        );
     }
 }
 

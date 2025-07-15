@@ -487,9 +487,11 @@ pub unsafe extern "C" fn new_wasmi_context(
         Box::new(WasmiContext::new(None))
     } else {
         Box::new(WasmiContext::new(unsafe {
-            Some(&*(core::mem::transmute::<*const c_void, *const ModuleCache>(
-                module_cache,
-            )))
+            Some(
+                &*(core::mem::transmute::<*const c_void, *const ModuleCache>(
+                    module_cache,
+                )),
+            )
         }))
     };
 

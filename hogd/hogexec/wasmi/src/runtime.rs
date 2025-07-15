@@ -63,7 +63,9 @@ impl WasmiRuntime {
         context: &WasmiContext,
         userctx: *mut c_void,
     ) -> Option<WasmiRuntime> {
-        let (module, linker) = if let Some(module_cache_inner) = &context.module_cache {
+        let (module, linker) = if let Some(module_cache_inner) =
+            &context.module_cache
+        {
             if let Some(module) = module_cache_inner.get(hash) {
                 (module.module, module.linker)
             } else {
@@ -80,7 +82,7 @@ impl WasmiRuntime {
             let module =
                 unsafe { Module::new_unchecked(&context.engine, bytes) }
                     .ok()?;
-            
+
             if !check_memory_limit(&module) {
                 return None;
             }

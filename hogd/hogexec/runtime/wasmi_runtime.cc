@@ -18,7 +18,8 @@
 namespace hogd {
 
 WasmiContext::WasmiContext(WasmiModuleCache *module_cache)
-  : wasmi_context_ptr_(new_wasmi_context(module_cache ? module_cache->get_inner() : nullptr))
+  : wasmi_context_ptr_(
+        new_wasmi_context(module_cache ? module_cache->get_inner() : nullptr))
 {}
 
 WasmiContext::~WasmiContext()
