@@ -90,18 +90,11 @@ impl WasmiRuntime {
         };
 
         let mut store = Store::new(module.engine(), userctx);
-
-        let instance = match linker.instantiate(&mut store, &module) {
-            Ok(inst_pre) => match inst_pre.ensure_no_start(&mut store) {
-                Ok(inst) => inst,
-                Err(_) => {
-                    return None;
-                }
-            },
-            Err(_) => {
-                return None;
-            }
-        };
+        let instance = linker
+            .instantiate(&mut store, &module)
+            .ok()?
+            .ensure_no_start(&mut store)
+            .ok()?;
         Some(Self { store, instance })
     }
 
@@ -121,14 +114,17 @@ impl WasmiRuntime {
                 if let Some(trap_code) = err.as_trap_code() {
                     return handle_trap_code(trap_code);
                 }
-                match err.downcast_ref::<external_call::TrampolineError>() {
-                    Some(trampoline_error) => {
-                        trampoline_error.to_wasmi_invoke_result()
-                    }
-                    None => WasmiInvokeResult::error(
-                        InvokeErrorCode::kInvokeUnrecoverable,
-                    ),
-                }
+                err.downcast_ref::<external_call::TrampolineError>()
+                    .map_or_else(
+                        || {
+                            WasmiInvokeResult::error(
+                                InvokeErrorCode::kInvokeUnrecoverable,
+                            )
+                        },
+                        |trampoline_error| {
+                            trampoline_error.to_wasmi_invoke_result()
+                        },
+                    )
             }
         }
     }
