@@ -142,9 +142,9 @@ impl<'a> WasmiContext<'a> {
         module: &Module,
         linker: &Linker<*mut c_void>,
     ) {
-        self.module_cache
-            .as_mut()
-            .map(|cache| cache.put(hash, module, linker));
+        if let Some(cache) = self.module_cache.as_mut() {
+            cache.put(hash, module, linker);
+        }
     }
 
     pub fn add_entry(&mut self, entry: LinkEntry) {

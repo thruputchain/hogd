@@ -69,7 +69,7 @@ impl WasmiRuntime {
             } else {
                 let linker = context.linker();
                 let module =
-                    unsafe { Module::new_unchecked(&linker.engine(), bytes) }
+                    unsafe { Module::new_unchecked(linker.engine(), bytes) }
                         .ok()?;
                 if !check_memory_limit(&module) {
                     return None;
@@ -80,7 +80,7 @@ impl WasmiRuntime {
         } else {
             let linker = context.linker();
             let module =
-                unsafe { Module::new_unchecked(&linker.engine(), bytes) }
+                unsafe { Module::new_unchecked(linker.engine(), bytes) }
                     .ok()?;
 
             if !check_memory_limit(&module) {
