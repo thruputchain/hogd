@@ -72,8 +72,8 @@ impl LinkEntry {
 }
 
 pub struct WasmiContext<'a> {
-    // pub entries: Vec<LinkEntry>,
-    pub linker: Linker<*mut c_void>,
+    pub entries: Vec<LinkEntry>,
+    //pub linker: Linker<*mut c_void>,
     pub module_cache: Option<&'a mut ModuleCache>,
 }
 
@@ -124,7 +124,8 @@ macro_rules! link_function_nargs {
 impl<'a> WasmiContext<'a> {
     fn new(module_cache: Option<&'a mut ModuleCache>) -> WasmiContext<'a> {
         Self {
-            linker: Linker::new(&Self::new_engine()),
+            //linker: Linker::new(&Self::new_engine()),
+            entries: Vec::new(),
             module_cache,
         }
     }
@@ -151,9 +152,9 @@ impl<'a> WasmiContext<'a> {
             .map(|cache| cache.put(hash, module, linker));
     }
 
-  //  pub fn add_entry(&mut self, entry: LinkEntry) {
-  //      self.entries.push(entry);
-  //  }
+    pub fn add_entry(&mut self, entry: LinkEntry) {
+        self.entries.push(entry);
+    }
 
     fn new_engine() -> Engine {
         Engine::new(
@@ -168,8 +169,12 @@ impl<'a> WasmiContext<'a> {
         // .wasm_relaxed_simd(false),
     }
 
-    /*pub fn new_linker(&self) -> Linker<*mut c_void> {
-        let engine = self.new_engine();
+    // pub fn linker(&self) -> Linker<*mut c_void> {
+    //     self.linker.clone()
+    // }
+
+    pub fn linker(&self) -> Linker<*mut c_void> {
+        let engine = Self::new_engine();
 
         let mut linker = Linker::new(&engine);
 
@@ -237,7 +242,7 @@ impl<'a> WasmiContext<'a> {
         }
 
         linker
-    } */
+    }
 
     fn verify_contract(&self, contract_data: &[u8]) -> bool {
         // TODO(geoff): consider caching the engine
@@ -343,8 +348,9 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 
     let c = unsafe { &mut *context };
 
-    //c.add_entry(LinkEntry::new(module, method, nargs, function_pointer));
-    match nargs {
+    c.add_entry(LinkEntry::new(module, method, nargs, function_pointer));
+    true
+   /* match nargs {
         0 => WasmiContext::link_function_0args(&mut c.linker, function_pointer, &module, &method),
         1 => WasmiContext::link_function_1args(&mut c.linker, function_pointer, &module, &method),
         2 => WasmiContext::link_function_2args(&mut c.linker, function_pointer, &module, &method),
@@ -357,7 +363,7 @@ pub unsafe extern "C" fn wasmi_link_nargs(
         _ => {
             return false;
         }
-    }.is_ok()
+    }.is_ok()*/
 }
 
 // Rust FFI needs no_mangle and extern "C"

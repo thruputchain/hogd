@@ -67,7 +67,7 @@ impl WasmiRuntime {
             if let Some(module) = context.get_cached_module(hash) {
                 (module.module, module.linker)
             } else {
-                let linker = context.linker.clone();
+                let linker = context.linker();
                 let module =
                     unsafe { Module::new_unchecked(&linker.engine(), bytes) }
                         .ok()?;
@@ -78,7 +78,7 @@ impl WasmiRuntime {
                 (module, linker)
             }
         } else {
-            let linker = context.linker.clone();
+            let linker = context.linker();
             let module =
                 unsafe { Module::new_unchecked(&linker.engine(), bytes) }
                     .ok()?;
