@@ -145,10 +145,6 @@ pub unsafe extern "C" fn wasmi_invoke(
 ) -> WasmiInvokeResult {
     let runtime: *mut WasmiRuntime =
         unsafe { core::mem::transmute(runtime_void) };
-<<<<<<< HEAD
-=======
-
->>>>>>> main
     debug_assert!(!runtime.is_null());
 
     if method_name.is_null() {
