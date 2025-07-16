@@ -4,7 +4,10 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
 
 1. Install the `wat2wasm` utility from the [WebAssembly Binary
    Toolkit](https://github.com/WebAssembly/wabt).  Most OS package
-   managers led you do this by installing a package called `wabt`.
+   managers let you do this by installing a package called `wabt`.
+
+1. Install the `wasm-opt` utility from [Binaryen](https://github.com/WebAssembly/binaryen).
+   Most package managers let you do this by installing the `binaryen` package.
 
 1. Install python-yaml, either with your OS package manager (e.g.,
    `pacman -S python-yaml`) or with `pip install pyyaml`.

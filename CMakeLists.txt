@@ -52,6 +52,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -O3")
 
 include(cmake/stacktrace.cmake)
 include(cmake/wat2wasm.cmake)
+include(cmake/wasmopt.cmake)
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.h.in
