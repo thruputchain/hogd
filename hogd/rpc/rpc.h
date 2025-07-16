@@ -355,8 +355,7 @@ rpc_client_call(RPCClient &client, x23::is_xdr_type auto &&...args)
       if (rpc_logfd >= 0) {
         auto msg =
             detail::make_log_message<meta>(true, client.get_peername(), msg_id,
-                                           std::forward<decltype(args)>(
-                                               args)...);
+                                           args...);
         write(rpc_logfd, msg.data(), msg.size());
       }
     }
