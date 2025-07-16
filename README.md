@@ -37,12 +37,6 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     cargo install --force cbindgen
     ~~~~
 
-1. Install gperftools, which contains tcmalloc.
-
-    ~~~~ .sh
-    sudo pacman -S gperftools
-    ~~~~
-
 1. If you plan to use clang as your compiler, install the llvm package as well.
 
     ~~~~ .sh
