@@ -33,8 +33,8 @@ fail(Errno err)
 void
 run_server(uint16_t port)
 {
-  auto handler =
-      [](std::span<const std::byte> /*args*/) -> OwningSpan<const std::byte> {
+  auto handler = [](std::span<const std::byte> /*args*/,
+                    std::string_view /*peer*/) -> OwningSpan<const std::byte> {
     return string_as_bytes(std::string(kRetSize, '0'));
   };
 

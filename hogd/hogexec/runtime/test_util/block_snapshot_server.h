@@ -5,6 +5,7 @@
 #include <set>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <sys/socket.h>
 #include <thread>
 #include <type_traits>
@@ -41,8 +42,9 @@ public:
   {
     auto res = RPCServer::create(
         port,
-        [this](std::span<const std::byte> args) -> OwningSpan<const std::byte> {
-          return handle_db_executor_rpc_request(*this, args);
+        [this](std::span<const std::byte> args,
+               std::string_view peer) -> OwningSpan<const std::byte> {
+          return handle_db_executor_rpc_request(*this, args, peer);
         });
     if (!res) {
       throw std::runtime_error("Failed to create RPC server");

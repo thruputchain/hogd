@@ -7,6 +7,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -33,7 +34,8 @@ protected:
     // this handler echoes args back in the return value. This is useful for
     // testing because it allows us to check for corruption in the value.
     auto handler =
-        [](std::span<const std::byte> args) -> OwningSpan<const std::byte> {
+        [](std::span<const std::byte> args,
+           std::string_view /*unused*/) -> OwningSpan<const std::byte> {
       std::vector buf(args.begin(), args.end());
       std::span<const std::byte> span(buf);
       return OwningSpan(span, [ref = std::move(buf)] mutable {});
