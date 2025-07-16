@@ -239,8 +239,8 @@ private:
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
-  Node *remove_branch(Node *branch, size_t num_children,
-                      std::byte remaining_child_hex);
+  static Node *remove_branch(Node *branch, size_t num_children,
+                             std::byte remaining_child_hex);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.

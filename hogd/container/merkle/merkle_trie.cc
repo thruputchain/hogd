@@ -651,8 +651,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // First Extension Node: Path is [0x123].
     // Branch Node: A leaf for [key_window] is child [0x4]. The child of
     //              [extension] is child [0x5] in this branch.
-    Node *first =
-        Node::create_extension(/*parent=*/extension_cache_parent);
+    Node *first = Node::create_extension(/*parent=*/extension_cache_parent);
     CHECK(first->rw_lock.try_lock_writer());
     first->path = key_window.get_subarray(0, diverge_idx);
 
