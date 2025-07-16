@@ -41,3 +41,17 @@ if [ $CLIPPY_RESULT -ne 0 ]; then
   exit 1
 fi
 
+cd ${ROOT_DIR}
+PYTHON_FILES=$(find . -name '*.py')
+if [ -n "$PYTHON_FILES" ]; then
+  printf "Running flake8 on python files\n"
+  flake8 $PYTHON_FILES
+  if [ $? -ne 0 ]; then
+    printf "flake8 failed!\n"
+    exit 1
+  fi
+fi
+
+
+
+
