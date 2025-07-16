@@ -36,7 +36,8 @@ handle_db_executor_rpc_request(Server &server, std::span<const std::byte> args,
   auto header_result = rpc_server_parse_and_strip_header(args);
   if (!header_result) {
     return vec_as_bytes(response_header_to_buf(
-        RPCResponseHeader{.error = RPCReponseErrorCode::kRpcInvalidArgument, .xid = 0}));
+        RPCResponseHeader{.error = RPCReponseErrorCode::kRpcInvalidArgument,
+                          .xid = 0}));
   }
   auto [header, arg_span] = header_result.value();
 
