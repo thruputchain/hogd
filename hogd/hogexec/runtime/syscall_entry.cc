@@ -16,8 +16,6 @@
 
 namespace hogd {
 
-int syscall_logfd = -1;
-
 namespace {
 // returns gas_consumed, syscall error>
 template<std::same_as<uint64_t>... Args>

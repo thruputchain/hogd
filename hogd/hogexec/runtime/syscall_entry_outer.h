@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/gas_cost_table.h"
@@ -350,13 +351,10 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
     // Once the syscall inputs are parsed, we can print them in a formatted log
     // message.
-    if (syscall_logfd != -1) {
-      auto log_string =
+    trace("{}",
           x23::show(make_syscall_input_struct<SyscallInputType>(std::tuple{
               SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                  std::get<Is>(parsed_args))...}));
-      write(syscall_logfd, log_string.c_str(), log_string.size());
-    }
+                  std::get<Is>(parsed_args))...})));
 
     // With parameter packs as structured bindings, the annoying if constexpr
     // disappears, and the following becomes
@@ -383,23 +381,15 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
     // Print the output of the syscall.  The outputs in parsed_args should only
     // be written to if the syscall succeeds.
-    if (syscall_logfd != -1) {
-      std::string log_string;
-
-      if (!res.first.has_value() ||
-          res.first.value() != SyscallErrorCode::kNone) {
-        log_string = syscall_error_message(res.first);
-      }
-      else {
-        assert(res.first.value() == SyscallErrorCode::kNone);
-        log_string =
-            x23::show(make_syscall_output_struct<SyscallInputType,
-                                                 SyscallOutputType>(std::tuple{
-                SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                    std::get<Is>(parsed_args))...}));
-      }
-      write(syscall_logfd, log_string.c_str(), log_string.size());
-    }
+    bool is_syscall_error =
+        !res.first.has_value() || res.first.value() != SyscallErrorCode::kNone;
+    trace("{}",
+          is_syscall_error
+              ? syscall_error_message(res.first)
+              : x23::show(make_syscall_output_struct<
+                          SyscallInputType, SyscallOutputType>(std::tuple{
+                    SyscallArgParams<typename syscall_t::template arg_i<Is>>::
+                        deref(std::get<Is>(parsed_args))...})));
 
     return res;
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));

@@ -352,7 +352,8 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
 void
 enable_syscall_logging()
 {
-  hogd::syscall_logfd = 1;
+  hogd::swap_logger(
+      std::make_unique<hogd::ConsoleLogger>(hogd::LogLevel::kTrace));
 }
 
 #ifdef __cplusplus
