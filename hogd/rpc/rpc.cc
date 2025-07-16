@@ -40,8 +40,6 @@
 
 namespace hogd {
 
-int rpc_logfd = -1;
-
 namespace {
 
 template<typename Result, typename T>

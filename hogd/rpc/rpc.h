@@ -329,8 +329,6 @@ get_rpc_method_number()
   }
 }
 
-extern int rpc_logfd;
-
 template<typename Interface, StringLiteral Name>
 requires (is_rpc_method<Interface, Name>())
 auto
