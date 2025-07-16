@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <stop_token>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -35,6 +36,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -120,6 +122,15 @@ sys_getsockname(int sockfd, T &val)
   socklen_t len = sizeof(val);
   return make_errno_status<void>(
       getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
+}
+
+template<typename T> requires std::is_trivially_copyable_v<T>
+inline ErrnoStatus<void>
+sys_getpeername(int sockfd, T &val)
+{
+  socklen_t len = sizeof(val);
+  return make_errno_status<void>(
+      getpeername(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
 }
 
 inline ErrnoStatus<size_t>
@@ -309,7 +320,7 @@ RPCClient::dial(std::string_view addr, int flows)
   }
 
   info("rpc client connected to {} with {} flows", addr, flows);
-  return RPCClient(std::move(flow_tbl));
+  return RPCClient(std::move(flow_tbl), std::string(addr));
 }
 
 std::future<OwningSpan<const std::byte>>
@@ -394,6 +405,16 @@ RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
   std::vector<OwningSpan<const std::byte>> requests;
   std::optional<size_t> n;
 
+  std::string peer = "unknown";
+
+  sockaddr_storage addr;
+  if (!sys_getpeername(socket.get_fd(), addr)) {
+    error("could not get socket name: {}", errno);
+  }
+  else {
+    peer = x23::show_addr(addr);
+  }
+
   if (!ref->register_worker(socket))
     return; // already closing server
   Defer d([&ref, &socket] { ref->unregister_worker(socket); });
@@ -428,7 +449,7 @@ RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
 
     // execute available requests.
     for (const auto &req : requests) {
-      OwningSpan<const std::byte> bytes = handler(req);
+      OwningSpan<const std::byte> bytes = handler(req, peer);
       size_t resp_bytes = bytes.size();
       if (ErrnoStatus<void> ret = write_full(w, byte_view(resp_bytes)); !ret) {
         error("server write size failed: {}", ret.error());

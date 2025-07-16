@@ -35,6 +35,7 @@ protected:
   {
     wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   }
+
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
 };
 
