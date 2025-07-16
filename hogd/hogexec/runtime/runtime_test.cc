@@ -24,7 +24,6 @@ TEST(RuntimeTest, MethodIDRoundTrip)
 int
 main(int argc, char *argv[])
 {
-  hogd::rpc_logfd = 1;
   auto ret = hogd::hogd_init(argc, argv);
   if (ret != 0)
     return ret;

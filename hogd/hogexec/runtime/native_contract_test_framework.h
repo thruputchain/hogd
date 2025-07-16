@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/rpc/rpc.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
@@ -38,6 +39,7 @@ public:
   {
     if (enable_logging) {
       x23::RpcLogger::default_logfd = 1;
+      rpc_logfd = 1;
     }
     initialize(mode);
   }
