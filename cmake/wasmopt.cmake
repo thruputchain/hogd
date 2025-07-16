@@ -15,7 +15,7 @@ macro(WASMOPT_TARGET Name Input Output)
     ${ARGN}
     )
 
-  set(WAT2WASM_TARGET_usage "WASMOPT_TARGET(<Name> <Input> <Output> [flags for wasm-opt])")
+  set(WASMOPT_TARGET_usage "WASMOPT_TARGET(<Name> <Input> <Output> [flags for wasm-opt])")
 
   if(NOT "${WASMOPT_TARGET_ARG_UNPARSED_ARGUMENTS}" STREQUAL "")
     message(SEND_ERROR ${WASMOPT_TARGET_usage})
