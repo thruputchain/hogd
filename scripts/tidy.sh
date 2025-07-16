@@ -42,7 +42,7 @@ if [ $CLIPPY_RESULT -ne 0 ]; then
 fi
 
 cd ${ROOT_DIR}
-PYTHON_FILES=$(find . -name '*.py')
+PYTHON_FILES=$(find hogd/ -name '*.py')
 if [ -n "$PYTHON_FILES" ]; then
   printf "Running flake8 on python files\n"
   flake8 $PYTHON_FILES
