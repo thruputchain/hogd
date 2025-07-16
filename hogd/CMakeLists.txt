@@ -1,5 +1,3 @@
-find_library(TCMALLOC_LIB tcmalloc_minimal REQUIRED)
-
 # Build each shared module
 add_subdirectory(base)
 add_subdirectory(container)
@@ -26,11 +24,9 @@ target_link_libraries(
 
 target_link_libraries(
   hogd
-  PUBLIC
-    base
-    crypto
-    hogd_interface
-  PRIVATE
+  base
+  crypto
+  hogd_interface
 )
 
 # Additional libraries that are not included by default (i.e., in hogd library)
