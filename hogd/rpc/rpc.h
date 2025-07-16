@@ -8,9 +8,9 @@
 #include <format>
 #include <functional>
 #include <future>
-#include <limits>
 #include <memory>
 #include <mutex>
+#include <print>
 #include <queue>
 #include <span>
 #include <stop_token>
@@ -30,8 +30,10 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "x23/format.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -86,12 +88,12 @@ public:
                                      int flows = kDefaultFlows);
 
   RPCClient() = default;
-  RPCClient(std::vector<std::unique_ptr<rpc_detail::ClientFlow>> &&flows)
-    : flows_(std::move(flows))
+  RPCClient(std::vector<std::unique_ptr<rpc_detail::ClientFlow>> &&flows, std::string&& peer)
+    : flows_(std::move(flows)), peer_(std::move(peer))
   {}
 
   // Enable move; disable copy.
-  RPCClient(RPCClient &&c) noexcept : flows_(std::move(c.flows_)) {}
+  RPCClient(RPCClient &&c) noexcept = default;
   RPCClient &operator=(RPCClient &&c) noexcept
   {
     flows_ = std::move(c.flows_);
@@ -111,8 +113,12 @@ public:
     return call_async(args).get();
   }
 
+  // get_peername returns the peer name of the client.
+  std::string_view get_peername() const { return peer_; }
+
 private:
   std::vector<std::unique_ptr<rpc_detail::ClientFlow>> flows_;
+  std::string peer_;
 };
 
 using RPCHandler =
@@ -277,6 +283,22 @@ is_rpc_method()
   }
 }
 
+template<typename Meta>
+std::string
+make_log_message(bool is_out, std::string_view peername, 
+                   const x23::is_xdr_type auto &...args)
+{
+  std::string ret =
+        std::format("{} {} {}::{} ", peername,
+                    is_out ? "<==" : "==>",
+                  Meta::version_meta::version_name,
+                  Meta::proc_name);
+  
+  ret += x23::show(std::forward_as_tuple(args...));
+  ret += '\n';
+  return ret;
+}
+
 template<typename Interface, StringLiteral Name, size_t Index = 0>
 requires (is_rpc_method<Interface, Name, Index>())
 constexpr uint32_t
@@ -291,18 +313,28 @@ get_rpc_method_number()
   }
 }
 
-template<typename Interface, StringLiteral Name>
+extern int rpc_logfd;
+
+template<typename Interface, StringLiteral Name, bool DoLogging = true>
 requires (is_rpc_method<Interface, Name>())
 auto
-rpc_client_call(RPCClient &client, auto &&...args)
+rpc_client_call(RPCClient &client, x23::is_xdr_type auto &&...args)
 {
   constexpr uint32_t kMethod = get_rpc_method_number<Interface, Name>();
-  using return_type = Interface::template proc_meta<kMethod>::return_type;
+  using meta = Interface::template proc_meta<kMethod>;
+  using return_type = meta::return_type;
 
   try {
     x23::Buf buf(sizeof(RPCCallHeader));
     RPCCallHeader header{.method = kMethod};
     std::memcpy(buf.data(), &header, sizeof(RPCCallHeader));
+
+    if constexpr (DoLogging) {
+      if (rpc_logfd >= 0) {
+        auto msg = make_log_message<meta>(true, client.get_peername(), std::forward<decltype(args)>(args)...);
+        write(rpc_logfd, msg.data(), msg.size());
+      }
+    }
 
     (x23::serialize_to(&buf, std::forward<decltype(args)>(args)), ...);
 
@@ -323,6 +355,12 @@ rpc_client_call(RPCClient &client, auto &&...args)
 
     return_type ret;
     x23::deserialize(&ret, res.subspan(sizeof(RPCResponseHeader)));
+    if constexpr (DoLogging) {
+      if (rpc_logfd >= 0) {
+        auto msg = make_log_message<meta>(false, client.get_peername(), ret);
+        write(rpc_logfd, msg.data(), msg.size());
+      }
+    }
     return SystemStatus<return_type>{std::move(ret)};
   } catch (const x23::XdrException &e) {
     error("x23 serialization error: {}", e.what());
@@ -353,16 +391,22 @@ rpc_server_parse_and_strip_header(std::span<const std::byte> args)
 // each other at compile time; this makes it easier to catch errors as rpc
 // definitions evolve.
 // The input arg span must already have the RPCCallHeader stripped off.
-template<typename Interface, StringLiteral Name>
+template<typename Interface, StringLiteral Name, bool DoLogging = true>
 requires (is_rpc_method<Interface, Name>())
 OwningSpan<const std::byte>
-rpc_server_dispatch_method(auto &server, std::span<const std::byte> args)
+rpc_server_dispatch_method(auto &server, std::span<const std::byte> args, std::string_view peername = "unimplemented")
 {
   constexpr uint32_t kMethod = get_rpc_method_number<Interface, Name>();
   using meta = Interface::template proc_meta<kMethod>;
   typename meta::arg_type a;
   try {
     x23::deserialize(&a, args);
+    if constexpr (DoLogging) {
+      if (rpc_logfd >= 0) {
+        auto msg = make_log_message<meta>(false, peername, a);
+        write(rpc_logfd, msg.data(), msg.size());
+      }
+    }
   } catch (const x23::XdrException &e) {
     error("x23 deserialization error: {}", e.what());
     return vec_as_bytes(response_header_to_buf(
@@ -370,6 +414,13 @@ rpc_server_dispatch_method(auto &server, std::span<const std::byte> args)
   }
 
   auto res = meta::dispatch(server, a);
+
+  if constexpr (DoLogging) {
+    if (rpc_logfd >= 0) {
+      auto msg = make_log_message<meta>(true, peername, a);
+      write(rpc_logfd, msg.data(), msg.size());
+    }
+  }
 
   auto buf_out =
       response_header_to_buf(RPCResponseHeader{RPCReponseErrorCode::kRpcOk});

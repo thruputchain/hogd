@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <stop_token>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -37,6 +38,8 @@
 #include "hogd/base/types.h"
 
 namespace hogd {
+
+int rpc_logfd = -1;
 
 namespace {
 
@@ -309,7 +312,7 @@ RPCClient::dial(std::string_view addr, int flows)
   }
 
   info("rpc client connected to {} with {} flows", addr, flows);
-  return RPCClient(std::move(flow_tbl));
+  return RPCClient(std::move(flow_tbl), std::string(addr));
 }
 
 std::future<OwningSpan<const std::byte>>

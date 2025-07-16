@@ -6,6 +6,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <sys/socket.h>
 #include <thread>
 #include <type_traits>
