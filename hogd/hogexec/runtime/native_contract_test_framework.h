@@ -11,7 +11,7 @@
 #include "contract.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogexec/runtime/database_proxy.h"

@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
 #include "hogd/storage_item/storage_lock_util.h"
 #include "rpc_types.hh"

@@ -20,7 +20,6 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "syscall_args.hh"

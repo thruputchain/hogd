@@ -19,7 +19,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/rpc/rpc.h"
 #include "hogd/storage_item/storage_item_wrapper.h"

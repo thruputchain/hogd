@@ -4,7 +4,7 @@
 #include <memory>
 #include <optional>
 
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "rpc_types.hh"

@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
