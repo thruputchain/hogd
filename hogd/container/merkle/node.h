@@ -15,6 +15,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/rw_lock.h"
 #include "hogd/crypto/crypto.h"
@@ -108,10 +109,10 @@ public:
     this->parent = parent;
   }
 
-  static Node *create_branch(Node *parent)
+  static Node *create_branch(Arena<Node> &arena, Node *parent)
   {
     // TODO(jhumphri): Use unique_ptr<> rather than [new] (here and elsewhere).
-    Node *node = new Node;
+    Node *node = arena.alloc();
     CHECK_PTR(node);
 
     node->clear();
@@ -119,9 +120,9 @@ public:
     return node;
   }
 
-  static Node *create_extension(Node *parent)
+  static Node *create_extension(Arena<Node> &arena, Node *parent)
   {
-    Node *node = new Node;
+    Node *node = arena.alloc();
     CHECK_PTR(node);
 
     node->clear();
@@ -129,9 +130,9 @@ public:
     return node;
   }
 
-  static Node *create_leaf(Node *parent)
+  static Node *create_leaf(Arena<Node> &arena, Node *parent)
   {
-    Node *node = new Node;
+    Node *node = arena.alloc();
     CHECK_PTR(node);
 
     node->clear();

@@ -18,6 +18,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -298,6 +299,8 @@ private:
   // If this is false, nodes are only hashed when [generate_all_hashes()] is
   // called.
   bool should_hash_nodes_on_each_op_ = true;
+  // An arena for allocating nodes.
+  Arena<Node> arena_;
 };
 
 // This is an optimization for the [MerkleTrie]. It exposes the same exact API,
