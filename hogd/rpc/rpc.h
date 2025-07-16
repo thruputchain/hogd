@@ -11,6 +11,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <print>
 #include <queue>
 #include <span>
 #include <stop_token>
@@ -292,18 +293,13 @@ is_rpc_method()
 namespace detail {
 
 template<typename Meta>
-std::string
-make_log_message(bool is_out, std::string_view peername, uint32_t xid,
-                 const x23::is_xdr_type auto &...args)
+inline void
+trace_log_message(bool is_out, std::string_view peername, uint32_t xid,
+                  const x23::is_xdr_type auto &...args)
 {
-  std::string ret =
-      std::format("{} {} (xid={:08X}) {}::{} ", peername,
-                  is_out ? "<==" : "==>", xid, Meta::version_meta::version_name,
-                  Meta::proc_name);
-
-  ret += x23::show(std::forward_as_tuple(args...));
-  ret += '\n';
-  return ret;
+  trace("{} {} (xid={:08X}) {}::{} {}", peername, is_out ? "<==" : "==>", xid,
+        Meta::version_meta::version_name, Meta::proc_name,
+        x23::show(std::forward_as_tuple(args...)));
 }
 
 inline uint32_t
@@ -335,7 +331,7 @@ get_rpc_method_number()
 
 extern int rpc_logfd;
 
-template<typename Interface, StringLiteral Name, bool DoLogging = true>
+template<typename Interface, StringLiteral Name>
 requires (is_rpc_method<Interface, Name>())
 auto
 rpc_client_call(RPCClient &client, x23::is_xdr_type auto &&...args)
@@ -351,13 +347,8 @@ rpc_client_call(RPCClient &client, x23::is_xdr_type auto &&...args)
     RPCCallHeader header{.method = kMethod, .xid = msg_id};
     std::memcpy(buf.data(), &header, sizeof(RPCCallHeader));
 
-    if constexpr (DoLogging) {
-      if (rpc_logfd >= 0) {
-        auto msg = detail::make_log_message<meta>(true, client.get_peername(),
-                                                  msg_id, args...);
-        write(rpc_logfd, msg.data(), msg.size());
-      }
-    }
+    detail::trace_log_message<meta>(true, client.get_peername(), msg_id,
+                                    args...);
 
     (x23::serialize_to(&buf, std::forward<decltype(args)>(args)), ...);
 
@@ -378,13 +369,8 @@ rpc_client_call(RPCClient &client, x23::is_xdr_type auto &&...args)
 
     return_type ret;
     x23::deserialize(&ret, res.subspan(sizeof(RPCResponseHeader)));
-    if constexpr (DoLogging) {
-      if (rpc_logfd >= 0) {
-        auto msg = detail::make_log_message<meta>(false, client.get_peername(),
-                                                  msg_id, ret);
-        write(rpc_logfd, msg.data(), msg.size());
-      }
-    }
+    detail::trace_log_message<meta>(false, client.get_peername(), msg_id, ret);
+
     return SystemStatus<return_type>{std::move(ret)};
   } catch (const x23::XdrException &e) {
     error("x23 serialization error: {}", e.what());
@@ -417,7 +403,7 @@ rpc_server_parse_and_strip_header(std::span<const std::byte> args)
 // each other at compile time; this makes it easier to catch errors as rpc
 // definitions evolve.
 // The input arg span must already have the RPCCallHeader stripped off.
-template<typename Interface, StringLiteral Name, bool DoLogging = true>
+template<typename Interface, StringLiteral Name>
 requires (is_rpc_method<Interface, Name>())
 OwningSpan<const std::byte>
 rpc_server_dispatch_method(auto &server, std::string_view peername,
@@ -428,12 +414,7 @@ rpc_server_dispatch_method(auto &server, std::string_view peername,
   typename meta::arg_type a;
   try {
     x23::deserialize(&a, args);
-    if constexpr (DoLogging) {
-      if (rpc_logfd >= 0) {
-        auto msg = detail::make_log_message<meta>(false, peername, xid, a);
-        write(rpc_logfd, msg.data(), msg.size());
-      }
-    }
+    detail::trace_log_message<meta>(false, peername, xid, a);
   } catch (const x23::XdrException &e) {
     error("x23 deserialization error(xid {}): {}", xid, e.what());
     return vec_as_bytes(response_header_to_buf(
@@ -442,13 +423,7 @@ rpc_server_dispatch_method(auto &server, std::string_view peername,
   }
 
   auto res = meta::dispatch(server, a);
-
-  if constexpr (DoLogging) {
-    if (rpc_logfd >= 0) {
-      auto msg = detail::make_log_message<meta>(true, peername, xid, res);
-      write(rpc_logfd, msg.data(), msg.size());
-    }
-  }
+  detail::trace_log_message<meta>(true, peername, xid, res);
 
   auto buf_out = response_header_to_buf(
       RPCResponseHeader{.error = RPCReponseErrorCode::kRpcOk, .xid = xid});

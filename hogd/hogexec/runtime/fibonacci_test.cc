@@ -10,6 +10,7 @@
 #include "bcs/encode.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -35,6 +36,7 @@ protected:
   {
     wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   }
+
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
 };
 

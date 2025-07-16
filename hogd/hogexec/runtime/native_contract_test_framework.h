@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/db_interface/block_manager.h"
@@ -19,14 +20,12 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
-#include "hogd/rpc/rpc.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/rpc.h"
 
 namespace hogd {
 
@@ -38,10 +37,17 @@ public:
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal)
   {
     if (enable_logging) {
-      x23::RpcLogger::default_logfd = 1;
-      rpc_logfd = 1;
+      previous_logger_ =
+          swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));
     }
     initialize(mode);
+  }
+
+  ~NativeContractTestFramework()
+  {
+    if (previous_logger_) {
+      swap_logger(std::move(previous_logger_));
+    }
   }
 
   void advance_block(
@@ -61,9 +67,6 @@ public:
     storage_snapshot_cache_ =
         std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
   }
-
-  InMemoryDatabase in_memory_db_ = InMemoryDatabase();
-  BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
 
   SystemCallHandler
   make_new_system_call_handler(SignedTransaction const &tx,
@@ -142,6 +145,9 @@ public:
     return &block_manager_.cost_model_;
   }
 
+  InMemoryDatabase in_memory_db_ = InMemoryDatabase();
+  BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
+
 private:
   void initialize(BlockExecutionMode mode)
   {
@@ -171,6 +177,8 @@ private:
 
   RPCDbExecutorServer db_executor_server_ =
       RPCDbExecutorServer(&block_manager_, 0);
+
+  std::unique_ptr<Logger> previous_logger_ = nullptr;
 };
 
 } // namespace hogd
