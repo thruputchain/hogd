@@ -353,9 +353,8 @@ rpc_client_call(RPCClient &client, x23::is_xdr_type auto &&...args)
 
     if constexpr (DoLogging) {
       if (rpc_logfd >= 0) {
-        auto msg =
-            detail::make_log_message<meta>(true, client.get_peername(), msg_id,
-                                           args...);
+        auto msg = detail::make_log_message<meta>(true, client.get_peername(),
+                                                  msg_id, args...);
         write(rpc_logfd, msg.data(), msg.size());
       }
     }

@@ -5,7 +5,6 @@
 #include "hogd/rpc/rpc.h"
 
 #include <arpa/inet.h>
-#include <atomic>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sched.h>
