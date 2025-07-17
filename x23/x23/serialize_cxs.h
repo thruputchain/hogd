@@ -115,7 +115,7 @@ U load_cxs_integral_impl(std::span<const uint8_t>& data) {
 // Load a uint64_t from a span of bytes.
 // Modifies the span to advance past the loaded value.
 template<std::unsigned_integral T>
-T load_cxs_unsigned_integral(std::span<const uint8_t>& data) {
+T load_cxs_uint(std::span<const uint8_t>& data) {
     check_size(data, 1);
     uint8_t first_byte = data[0];
     if (first_byte <= kCxsUInt81ByteMax) {
@@ -236,7 +236,7 @@ inline void store_cxs_bool(x23::Buf& buf, bool value) {
 }
 
 inline bool load_cxs_bool(std::span<const uint8_t>& data) {
-    auto value = load_cxs_unsigned_integral<uint8_t>(data);
+    auto value = load_cxs_uint<uint8_t>(data);
     if (value != 0 && value != 1) {
         throw CxsBadInput("Non canonical Cxs representation");
     }
@@ -244,7 +244,7 @@ inline bool load_cxs_bool(std::span<const uint8_t>& data) {
 }
 
 template<std::signed_integral T>
-T load_cxs_signed_integral(std::span<const uint8_t>& data) {
+T load_cxs_int(std::span<const uint8_t>& data) {
     check_size(data, 1);
     uint8_t first_byte = data[0];
     if (first_byte <= kCxsUInt81ByteMax) {
@@ -289,9 +289,9 @@ struct CxsSerializer<T> {
         if constexpr (std::is_same_v<T, bool>) {
             value = load_cxs_bool(data);
         } else if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
-            value = load_cxs_signed_integral<T>(data);
+            value = load_cxs_int<T>(data);
         } else if constexpr (std::is_integral_v<T> && std::is_unsigned_v<T>) {
-            value = load_cxs_unsigned_integral<T>(data);
+            value = load_cxs_uint<T>(data);
         } else {
             static_assert(false, "impossible");
         }
@@ -300,6 +300,7 @@ struct CxsSerializer<T> {
 
 template<typename T> requires (std::is_enum_v<T>)
 struct CxsSerializer<T> {
+    static_assert(std::is_integral_v<std::underlying_type_t<T>>);
     static void store(x23::Buf& buf, T value) {
         CxsSerializer<std::underlying_type_t<T>>::store(buf, static_cast<std::underlying_type_t<T>>(value));
     }

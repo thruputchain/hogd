@@ -22,7 +22,8 @@ TEST(CxsSerialize, Int8RoundTrip) {
             EXPECT_EQ(buf.size(), 1U);
         }
 
-        auto j = load_cxs_signed_integral<int8_t>(view);
+        int8_t j;
+        CxsSerializer<int8_t>::load(view, j);
         EXPECT_EQ(i, j);
     }
 }
