@@ -400,7 +400,7 @@ longest_full_snapshot(const std::vector<FileMetadata> &files)
   if (candidates.empty())
     return std::nullopt;
 
-  return std::ranges::max(candidates, &FileMetadata::operator<);
+  return std::ranges::min(candidates, &FileMetadata::operator<);
 }
 
 } // namespace
