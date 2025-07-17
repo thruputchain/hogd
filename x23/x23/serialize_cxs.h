@@ -70,30 +70,15 @@ constexpr uint64_t uint_canonical_upper_bound() {
 }
 
 template<size_t N>
-constexpr int64_t int_canonical_upper_bound() {
+constexpr std::pair<int64_t, int64_t> int_canonical_bounds() {
     if constexpr (N == 0) {
-        return kCxsInt81ByteMax;
+        return {kCxsInt81ByteMin, kCxsInt81ByteMax};
     } else if constexpr (N == 1) {
-        return std::numeric_limits<int8_t>::max();
+        return {std::numeric_limits<int8_t>::min(), std::numeric_limits<int8_t>::max()};
     } else if constexpr (N == 2) {
-        return std::numeric_limits<int16_t>::max();
+        return {std::numeric_limits<int16_t>::min(), std::numeric_limits<int16_t>::max()};
     } else if constexpr (N == 4) {
-        return std::numeric_limits<int32_t>::max();
-    } else {
-        std::unreachable();
-    }
-}
-
-template<size_t N>
-constexpr int64_t int_canonical_lower_bound() {
-    if constexpr (N == 0) {
-        return kCxsInt81ByteMin;
-    } else if constexpr (N == 1) {
-        return std::numeric_limits<int8_t>::min();
-    } else if constexpr (N == 2) {
-        return std::numeric_limits<int16_t>::min();
-    } else if constexpr (N == 4) {
-        return std::numeric_limits<int32_t>::min();
+        return {std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()};
     } else {
         std::unreachable();
     }
@@ -107,12 +92,24 @@ void load_canonical_check(T value) {
             throw CxsBadInput("Non canonical Cxs representation");
         }
     } else {
-        if (value >= int_canonical_lower_bound<kSize/2>() && value <= int_canonical_upper_bound<kSize/2>()) {
+        if (value >= int_canonical_bounds<kSize/2>().first && value <= int_canonical_bounds<kSize/2>().second) {
             throw CxsBadInput("Non canonical Cxs representation");
         }
     }
 }
 
+template<std::integral U, std::integral T>
+U load_cxs_integral_impl(std::span<const uint8_t>& data) {
+    check_size(data, 1 + sizeof(U));
+    if constexpr(sizeof(T) < sizeof(U)) {
+        throw CxsBadInput("Non canonical Cxs representation");
+    }
+    U out;
+    std::memcpy(&out, data.data() + 1, sizeof(U));
+    data = data.subspan(sizeof(U) + 1);
+    load_canonical_check<U>(out);
+    return out;
+}
 
 // Load a uint64_t from a span of bytes.
 // Modifies the span to advance past the loaded value.
@@ -124,53 +121,18 @@ T load_cxs_unsigned_integral(std::span<const uint8_t>& data) {
         data = data.subspan(1);
         return first_byte;
     }
+
     assert((first_byte & 0b0011'1111) == 63);
     uint8_t header = first_byte >> 6;
     switch(header) {
         case 0:
-        {
-            check_size(data, 2);
-            uint8_t out = data[1];
-            data = data.subspan(2);
-            load_canonical_check<uint8_t>(out);
-            return out;
-        }
-        case 1: {
-            if constexpr (sizeof(T) < 2) {
-                throw CxsBadInput("Non canonical Cxs representation");
-            } else {
-                check_size(data, 3);
-                uint16_t out;
-                std::memcpy(&out, data.data() + 1, 2);
-                data = data.subspan(3);
-                load_canonical_check<uint16_t>(out);
-                return out;
-            }
-        }
-        case 2: {
-            if constexpr (sizeof(T) < 4) {
-                throw CxsBadInput("Non canonical Cxs representation");
-            } else {
-                check_size(data, 5);
-                uint32_t out;
-                std::memcpy(&out, data.data() + 1, 4);
-                data = data.subspan(5);
-                load_canonical_check<uint32_t>(out);
-                return out;
-            }
-        }
-        case 3: {
-            if constexpr (sizeof(T) < 8) {
-                throw CxsBadInput("Non canonical Cxs representation");
-            } else {
-                check_size(data, 9);
-                uint64_t out;
-                std::memcpy(&out, data.data() + 1 , 8);
-                data = data.subspan(9);
-                load_canonical_check<uint64_t>(out);
-                return out;
-            }
-        }
+            return load_cxs_integral_impl<uint8_t, T>(data);
+        case 1:
+            return load_cxs_integral_impl<uint16_t, T>(data);
+        case 2:
+            return load_cxs_integral_impl<uint32_t, T>(data);
+        case 3:
+            return load_cxs_integral_impl<uint64_t, T>(data);
         default:
             std::unreachable();
     }
@@ -189,7 +151,7 @@ inline void store_cxs_int8_0_extra_byte(x23::Buf& buf, int64_t value) {
 
 template<size_t N> requires (N > 0)
 void store_cxs_int_extra_bytes(x23::Buf& buf, int64_t value) {
-    assert(value < int_canonical_lower_bound<N/2>() || value > int_canonical_upper_bound<N/2>()); // value is in canonical range for this size
+    assert(value < int_canonical_bounds<N/2>().first || value > int_canonical_bounds<N/2>().second); // value is in canonical range for this size
     buf.push_back(lookup_header_byte<N>());
     buf.resize_uninitialized(buf.size() + N);
     std::memcpy(buf.data() + buf.size() - N, &value, N);
@@ -205,16 +167,16 @@ constexpr static std::array<void(*)(x23::Buf&, int64_t), 5> kCxsStoreInt = {
 
 template<std::signed_integral T>
 uint8_t cxs_int_get_function_index(T value) {
-    if (value >= int_canonical_lower_bound<0>() && value <= int_canonical_upper_bound<0>()) {
+    if (value >= int_canonical_bounds<0>().first && value <= int_canonical_bounds<0>().second) {
         return 0;
     }
-    if (value >= int_canonical_lower_bound<1>() && value <= int_canonical_upper_bound<1>()) {
+    if (value >= int_canonical_bounds<1>().first && value <= int_canonical_bounds<1>().second) {
         return 1;
     }
-    if (value >= int_canonical_lower_bound<2>() && value <= int_canonical_upper_bound<2>()) {
+    if (value >= int_canonical_bounds<2>().first && value <= int_canonical_bounds<2>().second) {
         return 2;
     }
-    if (value >= int_canonical_lower_bound<4>() && value <= int_canonical_upper_bound<4>()) {
+    if (value >= int_canonical_bounds<4>().first && value <= int_canonical_bounds<4>().second) {
         return 3;
     }
     return 4;
@@ -259,12 +221,12 @@ uint8_t cxs_uint_get_function_index(T value) {
 }
 
 template<std::unsigned_integral T>
-void store_cxs_uint(x23::Buf& buf, T value) {
+inline void store_cxs_uint(x23::Buf& buf, T value) {
     kCxsStoreUInt[cxs_uint_get_function_index(value)](buf, value);
 }
 
 template<std::signed_integral T>
-void store_cxs_int(x23::Buf& buf, T value) {
+inline void store_cxs_int(x23::Buf& buf, T value) {
     kCxsStoreInt[cxs_int_get_function_index(value)](buf, value);
 }
 
@@ -296,49 +258,13 @@ T load_cxs_signed_integral(std::span<const uint8_t>& data) {
     uint8_t header = first_byte >> 6;
     switch(header) {
         case 0:
-        {
-            check_size(data, 2);
-            int8_t out = data[1];
-            data = data.subspan(2);
-            load_canonical_check<int8_t>(out);
-            return out;
-        }
-        case 1: {
-            if constexpr (sizeof(T) < 2) {
-                throw CxsBadInput("Non canonical Cxs representation");
-            } else {
-                check_size(data, 3);
-                int16_t out;
-                std::memcpy(&out, data.data() + 1, 2);
-                data = data.subspan(3);
-                load_canonical_check<int16_t>(out);
-                return out;
-            }
-        }
-        case 2: {
-            if constexpr (sizeof(T) < 4) {
-                throw CxsBadInput("Non canonical Cxs representation");
-            } else {
-                check_size(data, 5);
-                int32_t out;
-                std::memcpy(&out, data.data() + 1, 4);
-                data = data.subspan(5);
-                load_canonical_check<int32_t>(out);
-                return out;
-            }
-        }
-        case 3: {
-            if constexpr (sizeof(T) < 8) {
-                throw CxsBadInput("Non canonical Cxs representation");
-            } else {
-                check_size(data, 9);
-                int64_t out;
-                std::memcpy(&out, data.data() + 1, 8);
-                data = data.subspan(9);
-                load_canonical_check<int64_t>(out);
-                return out;
-            }
-        }
+            return load_cxs_integral_impl<int8_t, T>(data);
+        case 1:
+            return load_cxs_integral_impl<int16_t, T>(data);
+        case 2:
+            return load_cxs_integral_impl<int32_t, T>(data);
+        case 3:
+            return load_cxs_integral_impl<int64_t, T>(data);
         default:
             std::unreachable();
     }
