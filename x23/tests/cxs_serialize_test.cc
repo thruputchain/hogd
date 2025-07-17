@@ -1,3 +1,4 @@
+#include <array>
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -160,6 +161,17 @@ TEST(CxsSerialize, OpaqueVecRoundTrip) {
     value.resize_uninitialized(256);
     for (size_t i = 0; i < 256; ++i) {
         value[i] = i;
+    }
+    check_roundtrip(value);
+}
+
+TEST(CxsSerialize, ArrayRoundTrip) {
+    using test_array = std::array<fix_12, 100>;
+    test_array value;
+    for (size_t i = 0; i < value.size(); ++i) {
+        int32_t x = i;
+        double d = i*2;
+        value[i] = {.i = x, .d = d};
     }
     check_roundtrip(value);
 }

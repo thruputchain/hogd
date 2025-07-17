@@ -436,7 +436,6 @@ struct CxsSerializer<X> {
         }
     }
     static void load(std::span<const uint8_t>& data, X& value) {
-        value.resize(value.max_size());
         for (auto& element : value) {
             CxsSerializer<typename X::value_type>::load(data, element);
         }
