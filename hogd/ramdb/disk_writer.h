@@ -94,12 +94,6 @@ public:
   // size in bytes a log file must be before writer creates a new file.
   size_t get_file_size_threshold() const { return file_size_threshold_; }
 
-  uint64_t get_synced_lsn()
-  {
-    std::scoped_lock guard(to_disk_lock_);
-    return synced_lsn_;
-  }
-
 private:
   struct WriteHead {
     std::mutex lock;

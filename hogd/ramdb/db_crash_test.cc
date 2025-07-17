@@ -1,9 +1,20 @@
 // db_crash_test.cc - crash a ramdb and check recovery
 
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <signal.h>
+#include <unistd.h>
+
+#include <algorithm>
 #include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
 #include <future>
 #include <memory>
 #include <print>
@@ -23,24 +34,20 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 
-#include <sys/mman.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 namespace hogd {
 
 namespace {
 
 constexpr size_t kKeys = 1 * 1024 * 1024;
+static_assert((kKeys & (kKeys - 1)) == 0, "kKeys must be a power of two");
 constexpr size_t kPuts = 16 * kKeys;
+static_assert((kPuts & (kPuts - 1)) == 0, "kPuts must be a power of two");
 constexpr size_t kValueSize = 128;
 constexpr size_t kBatchSize = 16384;
-constexpr size_t kIters = 128;
 constexpr size_t kSyncsPerSnapshot = 16;
-constexpr auto kDurationBetweenCrashes = std::chrono::duration<double>{5};
+constexpr auto kDurationBetweenCrashes = std::chrono::duration<double>{30};
 
 constexpr bool kRemoveAllFilesAtStart = false;
-constexpr bool kNoFork = false;
 
 void
 fail(DBError err)
@@ -95,10 +102,6 @@ struct Shared {
   std::atomic<bool> starting_up;
 };
 
-uint64_t extract_put_seqnum(std::span<const std::byte> value) {
-  return *reinterpret_cast<const uint64_t*>(value.subspan(0, sizeof(uint64_t)).data());
-}
-
 void
 ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
 {
@@ -107,13 +110,13 @@ ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
   if (end > kKeys)
     start = end - kKeys;
 
-  info("checking that the results of puts [{}, {}) have expected values", start, end);
+  info("checking that puts [{}, {}) have expected values", start, end);
 
   std::vector<uint64_t> missing_keys{};
   bool failure = false;
   for (size_t i = start; i < end; i++) {
     shared.watchdog++;
-    uint64_t key = i % kKeys;
+    uint64_t key = i & (kKeys - 1);
     DBStatus<DBItem> ret = db.get(byte_view(key));
     if (!ret) [[unlikely]] {
       missing_keys.push_back(key);
@@ -125,22 +128,25 @@ ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
     // it's possible that a sync() could have completed but the process failed
     // to record that fact in shared memory; hence, it's possible that some
     // keys reflect the state of a later sync() than shared.put indicates.
-    uint64_t found = extract_put_seqnum(ret->value);
-    // either equal to the put number or the put number that key would have received in the next sync.
+    auto found = std::bit_cast<uint64_t>(ret->value.data());
+    // either equal to the put number or the put number that key would have
+    // received in the next sync.
     if (found != i && found != i + kKeys) {
-      error("checking put {} for key {} expected {} found {}", i, key, i, found);
+      error("-> put {} for key {} expected {} found {}", i, key, i, found);
       failure = true;
     }
   }
 
   std::ranges::sort(missing_keys);
-  std::print("Missing keys: ");
+  if (!missing_keys.empty())
+    std::print("Missing keys: ");
   uint64_t prev = kKeys;
   bool last_skipped = false;
   for (uint64_t key : missing_keys) {
     if (prev + 1 == key) {
       last_skipped = true;
-    } else {
+    }
+    else {
       if (last_skipped)
         std::print(" ... ");
       std::print("{}", key);
@@ -160,44 +166,53 @@ size_t
 db_size(hogd::Database &db)
 {
   size_t size = 0;
-  db.get_each([&size](std::span<const std::byte>, uint8_t, std::span<const std::byte>) { size++; });
+  db.get_each([&size](std::span<const std::byte>, uint8_t,
+                      std::span<const std::byte>) { size++; });
   return size;
 }
 
 void
-do_child(std::string_view path, Shared *shared)
+do_child(std::string_view path, Shared &shared)
 {
-  shared->starting_up = true;
+  shared.starting_up = true;
 
   auto db = make_db(path, kKeys, kValueSize);
-  warn("DB RECOVERED SYNCED_LSN IS {}", db->get_synced_lsn());
 
-  ensure_recovered_keys_uptodate(*db, *shared);
+  ensure_recovered_keys_uptodate(*db, shared);
 
   std::vector<std::byte> value{kValueSize};
-  size_t left_off_put = shared->put.load();
-  info("resuming put()s at {}; {} SUCCESSFUL RECOVERIES", left_off_put,
-       shared->recovery_count);
-  shared->recovery_count++;
+  size_t left_off_put = shared.put.load();
+  info("--> resuming put()s at {}; {} successful recoveries", left_off_put,
+       shared.recovery_count);
+  shared.recovery_count++;
 
-  shared->starting_up = false;
+  shared.starting_up = false;
 
   for (size_t put = left_off_put; put < kPuts; put++) {
-    shared->watchdog++;
-    uint64_t key = put % kKeys;
+    // bump this to reassure parent we aren't wedged.
+    shared.watchdog++;
+
+    // issue the next put accoring to its put sequence number.
+    uint64_t key = put & (kKeys - 1);
     std::ranges::copy(byte_view(put), value.begin());
     DBStatus<void> ret = db->put(byte_view(key), 0, std::span(value));
     if (!ret) [[unlikely]]
       fail(ret.error());
 
-    if (put && (put % kBatchSize == 0)) {
+    // sync after each batch.
+    if (put && ((put & (kBatchSize - 1)) == 0)) {
       uint64_t lsn;
-      if (shared->synced_lsn && (shared->synced_lsn % kSyncsPerSnapshot == 0)) {
-        info("DATABASE SIZE JUST BEFORE SNAPSHOT: {}", db_size(*db));
+
+      // after enough syncs issue a full snapshot.
+      if (shared.synced_lsn &&
+          ((shared.synced_lsn & (kSyncsPerSnapshot - 1)) == 0)) {
+        info("Database size just before snapshot: {}", db_size(*db));
         auto ret = db->sync_and_snapshot(0);
         if (!ret) [[unlikely]]
           fail(ret.error());
         lsn = ret->first;
+
+        // just synchronously wait for the snapshot to complete.
         auto sync_ret = ret->second.get();
         if (!sync_ret)
           fail(sync_ret.error());
@@ -211,18 +226,14 @@ do_child(std::string_view path, Shared *shared)
 
       info("child synced through lsn {} put {}", lsn, put);
 
-      if (shared->synced_lsn + 1 < lsn) {
-        warn("LSN IN SHM OUT OF DATE AFTER RECOVERY - UPDATING");
-      }
-      else if (shared->synced_lsn + 1 > lsn) {
+      if (shared.synced_lsn + 1 > lsn) {
         panic("FAILURE - LSN {} WAS LAST SYNCED ACCORDING TO SHM; NEW CALL TO "
               "sync() RETURNED LSN {}",
-              shared->synced_lsn, lsn);
+              shared.synced_lsn, lsn);
       }
 
-      shared->synced_lsn = lsn;
-      shared->put.store(put + 1);
-      info("Recorded {} as the place to resume operation", shared->put.load());
+      shared.synced_lsn = lsn;
+      shared.put.store(put + 1);
     }
   }
 
@@ -230,18 +241,16 @@ do_child(std::string_view path, Shared *shared)
 }
 
 void
-do_parent(pid_t child_pid, Shared *shared)
+do_parent(pid_t child_pid, Shared &shared)
 {
   using namespace std::chrono_literals;
 
-  size_t start_watchdog = shared->watchdog.load();
+  size_t start_watchdog = shared.watchdog.load();
   std::this_thread::sleep_for(kDurationBetweenCrashes);
-  size_t end_watchdog = shared->watchdog.load();
+  size_t end_watchdog = shared.watchdog.load();
 
-  if (start_watchdog == end_watchdog) {
-    error("!!! CHILD SEEMS STUCK !!! CHILD SEEMS STUCK!!! CHILD SEEMS STUCK!!! "
-          "CHILD SEEMS STUCK !!!");
-  }
+  if (start_watchdog == end_watchdog)
+    error("!!! CHILD SEEMS STUCK !!!");
 
   // before trying to kill the child, first see if it ran into some kind of
   // failure.
@@ -262,8 +271,9 @@ dead:
     std::exit(exit_status);
   }
 
-  if (shared->starting_up)
-    panic("child didn't make it through startup before injected crash; exiting testing");
+  if (shared.starting_up)
+    panic("child didn't make it through startup before injected crash; exiting "
+          "testing");
 
   info("restarting child");
 }
@@ -279,7 +289,7 @@ map_shared()
 {
   void *p = mmap(nullptr, sizeof(hogd::Shared), PROT_READ | PROT_WRITE,
                  MAP_ANONYMOUS | MAP_SHARED, -1, 0);
-  if (p == reinterpret_cast<void *>(-1))
+  if (reinterpret_cast<intptr_t>(p) == -1)
     hogd::panic("mmap failed");
 
   return new (p) hogd::Shared{};
@@ -305,27 +315,21 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   std::string path{argv[1]};
-
   hogd::remove_all_files(path);
-  hogd::Shared *shared = map_shared();
 
-  if (hogd::kNoFork) {
-    do_child(path, shared);
-    std::exit(0);
-  }
+  // map structure between parent/child. we just leak the mapping.
+  hogd::Shared &shared = *map_shared();
 
-  for (size_t iter = 0; iter < hogd::kIters; iter++) {
+  while (true) {
     pid_t pid = fork();
     if (pid == -1)
       hogd::panic("failed to create child process");
 
     if (pid == 0)
-      hogd::do_child(path, shared);
+      hogd::do_child(path, shared); // never returns
     else
-      hogd::do_parent(pid, shared);
+      hogd::do_parent(pid, shared); // returns to recover or exits if done.
   }
 
-  hogd::info("ALL DONE - EXITING");
-
-  return 0;
+  std::unreachable();
 }
