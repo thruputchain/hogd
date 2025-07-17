@@ -99,7 +99,7 @@ void load_canonical_check(T value) {
 }
 
 template<std::integral U, std::integral T>
-U load_cxs_integral_impl(std::span<const uint8_t>& data) {
+T load_cxs_integral_impl(std::span<const uint8_t>& data) {
     check_size(data, 1 + sizeof(U));
     if constexpr(sizeof(T) < sizeof(U)) {
         throw CxsBadInput("Non canonical Cxs representation");
@@ -125,18 +125,15 @@ T load_cxs_uint(std::span<const uint8_t>& data) {
 
     assert((first_byte & 0b0011'1111) == 63);
     uint8_t header = first_byte >> 6;
-    switch(header) {
-        case 0:
-            return load_cxs_integral_impl<uint8_t, T>(data);
-        case 1:
-            return load_cxs_integral_impl<uint16_t, T>(data);
-        case 2:
-            return load_cxs_integral_impl<uint32_t, T>(data);
-        case 3:
-            return load_cxs_integral_impl<uint64_t, T>(data);
-        default:
-            std::unreachable();
-    }
+
+    constexpr std::array<T(*)(std::span<const uint8_t>&), 4> kCxsLoadUInt = {
+        &load_cxs_integral_impl<uint8_t, T>,
+        &load_cxs_integral_impl<uint16_t, T>,
+        &load_cxs_integral_impl<uint32_t, T>,
+        &load_cxs_integral_impl<uint64_t, T>,
+    };
+    assert(header < kCxsLoadUInt.size());
+    return kCxsLoadUInt[header](data);
 }
 
 inline void store_cxs_int8_0_extra_byte(x23::Buf& buf, int64_t value) {
@@ -257,18 +254,15 @@ T load_cxs_int(std::span<const uint8_t>& data) {
     }
     assert((first_byte & 0b0011'1111) == 63);
     uint8_t header = first_byte >> 6;
-    switch(header) {
-        case 0:
-            return load_cxs_integral_impl<int8_t, T>(data);
-        case 1:
-            return load_cxs_integral_impl<int16_t, T>(data);
-        case 2:
-            return load_cxs_integral_impl<int32_t, T>(data);
-        case 3:
-            return load_cxs_integral_impl<int64_t, T>(data);
-        default:
-            std::unreachable();
-    }
+
+    constexpr std::array<T(*)(std::span<const uint8_t>&), 4> kCxsLoadInt = {
+        &load_cxs_integral_impl<int8_t, T>,
+        &load_cxs_integral_impl<int16_t, T>,
+        &load_cxs_integral_impl<int32_t, T>,
+        &load_cxs_integral_impl<int64_t, T>,
+    };
+    assert(header < kCxsLoadInt.size());
+    return kCxsLoadInt[header](data);
 }
 
 template<typename T>
