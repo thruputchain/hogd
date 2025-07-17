@@ -431,15 +431,12 @@ struct CxsSerializer<T> {
 template<is_xdr_cat<XdrCategory::kArray> X>
 struct CxsSerializer<X> {
     static void store(x23::Buf& buf, const X& value) {
-        CxsSerializer<uint32_t>::store(buf, value.size());
         for (const auto& element : value) {
             CxsSerializer<typename X::value_type>::store(buf, element);
         }
     }
     static void load(std::span<const uint8_t>& data, X& value) {
-        uint32_t size;
-        CxsSerializer<uint32_t>::load(data, size);
-        value.resize(size);
+        value.resize(value.max_size());
         for (auto& element : value) {
             CxsSerializer<typename X::value_type>::load(data, element);
         }
