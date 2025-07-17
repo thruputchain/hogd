@@ -464,4 +464,4 @@ void deserialize_cxs(std::span<const uint8_t>& data, T& value) {
     }
 }
 
-}
+} // namespace x23
