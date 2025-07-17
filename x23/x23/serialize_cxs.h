@@ -465,4 +465,15 @@ struct CxsSerializer<X> {
     }
 };
 
+inline void serialize_cxs(x23::Buf& buf, const is_xdr_type auto& value) {
+    CxsSerializer<std::remove_cvref_t<decltype(value)>>::store(buf, value);
+}
+template<is_xdr_type T>
+void deserialize_cxs(std::span<const uint8_t>& data, T& value) {
+    CxsSerializer<std::remove_cvref_t<decltype(value)>>::load(data, value);
+    if (data.size() != 0) {
+        throw CxsBadInput("Extra data after deserializing {}", xdr_type_name<T>());
+    }
+}
+
 }

@@ -47,10 +47,10 @@ namespace {
 template<typename T>
 void check_roundtrip(T const& input) {
     x23::Buf buf;
-    CxsSerializer<T>::store(buf, input);
+    serialize_cxs(buf, input);
     auto view = x23::BufView(buf);
     T output;
-    CxsSerializer<T>::load(view, output);
+    deserialize_cxs(view, output);
     EXPECT_EQ(input, output);
     EXPECT_EQ(view.size(), 0); // check all data consumed
 }
