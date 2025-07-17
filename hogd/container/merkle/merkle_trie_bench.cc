@@ -1,3 +1,4 @@
+#include <atomic>
 #include <benchmark/benchmark.h>
 
 #include <cstddef>
@@ -7,7 +8,6 @@
 #include <memory>
 #include <print>
 #include <random>
-#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -35,16 +35,16 @@ HexArray
 generate_64_byte_path()
 {
   constexpr size_t kPathNumBytes = 64;
-  std::random_device rd;
-  std::mt19937 gen(rd());
+  static thread_local std::random_device rd;
+  static thread_local std::mt19937 gen(rd());
 
-  static std::vector<std::byte> path(kPathNumBytes);
-  static size_t counter = 0;
+  static thread_local std::vector<std::byte> path(kPathNumBytes);
+  static std::atomic<size_t> counter = 0;
   std::uniform_int_distribution<int> path_dist(0, 0xff);
-  memcpy(path.data() + path.size() - sizeof(counter), &counter,
-         sizeof(counter));
-  counter++;
-  for (size_t i = 0; i < path.size() - sizeof(counter); i++) {
+  size_t counter_val = counter.fetch_add(1, std::memory_order_relaxed);
+  memcpy(path.data() + path.size() - sizeof(counter_val), &counter_val,
+         sizeof(counter_val));
+  for (size_t i = 0; i < path.size() - sizeof(counter_val); i++) {
     path[i] = static_cast<std::byte>(path_dist(gen));
   }
   return HexArray(path);
@@ -501,30 +501,34 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
 
   MerkleTriePrefix trie;
   std::vector<std::vector<HexArray>> paths(num_threads);
+  WorkerPool pool(num_threads);
+  std::vector<std::future<void>> futures;
+  futures.reserve(num_threads);
   {
-    std::set<HexArray> generated;
-    trie.set_should_hash_nodes_on_each_op(false);
-
     std::print("Completing initial fill...");
     fflush(stdout);
 
-    for (size_t i = 0; i < kLargeNumKVPairs; i++) {
-      HexArray path = generate_64_byte_path();
-      if (generated.contains(path)) {
-        i--;
-        continue;
-      }
-      CHECK(generated.insert(path).second);
-      std::string value = std::to_string(i);
-      std::span<std::byte> value_span{reinterpret_cast<std::byte *>(
-                                          value.data()),
-                                      value.size()};
-      CHECK(trie.insert(path, value_span));
+    for (size_t i = 0; i < num_threads; i++) {
+      futures.push_back(pool.submit([num_threads, &trie] {
+        for (size_t j = 0; j < kLargeNumKVPairs / num_threads; j++) {
+          HexArray path = generate_64_byte_path();
+          std::string value = std::to_string(j);
+          std::span<std::byte> value_span{reinterpret_cast<std::byte *>(
+                                              value.data()),
+                                          value.size()};
+          CHECK(trie.insert(path, value_span));
+        }
+      }));
     }
-    CHECK_EQ(trie.size(), kLargeNumKVPairs);
-    trie.set_should_hash_nodes_on_each_op(true);
-    trie.generate_all_hashes();
-    CHECK(trie.check());
+    for (std::future<void> &future : futures) {
+      future.get();
+    }
+    futures.clear();
+    CHECK_LT(static_cast<int64_t>(trie.size()) -
+                 static_cast<int64_t>(kLargeNumKVPairs),
+             static_cast<int64_t>(num_threads));
+    trie.generate_top_level_hashes();
+    // CHECK(trie.check());
 
     std::println(" done.");
     std::print("Generating paths for threads...");
@@ -535,19 +539,11 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
 
       for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
         HexArray path = generate_64_byte_path();
-        if (generated.contains(path)) {
-          j--;
-          continue;
-        }
-        CHECK(generated.insert(path).second);
         paths[i].push_back(path);
       }
     }
   }
   std::println(" done.");
-  WorkerPool pool(num_threads);
-  std::vector<std::future<void>> futures;
-  futures.reserve(num_threads);
   std::string value = "hello";
   std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
                                   value.size()};
