@@ -68,7 +68,7 @@ T load_cxs_unsigned_integral(std::span<const uint8_t>& data) {
                 check_size(data, 3);
                 uint16_t out;
                 std::memcpy(&out, data.data() + 1, 2);
-                data = data.subspan(2);
+                data = data.subspan(3);
                 if (out <= std::numeric_limits<uint8_t>::max()) {
                     throw CxsBadInput("Non canonical Cxs representation");
                 }
@@ -439,9 +439,9 @@ struct CxsSerializer<X> {
         buf.append_range(value);
     }
     static void load(std::span<const uint8_t>& data, X& value) {
-        for (auto& element : value) {
-            CxsSerializer<uint8_t>::load(data, element);
-        }
+        check_size(data, value.size());
+        std::memcpy(value.data(), data.data(), value.size());
+        data = data.subspan(value.size());
     }
 };
 

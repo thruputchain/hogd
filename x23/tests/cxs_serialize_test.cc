@@ -65,6 +65,50 @@ TEST(CxsSerialize, LargerIntRoundTrip) {
     }
 }
 
+// check uint edge cases
+TEST(CxsSerialize, Uint32RoundTrip) {
+    check_roundtrip(uint32_t{0});
+    check_roundtrip(uint32_t{255});
+    check_roundtrip(uint32_t{256});
+    check_roundtrip(uint32_t{65535});
+    check_roundtrip(uint32_t{65536});
+    check_roundtrip(std::numeric_limits<uint32_t>::max());
+}
+
+TEST(CxsSerialize, Uint64RoundTrip) {
+    check_roundtrip(uint64_t{0});
+    check_roundtrip(uint64_t{255});
+    check_roundtrip(uint64_t{256});
+    check_roundtrip(uint64_t{65535});
+    check_roundtrip(uint64_t{65536});
+    check_roundtrip(uint64_t{1ULL << 32} - 1);
+    check_roundtrip(uint64_t{1ULL << 32});
+    check_roundtrip(std::numeric_limits<uint64_t>::max());
+}
+
+TEST(CxsSerialize, Int64RoundTrip) {
+    check_roundtrip(int64_t{0});
+    check_roundtrip(int64_t{0} - 1);
+    
+    check_roundtrip(int64_t{std::numeric_limits<int8_t>::max()});
+    check_roundtrip(int64_t{std::numeric_limits<int8_t>::min()});
+    check_roundtrip(int64_t{std::numeric_limits<int8_t>::max()} + 1);
+    check_roundtrip(int64_t{std::numeric_limits<int8_t>::min()} - 1);
+
+    check_roundtrip(int64_t{std::numeric_limits<int16_t>::max()});
+    check_roundtrip(int64_t{std::numeric_limits<int16_t>::min()});
+    check_roundtrip(int64_t{std::numeric_limits<int16_t>::max()} + 1);
+    check_roundtrip(int64_t{std::numeric_limits<int16_t>::min()} - 1);
+
+    check_roundtrip(int64_t{std::numeric_limits<int32_t>::max()});
+    check_roundtrip(int64_t{std::numeric_limits<int32_t>::min()});
+    check_roundtrip(int64_t{std::numeric_limits<int32_t>::max()} + 1);
+    check_roundtrip(int64_t{std::numeric_limits<int32_t>::min()} - 1);
+
+    check_roundtrip(std::numeric_limits<int64_t>::min());
+    check_roundtrip(std::numeric_limits<int64_t>::max());
+}
+
 TEST(CxsSerialize, StructRoundTrip) {
     using test_struct = NonnegativeInt64SetAddArgs;
     test_struct value;
@@ -107,6 +151,16 @@ TEST(CxsSerialize, RecursiveRoundTrip) {
     value.next->next->next->elem = "?";
     value.next->next->next->next.emplace();
     value.next->next->next->next->elem = ".";
+    check_roundtrip(value);
+}
+
+TEST(CxsSerialize, OpaqueVecRoundTrip) {
+    using test_array = x23::Vec<uint8_t, 1024>;
+    test_array value;
+    value.resize_uninitialized(256);
+    for (size_t i = 0; i < 256; ++i) {
+        value[i] = i;
+    }
     check_roundtrip(value);
 }
 
