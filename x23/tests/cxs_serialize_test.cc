@@ -164,4 +164,12 @@ TEST(CxsSerialize, OpaqueVecRoundTrip) {
     check_roundtrip(value);
 }
 
+TEST(CxsSerialize, FloatRoundTrip) {
+    check_roundtrip(float{0.0});
+    check_roundtrip(float{1.0});
+    check_roundtrip(float{-1.0});
+    check_roundtrip(std::numeric_limits<float>::max());
+    check_roundtrip(std::numeric_limits<float>::min());
+}
+
 } // namespace x23

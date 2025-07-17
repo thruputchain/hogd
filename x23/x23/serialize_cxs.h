@@ -465,6 +465,22 @@ struct CxsSerializer<X> {
     }
 };
 
+// float and double are special cased because they are not integral types
+template<typename T> requires (is_xdr_cat<T, XdrCategory::kPrimitive> && !std::is_integral_v<T>)
+struct CxsSerializer<T> {
+    using uint_type = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
+    static_assert(sizeof(uint_type) == sizeof(T), "uint_type must be the same size as T");
+
+    static void store(x23::Buf& buf, T value) {
+        CxsSerializer<uint_type>::store(buf, std::bit_cast<uint_type>(value));
+    }
+    static void load(std::span<const uint8_t>& data, T& value) {
+        uint_type bits;
+        CxsSerializer<uint_type>::load(data, bits);
+        value = std::bit_cast<T>(bits);
+    }
+};
+
 inline void serialize_cxs(x23::Buf& buf, const is_xdr_type auto& value) {
     CxsSerializer<std::remove_cvref_t<decltype(value)>>::store(buf, value);
 }
