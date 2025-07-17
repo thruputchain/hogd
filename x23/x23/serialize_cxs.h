@@ -103,12 +103,13 @@ U load_cxs_integral_impl(std::span<const uint8_t>& data) {
     check_size(data, 1 + sizeof(U));
     if constexpr(sizeof(T) < sizeof(U)) {
         throw CxsBadInput("Non canonical Cxs representation");
+    } else {
+        U out;
+        std::memcpy(&out, data.data() + 1, sizeof(U));
+        data = data.subspan(sizeof(U) + 1);
+        load_canonical_check<U>(out);
+        return out;
     }
-    U out;
-    std::memcpy(&out, data.data() + 1, sizeof(U));
-    data = data.subspan(sizeof(U) + 1);
-    load_canonical_check<U>(out);
-    return out;
 }
 
 // Load a uint64_t from a span of bytes.
