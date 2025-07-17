@@ -16,9 +16,9 @@ TEST(CxsSerialize, Int8RoundTrip) {
         store_cxs_int8(buf, i);
         auto view = x23::BufView(buf);
         if (i < kCxsInt81ByteMin || i > kCxsInt81ByteMax) {
-            EXPECT_EQ(buf.size(), 2);
+            EXPECT_EQ(buf.size(), 2U);
         } else {
-            EXPECT_EQ(buf.size(), 1);
+            EXPECT_EQ(buf.size(), 1U);
         }
 
         auto j = load_cxs_signed_integral<int8_t>(view);
@@ -32,9 +32,9 @@ TEST(CxsSerialize, UInt8RoundTrip) {
         CxsSerializer<uint8_t>::store(buf, i);
         auto view = x23::BufView(buf);
         if (i > kCxsUInt81ByteMax) {
-            EXPECT_EQ(buf.size(), 2);
+            EXPECT_EQ(buf.size(), 2U);
         } else {
-            EXPECT_EQ(buf.size(), 1);
+            EXPECT_EQ(buf.size(), 1U);
         }
 
         uint8_t j;
