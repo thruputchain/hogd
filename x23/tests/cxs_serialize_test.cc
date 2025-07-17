@@ -52,7 +52,7 @@ void check_roundtrip(T const& input) {
     T output;
     deserialize_cxs(view, output);
     EXPECT_EQ(input, output);
-    EXPECT_EQ(view.size(), 0); // check all data consumed
+    EXPECT_EQ(view.size(), 0U); // check all data consumed
 }
 }
 
