@@ -496,6 +496,8 @@ BENCHMARK(hash_parallel_128_threads)->Unit(benchmark::kMillisecond);
 void
 run_multithread_insert(benchmark::State &state, size_t num_threads)
 {
+  const size_t large_num_kv_pairs_per_thread = kLargeNumKVPairs / num_threads;
+  CHECK_EQ(kLargeNumKVPairs % num_threads, 0UL);
   const size_t num_kv_pairs_per_thread = kNumKVPairs / num_threads;
   CHECK_EQ(kNumKVPairs % num_threads, 0UL);
 
@@ -509,8 +511,8 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
     fflush(stdout);
 
     for (size_t i = 0; i < num_threads; i++) {
-      futures.push_back(pool.submit([num_threads, &trie] {
-        for (size_t j = 0; j < kLargeNumKVPairs / num_threads; j++) {
+      futures.push_back(pool.submit([large_num_kv_pairs_per_thread, &trie] {
+        for (size_t j = 0; j < large_num_kv_pairs_per_thread; j++) {
           HexArray path = generate_64_byte_path();
           std::string value = std::to_string(j);
           std::span<std::byte> value_span{reinterpret_cast<std::byte *>(
@@ -524,9 +526,7 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
       future.get();
     }
     futures.clear();
-    CHECK_LT(static_cast<int64_t>(trie.size()) -
-                 static_cast<int64_t>(kLargeNumKVPairs),
-             static_cast<int64_t>(num_threads));
+    CHECK_EQ(trie.size(), kLargeNumKVPairs);
     trie.generate_top_level_hashes();
     // CHECK(trie.check());
 
