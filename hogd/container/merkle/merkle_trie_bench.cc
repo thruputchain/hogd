@@ -526,7 +526,7 @@ run_multithread_insert(benchmark::State &state, size_t num_threads)
     futures.clear();
     CHECK_LT(static_cast<int64_t>(trie.size()) -
                  static_cast<int64_t>(kLargeNumKVPairs),
-             num_threads);
+             static_cast<int64_t>(num_threads));
     trie.generate_top_level_hashes();
     // CHECK(trie.check());
 
