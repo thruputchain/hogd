@@ -7,6 +7,7 @@
 #include <bit>
 #include <concepts>
 #include <cstdint>
+#include <tuple>
 #include <utility>
 
 #include <x23/utility.h>
