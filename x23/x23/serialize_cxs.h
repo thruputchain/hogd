@@ -1,7 +1,5 @@
 #pragma once
 
-#include "x23/vec.h"
-#include "x23/x23.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -14,6 +12,9 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+
+#include <x23/vec.h>
+#include <x23/x23.h>
 
 namespace x23 {
 
