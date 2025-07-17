@@ -13,7 +13,7 @@ namespace x23 {
 TEST(CxsSerialize, Int8RoundTrip) {
     for (int8_t i = std::numeric_limits<int8_t>::min(); i != std::numeric_limits<int8_t>::max(); ++i) {
         x23::Buf buf;
-        store_cxs_int8(buf, i);
+        CxsSerializer<int8_t>::store(buf, i);
         auto view = x23::BufView(buf);
         if (i < kCxsInt81ByteMin || i > kCxsInt81ByteMax) {
             EXPECT_EQ(buf.size(), 2U);
@@ -170,6 +170,16 @@ TEST(CxsSerialize, FloatRoundTrip) {
     check_roundtrip(float{-1.0});
     check_roundtrip(std::numeric_limits<float>::max());
     check_roundtrip(std::numeric_limits<float>::min());
+}
+
+TEST(CxsSerialize, CanonicalCheck) {
+    x23::Buf buf;
+    buf.push_back(kCxsHeader1Byte);
+    buf.push_back(10);
+    x23::BufView view(buf);
+    uint8_t value;
+
+    EXPECT_ANY_THROW(CxsSerializer<uint8_t>::load(view, value));
 }
 
 } // namespace x23

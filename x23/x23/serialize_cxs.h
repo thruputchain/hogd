@@ -3,6 +3,7 @@
 #include "x23/vec.h"
 #include "x23/x23.h"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -38,6 +39,81 @@ constexpr static int8_t kCxsInt81ByteMax = 31; // inclusive
 
 constexpr static uint8_t kCxsUInt81ByteMax = 62; // inclusive
 
+template<size_t N>
+constexpr uint8_t lookup_header_byte() {
+    if constexpr (N == 1) {
+        return kCxsHeader1Byte;
+    } else if constexpr (N == 2) {
+        return kCxsHeader2Byte;
+    } else if constexpr (N == 4) {
+        return kCxsHeader4Byte;
+    } else if constexpr (N == 8) {
+        return kCxsHeader8Byte;
+    } else {
+        std::unreachable();
+    }
+}
+
+template<size_t N>
+constexpr uint64_t uint_canonical_upper_bound() {
+    if constexpr (N == 0) {
+        return kCxsUInt81ByteMax;
+    } else if constexpr (N == 1) {
+        return std::numeric_limits<uint8_t>::max();
+    } else if constexpr (N == 2) {
+        return std::numeric_limits<uint16_t>::max();
+    } else if constexpr (N == 4) {
+        return std::numeric_limits<uint32_t>::max();
+    } else {
+        std::unreachable();
+    }
+}
+
+template<size_t N>
+constexpr int64_t int_canonical_upper_bound() {
+    if constexpr (N == 0) {
+        return kCxsInt81ByteMax;
+    } else if constexpr (N == 1) {
+        return std::numeric_limits<int8_t>::max();
+    } else if constexpr (N == 2) {
+        return std::numeric_limits<int16_t>::max();
+    } else if constexpr (N == 4) {
+        return std::numeric_limits<int32_t>::max();
+    } else {
+        std::unreachable();
+    }
+}
+
+template<size_t N>
+constexpr int64_t int_canonical_lower_bound() {
+    if constexpr (N == 0) {
+        return kCxsInt81ByteMin;
+    } else if constexpr (N == 1) {
+        return std::numeric_limits<int8_t>::min();
+    } else if constexpr (N == 2) {
+        return std::numeric_limits<int16_t>::min();
+    } else if constexpr (N == 4) {
+        return std::numeric_limits<int32_t>::min();
+    } else {
+        std::unreachable();
+    }
+}
+
+template<std::integral T>
+void load_canonical_check(T value) {
+    constexpr size_t kSize = sizeof(T);
+    if constexpr (std::is_unsigned_v<T>) {
+        if (value <= uint_canonical_upper_bound<kSize/2>()) {
+            throw CxsBadInput("Non canonical Cxs representation");
+        }
+    } else {
+        if (value >= int_canonical_lower_bound<kSize/2>() && value <= int_canonical_upper_bound<kSize/2>()) {
+            throw CxsBadInput("Non canonical Cxs representation");
+        }
+    }
+}
+
+
 // Load a uint64_t from a span of bytes.
 // Modifies the span to advance past the loaded value.
 template<std::unsigned_integral T>
@@ -56,9 +132,7 @@ T load_cxs_unsigned_integral(std::span<const uint8_t>& data) {
             check_size(data, 2);
             uint8_t out = data[1];
             data = data.subspan(2);
-            if (out <= kCxsUInt81ByteMax) {
-                throw CxsBadInput("Non canonical Cxs representation");
-            }
+            load_canonical_check<uint8_t>(out);
             return out;
         }
         case 1: {
@@ -69,9 +143,7 @@ T load_cxs_unsigned_integral(std::span<const uint8_t>& data) {
                 uint16_t out;
                 std::memcpy(&out, data.data() + 1, 2);
                 data = data.subspan(3);
-                if (out <= std::numeric_limits<uint8_t>::max()) {
-                    throw CxsBadInput("Non canonical Cxs representation");
-                }
+                load_canonical_check<uint16_t>(out);
                 return out;
             }
         }
@@ -83,9 +155,7 @@ T load_cxs_unsigned_integral(std::span<const uint8_t>& data) {
                 uint32_t out;
                 std::memcpy(&out, data.data() + 1, 4);
                 data = data.subspan(5);
-                if (out <= std::numeric_limits<uint16_t>::max()) {
-                    throw CxsBadInput("Non canonical Cxs representation");
-                }
+                load_canonical_check<uint32_t>(out);
                 return out;
             }
         }
@@ -97,9 +167,7 @@ T load_cxs_unsigned_integral(std::span<const uint8_t>& data) {
                 uint64_t out;
                 std::memcpy(&out, data.data() + 1 , 8);
                 data = data.subspan(9);
-                if (out <= std::numeric_limits<uint32_t>::max()) {
-                    throw CxsBadInput("Non canonical Cxs representation");
-                }
+                load_canonical_check<uint64_t>(out);
                 return out;
             }
         }
@@ -108,22 +176,8 @@ T load_cxs_unsigned_integral(std::span<const uint8_t>& data) {
     }
 }
 
-inline void store_cxs_uint8(x23::Buf& buf, uint8_t value) {
-    if (value <= 62) {
-        buf.push_back(value);
-        return;
-    }
-    buf.push_back(kCxsHeader1Byte); // 63
-    buf.push_back(value);
-}
-
-inline void store_cxs_int8(x23::Buf& buf, int8_t value) {
-    if (value < kCxsInt81ByteMin || value > kCxsInt81ByteMax) {
-        // use 2 byte representation
-        buf.push_back(kCxsHeader1Byte); // 63
-        buf.push_back(value);
-        return;
-    }
+inline void store_cxs_int8_0_extra_byte(x23::Buf& buf, int64_t value) {
+    assert(value >= kCxsInt81ByteMin && value <= kCxsInt81ByteMax);
     // use 1 byte representation
     if (value >= 0) {
         buf.push_back(value);
@@ -133,68 +187,89 @@ inline void store_cxs_int8(x23::Buf& buf, int8_t value) {
     }
 }
 
-inline void store_cxs_uint16(x23::Buf& buf, uint16_t value) {
-    if (value > std::numeric_limits<uint8_t>::max()) {
-        buf.push_back(kCxsHeader2Byte); // 127
-        buf.resize_uninitialized(buf.size() + 2);
-        std::memcpy(buf.data() + buf.size() - 2, &value, 2);
-        return;
+template<size_t N> requires (N > 0)
+void store_cxs_int_extra_bytes(x23::Buf& buf, int64_t value) {
+    assert(value < int_canonical_lower_bound<N/2>() || value > int_canonical_upper_bound<N/2>()); // value is in canonical range for this size
+    buf.push_back(lookup_header_byte<N>());
+    buf.resize_uninitialized(buf.size() + N);
+    std::memcpy(buf.data() + buf.size() - N, &value, N);
+} 
+
+constexpr static std::array<void(*)(x23::Buf&, int64_t), 5> kCxsStoreInt = {
+    &store_cxs_int8_0_extra_byte,
+    &store_cxs_int_extra_bytes<1>,
+    &store_cxs_int_extra_bytes<2>,
+    &store_cxs_int_extra_bytes<4>,
+    &store_cxs_int_extra_bytes<8>,
+};
+
+template<std::signed_integral T>
+uint8_t cxs_int_get_function_index(T value) {
+    if (value >= int_canonical_lower_bound<0>() && value <= int_canonical_upper_bound<0>()) {
+        return 0;
     }
-    store_cxs_uint8(buf, value);
+    if (value >= int_canonical_lower_bound<1>() && value <= int_canonical_upper_bound<1>()) {
+        return 1;
+    }
+    if (value >= int_canonical_lower_bound<2>() && value <= int_canonical_upper_bound<2>()) {
+        return 2;
+    }
+    if (value >= int_canonical_lower_bound<4>() && value <= int_canonical_upper_bound<4>()) {
+        return 3;
+    }
+    return 4;
 }
 
-inline void store_cxs_int16(x23::Buf& buf, int16_t value) {
-    if (value < std::numeric_limits<int8_t>::min() || value > std::numeric_limits<int8_t>::max()) {
-        buf.push_back(kCxsHeader2Byte); // 127
-        buf.resize_uninitialized(buf.size() + 2);
-        std::memcpy(buf.data() + buf.size() - 2, &value, 2);
-        return;
-    }
-    store_cxs_int8(buf, value);
+inline void store_cxs_uint8_0_extra_byte(x23::Buf& buf, uint64_t value) {
+    assert(value <= kCxsUInt81ByteMax);
+    buf.push_back(value);
 }
 
-inline void store_cxs_uint32(x23::Buf& buf, uint32_t value) {
-    if (value > std::numeric_limits<uint16_t>::max()) {
-        buf.push_back(kCxsHeader4Byte); // 191
-        buf.resize_uninitialized(buf.size() + 4);
-        std::memcpy(buf.data() + buf.size() - 4, &value, 4);
-        return;
-    }
-    store_cxs_uint16(buf, value);
+template<size_t N> requires (N > 0)
+void store_cxs_uint_extra_bytes(x23::Buf& buf, uint64_t value) {
+    assert(value > uint_canonical_upper_bound<N/2>()); // value is in canonical range for this size
+    buf.push_back(lookup_header_byte<N>());
+    buf.resize_uninitialized(buf.size() + N);
+    std::memcpy(buf.data() + buf.size() - N, &value, N);
 }
 
-inline void store_cxs_int32(x23::Buf& buf, int32_t value) {
-    if (value < std::numeric_limits<int16_t>::min() || value > std::numeric_limits<int16_t>::max()) {
-        buf.push_back(kCxsHeader4Byte); // 191
-        buf.resize_uninitialized(buf.size() + 4);
-        std::memcpy(buf.data() + buf.size() - 4, &value, 4);
-        return;
+constexpr static std::array<void(*)(x23::Buf&, uint64_t), 5> kCxsStoreUInt = {
+    &store_cxs_uint8_0_extra_byte,
+    &store_cxs_uint_extra_bytes<1>,
+    &store_cxs_uint_extra_bytes<2>,
+    &store_cxs_uint_extra_bytes<4>,
+    &store_cxs_uint_extra_bytes<8>,
+};
+
+template<std::unsigned_integral T>
+uint8_t cxs_uint_get_function_index(T value) {
+    if (value <= kCxsUInt81ByteMax) {
+        return 0;
     }
-    store_cxs_int16(buf, value);
+    if (value <= std::numeric_limits<uint8_t>::max()) {
+        return 1;
+    }
+    if (value <= std::numeric_limits<uint16_t>::max()) {
+        return 2;
+    }
+    if (value <= std::numeric_limits<uint32_t>::max()) {
+        return 3;
+    }
+    return 4;
 }
 
-inline void store_cxs_uint64(x23::Buf& buf, uint64_t value) {
-    if (value > std::numeric_limits<uint32_t>::max()) {
-        buf.push_back(kCxsHeader8Byte); // 255
-        buf.resize_uninitialized(buf.size() + 8);
-        std::memcpy(buf.data() + buf.size() - 8, &value, 8);
-        return;
-    }
-    store_cxs_uint32(buf, value);
+template<std::unsigned_integral T>
+void store_cxs_uint(x23::Buf& buf, T value) {
+    kCxsStoreUInt[cxs_uint_get_function_index(value)](buf, value);
 }
 
-inline void store_cxs_int64(x23::Buf& buf, int64_t value) {
-    if (value < std::numeric_limits<int32_t>::min() || value > std::numeric_limits<int32_t>::max()) {
-        buf.push_back(kCxsHeader8Byte); // 255
-        buf.resize_uninitialized(buf.size() + 8);
-        std::memcpy(buf.data() + buf.size() - 8, &value, 8);
-        return;
-    }
-    store_cxs_int32(buf, value);
+template<std::signed_integral T>
+void store_cxs_int(x23::Buf& buf, T value) {
+    kCxsStoreInt[cxs_int_get_function_index(value)](buf, value);
 }
 
 inline void store_cxs_bool(x23::Buf& buf, bool value) {
-    store_cxs_uint8(buf, value ? 1 : 0);
+    store_cxs_uint<uint8_t>(buf, value ? 1 : 0);
 }
 
 inline bool load_cxs_bool(std::span<const uint8_t>& data) {
@@ -225,9 +300,7 @@ T load_cxs_signed_integral(std::span<const uint8_t>& data) {
             check_size(data, 2);
             int8_t out = data[1];
             data = data.subspan(2);
-            if (out >= kCxsInt81ByteMin && out <= kCxsInt81ByteMax) {
-                throw CxsBadInput("Non canonical Cxs representation");
-            }
+            load_canonical_check<int8_t>(out);
             return out;
         }
         case 1: {
@@ -238,9 +311,7 @@ T load_cxs_signed_integral(std::span<const uint8_t>& data) {
                 int16_t out;
                 std::memcpy(&out, data.data() + 1, 2);
                 data = data.subspan(3);
-                if (out >= std::numeric_limits<int8_t>::min() && out <= std::numeric_limits<int8_t>::max()) {
-                    throw CxsBadInput("Non canonical Cxs representation");
-                }
+                load_canonical_check<int16_t>(out);
                 return out;
             }
         }
@@ -252,9 +323,7 @@ T load_cxs_signed_integral(std::span<const uint8_t>& data) {
                 int32_t out;
                 std::memcpy(&out, data.data() + 1, 4);
                 data = data.subspan(5);
-                if (out >= std::numeric_limits<int16_t>::min() && out <= std::numeric_limits<int16_t>::max()) {
-                    throw CxsBadInput("Non canonical Cxs representation");
-                }
+                load_canonical_check<int32_t>(out);
                 return out;
             }
         }
@@ -266,9 +335,7 @@ T load_cxs_signed_integral(std::span<const uint8_t>& data) {
                 int64_t out;
                 std::memcpy(&out, data.data() + 1, 8);
                 data = data.subspan(9);
-                if (out >= std::numeric_limits<int32_t>::min() && out <= std::numeric_limits<int32_t>::max()) {
-                    throw CxsBadInput("Non canonical Cxs representation");
-                }
+                load_canonical_check<int64_t>(out);
                 return out;
             }
         }
@@ -285,24 +352,10 @@ struct CxsSerializer<T> {
     static void store(x23::Buf& buf, T value) {
         if constexpr (std::is_same_v<T, bool>) {
             store_cxs_bool(buf, value);
-        } else if constexpr (std::is_same_v<T, int8_t>) {
-            store_cxs_int8(buf, value);
-        } else if constexpr (std::is_same_v<T, uint8_t>) {
-            store_cxs_uint8(buf, value);
-        } else if constexpr (std::is_same_v<T, int16_t>) {
-            store_cxs_int16(buf, value);
-        } else if constexpr (std::is_same_v<T, uint16_t>) {
-            store_cxs_uint16(buf, value);
-        } else if constexpr (std::is_same_v<T, int32_t>) {
-            store_cxs_int32(buf, value);
-        } else if constexpr (std::is_same_v<T, uint32_t>) {
-            store_cxs_uint32(buf, value);
-        } else if constexpr (std::is_same_v<T, int64_t>) {
-            store_cxs_int64(buf, value);
-        } else if constexpr (std::is_same_v<T, uint64_t>) {
-            store_cxs_uint64(buf, value);
+        } else if constexpr (std::signed_integral<T>) {
+            store_cxs_int<T>(buf, value);
         } else {
-            static_assert(false, "impossible");
+            store_cxs_uint<T>(buf, value);
         }
     }
     static void load(std::span<const uint8_t>& data, T& value) {
