@@ -1,3 +1,4 @@
+#include <atomic>
 #include <benchmark/benchmark.h>
 
 #include <cstddef>
@@ -7,7 +8,6 @@
 #include <memory>
 #include <print>
 #include <random>
-#include <set>
 #include <span>
 #include <string>
 #include <vector>
