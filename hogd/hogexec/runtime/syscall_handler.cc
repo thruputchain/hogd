@@ -31,7 +31,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -65,7 +64,7 @@ SystemCallHandler::SystemCallHandler(
   }
 }
 
-InvokeResult
+void
 SystemCallHandler::perform_initial_validation()
 {
   // TODO(geoff): Adjust if some assumption on the rest of the system changes
@@ -88,10 +87,21 @@ SystemCallHandler::perform_initial_validation()
     if (!res) {
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-      return cumulative_invoke_result_;
     }
   }
-  return cumulative_invoke_result_;
+}
+
+void
+SystemCallHandler::check_final_validation_data()
+{
+  assert(cumulative_invoke_result_.is_root_success());
+  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+    auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
+    if (!validation_data.validate()) {
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+    }
+  }
 }
 
 InvokeResult
@@ -130,94 +140,87 @@ SystemCallHandler::root_invoke()
   auto res = runtime.value()->invoke(sdk_method_id(
                                          signed_tx_.tx.invocation.entrypoint),
                                      available_gas);
+  cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
+
   // finish_status takes res as input and shortcircuits if res is an error
   auto finish_status =
       invocation_frame_stack_.finish_frame(res, execution_mode_data_);
   if (!finish_status.has_value()) {
     cumulative_invoke_result_.result_ = finish_status.error().to_invoke_error();
-    cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
     return cumulative_invoke_result_;
   }
   res = finish_status.value();
+
   // should not have gotten here without being in a success state to begin with
   assert(cumulative_invoke_result_.is_root_success());
   cumulative_invoke_result_.result_ = res.result_;
-  cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
-
   if (!cumulative_invoke_result_.is_root_success()) {
     return cumulative_invoke_result_;
   }
 
-  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
-    auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
-    if (!validation_data.validate()) {
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-      cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
-      return cumulative_invoke_result_;
-    }
-  }
+  // update cumulative_invoke_result_ with the final validation data
+  check_final_validation_data();
 
   return cumulative_invoke_result_;
 }
 
-x23::Async<SystemStatus<bool>>
+SystemStatus<bool>
 SystemCallHandler::try_commit_transaction()
 {
-  assert(!transaction_committed_);
+  assert(!transaction_committed_or_aborted_);
   if (!cumulative_invoke_result_.is_root_success()) {
 
     auto st = db_proxy_.abort_transaction();
     if (!st.has_value()) {
-      co_return st.error();
+      return st.error();
     }
 
-    co_return false;
+    return false;
   }
   assert(last_frame_.has_value());
 
-  auto r = co_await last_frame_.value().try_acquire_frame_locks(db_proxy_, {});
+  auto r = last_frame_.value().try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
-    co_return r.error();
+    return r.error();
   }
 
   bool result = r.value();
 
-  // check if any of the 2pc database operations failed
-  if (result) {
-    auto res = db_proxy_.commit_transaction();
+  if (!result) {
+    auto res = db_proxy_.abort_transaction();
     if (!res.has_value()) {
-      co_return res.error();
+      return res.error();
     }
-
-    std::unordered_set<SHA256Hash> committed_contracts;
-    for (auto const &[addr, hash] :
-         last_frame_.value().new_contract_deployments_) {
-      auto contract_entry = newly_created_contracts_.find(hash);
-      assert(contract_entry != newly_created_contracts_.end());
-
-      auto res = db_proxy_.commit_contract_deploy(addr, hash);
-      if (!res.has_value()) {
-        co_return res.error();
-      }
-      if (committed_contracts.insert(hash).second) {
-        // contract that wasn't already created within the transaction
-        res = db_proxy_.commit_contract_create(*contract_entry->second);
-        if (!res.has_value()) {
-          co_return res.error();
-        }
-      }
-    }
-    transaction_committed_ = true;
-    co_return true;
+    transaction_committed_or_aborted_ = true;
+    return false;
   }
 
-  auto res = db_proxy_.abort_transaction();
+  // check if any of the 2pc database operations failed
+  auto res = db_proxy_.commit_transaction();
   if (!res.has_value()) {
-    co_return res.error();
+    return res.error();
   }
-  transaction_committed_ = true;
-  co_return false;
+
+  std::unordered_set<SHA256Hash> committed_contracts;
+  for (auto const &[addr, hash] :
+       last_frame_.value().new_contract_deployments_) {
+    auto contract_entry = newly_created_contracts_.find(hash);
+    assert(contract_entry != newly_created_contracts_.end());
+
+    auto res = db_proxy_.commit_contract_deploy(addr, hash);
+    if (!res.has_value()) {
+      return res.error();
+    }
+    if (committed_contracts.insert(hash).second) {
+      // contract that wasn't already created within the transaction
+      res = db_proxy_.commit_contract_create(*contract_entry->second);
+      if (!res.has_value()) {
+        return res.error();
+      }
+    }
+  }
+  transaction_committed_or_aborted_ = true;
+  return true;
 }
 
 // can only be called when call_frame_stack_ is nonempty
@@ -243,7 +246,7 @@ SystemCallHandler::get_msg_sender() const
                          : SyscallError{SyscallErrorCode::kIsRootTransaction};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
                           GasAmount gas_limit, Calldata calldata,
                           InvokeFlagSet flags)

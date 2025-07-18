@@ -21,7 +21,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -67,11 +66,11 @@ public:
   // Attempt to commit the current transaction to the database.
   // Requirement: root_invoke() must be called first, and
   // that must have returned successfully.
-  x23::Async<SystemStatus<bool>> try_commit_transaction();
+  SystemStatus<bool> try_commit_transaction();
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
-  std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+  std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
          Calldata calldata, InvokeFlagSet flags);
 
@@ -168,13 +167,19 @@ private:
   std::optional<InvocationFrame> last_frame_;
   InvokeResult cumulative_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
-  bool transaction_committed_ = false;
+  bool transaction_committed_or_aborted_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
 
   // Validate that the transaction can be run safely.
   // Ensures, for example, that the wasms are valid.
-  InvokeResult perform_initial_validation();
+  // Sets cumulative_invoke_result_ to the appropriate error if validation
+  // fails.
+  void perform_initial_validation();
+
+  // check the validation data at the end of a transaction, if in validation
+  // mode
+  void check_final_validation_data();
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

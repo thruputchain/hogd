@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <memory>
-#include <string>
 #include <string_view>
 #include <unordered_map>
 
@@ -48,17 +47,6 @@ make_hogexec_context()
            make_hogexec_wasm_context(RuntimeEngine::kWasmi)},
           // TODO(geoff): add hogexec native contracts here
       });
-}
-
-std::string
-engine_to_string(RuntimeEngine engine)
-{
-  switch (engine) {
-  case RuntimeEngine::kWasmi:
-    return "Wasmi";
-  default:
-    return "UnknownEngine";
-  }
 }
 
 InvokeResult

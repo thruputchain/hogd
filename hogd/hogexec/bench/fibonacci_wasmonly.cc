@@ -241,7 +241,7 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
             throw std::runtime_error("Failed to invoke transaction");
           }
           if (do_commit) {
-            if (auto r = handler.try_commit_transaction()();
+            if (auto r = handler.try_commit_transaction();
                 !r.has_value() || !r.value()) {
               throw std::runtime_error("failed to perform commit operation");
             }

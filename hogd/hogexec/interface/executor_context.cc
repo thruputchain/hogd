@@ -91,7 +91,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
     co_return out;
   }
 
-  auto commit_res = co_await syscall_handler.try_commit_transaction();
+  auto commit_res = syscall_handler.try_commit_transaction();
   if (!commit_res.has_value()) {
     // this error code should not be returned by the try_commit_transaction
     // function
@@ -136,7 +136,7 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
     co_return make_exec_result(invoke_res.result_.error().code());
   }
 
-  auto commit_res = co_await syscall_handler.try_commit_transaction();
+  auto commit_res = syscall_handler.try_commit_transaction();
   if (!commit_res.has_value()) {
     // this error code should not be returned by the try_commit_transaction
     // function

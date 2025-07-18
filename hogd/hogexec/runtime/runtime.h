@@ -1,5 +1,6 @@
 #pragma once
 
+#include <charconv>
 #include <concepts>
 #include <cstddef>
 #include <cstring>
@@ -10,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
@@ -22,6 +24,36 @@ namespace hogd {
 // Context to be passed into a host function call
 class SystemCallHandler;
 class Runtime;
+
+enum class RuntimeEngine {
+  kWasmi = 0,
+};
+
+namespace detail {
+
+struct RuntimeEngineInfo {
+  std::string name;
+  bool has_native_metering;
+  bool has_eager_link_guards;
+};
+
+constexpr static RuntimeEngineInfo kWasmiEngineInfo = {
+    .name = "wasmi",
+    .has_native_metering = true,
+    .has_eager_link_guards = true,
+};
+
+constexpr RuntimeEngineInfo const &
+get_engine_info(RuntimeEngine engine)
+{
+  switch (engine) {
+  case RuntimeEngine::kWasmi:
+    return kWasmiEngineInfo;
+  }
+  throw std::runtime_error("unknown engine");
+}
+
+} // namespace detail
 
 // Passed in as the argument to functions invoked from a sandbox.
 // The Runtime* argument allows a syscall to consume gas.
@@ -39,11 +71,10 @@ make_new_host_call_context(SystemCallHandler *syscall_handler)
   return out;
 }
 
-enum class RuntimeEngine {
-  kWasmi = 0,
-};
-
-std::string engine_to_string(RuntimeEngine engine);
+std::string_view inline engine_to_string(RuntimeEngine engine)
+{
+  return detail::get_engine_info(engine).name;
+}
 
 // Whether or not the engine has native gas metering.
 // Use case is when testing behavior across multiple engines,
@@ -52,11 +83,7 @@ std::string engine_to_string(RuntimeEngine engine);
 constexpr static bool
 engine_has_native_metering(RuntimeEngine engine)
 {
-  switch (engine) {
-  case RuntimeEngine::kWasmi:
-    return true;
-  }
-  throw std::runtime_error("unknown engine");
+  return detail::get_engine_info(engine).has_native_metering;
 }
 
 // does a missing linked function cause errors at instantiation time (true)
@@ -65,11 +92,7 @@ engine_has_native_metering(RuntimeEngine engine)
 constexpr static bool
 engine_has_eager_link_guards(RuntimeEngine engine)
 {
-  switch (engine) {
-  case RuntimeEngine::kWasmi:
-    return true;
-  }
-  throw std::runtime_error("unknown engine");
+  return detail::get_engine_info(engine).has_eager_link_guards;
 }
 
 // Abstract class that wraps the context associated with a sandbox runtime.
@@ -162,11 +185,13 @@ public:
   constexpr static std::optional<MethodID>
   method_id_from_name(std::string const &name)
   {
-    try {
-      return std::stoull(name, nullptr, 16);
-    } catch (std::invalid_argument &e) {
-      return std::nullopt;
+    MethodID id;
+    auto result =
+        std::from_chars(name.data(), name.data() + name.size(), id, 16);
+    if (result.ec == std::errc() && result.ptr == name.data() + name.size()) {
+      return id;
     }
+    return std::nullopt;
   }
 
   // The gas counter is saved before calling this method

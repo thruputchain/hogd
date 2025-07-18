@@ -32,9 +32,10 @@ public:
   WasmiModuleCache(WasmiModuleCache &&) = delete;
   WasmiModuleCache &operator=(WasmiModuleCache &&) = delete;
 
+private:
+  friend class WasmiContext;
   void *get_inner() const { return wasmi_module_cache_ptr_; }
 
-private:
   void *wasmi_module_cache_ptr_ = nullptr;
 };
 
