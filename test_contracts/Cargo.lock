@@ -119,16 +119,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cxs_roundtrip"
-version = "0.1.0"
-dependencies = [
- "cxs_roundtrip",
- "sdk_rs",
- "serde",
- "xdrs",
-]
-
-[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -618,23 +608,3 @@ name = "windows_x86_64_msvc"
 version = "0.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271414315aff87387382ec3d271b52d7ae78726f5d44ac98b4f4030c91880486"
-
-[[package]]
-name = "xdr-derive"
-version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/xdrs.git#1914bf17f6c49e398dca74d48a06d850a6fd5982"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "xdrs"
-version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/xdrs.git#1914bf17f6c49e398dca74d48a06d850a6fd5982"
-dependencies = [
- "thiserror",
- "xdr-derive",
-]
