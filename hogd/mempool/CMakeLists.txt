@@ -3,10 +3,16 @@ add_library(
   mempool.cc
 )
 target_link_libraries(
+  mempool
   base
   crypto
+  db_interface
+  exec_interface
   hogd
+  protocol
+  runtime
 )
+set_property(TARGET mempool PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 add_executable(
   mempool_test
@@ -16,10 +22,15 @@ target_link_libraries(
   mempool_test
   base
   crypto
+  db_interface
+  exec_interface
   hogd
   mempool
+  protocol
+  runtime
   GTest::gtest_main
 )
+set_property(TARGET mempool_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 gtest_discover_tests(mempool_test)
 
 add_executable(
@@ -30,7 +41,12 @@ target_link_libraries(
   mempool_bench
   base
   crypto
+  db_interface
+  exec_interface
   hogd
   mempool
+  protocol
+  runtime
   benchmark::benchmark
 )
+set_property(TARGET mempool_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

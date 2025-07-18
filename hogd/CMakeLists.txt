@@ -2,7 +2,6 @@
 add_subdirectory(base)
 add_subdirectory(container)
 add_subdirectory(crypto)
-add_subdirectory(mempool)
 add_subdirectory(metrics)
 add_subdirectory(mockdb)
 add_subdirectory(db_interface)
@@ -37,6 +36,7 @@ add_subdirectory(rpc)
 # Finally, build the hogdb, hogexec, and coord executables
 add_subdirectory(hogdb)
 add_subdirectory(hogexec)
+add_subdirectory(mempool)
 
 # Build module for mock contract tests
 if (ENABLE_TEST_FFI)
