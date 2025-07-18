@@ -128,7 +128,8 @@ ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
     // it's possible that a sync() could have completed but the process failed
     // to record that fact in shared memory; hence, it's possible that some
     // keys reflect the state of a later sync() than shared.put indicates.
-    auto found = std::bit_cast<uint64_t>(ret->value.data());
+    uint64_t found;
+    std::ranges::copy(ret->value, writable_byte_view(found).begin());
     // either equal to the put number or the put number that key would have
     // received in the next sync.
     if (found != i && found != i + kKeys) {
