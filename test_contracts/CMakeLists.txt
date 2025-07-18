@@ -2,11 +2,6 @@ add_custom_target(all_wasm_contracts)
 
 if(ENABLE_TEST_CONTRACTS)
 
-add_xdr_rs(
-	roundtrip_x_rs
-	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
-	integration_test_contracts/cxs_roundtrip/roundtrip.x)
-
 function(add_wasm_contract target_name)
 
   add_custom_command(
@@ -17,6 +12,7 @@ function(add_wasm_contract target_name)
         -p ${target_name}
         --target wasm32-unknown-unknown
         --release
+        --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
@@ -40,7 +36,5 @@ function(add_wasm_contract target_name)
 endfunction()
 
 add_wasm_contract(fibonacci)
-add_wasm_contract(cxs_roundtrip)
-add_dependencies(cxs_roundtrip_wasm roundtrip_x_rs)
 
 endif()
