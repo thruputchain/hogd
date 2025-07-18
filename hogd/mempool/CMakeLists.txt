@@ -1,0 +1,36 @@
+add_library(
+  mempool
+  mempool.cc
+)
+target_link_libraries(
+  base
+  crypto
+  hogd
+)
+
+add_executable(
+  mempool_test
+  mempool_test.cc
+)
+target_link_libraries(
+  mempool_test
+  base
+  crypto
+  hogd
+  mempool
+  GTest::gtest_main
+)
+gtest_discover_tests(mempool_test)
+
+add_executable(
+  mempool_bench
+  mempool_bench.cc
+)
+target_link_libraries(
+  mempool_bench
+  base
+  crypto
+  hogd
+  mempool
+  benchmark::benchmark
+)

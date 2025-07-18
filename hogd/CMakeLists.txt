@@ -2,6 +2,7 @@
 add_subdirectory(base)
 add_subdirectory(container)
 add_subdirectory(crypto)
+add_subdirectory(mempool)
 add_subdirectory(metrics)
 add_subdirectory(mockdb)
 add_subdirectory(db_interface)
