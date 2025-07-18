@@ -50,17 +50,6 @@ make_hogexec_context()
       });
 }
 
-std::string
-engine_to_string(RuntimeEngine engine)
-{
-  switch (engine) {
-  case RuntimeEngine::kWasmi:
-    return "Wasmi";
-  default:
-    return "UnknownEngine";
-  }
-}
-
 InvokeResult
 Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
 {

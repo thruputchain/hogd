@@ -71,7 +71,7 @@ public:
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
-  std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+  std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
          Calldata calldata, InvokeFlagSet flags);
 
@@ -174,7 +174,13 @@ private:
 
   // Validate that the transaction can be run safely.
   // Ensures, for example, that the wasms are valid.
-  InvokeResult perform_initial_validation();
+  // Sets cumulative_invoke_result_ to the appropriate error if validation
+  // fails.
+  void perform_initial_validation();
+
+  // check the validation data at the end of a transaction, if in validation
+  // mode
+  void check_final_validation_data();
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at
