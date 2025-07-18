@@ -35,8 +35,8 @@ DiskWriter::create_next_file()
       std::vformat(filename_format_, std::make_format_args(cur_lsn_));
 
   // create the new log file.
-  DBStatus<File> f =
-      dir_.openat(filename, O_WRONLY | O_CREAT).transform_error(to_db_error);
+  DBStatus<File> f = dir_.openat(filename, O_WRONLY | O_CREAT | O_TRUNC)
+                         .transform_error(to_db_error);
   if (!f)
     return f.error();
 

@@ -149,9 +149,6 @@ private:
   bool run_compact_{false};
   bool run_disk_cleanup_{false};
 
-  std::atomic<bool> cleanup_running_{false};
-  std::jthread cleanup_th_;
-
   // runs background_worker().
   std::jthread bg_th_;
 

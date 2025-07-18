@@ -559,8 +559,16 @@ TEST_F(DatabaseTest, DiskCleanup)
     }
   };
 
-  // create enough log files that we exceed the cleaning threshold
+  // create enough log files that we exceed the cleaning threshold.
   fill_file_and_sync(kDiskLogCleanupRatio);
+
+  // manually trigger a snapshot so some of the wal files become redundant.
+  auto sync_ret = db_->sync_and_snapshot(0);
+  EXPECT_TRUE(sync_ret);
+  auto &[new_lsn, snapshot_future] = *sync_ret;
+  EXPECT_EQ(new_lsn, 5);
+  DBStatus<void> snap_ret = snapshot_future.get();
+  EXPECT_TRUE(snap_ret);
 
   auto wait_for_deletion = [this](const std::string &path) {
     ElapsedTimer timer{};
