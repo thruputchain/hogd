@@ -84,6 +84,9 @@ DiskWriter::write_worker(const std::stop_token &stoken)
     return;
   }
 
+  if (wal_grew_observer_)
+    wal_grew_observer_();
+
   BufferedWriter w(*f);
   uint32_t crc = 0;
   size_t bytes_written = 0;
