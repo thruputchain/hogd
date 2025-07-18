@@ -163,7 +163,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction()();
+  auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
 }
@@ -235,7 +235,7 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction()();
+  auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
 
@@ -368,7 +368,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
         runtime_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
 
@@ -405,7 +405,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
         runtime_context);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.result_); // Should return error
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_FALSE(*commit_res); // Transaction should not commit
     advance_block();
@@ -436,9 +436,9 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
         runtime_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res.value());
     advance_block();
     // Storage should be updated to "world"
     auto read_res = lookup_storage_item_from_db(
@@ -626,7 +626,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   {
     auto res = tc1_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc1_handler2.try_commit_transaction()();
+    auto commit_res = tc1_handler2.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
   }
@@ -634,9 +634,9 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   // TC1.3: Then commit the first transaction (releasing the exclusive lock to a
   // set_typeclass lock).
   {
-    auto commit_res = tc1_handler.try_commit_transaction()();
+    auto commit_res = tc1_handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res.value());
   }
 
   // TC1.4: Then invoke method 2 again, with parameter [true]. This should
@@ -655,7 +655,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   {
     auto res = tc1_handler3.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc1_handler3.try_commit_transaction()();
+    auto commit_res = tc1_handler3.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
   }
@@ -689,9 +689,9 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   {
     auto res = tc2_handler1.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc2_handler1.try_commit_transaction()();
+    auto commit_res = tc2_handler1.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res.value());
   }
 
   // Step 3 & 4: Invoke M1({false, true}) and commit.
@@ -709,9 +709,9 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   {
     auto res = tc2_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc2_handler2.try_commit_transaction()();
+    auto commit_res = tc2_handler2.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res.value());
   }
 
   advance_block();
@@ -826,9 +826,9 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(commit_res.value());
 
   advance_block();
 
@@ -979,7 +979,7 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1146,7 +1146,7 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1266,7 +1266,7 @@ TEST_F(TryInvokeTest, CostChangeDecreaseSuccessCase)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1411,7 +1411,7 @@ TEST_F(TryInvokeTest, CostChangeDecreaseFailCase)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1560,7 +1560,7 @@ TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1710,7 +1710,7 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
             throw std::runtime_error("root invoke 0 failed");
           }
           co_await set.bg();
-          auto commit_res = handler.try_commit_transaction()();
+          auto commit_res = handler.try_commit_transaction();
           if (!commit_res.has_value()) {
             throw std::runtime_error("try_commit_transaction error");
           }
@@ -1744,7 +1744,7 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
           if (!res.is_root_success()) {
             co_return;
           }
-          auto commit_res = handler.try_commit_transaction()();
+          auto commit_res = handler.try_commit_transaction();
           if (!commit_res.has_value()) {
             throw std::runtime_error("try_commit_transaction error");
           }
@@ -1766,7 +1766,7 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 
       auto res = handler.root_invoke();
       ASSERT_TRUE(res.is_root_success());
-      auto commit_res = handler.try_commit_transaction()();
+      auto commit_res = handler.try_commit_transaction();
       ASSERT_TRUE(commit_res.has_value());
       ASSERT_TRUE(*commit_res);
     }
@@ -1957,7 +1957,7 @@ TEST_F(TryInvokeTest, InvokeErrorHandling)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 }

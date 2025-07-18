@@ -19,7 +19,6 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -87,10 +86,8 @@ InvocationFrame::set_frame_return(ReturnBuffer &&return_buffer)
   to_return_ = std::move(return_buffer);
 }
 
-x23::Async<SystemStatus<bool>>
-InvocationFrame::try_acquire_frame_locks(
-    PerTransactionDatabaseProxy &db_proxy,
-    std::vector<InvocationFrame> const &parent_frames)
+SystemStatus<bool>
+InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
 
   for (auto const &[addrkey, item_view] : modified_items_) {
@@ -104,12 +101,12 @@ InvocationFrame::try_acquire_frame_locks(
 
   auto res = db_proxy.try_push_current_subtransaction();
   if (!res.has_value()) {
-    co_return res.error();
+    return res.error();
   }
   if (res.value()) {
     try_invoke_frame_count_++;
   }
-  co_return res.value();
+  return res.value();
 }
 
 void
@@ -133,9 +130,7 @@ InvocationFrameStack::finish_frame(InvokeResult result,
 
       // If we're in proposal mode, we need to acquire the frame locks.
       if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
-        auto acq_res =
-            frame_stack_.back().try_acquire_frame_locks(db_proxy_,
-                                                        frame_stack_)();
+        auto acq_res = frame_stack_.back().try_acquire_frame_locks(db_proxy_);
         if (!acq_res.has_value()) {
           return acq_res.error();
         }

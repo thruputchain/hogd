@@ -21,7 +21,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -67,7 +66,7 @@ public:
   // Attempt to commit the current transaction to the database.
   // Requirement: root_invoke() must be called first, and
   // that must have returned successfully.
-  x23::Async<SystemStatus<bool>> try_commit_transaction();
+  SystemStatus<bool> try_commit_transaction();
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
@@ -168,7 +167,7 @@ private:
   std::optional<InvocationFrame> last_frame_;
   InvokeResult cumulative_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
-  bool transaction_committed_ = false;
+  bool transaction_committed_or_aborted_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
 

@@ -31,7 +31,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -165,63 +164,63 @@ SystemCallHandler::root_invoke()
   return cumulative_invoke_result_;
 }
 
-x23::Async<SystemStatus<bool>>
+SystemStatus<bool>
 SystemCallHandler::try_commit_transaction()
 {
-  assert(!transaction_committed_);
+  assert(!transaction_committed_or_aborted_);
   if (!cumulative_invoke_result_.is_root_success()) {
 
     auto st = db_proxy_.abort_transaction();
     if (!st.has_value()) {
-      co_return st.error();
+      return st.error();
     }
 
-    co_return false;
+    return false;
   }
   assert(last_frame_.has_value());
 
-  auto r = co_await last_frame_.value().try_acquire_frame_locks(db_proxy_, {});
+  auto r = last_frame_.value().try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
-    co_return r.error();
+    return r.error();
   }
 
   bool result = r.value();
 
-  // check if any of the 2pc database operations failed
-  if (result) {
-    auto res = db_proxy_.commit_transaction();
+  if (!result) {
+    auto res = db_proxy_.abort_transaction();
     if (!res.has_value()) {
-      co_return res.error();
+      return res.error();
     }
-
-    std::unordered_set<SHA256Hash> committed_contracts;
-    for (auto const &[addr, hash] :
-         last_frame_.value().new_contract_deployments_) {
-      auto contract_entry = newly_created_contracts_.find(hash);
-      assert(contract_entry != newly_created_contracts_.end());
-
-      auto res = db_proxy_.commit_contract_deploy(addr, hash);
-      if (!res.has_value()) {
-        co_return res.error();
-      }
-      if (committed_contracts.insert(hash).second) {
-        // contract that wasn't already created within the transaction
-        res = db_proxy_.commit_contract_create(*contract_entry->second);
-        if (!res.has_value()) {
-          co_return res.error();
-        }
-      }
-    }
-    transaction_committed_ = true;
-    co_return true;
+    transaction_committed_or_aborted_ = true;
+    return false;
   }
 
-  auto res = db_proxy_.abort_transaction();
+  // check if any of the 2pc database operations failed
+  auto res = db_proxy_.commit_transaction();
   if (!res.has_value()) {
-    co_return res.error();
+    return res.error();
   }
-  transaction_committed_ = true;
-  co_return false;
+
+  std::unordered_set<SHA256Hash> committed_contracts;
+  for (auto const &[addr, hash] :
+       last_frame_.value().new_contract_deployments_) {
+    auto contract_entry = newly_created_contracts_.find(hash);
+    assert(contract_entry != newly_created_contracts_.end());
+
+    auto res = db_proxy_.commit_contract_deploy(addr, hash);
+    if (!res.has_value()) {
+      return res.error();
+    }
+    if (committed_contracts.insert(hash).second) {
+      // contract that wasn't already created within the transaction
+      res = db_proxy_.commit_contract_create(*contract_entry->second);
+      if (!res.has_value()) {
+        return res.error();
+      }
+    }
+  }
+  transaction_committed_or_aborted_ = true;
+  return true;
 }
 
 // can only be called when call_frame_stack_ is nonempty
