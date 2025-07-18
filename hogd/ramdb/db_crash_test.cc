@@ -198,6 +198,7 @@ do_child(std::string_view path, Shared &shared)
     if (!future.valid())
       return;
 
+    // NOLINTNEXTLINE(misc-include-cleaner)
     if (!blocking && future.wait_for(0s) != std::future_status::ready)
       return;
 
@@ -278,6 +279,7 @@ do_parent(pid_t child_pid, Shared &shared)
   // can take a long time. so don't start the countdown to fault injection
   // until the start up phase is done to ensure some progres per crash.
   while (shared.starting_up)
+    // NOLINTNEXTLINE(misc-include-cleaner)
     std::this_thread::sleep_for(1s);
 
   size_t watchdog = shared.watchdog.load();
