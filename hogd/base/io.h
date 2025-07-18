@@ -198,7 +198,8 @@ public:
   }
 
   // throw away the next n bytes, refilling as needed.
-  ErrnoStatus<void> skip(size_t n);
+  // returns bytes skipped; can be less than n on EOF.
+  ErrnoStatus<size_t> skip(size_t n);
   // read_string returns the string before delim or EOF.
   ErrnoStatus<std::string> read_string(char delim);
   // readln returns the string before a new line or EOF.

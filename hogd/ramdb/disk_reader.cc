@@ -23,6 +23,7 @@
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/ramdb/constants.h"
@@ -281,9 +282,13 @@ load_log_file(
         (target_lsn && hdr.lsn >= *target_lsn);
 
     if (skip) {
-      ErrnoStatus ret = r.skip(hdr.key_len + hdr.value_len);
+      size_t to_skip = hdr.key_len + hdr.value_len;
+      ErrnoStatus<size_t> ret = r.skip(to_skip);
       if (!ret)
-        return ret.transform_error(to_db_error);
+        return {to_db_error(ret.error())};
+      // hit eof while trying to skip
+      if (*ret < to_skip)
+        break;
       continue;
     }
 
@@ -294,16 +299,23 @@ load_log_file(
     case kTombstone:
     {
       struct ItemHeader *dst = buf.push_item(&hdr);
-      if (!dst)
+      if (!dst) {
+        debug("out of memory in recovery buffer");
         return DBError(DBCode::kNoMemory);
+      }
       ret = read_full(r, dst->get_all());
-      if (!ret)
+      if (!ret) {
+        debug("couldn't read item");
         return to_db_error(ret.error());
+      }
       break;
     }
 
     case kBig:
+    {
       panic("not implemented yet");
+      break;
+    }
 
     case kCommit:
     {
@@ -311,8 +323,10 @@ load_log_file(
       uint32_t commit_crc;
       DBStatus<void> ret = read_full(r, writable_byte_view(commit_crc))
                                .transform_error(to_db_error);
-      if (!ret)
+      if (!ret) {
+        debug("couldn't read commit record crc");
         return ret.error();
+      }
       if (!crc_valid(commit_crc, buf, &hdr)) {
         info("crc check failure checking commit for lsn {}", hdr.lsn);
         return DBError(DBCode::kCorruption);
@@ -322,8 +336,10 @@ load_log_file(
       // for WAL files this applies just one lsn of items. snapshot
       // files may commit items of many lsns per commit record.
       ret = func(buf.take_buffer());
-      if (!ret)
+      if (!ret) {
+        debug("failed applying callback to recovery buffer");
         return ret.error();
+      }
 
       if (!file.snapshot_file_ && cur_lsn != hdr.lsn) {
         error("replaying log file {}, saw commit for lsn {} while expecting "
@@ -333,6 +349,13 @@ load_log_file(
       }
 
       cur_lsn = hdr.lsn + 1;
+      info("replayed lsn {}, cur_lsn now {}", hdr.lsn, cur_lsn);
+      break;
+    }
+
+    default:
+    {
+      return DBError(DBCode::kCorruption);
     }
     }
   }
@@ -377,7 +400,7 @@ longest_full_snapshot(const std::vector<FileMetadata> &files)
   if (candidates.empty())
     return std::nullopt;
 
-  return std::ranges::max(candidates, &FileMetadata::operator<);
+  return std::ranges::min(candidates, &FileMetadata::operator<);
 }
 
 } // namespace
@@ -385,6 +408,11 @@ longest_full_snapshot(const std::vector<FileMetadata> &files)
 DBStatus<uint64_t>
 DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn)
 {
+  ElapsedTimer timer{};
+  std::shared_ptr<void> _{nullptr, [&timer](...) {
+                            info("recovery took {:.2f}", timer.elapsed());
+                          }};
+
   uint64_t lsn;
   DBStatus<void> ret = load_database(
       dir,
@@ -498,16 +526,21 @@ DiskReader::load_database(
   }
   std::ranges::sort(files, &FileMetadata::operator<);
 
-  std::unordered_set<std::string> used_files{};
-
   for (FileMetadata &file : files) {
     if (target_lsn && cur_lsn == *target_lsn)
       break;
 
-    if (file.snapshot_file_ && file.begin_lsn_ > cur_lsn) {
-      warn("missing data detected: gap at LSN {}", cur_lsn);
-      ret = DBError(DBCode::kNotFound);
-      break;
+    if (file.snapshot_file_) {
+      if (file.end_lsn_exclusive_ < cur_lsn) {
+        info("skipping unneeded snapshot file {}", file.path_);
+        continue;
+      }
+
+      if (file.begin_lsn_ > cur_lsn) {
+        warn("missing data detected: gap at LSN {}", cur_lsn);
+        ret = DBError(DBCode::kNotFound);
+        break;
+      }
     }
 
     info("loading file {}", file.path_);
@@ -515,15 +548,14 @@ DiskReader::load_database(
     uint64_t tmp = cur_lsn;
     ret = load_log_file(allocator_, dir, file, cur_lsn, target_lsn, func);
     if (!ret) {
-      warn("couldn't load logfile {} : {}", file.path_, ret.error());
-      break;
+      warn("couldn't completely load logfile {} : {}", file.path_, ret.error());
+      if (ret.error() == DBCode::kCorruption)
+        break;
     }
 
     // file contained no useful records
     if (tmp == cur_lsn)
       continue;
-
-    used_files.emplace(file.path_);
   }
 
   // we reached the end; are we still missing data?
@@ -538,18 +570,6 @@ DiskReader::load_database(
       warn("unable to load any LSNs");
     else
       warn("able to load up to LSN {} despite encountering error", cur_lsn);
-  }
-  else {
-    info("initiating cleanup of skipped files");
-    for (auto &file : files) {
-      if (used_files.contains(file.path_))
-        continue;
-
-      info("removing unused file {}", file.path_);
-      ErrnoStatus ret = dir.unlink(file.path_);
-      if (!ret)
-        warn("couldn't remove unused file {}", file.path_);
-    }
   }
 
   if (loaded_lsn)

@@ -395,20 +395,24 @@ BufferedReader::read_string(char delim)
   return buf;
 }
 
-ErrnoStatus<void>
+ErrnoStatus<size_t>
 BufferedReader::skip(size_t n)
 {
+  size_t left_to_skip = n;
   while (true) {
-    if (n <= pos_.size()) {
-      pos_ = pos_.subspan(n);
-      return {};
-    }
+    size_t s = std::min(left_to_skip, pos_.size());
+    pos_ = pos_.subspan(s);
+    left_to_skip -= s;
 
-    n -= pos_.size();
+    if (left_to_skip == 0)
+      return n;
 
     ErrnoStatus<void> ret = refill();
     if (!ret)
       return ret.error();
+
+    if (pos_.empty())
+      return n - left_to_skip;
   }
 }
 
