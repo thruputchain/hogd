@@ -1,3 +1,5 @@
+add_custom_target(all_wasm_contracts)
+
 if(ENABLE_TEST_CONTRACTS)
 
 function(add_wasm_contract target_name)
@@ -6,10 +8,11 @@ function(add_wasm_contract target_name)
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
         RUSTFLAGS='-C link-args=-zstack-size=30000'
-        cargo +nightly build --locked
+        cargo +nightly build
         -p ${target_name}
         --target wasm32-unknown-unknown
         --release
+        --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
@@ -28,13 +31,10 @@ function(add_wasm_contract target_name)
   wasmopt_target(${target_name}_optimized ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm -mvp --enable-bulk-memory -Oz)
 
   add_custom_target(${target_name}_wasm ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
+
+  add_dependencies(all_wasm_contracts ${target_name}_wasm)
 endfunction()
 
 add_wasm_contract(fibonacci)
 
-add_custom_target(all_wasm_contracts DEPENDS fibonacci_wasm)
-
-
-else()
-  add_custom_target(all_wasm_contracts)
 endif()

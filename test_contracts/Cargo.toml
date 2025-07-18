@@ -10,6 +10,7 @@ resolver = "2"
 [workspace.dependencies]
 sdk = { package = "sdk_rs", git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 serde = { version = "1.0.217", default-features = false }
+xdrs = { git = "ssh://git@github.com/groundhogchain/xdrs.git" }
 
 [profile.dev]
 opt-level = "z"
