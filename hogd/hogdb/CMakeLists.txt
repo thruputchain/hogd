@@ -4,6 +4,7 @@ add_library(
   block_tx.cc
   invoke_tx.cc
   item_change.cc
+  rpc_context.cc
   status.cc
 )
 target_link_libraries(
