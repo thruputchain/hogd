@@ -128,13 +128,15 @@ TransactionState::extract_results()
 std::pair<TransactionState &, std::unique_lock<std::mutex>>
 TransactionStateManager::get(TransactionID txid)
 {
-  auto [state, ul] = tx_states_.find(txid);
-  if (!state) {
-    auto [ptr, lock] = tx_states_.insert(txid, TransactionState());
-    new_transaction_count_.fetch_add(1, std::memory_order_release);
-    return {*ptr, std::move(lock)};
+  {
+    auto [state, ul] = tx_states_.find(txid);
+    if (state) {
+      return {*state, std::move(ul)};
+    }
   }
-  return {*state, std::move(ul)};
+  auto [ptr, lock] = tx_states_.insert(txid, TransactionState());
+  new_transaction_count_.fetch_add(1, std::memory_order_release);
+  return {*ptr, std::move(lock)};
 }
 
 } // namespace hogd
