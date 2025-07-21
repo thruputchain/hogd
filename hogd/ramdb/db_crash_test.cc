@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -29,6 +30,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
+#include "hogd/base/string.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
@@ -178,19 +180,58 @@ db_size(hogd::Database &db)
   return size;
 }
 
+using time_point = std::chrono::high_resolution_clock::time_point;
+
+std::vector<Sample> prev_samples;
+time_point start;
+
 void
 dump_metrics(MetricRegistry &registry)
 {
   if (!kDumpMetrics)
     return;
 
+  std::vector<Sample> samples = registry.read();
+
+  std::vector<Sample> diff = samples;
+
+  std::vector<Metric> metrics = registry.get_metrics();
+  // this is expensive to build. should only do it once, worst case.
+  std::unordered_set<std::string_view> cumulative =
+      metrics |
+      std::views::filter([](const Metric &m) { return m.cumulative; }) |
+      std::views::transform([](const Metric &m) { return std::string_view{m.key}; }) |
+      std::ranges::to<std::unordered_set<std::string_view>>();
+
+  if (diff.size() == prev_samples.size()) {
+    for (size_t i = 0; i < diff.size(); ++i) {
+      if (cumulative.contains(diff[i].key)) {
+        diff[i].val -= prev_samples[i].val;
+      }
+    }
+  }
+
+  time_point now = std::chrono::high_resolution_clock::now();
+  if (start == time_point{})
+    start = now;
+
+  size_t ns = (now - start).count();
+
   info("== begin metrics ==");
 
-  std::vector<Sample> samples = registry.read();
   for (Sample &sample : samples)
-    info("> {} {}", sample.key, sample.val);
+    info("> {} {} {}", ns, sample.key, sample.val);
 
   info("== end metrics ==");
+
+  info("== begin delta metrics ==");
+
+  for (Sample &sample : diff)
+    info("Δ {} {} {} {}/s", ns, sample.key, sample.val, print_iec_bytes(sample.val, true));
+
+  info("== end delta metrics ==");
+
+  prev_samples = std::move(samples);
 }
 
 void
