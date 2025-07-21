@@ -110,7 +110,7 @@ struct GenRs {
     if (auto array_size = get_opaque_array_size(d)) {
         // type is a byte array
         if (needs_serde_imports)
-            prtop("#[serde(with = \"serde_arrays\")]\n");
+            prtop("#[cfg_attr(feature = \"serde\", serde(with = \"serde_arrays\"))]\n");
     } else if (d.qual == Declaration::kVec && get<string>(d.type) == "opaque") {
         // type is a byte vector
     }
@@ -132,6 +132,11 @@ struct GenRs {
 
   void show_typespec(const TypeSpecifier &ts, string t)
   {
+    if (optional<string> remainder = substring_removed(ts.comment, kRustWriteXDR)) {
+      // comment = *remainder;
+      prtop("#[derive(WriteXDR)]\n");
+    }
+
     visit([this, &t](const auto &v) { show_type(v, t); }, ts);
   }
 
@@ -216,6 +221,7 @@ struct GenRs {
   }
 
   static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
+  static constexpr string_view kRustWriteXDR = R"(#[rust(WriteXDR)])";
   static constexpr string_view kSerdeArrays = R"(#[serde(with = "serde_arrays")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
@@ -323,17 +329,19 @@ GenRs::show_type(const StructBody &s, string t)
         }
 
         derive_traits += ", Eq, Hash, Copy";
-
-        derive_traits += ", Serialize, Deserialize";
-        derive_traits += ", ReadXDR, WriteXDR";
-        needs_serde_imports = true; // for Serialize, Deserialize
     }
+    derive_traits += ", ReadXDR, WriteXDR";
     prtop("#[derive({})]\n", derive_traits);
-    prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
+
+    if (s.transparent) {
+        needs_serde_imports = true; // for Serialize, Deserialize
+        prtop("#[cfg_attr(feature = \"serde\", derive(Serialize, Deserialize))]\n");
+    }
 
     if (s.transparent)
         prtop("#[repr(transparent)]\n");
     else
+        // Do we actually need this?
         prtop("#[repr(C)]\n");
 
     prtop("pub struct {} ", t);
@@ -445,6 +453,37 @@ impl {0} {{
             prtop("}}");
             */
 
+            /*
+            impl<'a> From<&'a [u8; 32]> for &'a ContractAddress {
+                fn from(arr: &[u8; 32]) -> Self {
+                    let ptr = arr as *const [u8; 32] as *const ContractAddress;
+                    unsafe { &*ptr }
+                }
+            }
+            */
+            prtop("\nimpl<'a> From<&'a [u8; {}]> for &'a {} {{\n", *array_size, outer_id);
+            prtop("    fn from(arr: &[u8; {}]) -> Self {{\n", *array_size);
+            prtop("        let ptr = arr as *const [u8; {}] as *const {};\n", *array_size, outer_id);
+            prtop("        unsafe {{ &*ptr }}\n");
+            prtop("    }}\n");
+            prtop("}}");
+
+            /*
+            impl<'r> ReadXDR<'r> for &'r ContractAddress {
+                fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {
+                    let arr: &[u8; 32] = xdrs::read_xdr(r)?;
+                    let val = Self::from(arr);
+                    Ok(val)
+                }
+            }
+            */
+            prtop("\nimpl<'r> ReadXDR<'r> for &'r {} {{\n", outer_id);
+            prtop("    fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {{\n");
+            prtop("        let arr: &[u8; {}] = xdrs::read_xdr(r)?;\n", *array_size);
+            prtop("        let val = Self::from(arr);\n");
+            prtop("        Ok(val)\n");
+            prtop("    }}\n");
+            prtop("}}");
         }
     }
   }
@@ -455,7 +494,6 @@ GenRs::show_type(const EnumBody &e, string t)
 {
   prtop(R"(
 #[derive(Clone, Copy, PartialEq, Debug)]
-#[cfg_attr(feature="std", derive(ReadXdrEnum,WriteXdrEnum))]
 #[repr(i32)]
 pub enum {} )", t);
   auto _close = open_brace();
@@ -523,8 +561,8 @@ GenRs::show_type(const UnionBody &b, string t)
     };
   {
     prtop("#[repr(i32)]\n");
-    prtop("#[derive(PartialEq, Debug, Clone, ReadXDR, WriteXDR)]\n");
-    prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
+    prtop("#[derive(PartialEq, Debug, Clone)]\n");
+    prtop("#[derive(ReadXDR, WriteXDR)]\n");
     prtop("pub enum {} ", t);
     auto _close = open_brace();
     scopes_.push_back(t);
@@ -554,8 +592,8 @@ GenRs::show_type(const UnionBody &b, string t)
           prtop("{} = {} as i32,\n", int_qualified_declname(c), qualified_typename(c));
         }
         if (a.has_default) {
-          default_decl = std::format("default {{ {}: i32 }},", b.switch_id);
-          default_match = std::format("{0}::default{{ {1} }} => *{1} ,\n", t, b.switch_id);
+          default_decl = std::format("Default {{ {}: i32 }},", b.switch_id);
+          default_match = std::format("{0}::Default{{ {1} }} => *{1} ,\n", t, b.switch_id);
         }
       }
       else
@@ -582,8 +620,8 @@ GenRs::show_type(const UnionBody &b, string t)
         if (a.has_default) {
           std::format_to(
             std::back_inserter(default_decl),
-            "default {{ {}: i32, {}: {} }},", b.switch_id, a.decl.id, type_name(a.decl, false));
-          default_match = std::format("{0}::default{{ {1},..}} => *{1},\n", t, b.switch_id);
+            "Default {{ {}: i32, {}: {} }},", b.switch_id, a.decl.id, type_name(a.decl, false));
+          default_match = std::format("{0}::Default{{ {1},..}} => *{1},\n", t, b.switch_id);
         }
       }
     }
@@ -626,6 +664,9 @@ GenRs::show_comment(std::string_view comment, bool chomp, string prefix)
   };
 
   if (comment.empty())
+    return;
+
+  if (comment.find_first_not_of(" \t\n") == string::npos)
     return;
 
   if (chomp) {
@@ -736,21 +777,16 @@ GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_set
   case kArray:
     return std::format("[{}; {}]", tname, d.bound);
   case kVec:
-    if (in_colon_required_setting) {
-      if (tname == "string"s) {
-        return std::format("BytesM::<{}>", map_bound(d.bound));
+    {
+      auto colons = in_colon_required_setting ? "::" : "";
+      if (tname == "string"s || tname == "u8") {
+        if (d.bound.empty())
+          return std::format("BytesM");
+        return std::format("BytesM{}<{}>", colons, map_bound(d.bound));
       } else {
         if (d.bound.empty())
-          return std::format("Vec::<{}>", tname);
-        return std::format("VecM::<{}, {}>", tname, map_bound(d.bound));
-      }
-    } else {
-      if (tname == "string"s) {
-        return std::format("BytesM<{}>", map_bound(d.bound));
-      } else {
-        if (d.bound.empty())
-          return std::format("Vec<{}>", tname);
-        return std::format("VecM<{}, {}>", tname, map_bound(d.bound));
+          return std::format("VecM{}<{}>", colons, tname);
+        return std::format("VecM{}<{}, {}>", colons, tname, map_bound(d.bound));
       }
     }
   default:
@@ -779,14 +815,17 @@ use core::ops::{Deref, DerefMut};
 #[cfg(feature="std")]
 use std::io::{Read, Write};
 
+use ::xdrs::{ReadXDR, WriteXDR};
+
 )";
 
   gs.process(*defs);
 
   std::string serde_imports = gs.needs_serde_imports ? R"(
+#[cfg(feature = "serde")]
 use ::serde::{Serialize, Deserialize};
+#[cfg(feature = "serde")]
 use ::serde_arrays;
-use ::xdrs::{ReadXDR, WriteXDR};
 )" : "";
 
   return preamble + serde_imports + gs.top_ + R"(
