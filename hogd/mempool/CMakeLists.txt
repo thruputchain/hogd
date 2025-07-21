@@ -9,6 +9,7 @@ target_link_libraries(
   db_interface
   exec_interface
   hogd
+  merkle
   protocol
   runtime
 )
@@ -26,6 +27,7 @@ target_link_libraries(
   exec_interface
   hogd
   mempool
+  merkle
   protocol
   runtime
   GTest::gtest_main
@@ -45,6 +47,7 @@ target_link_libraries(
   exec_interface
   hogd
   mempool
+  merkle
   protocol
   runtime
   benchmark::benchmark

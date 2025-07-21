@@ -24,9 +24,40 @@
 
 namespace hogd {
 
+namespace {
+
+using fib_client_t = ContractTraitClient<Fibonacci>;
+
+std::vector<SignedTransaction>
+generate_txs(fib_client_t &fib_client, size_t num_txs)
+{
+  constexpr char kProgramName[] = "slow_fibonacci";
+  constexpr uint32_t kFibonacciN = 10;
+
+  std::vector<SignedTransaction> txs;
+  txs.reserve(num_txs);
+  for (size_t i = 0; i < num_txs; i++) {
+    SignedTransaction tx{
+        .tx =
+            Transaction{.invocation = fib_client.make_invocation<kProgramName>(
+                            UINT64_MAX, kFibonacciN)}};
+    txs.push_back(tx);
+  }
+  return txs;
+}
+
+} // namespace
+
 TEST(Mempool, HelloWorld)
 {
+  constexpr size_t kNumTxs = 100;
+
   Validator validator;
+  fib_client_t fib_client(ContractAddress{});
+  std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
+
+  SHA256Hash empty{};
+  EXPECT_FALSE(validator.validate(/*expected_root_hash=*/empty, txs));
 }
 
 } // namespace hogd
