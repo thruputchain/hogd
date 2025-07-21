@@ -32,6 +32,7 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 
@@ -52,6 +53,7 @@ constexpr auto kDurationBetweenCrashes = std::chrono::duration<double>{30};
 
 constexpr bool kOverlapPutsWithSnapshot = true;
 constexpr bool kRemoveAllFilesAtStart = false;
+constexpr bool kDumpMetrics = true;
 
 void
 fail(DBError err)
@@ -177,9 +179,34 @@ db_size(hogd::Database &db)
 }
 
 void
+dump_metrics(MetricRegistry &registry)
+{
+  if (!kDumpMetrics)
+    return;
+
+  info("== begin metrics ==");
+
+  std::vector<Sample> samples = registry.read();
+  for (Sample &sample : samples)
+    info("> {} {}", sample.key, sample.val);
+
+  info("== end metrics ==");
+}
+
+void
 do_child(std::string_view path, Shared &shared)
 {
+  MetricRegistry registry{};
+
   auto db = make_db(path, kKeys, kValueSize);
+
+  db->register_metrics(registry);
+  std::jthread _([&registry](std::stop_token &&stoken) {
+    while (!stoken.stop_requested()) {
+      std::this_thread::sleep_for(1s);
+      dump_metrics(registry);
+    }
+  });
 
   ensure_recovered_keys_uptodate(*db, shared);
 

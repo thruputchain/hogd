@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <concepts>
 #include <functional>
 #include <initializer_list>
@@ -47,6 +48,31 @@ public:
     : sources_(sources.begin(), sources.end()),
       read_fns_(read_fns.begin(), read_fns.end())
   {}
+
+  template<std::unsigned_integral T, template<typename> typename Counter>
+  void add(std::string key, std::string description, Counter<T> &cnt)
+  {
+    auto &&source =
+        std::make_pair(Metric{.key = std::move(key),
+                              .description = std::move(description),
+                              .cumulative = true},
+                       [&cnt] { return static_cast<size_t>(cnt.get()); });
+    sources_.emplace_back(source);
+  }
+
+  template<std::unsigned_integral T>
+  void add(std::string key, std::string description, bool cumulative,
+           std::atomic<T> &val)
+  {
+    auto &&source = std::make_pair(Metric{.key = std::move(key),
+                                          .description = std::move(description),
+                                          .cumulative = cumulative},
+                                   [&val] {
+                                     return static_cast<size_t>(
+                                         val.load(std::memory_order_relaxed));
+                                   });
+    sources_.emplace_back(source);
+  }
 
   // get_metrics returns a description vector of supported metrics.
   std::vector<Metric> get_metrics() const;
