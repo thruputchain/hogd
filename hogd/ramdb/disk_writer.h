@@ -17,6 +17,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
 
@@ -90,6 +91,8 @@ public:
 
   // print_stats prints disk usage statistics.
   void print_stats();
+
+  void register_metrics(MetricRegistry &registry);
 
   size_t get_bytes_out() const
   {
