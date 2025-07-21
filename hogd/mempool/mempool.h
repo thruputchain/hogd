@@ -51,6 +51,9 @@ public:
   Validator(size_t num_threads);
   ~Validator() = default;
 
+  bool validate(const SHA256Hash &expected_root_hash,
+                const std::vector<SignedTransaction> &txs);
+
   // Disable copy and move.
   Validator(const Validator &) = delete;
   Validator &operator=(const Validator &) = delete;

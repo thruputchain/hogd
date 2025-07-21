@@ -85,4 +85,24 @@ Validator::Validator(size_t num_threads)
   db_coordinator_server_.start_server(kCoordinatorPort);
 }
 
+bool
+Validator::validate(const SHA256Hash &expected_root_hash,
+                    const std::vector<SignedTransaction> &txs)
+{
+  // TODO(jhumphri):
+  // 1. Send the txs to the executors and get the results.
+  // 2. Throw out any txs that fail?
+  // 3. Build a Merkle Trie of the txs.
+  // 4. Compare the hash of the Merkle Trie root with [expected_root_hash].
+  //
+  // Follow up:
+  // 1. We can probably build the Merkle Trie while the executors are executing
+  //    the txs. If a tx fails, we can remove it from the Merkle Trie. This is
+  //    likely more efficient than building the Merkle Trie only after we know
+  //    which txs succeeded.
+  // 2. Experiment with different scheduling policies for txs. We want to model
+  //    txs of different lengths and multiple blocks validated at the same time.
+  return false;
+}
+
 } // namespace hogd
