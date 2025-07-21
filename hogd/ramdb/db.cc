@@ -1,6 +1,7 @@
 #include "hogd/ramdb/db.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
 #include <format>
@@ -26,6 +27,7 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_reader.h"
@@ -114,6 +116,16 @@ Database::set_active(bool yes)
   // set the worker pool limit.
   int cores = yes ? active_cores(pool_) : pool_.worker_count();
   pool_.adjust_workers(cores);
+}
+
+void
+Database::register_metrics(MetricRegistry &registry)
+{
+  registry.add("ramdb_snap_bytes_out",
+               "Number of bytes written to all snapshot files "
+               "since the last database recovery.",
+               true, metrics_.snap_bytes_out_);
+  disk_writer_.register_metrics(registry);
 }
 
 void
@@ -354,6 +366,7 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
     info("snapshot wrote {} to storage took {:.3f} s, {}/s",
          print_iec_bytes(bytes_out, true), snap_sync_timer.elapsed(),
          print_iec_bytes(bytes_out / seconds, true));
+    metrics_.snap_bytes_out_.fetch_add(bytes_out, std::memory_order_relaxed);
 
     promise->set_value({});
   }).detach();

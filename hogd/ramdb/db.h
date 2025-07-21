@@ -10,6 +10,7 @@
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_writer.h"
@@ -122,6 +123,8 @@ public:
   // thread safe.
   void set_active(bool yes);
 
+  void register_metrics(MetricRegistry &registry);
+
   // estimate_heap_size returns the heap size needed to store n items,
   // including overheads for compacting and buffering to disk.
   //
@@ -151,6 +154,12 @@ private:
 
   // runs background_worker().
   std::jthread bg_th_;
+
+  // periodically updated stats; registered in register_metrics().
+  struct Metrics {
+    std::atomic<size_t> snap_bytes_out_;
+  };
+  Metrics metrics_{};
 
   // called when memory is low.
   void notify_low_mem();

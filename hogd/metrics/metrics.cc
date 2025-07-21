@@ -18,8 +18,10 @@ std::vector<Sample>
 MetricRegistry::read() const
 {
   // run read observer functions.
-  std::ranges::for_each(read_fns_,
-                        [](const std::function<void()> &fn) { fn(); });
+  std::ranges::for_each(read_fns_, [](const std::function<void()> &fn) {
+    if (fn)
+      fn();
+  });
 
   // gather samples
   auto tmp = sources_ | std::views::transform([](const MetricSource &src) {
