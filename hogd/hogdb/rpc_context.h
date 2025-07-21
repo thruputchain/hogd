@@ -35,13 +35,13 @@ public:
 
   // retrieves a block transaction (and creates it if it doesn't exist).
   BlockTX &get_block_tx(BlockTXID bid);
-  // removes and returns a block transaction from the RPC context.
+  // removes a block transaction.
   void close_block_tx(BlockTXID bid);
 
   // retrieves an invoke transaction (and creates it if it doesn't
-  // exist).#include "hogd/hogdb/hog_types.h"
+  // exist).
   InvokeTX &get_invoke_tx(BlockTXID bid, InvokeTXID iid);
-  // removes and returns an invoke transaction from the RPC context.
+  // removes an invoke transaction.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid);
 
 private:
