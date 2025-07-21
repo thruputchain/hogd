@@ -91,6 +91,11 @@ public:
   // print_stats prints disk usage statistics.
   void print_stats();
 
+  size_t get_bytes_out() const
+  {
+    return bytes_out_.load(std::memory_order_relaxed);
+  }
+
   // size in bytes a log file must be before writer creates a new file.
   size_t get_file_size_threshold() const { return file_size_threshold_; }
 
