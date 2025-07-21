@@ -29,6 +29,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
+#include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
@@ -37,6 +38,8 @@
 namespace hogd {
 
 namespace {
+
+using namespace std::chrono_literals;
 
 constexpr size_t kKeys = 1 * 1024 * 1024;
 static_assert((kKeys & (kKeys - 1)) == 0, "kKeys must be a power of two");
@@ -47,6 +50,7 @@ constexpr size_t kBatchSize = 16384;
 constexpr size_t kSyncsPerSnapshot = 16;
 constexpr auto kDurationBetweenCrashes = std::chrono::duration<double>{30};
 
+constexpr bool kOverlapPutsWithSnapshot = true;
 constexpr bool kRemoveAllFilesAtStart = false;
 
 void
@@ -175,8 +179,6 @@ db_size(hogd::Database &db)
 void
 do_child(std::string_view path, Shared &shared)
 {
-  shared.starting_up = true;
-
   auto db = make_db(path, kKeys, kValueSize);
 
   ensure_recovered_keys_uptodate(*db, shared);
@@ -189,6 +191,24 @@ do_child(std::string_view path, Shared &shared)
 
   shared.starting_up = false;
 
+  DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>> snap_start_ret;
+  auto wait_for_snapshot = [&snap_start_ret](bool blocking) {
+    auto &future = snap_start_ret->second;
+
+    if (!future.valid())
+      return;
+
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    if (!blocking && future.wait_for(0s) != std::future_status::ready)
+      return;
+
+    auto snap_end_ret = future.get();
+    if (!snap_end_ret)
+      fail(snap_end_ret.error());
+
+    info("sync_and_snapshot finished");
+  };
+
   for (size_t put = left_off_put; put < kPuts; put++) {
     // bump this to reassure parent we aren't wedged.
     shared.watchdog++;
@@ -200,6 +220,9 @@ do_child(std::string_view path, Shared &shared)
     if (!ret) [[unlikely]]
       fail(ret.error());
 
+    // if an async snapshot is ongoing, see if it's return is ready.
+    wait_for_snapshot(false);
+
     // sync after each batch.
     if (put && ((put & (kBatchSize - 1)) == 0)) {
       uint64_t lsn;
@@ -208,21 +231,29 @@ do_child(std::string_view path, Shared &shared)
       if (shared.synced_lsn &&
           ((shared.synced_lsn & (kSyncsPerSnapshot - 1)) == 0)) {
         info("Database size just before snapshot: {}", db_size(*db));
-        auto ret = db->sync_and_snapshot(0);
-        if (!ret) [[unlikely]]
-          fail(ret.error());
-        lsn = ret->first;
 
-        // just synchronously wait for the snapshot to complete.
-        auto sync_ret = ret->second.get();
-        if (!sync_ret)
-          fail(sync_ret.error());
+        // ensure we don't start two concurrent snapshots.
+        wait_for_snapshot(true);
+
+        ElapsedTimer timer{};
+        snap_start_ret = db->sync_and_snapshot(0);
+        if (!snap_start_ret) [[unlikely]]
+          fail(snap_start_ret.error());
+        lsn = snap_start_ret->first;
+
+        info("sync_and_snapshot start took {:.2f} ms", timer.elapsed() * 1000);
+
+        wait_for_snapshot(!kOverlapPutsWithSnapshot);
       }
       else {
+        ElapsedTimer timer{};
+
         DBStatus<uint64_t> ret = db->sync();
         if (!ret) [[unlikely]]
           fail(ret.error());
         lsn = *ret;
+
+        info("sync took {:.2f} ms", timer.elapsed() * 1000);
       }
 
       info("child synced through lsn {} put {}", lsn, put);
@@ -244,13 +275,17 @@ do_child(std::string_view path, Shared &shared)
 void
 do_parent(pid_t child_pid, Shared &shared)
 {
-  using namespace std::chrono_literals;
+  // for large dbs, rechecking that all of the keys have the expected values
+  // can take a long time. so don't start the countdown to fault injection
+  // until the start up phase is done to ensure some progres per crash.
+  while (shared.starting_up)
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    std::this_thread::sleep_for(1s);
 
-  size_t start_watchdog = shared.watchdog.load();
+  size_t watchdog = shared.watchdog.load();
   std::this_thread::sleep_for(kDurationBetweenCrashes);
-  size_t end_watchdog = shared.watchdog.load();
 
-  if (start_watchdog == end_watchdog)
+  if (watchdog == shared.watchdog.load())
     error("!!! CHILD SEEMS STUCK !!!");
 
   // before trying to kill the child, first see if it ran into some kind of
@@ -322,6 +357,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::Shared &shared = *map_shared();
 
   while (true) {
+    // set this in the parent, so parent knows once false, child must have
+    // entered/exited start up phase.
+    shared.starting_up = true;
+
     pid_t pid = fork();
     if (pid == -1)
       hogd::panic("failed to create child process");

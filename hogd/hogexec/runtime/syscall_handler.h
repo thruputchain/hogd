@@ -61,11 +61,14 @@ public:
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Starts the invocation that is specified within signed_tx_.
+  // Must only be called once per transaction.
   InvokeResult root_invoke();
 
   // Attempt to commit the current transaction to the database.
-  // Requirement: root_invoke() must be called first, and
-  // that must have returned successfully.
+  // Requirement: root_invoke() must be called first.
+  // Returns true if the transaction commits, false otherwise.
+  // Calls abort_transaction if either the commit fails or
+  // the root_invoke earlier had an error.
   SystemStatus<bool> try_commit_transaction();
 
   // Create and run a child call frame.

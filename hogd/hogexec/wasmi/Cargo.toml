@@ -9,6 +9,7 @@ rust-version = "1.81"
 [dependencies]
 lru = "0.14.0"
 wasmi = "0.36.0"
+xdrs = { git = "ssh://git@github.com/groundhogchain/xdrs.git", features = ["strict", "alloc", "txs"] }
 
 [lib]
 crate-type = ["staticlib"]
