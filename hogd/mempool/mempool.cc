@@ -64,9 +64,9 @@ setup_grant_storage_token(InMemoryDatabase &in_memory_db,
 
 } // namespace
 
-Validator::Validator(size_t num_threads)
-  : db_pool_(x23::ThreadPool(num_threads)), cost_model_(12000, 1, 5, 100, 5),
-    block_manager_(0, &in_memory_db_),
+Validator::Validator()
+  : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
+    cost_model_(12000, 1, 5, 100, 5), block_manager_(0, &in_memory_db_),
     db_executor_server_(&block_manager_, kExecutorPort),
     db_coordinator_server_(&block_manager_),
     validator_pool_(kNumValidatorPoolThreads)
@@ -105,50 +105,17 @@ Validator::Validator(size_t num_threads)
     throw std::runtime_error("Failed to create snapshot");
   }
 
-  block_number_++;
-
   snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
+      std::make_unique<StorageSnapshotCache>(/*block_numer=*/0, *db_proxy_);
 }
 
 SystemCallHandler
 Validator::make_handler(SignedTransaction const &signed_tx, TransactionID txid)
 {
-  auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
+  auto proxy =
+      PerTransactionDatabaseProxy(*db_proxy_, /*block_number=*/0, txid);
   return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
                            ProposalModeData{});
-}
-
-void
-Validator::advance_block()
-{
-  auto r = coord_client_->dbcoord_close_snapshot(block_number_)();
-  if (r.result() != DbResult::DbResultOK) {
-    throw std::runtime_error("Failed to close snapshot");
-  }
-
-  auto r2 = coord_client_->dbcoord_commit_snapshot(block_number_)();
-  if (r2.result() != DbResult::DbResultOK) {
-    throw std::runtime_error("Failed to commit snapshot");
-  }
-
-  auto r3 = coord_client_->dbcoord_create_snapshot(
-      block_number_, block_number_ + 1,
-      BlockExecutionMode::kBlockExecutionModeProposal)();
-  if (r3 != DbResult::DbResultOK) {
-    throw std::runtime_error("Failed to create snapshot");
-  }
-
-  block_number_++;
-
-  snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
-}
-
-TransactionID
-Validator::allocate_txid()
-{
-  return next_tx_id_.fetch_add(1, std::memory_order_relaxed);
 }
 
 namespace {
@@ -167,8 +134,8 @@ set_to_false(std::atomic<bool> &b)
 } // namespace
 
 bool
-Validator::submit_txs(const std::vector<SignedTransaction> &txs,
-                      MerkleTriePrefix &trie)
+Validator::execute_txs(const std::vector<SignedTransaction> &txs,
+                       MerkleTriePrefix &trie)
 {
   size_t num_txs_per_thread = txs.size() / kNumValidatorPoolThreads;
   if (txs.size() % kNumValidatorPoolThreads) {
@@ -228,7 +195,7 @@ Validator::validate(const SHA256Hash &expected_root_hash,
   // 2. Experiment with different scheduling policies for txs. We want to model
   //    txs of different lengths and multiple blocks validated at the same time.
   MerkleTriePrefix trie;
-  if (!submit_txs(txs, trie)) {
+  if (!execute_txs(txs, trie)) {
     return false;
   }
 

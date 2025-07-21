@@ -49,7 +49,7 @@ namespace hogd {
 
 class Validator {
 public:
-  Validator(size_t num_threads);
+  Validator();
   ~Validator() = default;
 
   bool validate(const SHA256Hash &expected_root_hash,
@@ -65,7 +65,11 @@ private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint16_t kExecutorPort = 10000;
   static constexpr uint16_t kCoordinatorPort = 10001;
+  static constexpr size_t kNumDbPoolThreads = 16;
   static constexpr size_t kNumValidatorPoolThreads = 16;
+
+  using coord_client_t =
+      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
                                  TransactionID txid);
@@ -74,9 +78,10 @@ private:
 
   TransactionID allocate_txid();
 
-  bool submit_txs(const std::vector<SignedTransaction> &txs,
-                  MerkleTriePrefix &trie);
+  bool execute_txs(const std::vector<SignedTransaction> &txs,
+                   MerkleTriePrefix &trie);
 
+  // Server.
   x23::ThreadPool db_pool_;
   InMemoryDatabase in_memory_db_;
   StorageCostModel cost_model_;
@@ -84,17 +89,11 @@ private:
   RPCDbExecutorServer db_executor_server_;
   DbCoordServer db_coordinator_server_;
 
+  // Client.
   WorkerPool validator_pool_;
-  std::atomic<TransactionID> next_tx_id_ = 0;
-  BlockID block_number_ = 0;
   x23::CoroPoll cp_ = x23::CoroPoll(db_pool_);
-
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
-
-  using coord_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
   std::unique_ptr<coord_client_t> coord_client_;
 };
 

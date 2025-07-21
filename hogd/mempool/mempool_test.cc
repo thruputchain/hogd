@@ -25,7 +25,9 @@
 namespace hogd {
 
 TEST(Mempool, HelloWorld)
-{}
+{
+  Validator validator;
+}
 
 } // namespace hogd
 
