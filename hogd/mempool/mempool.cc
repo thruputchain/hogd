@@ -68,7 +68,8 @@ Validator::Validator(size_t num_threads)
   : db_pool_(x23::ThreadPool(num_threads)), cost_model_(12000, 1, 5, 100, 5),
     block_manager_(0, &in_memory_db_),
     db_executor_server_(&block_manager_, kExecutorPort),
-    db_coordinator_server_(&block_manager_)
+    db_coordinator_server_(&block_manager_),
+    validator_pool_(kNumValidatorPoolThreads)
 {
   ContractAddress contract_addr;
   std::shared_ptr<Contract> contract =
@@ -150,61 +151,63 @@ Validator::allocate_txid()
   return next_tx_id_.fetch_add(1, std::memory_order_relaxed);
 }
 
+namespace {
+
 void
-Validator::run_bench_rep(int num_txs, uint32_t nfib, int num_exec_threads,
-                         MerkleTriePrefix &trie)
+set_to_false(std::atomic<bool> &b)
 {
-  WorkerPool exec_pool(num_exec_threads);
-  exec_pool.adjust_workers(num_exec_threads);
+  // Checking if [b] is true before setting it to false ensures that a lot of
+  // cores do not fight over ownership of [b]'s cache line when there are many
+  // failed txs.
+  if (b.load(std::memory_order_relaxed)) {
+    b.store(false, std::memory_order_relaxed);
+  }
+}
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
-  fib_client_t fib_client(ContractAddress{});
+} // namespace
 
-  auto start_time = std::chrono::steady_clock::now();
-
-  int ntx_per_thread = num_txs / num_exec_threads;
-  if (num_txs % num_exec_threads != 0) {
-    ntx_per_thread++;
+bool
+Validator::submit_txs(const std::vector<SignedTransaction> &txs,
+                      MerkleTriePrefix &trie)
+{
+  size_t num_txs_per_thread = txs.size() / kNumValidatorPoolThreads;
+  if (txs.size() % kNumValidatorPoolThreads) {
+    num_txs_per_thread++;
   }
 
   std::vector<std::future<void>> futures;
-  futures.reserve(num_exec_threads);
-  const SignedTransaction tx{
-      .tx = Transaction{
-          .invocation =
-              fib_client.make_invocation<"slow_fibonacci">(UINT64_MAX, nfib)}};
+  futures.reserve(kNumValidatorPoolThreads);
+  std::atomic<bool> ret = true;
+  for (size_t i = 0; i < kNumValidatorPoolThreads; i++) {
+    const size_t offset = i * num_txs_per_thread;
+    size_t num_txs = std::min(num_txs_per_thread, txs.size() - offset);
 
-  for (int i = 0; i < num_exec_threads; i++) {
-    const int offset = i * ntx_per_thread;
-    int cur_count = std::min(ntx_per_thread, num_txs - offset);
-
-    futures.emplace_back(
-        exec_pool.submit([this, &trie, &tx, offset, cur_count]() -> void {
-          for (int j = 0; j < cur_count; j++) {
+    futures.emplace_back(validator_pool_.submit(
+        [this, &trie, &txs, offset, num_txs, &ret]() -> void {
+          for (int j = 0; j < num_txs; j++) {
+            // TODO(jhumphri): Incorporate the txid into the tx struct.
             TransactionID txid = offset + j;
-            auto handler = make_handler(tx, txid);
+            SystemCallHandler handler = make_handler(txs[txid], txid);
             if (!handler.root_invoke().is_root_success()) {
-              throw std::runtime_error("Failed to invoke transaction");
+              set_to_false(ret);
+              return;
             }
-            if (auto r = handler.try_commit_transaction();
+            if (SystemStatus<bool> r = handler.try_commit_transaction();
                 !r.has_value() || !r.value()) {
-              throw std::runtime_error("failed to perform commit operation");
+              set_to_false(ret);
+              return;
             }
             if (!trie.insert(HexArray(txid), std::span<const std::byte>())) {
-              throw std::runtime_error("could not insert tx into trie");
+              set_to_false(ret);
+              return;
             }
           }
         }));
   }
-  for (auto &f : futures) {
+  for (std::future<void> &f : futures) {
     f.wait();
   }
-  auto finish_time = std::chrono::steady_clock::now();
-  std::println("time taken: {} us for {} txs (fib {}) on {} threads",
-               std::chrono::duration_cast<std::chrono::microseconds>(
-                   finish_time - start_time)
-                   .count(),
-               num_txs, nfib, num_exec_threads);
+  return ret.load(std::memory_order_relaxed);
 }
 
 bool
@@ -225,7 +228,9 @@ Validator::validate(const SHA256Hash &expected_root_hash,
   // 2. Experiment with different scheduling policies for txs. We want to model
   //    txs of different lengths and multiple blocks validated at the same time.
   MerkleTriePrefix trie;
-  run_bench_rep(/*num_txs=*/10, /*nfib=*/10, /*num_exec_threads=*/64, trie);
+  if (!submit_txs(txs, trie)) {
+    return false;
+  }
 
   trie.generate_top_level_hashes();
   return trie.get_root_hash() == expected_root_hash;

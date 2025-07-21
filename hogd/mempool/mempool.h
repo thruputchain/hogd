@@ -65,6 +65,7 @@ private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr uint16_t kExecutorPort = 10000;
   static constexpr uint16_t kCoordinatorPort = 10001;
+  static constexpr size_t kNumValidatorPoolThreads = 16;
 
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
                                  TransactionID txid);
@@ -73,8 +74,8 @@ private:
 
   TransactionID allocate_txid();
 
-  void run_bench_rep(int num_txs, uint32_t nfib, int num_exec_threads,
-                     MerkleTriePrefix &trie);
+  bool submit_txs(const std::vector<SignedTransaction> &txs,
+                  MerkleTriePrefix &trie);
 
   x23::ThreadPool db_pool_;
   InMemoryDatabase in_memory_db_;
@@ -83,6 +84,7 @@ private:
   RPCDbExecutorServer db_executor_server_;
   DbCoordServer db_coordinator_server_;
 
+  WorkerPool validator_pool_;
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
   x23::CoroPoll cp_ = x23::CoroPoll(db_pool_);
