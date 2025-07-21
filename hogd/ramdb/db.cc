@@ -349,8 +349,11 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
       return;
     }
 
-    info("syncing snapshot file to storage took {:.3f} s",
-         snap_sync_timer.elapsed());
+    size_t bytes_out = snap_writer.get_bytes_out();
+    seconds = timer.elapsed();
+    info("snapshot wrote {} to storage took {:.3f} s, {}/s",
+         print_iec_bytes(bytes_out, true), snap_sync_timer.elapsed(),
+         print_iec_bytes(bytes_out / seconds, true));
 
     promise->set_value({});
   }).detach();

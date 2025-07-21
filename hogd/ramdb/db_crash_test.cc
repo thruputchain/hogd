@@ -230,7 +230,7 @@ do_child(std::string_view path, Shared &shared)
       // after enough syncs issue a full snapshot.
       if (shared.synced_lsn &&
           ((shared.synced_lsn & (kSyncsPerSnapshot - 1)) == 0)) {
-        info("Database size just before snapshot: {}", db_size(*db));
+        debug("Database size just before snapshot: {}", db_size(*db));
 
         // ensure we don't start two concurrent snapshots.
         wait_for_snapshot(true);
@@ -253,10 +253,10 @@ do_child(std::string_view path, Shared &shared)
           fail(ret.error());
         lsn = *ret;
 
-        info("sync took {:.2f} ms", timer.elapsed() * 1000);
+        debug("sync took {:.2f} ms", timer.elapsed() * 1000);
       }
 
-      info("child synced through lsn {} put {}", lsn, put);
+      debug("child synced through lsn {} put {}", lsn, put);
 
       if (shared.synced_lsn + 1 > lsn) {
         panic("FAILURE - LSN {} WAS LAST SYNCED ACCORDING TO SHM; NEW CALL TO "
