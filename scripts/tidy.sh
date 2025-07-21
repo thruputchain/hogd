@@ -21,7 +21,7 @@ done
 
 # Run clippy
 cd ${ROOT_DIR}/hogd/hogexec/wasmi
-cargo clippy --no-deps -- -D warnings &
+cargo +nightly clippy --no-deps -- -D warnings &
 CLIPPY_PID=$!
 
 # Run clang-tidy
