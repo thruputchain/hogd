@@ -83,6 +83,16 @@ public:
     size_ = hash.size() * 2;
   }
 
+  HexArray(size_t bytes)
+  {
+    CHECK_LE(sizeof(bytes), kArrayLength);
+
+    init();
+
+    memcpy(backing_store_.data(), &bytes, sizeof(bytes));
+    size_ = sizeof(bytes) * 2;
+  }
+
   bool operator==(const HexArray &a) const
   {
     if (size_ != a.size()) {
