@@ -327,7 +327,9 @@ GenRs::show_type(const StructBody &s, string t)
             derive_traits.emplace_back("Default");
         }
 
-        derive_traits.append_range(vector<string>{"Eq", "Hash", "Copy"});
+        derive_traits.emplace_back("Eq");
+        derive_traits.emplace_back("Hash");
+        derive_traits.emplace_back("Copy");
     }
     prtop("#[derive({})]\n", join(derive_traits, ", "));
     prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
