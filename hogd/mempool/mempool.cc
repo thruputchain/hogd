@@ -198,6 +198,8 @@ Validator::validate(const SHA256Hash &expected_root_hash,
   //    txs of different lengths and multiple blocks validated at the same time.
   MerkleTriePrefix trie;
   if (!execute_txs(txs, trie)) {
+    // TODO(jhumphri): Maybe this should have a return status code so we can
+    // test this vs. not having the right hash below in tests?
     return false;
   }
 
