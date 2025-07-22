@@ -105,15 +105,17 @@ Validator::Validator()
     throw std::runtime_error("Failed to create snapshot");
   }
 
+  // TODO(jhumphri): Is block 0 reserved? Why do I have the make the first block
+  // [1]?
   snapshot_cache_ =
-      std::make_unique<StorageSnapshotCache>(/*block_numer=*/0, *db_proxy_);
+      std::make_unique<StorageSnapshotCache>(/*block_numer=*/1, *db_proxy_);
 }
 
 SystemCallHandler
 Validator::make_handler(SignedTransaction const &signed_tx, TransactionID txid)
 {
   auto proxy =
-      PerTransactionDatabaseProxy(*db_proxy_, /*block_number=*/0, txid);
+      PerTransactionDatabaseProxy(*db_proxy_, /*block_number=*/1, txid);
   return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
                            ProposalModeData{});
 }
