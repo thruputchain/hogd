@@ -132,11 +132,6 @@ struct GenRs {
 
   void show_typespec(const TypeSpecifier &ts, string t)
   {
-    if (optional<string> remainder = substring_removed(ts.comment, kRustWriteXDR)) {
-      // comment = *remainder;
-      prtop("#[derive(WriteXDR)]\n");
-    }
-
     visit([this, &t](const auto &v) { show_type(v, t); }, ts);
   }
 
@@ -193,7 +188,7 @@ struct GenRs {
   string join(auto &&v, string with)
   {
     string ret;
-    Join j(with);
+    Join j(std::move(with));
     for (const auto &n : v) {
       ret += j.get();
       ret += n;
@@ -221,7 +216,6 @@ struct GenRs {
   }
 
   static constexpr string_view kRustNewtype = R"(#[rust(newtype)])";
-  static constexpr string_view kRustWriteXDR = R"(#[rust(WriteXDR)])";
   static constexpr string_view kSerdeArrays = R"(#[serde(with = "serde_arrays")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
@@ -284,9 +278,9 @@ GenRs::convert_to_newtype(const Definition &d)
       .attrs = attrs
     };
     return visit(visitor, d);
-
   }
-  return {};
+
+  return std::nullopt;
 }
 
 void
@@ -317,21 +311,28 @@ GenRs::show_type(const StructBody &s, string t)
   {
     optional<string> array_size;
 
-    string derive_traits = "PartialEq, Debug, Clone";
+    vector<string> derive_traits = {"PartialEq", "Debug", "Clone"};
+
     if (s.transparent) {
         auto inner = s.front();
+        if (s.size() > 1) {
+          throw std::runtime_error("Transparent structs with multiple fields are not supported");
+        }
+        
         array_size = get_opaque_array_size(inner);
 
         if (!(array_size && *array_size == "64")) {
             // arrays with size over 32 don't implement Default, so we can't
             // derive it here
-            derive_traits += ", Default";
+            derive_traits.emplace_back("Default");
         }
 
-        derive_traits += ", Eq, Hash, Copy";
+        derive_traits.emplace_back("Eq");
+        derive_traits.emplace_back("Hash");
+        derive_traits.emplace_back("Copy");
     }
-    derive_traits += ", ReadXDR, WriteXDR";
-    prtop("#[derive({})]\n", derive_traits);
+    prtop("#[derive({})]\n", join(derive_traits, ", "));
+    prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
 
     if (s.transparent) {
         needs_serde_imports = true; // for Serialize, Deserialize
@@ -477,6 +478,7 @@ impl {0} {{
                 }
             }
             */
+            prtop("#[cfg(feature = \"xdrs\")]\n");
             prtop("\nimpl<'r> ReadXDR<'r> for &'r {} {{\n", outer_id);
             prtop("    fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {{\n");
             prtop("        let arr: &[u8; {}] = xdrs::read_xdr(r)?;\n", *array_size);
@@ -562,7 +564,7 @@ GenRs::show_type(const UnionBody &b, string t)
   {
     prtop("#[repr(i32)]\n");
     prtop("#[derive(PartialEq, Debug, Clone)]\n");
-    prtop("#[derive(ReadXDR, WriteXDR)]\n");
+    prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
     prtop("pub enum {} ", t);
     auto _close = open_brace();
     scopes_.push_back(t);
@@ -815,6 +817,7 @@ use core::ops::{Deref, DerefMut};
 #[cfg(feature="std")]
 use std::io::{Read, Write};
 
+#[cfg(feature="xdrs")]
 use ::xdrs::{ReadXDR, WriteXDR};
 
 )";
