@@ -10,7 +10,6 @@
 #include <future>
 #include <memory>
 #include <optional>
-#include <print>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
@@ -81,8 +80,6 @@ Validator::Validator()
   setup_grant_storage_token(in_memory_db_, cost_model_, contract_addr,
                             1'000'000'000);
 
-  std::println("Starting executor server on port {}", kExecutorPort);
-  std::println("Starting coord server on port {}", kCoordinatorPort);
   db_coordinator_server_.start_server(kCoordinatorPort);
 
   // Initialize the client.

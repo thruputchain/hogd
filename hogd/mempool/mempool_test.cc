@@ -52,12 +52,25 @@ TEST(Mempool, HelloWorld)
 {
   constexpr size_t kNumTxs = 100;
 
-  Validator validator;
   fib_client_t fib_client(ContractAddress{});
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
 
-  SHA256Hash empty{};
-  EXPECT_FALSE(validator.validate(/*expected_root_hash=*/empty, txs));
+  {
+    Validator validator;
+    SHA256Hash empty{};
+    EXPECT_FALSE(validator.validate(/*expected_root_hash=*/empty, txs));
+  }
+
+  {
+    // We reconstruct the validator each time we attempt to validate [txs]
+    // because [validate()] *adds* the txs to the block rather than overwrite
+    // the existing txs in the block.
+    Validator validator;
+    HexArray expected(
+        "87eb620d9086e7df7899c4c016d3696cc198682e70105f18a4b90be1fd563564");
+    EXPECT_TRUE(
+        validator.validate(/*expected_root_hash=*/expected.to_sha256(), txs));
+  }
 }
 
 } // namespace hogd
