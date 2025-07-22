@@ -97,7 +97,7 @@ SyncDBExecutorServer::get_snapshot_item(BlockID block,
   auto const *item =
       block_data->get_snapshot_view()->get_snapshot_storage_item(addrkey);
   if (!item) {
-    return ExpectedStorageItem(RPCError::kRPCNoStorageItem);
+    return ExpectedStorageItem(RPCError::kRPCNotFound);
   }
 
   ExpectedStorageItem out;
@@ -145,7 +145,7 @@ SyncDBExecutorServer::get_contract(BlockID block,
   auto contract =
       block_data->get_snapshot_view()->get_snapshot_contract(contract_hash);
   if (!contract) {
-    return ExpectedContract(RPCError::kRPCContractNotExist);
+    return ExpectedContract(RPCError::kRPCNotFound);
   }
 
   ExpectedContract out;
@@ -166,7 +166,7 @@ SyncDBExecutorServer::get_deployment(BlockID block,
   auto hash = block_data->get_snapshot_view()->get_snapshot_deployment(
       contract_address);
   if (!hash) {
-    return ExpectedDeployment(RPCError::kRPCNoContractDeployed);
+    return ExpectedDeployment(RPCError::kRPCNotFound);
   }
 
   ExpectedDeployment out;
@@ -187,17 +187,17 @@ SyncDBExecutorServer::get_next_retrocausal_queue_block(
   auto const *item =
       block_data->get_snapshot_view()->get_snapshot_storage_item(addrkey);
   if (!item) {
-    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoStorageItem);
+    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNotFound);
   }
 
   if (item->type() != StorageItemType::kItemTypeRetrocausalQueue) {
-    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoStorageItem);
+    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNotFound);
   }
 
   auto const &queue = item->queue();
   const auto *next_block = queue.try_get_next_block(search_start_number);
   if (!next_block) {
-    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoQueueEntry);
+    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNotFound);
   }
 
   ExpectedRetrocausalQueueBlock out;
@@ -218,7 +218,7 @@ SyncDBExecutorServer::get_concurrent_retrocausal_queue_entry(
   auto entry =
       block_data->get_concurrent_retrocausal_queue_entry(addrkey, index);
   if (!entry.get()) {
-    return ExpectedQueueEntry(RPCError::kRPCNoQueueEntry);
+    return ExpectedQueueEntry(RPCError::kRPCNotFound);
   }
 
   ExpectedQueueEntry out;
