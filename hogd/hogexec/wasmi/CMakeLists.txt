@@ -3,7 +3,7 @@ set_source_files_properties(
     PROPERTIES GENERATED TRUE)
 
 # Import targets defined in a package or workspace manifest `Cargo.toml` file
-corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATE_TYPES staticlib)
+corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATE_TYPES staticlib LOCKED)
 corrosion_set_env_vars(wasmi_lib CARGO_NET_GIT_FETCH_WITH_CLI=true)
 
 add_dependencies(
