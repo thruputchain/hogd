@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "db_coord.hh"
+#include "exec_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -38,8 +39,6 @@
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
-#include "exec_coord.hh"
-#include "transaction.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
