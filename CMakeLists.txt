@@ -160,7 +160,6 @@ add_subdirectory(x23)
 include_directories(${X23_SOURCE_DIR} ${X23_BINARY_DIR})
 
 # Enable Corrosion
-set(Rust_TOOLCHAIN "nightly")
 add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)

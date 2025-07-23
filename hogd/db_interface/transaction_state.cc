@@ -17,12 +17,6 @@
 
 namespace hogd {
 
-TransactionState::TransactionState()
-{
-  // TODO(geoff): updated interface doesn't need this
-  subtransaction_stack_.emplace_back();
-}
-
 void
 TransactionState::push_subtransaction()
 {
@@ -34,9 +28,8 @@ void
 TransactionState::pop_subtransactions(uint32_t count)
 {
   assert(!finished_);
-  assert(subtransaction_stack_.size() > count);
+  assert(subtransaction_stack_.size() >= count);
   subtransaction_stack_.resize(subtransaction_stack_.size() - count);
-  assert(!subtransaction_stack_.empty());
 }
 
 void
@@ -44,6 +37,7 @@ TransactionState::add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
                             MeteredStorageLock &&new_lock)
 {
   assert(!finished_);
+  assert(!subtransaction_stack_.empty());
   if constexpr (is_debug_build()) {
     if (subtransaction_stack_.back().deltas_.contains(addrkey)) {
       assert(addrkey.key.key_type() ==

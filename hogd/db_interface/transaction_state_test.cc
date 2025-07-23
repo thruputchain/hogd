@@ -50,9 +50,26 @@ make_addrkey(uint8_t i)
 
 } // namespace
 
+TEST(TransactionState, EmptyTest)
+{
+  TransactionState tx;
+  tx.push_subtransaction();
+  tx.add_delta(make_addrkey(0), make_bstring_delta({1, 2, 3}),
+               make_bstring_lock({1, 2, 3}));
+  tx.pop_subtransactions(1);
+
+  auto results = tx.extract_results();
+  ASSERT_EQ(results.size(), 1);
+  // we have a lock, but no delta
+  EXPECT_EQ(results.at(make_addrkey(0)).first, std::nullopt);
+  EXPECT_EQ(results.at(make_addrkey(0)).second.lock_.lock_type(),
+            StorageLockType::kSetItemTypeClass);
+}
+
 TEST(TransactionState, SubtransactionTest)
 {
   TransactionState tx;
+  tx.push_subtransaction();
 
   tx.add_delta(make_addrkey(0), make_bstring_delta({1, 2, 3}),
                make_bstring_lock({1, 2, 3}));
