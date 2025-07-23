@@ -21,7 +21,7 @@ function(add_wasm_contract target_name)
           ${CMAKE_CURRENT_BINARY_DIR}/wasm32-unknown-unknown/release/${target_name}.wasm 
           ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
     DEPENDS 
-       # ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
+        ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
         ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
         ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml 
         ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/src/*.rs
