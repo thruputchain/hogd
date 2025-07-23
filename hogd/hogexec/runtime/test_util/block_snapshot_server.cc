@@ -38,7 +38,7 @@ BlockSnapshotServer::get_snapshot_item(BlockID block,
   auto m = items_.take();
   auto it = m->find(addrkey);
   if (it == m->end()) {
-    return ExpectedStorageItem(RPCError::kRPCNoStorageItem);
+    return ExpectedStorageItem(RPCError::kRPCNotFound);
   }
   ExpectedStorageItem out(RPCError::kRPCNone);
   out.item() = it->second.to_wire_item();
@@ -56,7 +56,7 @@ BlockSnapshotServer::get_contract(BlockID block,
   auto m = contracts_.take();
   auto it = m->find(contract_hash);
   if (it == m->end()) {
-    return ExpectedContract(RPCError::kRPCContractNotExist);
+    return ExpectedContract(RPCError::kRPCNotFound);
   }
   ExpectedContract out(RPCError::kRPCNone);
   out.contract() = it->second;
@@ -74,7 +74,7 @@ BlockSnapshotServer::get_deployment(BlockID block,
   auto m = deployments_.take();
   auto it = m->find(contract_address);
   if (it == m->end()) {
-    return ExpectedDeployment(RPCError::kRPCNoContractDeployed);
+    return ExpectedDeployment(RPCError::kRPCNotFound);
   }
   ExpectedDeployment out(RPCError::kRPCNone);
   out.deployed_hash() = it->second;
@@ -136,12 +136,12 @@ BlockSnapshotServer::get_next_retrocausal_queue_block(
   auto m = items_.take();
   auto it = m->find(addrkey);
   if (it == m->end()) {
-    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoStorageItem);
+    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNotFound);
   }
   auto &queue = it->second.queue();
   auto const *out = queue.try_get_next_block(search_start_number);
   if (!out) {
-    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNoQueueEntry);
+    return ExpectedRetrocausalQueueBlock(RPCError::kRPCNotFound);
   }
   ExpectedRetrocausalQueueBlock blk(RPCError::kRPCNone);
   blk.queue_block() = *out;
@@ -158,11 +158,11 @@ BlockSnapshotServer::get_concurrent_retrocausal_queue_entry(
   auto m = concurrent_rcq_items_.take();
   auto it = m->find(addrkey);
   if (it == m->end()) {
-    return ExpectedQueueEntry(RPCError::kRPCNoQueueEntry);
+    return ExpectedQueueEntry(RPCError::kRPCNotFound);
   }
   auto &entries = it->second;
   if (index >= entries.size()) {
-    return ExpectedQueueEntry(RPCError::kRPCNoQueueEntry);
+    return ExpectedQueueEntry(RPCError::kRPCNotFound);
   }
   ExpectedQueueEntry out(RPCError::kRPCNone);
   out.queue_entry() = entries[index];
