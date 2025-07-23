@@ -27,7 +27,7 @@ struct SubTransactionState {
 // Store data relevant to the 2PC process for one transaction.
 class TransactionState {
 public:
-  TransactionState();
+  TransactionState() = default;
 
   TransactionState(TransactionState const &) = delete;
   TransactionState &operator=(TransactionState const &) = delete;

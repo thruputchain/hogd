@@ -80,6 +80,7 @@ to_system_error_code(auto sys_err, auto &&f)
           return SystemStatus<ret_t>{f()};
         }
       }
+    case RPCError::kRPCStorageWriteFailed:
     case RPCError::kRPCNotFound:
       // can't directly combine these branches; f() isn't a valid expression in
       // the first case NOLINTBEGIN(bugprone-branch-clone)
