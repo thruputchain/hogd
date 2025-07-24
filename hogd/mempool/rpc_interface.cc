@@ -72,16 +72,29 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
       SchedulerNominationOutcome::SchedulerNominationError);
 }
 
+void
+MempoolRpcInterface::abandon_snapshot(BlockID block_id)
+{
+  auto res = rpc_client_call<DbCoord1, "dbcoord_abandon_snapshot">(*db_client_,
+                                                                   block_id);
+  if (!res.has_value() || res != DbResult::DbResultOK) {
+    // TODO(jhumphri): Any db cleanup needed?
+  }
+}
+
 x23::Async<SchedulerValidationResult>
 MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
                                              Nomination const &nomination)
 {
   BlockID block_id = get_ns_since_epoch();
-  auto res = rpc_client_call<DbCoord1, "dbcoord_create_snapshot">(
-      *db_client_, db_tip.id, block_id,
-      BlockExecutionMode::kBlockExecutionModeValidation);
-  if (!res.has_value()) {
-    // TODO(jhumphri): Handle error.
+  {
+    auto res = rpc_client_call<DbCoord1, "dbcoord_create_snapshot">(
+        *db_client_, db_tip.id, block_id,
+        BlockExecutionMode::kBlockExecutionModeValidation);
+    if (!res.has_value() || res.value() != DbResult::DbResultOK) {
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationDbFailed);
+    }
   }
 
   // [nomination] includes the the tx hashes and the nondeterministic proposal
@@ -92,30 +105,42 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   x23::Vec<ProposedTransaction> txs;
   txs.reserve(nomination.transaction_nominations.size());
   if (!find_vetted_txs(nomination, txs)) {
-    // TODO(jhumphri): Return error.
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationMissingTxs);
   }
   if (nomination.transaction_nominations.size() == 1) {
     CHECK_EQ(txs.size(), 1);
-    auto res2 =
+    auto res =
         rpc_client_call<ExecutorCoord1, "executorcoord_validate_transaction">(
-            *exec_client_, block_id, txs);
+            *exec_client_, block_id, txs[0]);
+    if (!res.has_value() || res.value() != ExecResult::ExecResultOK) {
+      abandon_snapshot(block_id);
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationInvalid);
+    }
   }
   else if (nomination.transaction_nominations.size() > 1) {
     CHECK_GT(txs.size(), 1);
+    auto res = rpc_client_call<ExecutorCoord1, "executorcoord_validate_batch">(
+        *exec_client_, block_id, txs);
+    if (!res.has_value() ||
+        std::any_of(res.value().begin(), res.value().end(), [](const auto &r) {
+          return r != ExecResult::ExecResultOK;
+        })) {
+      abandon_snapshot(block_id);
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationInvalid);
+    }
   }
   else {
     // Empty nomination.
     CHECK(txs.empty());
-    // TODO(jhumphri): Return error.
-  }
-  if (!res.has_value()) {
-    auto res2 =
-        rpc_client_call<DbCoord1, "dbcoord_abandon_snapshot">(*db_client_,
-                                                              block_id);
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
   co_return SchedulerValidationResult(
-      SchedulerValidationOutcome::SchedulerValidationInvalid);
+      SchedulerValidationOutcome::SchedulerValidationOK);
 }
 
 x23::Async<void>

@@ -74,6 +74,8 @@ private:
   bool find_vetted_txs(const Nomination &nomination,
                        x23::Vec<ProposedTransaction> &ret);
 
+  void abandon_snapshot(BlockID block_id);
+
   std::unique_ptr<RPCClient> db_client_;
   std::unique_ptr<RPCClient> exec_client_;
 
