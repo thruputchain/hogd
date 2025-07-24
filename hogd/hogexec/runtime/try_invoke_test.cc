@@ -32,6 +32,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
