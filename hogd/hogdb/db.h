@@ -25,6 +25,11 @@ public:
   HogDatabase(std::unique_ptr<Database> db) : db_(std::move(db)) {}
   ~HogDatabase() = default;
 
+  HogDBStatus<DBItem> get(std::span<const std::byte> key)
+  {
+    return db_->get(key).transform_error(to_hogdb_error);
+  }
+
   HogDBStatus<void> get_if_type(std::span<const std::byte> key, uint8_t type,
                                 std::span<std::byte> val_out)
   {

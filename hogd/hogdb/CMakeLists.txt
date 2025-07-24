@@ -5,6 +5,7 @@ add_library(
   invoke_tx.cc
   item_change.cc
   rpc_context.cc
+  rpc_from_hogexec.cc
   status.cc
 )
 target_link_libraries(

@@ -27,11 +27,10 @@ namespace hogd {
 // by the database.
 class RPCContext {
 public:
-  RPCContext() = default;
+  RPCContext(HogDatabase &db) : db_(db) {}
 
-  // getters & setters.
-  HogDatabase &get_db() const { return *db_; }
-  void set_db(HogDatabase *db) { db_ = db; }
+  // getters.
+  HogDatabase &get_db() const { return db_; }
 
   // retrieves a block transaction (and creates it if it doesn't exist).
   BlockTX &get_block_tx(BlockTXID bid);
@@ -54,7 +53,7 @@ private:
   };
 
   // the database used to persist state.
-  HogDatabase *db_{nullptr};
+  HogDatabase &db_;
   // pending invocation transactions.
   SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
   // protects block_txes_.
@@ -95,15 +94,6 @@ inline void
 RPCContext::close_invoke_tx(BlockTXID bid, InvokeTXID iid)
 {
   invoke_txes_.remove(std::make_pair(bid, iid));
-}
-
-// myctx returns the RPC context for the process. This is used to access
-// important state that is shared across all RPCs.
-[[nodiscard, gnu::pure]] inline RPCContext &
-myctx()
-{
-  static RPCContext ctx;
-  return ctx;
 }
 
 } // namespace hogd
