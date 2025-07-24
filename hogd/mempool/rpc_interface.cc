@@ -5,7 +5,9 @@
 
 #include "db_coord.hh"
 #include "exec_coord.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -20,7 +22,9 @@ MempoolRpcInterface::schedulercoord_submit_unvetted(
 {
   // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
   // vetted.
-  vetted_txs_.insert(vetted_txs_.end(), batch.cbegin(), batch.cend());
+  for (const SignedTransaction &tx : batch) {
+    vetted_txs_[sha256(tx)] = tx;
+  }
   co_return;
 }
 
@@ -28,30 +32,32 @@ x23::Async<void>
 MempoolRpcInterface::schedulercoord_submit_vetted(
     ValidatorID validator_id, SignedTransactionBatch const &batch)
 {
-  vetted_txs_.insert(vetted_txs_.end(), batch.cbegin(), batch.cend());
+  for (const SignedTransaction &tx : batch) {
+    vetted_txs_[sha256(tx)] = tx;
+  }
   co_return;
 }
 
 bool
-MempoolRpcInterface::find_vetted_txs(
-    const x23::Vec<SignedTransactionHash> &hashes,
-    std::vector<SignedTransaction> &ret)
+MempoolRpcInterface::find_vetted_txs(const Nomination &nomination,
+                                     x23::Vec<ProposedTransaction> &ret)
 {
-  // TODO(jhumphri): Make this faster with an [unordered_set].
+  CHECK_EQ(nomination.transaction_hashes.size(),
+           nomination.transaction_nominations.size());
+
   ret.clear();
-  for (const SignedTransactionHash &hash : hashes) {
-    bool found = false;
-    for (const SignedTransaction &tx : vetted_txs_) {
-      // TODO(jhumphri): Take the hash of [tx].
-      if (true) {
-        found = true;
-        ret.push_back(tx);
-        break;
-      }
-    }
-    if (!found) {
+  for (size_t i = 0; i < nomination.transaction_hashes.size(); i++) {
+    const SignedTransactionHash &hash = nomination.transaction_hashes[i];
+    const NominatedTransaction &nominated_tx =
+        nomination.transaction_nominations[i];
+
+    auto it = vetted_txs_.find(hash);
+    if (it == vetted_txs_.end()) {
       return false;
     }
+    ret.push_back({.signed_tx = it->second,
+                   .nondeterministic_proposal_data =
+                       nominated_tx.nondeterministic_proposal_data});
   }
   return true;
 }
@@ -83,17 +89,23 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   // [vetted_txs_]. Assuming we find all of the txs, we then combine them with
   // the nondeterminstic proposal data to form a [ProposedTransaction], which is
   // what the executors expect to receive.
-  std::vector<SignedTransaction> txs;
+  x23::Vec<ProposedTransaction> txs;
   txs.reserve(nomination.transaction_nominations.size());
-  if (!find_vetted_txs(nomination.transaction_hashes, txs)) {
+  if (!find_vetted_txs(nomination, txs)) {
     // TODO(jhumphri): Return error.
   }
   if (nomination.transaction_nominations.size() == 1) {
+    CHECK_EQ(txs.size(), 1);
+    auto res2 =
+        rpc_client_call<ExecutorCoord1, "executorcoord_validate_transaction">(
+            *exec_client_, block_id, txs);
   }
   else if (nomination.transaction_nominations.size() > 1) {
+    CHECK_GT(txs.size(), 1);
   }
   else {
     // Empty nomination.
+    CHECK(txs.empty());
     // TODO(jhumphri): Return error.
   }
   if (!res.has_value()) {
