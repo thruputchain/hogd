@@ -15,6 +15,7 @@
 
 #include "contract.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -255,9 +256,11 @@ public:
     HostFnStatus<SyscallErrorCode> host_fn_res = res.first;
 
     if (!host_fn_res.has_value()) {
+      trace("Invoke HostFnStatus error: {}", host_fn_res.error());
       return std::pair{host_fn_res.error(), res.second};
     }
     if (host_fn_res.value() != SyscallErrorCode::kNone) {
+      trace("Invoke SyscallStatus error: {}", host_fn_res.value());
       return std::pair{SyscallError{host_fn_res.value()}, res.second};
     }
 

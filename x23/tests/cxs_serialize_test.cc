@@ -52,7 +52,7 @@ void check_roundtrip(T const& input) {
     serialize_cxs(buf, input);
     auto view = x23::BufView(buf);
     T output;
-    deserialize_cxs(view, output);
+    deserialize_cxs(&output, view);
     EXPECT_EQ(input, output);
     EXPECT_EQ(view.size(), 0U); // check all data consumed
 }

@@ -56,6 +56,7 @@ add_library(runtime_test_objects OBJECT
   native_contract_test.cc
   rcq_test.cc
   runtime_test.cc
+  serialize_roundtrip_test.cc
   snapshot_storage_item_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc

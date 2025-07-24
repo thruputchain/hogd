@@ -453,12 +453,19 @@ struct CxsSerializer<T> {
     }
 };
 
-inline void serialize_cxs(x23::Buf& buf, const is_xdr_type auto& value) {
+inline void serialize_cxs_to(x23::Buf& buf, const is_xdr_type auto& value) {
     CxsSerializer<std::remove_cvref_t<decltype(value)>>::store(buf, value);
 }
+
+inline x23::Buf serialize_cxs(const is_xdr_type auto&... value) {
+    x23::Buf buf;
+    (serialize_cxs_to(buf, value), ...);
+    return buf;
+}
+
 template<is_xdr_type T>
-void deserialize_cxs(std::span<const uint8_t>& data, T& value) {
-    CxsSerializer<std::remove_cvref_t<decltype(value)>>::load(data, value);
+void deserialize_cxs(T* value, std::span<const uint8_t> data) {
+    CxsSerializer<T>::load(data, *value);
     if (data.size() != 0) {
         throw CxsBadInput("Extra data after deserializing {}", xdr_type_name<T>());
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <tuple>
@@ -113,7 +114,9 @@ template<> struct Serializer<SerializationFormat::kCxs> {
   {
     auto args = std::tuple<std::remove_cvref_t<Args>...>{};
     try {
-      x23::deserialize_cxs(&args, data);
+      x23::deserialize_cxs(&args,
+                           {reinterpret_cast<const uint8_t *>(data.data()),
+                            data.size()});
     } catch (const x23::XdrBadInput &e) {
       return std::nullopt;
     }
