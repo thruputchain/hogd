@@ -70,6 +70,9 @@ private:
     return ns.count();
   }
 
+  bool find_vetted_txs(const x23::Vec<SignedTransactionHash> &hashes,
+                       std::vector<SignedTransaction> &ret);
+
   std::unique_ptr<RPCClient> db_client_;
   std::unique_ptr<RPCClient> exec_client_;
 
