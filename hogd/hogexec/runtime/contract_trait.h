@@ -55,18 +55,6 @@ constexpr static std::array<std::pair<std::string_view, SerializationFormat>, 3>
         std::pair{"bcs", SerializationFormat::kBcs},
 };
 
-template<StringLiteral FormatName>
-constexpr static SerializationFormat
-get_serialization_format()
-    requires (is_serialization_format_string(FormatName.get()))
-{
-  return std::ranges::find_if(kSerializationFormatLookup,
-                              [&](auto const &p) {
-                                return p.first == FormatName.get();
-                              })
-      ->second;
-}
-
 } // namespace detail
 
 template<typename T>
@@ -89,19 +77,12 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   constexpr static size_t
   get_serialization_format_index(std::string_view format)
   {
-    return [&]<size_t I, std::size_t... Is>(this auto self,
-                                            std::index_sequence<I, Is...>) {
-      if (detail::kSerializationFormatLookup[I].first == format) {
-        return I;
+    for (size_t i = 0; i < detail::kSerializationFormatLookup.size(); ++i) {
+      if (detail::kSerializationFormatLookup[i].first == format) {
+        return i;
       }
-
-      if constexpr (sizeof...(Is) == 0) {
-        return std::numeric_limits<size_t>::max();
-      }
-      else {
-        return self(std::index_sequence<Is...>{});
-      }
-    }(std::make_index_sequence<detail::kSerializationFormatLookup.size()>{});
+    }
+    return std::numeric_limits<size_t>::max();
   }
 
   constexpr static SerializationFormat get_format_or_default()
