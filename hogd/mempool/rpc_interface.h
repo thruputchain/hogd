@@ -58,6 +58,9 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
+  // The maximum number of txs in a block.
+  static constexpr size_t kMaxBlockSize = 128;
+
   // TODO(jhumphri): We are using this function to generate unique block IDs.
   // This will need to be reworked if/when we have multiple threads processing
   // blocks.

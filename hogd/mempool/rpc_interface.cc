@@ -139,8 +139,14 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  co_return SchedulerValidationResult(
+  // TODO(jhumphri): Verify block hash.
+
+  SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
+  result.db_tip() = DbTip{.height = nomination.block_height,
+                          .hash = nomination.block_hash,
+                          .id = block_id};
+  co_return result;
 }
 
 x23::Async<void>
