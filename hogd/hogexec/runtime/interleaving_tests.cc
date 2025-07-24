@@ -6,7 +6,6 @@
 
 #include <memory>
 #include <stdexcept>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -18,6 +17,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
@@ -27,7 +27,6 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -127,8 +126,12 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                 // set_amount
                 co_await set.bg();
 
-                auto calldata = x23::serialize(
-                    std::tuple<int64_t, int64_t>{SetAmount, AddAmount});
+                auto calldata =
+                    Serializer<SerializationFormat::kTxs>::serialize<
+                        int64_t, int64_t>(SetAmount, AddAmount);
+                if (!calldata.has_value()) {
+                  throw std::runtime_error("Failed to serialize calldata");
+                }
 
                 auto handler = self->make_new_system_call_handler(
                     SignedTransaction{
@@ -140,7 +143,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                                .entrypoint =
                                                    entrypoint_from_method_id(0),
                                                .gas_limit = UINT64_MAX,
-                                               .calldata = calldata}}},
+                                               .calldata = *calldata}}},
                     runtime_context);
                 auto res = handler.root_invoke();
                 if (!res.is_root_success()) {

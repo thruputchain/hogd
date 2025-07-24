@@ -124,12 +124,6 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
 
   {
     // fibonacci(10) = 55
-    auto calldata =
-        Serializer<SerializationFormat::kTxs>::serialize<uint32_t, uint32_t>(
-            10U, 55U);
-    if (!calldata.has_value()) {
-      FAIL();
-    }
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
@@ -138,7 +132,11 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                         Invocation{.invoked_address = native_contract_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
-                                   .calldata = *calldata}}},
+                                   .calldata =
+                                       Serializer<SerializationFormat::kTxs>::
+                                           serialize<uint32_t, uint32_t>(10U,
+                                                                         55U)
+                                               .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -149,12 +147,6 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
 
   {
     // fibonacci(40) = 102334155 (0x6197ECB)
-    auto calldata =
-        Serializer<SerializationFormat::kTxs>::serialize<uint32_t, uint32_t>(
-            40U, 102334155U);
-    if (!calldata.has_value()) {
-      FAIL();
-    }
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
@@ -163,7 +155,11 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                         Invocation{.invoked_address = native_contract_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
-                                   .calldata = *calldata}}},
+                                   .calldata =
+                                       Serializer<SerializationFormat::kTxs>::
+                                           serialize<uint32_t, uint32_t>(
+                                               40U, 102334155U)
+                                               .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

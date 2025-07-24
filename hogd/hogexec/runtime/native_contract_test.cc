@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -26,7 +27,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -134,10 +134,11 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       [&address](SystemCallHandler &handler,
                  NativeRuntime &runtime) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
-        auto [r1, g1] =
-            handler.invoke(address, 0, UINT64_MAX,
-                           x23::serialize<uint32_t>(100),
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto [r1, g1] = handler.invoke(
+            address, 0, UINT64_MAX,
+            Serializer<SerializationFormat::kTxs>::serialize<uint32_t>(100)
+                .value(),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
