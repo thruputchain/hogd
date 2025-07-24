@@ -137,7 +137,8 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                 Serializer<NativeContractBuilder::
                                                kDefaultSerializationFormat>::
                                     serialize<uint32_t, uint32_t>(10U, 55U)
-                                        .value()}}},
+                                        .value() // NOLINT(bugprone-unchecked-optional-access)
+                        }}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -162,7 +163,8 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                                kDefaultSerializationFormat>::
                                     serialize<uint32_t, uint32_t>(40U,
                                                                   102334155U)
-                                        .value()}}},
+                                        .value() // NOLINT(bugprone-unchecked-optional-access)
+                        }}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

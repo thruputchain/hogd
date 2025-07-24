@@ -147,10 +147,12 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r2, g2] =
-            handler.invoke(address, 0, UINT64_MAX,
-                           x23::serialize<uint32_t>(200),
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto [r2, g2] = handler.invoke(
+            address, 0, UINT64_MAX,
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<uint32_t>(200)
+                    .value(),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -158,10 +160,12 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r3, g3] =
-            handler.invoke(address, 0, UINT64_MAX,
-                           x23::serialize<uint32_t>(150),
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto [r3, g3] = handler.invoke(
+            address, 0, UINT64_MAX,
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<uint32_t>(150)
+                    .value(),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r3.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
