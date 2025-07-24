@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -47,6 +48,25 @@ template<typename R, typename... Args> struct CalldataArgs<R (*&&)(Args...)> {
   using return_t = std::conditional_t<std::is_same_v<R, void>, std::tuple<>, R>;
 };
 
+constexpr static std::array<std::pair<std::string_view, SerializationFormat>, 3>
+    kSerializationFormatLookup = {
+        std::pair{"txs", SerializationFormat::kTxs},
+        std::pair{"cxs", SerializationFormat::kCxs},
+        std::pair{"bcs", SerializationFormat::kBcs},
+};
+
+template<StringLiteral FormatName>
+constexpr static SerializationFormat
+get_serialization_format()
+    requires (is_serialization_format_string(FormatName.get()))
+{
+  return std::ranges::find_if(kSerializationFormatLookup,
+                              [&](auto const &p) {
+                                return p.first == FormatName.get();
+                              })
+      ->second;
+}
+
 } // namespace detail
 
 template<typename T>
@@ -65,6 +85,45 @@ concept is_contract_trait = requires {
 };
 
 template<is_contract_trait ContractTrait> class ContractTraitMeta {
+
+  constexpr static size_t
+  get_serialization_format_index(std::string_view format)
+  {
+    return [&]<size_t I, std::size_t... Is>(this auto self,
+                                            std::index_sequence<I, Is...>) {
+      if (detail::kSerializationFormatLookup[I].first == format) {
+        return I;
+      }
+
+      if constexpr (sizeof...(Is) == 0) {
+        return std::numeric_limits<size_t>::max();
+      }
+      else {
+        return self(std::index_sequence<Is...>{});
+      }
+    }(std::make_index_sequence<detail::kSerializationFormatLookup.size()>{});
+  }
+
+  constexpr static SerializationFormat get_format_or_default()
+  {
+    if constexpr (requires {
+                    {
+                      ContractTrait::kSerializationFormat
+                    } -> std::convertible_to<std::string_view>;
+                  }) {
+      constexpr auto kIndex =
+          get_serialization_format_index(ContractTrait::kSerializationFormat);
+      static_assert(kIndex != std::numeric_limits<size_t>::max(),
+                    "Invalid serialization format");
+      return detail::kSerializationFormatLookup[kIndex].second;
+    }
+    else {
+      return SerializationFormat::kTxs;
+    }
+  }
+
+  constexpr static SerializationFormat kSerializationFormat =
+      get_format_or_default();
 
   // the type of the i'th exported function,
   // (ordered by their listing in ContractTrait::kExportNames)
@@ -136,7 +195,8 @@ public:
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
     return [data] -> SyscallStatus<args_type> {
       auto out =
-          Serializer<SerializationFormat::kTxs>::deserialize<args_type>(data);
+          Serializer<kSerializationFormat>::template deserialize<args_type>(
+              data);
       if (!out.has_value()) {
         return SyscallError{SyscallErrorCode::kCalldataParseError};
       }
@@ -151,7 +211,8 @@ public:
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
     return [data] -> SyscallStatus<return_type> {
       auto out =
-          Serializer<SerializationFormat::kTxs>::deserialize<return_type>(data);
+          Serializer<kSerializationFormat>::template deserialize<return_type>(
+              data);
       if (!out.has_value()) {
         return SyscallError{SyscallErrorCode::kReturnParseError};
       }
@@ -170,7 +231,7 @@ private:
   template<typename... Args>
   static Calldata make_encoding(std::tuple<Args...> args)
   {
-    auto out = Serializer<SerializationFormat::kTxs>::serialize(args);
+    auto out = Serializer<kSerializationFormat>::serialize(args);
     if (!out.has_value()) {
       throw std::runtime_error("Failed to encode calldata");
     }

@@ -126,6 +126,10 @@ struct NativeContractArgs<InvokeStatus<R> (T::*)(Args...) const> {
 
 class NativeContractBuilder {
 public:
+  constexpr static SerializationFormat kDefaultSerializationFormat =
+      SerializationFormat::kTxs;
+
+  template<SerializationFormat Format = kDefaultSerializationFormat>
   void add(MethodID id, auto lambda)
   {
     using fn_t = decltype(&decltype(lambda)::operator());
@@ -136,7 +140,7 @@ public:
                          SystemCallHandler &handler,
                          NativeRuntime &runtime) -> InvokeStatus<void> {
       auto calldata = handler.get_calldata();
-      auto args = Serializer<SerializationFormat::kTxs>::deserialize<args_t>(
+      auto args = Serializer<Format>::template deserialize<args_t>(
           std::as_bytes(std::span(calldata)));
       if (!args.has_value()) {
         return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -150,7 +154,6 @@ public:
             detail::NativeContractArgs<fn_t>::extra_args(handler, runtime);
         return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
           return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(*args)...);
-          // std::get<Is>(args.value())...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>());
       }(std::make_index_sequence<std::tuple_size_v<args_t>>());
       if (!return_value.has_value()) {
@@ -159,8 +162,8 @@ public:
 
       // otherwise, return the received value
       if constexpr (!std::is_same_v<return_t, void>) {
-        auto return_buffer = Serializer<SerializationFormat::kTxs>::serialize(
-            return_value.value());
+        auto return_buffer =
+            Serializer<Format>::serialize(return_value.value());
         if (!return_buffer.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -180,9 +183,6 @@ public:
   }
 
   std::unique_ptr<NativeContract> build();
-
-  constexpr static SerializationFormat kDefaultSerializationFormat =
-      SerializationFormat::kTxs;
 
 private:
   std::unordered_map<MethodID, NativeContract::function_t> functions_;

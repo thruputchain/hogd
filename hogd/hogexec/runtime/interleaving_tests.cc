@@ -117,50 +117,50 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
     model::RunnableActionSet actions(work_queue);
 
-    auto add_set_add_action =
-        [this, &runtime_context]<int64_t SetAmount, int64_t AddAmount>(
-            model::RunnableActionSet &actions, bool &action_result) {
-          actions.add_action(
-              [](model::RunnableActionSet &set, auto self,
-                 auto &runtime_context, bool &action_result) -> model::Async {
-                // set_amount
-                co_await set.bg();
+    auto add_set_add_action = [this, &runtime_context]<int64_t SetAmount,
+                                                       int64_t AddAmount>(
+                                  model::RunnableActionSet &actions,
+                                  bool &action_result) {
+      actions.add_action(
+          [](model::RunnableActionSet &set, auto self, auto &runtime_context,
+             bool &action_result) -> model::Async {
+            // set_amount
+            co_await set.bg();
 
-                auto calldata =
-                    Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize<
-                        int64_t, int64_t>(SetAmount, AddAmount);
-                if (!calldata.has_value()) {
-                  throw std::runtime_error("Failed to serialize calldata");
-                }
+            auto calldata =
+                Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                    serialize<int64_t, int64_t>(SetAmount, AddAmount);
+            if (!calldata.has_value()) {
+              throw std::runtime_error("Failed to serialize calldata");
+            }
 
-                auto handler = self->make_new_system_call_handler(
-                    SignedTransaction{
-                        .tx =
-                            Transaction{
-                                .invocation =
-                                    Invocation{.invoked_address =
-                                                   ContractAddress{},
-                                               .entrypoint =
-                                                   entrypoint_from_method_id(0),
-                                               .gas_limit = UINT64_MAX,
-                                               .calldata = *calldata}}},
-                    runtime_context);
-                auto res = handler.root_invoke();
-                if (!res.is_root_success()) {
-                  throw std::runtime_error("root invoke failed");
-                }
-                auto commit_res = handler.try_commit_transaction();
-                if (!commit_res.has_value()) {
-                  throw std::runtime_error("try_commit_transaction error");
-                }
-                if (!commit_res.value()) {
-                  action_result = false;
-                  co_return;
-                }
-                co_return;
-              },
-              this, runtime_context, action_result);
-        };
+            auto handler = self->make_new_system_call_handler(
+                SignedTransaction{
+                    .tx =
+                        Transaction{
+                            .invocation =
+                                Invocation{.invoked_address = ContractAddress{},
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = *calldata}}},
+                runtime_context);
+            auto res = handler.root_invoke();
+            if (!res.is_root_success()) {
+              throw std::runtime_error("root invoke failed");
+            }
+            auto commit_res = handler.try_commit_transaction();
+            if (!commit_res.has_value()) {
+              throw std::runtime_error("try_commit_transaction error");
+            }
+            if (!commit_res.value()) {
+              action_result = false;
+              co_return;
+            }
+            co_return;
+          },
+          this, runtime_context, action_result);
+    };
 
     bool action_1 = true;
     add_set_add_action.template operator()<100, 10>(actions, action_1);
