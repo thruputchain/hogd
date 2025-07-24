@@ -1,9 +1,11 @@
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <limits>
 #include <span>
 #include <utility>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/config.h"
 #include "hogd/crypto/crypto.h"
@@ -48,8 +50,10 @@ using cxs_client_t = ContractTraitClient<CxsRoundtrip>;
 
 template<StringLiteral MethodName, typename T>
 void
-roundtrip_test(T const &value, SystemCallHandler &handler, cxs_client_t &client)
+roundtrip_test(T const &value, SystemCallHandler &handler, cxs_client_t &client,
+               bool &success)
 {
+  success = false;
   auto calldata = Serializer<SerializationFormat::kCxs>::serialize(value);
   ASSERT_TRUE(calldata.has_value());
   auto [res, _gas] = client.invoke<MethodName>(handler, *calldata);
@@ -60,6 +64,7 @@ roundtrip_test(T const &value, SystemCallHandler &handler, cxs_client_t &client)
       std::as_bytes(std::span(return_buf)));
   ASSERT_TRUE(roundtrip_value.has_value());
   ASSERT_EQ(roundtrip_value.value(), value);
+  success = true;
 }
 } // namespace
 
@@ -75,24 +80,128 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtrip)
 
   cxs_client_t client(cxs_contract_addr);
 
-  auto native_contract = std::make_unique<NativeContract>(
-      std::unordered_map<MethodID, NativeContract::function_t>{
-          {0,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             ::test::Foo foo{0xABCD};
-             roundtrip_test<"roundtrip_foo">(foo, handler, client);
+  auto native_contract = std::make_unique<
+      NativeContract>(std::unordered_map<MethodID, NativeContract::function_t>{
+      {0,
+       [&](SystemCallHandler &handler,
+           NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         bool success = false;
+         ::test::Foo foo{0xABCD};
+         roundtrip_test<"roundtrip_foo">(foo, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
 
-             return {};
-           }},
-          {1,
-           [&](SystemCallHandler &handler,
-               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-             ::test::senum senum{::test::senum::SE_POSITIVE};
-             roundtrip_test<"roundtrip_senum">(senum, handler, client);
-             return {};
-           }},
-      });
+         return {};
+       }},
+      {1,
+       [&](SystemCallHandler &handler,
+           NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         bool success = false;
+         ::test::senum senum{::test::senum::SE_POSITIVE};
+         roundtrip_test<"roundtrip_senum">(senum, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }},
+      {2,
+       [&](SystemCallHandler &handler,
+           NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         bool success = false;
+         ::test::sunion sunion{::test::senum::SE_POSITIVE};
+         sunion.pos() = 5;
+         roundtrip_test<"roundtrip_sunion">(sunion, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         sunion.d(static_cast<::test::senum>(0)); // default case
+         roundtrip_test<"roundtrip_sunion">(sunion, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         sunion.d(static_cast<::test::senum>(1000)); // default case
+         roundtrip_test<"roundtrip_sunion">(sunion, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }},
+      {3,
+       [&](SystemCallHandler &handler,
+           NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         bool success = false;
+         int32_t value = -1;
+         roundtrip_test<"roundtrip_i32">(value, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+
+         value = 1;
+         roundtrip_test<"roundtrip_i32">(value, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+
+         value = 0;
+         roundtrip_test<"roundtrip_i32">(value, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+
+         value = std::numeric_limits<int32_t>::max();
+         roundtrip_test<"roundtrip_i32">(value, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+
+         value = std::numeric_limits<int32_t>::min();
+         roundtrip_test<"roundtrip_i32">(value, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+
+         return {};
+       }},
+      {4,
+       [&](SystemCallHandler &handler,
+           NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         bool success = false;
+         ::test::sunion_no_void sunion{::test::senum::SE_NEGATIVE};
+         sunion.neg() = true;
+         roundtrip_test<"roundtrip_sunion_no_void">(sunion, handler, client,
+                                                    success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         return {};
+       }},
+      {5,
+       [&](SystemCallHandler &handler,
+           NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+         bool success = false;
+         ::test::uunion uunion(1);
+         uunion.one() = true;
+         roundtrip_test<"roundtrip_uunion">(uunion, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         uunion.d(2);
+         uunion.two() = true;
+         roundtrip_test<"roundtrip_uunion">(uunion, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+         uunion.d(4);
+         uunion.four() = "hello";
+         roundtrip_test<"roundtrip_uunion">(uunion, handler, client, success);
+         if (!success) {
+           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+         }
+
+         return {};
+       }},
+  });
 
   std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
@@ -114,7 +223,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtrip)
           {ContractType::kWasmi, wasm_runtime_context_}});
 
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
-  for (size_t i = 0; i < 2; i++) {
+  for (size_t i = 0; i < 6; i++) {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =

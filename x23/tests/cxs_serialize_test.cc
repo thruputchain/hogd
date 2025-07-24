@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <random>
+#include <vector>
 
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
@@ -48,13 +49,17 @@ TEST(CxsSerialize, UInt8RoundTrip) {
 namespace {
 template<typename T>
 void check_roundtrip(T const& input) {
-    x23::Buf buf;
-    serialize_cxs(buf, input);
+    x23::Buf buf = serialize_cxs(input);
     auto view = x23::BufView(buf);
     T output;
     deserialize_cxs(&output, view);
     EXPECT_EQ(input, output);
-    EXPECT_EQ(view.size(), 0U); // check all data consumed
+}
+
+template<typename T>
+void check_expect(T const& input, x23::Buf const& expected) {
+    x23::Buf buf = serialize_cxs(input);
+    EXPECT_EQ(buf, expected);
 }
 }
 
@@ -193,6 +198,14 @@ TEST(CxsSerialize, CanonicalCheck) {
     uint8_t value;
 
     EXPECT_ANY_THROW(CxsSerializer<uint8_t>::load(view, value));
+}
+
+TEST(CxsSerialize, Int8Encoding) {
+    check_expect(int32_t{0}, {0x00});
+    check_expect(int32_t{1}, {0x01});
+    check_expect(int32_t{-1}, {0x3e});
+    check_expect(int32_t{-31}, {0x20});
+    check_expect(int32_t{31}, {0x1f});
 }
 
 } // namespace x23
