@@ -105,7 +105,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
     if (!res.is_root_success()) {
       throw std::runtime_error("root invoke for reset transaction failed");
     }
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     if (!commit_res.has_value() || !commit_res.value()) {
       throw std::runtime_error(
           "try_commit_transaction error for reset transaction");
@@ -144,12 +144,10 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                                .calldata = calldata.value()}}},
                     runtime_context);
                 auto res = handler.root_invoke();
-                // no point in co_await set.bg() here; there's no try_invoke in
-                // this test
                 if (!res.is_root_success()) {
                   throw std::runtime_error("root invoke failed");
                 }
-                auto commit_res = handler.try_commit_transaction()();
+                auto commit_res = handler.try_commit_transaction();
                 if (!commit_res.has_value()) {
                   throw std::runtime_error("try_commit_transaction error");
                 }

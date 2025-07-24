@@ -7,6 +7,8 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sched.h>
+#include <string>
 #include <sys/socket.h>
 
 #include <cassert>
@@ -22,6 +24,7 @@
 #include <stdexcept>
 #include <stop_token>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -33,6 +36,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -118,6 +122,15 @@ sys_getsockname(int sockfd, T &val)
   socklen_t len = sizeof(val);
   return make_errno_status<void>(
       getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
+}
+
+template<typename T> requires std::is_trivially_copyable_v<T>
+inline ErrnoStatus<void>
+sys_getpeername(int sockfd, T &val)
+{
+  socklen_t len = sizeof(val);
+  return make_errno_status<void>(
+      getpeername(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
 }
 
 inline ErrnoStatus<size_t>
@@ -307,21 +320,38 @@ RPCClient::dial(std::string_view addr, int flows)
   }
 
   info("rpc client connected to {} with {} flows", addr, flows);
-  return RPCClient(std::move(flow_tbl));
+  return RPCClient(std::move(flow_tbl), std::string(addr));
+}
+
+std::future<OwningSpan<const std::byte>>
+RPCClient::call_async(std::span<const std::byte> args)
+{
+  unsigned int core;
+#if defined(__linux__)
+  // NOTE: getcpu() is vDSO, so it's very fast. We use it to hopefully squeeze
+  // out a little more cache affinity while spreading load across flows.
+  getcpu(&core, nullptr);
+#else
+  // getcpu() isn't available outside of Linux, so we rely on thread ID
+  // instead.
+  core = std::hash<std::thread::id>()(std::this_thread::get_id());
+#endif
+  return flows_[core % flows_.size()]->call(args);
 }
 
 ErrnoStatus<std::shared_ptr<RPCServer>>
 RPCServer::create(uint16_t port, RPCHandler handler)
 {
+  // create the listener socket.
   ErrnoStatus<int> accept_fd = sys_socket(AF_INET, SOCK_STREAM, 0);
   if (!accept_fd)
     return accept_fd.error();
-
   ErrnoStatus<void> ret =
       sys_setsockopt(*accept_fd, SOL_SOCKET, SO_REUSEPORT, 1); // NOLINT
   if (!ret)
     return ret.error();
 
+  // bind the address to the socket.
   sockaddr_in saddr;
   saddr.sin_family = AF_INET;
   saddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -330,22 +360,22 @@ RPCServer::create(uint16_t port, RPCHandler handler)
   if (!ret)
     return ret.error();
 
+  // retrieve the port number if it was assigned automatically.
+  if (port == 0) {
+    ErrnoStatus<void> ret = sys_getsockname(*accept_fd, saddr);
+    if (!ret)
+      return ret.error();
+    port = ntohs(saddr.sin_port);
+  }
+
+  // enable listening.
   constexpr int kAcceptBacklog = 1024;
   ret = sys_listen(*accept_fd, kAcceptBacklog);
   if (!ret)
     return ret.error();
 
-  return std::make_shared<RPCServer>(std::move(handler), File(*accept_fd));
-}
-
-ErrnoStatus<uint16_t>
-RPCServer::get_port() const
-{
-  sockaddr_in addr;
-  ErrnoStatus<void> ret = sys_getsockname(listener_.get_fd(), addr);
-  if (!ret)
-    return ret.error();
-  return ntohs(addr.sin_port);
+  return std::make_shared<RPCServer>(port, std::move(handler),
+                                     File(*accept_fd));
 }
 
 ErrnoStatus<void>
@@ -375,7 +405,18 @@ RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
   std::vector<OwningSpan<const std::byte>> requests;
   std::optional<size_t> n;
 
-  ref->register_worker(socket);
+  std::string peer = "unknown";
+
+  sockaddr_storage addr;
+  if (!sys_getpeername(socket.get_fd(), addr)) {
+    error("could not get socket name: {}", errno);
+  }
+  else {
+    peer = x23::show_addr(addr);
+  }
+
+  if (!ref->register_worker(socket))
+    return; // already closing server
   Defer d([&ref, &socket] { ref->unregister_worker(socket); });
 
   while (true) {
@@ -408,7 +449,7 @@ RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
 
     // execute available requests.
     for (const auto &req : requests) {
-      OwningSpan<const std::byte> bytes = handler(req);
+      OwningSpan<const std::byte> bytes = handler(req, peer);
       size_t resp_bytes = bytes.size();
       if (ErrnoStatus<void> ret = write_full(w, byte_view(resp_bytes)); !ret) {
         error("server write size failed: {}", ret.error());
@@ -433,13 +474,33 @@ void
 RPCServer::stop()
 {
   std::scoped_lock guard(lock_);
-  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RD); !ret) {
+  closing_ = true;
+  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RDWR);
+      !ret) {
     error("could not shutdown listener socket: {}", ret.error());
   }
+  // mac compat: call close() on the listener fd
+  if (ErrnoStatus<void> ret = listener_.close(); !ret)
+    error("could not close listener socket: {}", ret.error());
 
   for (File *f : workers_) {
     if (ErrnoStatus<void> ret = sys_shutdown(f->get_fd(), SHUT_RD); !ret)
       error("could not shutdown worker socket: {}", ret.error());
+  }
+}
+
+std::string
+RPCResponseErrorCategory::message(int code) const
+{
+  switch (static_cast<RPCReponseErrorCode>(code)) {
+  case RPCReponseErrorCode::kRpcOk:
+    return "kRpcOk";
+  case RPCReponseErrorCode::kRpcInvalidArgument:
+    return "kRpcInvalidArgument";
+  case RPCReponseErrorCode::kRpcUnknownMethod:
+    return "kRpcUnknownMethod";
+  default:
+    return "Unknown RPCResponseError";
   }
 }
 

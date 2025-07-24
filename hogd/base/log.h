@@ -2,17 +2,21 @@
 
 #pragma once
 
+#include <cstddef>
 #include <unistd.h>
 
 #include <atomic>
 #include <chrono>
 #include <format>
-#include <iostream>
 #include <memory>
 #include <source_location>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+
+#ifdef __APPLE__
+#include <thread>
+#endif
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/sync.h"
@@ -263,6 +267,14 @@ format_arg(T &&t)
   }
 }
 
+#ifdef __APPLE__
+inline auto
+gettid()
+{
+  return std::this_thread::get_id();
+}
+#endif
+
 #define LOG_INTERNAL_CHECK(op, invop, expr1, expr2)                            \
   do {                                                                         \
     auto __val1 = expr1;                                                       \
@@ -317,6 +329,15 @@ inline void
 log_init(std::unique_ptr<Logger> logger)
 {
   detail::logger = std::move(logger);
+}
+
+// Replace the current logger with a new one.
+// returns the old logger (so it can be swapped back in later).
+inline std::unique_ptr<Logger>
+swap_logger(std::unique_ptr<Logger> logger)
+{
+  std::swap(detail::logger, logger);
+  return logger;
 }
 
 } // namespace hogd

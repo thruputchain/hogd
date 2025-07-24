@@ -15,8 +15,6 @@
 #include "x23/cleanup.h"
 #include "x23c/defs.h"
 
-using namespace x23;
-
 using std::optional;
 using std::string_view;
 using std::string_literals::operator""s;
@@ -107,11 +105,12 @@ struct GenRs {
       prtop("{}\n", d.attrs);
     }
 
-    if (get_opaque_array_size(d)) {
+    if (auto array_size = get_opaque_array_size(d)) {
         // type is a byte array
-
         if (needs_serde_imports)
-            prtop("#[serde(with = \"serde_arrays\")]\n");
+            prtop("#[cfg_attr(feature = \"serde\", serde(with = \"serde_arrays\"))]\n");
+    } else if (d.qual == Declaration::kVec && get<string>(d.type) == "opaque") {
+        // type is a byte vector
     }
 
     auto type_name_str = (holds_alternative<string>(d.type))
@@ -134,16 +133,16 @@ struct GenRs {
     visit([this, &t](const auto &v) { show_type(v, t); }, ts);
   }
 
-  void show_type(const string &s, string) { prtop("{}", map_type(s)); }
-  void show_type(const EnumBody &e, string);
-  void show_type(const StructBody &s, string);
-  void show_type(const UnionBody &b, string);
+  void show_type(const string &s, string const& /*unused*/) { prtop("{}", map_type(s)); }
+  void show_type(const EnumBody &e, string const& tname);
+  void show_type(const StructBody &s, string const& tname);
+  void show_type(const UnionBody &b, string const& tname);
 
   void show_comment(std::string_view comment, bool chomp, string prefix = {});
 
-  static string map_type(const string &);
-  static string map_case(const string &);
-  static string map_bound(const string &);
+  static string map_type(const string & t);
+  static string map_case(const string & c);
+  static string map_bound(const string & b);
   string type_name(const Declaration &d, bool generate, bool in_colon_required_setting = false);
   // return nullopt unless the type is an opaque array
   static std::optional<string> get_opaque_array_size(const Declaration &d);
@@ -158,7 +157,7 @@ struct GenRs {
 
   auto open_scope(string close = {})
   {
-    return Defer([this, indent = indent_, nsdepth = namespaces_.size(),
+    return x23::Defer([this, indent = indent_, nsdepth = namespaces_.size(),
                   sdepth = scopes_.size(), close = std::move(close)] {
       indent_ = indent;
       namespaces_.resize(nsdepth);
@@ -187,7 +186,7 @@ struct GenRs {
   string join(auto &&v, string with)
   {
     string ret;
-    Join j(with);
+    Join j(std::move(with));
     for (const auto &n : v) {
       ret += j.get();
       ret += n;
@@ -204,7 +203,7 @@ struct GenRs {
     return ret;
   }
 
-  optional<string> substring_removed(const string &str, const string_view sub) {
+  static optional<string> substring_removed(const string &str, const string_view sub) {
       string::size_type i = str.find(sub);
       if (i != string::npos) {
           string str2 = string{str};
@@ -277,9 +276,9 @@ GenRs::convert_to_newtype(const Definition &d)
       .attrs = attrs
     };
     return visit(visitor, d);
-
   }
-  return {};
+
+  return std::nullopt;
 }
 
 void
@@ -301,54 +300,65 @@ GenRs::show_def(const ProgDef &prog)
 }
 
 void
-GenRs::show_type(const StructBody &s, string t)
+GenRs::show_type(const StructBody &s, string const& tname)
 {
   for (const auto &d : s) {
-    do_generations(t + "_" + d.id, d.type);
+    do_generations(tname + "_" + d.id, d.type);
   }
 
   {
     optional<string> array_size;
 
-    string derive_traits = "PartialEq, Debug, Clone";
+    vector<string> derive_traits = {"PartialEq", "Debug", "Clone"};
+
     if (s.transparent) {
-        auto inner = s.front();
+        auto const& inner = s.front();
+        if (s.size() > 1) {
+          throw std::runtime_error("Transparent structs with multiple fields are not supported");
+        }
+        
         array_size = get_opaque_array_size(inner);
 
         if (!(array_size && *array_size == "64")) {
             // arrays with size over 32 don't implement Default, so we can't
             // derive it here
-            derive_traits += ", Default";
+            derive_traits.emplace_back("Default");
         }
 
-        derive_traits += ", Eq, Hash, Copy";
-
-        derive_traits += ", Serialize, Deserialize";
-        needs_serde_imports = true; // for Serialize, Deserialize
+        derive_traits.emplace_back("Eq");
+        derive_traits.emplace_back("Hash");
+        derive_traits.emplace_back("Copy");
     }
-    prtop("#[derive({})]\n", derive_traits);
-    prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
+    prtop("#[derive({})]\n", join(derive_traits, ", "));
+    prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
+
+    if (s.transparent) {
+        needs_serde_imports = true; // for Serialize, Deserialize
+        prtop("#[cfg_attr(feature = \"serde\", derive(Serialize, Deserialize))]\n");
+    }
 
     if (s.transparent)
         prtop("#[repr(transparent)]\n");
     else
+        // Do we actually need this?
         prtop("#[repr(C)]\n");
 
-    prtop("pub struct {} ", t);
+    prtop("pub struct {} ", tname);
     {
+        // NOLINTNEXTLINE(readability-identifier-naming)
         auto _close = (s.size() == 1 && s.front().id.empty())
           ? open_paren() : open_brace();
-        scopes_.push_back(t);
+        scopes_.push_back(tname);
 
         for (const auto &d : s) {
-          show_decl(d, t);
+          show_decl(d, tname);
         }
     }
 
     if (s.transparent) {
         // implement some conversion methods
 
-        auto outer_id = t;
+        auto outer_id = tname;
         auto inner = s.front();
         string inner_type = type_name(inner, false);
         string inner_access = (inner.id.empty()) ? "0" : inner.id;
@@ -443,21 +453,53 @@ impl {0} {{
             prtop("}}");
             */
 
+            /*
+            impl<'a> From<&'a [u8; 32]> for &'a ContractAddress {
+                fn from(arr: &[u8; 32]) -> Self {
+                    let ptr = arr as *const [u8; 32] as *const ContractAddress;
+                    unsafe { &*ptr }
+                }
+            }
+            */
+            prtop("\nimpl<'a> From<&'a [u8; {}]> for &'a {} {{\n", *array_size, outer_id);
+            prtop("    fn from(arr: &[u8; {}]) -> Self {{\n", *array_size);
+            prtop("        let ptr = arr as *const [u8; {}] as *const {};\n", *array_size, outer_id);
+            prtop("        unsafe {{ &*ptr }}\n");
+            prtop("    }}\n");
+            prtop("}}");
+
+            /*
+            impl<'r> ReadXDR<'r> for &'r ContractAddress {
+                fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {
+                    let arr: &[u8; 32] = xdrs::read_xdr(r)?;
+                    let val = Self::from(arr);
+                    Ok(val)
+                }
+            }
+            */
+            prtop("#[cfg(feature = \"xdrs\")]\n");
+            prtop("\nimpl<'r> ReadXDR<'r> for &'r {} {{\n", outer_id);
+            prtop("    fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {{\n");
+            prtop("        let arr: &[u8; {}] = xdrs::read_xdr(r)?;\n", *array_size);
+            prtop("        let val = Self::from(arr);\n");
+            prtop("        Ok(val)\n");
+            prtop("    }}\n");
+            prtop("}}");
         }
     }
   }
 }
 
 void
-GenRs::show_type(const EnumBody &e, string t)
+GenRs::show_type(const EnumBody &e, string const& tname)
 {
   prtop(R"(
-#[derive(Clone, PartialEq, Debug)]
-#[cfg_attr(feature="std", derive(ReadXdrEnum,WriteXdrEnum))]
+#[derive(Clone, Copy, PartialEq, Debug)]
 #[repr(i32)]
-pub enum {} )", t);
+pub enum {} )", tname);
+  // NOLINTNEXTLINE(readability-identifier-naming)
   auto _close = open_brace();
-  scopes_.push_back(t);
+  scopes_.push_back(tname);
   
   bool first = true, skip_anyway = false;
   for (const auto &cd : e) {
@@ -477,11 +519,11 @@ pub enum {} )", t);
 }
 
 void
-GenRs::show_type(const UnionBody &b, string t)
+GenRs::show_type(const UnionBody &b, string const& tname)
 {
   for (const auto& a : b.arms) {
     auto const& d = a.decl;
-    do_generations(t + "_" + d.id, d.type);
+    do_generations(tname + "_" + d.id, d.type);
   }
 
   std::string default_decl;
@@ -492,7 +534,7 @@ GenRs::show_type(const UnionBody &b, string t)
     const bool is_enum = (switch_type == b.switch_type);
     const bool is_bool = (switch_type == "bool");
 
-    auto bool_map = [] (std::string b) -> std::string {
+    auto bool_map = [] (std::string_view b) -> std::string {
       if (b == "TRUE") {
         return "true";
       }
@@ -508,9 +550,8 @@ GenRs::show_type(const UnionBody &b, string t)
           return bool_map(c);
         }
         return b.switch_type + "::" + c;
-      } else {
-        return c;
       }
+      return c;
     };
 
     auto int_qualified_declname = [&] (std::string c) {
@@ -522,10 +563,11 @@ GenRs::show_type(const UnionBody &b, string t)
   {
     prtop("#[repr(i32)]\n");
     prtop("#[derive(PartialEq, Debug, Clone)]\n");
-    prtop("#[cfg_attr(feature=\"std\", derive(ReadXdr,WriteXdr))]\n");
-    prtop("pub enum {} ", t);
+    prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
+    prtop("pub enum {} ", tname);
+    // NOLINTNEXTLINE(readability-identifier-naming)
     auto _close = open_brace();
-    scopes_.push_back(t);
+    scopes_.push_back(tname);
 
     for (const auto &a : b.arms) {
       bool double_case = false;
@@ -552,13 +594,13 @@ GenRs::show_type(const UnionBody &b, string t)
           prtop("{} = {} as i32,\n", int_qualified_declname(c), qualified_typename(c));
         }
         if (a.has_default) {
-          default_decl = std::format("default {{ {}: i32 }},", b.switch_id);
-          default_match = std::format("{0}::default{{ {1} }} => *{1} ,\n", t, b.switch_id);
+          default_decl = std::format("Default {{ {}: i32 }},", b.switch_id);
+          default_match = std::format("{0}::Default{{ {1} }} => *{1} ,\n", tname, b.switch_id);
         }
       }
       else
       {
-        std::string name_prefix = t + "_";
+        std::string name_prefix = tname + "_";
         if (holds_alternative<string>(a.decl.type)) {
           name_prefix = "";
         }
@@ -580,8 +622,8 @@ GenRs::show_type(const UnionBody &b, string t)
         if (a.has_default) {
           std::format_to(
             std::back_inserter(default_decl),
-            "default {{ {}: i32, {}: {} }},", b.switch_id, a.decl.id, type_name(a.decl, false));
-          default_match = std::format("{0}::default{{ {1},..}} => *{1},\n", t, b.switch_id);
+            "Default {{ {}: i32, {}: {} }},", b.switch_id, a.decl.id, type_name(a.decl, false));
+          default_match = std::format("{0}::Default{{ {1},..}} => *{1},\n", tname, b.switch_id);
         }
       }
     }
@@ -599,18 +641,19 @@ GenRs::show_type(const UnionBody &b, string t)
     }}
 }}
 
-)", t, default_match, b.switch_id);
+)", tname, default_match, b.switch_id);
 }
 
 void
 GenRs::show_comment(std::string_view comment, bool chomp, string prefix)
 {
-  constexpr auto split = [](std::string_view sv) {
+  constexpr auto kSplit = [](std::string_view sv) {
+    // NOLINTNEXTLINE(readability-static-accessed-through-instance)
     if (auto pos = sv.find('\n'); pos != sv.npos)
       return std::pair{sv.substr(0, pos + 1), sv.substr(pos + 1)};
     return std::pair{sv, std::string_view{}};
   };
-  constexpr auto startcol = [](std::string_view sv) {
+  constexpr auto kStartcol = [](std::string_view sv) {
     size_t pos = 0, col = 1;
     for (; pos < sv.size(); ++pos) {
       if (sv[pos] == '\t')
@@ -626,6 +669,9 @@ GenRs::show_comment(std::string_view comment, bool chomp, string prefix)
   if (comment.empty())
     return;
 
+  if (comment.find_first_not_of(" \t\n") == string::npos)
+    return;
+
   if (chomp) {
     if (comment.back() == '\n') {
       top_ += '\n';
@@ -633,14 +679,14 @@ GenRs::show_comment(std::string_view comment, bool chomp, string prefix)
     }
   }
 
-  auto [first, rest] = split(comment);
+  auto [first, rest] = kSplit(comment);
   size_t left;
-  tie(left, first) = startcol(first);
+  tie(left, first) = kStartcol(first);
   prtop("{}{}", prefix, first);
   while (!rest.empty()) {
-    tie(first, rest) = split(rest);
+    tie(first, rest) = kSplit(rest);
     std::string_view::size_type col;
-    tie(col, first) = startcol(first);
+    tie(col, first) = kStartcol(first);
     prtop("{}{}{}", prefix, col <= left ? ""s : std::string(col - left, ' '),
           first);
   }
@@ -686,7 +732,7 @@ GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
   if (holds_alternative<string>(type)) {
     return;
   }
-  show_typespec(type, name_prefix);
+  show_typespec(type, std::move(name_prefix));
   top_ += "\n\n";
 }
 
@@ -714,10 +760,7 @@ GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_set
   if (holds_alternative<string>(d.type))
     tname = map_type(get<string>(d.type));
   else {
-    if (holds_alternative<EnumBody>(d.type))
-      tname = d.id;
-    else
-      tname = d.id;
+    tname = d.id;
     if (generate) {
       show_typespec(d.type, d.id);
     }
@@ -734,14 +777,19 @@ GenRs::type_name(const Declaration &d, bool generate, bool in_colon_required_set
   case kArray:
     return std::format("[{}; {}]", tname, d.bound);
   case kVec:
-    if (in_colon_required_setting) {
-      if (tname == "string"s)
-        return std::format("BytesM::<{}>", map_bound(d.bound));
-      return std::format("VecM::<{}, {}>", tname, map_bound(d.bound));
+    {
+      std::string_view colons = in_colon_required_setting ? "::" : "";
+      if (tname == "string"s || tname == "u8") {
+        if (d.bound.empty())
+          return std::format("BytesM");
+        return std::format("BytesM{}<{}>", colons, map_bound(d.bound));
+      }
+
+      // Otherwise, vector of some non-opaque type
+      if (d.bound.empty())
+        return std::format("VecM{}<{}>", colons, tname);
+      return std::format("VecM{}<{}, {}>", colons, tname, map_bound(d.bound));
     }
-    if (tname == "string"s)
-      return std::format("BytesM<{}>", map_bound(d.bound));
-    return std::format("VecM<{}, {}>", tname, map_bound(d.bound));
   default:
     return {}; // suppress warnings
   }
@@ -768,12 +816,17 @@ use core::ops::{Deref, DerefMut};
 #[cfg(feature="std")]
 use std::io::{Read, Write};
 
+#[cfg(feature="xdrs")]
+use ::xdrs::{ReadXDR, WriteXDR};
+
 )";
 
   gs.process(*defs);
 
   std::string serde_imports = gs.needs_serde_imports ? R"(
+#[cfg(feature = "serde")]
 use ::serde::{Serialize, Deserialize};
+#[cfg(feature = "serde")]
 use ::serde_arrays;
 )" : "";
 

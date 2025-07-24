@@ -35,6 +35,7 @@ protected:
   {
     wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   }
+
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
 };
 
@@ -58,7 +59,7 @@ TEST_F(FibonacciTest, FibonacciCalls)
         wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
   }
@@ -133,7 +134,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
   }
@@ -155,7 +156,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
   }

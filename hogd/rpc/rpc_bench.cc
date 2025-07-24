@@ -33,8 +33,8 @@ fail(Errno err)
 void
 run_server(uint16_t port)
 {
-  auto handler =
-      [](std::span<const std::byte> /*args*/) -> OwningSpan<const std::byte> {
+  auto handler = [](std::span<const std::byte> /*args*/,
+                    std::string_view /*peer*/) -> OwningSpan<const std::byte> {
     return string_as_bytes(std::string(kRetSize, '0'));
   };
 
@@ -61,7 +61,7 @@ run_client(std::string_view addr, int conns, int threads, int n)
     workers.emplace_back([&c = *client, n] {
       std::vector<std::byte> args(kArgSize);
       for (int i = 0; i < n; ++i)
-        c.call(std::span(args)).wait();
+        c.call(std::span(args));
     });
   }
   for (std::jthread &th : workers)

@@ -2,21 +2,26 @@
 
 #pragma once
 
+#include <cerrno>
 #include <fcntl.h>
+#include <iterator>
+#include <optional>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/status.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 
@@ -42,12 +47,17 @@ public:
 
   File() = default;
   explicit File(int fd) : fd_(fd) {}
-  ~File();
+  ~File() { std::ignore = close(); }
 
   // Enable move; disable copy.
-  File(File &&f) noexcept : fd_{std::exchange(f.fd_, kInvalidFD)} {}
+  File(File &&f) noexcept
+  {
+    std::ignore = close();
+    fd_ = std::exchange(f.fd_, kInvalidFD);
+  }
   File &operator=(File &&f) noexcept
   {
+    std::ignore = close();
     fd_ = std::exchange(f.fd_, kInvalidFD);
     return *this;
   }
@@ -66,6 +76,9 @@ public:
   ErrnoStatus<off_t> lseek(off_t offset, int whence) const;
   // sync flushes all modified file data to the storage device.
   ErrnoStatus<void> sync() const;
+
+  // close closes the file.
+  ErrnoStatus<void> close();
 
 private:
   int fd_{kInvalidFD};
@@ -184,6 +197,9 @@ public:
     return read_slowpath(dst);
   }
 
+  // throw away the next n bytes, refilling as needed.
+  // returns bytes skipped; can be less than n on EOF.
+  ErrnoStatus<size_t> skip(size_t n);
   // read_string returns the string before delim or EOF.
   ErrnoStatus<std::string> read_string(char delim);
   // readln returns the string before a new line or EOF.

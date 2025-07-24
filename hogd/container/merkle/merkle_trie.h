@@ -9,14 +9,15 @@
 
 #include <format>
 #include <ostream>
+#include <span>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -47,7 +48,6 @@ class MerkleTrie {
 public:
   // Type definitions.
   using Key = HexArray;
-  using T = std::string;
 
   MerkleTrie() { init_root_node(); }
 
@@ -77,7 +77,7 @@ public:
     // It is fine to spin on [try_lock_reader()] because we know the root node
     // is never deleted by a writer.
     while (!root_.hash_lock.try_lock_reader()) {
-      _mm_pause();
+      cpu_relax();
     }
 
     SHA256Hash ret = root_.hash;
@@ -105,25 +105,28 @@ public:
   // element.
   static bool prove(const SHA256Hash &root_hash,
                     const std::vector<std::byte> &encodings, const Key &k,
-                    const T &value);
+                    const std::span<const std::byte> &value);
 
-  // Finds the value for key [k]. If key [k] does not exist in the trie, returns
-  // a nullptr. If a non-null pointer is returned, you *must* call
-  // [find_end(cookie)] when you are done accessing the value!
+  // Finds the value hash for key [k]. If key [k] does not exist in the trie,
+  // returns a nullptr. If true is returned, you *must* call [find_end(cookie)]
+  // when you are done accessing the value hash!
   //
-  // We guarantee pointer stability for the value.
-  T *find_begin(const Key &k, void *&cookie);
+  // We guarantee pointer stability for the value hash.
+  bool find_begin(const Key &k, SHA256Hash *&value_hash, void *&cookie);
 
   // You must call this when you are done accessing a value returned by
   // [find_begin].
   static void find_end(void *cookie);
 
-  // Inserts a KV pair with key [k] and value [obj] into the trie. You must pass
-  // [obj] to this method with [std::move()].
-  bool insert(const Key &k, T &&obj);
-  // Inserts a KV pair with key [k] and value [obj] into the trie. This method
-  // copies [obj] rather than move it as the method above does.
-  bool insert(const Key &k, const T &obj) { return insert(k, T(obj)); }
+  // Inserts a KV pair with key [k] and value [obj] into the trie. Fails if the
+  // key already exists in the trie. Returns true on success and false on
+  // failure.
+  bool insert(const Key &k, const std::span<const std::byte> &obj);
+
+  // Inserts a KV pair with key [k] and value [obj] into the trie. If the key
+  // already exists, the value in the trie is updated. Returns true on success
+  // and false on failure.
+  bool insert_or_update(const Key &k, const std::span<const std::byte> &obj);
 
   // Removes the KV pair for key [k] from the trie.
   bool remove(const Key &k);
@@ -150,8 +153,8 @@ public:
       switch (node.type) {
       case Node::Type::kBranch:
       case Node::Type::kLeaf:
-        if (node.value) {
-          func({path, *node.value});
+        if (node.value_hash) {
+          func({path, *node.value_hash});
         }
         break;
       default:
@@ -192,17 +195,26 @@ private:
   // Finds the node for key [k]. Returns nullptr if [k] is not in the trie.
   Node *find_node(const Key &k);
 
+  // Inserts key [k] with value [obj]. If [update] is true, the value is updated
+  // in the trie if the key already exists. Otherwise, if [update] is false, if
+  // the key already exists in the trie then the insert fails.
+  //
+  // Returns true on success and false on failure.
+  bool insert_helper(const Key &k, const std::span<const std::byte> &obj,
+                     bool update);
+
   // Helper function for [insert()]. When we add a KV pair and there is an
   // extension node below the lowest branch for that pair, we need to handle the
   // extension node and its subtree.
   Node *insert_handle_extension(Node *current_extension, const Key &k,
-                                size_t idx, T &&obj);
+                                size_t idx,
+                                const std::span<const std::byte> &obj);
 
   // Helper function for [insert()]. When we add a KV pair and there is a leaf
   // node below the lowest branch for that pair, we need to handle the leaf
   // node.
   Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
-                           T &&obj);
+                           const std::span<const std::byte> &obj);
 
   // Returns true if we will need to remove [branch] after removing a KV pair
   // that is "under" it.
@@ -227,8 +239,8 @@ private:
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
-  Node *remove_branch(Node *branch, size_t num_children,
-                      std::byte remaining_child_hex);
+  static Node *remove_branch(Node *branch, size_t num_children,
+                             std::byte remaining_child_hex);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.
@@ -286,8 +298,6 @@ private:
   // If this is false, nodes are only hashed when [generate_all_hashes()] is
   // called.
   bool should_hash_nodes_on_each_op_ = true;
-  // An arena for allocating nodes.
-  Arena<Node> arena_;
 };
 
 // This is an optimization for the [MerkleTrie]. It exposes the same exact API,
@@ -364,27 +374,14 @@ public:
 
   static bool prove(const SHA256Hash &root_hash,
                     const std::vector<std::byte> &encodings,
-                    const MerkleTrie::Key &k, const MerkleTrie::T &value)
+                    const MerkleTrie::Key &k,
+                    const std::span<const std::byte> &value)
   {
     return MerkleTrie::prove(root_hash, encodings, k, value);
   }
 
-  MerkleTrie::T *find_begin(const MerkleTrie::Key &k, void *&cookie)
-  {
-    if (k.empty()) {
-      // We do not support empty keys.
-      return nullptr;
-    }
-
-    const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index].find_begin(k_no_prefix, cookie);
-  }
-
-  // You must call this when you are done accessing a value returned by
-  // [find_begin].
-  static void find_end(void *cookie) { MerkleTrie::find_end(cookie); }
-
-  bool insert(const MerkleTrie::Key &k, MerkleTrie::T &&obj)
+  bool find_begin(const MerkleTrie::Key &k, SHA256Hash *&value_hash,
+                  void *&cookie)
   {
     if (k.empty()) {
       // We do not support empty keys.
@@ -392,12 +389,34 @@ public:
     }
 
     const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index].insert(k_no_prefix, std::move(obj));
+    return tries_[index].find_begin(k_no_prefix, value_hash, cookie);
   }
 
-  bool insert(const MerkleTrie::Key &k, const MerkleTrie::T &obj)
+  // You must call this when you are done accessing a value returned by
+  // [find_begin].
+  static void find_end(void *cookie) { MerkleTrie::find_end(cookie); }
+
+  bool insert(const MerkleTrie::Key &k, const std::span<const std::byte> &obj)
   {
-    return insert(k, MerkleTrie::T(obj));
+    if (k.empty()) {
+      // We do not support empty keys.
+      return false;
+    }
+
+    const auto &[index, k_no_prefix] = get_prefix(k);
+    return tries_[index].insert(k_no_prefix, obj);
+  }
+
+  bool insert_or_update(const MerkleTrie::Key &k,
+                        const std::span<const std::byte> &obj)
+  {
+    if (k.empty()) {
+      // We do not support empty keys.
+      return false;
+    }
+
+    const auto &[index, k_no_prefix] = get_prefix(k);
+    return tries_[index].insert_or_update(k_no_prefix, obj);
   }
 
   bool remove(const MerkleTrie::Key &k)

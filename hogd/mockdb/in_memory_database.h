@@ -3,12 +3,11 @@
 
 #include <memory>
 #include <optional>
-#include <print>
 #include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "types.hh"
 #include "x23/mvar.h"

@@ -15,10 +15,9 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/rw_lock.h"
-#include "hogd/container/merkle/sha256.h"
+#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {
@@ -56,7 +55,7 @@ public:
     Type type;
     SHA256Hash hash;
     HexArray path;
-    std::optional<std::string> value;
+    std::optional<SHA256Hash> value_hash;
     std::array<SHA256Hash, kMaxNumBranches> child_hashes;
   };
 
@@ -80,7 +79,7 @@ public:
   HexArray path;
 
   // Used by branches and leaves.
-  std::optional<std::string> value;
+  std::optional<SHA256Hash> value_hash;
 
   // Used by branches and extensions.
   //
@@ -109,10 +108,10 @@ public:
     this->parent = parent;
   }
 
-  static Node *create_branch(Arena<Node> &arena, Node *parent)
+  static Node *create_branch(Node *parent)
   {
     // TODO(jhumphri): Use unique_ptr<> rather than [new] (here and elsewhere).
-    Node *node = arena.alloc();
+    Node *node = new Node;
     CHECK_PTR(node);
 
     node->clear();
@@ -120,9 +119,9 @@ public:
     return node;
   }
 
-  static Node *create_extension(Arena<Node> &arena, Node *parent)
+  static Node *create_extension(Node *parent)
   {
-    Node *node = arena.alloc();
+    Node *node = new Node;
     CHECK_PTR(node);
 
     node->clear();
@@ -130,9 +129,9 @@ public:
     return node;
   }
 
-  static Node *create_leaf(Arena<Node> &arena, Node *parent)
+  static Node *create_leaf(Node *parent)
   {
-    Node *node = arena.alloc();
+    Node *node = new Node;
     CHECK_PTR(node);
 
     node->clear();
@@ -148,20 +147,14 @@ public:
   static bool get_node_from_encoding(const std::vector<std::byte> &encodings,
                                      size_t &idx, Node::Raw &node);
 
-  SHA256Hash compute_node_hash() const
-  {
-    return Sha256::get_sha256(get_node_encoding());
-  }
+  SHA256Hash compute_node_hash() const { return sha256(get_node_encoding()); }
 
   void clear()
   {
-    // [Node] is not a trivally copyable type (due to the [std::string] in the
-    // [value] field), so we cannot just memset() it to all zeroes. Instead, we
-    // assign each field individually.
     memset(&hash, 0, sizeof(hash));
     parent = nullptr;
     path.clear();
-    value = std::nullopt;
+    value_hash = std::nullopt;
     memset(static_cast<void *>(child.data()), 0,
            child.size() *
                sizeof(child[0])); // NOLINT(bugprone-sizeof-expression)

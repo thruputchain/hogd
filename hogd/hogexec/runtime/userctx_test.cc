@@ -4,6 +4,7 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
@@ -36,7 +37,8 @@ TEST(UserCtxTest, CheckCtxCorrect)
 
   context.link_fn("test", "redir_call", &foo);
 
-  auto runtime = context.make_new_runtime(contract, ctx_check, true);
+  auto runtime =
+      context.make_new_runtime(contract, sha256(contract), ctx_check, true);
 
   ASSERT_TRUE(runtime);
 

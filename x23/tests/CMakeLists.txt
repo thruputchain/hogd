@@ -53,6 +53,7 @@ add_x23_gtest(shutdown)
 add_x23_gtest(xdr)
 add_x23_gtest(sync)
 add_x23_gtest(uiobuf)
+add_x23_gtest(cxs_serialize_test)
 
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 

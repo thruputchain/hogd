@@ -3,12 +3,11 @@
 
 #pragma once
 
-#include <immintrin.h>
-
 #include <atomic>
 #include <cstddef>
 #include <cstring>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 
@@ -43,13 +42,13 @@ public:
       int64_t cur = lock_.load(std::memory_order_relaxed);
       if (cur == kWriterLocked) {
         // The lock is currently held by a writer.
-        _mm_pause();
+        cpu_relax();
         continue;
       }
       if (!lock_.compare_exchange_weak(/*expected=*/cur, /*desired=*/cur + 1,
                                        /*success=*/std::memory_order_acquire,
                                        /*failure=*/std::memory_order_relaxed)) {
-        _mm_pause();
+        cpu_relax();
         continue;
       }
       break;
@@ -78,7 +77,7 @@ public:
                                       /*failure=*/std::memory_order_relaxed)) {
         return true;
       }
-      _mm_pause();
+      cpu_relax();
     }
   }
 
@@ -91,7 +90,7 @@ public:
                                      /*desired=*/kWriterLocked,
                                      /*success=*/std::memory_order_acquire,
                                      /*failure=*/std::memory_order_relaxed)) {
-      _mm_pause();
+      cpu_relax();
       expected = kUnlocked;
     }
   }
@@ -140,7 +139,7 @@ public:
                                        /*desired=*/kWriterLocked,
                                        /*success=*/std::memory_order_acquire,
                                        /*failure=*/std::memory_order_relaxed)) {
-        _mm_pause();
+        cpu_relax();
         expected = 1;
       }
     }

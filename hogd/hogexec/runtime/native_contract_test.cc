@@ -26,9 +26,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/event.h"
-#include "x23/sockio.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -85,14 +82,9 @@ protected:
     contract_map.emplace(1, std::move(contract_1));
 
     runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
-    auto r = snapshot_server_.start_server(0);
-    db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             x23::get_port(r)});
+    db_proxy_ = std::make_unique<DatabaseProxy>(
+        LocalMockDB{.read_port_number_ = snapshot_server_.port()});
   }
-
-  x23::ThreadPool pool_ = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
   BlockSnapshotServer snapshot_server_ = BlockSnapshotServer(0);
 
@@ -110,7 +102,8 @@ TEST_F(NativeContractTest, BasicInstantiate)
   Contract contract(ContractType::kNative);
   contract.native_contract_id() = 0;
 
-  auto runtime = runtime_context_->make_new_runtime(contract, &handler, true);
+  auto runtime = runtime_context_->make_new_runtime(contract, sha256(contract),
+                                                    &handler, true);
 
   auto res = runtime->invoke(0, UINT64_MAX);
 

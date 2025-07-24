@@ -4,7 +4,10 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
 
 1. Install the `wat2wasm` utility from the [WebAssembly Binary
    Toolkit](https://github.com/WebAssembly/wabt).  Most OS package
-   managers led you do this by installing a package called `wabt`.
+   managers let you do this by installing a package called `wabt`.
+
+1. Install the `wasm-opt` utility from [Binaryen](https://github.com/WebAssembly/binaryen).
+   Most package managers let you do this by installing the `binaryen` package.
 
 1. Install python-yaml, either with your OS package manager (e.g.,
    `pacman -S python-yaml`) or with `pip install pyyaml`.
@@ -49,16 +52,22 @@ Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/wo
     git submodule update --init --recursive
     ~~~~
 
-1. Configure the build system using "`cmake -B `_builddir_", setting
-   the `CXX` and `CXXFLAGS` environment variables if you don't want to
-   use the default.  For instance, any of the following might be what
-   you want:
+1. Configure the build system using "`cmake -B `_builddir_", setting the
+   `CXXFLAGS` environment variable if you don't want to use the default. Also
+    set the `DCMAKE_C_COMPILER` and `DCMAKE_CXX_COMPILER` flags if you want to
+    use clang. For instance, any of the following might be what you want:
 
     * `cmake -B build`
     * `CXXFLAGS=-ggdb cmake -B debug-build`
-    * `CXX=clang++ cmake -B clang-build`
+    * `cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`
 
 1. Build the system by running `make` in the build directory, E.g.:
 
     * `cd build && make`
     * `make -C build -j$(nproc)`
+
+1. Tidy and format scripts require the following:
+    * clang-tidy
+    * clang-format
+    * flake8 (for python)
+    * clippy (for rust)

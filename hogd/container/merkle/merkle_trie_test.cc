@@ -10,6 +10,7 @@
 #include <print>
 #include <random>
 #include <set>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,7 +21,7 @@
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
-#include "hogd/container/merkle/sha256.h"
+#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {
@@ -59,8 +60,8 @@ generate_random_path(bool allow_empty)
 }
 
 void
-for_each_func(std::map<HexArray, std::string> &seen,
-              const std::pair<HexArray, std::string> &pair)
+for_each_func(std::map<HexArray, SHA256Hash> &seen,
+              const std::pair<HexArray, SHA256Hash> &pair)
 {
   seen[pair.first] = pair.second;
 }
@@ -76,8 +77,10 @@ TEST(MerkleTrie, SizeAndEmpty)
   EXPECT_TRUE(trie.empty());
 
   const HexArray key("12");
-  const std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   EXPECT_EQ(trie.size(), 1);
   EXPECT_FALSE(trie.empty());
 
@@ -94,7 +97,9 @@ TEST(MerkleTrie, EmptyKey)
 
   HexArray key;
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
 }
 
@@ -104,9 +109,13 @@ TEST(MerkleTrie, EmptyKeyFind)
 
   HexArray key;
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(key, cookie), value);
+  EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -116,7 +125,9 @@ TEST(MerkleTrie, EmptyKeyRemove)
 
   HexArray key;
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
   EXPECT_TRUE(trie.remove(key));
   std::cout << trie << '\n';
@@ -128,11 +139,17 @@ TEST(MerkleTrie, EmptyKeyRemoveWithChild)
 
   HexArray key_a;
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b = HexArray("1");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
 
   std::cout << trie << '\n';
   EXPECT_TRUE(trie.remove(key_a));
@@ -145,11 +162,17 @@ TEST(MerkleTrie, EmptyKeyRemoveChild)
 
   HexArray key_a;
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b = HexArray("1");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
 
   std::cout << trie << '\n';
   EXPECT_TRUE(trie.remove(key_b));
@@ -163,9 +186,12 @@ TEST(MerkleTriePrefix, EmptyKey)
 
   HexArray key;
   std::string value = "hello";
-  EXPECT_FALSE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_FALSE(trie.insert(key, value_span));
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(trie.find_begin(key, cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(key, value_hash, cookie));
   EXPECT_FALSE(trie.remove(key));
   EXPECT_TRUE(trie.get_proof(key).second.empty());
   EXPECT_TRUE(trie.get_proof_by_node(key).second.empty());
@@ -178,8 +204,7 @@ TEST(MerkleTrie, EmptyValue)
   std::cout << trie << '\n';
 
   HexArray key("1");
-  std::string value;
-  EXPECT_TRUE(trie.insert(key, value));
+  EXPECT_TRUE(trie.insert(key, std::span<std::byte>()));
   std::cout << trie << '\n';
 }
 
@@ -189,9 +214,13 @@ TEST(MerkleTrie, EmptyValueFind)
 
   HexArray key("1");
   std::string value;
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(key, cookie), value);
+  EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -201,7 +230,9 @@ TEST(MerkleTrie, EmptyValueRemove)
 
   HexArray key("1");
   std::string value;
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
   EXPECT_TRUE(trie.remove(key));
   std::cout << trie << '\n';
@@ -214,9 +245,13 @@ TEST(MerkleTrie, EvenSizeKey)
 
   HexArray key("01");
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(key, cookie), value);
+  EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -226,9 +261,13 @@ TEST(MerkleTrie, OddSizeKey)
 
   HexArray key("012");
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(key, cookie), value);
+  EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -238,17 +277,26 @@ TEST(MerkleTrie, EvenAndOddSizedKeys)
 
   HexArray even_key("01");
   std::string even_value = "hello";
-  EXPECT_TRUE(trie.insert(even_key, even_value));
+  std::span<std::byte> even_value_span{reinterpret_cast<std::byte *>(
+                                           even_value.data()),
+                                       even_value.size()};
+  EXPECT_TRUE(trie.insert(even_key, even_value_span));
 
   HexArray odd_key("012");
   std::string odd_value = "hello";
-  EXPECT_TRUE(trie.insert(odd_key, odd_value));
+  std::span<std::byte> odd_value_span{reinterpret_cast<std::byte *>(
+                                          odd_value.data()),
+                                      odd_value.size()};
+  EXPECT_TRUE(trie.insert(odd_key, odd_value_span));
 
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(even_key, cookie), even_value);
+  EXPECT_TRUE(trie.find_begin(even_key, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(even_value));
   hogd::MerkleTrie::find_end(cookie);
 
-  EXPECT_EQ(*trie.find_begin(odd_key, cookie), odd_value);
+  EXPECT_TRUE(trie.find_begin(odd_key, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(odd_value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -259,13 +307,21 @@ TEST(MerkleTrie, InsertDuplicateKey)
 
   HexArray key("1234");
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
 
   // Attempt to insert the same key again.
-  EXPECT_FALSE(trie.insert(key, "hello again"));
+  std::string other_value = "hello again";
+  std::span<std::byte> other_value_span{reinterpret_cast<std::byte *>(
+                                            other_value.data()),
+                                        other_value.size()};
+  EXPECT_FALSE(trie.insert(key, other_value_span));
 
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(key, cookie), value);
+  EXPECT_TRUE(trie.find_begin(key, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value));
   hogd::MerkleTrie::find_end(cookie);
 }
 
@@ -277,7 +333,9 @@ TEST(MerkleTrie, RemoveMissingKey)
 
   HexArray key("1234");
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   EXPECT_TRUE(trie.remove(key));
 
   // Attempt to remove the same key again.
@@ -293,12 +351,16 @@ TEST(MerkleTrie, TwoLeaves)
 
   HexArray key("1234");
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
 
   key = HexArray("1223");
   value = "hello again";
-  EXPECT_TRUE(trie.insert(key, value));
+  value_span = std::span<std::byte>{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
 }
 
@@ -308,21 +370,31 @@ TEST(MerkleTrie, TwoLeavesFind)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
 
   HexArray key_b("1223");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
-  EXPECT_EQ(trie.find_begin(HexArray("123456"), cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
+  EXPECT_FALSE(trie.find_begin(HexArray("123456"), value_hash, cookie));
 }
 
 TEST(MerkleTrie, TwoLeavesRemove)
@@ -331,11 +403,17 @@ TEST(MerkleTrie, TwoLeavesRemove)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b("1223");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
   std::cout << trie << '\n';
   EXPECT_TRUE(trie.remove(key_b));
   std::cout << trie << '\n';
@@ -350,12 +428,16 @@ TEST(MerkleTrie, BranchAndLeaf)
 
   HexArray key("1234");
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
 
   key = HexArray("123456");
   value = "hello again";
-  EXPECT_TRUE(trie.insert(key, value));
+  value_span = std::span<std::byte>{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
 }
 
@@ -365,11 +447,17 @@ TEST(MerkleTrie, BranchAndLeafRemove)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b = HexArray("123456");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
 
   std::cout << trie << '\n';
   EXPECT_TRUE(trie.remove(key_b));
@@ -382,22 +470,32 @@ TEST(MerkleTrie, BranchAndLeafFind)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
   std::cout << trie << '\n';
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
-  EXPECT_EQ(trie.find_begin(HexArray("12345678"), cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
+  EXPECT_FALSE(trie.find_begin(HexArray("12345678"), value_hash, cookie));
 }
 
 // This tests that a branch node with an empty value (i.e., a value of
@@ -408,18 +506,25 @@ TEST(MerkleTrie, DoNotfindBranchValue)
 
   HexArray key_a("123456");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b("123478");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
 
   // "1234" maps to a branch node that has no value (i.e., [node->value] is
   // [std::nullopt]). Check that we can properly detect this and return
   // [nullptr] rather than mistakenly return an empty string or something
   // similar.
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(trie.find_begin(HexArray("1234"), cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(HexArray("1234"), value_hash, cookie));
 }
 
 // This test adds three KV pairs to the trie, with this structure:
@@ -437,30 +542,46 @@ TEST(MerkleTrie, BranchBranchLeaf)
 
   HexArray key_a("76c772");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
   std::cout << trie << '\n';
 
   HexArray key_b("7ead1e640fb4854117ef3f882338ae");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
   std::cout << trie << '\n';
 
   HexArray key_c("76");
   std::string value_c = "hello three";
-  EXPECT_TRUE(trie.insert(key_c, value_c));
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  std::span<std::byte> value_c_span{reinterpret_cast<std::byte *>(
+                                        value_c.data()),
+                                    value_c.size()};
+  EXPECT_TRUE(trie.insert(key_c, value_c_span));
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(*trie.find_begin(key_c, cookie), value_c);
+  EXPECT_TRUE(trie.find_begin(key_c, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_c));
   hogd::MerkleTrie::find_end(cookie);
   std::cout << trie << '\n';
 
@@ -469,7 +590,7 @@ TEST(MerkleTrie, BranchBranchLeaf)
   EXPECT_EQ(
       HexArray(trie.get_root_hash()),
       HexArray(
-          "dd9dfb98cd1516f5022f76d8972ed5fdc56c481c54a0a764c03d6003d1a39641"));
+          "b5f9b456037a1449926a578ec7bcf9b1a0f0815e059185ac42d55bebb757ad1d"));
 }
 
 // These tests add three KV pairs to the trie, with this structure:
@@ -491,17 +612,23 @@ TEST(MerkleTrie, TwoLeavesAndOneBranch)
 
   HexArray key("1234");
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
 
   key = HexArray("123456");
   value = "hello again";
-  EXPECT_TRUE(trie.insert(key, value));
+  value_span = std::span<std::byte>{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
 
   key = HexArray("12ab");
   value = "hello three";
-  EXPECT_TRUE(trie.insert(key, value));
+  value_span = std::span<std::byte>{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   std::cout << trie << '\n';
 }
 
@@ -511,64 +638,89 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchFind)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
+  SHA256Hash *value_hash;
   void *cookie;
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
-  EXPECT_EQ(trie.find_begin(HexArray("12345678"), cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
+  EXPECT_FALSE(trie.find_begin(HexArray("12345678"), value_hash, cookie));
 
   HexArray key_c("12ab");
   std::string value_c = "hello three";
-  EXPECT_TRUE(trie.insert(key_c, value_c));
-  EXPECT_EQ(*trie.find_begin(key_a, cookie), value_a);
+  std::span<std::byte> value_c_span{reinterpret_cast<std::byte *>(
+                                        value_c.data()),
+                                    value_c.size()};
+  EXPECT_TRUE(trie.insert(key_c, value_c_span));
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(*trie.find_begin(key_b, cookie), value_b);
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_b));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(*trie.find_begin(key_c, cookie), value_c);
+  EXPECT_TRUE(trie.find_begin(key_c, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_c));
   hogd::MerkleTrie::find_end(cookie);
-  EXPECT_EQ(trie.find_begin(HexArray("12"), cookie), nullptr);
-  EXPECT_EQ(trie.find_begin(HexArray("12abcd"), cookie), nullptr);
-  EXPECT_EQ(trie.find_begin(HexArray("12345678"), cookie), nullptr);
+  EXPECT_FALSE(trie.find_begin(HexArray("12"), value_hash, cookie));
+  EXPECT_FALSE(trie.find_begin(HexArray("12abcd"), value_hash, cookie));
+  EXPECT_FALSE(trie.find_begin(HexArray("12345678"), value_hash, cookie));
 }
 
 TEST(MerkleTrie, TwoLeavesAndOneBranchForEach)
 {
   MerkleTrie trie;
-  std::map<HexArray, std::string> seen;
-  auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
+  std::map<HexArray, SHA256Hash> seen;
+  auto f = [&seen](const std::pair<HexArray, SHA256Hash> &pair) {
     for_each_func(seen, pair);
   };
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
   trie.for_each(f);
-  std::map<HexArray, std::string> expected = {{key_a, value_a}};
+  std::map<HexArray, SHA256Hash> expected = {{key_a, sha256(value_a)}};
   EXPECT_EQ(seen, expected);
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
   seen.clear();
-  expected.insert({{key_b, value_b}});
+  expected.insert({{key_b, sha256(value_b)}});
   trie.for_each(f);
   EXPECT_EQ(seen, expected);
 
   HexArray key_c("12ab");
   std::string value_c = "hello three";
-  EXPECT_TRUE(trie.insert(key_c, value_c));
+  std::span<std::byte> value_c_span{reinterpret_cast<std::byte *>(
+                                        value_c.data()),
+                                    value_c.size()};
+  EXPECT_TRUE(trie.insert(key_c, value_c_span));
   seen.clear();
-  expected.insert({{key_c, value_c}});
+  expected.insert({{key_c, sha256(value_c)}});
   trie.for_each(f);
   EXPECT_EQ(seen, expected);
 }
@@ -579,19 +731,88 @@ TEST(MerkleTrie, TwoLeavesAndOneBranchRemove)
 
   HexArray key_a("1234");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
 
   HexArray key_c("12ab");
   std::string value_c = "hello three";
-  EXPECT_TRUE(trie.insert(key_c, value_c));
+  std::span<std::byte> value_c_span{reinterpret_cast<std::byte *>(
+                                        value_c.data()),
+                                    value_c.size()};
+  EXPECT_TRUE(trie.insert(key_c, value_c_span));
 
   std::cout << trie << '\n';
   EXPECT_TRUE(trie.remove(key_b));
   std::cout << trie << '\n';
+}
+
+// Tests [insert_or_update()].
+TEST(MerkleTrie, InsertOrUpdate)
+{
+  MerkleTrie trie;
+
+  HexArray key_a("1234");
+  std::string value_a = "hello";
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
+
+  HexArray key_b("123456");
+  std::string value_b = "hello again";
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
+
+  HexArray key_c("12ab");
+  std::string value_c = "hello three";
+  std::span<std::byte> value_c_span{reinterpret_cast<std::byte *>(
+                                        value_c.data()),
+                                    value_c.size()};
+  EXPECT_TRUE(trie.insert_or_update(key_c, value_c_span));
+  SHA256Hash *value_hash;
+  void *cookie;
+  EXPECT_TRUE(trie.find_begin(key_c, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_c));
+  hogd::MerkleTrie::find_end(cookie);
+
+  // [key_a] is in a branch node.
+  std::string new_value_a = "hello four";
+  std::span<std::byte> new_value_a_span{reinterpret_cast<std::byte *>(
+                                            new_value_a.data()),
+                                        new_value_a.size()};
+  EXPECT_FALSE(trie.insert(key_a, new_value_a_span));
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_a));
+  hogd::MerkleTrie::find_end(cookie);
+  EXPECT_TRUE(trie.insert_or_update(key_a, new_value_a_span));
+  EXPECT_TRUE(trie.find_begin(key_a, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(new_value_a));
+  hogd::MerkleTrie::find_end(cookie);
+
+  // [key_b] is in a leaf node.
+  std::string new_value_b = "hello five";
+  std::span<std::byte> new_value_b_span{reinterpret_cast<std::byte *>(
+                                            new_value_b.data()),
+                                        new_value_b.size()};
+  EXPECT_FALSE(trie.insert(key_b, new_value_b_span));
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(value_b));
+  hogd::MerkleTrie::find_end(cookie);
+  EXPECT_TRUE(trie.insert_or_update(key_b, new_value_b_span));
+  EXPECT_TRUE(trie.find_begin(key_b, value_hash, cookie));
+  EXPECT_EQ(*value_hash, sha256(new_value_b));
+  hogd::MerkleTrie::find_end(cookie);
 }
 
 namespace {
@@ -604,15 +825,24 @@ prove(T &trie)
 {
   HexArray key_a("1234");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b("123456");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
 
   HexArray key_c("12ab");
   std::string value_c = "hello three";
-  EXPECT_TRUE(trie.insert(key_c, value_c));
+  std::span<std::byte> value_c_span{reinterpret_cast<std::byte *>(
+                                        value_c.data()),
+                                    value_c.size()};
+  EXPECT_TRUE(trie.insert(key_c, value_c_span));
 
   trie.generate_top_level_hashes();
   const auto &[root_hash, node_encodings] = trie.get_proof(key_b);
@@ -631,60 +861,65 @@ prove(T &trie)
   EXPECT_EQ(node_encodings, node_encodings_by_node_flat);
 
   // [key_b/value_b] is in the trie, so we should be able to prove it.
-  EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
+  EXPECT_TRUE(
+      MerkleTrie::prove(root_hash, node_encodings, key_b, value_b_span));
 
   // None of these pairs are in the trie, so we should not be able to prove
   // them.
-  EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key_a, value_a));
-  EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key_b, value_c));
-  EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key_c, value_b));
+  EXPECT_FALSE(
+      MerkleTrie::prove(root_hash, node_encodings, key_a, value_a_span));
+  EXPECT_FALSE(
+      MerkleTrie::prove(root_hash, node_encodings, key_b, value_c_span));
+  EXPECT_FALSE(
+      MerkleTrie::prove(root_hash, node_encodings, key_c, value_b_span));
 
   // Try an empty key and an empty value.
   EXPECT_FALSE(
-      MerkleTrie::prove(root_hash, node_encodings, HexArray(), value_b));
-  EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key_b, ""));
+      MerkleTrie::prove(root_hash, node_encodings, HexArray(), value_b_span));
+  EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key_b,
+                                 std::span<std::byte>()));
 
   // Try removing a hex digit from the key.
   EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings,
-                                 key_b.get_subarray(1, key_b.size()), value_b));
+                                 key_b.get_subarray(1, key_b.size()),
+                                 value_b_span));
 
   {
     // Try adding a hex digit to the key.
     HexArray key_b_copy = key_b;
     key_b_copy.append(std::byte{0x00});
     EXPECT_FALSE(
-        MerkleTrie::prove(root_hash, node_encodings, key_b_copy, value_b));
+        MerkleTrie::prove(root_hash, node_encodings, key_b_copy, value_b_span));
   }
 
   // Omit the node encodings.
-  EXPECT_FALSE(MerkleTrie::prove(root_hash, {}, key_b, value_b));
+  EXPECT_FALSE(MerkleTrie::prove(root_hash, {}, key_b, value_b_span));
   {
     // Remove a byte from the beginning of the node encodings.
     std::vector<std::byte> copy(node_encodings.begin() + 1,
                                 node_encodings.end());
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
   {
     // Remove a byte from the end of the node encodings.
     std::vector<std::byte> copy(node_encodings.begin(),
                                 node_encodings.end() - 1);
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
   {
     // Try an incorrect root hash.
     SHA256Hash different_root_hash;
     memset(&different_root_hash, 0, sizeof(different_root_hash));
-    EXPECT_FALSE(
-        MerkleTrie::prove(different_root_hash, node_encodings, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(different_root_hash, node_encodings, key_b,
+                                   value_b_span));
   }
 
   {
     // Try using the hash of an internal node as the root hash.
-    SHA256Hash different_root_hash =
-        Sha256::get_sha256(node_encodings_by_node[1]);
-    EXPECT_FALSE(
-        MerkleTrie::prove(different_root_hash, node_encodings, key_b, value_b));
+    SHA256Hash different_root_hash = sha256(node_encodings_by_node[1]);
+    EXPECT_FALSE(MerkleTrie::prove(different_root_hash, node_encodings, key_b,
+                                   value_b_span));
   }
 
   {
@@ -692,7 +927,7 @@ prove(T &trie)
     std::vector<std::byte> copy(node_encodings.begin() +
                                     node_encodings_by_node[0].size(),
                                 node_encodings.end());
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
   {
@@ -700,7 +935,7 @@ prove(T &trie)
     std::vector<std::byte> copy(node_encodings.begin(),
                                 node_encodings.end() -
                                     node_encodings_by_node.back().size());
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
   {
@@ -712,14 +947,14 @@ prove(T &trie)
                 node_encodings.begin() + node_encodings_by_node[0].size() +
                     node_encodings_by_node[1].size(),
                 node_encodings.end());
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
   {
     // Set the node type to an invalid type.
     std::vector<std::byte> copy = node_encodings;
     copy[0] = std::byte{0xFF};
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
   {
@@ -727,21 +962,21 @@ prove(T &trie)
     // encoding is detected.
     std::vector<std::byte> copy = node_encodings;
     copy.erase(copy.begin() + node_encodings_by_node[0].size());
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
   {
     // Change the path in the leaf node.
     std::vector<std::byte> copy = node_encodings;
     copy[1 + sizeof(size_t)] = std::byte{0x00};
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
   {
     // Make the path longer than the [HexArray] capacity in a leaf node.
     std::vector<std::byte> copy = node_encodings;
     copy[1] = std::byte{0xFF};
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
   {
@@ -761,14 +996,14 @@ prove(T &trie)
       // Change the path in an extension node.
       std::vector<std::byte> copy = node_encodings;
       copy[idx + 1 + sizeof(size_t)] = std::byte{0x00};
-      EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+      EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
     }
 
     {
       // Make the path longer than the [HexArray] capacity in an extension node.
       std::vector<std::byte> copy = node_encodings;
       copy[idx + 1] = std::byte{0xFF};
-      EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+      EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
     }
 
     {
@@ -777,7 +1012,7 @@ prove(T &trie)
       std::vector<std::byte> copy = node_encodings;
       uint8_t result = static_cast<uint8_t>(copy[end_idx - 1]) + 1;
       copy[end_idx - 1] = static_cast<std::byte>(result);
-      EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+      EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
     }
   }
 
@@ -787,7 +1022,7 @@ prove(T &trie)
     std::vector<std::byte> copy = node_encodings;
     uint8_t result = static_cast<uint8_t>(copy[end_idx - 1]) + 1;
     copy[end_idx - 1] = static_cast<std::byte>(result);
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
   }
 
   {
@@ -815,8 +1050,7 @@ prove(T &trie)
       // find matching branch.
       branch_begin_idx = idx + node_encodings_by_node[node_idx].size() -
                          (Node::kMaxNumBranches * sizeof(SHA256Hash));
-      SHA256Hash to_find =
-          Sha256::get_sha256(node_encodings_by_node[node_idx - 1]);
+      SHA256Hash to_find = sha256(node_encodings_by_node[node_idx - 1]);
       for (size_t i = 0; i < Node::kMaxNumBranches; i++) {
         auto *to_compare = reinterpret_cast<SHA256Hash *>(
             &copy[branch_begin_idx + (i * sizeof(SHA256Hash))]);
@@ -831,7 +1065,7 @@ prove(T &trie)
             copy[branch_begin_idx + (matching_idx * sizeof(SHA256Hash))];
         uint8_t result = static_cast<uint8_t>(change) + 1;
         change = static_cast<std::byte>(result);
-        EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+        EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
       }
     }
 
@@ -848,7 +1082,7 @@ prove(T &trie)
             copy[branch_begin_idx + (nonmatching_idx * sizeof(SHA256Hash))];
         uint8_t result = static_cast<uint8_t>(change) + 1;
         change = static_cast<std::byte>(result);
-        EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+        EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
       }
     }
 
@@ -860,7 +1094,7 @@ prove(T &trie)
       SHA256Hash &nonmatching_hash =
           *reinterpret_cast<SHA256Hash *>(&copy[nonmatching_idx]);
       std::swap(matching_hash, nonmatching_hash);
-      EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b));
+      EXPECT_FALSE(MerkleTrie::prove(root_hash, copy, key_b, value_b_span));
     }
   }
 }
@@ -888,9 +1122,9 @@ void
 prove_empty_trie(T &trie)
 {
   HexArray key;
-  std::string value;
   const auto &[root_hash, node_encodings] = trie.get_proof(key);
-  EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
+  EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key,
+                                 std::span<std::byte>()));
 }
 
 } // namespace
@@ -914,18 +1148,18 @@ TEST(MerkleTrie, ProveEmptyKVPair)
   MerkleTrie trie;
 
   HexArray key;
-  std::string value;
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span;
+  EXPECT_TRUE(trie.insert(key, value_span));
 
   {
     const auto &[root_hash, node_encodings] = trie.get_proof(key);
-    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key, value));
+    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key, value_span));
   }
 
   {
     EXPECT_TRUE(trie.remove(key));
     const auto &[root_hash, node_encodings] = trie.get_proof(key);
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value_span));
   }
 }
 
@@ -940,19 +1174,21 @@ prove_after_removing_key(T &trie)
 {
   HexArray key("1234");
   std::string value = "hello";
-  EXPECT_TRUE(trie.insert(key, value));
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  EXPECT_TRUE(trie.insert(key, value_span));
   EXPECT_TRUE(trie.remove(key));
 
   {
     const auto &[root_hash, node_encodings] = trie.get_proof(key);
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value_span));
   }
 
   {
     key = HexArray();
-    value = "";
     const auto &[root_hash, node_encodings] = trie.get_proof(key);
-    EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key, value));
+    EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, key,
+                                   std::span<std::byte>()));
   }
 }
 
@@ -978,11 +1214,17 @@ TEST(MerkleTrie, ProveAllByteVariations)
 
   HexArray key_a("12");
   std::string value_a = "a1";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b("123");
   std::string value_b = "b2";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
 
   auto [root_hash, node_encodings] = trie.get_proof(key_b);
   for (size_t i = 0; i < node_encodings.size(); i++) {
@@ -998,11 +1240,12 @@ TEST(MerkleTrie, ProveAllByteVariations)
       }
       node_encodings[i] = to_set;
       EXPECT_FALSE(
-          MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
+          MerkleTrie::prove(root_hash, node_encodings, key_b, value_b_span));
     }
     node_encodings[i] = cur;
   }
-  EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
+  EXPECT_TRUE(
+      MerkleTrie::prove(root_hash, node_encodings, key_b, value_b_span));
 }
 
 // [MerkleTriePrefix] includes an additional branch node in the proof than in
@@ -1014,11 +1257,17 @@ TEST(MerkleTriePrefix, ProveAllByteVariations)
 
   HexArray key_a("12");
   std::string value_a = "a1";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b("123");
   std::string value_b = "b2";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
 
   auto [_, node_encodings_by_node] = trie.get_proof_by_node(key_b);
   auto [root_hash, node_encodings] = trie.get_proof(key_b);
@@ -1035,11 +1284,12 @@ TEST(MerkleTriePrefix, ProveAllByteVariations)
       }
       node_encodings[idx] = to_set;
       EXPECT_FALSE(
-          MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
+          MerkleTrie::prove(root_hash, node_encodings, key_b, value_b_span));
     }
     node_encodings[idx] = cur;
   }
-  EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, key_b, value_b));
+  EXPECT_TRUE(
+      MerkleTrie::prove(root_hash, node_encodings, key_b, value_b_span));
 }
 
 // This test adds three KV pairs to the trie, with this structure:
@@ -1058,27 +1308,36 @@ TEST(MerkleTrie, PlaceInBranchBelowExtensionNode)
 
   HexArray key_a("2671291b5a3887d332b73ec01345d7");
   std::string value_a = "hello";
-  EXPECT_TRUE(trie.insert(key_a, value_a));
+  std::span<std::byte> value_a_span{reinterpret_cast<std::byte *>(
+                                        value_a.data()),
+                                    value_a.size()};
+  EXPECT_TRUE(trie.insert(key_a, value_a_span));
 
   HexArray key_b("267124564f6835");
   std::string value_b = "hello again";
-  EXPECT_TRUE(trie.insert(key_b, value_b));
+  std::span<std::byte> value_b_span{reinterpret_cast<std::byte *>(
+                                        value_b.data()),
+                                    value_b.size()};
+  EXPECT_TRUE(trie.insert(key_b, value_b_span));
   std::cout << trie << '\n';
 
   // This needs to be placed directly into the branch under the extension node.
   HexArray key_c("2671");
   std::string value_c = "hello three";
-  EXPECT_TRUE(trie.insert(key_c, value_c));
+  std::span<std::byte> value_c_span{reinterpret_cast<std::byte *>(
+                                        value_c.data()),
+                                    value_c.size()};
+  EXPECT_TRUE(trie.insert(key_c, value_c_span));
   std::cout << trie << '\n';
 
-  std::map<HexArray, std::string> seen;
-  auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
+  std::map<HexArray, SHA256Hash> seen;
+  auto f = [&seen](const std::pair<HexArray, SHA256Hash> &pair) {
     for_each_func(seen, pair);
   };
   trie.for_each(f);
-  std::map<HexArray, std::string> expected = {{key_a, value_a},
-                                              {key_b, value_b},
-                                              {key_c, value_c}};
+  std::map<HexArray, SHA256Hash> expected = {{key_a, sha256(value_a)},
+                                             {key_b, sha256(value_b)},
+                                             {key_c, sha256(value_c)}};
   EXPECT_EQ(seen, expected);
 }
 
@@ -1096,16 +1355,18 @@ stress(T &trie, bool allow_empty)
   constexpr size_t kNumIterations = 100;
 
   std::map<HexArray, std::string> total;
-  std::map<HexArray, std::string> seen;
-  auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
+  std::map<HexArray, SHA256Hash> seen;
+  auto f = [&seen](const std::pair<HexArray, SHA256Hash> &pair) {
     for_each_func(seen, pair);
   };
 
   // Insert the KV pairs.
   for (size_t i = 0; i < kNumIterations; i++) {
     HexArray path = generate_random_path(allow_empty);
-    const std::string value = std::to_string(i);
-    bool insert = trie.insert(path, value);
+    std::string value = std::to_string(i);
+    std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
+    bool insert = trie.insert(path, value_span);
     EXPECT_EQ(insert, !total.contains(path));
     if (!insert) {
       // A duplicate key was generated, so try again.
@@ -1117,25 +1378,34 @@ stress(T &trie, bool allow_empty)
 
     seen.clear();
     trie.for_each(f);
-    EXPECT_EQ(seen, total);
+    for (const auto &[k, value_hash] : seen) {
+      EXPECT_EQ(value_hash, sha256(total[k]));
+    }
+    EXPECT_EQ(seen.size(), total.size());
 
     trie.generate_top_level_hashes();
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
-    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
+    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value_span));
+    SHA256Hash *value_hash;
     void *cookie;
-    EXPECT_EQ(*trie.find_begin(path, cookie), value);
+    EXPECT_TRUE(trie.find_begin(path, value_hash, cookie));
+    EXPECT_EQ(*value_hash, sha256(value));
     hogd::MerkleTrie::find_end(cookie);
 
     EXPECT_TRUE(trie.check());
   }
 
   // Check every single KV pair.
-  for (const auto &[path, value] : total) {
+  for (auto &[path, value] : total) {
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
-    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
+    std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
+    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value_span));
 
+    SHA256Hash *value_hash;
     void *cookie;
-    EXPECT_EQ(*trie.find_begin(path, cookie), value);
+    EXPECT_TRUE(trie.find_begin(path, value_hash, cookie));
+    EXPECT_EQ(*value_hash, sha256(value));
     hogd::MerkleTrie::find_end(cookie);
   }
 
@@ -1145,9 +1415,11 @@ stress(T &trie, bool allow_empty)
     // reference because we continue using [path] after removing the the KV
     // pair from [total].
     const HexArray path = total.begin()->first;
-    const std::string &value = total.begin()->second;
+    std::string &value = total.begin()->second;
+    std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
-    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
+    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value_span));
 
     EXPECT_TRUE(trie.remove(path));
     auto it = total.erase(total.begin());
@@ -1161,12 +1433,16 @@ stress(T &trie, bool allow_empty)
     trie.generate_top_level_hashes();
     EXPECT_TRUE(trie.check());
 
+    SHA256Hash *value_hash;
     void *cookie;
-    EXPECT_EQ(trie.find_begin(path, cookie), nullptr);
+    EXPECT_FALSE(trie.find_begin(path, value_hash, cookie));
 
     seen.clear();
     trie.for_each(f);
-    EXPECT_EQ(seen, total);
+    for (const auto &[k, value_hash] : seen) {
+      EXPECT_EQ(value_hash, sha256(total[k]));
+    }
+    EXPECT_EQ(seen.size(), total.size());
 
     EXPECT_TRUE(trie.check());
   }
@@ -1200,16 +1476,18 @@ stress_two(T &trie, bool allow_empty)
   constexpr size_t kNumIterations = 5'000;
 
   std::map<HexArray, std::string> total;
-  std::map<HexArray, std::string> seen;
-  auto f = [&seen](const std::pair<HexArray, std::string> &pair) {
+  std::map<HexArray, SHA256Hash> seen;
+  auto f = [&seen](const std::pair<HexArray, SHA256Hash> &pair) {
     for_each_func(seen, pair);
   };
 
   // Insert the KV pairs.
   for (size_t i = 0; i < kNumIterations; i++) {
     HexArray path = generate_random_path(allow_empty);
-    const std::string value = std::to_string(i);
-    bool insert = trie.insert(path, value);
+    std::string value = std::to_string(i);
+    std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
+    bool insert = trie.insert(path, value_span);
     EXPECT_EQ(insert, !total.contains(path));
     if (!insert) {
       // A duplicate key was generated, so try again.
@@ -1223,18 +1501,22 @@ stress_two(T &trie, bool allow_empty)
   trie.generate_top_level_hashes();
   EXPECT_TRUE(trie.check());
   // Check every single KV pair.
-  for (const auto &[path, value] : total) {
+  for (auto &[path, value] : total) {
     const auto &[root_hash, node_encodings] = trie.get_proof(path);
-    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value));
+    std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                    value.size()};
+    EXPECT_TRUE(MerkleTrie::prove(root_hash, node_encodings, path, value_span));
 
+    SHA256Hash *value_hash;
     void *cookie;
-    EXPECT_EQ(*trie.find_begin(path, cookie), value);
+    EXPECT_TRUE(trie.find_begin(path, value_hash, cookie));
+    EXPECT_EQ(*value_hash, sha256(value));
     hogd::MerkleTrie::find_end(cookie);
   }
 
   // Remove all KV pairs.
   for (size_t i = 0; i < kNumIterations; i++) {
-    const auto &[path, value] = *total.begin();
+    const auto &[path, _] = *total.begin();
 
     EXPECT_TRUE(trie.remove(path));
     auto it = total.erase(total.begin());
@@ -1252,7 +1534,10 @@ stress_two(T &trie, bool allow_empty)
 
   seen.clear();
   trie.for_each(f);
-  EXPECT_EQ(seen, total);
+  for (const auto &[k, value_hash] : seen) {
+    EXPECT_EQ(value_hash, sha256(total[k]));
+  }
+  EXPECT_EQ(seen.size(), total.size());
 }
 
 } // namespace
@@ -1298,7 +1583,11 @@ run_multithread(size_t num_threads)
         continue;
       }
       CHECK(generated.insert(path).second);
-      EXPECT_TRUE(trie.insert(path, std::to_string(i)));
+      std::string value = std::to_string(i);
+      std::span<std::byte> value_span{reinterpret_cast<std::byte *>(
+                                          value.data()),
+                                      value.size()};
+      EXPECT_TRUE(trie.insert(path, value_span));
     }
     EXPECT_EQ(trie.size(), kInitialSize);
     trie.set_should_hash_nodes_on_each_op(true);
@@ -1326,20 +1615,26 @@ run_multithread(size_t num_threads)
   std::println(" done.");
   WorkerPool pool(num_threads);
   std::vector<std::future<void>> futures;
+  futures.reserve(num_threads);
+  std::string value = "hello";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
   std::print("Inserting keys...");
   fflush(stdout);
 
-  futures.reserve(num_threads);
   for (size_t i = 0; i < num_threads; i++) {
-    futures.push_back(pool.submit([i, num_kv_pairs_per_thread, &trie, &paths] {
-      void *cookie;
-      for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
-        EXPECT_TRUE(trie.insert(paths[i][j], "hello"));
-        EXPECT_EQ(*trie.find_begin(paths[i][j], cookie), "hello");
-        hogd::MerkleTrie::find_end(cookie);
-        EXPECT_TRUE(trie.remove(paths[i][j]));
-      }
-    }));
+    futures.push_back(pool.submit(
+        [i, num_kv_pairs_per_thread, &trie, &paths, &value, &value_span] {
+          SHA256Hash *value_hash;
+          void *cookie;
+          for (size_t j = 0; j < num_kv_pairs_per_thread; j++) {
+            EXPECT_TRUE(trie.insert(paths[i][j], value_span));
+            EXPECT_TRUE(trie.find_begin(paths[i][j], value_hash, cookie));
+            EXPECT_EQ(*value_hash, sha256(value));
+            hogd::MerkleTrie::find_end(cookie);
+            EXPECT_TRUE(trie.remove(paths[i][j]));
+          }
+        }));
   }
   for (std::future<void> &future : futures) {
     future.get();

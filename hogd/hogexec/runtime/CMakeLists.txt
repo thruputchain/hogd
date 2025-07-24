@@ -79,6 +79,7 @@ target_link_libraries(
   wasmi_lib
   runtime_trampoline
   protocol
+  rpc
   hogd
 )
 

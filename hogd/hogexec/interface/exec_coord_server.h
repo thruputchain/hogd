@@ -52,7 +52,7 @@ private:
                          uint16_t self_executor_id);
 
   // Connect to all relevant database components.
-  std::unique_ptr<DatabaseProxy>
+  static std::unique_ptr<DatabaseProxy>
   connect_to_database(DatabaseIdentifier identifier);
 
   std::optional<Coordinator1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>

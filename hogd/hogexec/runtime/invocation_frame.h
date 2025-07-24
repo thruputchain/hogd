@@ -11,13 +11,12 @@
 #include <vector>
 
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -87,9 +86,8 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
-  x23::Async<SystemStatus<bool>>
-  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
-                          std::vector<InvocationFrame> const &parent_frames);
+  SystemStatus<bool>
+  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
 
 private:
   const ContractAddress address_;

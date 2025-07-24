@@ -115,7 +115,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
         runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto r = handler.try_commit_transaction()();
+    auto r = handler.try_commit_transaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(*r);
   }
@@ -136,7 +136,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
         runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto r = handler.try_commit_transaction()();
+    auto r = handler.try_commit_transaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(*r);
   }
@@ -160,7 +160,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
         runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto r = handler.try_commit_transaction()();
+    auto r = handler.try_commit_transaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(*r);
   }
@@ -185,7 +185,7 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
         runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto r = handler.try_commit_transaction()();
+    auto r = handler.try_commit_transaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(*r);
   }

@@ -13,19 +13,24 @@
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/hogexec/wasmi/bindings.h"
+#include "types.hh"
 
 namespace hogd {
 
-WasmiContext::WasmiContext() : wasmi_context_ptr_(new_wasmi_context())
+WasmiContext::WasmiContext(WasmiModuleCache *module_cache)
+  : wasmi_context_ptr_(
+        new_wasmi_context(module_cache ? module_cache->get_inner() : nullptr))
 {}
 
 WasmiContext::~WasmiContext()
 {
-  free_wasmi_context(wasmi_context_ptr_);
+  if (wasmi_context_ptr_ != nullptr) {
+    free_wasmi_context(wasmi_context_ptr_);
+  }
 }
 
 std::unique_ptr<Runtime>
-WasmiContext::make_new_runtime(Contract const &contract,
+WasmiContext::make_new_runtime(Contract const &contract, SHA256Hash const &hash,
                                SystemCallHandler *syscall_handler,
                                bool do_contract_verify)
 {
@@ -41,7 +46,7 @@ WasmiContext::make_new_runtime(Contract const &contract,
 
   void *wasmi_runtime_ptr =
       new_wasmi_runtime(contract.wasmi_contract().data(),
-                        contract.wasmi_contract().size(),
+                        contract.wasmi_contract().size(), hash.data(),
                         host_call_context.get(), wasmi_context_ptr_);
   if (wasmi_runtime_ptr == nullptr) {
     return {};
@@ -127,6 +132,17 @@ WasmiRuntime::~WasmiRuntime()
 {
   if (wasmi_runtime_ptr_ != nullptr) {
     free_wasmi_runtime(wasmi_runtime_ptr_);
+  }
+}
+
+WasmiModuleCache::WasmiModuleCache(size_t capacity)
+  : wasmi_module_cache_ptr_(new_wasmi_module_cache(capacity))
+{}
+
+WasmiModuleCache::~WasmiModuleCache()
+{
+  if (wasmi_module_cache_ptr_ != nullptr) {
+    free_wasmi_module_cache(wasmi_module_cache_ptr_);
   }
 }
 

@@ -2,6 +2,11 @@
 
 #pragma once
 
+extern "C" {
+#include "blake3.h"
+}
+
+#include <openssl/sha.h> // NOLINT(misc-include-cleaner)
 #include <sodium.h>
 
 #include <array>
@@ -32,13 +37,16 @@ read_random(x23::is_bytespan auto buf)
 inline SHA256Hash
 sha256(x23::is_bytespan auto buf)
 {
+  // We need to directly use lower-level functions in OpenSSL even though they
+  // are deprecated. The public API (i.e., the [EVP_*] functions) do reference
+  // counting and acquire locks, which limits parallelism and also harms
+  // single-thread performance.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   SHA256Hash out;
-  [[maybe_unused]]
-  int ret = crypto_hash_sha256(out.data(),
-                               reinterpret_cast<const uint8_t *>(buf.data()),
-                               buf.size());
-  // this libsodium call cannot fail (V1.20).
-  assert(ret == 0);
+  SHA256_CTX ctx;
+  SHA256_Init(&ctx);
+  SHA256_Update(&ctx, buf.data(), buf.size());
+  SHA256_Final(out.data(), &ctx);
   return out;
 }
 
@@ -46,8 +54,27 @@ template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
 inline SHA256Hash
 sha256(const T &value)
 {
-  auto buf = x23::serialize(value);
-  return sha256(buf);
+  return sha256(x23::serialize(value));
+}
+
+using Blake3Hash = std::array<unsigned char, BLAKE3_OUT_LEN>;
+
+inline Blake3Hash
+blake3(x23::is_bytespan auto buf)
+{
+  Blake3Hash out;
+  blake3_hasher hasher;
+  blake3_hasher_init(&hasher);
+  blake3_hasher_update(&hasher, buf.data(), buf.size());
+  blake3_hasher_finalize(&hasher, out.data(), sizeof(out));
+  return out;
+}
+
+template<x23::is_xdr_type T> requires (!x23::is_bytespan<T>)
+inline Blake3Hash
+blake3(const T &value)
+{
+  return blake3(x23::serialize(value));
 }
 
 // SipHash24Key is the secret key used by SipHash24.
@@ -98,6 +125,17 @@ SipHash24::operator()(x23::is_bytespan auto buf)
   // this libsodium call cannot fail (V1.20).
   assert(ret == 0);
   return out;
+}
+
+inline bool
+ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
+               std::span<const std::byte, sizeof(Ed25519Signature)> signature,
+               x23::is_bytespan auto msg)
+{
+  return crypto_sign_ed25519_verify_detached(
+             reinterpret_cast<const uint8_t *>(signature.data()),
+             reinterpret_cast<const uint8_t *>(msg.data()), msg.size(),
+             reinterpret_cast<const uint8_t *>(public_key.data())) == 0;
 }
 
 // ed25519_verify verifies sig for a msg and publickey.

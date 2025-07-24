@@ -4,6 +4,7 @@ set_source_files_properties(
 
 # Import targets defined in a package or workspace manifest `Cargo.toml` file
 corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATE_TYPES staticlib LOCKED)
+corrosion_set_env_vars(wasmi_lib CARGO_NET_GIT_FETCH_WITH_CLI=true)
 
 add_dependencies(
   cargo-prebuild_wasmi_lib
@@ -28,6 +29,7 @@ add_custom_command(
       ${CMAKE_CURRENT_SOURCE_DIR}/src/external_call.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/invoke_result.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/module_cache.rs
       ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime.rs
     COMMAND 
       cbindgen --config cbindgen.toml --crate wasmi_lib --output ${CMAKE_CURRENT_BINARY_DIR}/bindings.h

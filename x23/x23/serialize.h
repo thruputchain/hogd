@@ -3,10 +3,20 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <bit>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <exception>
+#include <limits>
+#include <tuple>
+#include <unistd.h>
 #include <utility>
 
 #include <x23/utility.h>
+#include <x23/vec.h>
 #include <x23/x23.h>
 
 namespace x23 {
@@ -501,7 +511,7 @@ deserialize_from(Xout *out, BufType &&buf)
   detail::Deserializer d(buf);
   d.go<true>(*out);
   d.check();
-  return d.p - buf.data();
+  return d.p - reinterpret_cast<const std::uint8_t *>(buf.data());
 }
 
 template<is_xdr_type Xout, std::convertible_to<BufView> BufType>
