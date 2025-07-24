@@ -10,10 +10,10 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "types.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -31,8 +31,9 @@ auto always_error = [](NativeRuntime &runtime) -> InvokeStatus<void> {
 StorageKeyContractData
 allowance_key(ContractAddress owner, ContractAddress spender)
 {
-  auto data = x23::serialize(owner, spender);
-  return sha256(data);
+  auto data = Serializer<SerializationFormat::kTxs>::serialize(owner, spender);
+  assert(data.has_value());
+  return sha256(*data);
 }
 
 SystemStatus<bool>

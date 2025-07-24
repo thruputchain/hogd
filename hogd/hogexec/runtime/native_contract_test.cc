@@ -136,7 +136,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         // invoke method 0 three times, with various gas costs
         auto [r1, g1] = handler.invoke(
             address, 0, UINT64_MAX,
-            Serializer<SerializationFormat::kTxs>::serialize<uint32_t>(100)
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize<uint32_t>(100)
                 .value(),
             std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r1.has_value()) {

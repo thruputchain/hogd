@@ -181,6 +181,9 @@ public:
 
   std::unique_ptr<NativeContract> build();
 
+  constexpr static SerializationFormat kDefaultSerializationFormat =
+      SerializationFormat::kTxs;
+
 private:
   std::unordered_map<MethodID, NativeContract::function_t> functions_;
   bool built_ = false;

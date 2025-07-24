@@ -133,7 +133,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata =
-                                       Serializer<SerializationFormat::kTxs>::
+                                       Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                                            serialize<uint32_t, uint32_t>(10U,
                                                                          55U)
                                                .value()}}},
@@ -156,7 +156,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata =
-                                       Serializer<SerializationFormat::kTxs>::
+                                       Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
                                            serialize<uint32_t, uint32_t>(
                                                40U, 102334155U)
                                                .value()}}},

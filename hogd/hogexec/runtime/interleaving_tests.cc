@@ -127,7 +127,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                 co_await set.bg();
 
                 auto calldata =
-                    Serializer<SerializationFormat::kTxs>::serialize<
+                    Serializer<NativeContractBuilder::kDefaultSerializationFormat>::serialize<
                         int64_t, int64_t>(SetAmount, AddAmount);
                 if (!calldata.has_value()) {
                   throw std::runtime_error("Failed to serialize calldata");

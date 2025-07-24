@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/preset_native_token.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -32,7 +33,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -1625,38 +1625,42 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
                 return {};
               });
 
-  builder.add(2,
-              [&](SystemCallHandler &handler,
-                  NativeRuntime &runtime) -> InvokeStatus<void> {
-                // perform an add_nnint, then perform a set_add_nnint with the
-                // same set value in a try_invoke frame
-                auto calldata0 = x23::serialize(std::tuple<int64_t>{100});
+  builder.add(
+      2,
+      [&](SystemCallHandler &handler,
+          NativeRuntime &runtime) -> InvokeStatus<void> {
+        // perform an add_nnint, then perform a set_add_nnint with the
+        // same set value in a try_invoke frame
+        auto calldata0 =
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<int64_t>(100)
+                    .value();
 
-                auto [r0, _g0] =
-                    handler.invoke(handler.get_current_address(), 1,
-                                   runtime.get_available_gas(), calldata0,
-                                   std::to_underlying(
-                                       InvokeFlag::kInvokeFlagTryInvoke));
-                if (!r0.has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                // tolerate try_invoke failure
+        auto [r0, _g0] = handler.invoke(handler.get_current_address(), 1,
+                                        runtime.get_available_gas(), calldata0,
+                                        std::to_underlying(
+                                            InvokeFlag::kInvokeFlagTryInvoke));
+        if (!r0.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        // tolerate try_invoke failure
 
-                auto calldata1 =
-                    x23::serialize(std::tuple<int64_t, int64_t>{100, -100});
+        auto calldata1 =
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<int64_t, int64_t>(100, -100)
+                    .value();
 
-                auto [r1, _g1] =
-                    handler.invoke(handler.get_current_address(), 0,
-                                   runtime.get_available_gas(), calldata1,
-                                   std::to_underlying(
-                                       InvokeFlag::kInvokeFlagTryInvoke));
-                if (!r1.has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                // tolerate try_invoke failure
+        auto [r1, _g1] = handler.invoke(handler.get_current_address(), 0,
+                                        runtime.get_available_gas(), calldata1,
+                                        std::to_underlying(
+                                            InvokeFlag::kInvokeFlagTryInvoke));
+        if (!r1.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        // tolerate try_invoke failure
 
-                return {};
-              });
+        return {};
+      });
   builder.add(3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
     // reset contract state
     auto r = handler.set_nnint(key, 35, 0);
@@ -1729,7 +1733,9 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
           // If this one preceeds the set_add_nnint in method 2, then that will
           // succeed.
           auto calldata =
-              x23::serialize(std::tuple<int64_t, int64_t>{100, 100});
+              Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                  serialize<int64_t, int64_t>(100, 100)
+                      .value();
           auto handler = self->make_new_system_call_handler(
               SignedTransaction{
                   .tx =
