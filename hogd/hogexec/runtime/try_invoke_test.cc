@@ -1630,24 +1630,26 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
                   NativeRuntime &runtime) -> InvokeStatus<void> {
                 // perform an add_nnint, then perform a set_add_nnint with the
                 // same set value in a try_invoke frame
-                auto calldata0 =
-                    x23::serialize(std::tuple<int64_t>{100});
+                auto calldata0 = x23::serialize(std::tuple<int64_t>{100});
 
-                auto [r0, _g0] = handler.invoke(
-                    handler.get_current_address(), 1,
-                    runtime.get_available_gas(), calldata0,
-                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+                auto [r0, _g0] =
+                    handler.invoke(handler.get_current_address(), 1,
+                                   runtime.get_available_gas(), calldata0,
+                                   std::to_underlying(
+                                       InvokeFlag::kInvokeFlagTryInvoke));
                 if (!r0.has_value()) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
                 // tolerate try_invoke failure
 
-                auto calldata1 = x23::serialize(std::tuple<int64_t, int64_t>{100, -100});
+                auto calldata1 =
+                    x23::serialize(std::tuple<int64_t, int64_t>{100, -100});
 
-                auto [r1, _g1] = handler.invoke(
-                    handler.get_current_address(), 0,
-                    runtime.get_available_gas(), calldata1,
-                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+                auto [r1, _g1] =
+                    handler.invoke(handler.get_current_address(), 0,
+                                   runtime.get_available_gas(), calldata1,
+                                   std::to_underlying(
+                                       InvokeFlag::kInvokeFlagTryInvoke));
                 if (!r1.has_value()) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
@@ -1726,7 +1728,8 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 
           // If this one preceeds the set_add_nnint in method 2, then that will
           // succeed.
-          auto calldata = x23::serialize(std::tuple<int64_t, int64_t>{100, 100});
+          auto calldata =
+              x23::serialize(std::tuple<int64_t, int64_t>{100, 100});
           auto handler = self->make_new_system_call_handler(
               SignedTransaction{
                   .tx =

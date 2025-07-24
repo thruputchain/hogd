@@ -158,9 +158,8 @@ public:
         auto extra_args =
             detail::NativeContractArgs<fn_t>::extra_args(handler, runtime);
         return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
-          return f(std::get<ExtraIs>(extra_args)...,
-                   std::get<Is>(args)...);
-                   //std::get<Is>(args.value())...);
+          return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(args)...);
+          // std::get<Is>(args.value())...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>());
       }(std::make_index_sequence<std::tuple_size_v<args_t>>());
       if (!return_value.has_value()) {
@@ -170,10 +169,9 @@ public:
       // otherwise, return the received value
       if constexpr (!std::is_same_v<return_t, void>) {
         try {
-        auto return_buffer =
-            x23::serialize(return_value.value());
-            handler.set_return_buffer(std::move(return_buffer));
-            return {};
+          auto return_buffer = x23::serialize(return_value.value());
+          handler.set_return_buffer(std::move(return_buffer));
+          return {};
         } catch (const x23::XdrBadInput &e) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }

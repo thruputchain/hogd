@@ -76,7 +76,6 @@ make_native_token_contract()
               [](SystemCallHandler &handler, NativeRuntime &runtime,
                  ContractAddress receiver,
                  NativeTokenTrait::amount_t amount) -> InvokeStatus<void> {
-
                 if (!runtime.consume_gas(1)) {
                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                 }
@@ -91,7 +90,9 @@ make_native_token_contract()
                 }
 
                 // subtract amount from owner's balance
-                auto r1 = handler.modify_native_token_balance(*owner, -from_xdr(amount));
+                auto r1 =
+                    handler.modify_native_token_balance(*owner,
+                                                        -from_xdr(amount));
                 if (!r1.has_value()) {
                   return r1.error().to_invoke_error();
                 }
@@ -100,7 +101,8 @@ make_native_token_contract()
                 }
 
                 // add amount to receiver's balance
-                auto r2 = handler.modify_native_token_balance(receiver, from_xdr(amount));
+                auto r2 = handler.modify_native_token_balance(receiver,
+                                                              from_xdr(amount));
                 if (!r2.has_value()) {
                   return r2.error().to_invoke_error();
                 }
@@ -131,7 +133,9 @@ make_native_token_contract()
                 }
 
                 // subtract amount from owner's balance
-                auto r1 = handler.modify_native_token_balance(owner, -from_xdr(amount));
+                auto r1 =
+                    handler.modify_native_token_balance(owner,
+                                                        -from_xdr(amount));
                 if (!r1.has_value()) {
                   return r1.error().to_invoke_error();
                 }
@@ -140,7 +144,8 @@ make_native_token_contract()
                 }
 
                 // add amount to receiver's balance
-                auto r2 = handler.modify_native_token_balance(receiver, from_xdr(amount));
+                auto r2 = handler.modify_native_token_balance(receiver,
+                                                              from_xdr(amount));
                 if (!r2.has_value()) {
                   return r2.error().to_invoke_error();
                 }
@@ -149,8 +154,8 @@ make_native_token_contract()
                 }
 
                 // subtract amount from spender's allowance
-                auto allow_res =
-                    adjust_allowance(handler, owner, *spender, -from_xdr(amount));
+                auto allow_res = adjust_allowance(handler, owner, *spender,
+                                                  -from_xdr(amount));
                 if (!allow_res.has_value()) {
                   return allow_res.error().to_invoke_error();
                 }
@@ -175,7 +180,8 @@ make_native_token_contract()
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
 
-                auto r = adjust_allowance(handler, *owner, spender, from_xdr(amount));
+                auto r = adjust_allowance(handler, *owner, spender,
+                                          from_xdr(amount));
                 if (!r.has_value()) {
                   return r.error().to_invoke_error();
                 }
@@ -188,7 +194,8 @@ make_native_token_contract()
   // get_balance_of
   builder.add(sdk_method_id(trait_t::entrypoint<"get_balance_of">()),
               [](SystemCallHandler &handler, NativeRuntime &runtime,
-                 ContractAddress contract_address) -> InvokeStatus<NativeTokenTrait::amount_t> {
+                 ContractAddress contract_address)
+                  -> InvokeStatus<NativeTokenTrait::amount_t> {
                 if (!runtime.consume_gas(1)) {
                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                 }
@@ -205,8 +212,8 @@ make_native_token_contract()
 
   // get_balance
   builder.add(sdk_method_id(trait_t::entrypoint<"get_balance">()),
-              [](SystemCallHandler &handler,
-                 NativeRuntime &runtime) -> InvokeStatus<NativeTokenTrait::amount_t> {
+              [](SystemCallHandler &handler, NativeRuntime &runtime)
+                  -> InvokeStatus<NativeTokenTrait::amount_t> {
                 if (!runtime.consume_gas(1)) {
                   return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
                 }
@@ -234,14 +241,15 @@ make_native_token_contract()
   builder.add(sdk_method_id(trait_t::entrypoint<"burn">()), always_error);
 
   // total_supply
-  builder.add(sdk_method_id(trait_t::entrypoint<"total_supply">()),
-              [](NativeRuntime &runtime) -> InvokeStatus<NativeTokenTrait::amount_t> {
-                // TODO(geoff): gas costs
-                if (!runtime.consume_gas(1)) {
-                  return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-                }
-                return to_xdr(int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
-              });
+  builder.add(
+      sdk_method_id(trait_t::entrypoint<"total_supply">()),
+      [](NativeRuntime &runtime) -> InvokeStatus<NativeTokenTrait::amount_t> {
+        // TODO(geoff): gas costs
+        if (!runtime.consume_gas(1)) {
+          return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+        }
+        return to_xdr(int128_t{kTotalHogSupply} * int128_t{kHogDivisibility});
+      });
 
   return builder.build();
 }

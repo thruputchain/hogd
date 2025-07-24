@@ -19,7 +19,7 @@ syscall_Log_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().code(), 0};
   }
-  
+
   return {SyscallErrorCode::kNone, 0};
 };
 

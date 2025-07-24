@@ -38,7 +38,7 @@ protected:
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
 
-  // An amount of gas that suffices for correct tests, but means that if there's 
+  // An amount of gas that suffices for correct tests, but means that if there's
   // another calldata parsing error, we'll run out of gas and error out quickly
   // instead of trying to compute an absurdly high fibonacci.
   constexpr static GasAmount kSufficientGas = 10000;
@@ -132,8 +132,9 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                         Invocation{.invoked_address = native_contract_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = kSufficientGas,
-                                   .calldata =
-                                       x23::serialize(std::tuple<uint32_t, uint32_t>{10U, 55U})}}},
+                                   .calldata = x23::serialize(
+                                       std::tuple<uint32_t, uint32_t>{10U,
+                                                                      55U})}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -152,8 +153,9 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                         Invocation{.invoked_address = native_contract_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
-                                   .calldata =
-                                       x23::serialize(std::tuple<uint32_t, uint32_t>{40U, 102334155U})}}},
+                                   .calldata = x23::serialize(
+                                       std::tuple<uint32_t, uint32_t>{
+                                           40U, 102334155U})}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

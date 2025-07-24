@@ -135,7 +135,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
                  NativeRuntime &runtime) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
         auto [r1, g1] =
-            handler.invoke(address, 0, UINT64_MAX, x23::serialize<uint32_t>(100),
+            handler.invoke(address, 0, UINT64_MAX,
+                           x23::serialize<uint32_t>(100),
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -145,7 +146,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto [r2, g2] =
-            handler.invoke(address, 0, UINT64_MAX, x23::serialize<uint32_t>(200),
+            handler.invoke(address, 0, UINT64_MAX,
+                           x23::serialize<uint32_t>(200),
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -155,7 +157,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         }
 
         auto [r3, g3] =
-            handler.invoke(address, 0, UINT64_MAX, x23::serialize<uint32_t>(150),
+            handler.invoke(address, 0, UINT64_MAX,
+                           x23::serialize<uint32_t>(150),
                            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r3.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};

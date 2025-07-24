@@ -127,7 +127,8 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                 // set_amount
                 co_await set.bg();
 
-                auto calldata = x23::serialize(std::tuple<int64_t, int64_t>{SetAmount, AddAmount});
+                auto calldata = x23::serialize(
+                    std::tuple<int64_t, int64_t>{SetAmount, AddAmount});
 
                 auto handler = self->make_new_system_call_handler(
                     SignedTransaction{
