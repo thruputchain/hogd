@@ -5,8 +5,8 @@
 #include <utility>
 
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "syscall.hh"
 #include "transaction.hh"
@@ -15,16 +15,18 @@
 namespace hogd {
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
-syscall_GetTransactionStatistics_inner(SystemCallHandler& syscall_handler, WrappedGasAmount remaining_gas, TransactionStatistic input_statistic, uint64_t& output_result)
+syscall_GetTransactionStatistics_inner(SystemCallHandler &syscall_handler,
+                                       WrappedGasAmount remaining_gas,
+                                       TransactionStatistic input_statistic,
+                                       uint64_t &output_result)
 {
-    switch(input_statistic) {
-        case TransactionStatistic::kTxStatGasRemaining:
-            output_result = remaining_gas.gas_amount_;
-            return {SyscallErrorCode::kNone, 0};
-        default:
-            return {SyscallErrorCode::kInvalidSyscallInput, 0};
-    }
-
+  switch (input_statistic) {
+  case TransactionStatistic::kTxStatGasRemaining:
+    output_result = remaining_gas.gas_amount_;
+    return {SyscallErrorCode::kNone, 0};
+  default:
+    return {SyscallErrorCode::kInvalidSyscallInput, 0};
+  }
 };
 
 } // namespace hogd
