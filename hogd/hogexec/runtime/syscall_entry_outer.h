@@ -350,7 +350,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
     // Once the syscall inputs are parsed, we can print them in a formatted log
     // message.
-    trace("{}",
+    trace("Syscall {} Input: {}", Syscall,
           x23::show(make_syscall_input_struct<SyscallInputType>(std::tuple{
               SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
                   std::get<Is>(parsed_args))...})));
@@ -382,7 +382,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
     // be written to if the syscall succeeds.
     bool is_syscall_error =
         !res.first.has_value() || res.first.value() != SyscallErrorCode::kNone;
-    trace("{}",
+    trace("Syscall {} Output: {}", Syscall,
           is_syscall_error
               ? syscall_error_message(res.first)
               : x23::show(make_syscall_output_struct<

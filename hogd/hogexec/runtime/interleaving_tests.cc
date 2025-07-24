@@ -10,7 +10,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "bcs/encode.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -28,6 +27,7 @@
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -52,8 +52,8 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
   // perform a set_add_nnint
   builder.add(0,
-              [&](SystemCallHandler &handler, int128_t set_amount,
-                  int128_t add_amount) -> InvokeStatus<void> {
+              [&](SystemCallHandler &handler, int64_t set_amount,
+                  int64_t add_amount) -> InvokeStatus<void> {
                 auto r = handler.set_nnint(key, set_amount, add_amount);
                 if (!r.has_value() || !r.value().has_value()) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -119,7 +119,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
     model::RunnableActionSet actions(work_queue);
 
     auto add_set_add_action =
-        [this, &runtime_context]<int128_t SetAmount, int128_t AddAmount>(
+        [this, &runtime_context]<int64_t SetAmount, int64_t AddAmount>(
             model::RunnableActionSet &actions, bool &action_result) {
           actions.add_action(
               [](model::RunnableActionSet &set, auto self,
@@ -127,9 +127,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                 // set_amount
                 co_await set.bg();
 
-                auto calldata = bcs::encode_to<Calldata>(
-                    std::tuple<int128_t, int128_t>{SetAmount, AddAmount});
-                assert(calldata.has_value());
+                auto calldata = x23::serialize(std::tuple<int64_t, int64_t>{SetAmount, AddAmount});
 
                 auto handler = self->make_new_system_call_handler(
                     SignedTransaction{
@@ -141,7 +139,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                                .entrypoint =
                                                    entrypoint_from_method_id(0),
                                                .gas_limit = UINT64_MAX,
-                                               .calldata = calldata.value()}}},
+                                               .calldata = calldata}}},
                     runtime_context);
                 auto res = handler.root_invoke();
                 if (!res.is_root_success()) {

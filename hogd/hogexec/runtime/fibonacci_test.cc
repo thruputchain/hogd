@@ -7,7 +7,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "bcs/encode.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -22,6 +21,7 @@
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -37,6 +37,11 @@ protected:
   }
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
+
+  // An amount of gas that suffices for correct tests, but means that if there's 
+  // another calldata parsing error, we'll run out of gas and error out quickly
+  // instead of trying to compute an absurdly high fibonacci.
+  constexpr static GasAmount kSufficientGas = 10000;
 };
 
 // Simple test for sdk, to verify that calls actually happen.
@@ -55,7 +60,7 @@ TEST_F(FibonacciTest, FibonacciCalls)
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx = Transaction{.invocation = client.make_invocation<"fibonacci">(
-                                  UINT64_MAX, 5U)}},
+                                  kSufficientGas, 5U)}},
         wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -126,11 +131,9 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                     .invocation =
                         Invocation{.invoked_address = native_contract_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kSufficientGas,
                                    .calldata =
-                                       bcs::encode_to<Calldata, uint32_t,
-                                                      uint32_t>(10U, 55U)
-                                           .value()}}},
+                                       x23::serialize(std::tuple<uint32_t, uint32_t>{10U, 55U})}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -150,9 +153,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
                                    .calldata =
-                                       bcs::encode_to<Calldata, uint32_t,
-                                                      uint32_t>(40U, 102334155U)
-                                           .value()}}},
+                                       x23::serialize(std::tuple<uint32_t, uint32_t>{40U, 102334155U})}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());

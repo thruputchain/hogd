@@ -6,14 +6,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 
-#include "bcs/decode.h"
-#include "bcs/encode.h"
 #include "contract.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
@@ -23,6 +20,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -136,11 +134,13 @@ public:
     using args_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
     return [data] -> SyscallStatus<args_type> {
-      auto r = bcs::decode_from<args_type>(data);
-      if (!r.has_value()) {
-        return SyscallStatus<args_type>(SyscallErrorCode::kCalldataParseError);
+      args_type out;
+      try {
+        x23::deserialize_from(&out, data);
+      } catch (const x23::XdrBadInput &e) {
+        return SyscallError{SyscallErrorCode::kCalldataParseError};
       }
-      return SyscallStatus<args_type>(r.value());
+      return out;
     }();
   }
 
@@ -150,18 +150,22 @@ public:
     using return_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
     return [data] -> SyscallStatus<return_type> {
-      auto r = bcs::decode_from<return_type>(data);
-      if (!r.has_value()) {
+      return_type out;
+      try {
+        x23::deserialize(&out, data);
+      } catch (const x23::XdrBadInput &e) {
         return SyscallError{SyscallErrorCode::kReturnParseError};
       }
+
+      return out;
       // if the return type is a single value, return it directly instead of as
       // a tuple
-      if constexpr (requires { std::tuple_size_v<return_type> == 1; }) {
-        return std::get<0>(r.value());
+      /*if constexpr (requires { std::tuple_size_v<return_type> == 1; }) {
+        return std::get<0>(out);
       }
       else {
-        return r.value();
-      }
+        return out;
+      } */
     }();
   }
 
@@ -176,11 +180,12 @@ private:
   template<typename... Args>
   static Calldata make_encoding(std::tuple<Args...> args)
   {
-    auto out = bcs::encode_to<Calldata>(args);
-    if (!out.has_value()) {
-      throw std::runtime_error("Failed to encode calldata");
-    }
-    return out.value();
+    return x23::serialize(args);
+    // auto out = bcs::encode_to<Calldata>(args);
+    // if (!out.has_value()) {
+    //   throw std::runtime_error("Failed to encode calldata");
+    // }
+    // return out.value();
   }
 };
 
