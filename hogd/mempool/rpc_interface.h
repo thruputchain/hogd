@@ -1,8 +1,11 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 #include <memory>
+#include <random>
 #include <utility>
+#include <vector>
 
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
@@ -22,7 +25,10 @@ class MempoolRpcInterface {
 public:
   using rpc_service = SchedulerCoord1;
 
-  MempoolRpcInterface() = default;
+  MempoolRpcInterface(std::unique_ptr<RPCClient> &&db_client,
+                      std::unique_ptr<RPCClient> &&exec_client)
+    : db_client_(std::move(db_client)), exec_client_(std::move(exec_client))
+  {}
 
   // Disable copy and move
   MempoolRpcInterface(MempoolRpcInterface const &) = delete;
@@ -42,7 +48,7 @@ public:
   schedulercoord_nominate(DbTip const &db_tip);
 
   x23::Async<SchedulerValidationResult>
-  schedulercoord_validate(Nomination const &nomination);
+  schedulercoord_validate(DbTip const &db_tip, Nomination const &nomination);
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
@@ -51,6 +57,24 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
+  // TODO(jhumphri): We are using this function to generate unique block IDs.
+  // This will need to be reworked if/when we have multiple threads processing
+  // blocks.
+  static uint64_t get_ns_since_epoch()
+  {
+    std::chrono::time_point<std::chrono::system_clock> now =
+        std::chrono::system_clock::now();
+    std::chrono::nanoseconds ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            now.time_since_epoch());
+    return ns.count();
+  }
+
+  std::unique_ptr<RPCClient> db_client_;
+  std::unique_ptr<RPCClient> exec_client_;
+
+  std::vector<SignedTransaction> vetted_txs_;
+
   std::atomic<bool> shutdown_flag_ = false;
 };
 

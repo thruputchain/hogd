@@ -51,6 +51,12 @@ namespace hogd {
 
 class Validator {
 public:
+  static constexpr std::string kExecutorAddress = "127.0.0.1";
+  static constexpr uint16_t kExecutorPort = 10000;
+  static constexpr uint16_t kCoordinatorPort = 10001;
+  static constexpr std::string kDatabaseAddress = "127.0.0.1";
+  static constexpr uint16_t kDatabasePort = 10001;
+
   Validator();
   ~Validator() = default;
 
@@ -65,8 +71,6 @@ public:
 
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
-  static constexpr uint16_t kExecutorPort = 10000;
-  static constexpr uint16_t kCoordinatorPort = 10001;
   static constexpr size_t kNumDbPoolThreads = 16;
   static constexpr size_t kNumValidatorPoolThreads = 16;
 
@@ -97,6 +101,10 @@ private:
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
   std::unique_ptr<coord_client_t> coord_client_;
+
+  // New.
+  std::unique_ptr<RPCClient> db_client_;
+  std::unique_ptr<RPCClient> exec_client_;
 };
 
 } // namespace hogd
