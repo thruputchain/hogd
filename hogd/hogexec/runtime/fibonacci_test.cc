@@ -122,6 +122,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
 
   fib_client_t client(fib_contract_addr);
 
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   {
     // fibonacci(10) = 55
     auto handler = make_new_system_call_handler(
@@ -137,8 +138,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                 Serializer<NativeContractBuilder::
                                                kDefaultSerializationFormat>::
                                     serialize<uint32_t, uint32_t>(10U, 55U)
-                                        .value() // NOLINT(bugprone-unchecked-optional-access)
-                        }}},
+                                        .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -163,8 +163,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                                                kDefaultSerializationFormat>::
                                     serialize<uint32_t, uint32_t>(40U,
                                                                   102334155U)
-                                        .value() // NOLINT(bugprone-unchecked-optional-access)
-                        }}},
+                                        .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -172,6 +171,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
   }
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 } // namespace hogd
