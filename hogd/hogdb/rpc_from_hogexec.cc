@@ -76,6 +76,9 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
   case StorageDeltaType::kDeltaTypeBytestringSet:
     return to_rpc_error(
         tx.request_bytes(make_item_key(addrkey), to_span(delta.bytestring())));
+  case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
+    return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
+                                            from_xdr(delta.nnint().add_value)));
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
                                             from_xdr(delta.nnint().set_value),
