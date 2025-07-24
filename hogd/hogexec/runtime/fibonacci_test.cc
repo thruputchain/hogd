@@ -1,7 +1,7 @@
-#include <cstring>
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <tuple>
 #include <unordered_map>
@@ -16,12 +16,12 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -124,6 +124,12 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
 
   {
     // fibonacci(10) = 55
+    auto calldata =
+        Serializer<SerializationFormat::kTxs>::serialize<uint32_t, uint32_t>(
+            10U, 55U);
+    if (!calldata.has_value()) {
+      FAIL();
+    }
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
@@ -131,10 +137,8 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                     .invocation =
                         Invocation{.invoked_address = native_contract_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = kSufficientGas,
-                                   .calldata = x23::serialize(
-                                       std::tuple<uint32_t, uint32_t>{10U,
-                                                                      55U})}}},
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = *calldata}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -145,6 +149,12 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
 
   {
     // fibonacci(40) = 102334155 (0x6197ECB)
+    auto calldata =
+        Serializer<SerializationFormat::kTxs>::serialize<uint32_t, uint32_t>(
+            40U, 102334155U);
+    if (!calldata.has_value()) {
+      FAIL();
+    }
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx =
@@ -153,9 +163,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
                         Invocation{.invoked_address = native_contract_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
                                    .gas_limit = UINT64_MAX,
-                                   .calldata = x23::serialize(
-                                       std::tuple<uint32_t, uint32_t>{
-                                           40U, 102334155U})}}},
+                                   .calldata = *calldata}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
