@@ -15,11 +15,11 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -135,21 +135,12 @@ public:
     auto wrapped_f = [f = std::forward<decltype(lambda)>(lambda)](
                          SystemCallHandler &handler,
                          NativeRuntime &runtime) -> InvokeStatus<void> {
-      args_t args;
       auto calldata = handler.get_calldata();
-      try {
-        x23::deserialize_from(&args, std::as_bytes(std::span(calldata)));
-      } catch (const x23::XdrBadInput &e) {
-        return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-      }
-      /*auto args = [&]<size_t... Is>(std::index_sequence<Is...>) {
-        return bcs::decode_from<std::remove_cvref_t<decltype(std::get<Is>(
-            std::declval<args_t>()))>...>(
-            std::as_bytes(std::span(handler.get_calldata())));
-      }(std::make_index_sequence<std::tuple_size_v<args_t>>());
+      auto args = Serializer<SerializationFormat::kTxs>::deserialize<args_t>(
+          std::as_bytes(std::span(calldata)));
       if (!args.has_value()) {
         return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-      } */
+      }
 
       // invoke the lambda, and return the error if there is one
       auto return_value =
@@ -158,7 +149,7 @@ public:
         auto extra_args =
             detail::NativeContractArgs<fn_t>::extra_args(handler, runtime);
         return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
-          return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(args)...);
+          return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(*args)...);
           // std::get<Is>(args.value())...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>());
       }(std::make_index_sequence<std::tuple_size_v<args_t>>());
@@ -168,13 +159,13 @@ public:
 
       // otherwise, return the received value
       if constexpr (!std::is_same_v<return_t, void>) {
-        try {
-          auto return_buffer = x23::serialize(return_value.value());
-          handler.set_return_buffer(std::move(return_buffer));
-          return {};
-        } catch (const x23::XdrBadInput &e) {
+        auto return_buffer = Serializer<SerializationFormat::kTxs>::serialize(
+            return_value.value());
+        if (!return_buffer.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
+        handler.set_return_buffer(std::move(return_buffer.value()));
+        return {};
       }
       else {
         handler.set_return_buffer(ReturnBuffer{});

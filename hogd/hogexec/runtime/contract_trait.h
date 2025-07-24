@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -17,10 +18,10 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "serialize_calldata.h"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -134,13 +135,12 @@ public:
     using args_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
     return [data] -> SyscallStatus<args_type> {
-      args_type out;
-      try {
-        x23::deserialize_from(&out, data);
-      } catch (const x23::XdrBadInput &e) {
+      auto out =
+          Serializer<SerializationFormat::kTxs>::deserialize<args_type>(data);
+      if (!out.has_value()) {
         return SyscallError{SyscallErrorCode::kCalldataParseError};
       }
-      return out;
+      return *out;
     }();
   }
 
@@ -150,22 +150,12 @@ public:
     using return_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
     return [data] -> SyscallStatus<return_type> {
-      return_type out;
-      try {
-        x23::deserialize(&out, data);
-      } catch (const x23::XdrBadInput &e) {
+      auto out =
+          Serializer<SerializationFormat::kTxs>::deserialize<return_type>(data);
+      if (!out.has_value()) {
         return SyscallError{SyscallErrorCode::kReturnParseError};
       }
-
-      return out;
-      // if the return type is a single value, return it directly instead of as
-      // a tuple
-      /*if constexpr (requires { std::tuple_size_v<return_type> == 1; }) {
-        return std::get<0>(out);
-      }
-      else {
-        return out;
-      } */
+      return *out;
     }();
   }
 
@@ -180,12 +170,11 @@ private:
   template<typename... Args>
   static Calldata make_encoding(std::tuple<Args...> args)
   {
-    return x23::serialize(args);
-    // auto out = bcs::encode_to<Calldata>(args);
-    // if (!out.has_value()) {
-    //   throw std::runtime_error("Failed to encode calldata");
-    // }
-    // return out.value();
+    auto out = Serializer<SerializationFormat::kTxs>::serialize(args);
+    if (!out.has_value()) {
+      throw std::runtime_error("Failed to encode calldata");
+    }
+    return out.value();
   }
 };
 
