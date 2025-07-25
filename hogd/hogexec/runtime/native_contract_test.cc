@@ -4,6 +4,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <unordered_map>
@@ -22,6 +23,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -334,13 +336,15 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     }
 
     // add ops shouldn't query db
-    auto r = handler.set_nnint(bad_key, std::nullopt, 100);
-    if (!r.has_value() || !r.value().has_value()) {
+    auto [r, _gas] =
+        syscall_NonnegativeIntSetAdd_inner(handler, bad_key, nullptr, 100);
+    if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
 
-    auto r2 = handler.set_nnint(bad_key, std::nullopt, -200);
-    if (!r2.has_value() || !r2.value().has_value()) {
+    auto [r2, _gas2] =
+        syscall_NonnegativeIntSetAdd_inner(handler, bad_key, nullptr, -200);
+    if (!r2.has_value() || r2.value() != SyscallErrorCode::kNone) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
 
@@ -356,8 +360,10 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   });
 
   builder.add(1, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
-    auto r = handler.set_nnint(bad_key, 100, 200);
-    if (!r.has_value() || !r.value().has_value()) {
+    int128_t set_value = 100;
+    auto [r, _gas] =
+        syscall_NonnegativeIntSetAdd_inner(handler, bad_key, &set_value, 200);
+    if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
 

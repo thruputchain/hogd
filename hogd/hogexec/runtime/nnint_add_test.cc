@@ -24,6 +24,7 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -146,14 +147,18 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
-             auto res = handler.set_nnint(key, 200, 300);
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
+             int128_t set_value = 200;
+             auto [res, _gas] =
+                 syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value,
+                                                    300);
+             if (!res.has_value() || res.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto res2 = handler.set_nnint(key, std::nullopt, 100);
-             if (!res2.has_value()) {
-               return res2.error().to_invoke_error();
+             auto [res2, _gas2] =
+                 syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 100);
+             if (!res2.has_value() || res2.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              auto res3 = handler.get_nnint(key, true);
