@@ -60,6 +60,12 @@ public:
 private:
   // The maximum number of txs in a block.
   static constexpr size_t kMaxBlockSize = 128;
+  // To compute the block hash, we insert tx hashes into a Merkle Trie. We make
+  // insertion faster with multiple threads. Using a lot of threads could cause
+  // worse performance if each thread has few hashes to insert. Thus, to
+  // calculate a reasonable number of threads to use, we ensure that each thread
+  // has at least [kMinHashesPerThread] hashes to insert.
+  static constexpr size_t kMinHashesPerThread = 16'384;
 
   // TODO(jhumphri): We are using this function to generate unique block IDs.
   // This will need to be reworked if/when we have multiple threads processing

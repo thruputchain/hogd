@@ -78,10 +78,43 @@ SHA256Hash
 MempoolRpcInterface::get_block_hash(
     const x23::Vec<SignedTransactionHash> &hashes)
 {
+  CHECK(!hashes.empty());
+
   MerkleTriePrefix trie;
-  // TODO(jhumphri): Use a [WorkerPool].
-  for (const SignedTransactionHash &hash : hashes) {
-    CHECK(trie.insert(HexArray(hash), std::span<const std::byte>()));
+  WorkerPool &worker_pool = WorkerPool::get_default_pool();
+  std::vector<std::future<void>> futures;
+
+  size_t num_threads =
+      std::min(hashes.size() / kMinHashesPerThread, worker_pool.worker_count());
+  if (hashes.size() % kMinHashesPerThread &&
+      num_threads < worker_pool.worker_count()) {
+    num_threads++;
+  }
+  // We CHECK at the top of the method that [hashes] is not empty, so
+  // [num_threads] must be at least 1. This is important since we divide by
+  // [num_threads] below, so we want to make sure we do not divide by 0.
+  CHECK_GT(num_threads, 0);
+  CHECK_LE(num_threads, worker_pool.worker_count());
+  futures.reserve(num_threads);
+  const size_t hashes_per_thread = hashes.size() / num_threads;
+  for (size_t i = 0; i < num_threads; i++) {
+    futures.push_back(worker_pool.submit([&] {
+      for (size_t j = 0; j < hashes_per_thread; j++) {
+        size_t hash_idx = (hashes_per_thread * i) + j;
+        if (hash_idx >= hashes.size()) {
+          // If [hashes.size()] is not evenly divisible by
+          // [kMinHashesPerThread], then the last thread may have fewer than
+          // [hashes_per_thread] hashes to insert into the trie.
+          CHECK_EQ(i, num_threads - 1);
+          break;
+        }
+        CHECK(trie.insert(HexArray(hashes[hash_idx]),
+                          std::span<const std::byte>()));
+      }
+    }));
+  }
+  for (std::future<void> &future : futures) {
+    future.get();
   }
   trie.generate_top_level_hashes();
   return trie.get_root_hash();

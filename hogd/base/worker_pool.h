@@ -61,7 +61,7 @@ public:
   WorkerPool &operator=(const WorkerPool &p) = delete;
 
   // worker_count returns the maximum number of available workers.
-  int worker_count() const { return workers_.size(); }
+  size_t worker_count() const { return workers_.size(); }
 
   // submit enqueues a job and returns a future for when the job completes.
   template<typename Func,
