@@ -144,7 +144,8 @@ inline void store_cxs_int8_0_extra_byte(x23::Buf& buf, int64_t value) {
         buf.push_back(value);
     } else {
         // invert and set highbit
-        buf.push_back(((~value) & 0b0001'1111) | 0b0010'0000);
+        int8_t inverted = -value;
+        buf.push_back(((~inverted) & 0b0001'1111) | 0b0010'0000);
     }
 }
 
@@ -247,11 +248,12 @@ T load_cxs_int(std::span<const uint8_t>& data) {
     uint8_t first_byte = data[0];
     if (first_byte <= kCxsUInt81ByteMax) {
         data = data.subspan(1);
-        // convert to signed
-        if (first_byte & 0b0010'0000) {
-            return ~(first_byte & 0b0001'1111);
+        if (first_byte <= kCxsInt81ByteMax) {
+            assert(!(first_byte & 0b0010'0000));
+            return first_byte;
         }
-        return first_byte;
+        int8_t signed_byte = first_byte;
+        return -(((~signed_byte) & 0b0001'1111));
     }
     assert((first_byte & 0b0011'1111) == 63);
     uint8_t header = first_byte >> 6;
@@ -453,12 +455,19 @@ struct CxsSerializer<T> {
     }
 };
 
-inline void serialize_cxs(x23::Buf& buf, const is_xdr_type auto& value) {
+inline void serialize_cxs_to(x23::Buf& buf, const is_xdr_type auto& value) {
     CxsSerializer<std::remove_cvref_t<decltype(value)>>::store(buf, value);
 }
+
+inline x23::Buf serialize_cxs(const is_xdr_type auto&... value) {
+    x23::Buf buf;
+    (serialize_cxs_to(buf, value), ...);
+    return buf;
+}
+
 template<is_xdr_type T>
-void deserialize_cxs(std::span<const uint8_t>& data, T& value) {
-    CxsSerializer<std::remove_cvref_t<decltype(value)>>::load(data, value);
+void deserialize_cxs(T* value, std::span<const uint8_t> data) {
+    CxsSerializer<T>::load(data, *value);
     if (data.size() != 0) {
         throw CxsBadInput("Extra data after deserializing {}", xdr_type_name<T>());
     }

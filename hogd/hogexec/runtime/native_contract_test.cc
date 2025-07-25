@@ -18,6 +18,7 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -133,9 +134,12 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       [&address](SystemCallHandler &handler,
                  NativeRuntime &runtime) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
-        auto [r1, g1] =
-            handler.invoke(address, 0, UINT64_MAX, Calldata{100, 0, 0, 0},
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto [r1, g1] = handler.invoke(
+            address, 0, UINT64_MAX,
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<uint32_t>(100)
+                    .value(),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -143,9 +147,12 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r2, g2] =
-            handler.invoke(address, 0, UINT64_MAX, Calldata{200, 0, 0, 0},
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto [r2, g2] = handler.invoke(
+            address, 0, UINT64_MAX,
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<uint32_t>(200)
+                    .value(),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -153,9 +160,12 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r3, g3] =
-            handler.invoke(address, 0, UINT64_MAX, Calldata{150, 0, 0, 0},
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto [r3, g3] = handler.invoke(
+            address, 0, UINT64_MAX,
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<uint32_t>(150)
+                    .value(),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r3.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }

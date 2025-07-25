@@ -551,6 +551,8 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::add_nnint(StorageKeyContractData const &storage_key,
                              int128_t add_value)
 {
+  // TODO(geoff): This should not default to overwriting the set value with
+  // nullopt.
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
