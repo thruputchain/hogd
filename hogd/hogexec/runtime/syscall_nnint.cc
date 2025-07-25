@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
+#include <cassert>
 #include <utility>
 
 #include "hogd/base/types.h"
@@ -16,15 +17,15 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 int128_t &output_current_set,
                                 int128_t &output_current_add)
 {
-  auto status = syscall_handler.get_nnint(input_key);
+  auto status = syscall_handler.get_nnint(input_key, true);
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }
   if (!status.value()) {
     return {status.value().error().code(), 0};
   }
-
-  output_current_set = status.value().value().first;
+  assert(status.value().value().first.has_value());
+  output_current_set = *status.value().value().first;
   output_current_add = status.value().value().second;
 
   return {SyscallErrorCode::kNone, 0};

@@ -125,11 +125,19 @@ public:
                  std::span<const std::byte> input_bytestring);
 
   // === Nonnegative Integer syscalls ===
-  SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
-  get_nnint(StorageKeyContractData const &storage_key);
+  // get_nnint returns the base value and the add value.
+  // Returns the base value from the snapshot if load_from_snapshot is true.
+  // Otherwise, returns a tx-local written set value, if one exists,
+  // or nullopt if not.
+  SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
+  get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
+
   SystemStatus<SyscallStatus<void>>
   set_nnint(StorageKeyContractData const &storage_key, int128_t set_value,
             int128_t add_value);
+  // Defined as equivalent to outputting set_add with set equal to whatever
+  // the current database snapshot value is.
+  // Has, therefore, the same overwrite semantics as set_add.
   SystemStatus<SyscallStatus<void>>
   add_nnint(StorageKeyContractData const &storage_key, int128_t add_value);
 
