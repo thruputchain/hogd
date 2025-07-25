@@ -495,8 +495,10 @@ DiskReader::cleanup(const Directory &dir)
     needed.insert(f);
 
   for (auto &file : *files) {
-    if (needed.contains(file.path_))
+    if (needed.contains(file.path_)) {
+      info("file {} needed for recovery; retaining", file.path_);
       continue;
+    }
     info("file {} not needed for recovery; cleaning up", file.path_);
     ErrnoStatus<void> r = dir.unlink(file.path_);
     if (!r)

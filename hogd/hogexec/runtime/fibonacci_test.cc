@@ -1,13 +1,12 @@
-#include <cstring>
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
 
-#include "bcs/encode.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -17,6 +16,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
@@ -37,6 +37,11 @@ protected:
   }
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
+
+  // An amount of gas that suffices for correct tests, but means that if there's
+  // another calldata parsing error, we'll run out of gas and error out quickly
+  // instead of trying to compute an absurdly high fibonacci.
+  constexpr static GasAmount kSufficientGas = 10000;
 };
 
 // Simple test for sdk, to verify that calls actually happen.
@@ -55,7 +60,7 @@ TEST_F(FibonacciTest, FibonacciCalls)
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx = Transaction{.invocation = client.make_invocation<"fibonacci">(
-                                  UINT64_MAX, 5U)}},
+                                  kSufficientGas, 5U)}},
         wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -117,6 +122,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
 
   fib_client_t client(fib_contract_addr);
 
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   {
     // fibonacci(10) = 55
     auto handler = make_new_system_call_handler(
@@ -124,13 +130,15 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata =
-                                       bcs::encode_to<Calldata, uint32_t,
-                                                      uint32_t>(10U, 55U)
-                                           .value()}}},
+                        Invocation{
+                            .invoked_address = native_contract_addr,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .gas_limit = UINT64_MAX,
+                            .calldata =
+                                Serializer<NativeContractBuilder::
+                                               kDefaultSerializationFormat>::
+                                    serialize<uint32_t, uint32_t>(10U, 55U)
+                                        .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -146,13 +154,16 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
             .tx =
                 Transaction{
                     .invocation =
-                        Invocation{.invoked_address = native_contract_addr,
-                                   .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
-                                   .calldata =
-                                       bcs::encode_to<Calldata, uint32_t,
-                                                      uint32_t>(40U, 102334155U)
-                                           .value()}}},
+                        Invocation{
+                            .invoked_address = native_contract_addr,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .gas_limit = UINT64_MAX,
+                            .calldata =
+                                Serializer<NativeContractBuilder::
+                                               kDefaultSerializationFormat>::
+                                    serialize<uint32_t, uint32_t>(40U,
+                                                                  102334155U)
+                                        .value()}}},
         multiplexed_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
@@ -160,6 +171,7 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
   }
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 } // namespace hogd

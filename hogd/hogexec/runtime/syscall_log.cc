@@ -1,7 +1,9 @@
+#include "hogd/base/log.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cstddef>
 #include <span>
+#include <string_view>
 #include <utility>
 
 #include "hogd/hogexec/runtime/status.h"
@@ -19,6 +21,9 @@ syscall_Log_inner(SystemCallHandler &syscall_handler,
   if (!status) {
     return {status.error().code(), 0};
   }
+  trace("Log: {}",
+        std::string_view(reinterpret_cast<const char *>(input_buffer.data()),
+                         input_buffer.size()));
 
   return {SyscallErrorCode::kNone, 0};
 };

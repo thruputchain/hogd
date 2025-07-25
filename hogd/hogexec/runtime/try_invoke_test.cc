@@ -1,10 +1,9 @@
-#include <cstddef>
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
-
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -12,7 +11,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "bcs/encode.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -22,6 +20,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/preset_native_token.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -1476,7 +1475,7 @@ TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
              auto [r_transfer, g_transfer] =
                  native_token_client.invoke<"transfer">(handler, receiver_addr,
-                                                        write_cost);
+                                                        to_xdr(write_cost));
 
              if (!r_transfer.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -1494,7 +1493,11 @@ TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
              auto [r_balance, g_balance] =
                  native_token_client.invoke<"get_balance">(handler);
-             if (!r_balance.has_value() || r_balance.value() != 0) {
+             if ((!r_balance.has_value()) || !r_balance.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             if (from_xdr(r_balance.value().value()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -1601,10 +1604,14 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 
   // perform a set_add_nnint
   builder.add(0,
-              [&](SystemCallHandler &handler, int128_t set_amount,
-                  int128_t add_amount) -> InvokeStatus<void> {
-                auto r = handler.set_nnint(key, set_amount, add_amount);
-                if (!r.has_value() || !r.value().has_value()) {
+              [&](SystemCallHandler &handler, int64_t set_amount,
+                  int64_t add_amount) -> InvokeStatus<void> {
+                int128_t set_128 = set_amount;
+                auto [r, _gas] =
+                    syscall_NonnegativeIntSetAdd_inner(handler, key, &set_128,
+                                                       add_amount);
+
+                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
                 return {};
@@ -1613,51 +1620,60 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
   // perform a add_nnint
   builder.add(1,
               [&](SystemCallHandler &handler,
-                  int128_t add_amount) -> InvokeStatus<void> {
-                auto r = handler.add_nnint(key, add_amount);
-                if (!r.has_value() || !r.value().has_value()) {
+                  int64_t add_amount) -> InvokeStatus<void> {
+                auto [r, _gas] =
+                    syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
+                                                       add_amount);
+                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
                 return {};
               });
 
-  builder.add(2,
-              [&](SystemCallHandler &handler,
-                  NativeRuntime &runtime) -> InvokeStatus<void> {
-                // perform an add_nnint, then perform a set_add_nnint with the
-                // same set value in a try_invoke frame
-                auto calldata0 =
-                    bcs::encode_to<Calldata>(std::tuple<int128_t>{100});
-                assert(calldata0.has_value());
+  builder.add(
+      2,
+      [&](SystemCallHandler &handler,
+          NativeRuntime &runtime) -> InvokeStatus<void> {
+        // perform an add_nnint, then perform a set_add_nnint with the
+        // same set value in a try_invoke frame
+        auto calldata0 =
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<int64_t>(100)
+                    .value();
 
-                auto [r0, _g0] = handler.invoke(
-                    handler.get_current_address(), 1,
-                    runtime.get_available_gas(), calldata0.value(),
-                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-                if (!r0.has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                // tolerate try_invoke failure
+        auto [r0, _g0] = handler.invoke(handler.get_current_address(), 1,
+                                        runtime.get_available_gas(), calldata0,
+                                        std::to_underlying(
+                                            InvokeFlag::kInvokeFlagTryInvoke));
+        if (!r0.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        // tolerate try_invoke failure
 
-                auto calldata1 = bcs::encode_to<Calldata>(
-                    std::tuple<int128_t, int128_t>{100, -100});
-                assert(calldata1.has_value());
+        auto calldata1 =
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<int64_t, int64_t>(100, -100)
+                    .value();
 
-                auto [r1, _g1] = handler.invoke(
-                    handler.get_current_address(), 0,
-                    runtime.get_available_gas(), calldata1.value(),
-                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-                if (!r1.has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                // tolerate try_invoke failure
+        auto [r1, _g1] = handler.invoke(handler.get_current_address(), 0,
+                                        runtime.get_available_gas(), calldata1,
+                                        std::to_underlying(
+                                            InvokeFlag::kInvokeFlagTryInvoke));
+        if (!r1.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        // tolerate try_invoke failure
 
-                return {};
-              });
+        return {};
+      });
   builder.add(3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
     // reset contract state
-    auto r = handler.set_nnint(key, 35, 0);
-    if (!r.has_value() || !r.value().has_value()) {
+    int128_t set_value = 35;
+    auto [r, _gas] =
+        syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value, 0);
+    // auto r = handler.set_nnint(key, 35, 0);
+    // if (!r.has_value() || !r.value().has_value()) {
+    if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
     return {};
@@ -1725,9 +1741,10 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 
           // If this one preceeds the set_add_nnint in method 2, then that will
           // succeed.
-          auto calldata = bcs::encode_to<Calldata>(
-              std::tuple<int128_t, int128_t>{100, 100});
-          assert(calldata.has_value());
+          auto calldata =
+              Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                  serialize<int64_t, int64_t>(100, 100)
+                      .value();
           auto handler = self->make_new_system_call_handler(
               SignedTransaction{
                   .tx =
@@ -1737,7 +1754,7 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
                                          .gas_limit = UINT64_MAX,
-                                         .calldata = calldata.value()}}},
+                                         .calldata = calldata}}},
               runtime_context);
           auto res = handler.root_invoke();
           co_await set.bg();

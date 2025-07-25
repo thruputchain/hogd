@@ -4,6 +4,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <unordered_map>
@@ -18,9 +19,11 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -133,9 +136,12 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
       [&address](SystemCallHandler &handler,
                  NativeRuntime &runtime) -> InvokeStatus<int32_t> {
         // invoke method 0 three times, with various gas costs
-        auto [r1, g1] =
-            handler.invoke(address, 0, UINT64_MAX, Calldata{100, 0, 0, 0},
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto [r1, g1] = handler.invoke(
+            address, 0, UINT64_MAX,
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<uint32_t>(100)
+                    .value(),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r1.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -143,9 +149,12 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r2, g2] =
-            handler.invoke(address, 0, UINT64_MAX, Calldata{200, 0, 0, 0},
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto [r2, g2] = handler.invoke(
+            address, 0, UINT64_MAX,
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<uint32_t>(200)
+                    .value(),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r2.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -153,9 +162,12 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
 
-        auto [r3, g3] =
-            handler.invoke(address, 0, UINT64_MAX, Calldata{150, 0, 0, 0},
-                           std::to_underlying(InvokeFlag::kInvokeFlagNone));
+        auto [r3, g3] = handler.invoke(
+            address, 0, UINT64_MAX,
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<uint32_t>(150)
+                    .value(),
+            std::to_underlying(InvokeFlag::kInvokeFlagNone));
         if (!r3.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
@@ -315,23 +327,66 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   bad_full_key.contract_data_key() = bad_key;
 
   builder.add(0, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
-    auto r = handler.add_nnint(bad_key, 100);
-    if (!r.has_value() || !r.value().has_value()) {
+    // get_nnint() with force_load_from_snapshot=false from clean state should
+    // not query db
+    auto r0 = handler.get_nnint(bad_key, false);
+    if (!r0.has_value() || !r0.value().has_value() ||
+        r0.value().value().first.has_value()) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
 
-    auto r2 = handler.add_nnint(bad_key, -200);
-    if (!r2.has_value() || !r2.value().has_value()) {
+    // add ops shouldn't query db
+    auto [r, _gas] =
+        syscall_NonnegativeIntSetAdd_inner(handler, bad_key, nullptr, 100);
+    if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    auto [r2, _gas2] =
+        syscall_NonnegativeIntSetAdd_inner(handler, bad_key, nullptr, -200);
+    if (!r2.has_value() || r2.value() != SyscallErrorCode::kNone) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    // assert that get_nnint() without a load doesn't query db
+    auto r3 = handler.get_nnint(bad_key, false);
+    if (!r3.has_value() || !r3.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (r3.value().value().first.has_value()) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
     return {};
   });
 
   builder.add(1, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
-    auto r = handler.set_nnint(bad_key, 100, 200);
-    if (!r.has_value() || !r.value().has_value()) {
+    int128_t set_value = 100;
+    auto [r, _gas] =
+        syscall_NonnegativeIntSetAdd_inner(handler, bad_key, &set_value, 200);
+    if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
+
+    // assert that get_nnint() after a set doesn't query db, even with
+    // force_load_from_snapshot=true
+    auto r2 = handler.get_nnint(bad_key, true);
+    if (!r2.has_value() || !r2.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (!r2.value().value().first.has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    // get_nnint() after a set with force_load_from_snapshot=false should return
+    // the set value if it exists
+    auto r3 = handler.get_nnint(bad_key, false);
+    if (!r3.has_value() || !r3.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (!r3.value().value().first.has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
     return {};
   });
 
