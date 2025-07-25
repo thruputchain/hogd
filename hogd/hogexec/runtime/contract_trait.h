@@ -152,7 +152,7 @@ public:
   }
 
   template<StringLiteral Name, typename... Args>
-  static Calldata make_calldata(Args... args) requires (
+  static Calldata make_calldata(Args const &...args) requires (
       std::same_as<
           std::tuple<Args...>,
           typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t>)
@@ -211,7 +211,7 @@ public:
 
 private:
   template<typename... Args>
-  static Calldata make_encoding(std::tuple<Args...> args)
+  static Calldata make_encoding(std::tuple<Args...> const &args)
   {
     auto out = Serializer<kSerializationFormat>::serialize(args);
     if (!out.has_value()) {

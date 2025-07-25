@@ -262,6 +262,7 @@ protected:
 
   using cxs_client_t = ContractTraitClient<CxsRoundtrip>;
 
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   template<StringLiteral MethodName, typename T>
   void roundtrip_test(T const &value, SystemCallHandler &handler,
                       cxs_client_t &client, bool &success)
@@ -280,6 +281,7 @@ protected:
     ASSERT_EQ(roundtrip_value.value(), value);
     success = true;
   }
+  // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::shared_ptr<RuntimeContext> wasm_runtime_context_;
   const ContractAddress cxs_contract_addr_ = make_contract_address(0);
