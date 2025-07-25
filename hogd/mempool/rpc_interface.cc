@@ -7,6 +7,8 @@
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/hex_array.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
@@ -73,17 +75,16 @@ MempoolRpcInterface::abandon_snapshot(BlockID block_id)
 }
 
 SHA256Hash
-MempoolRpcInterface::get_block_hash(const x23::Vec<SignedTransaction> &txs)
+MempoolRpcInterface::get_block_hash(
+    const x23::Vec<SignedTransactionHash> &hashes)
 {
-  // TODO(jhumphri): Implement.
-  return SHA256Hash{};
-}
-
-SHA256Hash
-MempoolRpcInterface::get_block_hash(const x23::Vec<ProposedTransaction> &txs)
-{
-  // TODO(jhumphri): Implement.
-  return SHA256Hash{};
+  MerkleTriePrefix trie;
+  // TODO(jhumphri): Use a [WorkerPool].
+  for (const SignedTransactionHash &hash : hashes) {
+    CHECK(trie.insert(HexArray(hash), std::span<const std::byte>()));
+  }
+  trie.generate_top_level_hashes();
+  return trie.get_root_hash();
 }
 
 x23::Async<SchedulerNominationResult>
@@ -120,7 +121,7 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
     txs.push_back(it->second);
     it = vetted_txs_.erase(it);
   }
-  nomination.block_hash = get_block_hash(txs);
+  nomination.block_hash = get_block_hash(nomination.transaction_hashes);
 
   if (txs.size() == 1) {
     auto res =
@@ -239,8 +240,10 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  // Verify the block hash.
-  if (get_block_hash(txs) != nomination.block_hash) {
+  // Verify the block hash. It is safe to directly use
+  // [nomination.transaction_hashes] here because we already checked above that
+  // all of these hashes correspond to vetted txs.
+  if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }

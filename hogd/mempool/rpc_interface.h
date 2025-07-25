@@ -79,8 +79,7 @@ private:
 
   void abandon_snapshot(BlockID block_id);
 
-  SHA256Hash get_block_hash(const x23::Vec<SignedTransaction> &txs);
-  SHA256Hash get_block_hash(const x23::Vec<ProposedTransaction> &txs);
+  SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
 
   std::unique_ptr<RPCClient> db_client_;
   std::unique_ptr<RPCClient> exec_client_;
