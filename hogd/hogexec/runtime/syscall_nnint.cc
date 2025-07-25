@@ -16,10 +16,11 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                 const StorageKeyContractData &input_key,
                                 bool input_force_load_from_snapshot,
                                 int128_t &output_current_set,
-                                bool& output_current_set_opt,
+                                bool &output_current_set_opt,
                                 int128_t &output_current_add)
 {
-  auto status = syscall_handler.get_nnint(input_key, input_force_load_from_snapshot);
+  auto status =
+      syscall_handler.get_nnint(input_key, input_force_load_from_snapshot);
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }
@@ -29,7 +30,8 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
   if (status.value().value().first.has_value()) {
     output_current_set = *(status.value().value().first);
     output_current_set_opt = true;
-  } else {
+  }
+  else {
     output_current_set_opt = false;
   }
   output_current_add = status.value().value().second;
