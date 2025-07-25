@@ -15,6 +15,8 @@
 #include "x23/cleanup.h"
 #include "x23c/defs.h"
 
+#include "x23/config.h"
+
 using std::optional;
 using std::string_view;
 using std::string_literals::operator""s;
@@ -815,6 +817,8 @@ gen_rs(vector<Definition> *defs)
   GenRs gs;
   std::string preamble = R"(// -*-Rust-*-
 // Generated Code: DO NOT CHECK IN
+
+// Generated from xdrc commit: )" + std::string(GIT_COMMIT_HASH) + R"(
 
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
