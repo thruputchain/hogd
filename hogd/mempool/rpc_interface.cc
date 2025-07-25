@@ -72,6 +72,20 @@ MempoolRpcInterface::abandon_snapshot(BlockID block_id)
   }
 }
 
+SHA256Hash
+MempoolRpcInterface::get_block_hash(const x23::Vec<SignedTransaction> &txs)
+{
+  // TODO(jhumphri): Implement.
+  return SHA256Hash{};
+}
+
+SHA256Hash
+MempoolRpcInterface::get_block_hash(const x23::Vec<ProposedTransaction> &txs)
+{
+  // TODO(jhumphri): Implement.
+  return SHA256Hash{};
+}
+
 x23::Async<SchedulerNominationResult>
 MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
 {
@@ -86,12 +100,27 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
     }
   }
 
+  SchedulerNominationResult result(
+      SchedulerNominationOutcome::SchedulerNominationOK);
+  result.scheduler_nomination().block_id = block_id;
+  Nomination &nomination = result.scheduler_nomination().nomination;
+  // TODO(jhumphri): What should [block_height] be?
+  nomination.block_height = 0;
+  nomination.prev_block_hash = db_tip.hash;
+  // [nomination.block_hash], [nomination.transaction_hashes], and
+  // [nomination.transaction_nominations] are filled in below.
+  nomination.transaction_hashes.reserve(kMaxBlockSize);
+  nomination.transaction_nominations.reserve(kMaxBlockSize);
+
   x23::Vec<SignedTransaction> txs;
+  txs.reserve(kMaxBlockSize);
   auto it = vetted_txs_.begin();
   for (size_t i = 0; i < kMaxBlockSize && it != vetted_txs_.end(); i++) {
+    nomination.transaction_hashes.push_back(it->first);
     txs.push_back(it->second);
     it = vetted_txs_.erase(it);
   }
+  nomination.block_hash = get_block_hash(txs);
 
   if (txs.size() == 1) {
     auto res =
@@ -104,7 +133,12 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
     }
     if (res.value() ==
         ExecProposeResult(ExecResult::ExecResultTxDeterministicError)) {
-      // TODO(jhumphri): Handle the nondeterministic data.
+      nomination.transaction_nominations.push_back(
+          {.nondeterministic_proposal_data = res.value().proposal_data()});
+    }
+    else {
+      nomination.transaction_nominations.push_back(
+          {.nondeterministic_proposal_data = NondeterministicProposalData{}});
     }
   }
   else if (txs.size() > 1) {
@@ -118,7 +152,12 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
     for (const ExecProposeResult &result : res.value()) {
       if (result ==
           ExecProposeResult(ExecResult::ExecResultTxDeterministicError)) {
-        // TODO(jhumphri): Handle the nondeterministic data.
+        nomination.transaction_nominations.push_back(
+            {.nondeterministic_proposal_data = result.proposal_data()});
+      }
+      else {
+        nomination.transaction_nominations.push_back(
+            {.nondeterministic_proposal_data = NondeterministicProposalData{}});
       }
     }
   }
@@ -129,10 +168,17 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
-  // TODO(jhumphri): Close snapshot in db.
+  {
+    auto res = rpc_client_call<DbCoord1, "dbcoord_close_snapshot">(*db_client_,
+                                                                   block_id);
+    if (!res.has_value() ||
+        res.value() != DbBlockResult(DbResult::DbResultOK)) {
+      co_return SchedulerNominationResult(
+          SchedulerNominationOutcome::SchedulerNominationError);
+    }
+  }
 
-  co_return SchedulerNominationResult(
-      SchedulerNominationOutcome::SchedulerNominationError);
+  co_return result;
 }
 
 x23::Async<SchedulerValidationResult>
@@ -153,8 +199,8 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   // [nomination] includes the the tx hashes and the nondeterministic proposal
   // data. We need to use these tx hashes to look up the vetted txs in
   // [vetted_txs_]. Assuming we find all of the txs, we then combine them with
-  // the nondeterminstic proposal data to form a [ProposedTransaction], which is
-  // what the executors expect to receive.
+  // the nondeterminstic proposal data to form a [ProposedTransaction], which
+  // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
   txs.reserve(nomination.transaction_nominations.size());
   if (!find_vetted_txs(nomination, txs)) {
@@ -193,8 +239,21 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  // TODO(jhumphri): Verify block hash.
-  // TODO(jhumphri): Close snapshot in db.
+  // Verify the block hash.
+  if (get_block_hash(txs) != nomination.block_hash) {
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
+
+  {
+    auto res = rpc_client_call<DbCoord1, "dbcoord_close_snapshot">(*db_client_,
+                                                                   block_id);
+    if (!res.has_value() ||
+        res.value() != DbBlockResult(DbResult::DbResultOK)) {
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationDbFailed);
+    }
+  }
 
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
