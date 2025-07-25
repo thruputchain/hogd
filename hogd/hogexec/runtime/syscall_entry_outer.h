@@ -250,7 +250,6 @@ arg_to_xdr(auto arg)
         .reinterpret<x23::Vec<uint8_t>>();
   }
   else if constexpr (std::is_pointer_v<T>) {
-    // using base_t = std::remove_const_t<std::remove_pointer_t<T>>;
     using base_t = std::remove_cvref_t<decltype(arg_to_xdr(*arg))>;
     if (arg) {
       return x23::Ptr<base_t>(new base_t(arg_to_xdr(*arg)));
