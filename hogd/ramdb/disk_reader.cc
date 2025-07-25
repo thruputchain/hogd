@@ -221,6 +221,9 @@ struct FileMetadata {
     if (begin_lsn_ < b.begin_lsn_)
       return true;
 
+    if (begin_lsn_ > b.begin_lsn_)
+      return false;
+
     // Prioritize files that cover "longer" lsn ranges.
     return end_lsn_exclusive_ > b.end_lsn_exclusive_;
   }
