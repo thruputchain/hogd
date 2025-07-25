@@ -549,29 +549,19 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
 
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
-                             int128_t set_value, int128_t add_value)
+                             std::optional<int128_t> set_value,
+                             int128_t add_value)
 {
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
+  // Writing to an nnint, without explicitly defining the set value,
+  // is defined as equivalent to outputting set_add with set equal to
+  // whatever the current database snapshot value is.  As such, it is correct to
+  // overwrite the set value here with nullopt, in such a case.
   return item_view->set(
       NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
 }
-
-SystemStatus<SyscallStatus<void>>
-SystemCallHandler::add_nnint(StorageKeyContractData const &storage_key,
-                             int128_t add_value)
-{
-  // This is defined as equivalent to outputting set_add with set equal to
-  // whatever the current database snapshot value is.  As such, it is correct to
-  // overwrite the set value here with nullopt.
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
-  assert(item_view);
-
-  return item_view->set(
-      NNIntItem{.base_value_ = std::nullopt, .add_value_ = add_value});
-}
-
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {

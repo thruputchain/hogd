@@ -54,7 +54,7 @@ adjust_allowance(SystemCallHandler &handler, ContractAddress owner,
   }
   int128_t new_add = add + amount;
   assert(set.has_value());
-  auto r2 = handler.set_nnint(allow_key, *set, new_add);
+  auto r2 = handler.set_nnint(allow_key, set, new_add);
   if (!r2.has_value()) {
     return r2.error();
   }

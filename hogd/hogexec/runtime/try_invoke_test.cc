@@ -1606,8 +1606,12 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
   builder.add(0,
               [&](SystemCallHandler &handler, int64_t set_amount,
                   int64_t add_amount) -> InvokeStatus<void> {
-                auto r = handler.set_nnint(key, set_amount, add_amount);
-                if (!r.has_value() || !r.value().has_value()) {
+                int128_t set_128 = set_amount;
+                auto [r, _gas] =
+                    syscall_NonnegativeIntSetAdd_inner(handler, key, &set_128,
+                                                       add_amount);
+
+                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
                 return {};
@@ -1617,8 +1621,10 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
   builder.add(1,
               [&](SystemCallHandler &handler,
                   int64_t add_amount) -> InvokeStatus<void> {
-                auto r = handler.add_nnint(key, add_amount);
-                if (!r.has_value() || !r.value().has_value()) {
+                auto [r, _gas] =
+                    syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
+                                                       add_amount);
+                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
                 return {};
@@ -1662,8 +1668,12 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
       });
   builder.add(3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
     // reset contract state
-    auto r = handler.set_nnint(key, 35, 0);
-    if (!r.has_value() || !r.value().has_value()) {
+    int128_t set_value = 35;
+    auto [r, _gas] =
+        syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value, 0);
+    // auto r = handler.set_nnint(key, 35, 0);
+    // if (!r.has_value() || !r.value().has_value()) {
+    if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
     return {};

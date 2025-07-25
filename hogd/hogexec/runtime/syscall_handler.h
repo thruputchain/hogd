@@ -133,13 +133,8 @@ public:
   get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
 
   SystemStatus<SyscallStatus<void>>
-  set_nnint(StorageKeyContractData const &storage_key, int128_t set_value,
-            int128_t add_value);
-  // Defined as equivalent to outputting set_add with set equal to whatever
-  // the current database snapshot value is.
-  // Has, therefore, the same overwrite semantics as set_add.
-  SystemStatus<SyscallStatus<void>>
-  add_nnint(StorageKeyContractData const &storage_key, int128_t add_value);
+  set_nnint(StorageKeyContractData const &storage_key,
+            std::optional<int128_t> set_value, int128_t add_value);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>

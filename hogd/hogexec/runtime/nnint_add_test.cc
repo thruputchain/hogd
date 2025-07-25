@@ -24,6 +24,7 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -67,9 +68,10 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
-             auto res = handler.add_nnint(key, 200);
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
+             auto [r, _gas] =
+                 syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 200);
+             if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              auto res2 = handler.get_nnint(key, false);
@@ -78,9 +80,10 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
                return err;
              }
 
-             auto res3 = handler.add_nnint(key, 300);
-             if (!res3.has_value()) {
-               return res3.error().to_invoke_error();
+             auto [r3, _gas3] =
+                 syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 300);
+             if (!r3.has_value() || r3.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // expected result: base 0, add 300
@@ -146,14 +149,18 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
-             auto res = handler.set_nnint(key, 200, 300);
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
+             int128_t set_value = 200;
+             auto [res, _gas] =
+                 syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value,
+                                                    300);
+             if (!res.has_value() || res.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             auto res2 = handler.add_nnint(key, 100);
-             if (!res2.has_value()) {
-               return res2.error().to_invoke_error();
+             auto [res2, _gas2] =
+                 syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 100);
+             if (!res2.has_value() || res2.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              auto res3 = handler.get_nnint(key, true);
