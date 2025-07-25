@@ -82,8 +82,6 @@ MempoolRpcInterface::get_block_hash(
 
   MerkleTriePrefix trie;
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
-  std::vector<std::future<void>> futures;
-
   size_t num_threads =
       std::min(hashes.size() / kMinHashesPerThread, worker_pool.worker_count());
   if (!num_threads) {
@@ -94,6 +92,7 @@ MempoolRpcInterface::get_block_hash(
   // [num_threads] below, so we want to make sure we do not divide by 0.
   CHECK_GT(num_threads, 0);
   CHECK_LE(num_threads, worker_pool.worker_count());
+  std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
 
   size_t base = 0;
