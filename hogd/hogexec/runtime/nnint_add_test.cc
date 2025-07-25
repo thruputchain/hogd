@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -57,6 +58,7 @@ protected:
   }
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_F(NNIntAddTest, ReadWriteAddValue)
 {
   auto native_contract = std::make_unique<NativeContract>(
@@ -208,5 +210,6 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
   auto nnint_item = read_res.value().nnint();
   ASSERT_EQ(from_xdr(nnint_item), 150);
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
