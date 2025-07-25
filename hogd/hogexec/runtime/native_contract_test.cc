@@ -334,6 +334,16 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     if (!r2.has_value() || !r2.value().has_value()) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
+
+    // assert that get_nnint() without a load doesn't query db
+    auto r3 = handler.get_nnint(bad_key, false);
+    if (!r3.has_value() || !r3.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (r3.value().value().first.has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
     return {};
   });
 
