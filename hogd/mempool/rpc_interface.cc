@@ -86,9 +86,8 @@ MempoolRpcInterface::get_block_hash(
 
   size_t num_threads =
       std::min(hashes.size() / kMinHashesPerThread, worker_pool.worker_count());
-  if (hashes.size() % kMinHashesPerThread &&
-      num_threads < worker_pool.worker_count()) {
-    num_threads++;
+  if (!num_threads) {
+    num_threads = 1;
   }
   // We CHECK at the top of the method that [hashes] is not empty, so
   // [num_threads] must be at least 1. This is important since we divide by
@@ -96,20 +95,18 @@ MempoolRpcInterface::get_block_hash(
   CHECK_GT(num_threads, 0);
   CHECK_LE(num_threads, worker_pool.worker_count());
   futures.reserve(num_threads);
-  const size_t hashes_per_thread = hashes.size() / num_threads;
+
+  size_t base = 0;
+  size_t chunk_size = hashes.size() / num_threads;
+  size_t remainder = hashes.size() % num_threads;
   for (size_t i = 0; i < num_threads; i++) {
-    futures.push_back(worker_pool.submit([&] {
-      for (size_t j = 0; j < hashes_per_thread; j++) {
-        size_t hash_idx = (hashes_per_thread * i) + j;
-        if (hash_idx >= hashes.size()) {
-          // If [hashes.size()] is not evenly divisible by
-          // [kMinHashesPerThread], then the last thread may have fewer than
-          // [hashes_per_thread] hashes to insert into the trie.
-          CHECK_EQ(i, num_threads - 1);
-          break;
-        }
-        CHECK(trie.insert(HexArray(hashes[hash_idx]),
-                          std::span<const std::byte>()));
+    size_t start = base;
+    size_t end = base + chunk_size + (i < remainder ? 1 : 0);
+    base = end;
+
+    futures.push_back(worker_pool.submit([start, end, &trie, &hashes] {
+      for (size_t j = start; j < end; j++) {
+        CHECK(trie.insert(HexArray(hashes[j]), std::span<const std::byte>()));
       }
     }));
   }
