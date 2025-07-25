@@ -86,6 +86,7 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
              if (auto err = check_nnint_get_result(res4, 0, 300); !err) {
                return err;
              }
+
              return {};
            }},
       });
