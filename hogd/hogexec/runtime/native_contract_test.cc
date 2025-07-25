@@ -325,6 +325,15 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
   bad_full_key.contract_data_key() = bad_key;
 
   builder.add(0, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+    // get_nnint() with force_load_from_snapshot=false from clean state should
+    // not query db
+    auto r0 = handler.get_nnint(bad_key, false);
+    if (!r0.has_value() || !r0.value().has_value() ||
+        r0.value().value().first.has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    // add ops shouldn't query db
     auto r = handler.add_nnint(bad_key, 100);
     if (!r.has_value() || !r.value().has_value()) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -332,6 +341,15 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
     auto r2 = handler.add_nnint(bad_key, -200);
     if (!r2.has_value() || !r2.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    // assert that get_nnint() without a load doesn't query db
+    auto r3 = handler.get_nnint(bad_key, false);
+    if (!r3.has_value() || !r3.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (r3.value().value().first.has_value()) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
     return {};
@@ -342,6 +360,27 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     if (!r.has_value() || !r.value().has_value()) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
+
+    // assert that get_nnint() after a set doesn't query db, even with
+    // force_load_from_snapshot=true
+    auto r2 = handler.get_nnint(bad_key, true);
+    if (!r2.has_value() || !r2.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (!r2.value().value().first.has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
+    // get_nnint() after a set with force_load_from_snapshot=false should return
+    // the set value if it exists
+    auto r3 = handler.get_nnint(bad_key, false);
+    if (!r3.has_value() || !r3.value().has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    if (!r3.value().value().first.has_value()) {
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+
     return {};
   });
 

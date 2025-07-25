@@ -41,7 +41,7 @@ adjust_allowance(SystemCallHandler &handler, ContractAddress owner,
                  ContractAddress spender, int128_t amount)
 {
   auto allow_key = allowance_key(owner, spender);
-  auto r = handler.get_nnint(allow_key);
+  auto r = handler.get_nnint(allow_key, true);
   if (!r.has_value()) {
     return r.error();
   }
@@ -53,7 +53,8 @@ adjust_allowance(SystemCallHandler &handler, ContractAddress owner,
     return false;
   }
   int128_t new_add = add + amount;
-  auto r2 = handler.set_nnint(allow_key, set, new_add);
+  assert(set.has_value());
+  auto r2 = handler.set_nnint(allow_key, *set, new_add);
   if (!r2.has_value()) {
     return r2.error();
   }
