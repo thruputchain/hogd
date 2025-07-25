@@ -19,9 +19,28 @@ option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
 # crate (to guard against accidentally recursively cloning the repo)
 option(ENABLE_TEST_CONTRACTS "Enable test contracts" ON)
 
+# Get git commit hash
+find_package(Git)
+if(GIT_EXECUTABLE)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        RESULT_VARIABLE git_status
+        OUTPUT_VARIABLE GIT_COMMIT_HASH
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(git_status)
+        set(GIT_COMMIT_HASH "unknown")
+    endif()
+else()
+    set(GIT_COMMIT_HASH "unknown")
+endif()
+
 # Print configuration options
 message(STATUS "ENABLE_TEST_FFI: ${ENABLE_TEST_FFI}")
 message(STATUS "ENABLE_TEST_CONTRACTS: ${ENABLE_TEST_CONTRACTS}")
+message(STATUS "GIT_COMMIT_HASH: ${GIT_COMMIT_HASH}")
 
 # Handle configuration options
 if(NOT CMAKE_BUILD_TYPE)
