@@ -68,9 +68,10 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
-             auto res = handler.set_nnint(key, std::nullopt, 200);
-             if (!res.has_value()) {
-               return res.error().to_invoke_error();
+             auto [r, _gas] =
+                 syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 200);
+             if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              auto res2 = handler.get_nnint(key, false);
@@ -79,9 +80,10 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
                return err;
              }
 
-             auto res3 = handler.set_nnint(key, std::nullopt, 300);
-             if (!res3.has_value()) {
-               return res3.error().to_invoke_error();
+             auto [r3, _gas3] =
+                 syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr, 300);
+             if (!r3.has_value() || r3.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // expected result: base 0, add 300
