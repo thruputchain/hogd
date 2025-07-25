@@ -26,8 +26,7 @@ class MempoolRpcInterface {
 public:
   using rpc_service = SchedulerCoord1;
 
-  MempoolRpcInterface(std::unique_ptr<RPCClient> &&db_client,
-                      std::unique_ptr<RPCClient> &&exec_client)
+  MempoolRpcInterface(RPCClient &&db_client, RPCClient &&exec_client)
     : db_client_(std::move(db_client)), exec_client_(std::move(exec_client))
   {}
 
@@ -87,8 +86,8 @@ private:
 
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
 
-  std::unique_ptr<RPCClient> db_client_;
-  std::unique_ptr<RPCClient> exec_client_;
+  RPCClient db_client_;
+  RPCClient exec_client_;
 
   std::unordered_map<SHA256Hash, SignedTransaction> vetted_txs_;
 

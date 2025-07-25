@@ -20,11 +20,68 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/mempool/mempool.h"
+#include "hogd/mempool/rpc_interface.h"
 #include "types.hh"
 
 namespace hogd {
 
 namespace {
+
+class MempoolTestServer {
+public:
+  static constexpr std::string kExecutorAddress = "127.0.0.1";
+  static constexpr uint16_t kExecutorPort = 10000;
+  static constexpr uint16_t kCoordinatorPort = 10001;
+  static constexpr std::string kDatabaseAddress = "127.0.0.1";
+  static constexpr uint16_t kDatabasePort = 10001;
+
+  MempoolTestServer()
+    : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
+      cost_model_(12000, 1, 5, 100, 5), block_manager_(0, &in_memory_db_),
+      db_executor_server_(&block_manager_, kExecutorPort),
+      db_coordinator_server_(&block_manager_)
+  {
+    ContractAddress contract_addr;
+    std::shared_ptr<Contract> contract =
+        test::load_test_contract(kTestContractFileName);
+
+    in_memory_db_.write_contract(sha256(*contract), contract);
+    in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+
+    setup_grant_storage_token(in_memory_db_, cost_model_, contract_addr,
+                              1'000'000'000);
+
+    db_coordinator_server_.start_server(kCoordinatorPort);
+  }
+
+private:
+  static constexpr std::string kTestContractFileName = "fibonacci.wasm";
+  static constexpr size_t kNumDbPoolThreads = 16;
+
+  static void setup_grant_storage_token(InMemoryDatabase &in_memory_db,
+                                        StorageCostModel const &cost_model,
+                                        ContractAddress const &address,
+                                        int128_t amount)
+  {
+    CHECK_GE(amount, 0);
+    CHECK_LE(amount, int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
+
+    AddressAndKey addrkey = {
+        .address = address,
+        .key =
+            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+
+    in_memory_db.write_item(addrkey, std::make_shared<const StorageItemWrapper>(
+                                         amount, &cost_model));
+  }
+
+  x23::ThreadPool db_pool_;
+  InMemoryDatabase in_memory_db_;
+  StorageCostModel cost_model_;
+  BlockManager block_manager_;
+  RPCDbExecutorServer db_executor_server_;
+  DbCoordServer db_coordinator_server_;
+};
 
 using fib_client_t = ContractTraitClient<Fibonacci>;
 
@@ -55,22 +112,26 @@ TEST(Mempool, HelloWorld)
   fib_client_t fib_client(ContractAddress{});
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
 
-  {
-    Validator validator;
-    SHA256Hash empty{};
-    EXPECT_FALSE(validator.validate(/*expected_root_hash=*/empty, txs));
-  }
+  MempoolTestServer server;
 
-  {
-    // We reconstruct the validator each time we attempt to validate [txs]
-    // because [validate()] *adds* the txs to the block rather than overwrite
-    // the existing txs in the block.
-    Validator validator;
-    HexArray expected(
-        "87eb620d9086e7df7899c4c016d3696cc198682e70105f18a4b90be1fd563564");
-    EXPECT_TRUE(
-        validator.validate(/*expected_root_hash=*/expected.to_sha256(), txs));
+  auto db_res =
+      RPCClient::dial(MempoolTestServer::kDatabaseAddress +
+                      std::to_string(MempoolTestServer::kDatabasePort));
+  if (!db_res) {
+    throw std::runtime_error("Failed to connect to local mock database");
   }
+  RPCClient db_client = std::move(*db_res);
+
+  auto executor_res =
+      RPCClient::dial(MempoolTestServer::kExecutorAddress +
+                      std::to_string(MempoolTestServer::kExecutorPort));
+  if (!executor_res) {
+    throw std::runtime_error("Failed to connect to local executor server");
+  }
+  RPCClient executor_client = std::move(*executor_res);
+
+  MempoolRpcInterface interface(std::move(db_client),
+                                std::move(executor_client));
 }
 
 } // namespace hogd
