@@ -67,7 +67,7 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
            [](SystemCallHandler &handler,
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto key = make_storage_key("test");
-             auto res = handler.add_nnint(key, 200);
+             auto res = handler.set_nnint(key, std::nullopt, 200);
              if (!res.has_value()) {
                return res.error().to_invoke_error();
              }
@@ -78,7 +78,7 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
                return err;
              }
 
-             auto res3 = handler.add_nnint(key, 300);
+             auto res3 = handler.set_nnint(key, std::nullopt, 300);
              if (!res3.has_value()) {
                return res3.error().to_invoke_error();
              }
@@ -151,7 +151,7 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
                return res.error().to_invoke_error();
              }
 
-             auto res2 = handler.add_nnint(key, 100);
+             auto res2 = handler.set_nnint(key, std::nullopt, 100);
              if (!res2.has_value()) {
                return res2.error().to_invoke_error();
              }

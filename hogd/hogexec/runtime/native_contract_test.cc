@@ -334,12 +334,12 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
     }
 
     // add ops shouldn't query db
-    auto r = handler.add_nnint(bad_key, 100);
+    auto r = handler.set_nnint(bad_key, std::nullopt, 100);
     if (!r.has_value() || !r.value().has_value()) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
 
-    auto r2 = handler.add_nnint(bad_key, -200);
+    auto r2 = handler.set_nnint(bad_key, std::nullopt, -200);
     if (!r2.has_value() || !r2.value().has_value()) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }

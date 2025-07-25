@@ -1,6 +1,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 
 #include <cassert>
+#include <optional>
 #include <utility>
 
 #include "hogd/base/types.h"
@@ -42,11 +43,15 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
-                                   int128_t input_set_value,
+                                   const int128_t *optional_input_set_value,
                                    int128_t input_add_value)
 {
+  std::optional<int128_t> set_value = std::nullopt;
+  if (optional_input_set_value) {
+    set_value = *optional_input_set_value;
+  }
   auto status =
-      syscall_handler.set_nnint(input_key, input_set_value, input_add_value);
+      syscall_handler.set_nnint(input_key, set_value, input_add_value);
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }
