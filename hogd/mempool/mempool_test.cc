@@ -31,7 +31,6 @@ class MempoolTestServer {
 public:
   static constexpr std::string kExecutorAddress = "127.0.0.1";
   static constexpr uint16_t kExecutorPort = 10000;
-  static constexpr uint16_t kCoordinatorPort = 10001;
   static constexpr std::string kDatabaseAddress = "127.0.0.1";
   static constexpr uint16_t kDatabasePort = 10001;
 
@@ -51,7 +50,7 @@ public:
     setup_grant_storage_token(in_memory_db_, cost_model_, contract_addr,
                               1'000'000'000);
 
-    db_coordinator_server_.start_server(kCoordinatorPort);
+    db_coordinator_server_.start_server(kDatabasePort);
   }
 
 private:
@@ -114,24 +113,44 @@ TEST(Mempool, HelloWorld)
 
   MempoolTestServer server;
 
-  auto db_res =
-      RPCClient::dial(MempoolTestServer::kDatabaseAddress +
-                      std::to_string(MempoolTestServer::kDatabasePort));
-  if (!db_res) {
-    throw std::runtime_error("Failed to connect to local mock database");
-  }
-  RPCClient db_client = std::move(*db_res);
+  using coord_client_t =
+      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  auto executor_res =
-      RPCClient::dial(MempoolTestServer::kExecutorAddress +
-                      std::to_string(MempoolTestServer::kExecutorPort));
-  if (!executor_res) {
-    throw std::runtime_error("Failed to connect to local executor server");
-  }
-  RPCClient executor_client = std::move(*executor_res);
+  x23::ThreadPool db_pool = x23::ThreadPool(1);
+  x23::CoroPoll cp_ = x23::CoroPoll(db_pool);
+  std::unique_ptr<coord_client_t> coord_client =
+      [&] -> std::unique_ptr<coord_client_t> {
+    auto fd =
+        cp_.tcpconnect(MempoolTestServer::kDatabaseAddress,
+                       std::to_string(MempoolTestServer::kDatabasePort))();
+    if (!fd) {
+      throw std::runtime_error("Failed to connect to coord server");
+    }
+    auto client_config = x23::rpc_stream_logged(cp_, *fd);
+    return std::make_unique<coord_client_t>(
+        client_config.template client<DbCoord1>());
+  }();
 
-  MempoolRpcInterface interface(std::move(db_client),
-                                std::move(executor_client));
+  using exec_client_t =
+      ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  x23::ThreadPool exec_pool = x23::ThreadPool(1);
+  x23::CoroPoll exec_cp = x23::CoroPoll(exec_pool);
+  std::unique_ptr<exec_client_t> exec_client =
+      [&] -> std::unique_ptr<exec_client_t> {
+    auto fd =
+        cp_.tcpconnect(MempoolTestServer::kExecutorAddress,
+                       std::to_string(MempoolTestServer::kExecutorPort))();
+    if (!fd) {
+      throw std::runtime_error("Failed to connect to executor server");
+    }
+    auto client_config = x23::rpc_stream_logged(cp_, *fd);
+    return std::make_unique<exec_client_t>(
+        client_config.template client<ExecutorCoord1>());
+  }();
+
+  // MempoolRpcInterface interface(std::move(db_client),
+  //                               std::move(executor_client));
 }
 
 } // namespace hogd
