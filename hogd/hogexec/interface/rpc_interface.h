@@ -12,6 +12,8 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include "x23/event.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -21,11 +23,14 @@ class ExecutorRpcInterface {
 public:
   using rpc_service = ExecutorCoord1;
 
-  ExecutorRpcInterface(uint16_t self_executor_id, WorkerPool &main_worker_pool,
+  ExecutorRpcInterface(uint16_t self_executor_id, x23::CoroPoll &cp,
+                       WorkerPool &main_worker_pool,
                        std::unique_ptr<DatabaseProxy> db_proxy)
-    : self_executor_id_(self_executor_id), main_worker_pool_(main_worker_pool),
-      executor_states_(std::move(db_proxy))
+    : self_executor_id_(self_executor_id), cp_(cp),
+      main_worker_pool_(main_worker_pool), executor_states_(std::move(db_proxy))
   {}
+
+  void start_server(uint32_t port_number);
 
   // Disable copy and move
   ExecutorRpcInterface(ExecutorRpcInterface const &) = delete;
@@ -67,7 +72,9 @@ private:
   std::atomic<uint64_t> self_id_ = 0;
   const uint16_t self_executor_id_;
 
+  x23::CoroPoll &cp_;
   WorkerPool &main_worker_pool_;
+
   ExecutorStateManager executor_states_;
   std::atomic<bool> shutdown_flag_ = false;
 };

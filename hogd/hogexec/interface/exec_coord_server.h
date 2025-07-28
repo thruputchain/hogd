@@ -32,6 +32,11 @@ public:
     init_from_coord(coord_addr);
   }
 
+  void start_server(uint32_t port_number)
+  {
+    rpc_interface_->start_server(port_number);
+  }
+
   void await_shutdown_request()
   {
     if (rpc_interface_) {

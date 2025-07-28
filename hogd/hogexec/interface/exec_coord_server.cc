@@ -30,7 +30,7 @@ ExecCoordServer::start_rpc_service(DatabaseIdentifier identifier,
                                    uint16_t self_executor_id)
 {
   auto db_proxy = connect_to_database(std::move(identifier));
-  rpc_interface_ = std::make_unique<ExecutorRpcInterface>(self_executor_id,
+  rpc_interface_ = std::make_unique<ExecutorRpcInterface>(self_executor_id, cp_,
                                                           main_worker_pool_,
                                                           std::move(db_proxy));
 }

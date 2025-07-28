@@ -78,6 +78,8 @@ private:
   InMemoryDatabase in_memory_db_;
   StorageCostModel cost_model_;
   BlockManager block_manager_;
+  // TODO(jhumphri): Add [ExecCoordServer]. Keep the [db_executor_server_]
+  // variable below because I think we need it.
   RPCDbExecutorServer db_executor_server_;
   DbCoordServer db_coordinator_server_;
 };
@@ -116,6 +118,8 @@ TEST(Mempool, HelloWorld)
   using coord_client_t =
       DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
+  printf("A\n");
+
   x23::ThreadPool db_pool = x23::ThreadPool(1);
   x23::CoroPoll cp_ = x23::CoroPoll(db_pool);
   std::unique_ptr<coord_client_t> coord_client =
@@ -130,6 +134,8 @@ TEST(Mempool, HelloWorld)
     return std::make_unique<coord_client_t>(
         client_config.template client<DbCoord1>());
   }();
+
+  printf("B\n");
 
   using exec_client_t =
       ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
@@ -148,6 +154,22 @@ TEST(Mempool, HelloWorld)
     return std::make_unique<exec_client_t>(
         client_config.template client<ExecutorCoord1>());
   }();
+
+  printf("C\n");
+  auto r = coord_client->dbcoord_create_snapshot(
+      0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
+  if (r != DbResult::DbResultOK) {
+    throw std::runtime_error("Failed to create snapshot");
+  }
+  else {
+    printf("db result was ok\n");
+  }
+
+  printf("D\n");
+
+  exec_client->executorcoord_null()();
+
+  printf("down here\n");
 
   // MempoolRpcInterface interface(std::move(db_client),
   //                               std::move(executor_client));
