@@ -31,21 +31,18 @@ namespace {
 
 class MempoolTestServer {
 public:
-  static constexpr std::string kExecutorAddress = "127.0.0.1";
-  static constexpr uint16_t kExecutorPort = 10000;
-  static constexpr std::string kDatabaseAddress = "127.0.0.1";
-  static constexpr uint16_t kDatabasePort = 10001;
-  static constexpr std::string kCoordinatorAddress = "127.0.0.1";
+  static constexpr std::string kAddress = "127.0.0.1";
+  static constexpr uint16_t kExecutorDbPort = 10000;
+  static constexpr uint16_t kCoordinatorDbPort = 10001;
   static constexpr uint16_t kCoordinatorPort = 10002;
+  static constexpr uint16_t kExecutorPort = 10003;
 
   MempoolTestServer()
     : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
       cost_model_(12000, 1, 5, 100, 5), block_manager_(0, &in_memory_db_),
       coordinator_server_(kCoordinatorPort),
-      executor_coord_server_(exec_card_, /*poll_threads=*/1,
-                             kCoordinatorAddress + ":" +
-                                 std::to_string(kCoordinatorPort)),
-      db_executor_server_(&block_manager_, kExecutorPort),
+      executor_coord_server_(exec_card_, /*poll_threads=*/1),
+      db_executor_server_(&block_manager_, kExecutorDbPort),
       db_coordinator_server_(&block_manager_)
   {
     ContractAddress contract_addr;
@@ -58,7 +55,12 @@ public:
     setup_grant_storage_token(in_memory_db_, cost_model_, contract_addr,
                               1'000'000'000);
 
-    db_coordinator_server_.start_server(kDatabasePort);
+    db_coordinator_server_.start_server(kCoordinatorDbPort);
+
+    executor_coord_server_.init_from_coord(kAddress + ":" +
+                                               std::to_string(kCoordinatorPort),
+                                           &db_proxy_);
+    executor_coord_server_.start_server(kExecutorPort);
   }
 
 private:
@@ -86,11 +88,11 @@ private:
   InMemoryDatabase in_memory_db_;
   StorageCostModel cost_model_;
   BlockManager block_manager_;
-  ExecCard exec_card_ = {.protocol = "blah",
-                         .upid = {},
-                         .address = (kCoordinatorAddress + ":" +
-                                     std::to_string(kCoordinatorPort))
-                                        .c_str()};
+  ExecCard exec_card_ = {
+      .protocol = "blah",
+      .upid = {},
+      .address = (kAddress + ":" + std::to_string(kCoordinatorPort)).c_str()};
+  LocalMockDB db_proxy_{.read_port_number_ = kCoordinatorDbPort};
   CoordinatorServer coordinator_server_;
   ExecCoordServer executor_coord_server_;
   // TODO(jhumphri): Add [ExecCoordServer]. Keep the [db_executor_server_]
@@ -128,22 +130,18 @@ TEST(Mempool, HelloWorld)
   fib_client_t fib_client(ContractAddress{});
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
 
-  printf("Start\n");
-
   MempoolTestServer server;
 
   using coord_client_t =
       DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
-  printf("A\n");
 
   x23::ThreadPool db_pool = x23::ThreadPool(1);
   x23::CoroPoll cp_ = x23::CoroPoll(db_pool);
   std::unique_ptr<coord_client_t> coord_client =
       [&] -> std::unique_ptr<coord_client_t> {
     auto fd =
-        cp_.tcpconnect(MempoolTestServer::kDatabaseAddress,
-                       std::to_string(MempoolTestServer::kDatabasePort))();
+        cp_.tcpconnect(MempoolTestServer::kAddress,
+                       std::to_string(MempoolTestServer::kCoordinatorDbPort))();
     if (!fd) {
       throw std::runtime_error("Failed to connect to coord server");
     }
@@ -151,8 +149,6 @@ TEST(Mempool, HelloWorld)
     return std::make_unique<coord_client_t>(
         client_config.template client<DbCoord1>());
   }();
-
-  printf("B\n");
 
   using exec_client_t =
       ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
@@ -162,7 +158,7 @@ TEST(Mempool, HelloWorld)
   std::unique_ptr<exec_client_t> exec_client =
       [&] -> std::unique_ptr<exec_client_t> {
     auto fd =
-        cp_.tcpconnect(MempoolTestServer::kExecutorAddress,
+        cp_.tcpconnect(MempoolTestServer::kAddress,
                        std::to_string(MempoolTestServer::kExecutorPort))();
     if (!fd) {
       throw std::runtime_error("Failed to connect to executor server");
@@ -172,21 +168,13 @@ TEST(Mempool, HelloWorld)
         client_config.template client<ExecutorCoord1>());
   }();
 
-  printf("C\n");
   auto r = coord_client->dbcoord_create_snapshot(
       0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
   if (r != DbResult::DbResultOK) {
     throw std::runtime_error("Failed to create snapshot");
   }
-  else {
-    printf("db result was ok\n");
-  }
-
-  printf("D\n");
 
   exec_client->executorcoord_null()();
-
-  printf("down here\n");
 
   // MempoolRpcInterface interface(std::move(db_client),
   //                               std::move(executor_client));

@@ -19,23 +19,19 @@ namespace hogd {
 void
 ExecutorRpcInterface::start_server(uint32_t port_number)
 {
-  {
-    {
-      auto lfd = x23::tcplisten(port_number);
-      if (!lfd) {
-        perror("listen");
-        exit(EXIT_FAILURE);
-      }
-
-      [](x23::CoroPoll &cp, ExecutorRpcInterface *server,
-         x23::UniqueFd lfd) -> x23::Detached {
-        co_await cp.pool_.bg();
-        while (auto c = co_await cp.accept(lfd)) {
-          x23::rpc_stream_logged(cp, *c).server(server);
-        }
-      }(cp_, this, std::move(lfd));
-    }
+  auto lfd = x23::tcplisten(port_number);
+  if (!lfd) {
+    perror("listen");
+    exit(EXIT_FAILURE);
   }
+
+  [](x23::CoroPoll &cp, ExecutorRpcInterface *server,
+     x23::UniqueFd lfd) -> x23::Detached {
+    co_await cp.pool_.bg();
+    while (auto c = co_await cp.accept(lfd)) {
+      x23::rpc_stream_logged(cp, *c).server(server);
+    }
+  }(cp_, this, std::move(lfd));
 }
 
 x23::Async<ExecProposeResult>

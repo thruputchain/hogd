@@ -8,7 +8,8 @@ class CoordinatorServer {
 public:
   using rpc_service = Coordinator1;
 
-  CoordinatorServer(uint16_t port_number) : pool_(/*nthreads=*/4), cp_(pool_) {
+  CoordinatorServer(uint16_t port_number) : pool_(/*nthreads=*/4), cp_(pool_)
+  {
     start_server(port_number);
   }
 
