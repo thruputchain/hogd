@@ -39,6 +39,7 @@ std::optional<Coordinator1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
 ExecCoordServer::connect_to_coord_allocate_service(
     std::string const &coord_address, std::string const &coord_allocate_port)
 {
+  printf("here coord address %s, coord port %s\n", coord_address.c_str(), coord_allocate_port.c_str());
   auto fd = cp_.tcpconnect(coord_address, coord_allocate_port)();
   if (!fd) {
     return std::nullopt;
@@ -52,15 +53,22 @@ IntroExecResult
 ExecCoordServer::get_exec_result(std::string const &coord_address,
                                  std::string const &coord_allocate_port)
 {
+  printf("get_exec_result start\n");
   while (true) {
+    printf("get_exec_result iter A\n");
     auto client =
         connect_to_coord_allocate_service(coord_address, coord_allocate_port);
+    printf("get_exec_result iter B\n");
     if (!client) {
+      printf("get_exec_result iter error A\n");
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
+    printf("get_exec_result iter C\n");
 
-    return client->coordinator_intro_exec(self_card_)();
+    auto ret = client->coordinator_intro_exec(self_card_)();
+    printf("get_exec_result iter D\n");
+    return ret;
   }
 }
 
@@ -74,6 +82,7 @@ ExecCoordServer::init_from_coord(std::string const &coord_addr)
 
   std::string host = {host_port.host.begin(), host_port.host.end()};
   std::string port = {host_port.port.begin(), host_port.port.end()};
+  printf("full %s, host %s, port %s\n", coord_addr.c_str(), host.c_str(), port.c_str());
 
   auto exec_result = get_exec_result(host, port);
   assert(exec_result.exec_id < std::numeric_limits<uint16_t>::max());

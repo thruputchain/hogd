@@ -19,6 +19,8 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/interface/exec_coord_server.h"
+#include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/mempool.h"
 #include "hogd/mempool/rpc_interface.h"
 #include "types.hh"
@@ -33,10 +35,16 @@ public:
   static constexpr uint16_t kExecutorPort = 10000;
   static constexpr std::string kDatabaseAddress = "127.0.0.1";
   static constexpr uint16_t kDatabasePort = 10001;
+  static constexpr std::string kCoordinatorAddress = "127.0.0.1";
+  static constexpr uint16_t kCoordinatorPort = 10002;
 
   MempoolTestServer()
     : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
       cost_model_(12000, 1, 5, 100, 5), block_manager_(0, &in_memory_db_),
+      coordinator_server_(kCoordinatorPort),
+      executor_coord_server_(exec_card_, /*poll_threads=*/1,
+                             kCoordinatorAddress + ":" +
+                                 std::to_string(kCoordinatorPort)),
       db_executor_server_(&block_manager_, kExecutorPort),
       db_coordinator_server_(&block_manager_)
   {
@@ -78,6 +86,13 @@ private:
   InMemoryDatabase in_memory_db_;
   StorageCostModel cost_model_;
   BlockManager block_manager_;
+  ExecCard exec_card_ = {.protocol = "blah",
+                         .upid = {},
+                         .address = (kCoordinatorAddress + ":" +
+                                     std::to_string(kCoordinatorPort))
+                                        .c_str()};
+  CoordinatorServer coordinator_server_;
+  ExecCoordServer executor_coord_server_;
   // TODO(jhumphri): Add [ExecCoordServer]. Keep the [db_executor_server_]
   // variable below because I think we need it.
   RPCDbExecutorServer db_executor_server_;
@@ -112,6 +127,8 @@ TEST(Mempool, HelloWorld)
 
   fib_client_t fib_client(ContractAddress{});
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
+
+  printf("Start\n");
 
   MempoolTestServer server;
 
