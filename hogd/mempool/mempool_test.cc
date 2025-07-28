@@ -162,6 +162,19 @@ TEST(Mempool, HelloWorld)
 
   MempoolRpcInterface interface(std::move(coord_client),
                                 std::move(exec_client));
+
+  {
+    SignedTransaction tx{};
+    interface.schedulercoord_submit_unvetted({tx})();
+  }
+
+  {
+    ValidatorID validator_id{};
+    SignedTransaction tx{};
+    interface.schedulercoord_submit_vetted(validator_id, {tx})();
+  }
+
+  // TODO(jhumphri): Exit gracefully.
 }
 
 } // namespace hogd
