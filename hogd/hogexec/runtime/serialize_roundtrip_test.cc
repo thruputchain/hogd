@@ -424,9 +424,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripUunionBool)
   ASSERT_TRUE(*commit_res);
 }
 
-// Disabled pending fixes in the rust version of CXS: See failing test cases in
-// https://github.com/groundhogchain/xdrs/pull/3
-TEST_F(SerializeRoundtripTest, DISABLED_CxsSerializeRoundtripTestRecursive)
+TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripTestRecursive)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
