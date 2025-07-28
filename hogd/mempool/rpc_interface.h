@@ -16,7 +16,9 @@
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/async.h"
+#include "x23/rpc.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -26,7 +28,13 @@ class MempoolRpcInterface {
 public:
   using rpc_service = SchedulerCoord1;
 
-  MempoolRpcInterface(RPCClient &&db_client, RPCClient &&exec_client)
+  using coord_client_t =
+      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  using exec_client_t =
+      ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
+
+  MempoolRpcInterface(coord_client_t &&db_client, exec_client_t &&exec_client)
     : db_client_(std::move(db_client)), exec_client_(std::move(exec_client))
   {}
 
@@ -86,8 +94,8 @@ private:
 
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
 
-  RPCClient db_client_;
-  RPCClient exec_client_;
+  coord_client_t db_client_;
+  exec_client_t exec_client_;
 
   std::unordered_map<SHA256Hash, SignedTransaction> vetted_txs_;
 

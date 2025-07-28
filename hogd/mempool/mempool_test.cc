@@ -132,13 +132,10 @@ TEST(Mempool, HelloWorld)
 
   MempoolTestServer server;
 
-  using coord_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
   x23::ThreadPool db_pool = x23::ThreadPool(1);
   x23::CoroPoll cp_ = x23::CoroPoll(db_pool);
-  std::unique_ptr<coord_client_t> coord_client =
-      [&] -> std::unique_ptr<coord_client_t> {
+  MempoolRpcInterface::coord_client_t coord_client =
+      [&] -> MempoolRpcInterface::coord_client_t {
     auto fd =
         cp_.tcpconnect(MempoolTestServer::kAddress,
                        std::to_string(MempoolTestServer::kCoordinatorDbPort))();
@@ -146,17 +143,13 @@ TEST(Mempool, HelloWorld)
       throw std::runtime_error("Failed to connect to coord server");
     }
     auto client_config = x23::rpc_stream_logged(cp_, *fd);
-    return std::make_unique<coord_client_t>(
-        client_config.template client<DbCoord1>());
+    return client_config.template client<DbCoord1>();
   }();
-
-  using exec_client_t =
-      ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   x23::ThreadPool exec_pool = x23::ThreadPool(1);
   x23::CoroPoll exec_cp = x23::CoroPoll(exec_pool);
-  std::unique_ptr<exec_client_t> exec_client =
-      [&] -> std::unique_ptr<exec_client_t> {
+  MempoolRpcInterface::exec_client_t exec_client =
+      [&] -> MempoolRpcInterface::exec_client_t {
     auto fd =
         cp_.tcpconnect(MempoolTestServer::kAddress,
                        std::to_string(MempoolTestServer::kExecutorPort))();
@@ -164,20 +157,11 @@ TEST(Mempool, HelloWorld)
       throw std::runtime_error("Failed to connect to executor server");
     }
     auto client_config = x23::rpc_stream_logged(cp_, *fd);
-    return std::make_unique<exec_client_t>(
-        client_config.template client<ExecutorCoord1>());
+    return client_config.template client<ExecutorCoord1>();
   }();
 
-  auto r = coord_client->dbcoord_create_snapshot(
-      0, 1, BlockExecutionMode::kBlockExecutionModeProposal)();
-  if (r != DbResult::DbResultOK) {
-    throw std::runtime_error("Failed to create snapshot");
-  }
-
-  exec_client->executorcoord_null()();
-
-  // MempoolRpcInterface interface(std::move(db_client),
-  //                               std::move(executor_client));
+  MempoolRpcInterface interface(std::move(coord_client),
+                                std::move(exec_client));
 }
 
 } // namespace hogd

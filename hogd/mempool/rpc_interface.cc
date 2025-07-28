@@ -67,9 +67,8 @@ MempoolRpcInterface::find_vetted_txs(const Nomination &nomination,
 void
 MempoolRpcInterface::abandon_snapshot(BlockID block_id)
 {
-  auto res = rpc_client_call<DbCoord1, "dbcoord_abandon_snapshot">(db_client_,
-                                                                   block_id);
-  if (!res.has_value() || res != DbResult::DbResultOK) {
+  auto res = db_client_.dbcoord_abandon_snapshot(block_id)();
+  if (res != DbResult::DbResultOK) {
     // TODO(jhumphri): Any db cleanup needed?
   }
 }
@@ -121,10 +120,9 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
 {
   BlockID block_id = get_ns_since_epoch();
   {
-    auto res = rpc_client_call<DbCoord1, "dbcoord_create_snapshot">(
-        db_client_, db_tip.id, block_id,
-        BlockExecutionMode::kBlockExecutionModeProposal);
-    if (!res.has_value() || res.value() != DbResult::DbResultOK) {
+    auto res = db_client_.dbcoord_create_snapshot(
+        db_tip.id, block_id, BlockExecutionMode::kBlockExecutionModeProposal)();
+    if (res != DbResult::DbResultOK) {
       co_return SchedulerNominationResult(
           SchedulerNominationOutcome::SchedulerNominationError);
     }
@@ -154,17 +152,10 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
 
   if (txs.size() == 1) {
     auto res =
-        rpc_client_call<ExecutorCoord1, "executorcoord_propose_transaction">(
-            exec_client_, block_id, txs[0]);
-    if (!res.has_value()) {
-      abandon_snapshot(block_id);
-      co_return SchedulerNominationResult(
-          SchedulerNominationOutcome::SchedulerNominationError);
-    }
-    if (res.value() ==
-        ExecProposeResult(ExecResult::ExecResultTxDeterministicError)) {
+        exec_client_.executorcoord_propose_transaction(block_id, txs[0])();
+    if (res.result() == ExecResult::ExecResultTxDeterministicError) {
       nomination.transaction_nominations.push_back(
-          {.nondeterministic_proposal_data = res.value().proposal_data()});
+          {.nondeterministic_proposal_data = res.proposal_data()});
     }
     else {
       nomination.transaction_nominations.push_back(
@@ -172,14 +163,8 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
     }
   }
   else if (txs.size() > 1) {
-    auto res = rpc_client_call<ExecutorCoord1, "executorcoord_propose_batch">(
-        exec_client_, block_id, txs);
-    if (!res.has_value()) {
-      abandon_snapshot(block_id);
-      co_return SchedulerNominationResult(
-          SchedulerNominationOutcome::SchedulerNominationError);
-    }
-    for (const ExecProposeResult &result : res.value()) {
+    auto res = exec_client_.executorcoord_propose_batch(block_id, txs)();
+    for (const ExecProposeResult &result : res) {
       if (result ==
           ExecProposeResult(ExecResult::ExecResultTxDeterministicError)) {
         nomination.transaction_nominations.push_back(
@@ -199,10 +184,8 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
   }
 
   {
-    auto res = rpc_client_call<DbCoord1, "dbcoord_close_snapshot">(db_client_,
-                                                                   block_id);
-    if (!res.has_value() ||
-        res.value() != DbBlockResult(DbResult::DbResultOK)) {
+    auto res = db_client_.dbcoord_close_snapshot(block_id)();
+    if (res.result() != DbResult::DbResultOK) {
       co_return SchedulerNominationResult(
           SchedulerNominationOutcome::SchedulerNominationError);
     }
@@ -217,10 +200,10 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
 {
   BlockID block_id = get_ns_since_epoch();
   {
-    auto res = rpc_client_call<DbCoord1, "dbcoord_create_snapshot">(
-        db_client_, db_tip.id, block_id,
-        BlockExecutionMode::kBlockExecutionModeValidation);
-    if (!res.has_value() || res.value() != DbResult::DbResultOK) {
+    auto res = db_client_.dbcoord_create_snapshot(
+        db_tip.id, block_id,
+        BlockExecutionMode::kBlockExecutionModeValidation)();
+    if (res != DbResult::DbResultOK) {
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationDbFailed);
     }
@@ -240,9 +223,8 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   if (nomination.transaction_nominations.size() == 1) {
     CHECK_EQ(txs.size(), 1);
     auto res =
-        rpc_client_call<ExecutorCoord1, "executorcoord_validate_transaction">(
-            exec_client_, block_id, txs[0]);
-    if (!res.has_value() || res.value() != ExecResult::ExecResultOK) {
+        exec_client_.executorcoord_validate_transaction(block_id, txs[0])();
+    if (res != ExecResult::ExecResultOK) {
       abandon_snapshot(block_id);
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationInvalid);
@@ -250,10 +232,8 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   }
   else if (nomination.transaction_nominations.size() > 1) {
     CHECK_GT(txs.size(), 1);
-    auto res = rpc_client_call<ExecutorCoord1, "executorcoord_validate_batch">(
-        exec_client_, block_id, txs);
-    if (!res.has_value() ||
-        std::any_of(res.value().begin(), res.value().end(), [](const auto &r) {
+    auto res = exec_client_.executorcoord_validate_batch(block_id, txs)();
+    if (std::any_of(res.begin(), res.end(), [](const auto &r) {
           return r != ExecResult::ExecResultOK;
         })) {
       abandon_snapshot(block_id);
@@ -278,10 +258,8 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   }
 
   {
-    auto res = rpc_client_call<DbCoord1, "dbcoord_close_snapshot">(db_client_,
-                                                                   block_id);
-    if (!res.has_value() ||
-        res.value() != DbBlockResult(DbResult::DbResultOK)) {
+    auto res = db_client_.dbcoord_close_snapshot(block_id)();
+    if (res.result() != DbResult::DbResultOK) {
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationDbFailed);
     }
