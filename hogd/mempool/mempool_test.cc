@@ -179,28 +179,31 @@ create_clients()
           .interface = std::move(interface)};
 }
 
+constexpr size_t kNumTxs = 100;
+
 } // namespace
 
-TEST(Mempool, HelloWorld)
+TEST(Mempool, SubmitUnvetted)
 {
-  constexpr size_t kNumTxs = 100;
-
   fib_client_t fib_client(ContractAddress{});
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
   Clients clients = create_clients();
 
-  {
-    SignedTransaction tx{};
-    clients.interface->schedulercoord_submit_unvetted({tx})();
-  }
+  clients.interface->schedulercoord_submit_unvetted({txs[0]})();
+}
 
-  {
-    ValidatorID validator_id{};
-    SignedTransaction tx{};
-    clients.interface->schedulercoord_submit_vetted(validator_id, {tx})();
-  }
+TEST(Mempool, SubmitVetted)
+{
+  fib_client_t fib_client(ContractAddress{});
+  std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients();
+
+  ValidatorID validator_id{};
+  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
 }
 
 } // namespace hogd
