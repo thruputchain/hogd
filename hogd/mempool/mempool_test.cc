@@ -128,6 +128,57 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
   return txs;
 }
 
+struct Clients {
+  std::unique_ptr<x23::ThreadPool> db_pool;
+  std::unique_ptr<x23::CoroPoll> db_cp;
+
+  std::unique_ptr<x23::ThreadPool> exec_pool;
+  std::unique_ptr<x23::CoroPoll> exec_cp;
+
+  std::unique_ptr<MempoolRpcInterface> interface;
+};
+
+Clients
+create_clients()
+{
+  auto db_pool = std::make_unique<x23::ThreadPool>(1);
+  auto db_cp = std::make_unique<x23::CoroPoll>(*db_pool);
+  MempoolRpcInterface::coord_client_t coord_client =
+      [&] -> MempoolRpcInterface::coord_client_t {
+    auto fd = db_cp->tcpconnect(MempoolTestServer::kAddress,
+                                std::to_string(
+                                    MempoolTestServer::kCoordinatorDbPort))();
+    if (!fd) {
+      throw std::runtime_error("Failed to connect to coord server");
+    }
+    auto client_config = x23::rpc_stream_logged(*db_cp, *fd);
+    return client_config.template client<DbCoord1>();
+  }();
+
+  auto exec_pool = std::make_unique<x23::ThreadPool>(1);
+  auto exec_cp = std::make_unique<x23::CoroPoll>(*exec_pool);
+  MempoolRpcInterface::exec_client_t exec_client =
+      [&] -> MempoolRpcInterface::exec_client_t {
+    auto fd =
+        exec_cp->tcpconnect(MempoolTestServer::kAddress,
+                            std::to_string(MempoolTestServer::kExecutorPort))();
+    if (!fd) {
+      throw std::runtime_error("Failed to connect to executor server");
+    }
+    auto client_config = x23::rpc_stream_logged(*exec_cp, *fd);
+    return client_config.template client<ExecutorCoord1>();
+  }();
+
+  auto interface =
+      std::make_unique<MempoolRpcInterface>(std::move(coord_client),
+                                            std::move(exec_client));
+  return {.db_pool = std::move(db_pool),
+          .db_cp = std::move(db_cp),
+          .exec_pool = std::move(exec_pool),
+          .exec_cp = std::move(exec_cp),
+          .interface = std::move(interface)};
+}
+
 } // namespace
 
 TEST(Mempool, HelloWorld)
@@ -138,47 +189,17 @@ TEST(Mempool, HelloWorld)
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-
-  x23::ThreadPool db_pool = x23::ThreadPool(1);
-  x23::CoroPoll cp_ = x23::CoroPoll(db_pool);
-  MempoolRpcInterface::coord_client_t coord_client =
-      [&] -> MempoolRpcInterface::coord_client_t {
-    auto fd =
-        cp_.tcpconnect(MempoolTestServer::kAddress,
-                       std::to_string(MempoolTestServer::kCoordinatorDbPort))();
-    if (!fd) {
-      throw std::runtime_error("Failed to connect to coord server");
-    }
-    auto client_config = x23::rpc_stream_logged(cp_, *fd);
-    return client_config.template client<DbCoord1>();
-  }();
-
-  x23::ThreadPool exec_pool = x23::ThreadPool(1);
-  x23::CoroPoll exec_cp = x23::CoroPoll(exec_pool);
-  MempoolRpcInterface::exec_client_t exec_client =
-      [&] -> MempoolRpcInterface::exec_client_t {
-    auto fd =
-        cp_.tcpconnect(MempoolTestServer::kAddress,
-                       std::to_string(MempoolTestServer::kExecutorPort))();
-    if (!fd) {
-      throw std::runtime_error("Failed to connect to executor server");
-    }
-    auto client_config = x23::rpc_stream_logged(cp_, *fd);
-    return client_config.template client<ExecutorCoord1>();
-  }();
-
-  MempoolRpcInterface interface(std::move(coord_client),
-                                std::move(exec_client));
+  Clients clients = create_clients();
 
   {
     SignedTransaction tx{};
-    interface.schedulercoord_submit_unvetted({tx})();
+    clients.interface->schedulercoord_submit_unvetted({tx})();
   }
 
   {
     ValidatorID validator_id{};
     SignedTransaction tx{};
-    interface.schedulercoord_submit_vetted(validator_id, {tx})();
+    clients.interface->schedulercoord_submit_vetted(validator_id, {tx})();
   }
 }
 
