@@ -10,7 +10,6 @@
 #include <sys/socket.h>
 #include <thread>
 #include <type_traits>
-#include <utility>
 
 // generated x23 headers
 #include "contract.hh"
@@ -19,7 +18,6 @@
 #include "storage_item.hh"
 #include "types.hh"
 
-#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -115,6 +113,10 @@ hogd_from_execd_handler(Server &server, std::span<const std::byte> args,
 class HogDBExecutorServer {
 public:
   explicit HogDBExecutorServer(RPCContext &ctx) : ctx_(ctx) {}
+  ~HogDBExecutorServer() { rpc_server_->stop(); }
+
+  // Start the server on the specified port
+  ErrnoStatus<void> start_server(uint16_t port);
 
   RPCError commit_transaction(BlockID block, TransactionID tx);
   RPCError abort_transaction(BlockID block, TransactionID tx);
@@ -138,6 +140,8 @@ public:
 
 private:
   RPCContext &ctx_;
+  std::shared_ptr<RPCServer> rpc_server_;
+  std::jthread rpc_listener_th_;
 
   static RPCError request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
@@ -146,37 +150,5 @@ private:
 
 static_assert(is_DatabaseToExecutorInterfaceV1<HogDBExecutorServer *,
                                                std::type_identity_t>);
-
-// Wraps the HogDBExecutorServer into an RPCServer.
-class HogDBExecutorRPCServer {
-public:
-  HogDBExecutorRPCServer(RPCContext &ctx, uint16_t port) : exec_server_(ctx)
-  {
-    auto res = RPCServer::create(
-        port,
-        [this](std::span<const std::byte> args,
-               std::string_view peer) -> OwningSpan<const std::byte> {
-          return hogd_from_execd_handler(exec_server_, args, peer);
-        });
-    if (!res) {
-      throw std::runtime_error("Failed to create RPC server");
-    }
-    rpc_server_ = std::move(*res);
-    rpc_listener_th_ = std::jthread([this] {
-      if (ErrnoStatus<void> ret = rpc_server_->listen(); !ret) {
-        error("Database to executor server listen failed: {}", ret.error());
-      }
-    });
-  }
-
-  ~HogDBExecutorRPCServer() { rpc_server_->stop(); }
-
-  uint16_t port() const { return rpc_server_->get_port(); }
-
-private:
-  HogDBExecutorServer exec_server_;
-  std::shared_ptr<RPCServer> rpc_server_;
-  std::jthread rpc_listener_th_;
-};
 
 } // namespace hogd

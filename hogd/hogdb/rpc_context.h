@@ -32,14 +32,16 @@ public:
   // getters.
   HogDatabase &get_db() const { return db_; }
 
-  // retrieves a block transaction (and creates it if it doesn't exist).
-  BlockTX &get_block_tx(BlockTXID bid);
-  // removes a block transaction.
+  // opens a new block transaction.
+  HogDBStatus<BlockTX *> open_block_tx(BlockTXID bid);
+  // retrieves an open block transaction.
+  BlockTX *get_block_tx(BlockTXID bid);
+  // closes a block transaction.
   void close_block_tx(BlockTXID bid);
 
-  // retrieves an invoke transaction (and creates it if it doesn't
-  // exist).
-  InvokeTX &get_invoke_tx(BlockTXID bid, InvokeTXID iid);
+  // retrieves an invoke transaction (and creates it if it doesn't exist).
+  // Returns nullptr if the bid is not open.
+  InvokeTX *get_invoke_tx(BlockTXID bid, InvokeTXID iid);
   // removes an invoke transaction.
   void close_invoke_tx(BlockTXID bid, InvokeTXID iid);
 
@@ -64,10 +66,10 @@ private:
   PerThread<BlockCache> block_tx_cache_;
 
   // slow path for get_block_tx().
-  BlockTX &get_block_tx_slow(BlockTXID bid);
+  BlockTX *get_block_tx_slow(BlockTXID bid);
 };
 
-inline BlockTX &
+inline BlockTX *
 RPCContext::get_block_tx(BlockTXID bid)
 {
   BlockCache &cache = *block_tx_cache_;
@@ -75,19 +77,22 @@ RPCContext::get_block_tx(BlockTXID bid)
   auto it = cache.blocks.find(bid);
   if (it == cache.blocks.end())
     return get_block_tx_slow(bid);
-  return *it->second;
+  return it->second;
 }
 
-inline InvokeTX &
+inline InvokeTX *
 RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
 {
   auto key = std::make_pair(bid, iid);
   auto [tx, ul] = invoke_txes_.find(key);
   if (!tx) {
-    tx = invoke_txes_.insert(key, InvokeTX(get_block_tx(bid)), ul);
+    BlockTX *btx = get_block_tx(bid);
+    if (!btx) [[unlikely]]
+      return nullptr;
+    tx = invoke_txes_.insert(key, InvokeTX(*btx), ul);
     assert(tx != nullptr);
   }
-  return *tx;
+  return tx;
 }
 
 inline void

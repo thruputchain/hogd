@@ -1,10 +1,13 @@
-#include "hogd/hogdb/rpc_from_hogexec.h"
+#include "hogd/hogdb/rpc_from_exec.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <span>
+#include <string_view>
+#include <utility>
 
 // generated x23 headers
 #include "contract.hh"
@@ -13,7 +16,9 @@
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hogd/base/log.h"
 #include "hogd/base/span.h"
+#include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -23,6 +28,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/rpc/rpc.h"
 
 namespace hogd {
 
@@ -31,12 +37,11 @@ namespace {
 constexpr RPCError
 to_rpc_error(HogDBStatus<void> ret)
 {
-  // placeholder until we can fix error codes.
+  // TODO(abelay): the RPC error codes ought to be the same as or similar to
+  // HogDBStatus; the current ones don't translate well.
   if (ret)
     return RPCError::kRPCNone;
 
-  // TODO(abelay): the RPC error codes ought to be the same as or similar to
-  // HogDBStatus; the current ones don't translate well.
   switch (ret.error().code()) {
   case HogDBCode::kNotFound:
     return RPCError::kRPCNotFound;
@@ -63,6 +68,25 @@ to_span(const Bytestring &bs)
 }
 
 } // namespace
+
+ErrnoStatus<void>
+HogDBExecutorServer::start_server(uint16_t port)
+{
+  ErrnoStatus<std::shared_ptr<RPCServer>> server = RPCServer::create(
+      port,
+      [this](std::span<const std::byte> args,
+             std::string_view peer) -> OwningSpan<const std::byte> {
+        return hogd_from_execd_handler(*this, args, peer);
+      });
+  if (!server)
+    return server.error();
+  rpc_server_ = std::move(*server);
+  rpc_listener_th_ = std::jthread([this] {
+    if (ErrnoStatus<void> ret = rpc_server_->listen(); !ret)
+      error("Database to executor server listen failed: {}", ret.error());
+  });
+  return {};
+}
 
 // HogDBExecutorServer implementations
 
@@ -93,7 +117,10 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
 RPCError
 HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx)
 {
-  ctx_.get_invoke_tx(block, tx).commit();
+  InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
+  if (!itx)
+    return RPCError::kRPCNotFound;
+  itx->commit();
   ctx_.close_invoke_tx(block, tx);
   return RPCError::kRPCNone;
 }
@@ -101,7 +128,10 @@ HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx)
 RPCError
 HogDBExecutorServer::abort_transaction(BlockID block, TransactionID tx)
 {
-  ctx_.get_invoke_tx(block, tx).abort();
+  InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
+  if (!itx)
+    return RPCError::kRPCNotFound;
+  itx->abort();
   ctx_.close_invoke_tx(block, tx);
   return RPCError::kRPCNone;
 }
@@ -111,14 +141,16 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
                                                  TransactionID tx,
                                                  StorageDeltaBatch const &batch)
 {
-  InvokeTX &itx = ctx_.get_invoke_tx(block, tx);
-  int depth = itx.create_savepoint();
+  InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
+  if (!itx)
+    return RPCError::kRPCNotFound;
+  int depth = itx->create_savepoint();
 
   for (auto const &delta : batch) {
     if (RPCError err =
-            request_one(itx, delta.addrkey, delta.delta, delta.flags);
+            request_one(*itx, delta.addrkey, delta.delta, delta.flags);
         err != RPCError::kRPCNone) {
-      itx.rollback_to_savepoint(depth - 1);
+      itx->rollback_to_savepoint(depth - 1);
       return err;
     }
   }
@@ -130,8 +162,11 @@ RPCError
 HogDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
                                          uint32_t popcount)
 {
-  InvokeTX &itx = ctx_.get_invoke_tx(block, tx);
-  itx.release_savepoint(itx.get_savepoint_head() - popcount - 1);
+  InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
+  if (!itx)
+    return RPCError::kRPCNotFound;
+
+  itx->release_savepoint(itx->get_savepoint_head() - popcount - 1);
   return RPCError::kRPCNone;
 }
 
