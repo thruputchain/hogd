@@ -64,6 +64,7 @@ public:
   // that are still running.
   x23::Async<void> executorcoord_shutdown();
 
+  void shut_down();
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:

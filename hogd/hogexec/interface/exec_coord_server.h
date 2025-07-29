@@ -36,6 +36,13 @@ public:
     rpc_interface_->start_server(port_number);
   }
 
+  void shut_down()
+  {
+    if (rpc_interface_) {
+      rpc_interface_->shut_down();
+    }
+  }
+
   void await_shutdown_request()
   {
     if (rpc_interface_) {

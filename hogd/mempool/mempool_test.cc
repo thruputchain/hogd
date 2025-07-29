@@ -63,6 +63,13 @@ public:
     executor_coord_server_.start_server(kExecutorPort);
   }
 
+  ~MempoolTestServer()
+  {
+    // We need to call [executor_coord_server_.shut_down()] so that the
+    // [ExecCoordServer] destructor does not block.
+    executor_coord_server_.shut_down();
+  }
+
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr size_t kNumDbPoolThreads = 16;
@@ -88,15 +95,15 @@ private:
   InMemoryDatabase in_memory_db_;
   StorageCostModel cost_model_;
   BlockManager block_manager_;
+
+  LocalMockDB db_proxy_{.read_port_number_ = kCoordinatorDbPort};
   ExecCard exec_card_ = {
       .protocol = "blah",
       .upid = {},
       .address = (kAddress + ":" + std::to_string(kCoordinatorPort)).c_str()};
-  LocalMockDB db_proxy_{.read_port_number_ = kCoordinatorDbPort};
   CoordinatorServer coordinator_server_;
   ExecCoordServer executor_coord_server_;
-  // TODO(jhumphri): Add [ExecCoordServer]. Keep the [db_executor_server_]
-  // variable below because I think we need it.
+
   RPCDbExecutorServer db_executor_server_;
   DbCoordServer db_coordinator_server_;
 };
@@ -173,8 +180,6 @@ TEST(Mempool, HelloWorld)
     SignedTransaction tx{};
     interface.schedulercoord_submit_vetted(validator_id, {tx})();
   }
-
-  // TODO(jhumphri): Exit gracefully.
 }
 
 } // namespace hogd

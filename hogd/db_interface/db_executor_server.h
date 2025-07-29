@@ -171,13 +171,18 @@ public:
     }
     rpc_server_ = std::move(*res);
     server_listener_ = std::jthread([this] {
-      if (ErrnoStatus<void> ret = rpc_server_->listen(); !ret) {
+      if (ErrnoStatus<void> ret = rpc_server_->listen();
+          !ret && !stopped_.load(std::memory_order_relaxed)) {
         error("Database to executor server listen failed: {}", ret.error());
       }
     });
   }
 
-  ~RPCDbExecutorServer() { rpc_server_->stop(); }
+  ~RPCDbExecutorServer()
+  {
+    stopped_.store(true, std::memory_order_relaxed);
+    rpc_server_->stop();
+  }
 
   uint32_t port() const { return rpc_server_->get_port(); }
 
@@ -185,6 +190,7 @@ private:
   SyncDBExecutorServer sync_server_;
   std::shared_ptr<RPCServer> rpc_server_;
   std::jthread server_listener_;
+  std::atomic<bool> stopped_ = false;
 };
 
 } // namespace hogd
