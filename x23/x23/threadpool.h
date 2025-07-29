@@ -2,40 +2,45 @@
 
 #pragma once
 
+#include <cassert>
+#include <concepts>
+#include <condition_variable>
 #include <coroutine>
-#include <new>
+#include <cstddef>
+#include <functional>
+#include <memory>
 #include <queue>
 #include <ranges>
 #include <stop_token>
 #include <thread>
+#include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
 #include <x23/err.h>
 #include <x23/mvar.h>
+#include <x23/utility.h>
 #include <x23/vec.h>
 
 namespace x23 {
-
-// Note: this could break binary compatibility, but we don't have that
-// across compilers anyway because of how clang deals with
-// [[no_unique_address]]:
-// https://github.com/llvm/llvm-project/issues/50766
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpragmas"
-#pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#pragma GCC diagnostic ignored "-Wunknown-warning-group"
-#pragma GCC diagnostic ignored "-Winterference-size"
-constexpr size_t hardware_destructive_interference_size =
-    std::hardware_destructive_interference_size;
-#pragma GCC diagnostic pop
 
 // Return the number of available hardware threads.  Tries to figure
 // it out from Cpus_allowed in /proc/self/status, which works on
 // modern linux distributions, but then falls back to
 // std::thread::hardware_concurrency().
 unsigned nproc();
+
+// Return a mapping of CPU number to cache, similar to what you see in
+// "lscpu -e".  The level corresponds to N in the pathname:
+//     /sys/devices/system/cpu/cpu0/cache/indexN
+// Generally this is:
+//     0 - L1d
+//     1 - L1i
+//     2 - L2
+//     3 - L3
+std::unordered_map<int, int> cpu_cache_map(int level);
 
 class ThreadPool {
 public:

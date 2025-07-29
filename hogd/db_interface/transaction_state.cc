@@ -17,12 +17,6 @@
 
 namespace hogd {
 
-TransactionState::TransactionState()
-{
-  // TODO(geoff): updated interface doesn't need this
-  subtransaction_stack_.emplace_back();
-}
-
 void
 TransactionState::push_subtransaction()
 {
@@ -34,9 +28,8 @@ void
 TransactionState::pop_subtransactions(uint32_t count)
 {
   assert(!finished_);
-  assert(subtransaction_stack_.size() > count);
+  assert(subtransaction_stack_.size() >= count);
   subtransaction_stack_.resize(subtransaction_stack_.size() - count);
-  assert(!subtransaction_stack_.empty());
 }
 
 void
@@ -44,6 +37,7 @@ TransactionState::add_delta(AddressAndKey const &addrkey, StorageDelta &&delta,
                             MeteredStorageLock &&new_lock)
 {
   assert(!finished_);
+  assert(!subtransaction_stack_.empty());
   if constexpr (is_debug_build()) {
     if (subtransaction_stack_.back().deltas_.contains(addrkey)) {
       assert(addrkey.key.key_type() ==
@@ -128,13 +122,15 @@ TransactionState::extract_results()
 std::pair<TransactionState &, std::unique_lock<std::mutex>>
 TransactionStateManager::get(TransactionID txid)
 {
-  auto [state, ul] = tx_states_.find(txid);
-  if (!state) {
-    auto [ptr, lock] = tx_states_.insert(txid, TransactionState());
-    new_transaction_count_.fetch_add(1, std::memory_order_release);
-    return {*ptr, std::move(lock)};
+  {
+    auto [state, ul] = tx_states_.find(txid);
+    if (state) {
+      return {*state, std::move(ul)};
+    }
   }
-  return {*state, std::move(ul)};
+  auto [ptr, lock] = tx_states_.insert(txid, TransactionState());
+  new_transaction_count_.fetch_add(1, std::memory_order_release);
+  return {*ptr, std::move(lock)};
 }
 
 } // namespace hogd

@@ -1,23 +1,17 @@
 #pragma once
 
 #include <cassert>
-#include <concepts>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
-#include <exception>
-#include <format>
 #include <limits>
 #include <memory>
-#include <optional>
-#include <span>
 #include <string>
 #include <tuple>
-#include <type_traits>
 #include <unistd.h>
 #include <utility>
 
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -148,15 +142,10 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
 
     // Once the syscall inputs are parsed, we can print them in a formatted log
     // message.
-    if (syscall_logfd != -1) {
-      auto log_string =
-          "Syscall " + x23::show(Syscall) + " input: " +
+    trace("Syscall {} Input: {}", x23::show(Syscall),
           x23::show(make_syscall_input_struct<InputArg>(std::tuple{
               SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                  std::get<Is>(parsed_args))...})) +
-          "\n";
-      write(syscall_logfd, log_string.c_str(), log_string.size());
-    }
+                  std::get<Is>(parsed_args))...})));
 
     // With parameter packs as structured bindings, the annoying if constexpr
     // disappears, and the following becomes
@@ -187,23 +176,16 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
 
     // Print the output of the syscall.  The outputs in parsed_args should only
     // be written to if the syscall succeeds.
-    if (syscall_logfd != -1) {
-      std::string log_string;
-      if (!res.first.has_value() ||
-          res.first.value() != SyscallErrorCode::kNone) {
-        log_string = syscall_error_message(res.first);
-      }
-      else {
-        log_string =
-            "Syscall " + x23::show(Syscall) + " output: " +
-            x23::show(make_syscall_output_struct<InputArg,
-                                                 OutputArg>(std::tuple{
-                SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                    std::get<Is>(parsed_args))...})) +
-            "\n";
-      }
-      write(syscall_logfd, log_string.c_str(), log_string.size());
-    }
+
+    bool is_syscall_error =
+        !res.first.has_value() || res.first.value() != SyscallErrorCode::kNone;
+    trace("Syscall {} Result: {}", x23::show(Syscall),
+          is_syscall_error
+              ? syscall_error_message(res.first)
+              : x23::show(
+                    make_syscall_output_struct<InputArg, OutputArg>(std::tuple{
+                        SyscallArgParams<typename syscall_t::template arg_i<
+                            Is>>::deref(std::get<Is>(parsed_args))...})));
 
     return from_status(res.first);
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));

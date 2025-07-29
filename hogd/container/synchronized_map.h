@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -99,10 +100,8 @@ public:
   {
     auto [map, ul] = get_bucket(key);
     auto it = map.find(key);
-    if (it == map.end()) {
-      ul.unlock();
+    if (it == map.end())
       return {nullptr, std::move(ul)};
-    }
     return {&it->second, std::move(ul)};
   }
 
@@ -110,10 +109,8 @@ public:
   {
     auto [map, ul] = get_bucket(k);
     auto [it, inserted] = map.insert({k, std::move(obj)});
-    if (!inserted) {
-      ul.unlock();
+    if (!inserted)
       return {nullptr, std::move(ul)};
-    }
     return {&it->second, std::move(ul)};
   }
 
@@ -122,11 +119,24 @@ public:
   {
     auto [map, ul] = get_bucket(k);
     auto [it, inserted] = map.insert({k, obj});
-    if (!inserted) {
-      ul.unlock();
+    if (!inserted)
       return {nullptr, std::move(ul)};
-    }
     return {&it->second, std::move(ul)};
+  }
+
+  T *insert(const Key &key, T &&obj, const std::unique_lock<std::mutex> &ul)
+  {
+    assert(std::has_single_bit(locks_.size()));
+    assert(locks_.size() == buckets_.size());
+    assert(ul.owns_lock());
+
+    size_t idx = hash_fn_(key) & (buckets_.size() - 1);
+    if (ul.mutex() != std::addressof(locks_[idx])) [[unlikely]]
+      panic("Wrong lock.");
+    auto [it, inserted] = buckets_[idx].insert({key, std::move(obj)});
+    if (!inserted)
+      return nullptr;
+    return &it->second;
   }
 
   std::pair<T &, std::unique_lock<std::mutex>> insert_or_assign(const Key &k,
@@ -150,8 +160,8 @@ public:
     assert(ul.owns_lock());
 
     size_t idx = hash_fn_(key) & (buckets_.size() - 1);
-    if (ul.mutex() != std::addressof(locks_[idx]))
-      throw std::invalid_argument("Wrong lock.");
+    if (ul.mutex() != std::addressof(locks_[idx])) [[unlikely]]
+      panic("Wrong lock.");
     return buckets_[idx].erase(key);
   }
 

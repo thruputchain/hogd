@@ -47,8 +47,7 @@ load_wasm_from_file(std::string_view filename)
 static std::shared_ptr<Contract>
 load_test_contract(std::string_view filename)
 {
-  auto wasm = load_raw_file("/test_contracts/integration_test_contracts/" +
-                            std::string(filename));
+  auto wasm = load_raw_file("/test_contracts/" + std::string(filename));
   auto out = std::make_shared<Contract>(ContractType::kWasmi);
   out->wasmi_contract() = std::move(wasm);
   return out;

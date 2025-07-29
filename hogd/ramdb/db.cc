@@ -1,16 +1,18 @@
 #include "hogd/ramdb/db.h"
 
 #include <algorithm>
-#include <bit>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
+#include <format>
 #include <future>
 #include <latch>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -41,7 +43,7 @@ active_cores(const WorkerPool &pool)
 }
 
 DBStatus<std::unique_ptr<Database>>
-create_db(const std::string &path, size_t heap_size, int bucket_order)
+create_db(std::string_view path, size_t heap_size, int bucket_order)
 {
   // NOTE: all variables with the _order suffix means they are log2(n).
 
@@ -77,54 +79,6 @@ create_db(const std::string &path, size_t heap_size, int bucket_order)
 }
 
 } // namespace
-
-DBStatus<std::unique_ptr<Database>>
-Database::open(const std::string &path, size_t heap_size, int bucket_order)
-{
-  DBStatus<std::unique_ptr<Database>> ret =
-      create_db(path, heap_size, bucket_order);
-  if (!ret)
-    return ret.error();
-  std::unique_ptr<Database> db = std::move(ret.value());
-  db->pool_.adjust_workers(active_cores(db->pool_));
-
-  // load all the LSNs that are available and valid.
-  DiskReader r(*db->loglet_allocator_, db->map_);
-  DBStatus<uint64_t> lsn = r.load(db->dir_);
-  if (!lsn) {
-    error("failed to load database: {}", lsn.error());
-    return lsn.error();
-  }
-  if (*lsn == 0)
-    debug("no existing database found; creating a new database.");
-  else
-    debug("loaded up to LSN {}, {} items", *lsn, db->map_.size());
-  db->disk_writer_.init(*lsn);
-  return db;
-}
-
-DBStatus<std::unique_ptr<Database>>
-Database::open_lsn(const std::string &path, uint64_t lsn, size_t heap_size,
-                   int bucket_order)
-{
-  DBStatus<std::unique_ptr<Database>> ret =
-      create_db(path, heap_size, bucket_order);
-  if (!ret)
-    return ret.error();
-  std::unique_ptr<Database> db = std::move(ret.value());
-  db->pool_.adjust_workers(active_cores(db->pool_));
-
-  // load up to a specific LSN.
-  DiskReader r(*db->loglet_allocator_, db->map_);
-  DBStatus<uint64_t> load_ret = r.load(db->dir_, lsn);
-  if (!load_ret) {
-    error("failed to load database: {}", load_ret.error());
-    return load_ret.error();
-  }
-  assert(*load_ret == lsn);
-  db->disk_writer_.init(lsn);
-  return db;
-}
 
 DBStatus<uint64_t>
 Database::check(const std::string &path, size_t heap_size)
@@ -171,6 +125,14 @@ Database::notify_low_mem()
 }
 
 void
+Database::notify_wal_grew()
+{
+  std::scoped_lock g(lock_);
+  run_disk_cleanup_ = true;
+  cv_.notify_one();
+}
+
+void
 Database::background_worker(const std::stop_token &stoken)
 {
   // NOTE: This thread is needed to synchronize compaction and expansion.
@@ -178,7 +140,7 @@ Database::background_worker(const std::stop_token &stoken)
 
   while (true) {
     bool expand = false;
-    bool compact;
+    bool compact, disk_cleanup;
     {
       // wait for change in status or timeout.
       std::scoped_lock g(lock_);
@@ -195,6 +157,8 @@ Database::background_worker(const std::stop_token &stoken)
       // check if the buckets need to be expanded.
       if (!active_ && map_.prepare_expand())
         expand = true;
+
+      disk_cleanup = std::exchange(run_disk_cleanup_, false);
     }
 
     // run item compactor if needed.
@@ -221,6 +185,19 @@ Database::background_worker(const std::stop_token &stoken)
       loglet_allocator_->print_stats();
       disk_writer_.print_stats();
     }
+
+    if (disk_cleanup) {
+      debug("checking to see if disk cleanup is needed");
+
+      // determine how much wal data there is, see if it's "too much".
+      size_t log_bytes = DiskReader::log_bytes(dir_);
+      bool needed = log_bytes >= (4 * disk_writer_.get_file_size_threshold());
+      info("disk logs occupy {}; cleanup {}needed",
+           print_iec_bytes(log_bytes, true), needed ? "" : "not ");
+
+      if (needed)
+        DiskReader::cleanup(dir_);
+    }
   }
 }
 
@@ -238,27 +215,25 @@ Database::estimate_heap_size(size_t n, size_t key_size, size_t value_size)
   heap_size += (heap_size / kLogletRegionSize + 1) * kBigItemThreshold;
   heap_size = align_up(heap_size, kLogletRegionSize);
 
-  // determine number of cores.
-  size_t cores = std::jthread::hardware_concurrency();
-  int cores_order = std::countr_zero(std::bit_ceil(cores));
-
-  // add the compactor overhead.
-  heap_size += cores * kLogletRegionSize * 2;
+  // need two loglets per compactor thread and one loglet per worker thread.
+  heap_size += available_parallelism() * kLogletRegionSize * 3;
 
   // add disk buffering overhead.
-  heap_size += (1UL << (cores_order + kBaseWriteHeadOrder)) * kLogletRegionSize;
+  heap_size +=
+      (1UL << scalable_shard_order(kBaseWriteHeadOrder)) * kLogletRegionSize;
 
   return heap_size;
 }
 
 DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>>
-Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
+Database::sync_and_snapshot(uint64_t begin_lsn)
 {
   DBStatus<uint64_t> ret = sync();
   if (!ret) [[unlikely]]
     return ret.error();
 
   uint64_t end_lsn = *ret;
+  std::string path = std::format("{}-{}.snap", begin_lsn, end_lsn);
   info("begin snapshot from lsn {} -> lsn {} to {}", begin_lsn, end_lsn, path);
 
   if (begin_lsn > end_lsn) {
@@ -295,9 +270,11 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
 
     // only allocate one head for this writer since snapshotting is
     // single-threaded anyway.
-    DiskWriter snap_writer{*loglet_allocator_, dir_, std::move(path),
-                           kMaxFileSize, 0};
-    snap_writer.init(begin_lsn); // start snap writer bg thread
+    std::string tmp_path = std::format("__{}.tmp", path);
+    DiskWriter snap_writer{*loglet_allocator_, dir_, 0};
+    // start snap writer bg thread; this also configures writer so that
+    // sync() at end of snapshotting writes a commit record for end_lsn - 1.
+    snap_writer.init(end_lsn - 1, tmp_path, kMaxFileSize);
 
     auto add_item_to_snapshot = [&snap_writer, &begin_lsn, &end_lsn,
                                  &stats = perthread_stats](ItemHeader *item) {
@@ -306,7 +283,8 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
 
       constexpr size_t kHash = 0; // irrelevant; there is only one head
       ScopedDiskWrite record = snap_writer.write_record(kHash);
-      DBStatus<uint64_t> ret = record.modify(item);
+      // add item to snapshot file using the lsn indicated by item->lsn.
+      DBStatus<uint64_t> ret = record.modify(item, true);
       if (!ret) [[unlikely]]
         return;
       // ret LSN ignored; it is meaningless outside of redo log.
@@ -356,6 +334,21 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
       return;
     }
 
+    // atomically rename snapshot files to prevent recovery from trying to
+    // recover partially written snapshots.
+    ErrnoStatus<void> r = dir_.rename(tmp_path, path);
+    if (!r) {
+      warn("snapshot atomic rename from {} to {} failed", tmp_path, path);
+      promise->set_value(ret.error());
+      return;
+    }
+    // sync the dir to avoid losing the updated dentry (thanks abelay!).
+    DBStatus<void> dirsync_ret = dir_.sync().transform_error(to_db_error);
+    if (!dirsync_ret) {
+      promise->set_value(dirsync_ret.error());
+      return;
+    }
+
     info("syncing snapshot file to storage took {:.3f} s",
          snap_sync_timer.elapsed());
 
@@ -371,6 +364,39 @@ Database::sync_and_snapshot(const std::string &path, uint64_t begin_lsn)
   setup_latch.wait();
 
   return std::make_pair(end_lsn, promise->get_future());
+}
+
+DBStatus<std::unique_ptr<Database>>
+Database::open_internal(std::string_view path, std::optional<uint64_t> lsn,
+                        size_t heap_size, int bucket_order,
+                        size_t log_file_size_threshold)
+{
+  DBStatus<std::unique_ptr<Database>> ret =
+      create_db(path, heap_size, bucket_order);
+  if (!ret)
+    return ret.error();
+  std::unique_ptr<Database> db = std::move(ret.value());
+  db->pool_.adjust_workers(active_cores(db->pool_));
+
+  DiskReader r(*db->loglet_allocator_, db->map_);
+  // load up to a specific LSN or everything if no lsn limit given.
+  DBStatus<uint64_t> load_ret = r.load(db->dir_, lsn);
+  if (!load_ret) {
+    error("failed to load database: {}", load_ret.error());
+    return load_ret.error();
+  }
+
+  if (lsn && *load_ret != *lsn) {
+    error("failed to recover up through specified lsn");
+    return DBError{DBCode::kCorruption};
+  }
+
+  if (*load_ret == 0)
+    info("no existing database found; creating a new database.");
+  else
+    info("loaded up to LSN {}, {} items", *load_ret, db->map_.size());
+  db->disk_writer_.init(*load_ret, "{}.log", log_file_size_threshold);
+  return db;
 }
 
 } // namespace hogd

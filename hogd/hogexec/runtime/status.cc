@@ -76,17 +76,4 @@ InvokeResult::to_host_fn_result() const
   return {SyscallErrorCode::kNone, gas_consumed_};
 }
 
-InvokeResult
-InvokeResult::to_root_error() const
-{
-  assert(!is_root_success());
-
-  if (result_.has_value()) {
-    return InvokeResult{.result_ =
-                            InvokeError{InvokeErrorCode::kInvokeDeterministic},
-                        .gas_consumed_ = gas_consumed_};
-  }
-  return *this;
-}
-
 } // namespace hogd

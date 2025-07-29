@@ -75,7 +75,10 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   auto invoke_res = co_await async;
 
   if (!invoke_res.is_root_success()) {
-    co_await proxy.abort_transaction();
+    auto st = proxy.abort_transaction();
+    if (!st.has_value()) {
+      co_return ExecProposeResult(make_exec_result(st.error().code()));
+    }
     assert(!invoke_res.result_.has_value());
 
     auto out =
@@ -88,7 +91,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
     co_return out;
   }
 
-  auto commit_res = co_await syscall_handler.try_commit_transaction();
+  auto commit_res = syscall_handler.try_commit_transaction();
   if (!commit_res.has_value()) {
     // this error code should not be returned by the try_commit_transaction
     // function
@@ -125,12 +128,15 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
   auto invoke_res = co_await async;
 
   if (!invoke_res.is_root_success()) {
-    co_await proxy.abort_transaction();
+    auto res = proxy.abort_transaction();
+    if (!res.has_value()) {
+      co_return make_exec_result(res.error().code());
+    }
     assert(!invoke_res.result_.has_value());
     co_return make_exec_result(invoke_res.result_.error().code());
   }
 
-  auto commit_res = co_await syscall_handler.try_commit_transaction();
+  auto commit_res = syscall_handler.try_commit_transaction();
   if (!commit_res.has_value()) {
     // this error code should not be returned by the try_commit_transaction
     // function

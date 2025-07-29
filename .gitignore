@@ -8,10 +8,11 @@
 .project
 .vscode
 /compile_commands.json
-Cargo.lock
 Testing/**
 [._]*.sw[a-p]
 bcheck/**
 build/**
 /x23/benchmark
 /x23/tests/bench
+metrics_history
+

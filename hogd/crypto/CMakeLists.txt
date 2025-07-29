@@ -7,6 +7,9 @@ target_link_libraries(crypto_interface
   INTERFACE
   protocol
   crc32c
+  blake3
+  OpenSSL::SSL
+  OpenSSL::Crypto
 )
 
 add_library(crypto_objects OBJECT crypto.cc)
@@ -17,16 +20,25 @@ add_library(
   $<TARGET_OBJECTS:crypto_objects>
 )
 
+find_package(OpenSSL REQUIRED)
 add_dependencies(crypto libsodium_build)
 target_link_libraries(
   crypto
   protocol
   libsodium
   crc32c
+  OpenSSL::SSL
+  OpenSSL::Crypto
+  blake3
 )
 
 add_library(crypto_test_objects OBJECT crypto_test.cc)
-target_link_libraries(crypto_test_objects crypto_interface GTest::gtest_main)
+target_link_libraries(
+  crypto_test_objects 
+  crypto_interface
+  OpenSSL::SSL
+  OpenSSL::Crypto
+  GTest::gtest_main)
 
 # create crypto module test binary
 add_executable(

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <compare>
 #include <cstddef>
 #include <functional>
 #include <span>
@@ -12,6 +13,7 @@
 #include <utility>
 
 #include "hogd/base/unique_function.h"
+#include "x23/vec.h"
 
 // enable hashing of const byte spans.
 template<> struct std::hash<std::span<const std::byte>> {
@@ -138,6 +140,15 @@ string_as_bytes(std::string str)
       reinterpret_cast<const std::byte *>(str.data()),
       str.size() * sizeof(decltype(str)::value_type)};
   return OwningSpan(span, [ref = std::move(str)] mutable {});
+}
+
+inline OwningSpan<const std::byte>
+vec_as_bytes(x23::Buf buf)
+{
+  std::span<const std::byte> span = {reinterpret_cast<const std::byte *>(
+                                         buf.data()),
+                                     buf.size()};
+  return OwningSpan(span, [ref = std::move(buf)] mutable {});
 }
 
 } // namespace hogd

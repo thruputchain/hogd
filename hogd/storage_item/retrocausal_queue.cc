@@ -1,5 +1,6 @@
 #include "hogd/storage_item/retrocausal_queue.h"
 
+#include <algorithm>
 #include <cassert>
 #include <limits>
 #include <memory>
@@ -12,6 +13,17 @@
 
 namespace hogd {
 
+namespace {
+bool
+parent_block_assert(auto const &parent_blocks, uint64_t cur_block_number)
+{
+  return std::ranges::all_of(parent_blocks,
+                             [cur_block_number](auto const &block) {
+                               return block.first != cur_block_number;
+                             });
+}
+} // namespace
+
 RetrocausalQueue::RetrocausalQueue(
     RetrocausalQueue const &parent,
     RetrocausalQueuePastBlockConsumeDelta const &consume_delta,
@@ -22,9 +34,8 @@ RetrocausalQueue::RetrocausalQueue(
     consumed_size_(parent.consumed_size_)
 {
   if constexpr (is_debug_build()) {
-    for (auto const &[block_number, _] : parent.blocks_) {
-      assert(block_number != current_round_block.block_number);
-    }
+    assert(
+        parent_block_assert(parent.blocks_, current_round_block.block_number));
   }
 
   assert(consume_delta.max_fully_consumed_block_number !=

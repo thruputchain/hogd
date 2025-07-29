@@ -6,22 +6,22 @@
 #include <cstring>
 #include <exception>
 #include <memory>
-#include <print>
+#include <mutex>
 #include <span>
 #include <utility>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
+#include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/mock_syscall_entry.h"
-#include "hogd/test_ffi/port_allocator.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -32,13 +32,26 @@ namespace hogd {
 
 namespace {
 
+void
+lazy_init()
+{
+  static std::mutex init_mutex;
+  std::lock_guard lock(init_mutex);
+  static bool initialized = false;
+  if (!initialized) {
+    hogd_init(0, nullptr);
+    initialized = true;
+  }
+}
+
 DBContext *
 make_new_db() noexcept
 {
+  lazy_init();
   try {
-    return new DBContext(PortAllocator::get());
+    return new DBContext();
   } catch (std::exception const &e) {
-    std::println("error creating db context: {}", e.what());
+    error("error creating db context: {}", e.what());
     return nullptr;
   }
 }
@@ -61,11 +74,12 @@ advance_new_block(void *db) noexcept
 void *
 open_runtime_context() noexcept
 {
+  lazy_init();
   std::shared_ptr<hogd::MockRuntimeContext> *out;
   try {
     out = new std::shared_ptr<hogd::MockRuntimeContext>();
   } catch (std::exception const &e) {
-    std::println("error creating runtime context: {}", e.what());
+    error("error creating runtime context: {}", e.what());
     return nullptr;
   }
   *out = std::make_shared<hogd::MockRuntimeContext>(make_hogexec_context());
@@ -122,11 +136,10 @@ open_syscall_handler(void *db, void *rc, const unsigned char *signed_tx,
                      std::span<const unsigned char>(signed_tx, signed_tx_len));
     auto *out = static_cast<void *>(
         new SyscallHandlerContext(*runtime_context, stx, *db_context));
-    std::println("created syscall handler context {}", out);
     return out;
   } catch (std::exception const &e) {
     try {
-      std::println("error creating syscall handler context: {}", e.what());
+      error("error creating syscall handler context: {}", e.what());
     } catch (...) {
       return nullptr;
     }
@@ -140,11 +153,10 @@ void
 close_syscall_handler(void *syscall_handler) noexcept
 {
   try {
-    std::println("closing syscall handler {}", syscall_handler);
     delete static_cast<SyscallHandlerContext *>(syscall_handler);
   } catch (std::exception const &e) {
     try {
-      std::println("error closing syscall handler: {}", e.what());
+      error("error closing syscall handler: {}", e.what());
     } catch (...) {
       return;
     }
@@ -163,7 +175,7 @@ root_invoke(void *syscall_handler) noexcept
 {
   try {
     if (!syscall_handler) {
-      std::println("no syscall handler!");
+      error("root_invoke error: no syscall handler!");
       return kUnrecoverableError;
     }
 
@@ -172,7 +184,7 @@ root_invoke(void *syscall_handler) noexcept
     return res;
   } catch (std::exception const &e) {
     try {
-      std::println("error invoking root invoke: {}", e.what());
+      error("error during root_invoke: {}", e.what());
     } catch (...) {
       return kUnrecoverableError;
     }
@@ -339,7 +351,8 @@ mock_syscall_entrypoint(int32_t syscall, uint64_t arg1, uint64_t arg2,
 void
 enable_syscall_logging()
 {
-  hogd::syscall_logfd = 1;
+  hogd::swap_logger(
+      std::make_unique<hogd::ConsoleLogger>(hogd::LogLevel::kTrace));
 }
 
 #ifdef __cplusplus

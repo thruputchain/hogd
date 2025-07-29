@@ -10,7 +10,6 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/syscall_argument_parsers.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -51,6 +50,22 @@ struct SyscallArgParams<T> {
   }
 
   constexpr static T parse_mock(uint64_t input) { return input; }
+  constexpr static bool validate(T /*unused*/) { return true; }
+  constexpr static T deref(T value) { return value; }
+};
+
+// primitive type enum values
+template<typename T> requires (std::is_enum_v<T> && sizeof(T) <= 8)
+struct SyscallArgParams<T> {
+  constexpr static size_t kNumInputs = 1;
+  constexpr static T parse(std::span<std::byte> /*unused*/, uint64_t input)
+  {
+    return static_cast<T>(input);
+  }
+  constexpr static T parse_mock(uint64_t input)
+  {
+    return static_cast<T>(input);
+  }
   constexpr static bool validate(T /*unused*/) { return true; }
   constexpr static T deref(T value) { return value; }
 };
@@ -231,73 +246,6 @@ struct SyscallArgParams<const T *> {
   constexpr static const T *deref(std::optional<T> &value)
   {
     return value.has_value() ? &(*value) : nullptr;
-  }
-};
-
-// custom parse input types.
-// For those types that don't quite fit into any of the above categories.
-// At this point, these include PublicKeys and Signatures,
-// which are both unions over different cryptographic schemes.
-// The first argument is an enum of the cryptographic scheme,
-// and the second can be scheme-dependent, but refers to whatever
-// data is required for the scheme.
-// (Future schemes might require variable numbers of arguments; that is not
-// implemented here).)
-template<> struct SyscallArgParams<const Signature &> {
-  constexpr static size_t kNumInputs = 2;
-  constexpr static std::optional<const Signature>
-  parse(std::span<std::byte> contract_memory, uint64_t arg1, uint64_t arg2)
-  {
-    return check_user_custom_input_argument<Signature>(contract_memory, arg1,
-                                                       arg2);
-  }
-
-  constexpr static std::optional<const Signature> parse_mock(uint64_t arg1,
-                                                             uint64_t arg2)
-  {
-    return check_user_custom_input_argument_mock<Signature>(arg1, arg2);
-  }
-
-  constexpr static bool validate(std::optional<const Signature> const &arg)
-  {
-    return arg.has_value();
-  }
-
-  constexpr static const Signature &
-  deref(std::optional<const Signature> const &value)
-  {
-    assert(value.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return *value;
-  }
-};
-
-template<> struct SyscallArgParams<const PublicKey &> {
-  constexpr static size_t kNumInputs = 2;
-  constexpr static std::optional<const PublicKey>
-  parse(std::span<std::byte> contract_memory, uint64_t arg1, uint64_t arg2)
-  {
-    return check_user_custom_input_argument<PublicKey>(contract_memory, arg1,
-                                                       arg2);
-  }
-
-  constexpr static std::optional<const PublicKey> parse_mock(uint64_t arg1,
-                                                             uint64_t arg2)
-  {
-    return check_user_custom_input_argument_mock<PublicKey>(arg1, arg2);
-  }
-
-  constexpr static bool validate(std::optional<const PublicKey> const &arg)
-  {
-    return arg.has_value();
-  }
-
-  constexpr static const PublicKey &
-  deref(std::optional<const PublicKey> const &value)
-  {
-    assert(value.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return *value;
   }
 };
 

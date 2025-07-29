@@ -35,32 +35,32 @@ public:
   // LSN that is valid.
   DBStatus<uint64_t> verify(Directory &dir);
 
+  // inspects log files in dir and returns total amount of space they
+  // occupy in bytes. used by Database to decide whether to call cleanup().
+  static size_t log_bytes(const Directory &dir);
+  // given a dir of snapshot and log files, figure out which ones need to be
+  // preserved to enable recovery, then delete the rest. used by Database
+  // for periodic disk cleanup when log adds a new file.
+  static void cleanup(const Directory &dir);
+
 private:
   // the allocator to use for loglet buffers.
   LogletAllocator &allocator_;
   // the map to insert items into.
   ScalableMap &map_;
 
-  // load_log_file calls func with a buffer of changes for each committed LSN in
-  // just one log file.
-  DBStatus<void> load_log_file(
-      File &f, uint64_t &cur_lsn, std::optional<uint64_t> target_lsn,
-      const std::function<DBStatus<void>(uint64_t lsn,
-                                         std::vector<UniqueLoglet> &&)> &func);
-
-  // load_database calls func with a buffer of changes for each committed LSN
+  // load_database calls func with a buffer of changes for each commit record
   // in an entire database.  It extracts these changes from the log files in
   // dir. It stops when target_lsn is reached or there is a failure.
   // Regardless, it sets loaded_lsn to the last LSN that was loaded
   // successfully.
   DBStatus<void> load_database(
       Directory &dir,
-      const std::function<DBStatus<void>(uint64_t lsn,
-                                         std::vector<UniqueLoglet> &&)> &func,
+      const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
       std::optional<uint64_t> target_lsn, uint64_t *loaded_lsn = nullptr);
 
   // apply_changes loads a buffer of changes into map_.
-  DBStatus<void> apply_changes(uint64_t lsn, std::vector<UniqueLoglet> &&log);
+  DBStatus<void> apply_changes(std::vector<UniqueLoglet> &&log);
 };
 
 } // namespace hogd

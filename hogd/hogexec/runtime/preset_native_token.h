@@ -5,7 +5,6 @@
 #include <string_view>
 #include <tuple>
 
-#include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "types.hh"
 
@@ -77,18 +76,19 @@ struct NativeTokenTrait {
                                       "get_balance_of", "get_balance",
                                       "mint",           "burn",
                                       "total_supply"};
+  using amount_t = int128_xdr;
 
   using export_types =
       std::tuple<void (*)(ContractAddress),           // initialize
-                 void (*)(ContractAddress, int128_t), // transfer
+                 void (*)(ContractAddress, amount_t), // transfer
                  void (*)(ContractAddress, ContractAddress,
-                          int128_t),                  // transfer_from
-                 void (*)(ContractAddress, int128_t), // adjust_allowance
-                 int128_t (*)(ContractAddress),       // get_balance_of
-                 int128_t (*)(),                      // get_balance
-                 void (*)(ContractAddress, int128_t), // mint
-                 void (*)(ContractAddress, int128_t), // burn
-                 int128_t (*)(ContractAddress)        // total_supply
+                          amount_t),                  // transfer_from
+                 void (*)(ContractAddress, amount_t), // adjust_allowance
+                 amount_t (*)(ContractAddress),       // get_balance_of
+                 amount_t (*)(),                      // get_balance
+                 void (*)(ContractAddress, amount_t), // mint
+                 void (*)(ContractAddress, amount_t), // burn
+                 amount_t (*)(ContractAddress)        // total_supply
                  >;
 };
 

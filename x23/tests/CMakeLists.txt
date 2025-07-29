@@ -17,6 +17,7 @@ macro(add_x23_test TEST_NAME)
   list(APPEND TEST_EXECUTABLES test_${TEST_NAME})
 endmacro()
 
+add_x23_test(affinity)
 add_x23_test(callback)
 add_x23_test(cleanup)
 add_x23_test(event)
@@ -26,13 +27,12 @@ add_x23_test(marshal)
 add_x23_test(rpc)
 add_x23_test(uvec)
 add_x23_test(rpcthroughput)
+add_x23_test(srpcthroughput)
 add_x23_test(namespace_check xdr_namespace_test1.x xdr_namespace_test2.x xdr_namespace_test3.x)
 
 # flaky tests: prefer timeout failure over stuck CI
 set_tests_properties(event PROPERTIES TIMEOUT 10)
 set_tests_properties(rpcthroughput PROPERTIES TIMEOUT 10)
-
-# Test consistently segfaults in CI on clang
 set_tests_properties(rpcthroughput PROPERTIES DISABLED TRUE)
 
 if(GOOGLETEST_PATH)
@@ -52,6 +52,8 @@ endif()
 add_x23_gtest(shutdown)
 add_x23_gtest(xdr)
 add_x23_gtest(sync)
+add_x23_gtest(uiobuf)
+add_x23_gtest(cxs_serialize_test)
 
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 

@@ -3,14 +3,13 @@
 #include <cassert>
 #include <memory>
 #include <optional>
-#include <print>
 #include <shared_mutex>
 #include <unordered_map>
 #include <variant>
 
 #include "contract.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/container/synchronized_map.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"

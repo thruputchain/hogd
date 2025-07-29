@@ -170,7 +170,7 @@ Benchmark::reload_db(size_t num)
 void
 Benchmark::snapshot()
 {
-  auto ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  auto ret = db_->sync_and_snapshot(0);
   if (unlikely(!ret))
     fail(ret.error());
   DBStatus<void> r = ret->second.get();
@@ -181,7 +181,7 @@ Benchmark::snapshot()
 std::pair<uint64_t, std::future<DBStatus<void>>>
 Benchmark::sync_and_snapshot()
 {
-  auto ret = db_->sync_and_snapshot("snapshot.dat", 0);
+  auto ret = db_->sync_and_snapshot(0);
   if (unlikely(!ret))
     fail(ret.error());
   return std::move(*ret);

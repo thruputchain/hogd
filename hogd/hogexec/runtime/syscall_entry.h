@@ -8,8 +8,6 @@ namespace hogd {
 
 struct HostCallContext;
 
-extern int syscall_logfd;
-
 HostFnStatus<SyscallErrorCode> syscall_entry(HostCallContext *call_context,
                                              uint64_t arg0, uint64_t arg1,
                                              uint64_t arg2, uint64_t arg3,

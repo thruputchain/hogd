@@ -8,10 +8,36 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "types.hh"
 
 namespace hogd {
 
 struct Contract;
+
+// Cache wasm modules across multiple contexts.
+// Can be used across multiple WasmiContexts and across multiple transactions.
+//
+// === WARNINGS ===
+// MUST OUTLIVE ANY WasmiContexts that use it.
+// MUST NOT BE USED WITH CompilationMode::Lazy or
+// CompilationMode::LazyTranslation in Wasmi!!!
+class WasmiModuleCache {
+public:
+  WasmiModuleCache(size_t capacity);
+  ~WasmiModuleCache();
+
+  // Disable copy and move
+  WasmiModuleCache(WasmiModuleCache const &) = delete;
+  WasmiModuleCache &operator=(WasmiModuleCache const &) = delete;
+  WasmiModuleCache(WasmiModuleCache &&) = delete;
+  WasmiModuleCache &operator=(WasmiModuleCache &&) = delete;
+
+private:
+  friend class WasmiContext;
+  void *get_inner() const { return wasmi_module_cache_ptr_; }
+
+  void *wasmi_module_cache_ptr_ = nullptr;
+};
 
 // Context shared between WasmiRuntime objects.
 // Guarantee isolation between transactions
@@ -46,12 +72,15 @@ struct Contract;
 // are destroyed.
 class WasmiContext : public RuntimeContext {
 public:
-  WasmiContext();
+  // module_cache can be nullptr, in which case no module cache is used.
+  // module_cache must outlive this WasmiContext.
+  WasmiContext(WasmiModuleCache *module_cache = nullptr);
 
   // wrapper around a manual drop call on the rust side
   ~WasmiContext() override;
 
   std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
+                                            SHA256Hash const &hash,
                                             SystemCallHandler *syscall_handler,
                                             bool do_contract_verify) override;
 

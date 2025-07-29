@@ -20,6 +20,16 @@ TEST(SHA256, BasicUsage)
   EXPECT_NE(sha256(a), sha256(b));
 }
 
+TEST(Blake3, BasicUsage)
+{
+  std::vector<uint8_t> a = {0, 1, 2, 3};
+  std::vector<uint8_t> a_same = {0, 1, 2, 3};
+  std::vector<uint8_t> b = {3, 2, 1, 0};
+
+  EXPECT_EQ(blake3(a), blake3(a_same));
+  EXPECT_NE(blake3(a), blake3(b));
+}
+
 TEST(CRC32C, BasicUsage)
 {
   std::vector<uint8_t> a = {0, 1, 2, 3};

@@ -1,0 +1,34 @@
+cargo-features = ["trim-paths", "profile-rustflags"] #unstable
+
+[workspace]
+members = [
+    "integration_test_contracts/simple_wallet",
+    "integration_test_contracts/fibonacci",
+    "integration_test_contracts/cxs_roundtrip",
+]
+resolver = "2"
+
+[workspace.dependencies]
+sdk = { package = "sdk_rs", git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
+serde = { version = "1.0.217", default-features = false }
+xdrs = { git = "ssh://git@github.com/groundhogchain/xdrs.git" }
+xdr_common = { git = "ssh://git@github.com/groundhogchain/xdr_common.git" }
+
+[profile.dev]
+opt-level = "z"
+overflow-checks = false
+debug = false
+strip = "debuginfo"
+panic = "abort"
+
+[profile.release]
+opt-level = 3
+overflow-checks = false
+debug = false
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+lto = true
+codegen-units = 1
+trim-paths = "all" # unstable
+#rustflags = [ "-C", "link-args=-zstack-size=64000" ]

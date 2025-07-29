@@ -183,16 +183,6 @@ File::open_temporary()
   return File(fd);
 }
 
-File::~File()
-{
-  if (fd_ == kInvalidFD)
-    return;
-
-  ErrnoStatus<void> ret = sys_close(fd_);
-  if (!ret)
-    error("could not close fd {}: {}", fd_, ret.error());
-}
-
 ErrnoStatus<size_t>
 File::read(std::span<std::byte> buf) const
 {
@@ -215,6 +205,22 @@ ErrnoStatus<void>
 File::sync() const
 {
   return sys_fsync(fd_);
+}
+
+ErrnoStatus<void>
+File::close()
+{
+  if (fd_ == kInvalidFD)
+    return {};
+
+  ErrnoStatus<void> ret = sys_close(fd_);
+  if (!ret) {
+    error("could not close fd {}: {}", fd_, ret.error());
+    return ret.error();
+  }
+
+  fd_ = kInvalidFD;
+  return {};
 }
 
 ErrnoStatus<Directory>
@@ -387,6 +393,27 @@ BufferedReader::read_string(char delim)
   }
 
   return buf;
+}
+
+ErrnoStatus<size_t>
+BufferedReader::skip(size_t n)
+{
+  size_t left_to_skip = n;
+  while (true) {
+    size_t s = std::min(left_to_skip, pos_.size());
+    pos_ = pos_.subspan(s);
+    left_to_skip -= s;
+
+    if (left_to_skip == 0)
+      return n;
+
+    ErrnoStatus<void> ret = refill();
+    if (!ret)
+      return ret.error();
+
+    if (pos_.empty())
+      return n - left_to_skip;
+  }
 }
 
 inline size_t

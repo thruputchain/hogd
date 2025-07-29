@@ -18,6 +18,12 @@ while getopts 'd:' flag; do
     esac
 done
 
+
+# Run clippy
+cd ${ROOT_DIR}/hogd/hogexec/wasmi
+cargo +nightly clippy --no-deps -- -D warnings &
+CLIPPY_PID=$!
+
 # Run clang-tidy
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
@@ -28,6 +34,24 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Run clippy
-cd ${ROOT_DIR}/hogd/hogexec/wasmi
-cargo clippy
+wait $CLIPPY_PID
+CLIPPY_RESULT=$?
+if [ $CLIPPY_RESULT -ne 0 ]; then
+  printf "clippy failed!\n"
+  exit 1
+fi
+
+cd ${ROOT_DIR}
+PYTHON_FILES=$(find hogd/ -name '*.py')
+if [ -n "$PYTHON_FILES" ]; then
+  printf "Running flake8 on python files\n"
+  flake8 $PYTHON_FILES
+  if [ $? -ne 0 ]; then
+    printf "flake8 failed!\n"
+    exit 1
+  fi
+fi
+
+
+
+
