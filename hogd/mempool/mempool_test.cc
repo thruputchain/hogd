@@ -206,6 +206,22 @@ TEST(Mempool, SubmitVetted)
   clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
 }
 
+TEST(Mempool, Nominate)
+{
+  fib_client_t fib_client(ContractAddress{});
+  std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients();
+
+  ValidatorID validator_id{};
+  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res = clients.interface->schedulercoord_nominate(db_tip)();
+  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+}
+
 } // namespace hogd
 
 int
