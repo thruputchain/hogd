@@ -466,7 +466,7 @@ impl {0} {{
             prtop("        let ptr = arr as *const [u8; {}] as *const {};\n", *array_size, outer_id);
             prtop("        unsafe {{ &*ptr }}\n");
             prtop("    }}\n");
-            prtop("}}");
+            prtop("}}\n");
 
             /*
             impl<'r> ReadXDR<'r> for &'r ContractAddress {
@@ -478,13 +478,13 @@ impl {0} {{
             }
             */
             prtop("#[cfg(feature = \"xdrs\")]\n");
-            prtop("\nimpl<'r> ReadXDR<'r> for &'r {} {{\n", outer_id);
+            prtop("impl<'r> ReadXDR<'r> for &'r {} {{\n", outer_id);
             prtop("    fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {{\n");
             prtop("        let arr: &[u8; {}] = xdrs::read_xdr(r)?;\n", *array_size);
             prtop("        let val = Self::from(arr);\n");
             prtop("        Ok(val)\n");
             prtop("    }}\n");
-            prtop("}}");
+            prtop("}}\n");
         }
     }
   }
