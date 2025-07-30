@@ -14,6 +14,7 @@ GCC_BUILD_AND_TEST_LOG=${BUILD_DIR}/gcc_build_and_test.log
 LLVM_BUILD_AND_TEST_LOG=${BUILD_DIR}/llvm_build_and_test.log
 GCC_RELEASE_BUILD_LOG=${BUILD_DIR}/gcc_release_build.log
 
+printf "${COLOR}STEPS 1-2: Start gcc checks\n${NC}"
 (
 printf "${COLOR}STEP 1: Check build (gcc debug)\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc -t Debug -c gcc -f "-Werror" ; then
@@ -29,6 +30,7 @@ fi
 ) > ${GCC_BUILD_AND_TEST_LOG} 2>&1 &
 GCC_PID=$!
 
+printf "${COLOR}STEPS 3-5: Start llvm checks\n${NC}"
 (
 printf "${COLOR}STEP 3: Check build (llvm debug)\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" ; then
@@ -82,6 +84,7 @@ fi
 ) > ${LLVM_BUILD_AND_TEST_LOG} 2>&1 &
 LLVM_PID=$!
 
+printf "${COLOR}STEP 7: Start build (gcc release)\n${NC}"
 (
 printf "${COLOR}STEP 7: Check build (gcc release)\n${NC}"
 if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc ; then
@@ -100,6 +103,7 @@ fi
 
 wait $GCC_PID
 GCC_EXIT_CODE=$?
+printf "${COLOR}GCC build and test finished with exit code $GCC_EXIT_CODE\n${NC}"
 
 if [ $GCC_EXIT_CODE -ne 0 ]; then
     printf "${COLOR}GCC build and test failed with exit code $GCC_EXIT_CODE\n${NC}"
@@ -111,6 +115,7 @@ fi
 
 wait $LLVM_PID
 LLVM_EXIT_CODE=$?
+printf "${COLOR}LLVM build and test and tidy finished with exit code $LLVM_EXIT_CODE\n${NC}"
 
 if [ $LLVM_EXIT_CODE -ne 0 ]; then
     printf "${COLOR}LLVM build and test and tidy failed with exit code $LLVM_EXIT_CODE\n${NC}"
@@ -122,6 +127,7 @@ fi
 
 wait $GCC_RELEASE_PID
 GCC_RELEASE_EXIT_CODE=$?
+printf "${COLOR}GCC release build finished with exit code $GCC_RELEASE_EXIT_CODE\n${NC}"
 
 if [ $GCC_RELEASE_EXIT_CODE -ne 0 ]; then
     printf "${COLOR}GCC release build failed with exit code $GCC_RELEASE_EXIT_CODE\n${NC}"
