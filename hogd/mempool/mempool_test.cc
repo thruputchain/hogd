@@ -96,7 +96,7 @@ private:
   StorageCostModel cost_model_;
   BlockManager block_manager_;
 
-  LocalMockDB db_proxy_{.read_port_number_ = kCoordinatorDbPort};
+  LocalMockDB db_proxy_{.read_port_number_ = kExecutorDbPort};
   ExecCard exec_card_ = {
       .protocol = "blah",
       .upid = {},
@@ -220,6 +220,39 @@ TEST(Mempool, Nominate)
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = clients.interface->schedulercoord_nominate(db_tip)();
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+}
+
+TEST(Mempool, Validate)
+{
+  fib_client_t fib_client(ContractAddress{});
+  std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients();
+
+  ValidatorID validator_id{};
+  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+  printf("nominated block id %zu\n",
+         res_nominate.scheduler_nomination().block_id);
+
+  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
+  printf("id = %zu, hash = %s, prev hash = %s\n", db_tip.id,
+         HexArray(res_nominate.scheduler_nomination().nomination.block_hash)
+             .str()
+             .c_str(),
+         HexArray(
+             res_nominate.scheduler_nomination().nomination.prev_block_hash)
+             .str()
+             .c_str());
+  auto res_validate = clients.interface->schedulercoord_validate(
+      db_tip, res_nominate.scheduler_nomination().nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
 }
 
 } // namespace hogd

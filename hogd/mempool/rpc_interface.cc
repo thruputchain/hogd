@@ -73,6 +73,12 @@ MempoolRpcInterface::abandon_snapshot(BlockID block_id)
   }
 }
 
+void
+MempoolRpcInterface::finish_block(BlockID block_id)
+{
+  exec_client_.executorcoord_finish_block(block_id)();
+}
+
 SHA256Hash
 MempoolRpcInterface::get_block_hash(
     const x23::Vec<SignedTransactionHash> &hashes)
@@ -128,6 +134,15 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
     }
   }
 
+  {
+    auto res = exec_client_.executorcoord_open_proposal_block(block_id)();
+    if (res != ExecResult::ExecResultOK) {
+      abandon_snapshot(block_id);
+      co_return SchedulerNominationResult(
+          SchedulerNominationOutcome::SchedulerNominationError);
+    }
+  }
+
   SchedulerNominationResult result(
       SchedulerNominationOutcome::SchedulerNominationOK);
   result.scheduler_nomination().block_id = block_id;
@@ -157,32 +172,41 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
       nomination.transaction_nominations.push_back(
           {.nondeterministic_proposal_data = res.proposal_data()});
     }
-    else {
+    else if (res.result() == ExecResult::ExecResultOK) {
       nomination.transaction_nominations.push_back(
           {.nondeterministic_proposal_data = NondeterministicProposalData{}});
+    }
+    else {
+      co_return SchedulerNominationResult(
+          SchedulerNominationOutcome::SchedulerNominationError);
     }
   }
   else if (txs.size() > 1) {
     auto res = exec_client_.executorcoord_propose_batch(block_id, txs)();
     for (const ExecProposeResult &result : res) {
-      if (result ==
-          ExecProposeResult(ExecResult::ExecResultTxDeterministicError)) {
+      if (result.result() == ExecResult::ExecResultTxDeterministicError) {
         nomination.transaction_nominations.push_back(
             {.nondeterministic_proposal_data = result.proposal_data()});
       }
-      else {
+      else if (result.result() == ExecResult::ExecResultOK) {
         nomination.transaction_nominations.push_back(
             {.nondeterministic_proposal_data = NondeterministicProposalData{}});
+      }
+      else {
+        co_return SchedulerNominationResult(
+            SchedulerNominationOutcome::SchedulerNominationError);
       }
     }
   }
   else {
     // There are no vetted txs, so we cannot propose a block.
+    finish_block(block_id);
     abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  finish_block(block_id);
   {
     auto res = db_client_.dbcoord_close_snapshot(block_id)();
     if (res.result() != DbResult::DbResultOK) {
@@ -199,11 +223,22 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
                                              Nomination const &nomination)
 {
   BlockID block_id = get_ns_since_epoch();
+  printf("validate, create snapshot for id %zu\n", block_id);
   {
     auto res = db_client_.dbcoord_create_snapshot(
         db_tip.id, block_id,
         BlockExecutionMode::kBlockExecutionModeValidation)();
     if (res != DbResult::DbResultOK) {
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationDbFailed);
+    }
+  }
+
+  {
+    auto res = exec_client_.executorcoord_open_validation_block(block_id)();
+    if (res != ExecResult::ExecResultOK) {
+      abandon_snapshot(block_id);
+      // TODO(jhumphri): Maybe we should have an ExecutorFailed status, too?
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationDbFailed);
     }
@@ -217,6 +252,8 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   x23::Vec<ProposedTransaction> txs;
   txs.reserve(nomination.transaction_nominations.size());
   if (!find_vetted_txs(nomination, txs)) {
+    finish_block(block_id);
+    abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationMissingTxs);
   }
@@ -225,7 +262,9 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
     auto res =
         exec_client_.executorcoord_validate_transaction(block_id, txs[0])();
     if (res != ExecResult::ExecResultOK) {
+      finish_block(block_id);
       abandon_snapshot(block_id);
+      printf("A, %d\n", res);
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationInvalid);
     }
@@ -236,7 +275,9 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
     if (std::any_of(res.begin(), res.end(), [](const auto &r) {
           return r != ExecResult::ExecResultOK;
         })) {
+      finish_block(block_id);
       abandon_snapshot(block_id);
+      printf("B\n");
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationInvalid);
     }
@@ -244,7 +285,9 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   else {
     // Empty nomination.
     CHECK(txs.empty());
+    finish_block(block_id);
     abandon_snapshot(block_id);
+    printf("C\n");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -253,10 +296,14 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   // [nomination.transaction_hashes] here because we already checked above that
   // all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
+    printf("D\n");
+    finish_block(block_id);
+    abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
+  finish_block(block_id);
   {
     auto res = db_client_.dbcoord_close_snapshot(block_id)();
     if (res.result() != DbResult::DbResultOK) {

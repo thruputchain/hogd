@@ -91,6 +91,7 @@ private:
                        x23::Vec<ProposedTransaction> &ret);
 
   void abandon_snapshot(BlockID block_id);
+  void finish_block(BlockID block_id);
 
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
 
