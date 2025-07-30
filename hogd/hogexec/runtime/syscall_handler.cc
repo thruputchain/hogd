@@ -367,6 +367,7 @@ SyscallStatus<void>
 SystemCallHandler::log(std::span<const std::byte> message)
 {
   assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
 
   if (message.size() > kMaxLogMessageLen) {
     // log message too long, return error
@@ -392,6 +393,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
   assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
 
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
@@ -562,12 +564,14 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   return item_view->set(
       NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
 }
+
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
+  assert(!is_read_only());
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-
   return item_view->set(DeletedItem{});
 }
 
@@ -721,6 +725,9 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::modify_native_token_balance(
     ContractAddress const &contract_address, int128_t transfer_amount)
 {
+  assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
+
   AddressAndKey addrkey{
       .address = contract_address,
       .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};

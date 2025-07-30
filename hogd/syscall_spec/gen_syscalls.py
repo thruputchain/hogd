@@ -40,6 +40,7 @@ Each syscall is specified in the following (example) format:
     - list of outputs
   returns: yes/no (default: yes)
   number: 0
+  read_only: yes/no (default: no)
 
 Syscall yaml specification is as follows.
 
@@ -69,6 +70,13 @@ returns:
     default: no
   description: Defines whether or not the function returns to the caller
   or terminates the caller runtime instance.
+
+read_only:
+  type: boolean
+  required: no
+    default: no
+  description: Defines whether or not the syscall is read-only.
+  If false, the syscall will fail if the current invocation is read-only.
 
 inputs and outputs are lists of parameters, of the following yaml type. The
 inputs and outputs are lists of parameters. The logic is largely the same,
@@ -281,6 +289,39 @@ def gen_syscall_table(spec: list[dict]) -> str:
     return table
 
 
+def gen_syscall_meta(syscall: dict) -> str:
+    name = syscall["name"]
+    read_only = "false"
+    if "read_only" in syscall and syscall["read_only"]:
+        read_only = "true"
+    return f"""template<>
+struct SyscallMeta<SyscallNo::k{name}> {{
+    static constexpr bool kIsReadOnlySyscall = {read_only};
+}};
+"""
+
+
+def gen_syscall_meta_h(spec_full: dict) -> str:
+    spec = spec_full["syscalls"]
+    syscall_meta = ""
+    for syscall in spec:
+        syscall_meta += gen_syscall_meta(syscall)
+    return f"""// -*-C++-*-
+#pragma once
+
+#include "syscall.hh"
+
+namespace hogd {{
+
+template<SyscallNo Syscall>
+struct SyscallMeta;
+
+{syscall_meta}
+
+}}
+"""
+
+
 def gen_syscall_inner_h(spec_full: dict) -> str:
     inner_decls = ""
     syscall_argcount = spec_full["syscall_input_count"]
@@ -288,8 +329,8 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 
     for syscall in spec:
         inner_decls += gen_inner(syscall, syscall_argcount)
-        syscall_table = gen_syscall_table(spec)
 
+    syscall_table = gen_syscall_table(spec)
     uint64_t_args = ", ".join(["uint64_t"] * (syscall_argcount))
 
     return f"""// -*-C++-*-
@@ -589,6 +630,10 @@ parser.add_argument(
     '--mock_syscall_entry_cc',
     action='store_true',
     help="gen mock_syscall_entry_cc")
+parser.add_argument(
+    '--syscall_meta_h',
+    action='store_true',
+    help="gen syscall_meta.h")
 
 args = parser.parse_args()
 
@@ -614,6 +659,11 @@ if args.syscall_inner_h:
     filename = args.output_dir + "/syscall_inner.h"
     with open(filename, "w") as f:
         f.write(gen_syscall_inner_h(spec_full))
+
+if args.syscall_meta_h:
+    filename = args.output_dir + "/syscall_meta.h"
+    with open(filename, "w") as f:
+        f.write(gen_syscall_meta_h(spec_full))
 
 if args.syscall_frame is not None and len(args.syscall_frame) > 0:
     print(gen_syscall_frame(spec, args.syscall_frame))

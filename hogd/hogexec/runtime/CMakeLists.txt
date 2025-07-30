@@ -3,6 +3,10 @@ set_source_files_properties(
     PROPERTIES GENERATED TRUE)
 
 set_source_files_properties(
+    ${CMAKE_CURRENT_BINARY_DIR}/syscall_meta.h
+    PROPERTIES GENERATED TRUE)
+
+set_source_files_properties(
     ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
     PROPERTIES GENERATED TRUE)
 
@@ -57,6 +61,7 @@ add_library(runtime_test_objects OBJECT
   native_contract_test.cc
   nnint_add_test.cc
   rcq_test.cc
+  read_only_test.cc
   runtime_test.cc
   serialize_roundtrip_test.cc
   snapshot_storage_item_test.cc
@@ -89,6 +94,7 @@ target_link_libraries(
 add_dependencies(
   runtime_objects
   generate_syscall_inner_h
+  generate_syscall_meta_h
   generate_wasmi_ffi_h
   protocol
 )
