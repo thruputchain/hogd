@@ -333,13 +333,13 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
   if (handler.is_read_only()) {
     if (!SyscallMeta::kIsReadOnlySyscall) {
-      trace("Syscall {} is not read-only, but called in read-only mode", Syscall);
-        return {HostFnStatus<SyscallErrorCode>{
-                    SyscallErrorCode::kInvalidSyscallInput},
-                0};
+      trace("Syscall {} is not read-only, but called in read-only mode",
+            Syscall);
+      return {HostFnStatus<SyscallErrorCode>{
+                  SyscallErrorCode::kInvalidSyscallInput},
+              0};
     }
   }
-
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context

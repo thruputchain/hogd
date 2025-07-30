@@ -75,7 +75,6 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-
              return {};
            }},
       });

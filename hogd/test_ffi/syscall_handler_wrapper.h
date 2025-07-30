@@ -165,7 +165,8 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
 
     if (handler->to_handler().is_read_only()) {
       if (!SyscallMeta::kIsReadOnlySyscall) {
-        trace("Syscall {} is not read-only, but called in read-only mode", Syscall);
+        trace("Syscall {} is not read-only, but called in read-only mode",
+              Syscall);
         return recoverable_error(SyscallErrorCode::kInvalidSyscallInput);
       }
     }
