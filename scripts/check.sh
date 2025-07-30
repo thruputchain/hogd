@@ -38,6 +38,8 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
   ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" > "$LLVM_LOG" 2>&1 &
   LLVM_BUILD_PID=$!
   
+  LLVM_TEST_LOG=${BUILD_DIR}/llvm_test.log
+  
   # Launch LLVM tests in background, waiting for build to complete first
   (
     wait $LLVM_BUILD_PID
@@ -49,7 +51,6 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
         printf "===== end llvm build log =====\n\n"
         exit 1
     fi
-    LLVM_TEST_LOG=${BUILD_DIR}/llvm_test.log
     printf "${COLOR}Step 4: Check tests (llvm)\n${NC}"
     ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100 > "$LLVM_TEST_LOG" 2>&1
   ) &
