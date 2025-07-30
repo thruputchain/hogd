@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_meta.h"
 #include "syscall.hh"
 #include "syscall_args.hh"
 #include "types.hh"
@@ -327,6 +328,18 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
   using SyscallOutputType =
       std::remove_reference_t<decltype(get<std::to_underlying(Syscall) + 1>(
           SyscallOutput{}))>;
+
+  using SyscallMeta = SyscallMeta<Syscall>;
+
+  if (handler.is_read_only()) {
+    if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+      trace("Syscall {} is not read-only, but called in read-only mode",
+            Syscall);
+      return {HostFnStatus<SyscallErrorCode>{
+                  SyscallErrorCode::kInvalidSyscallInput},
+              0};
+    }
+  }
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
