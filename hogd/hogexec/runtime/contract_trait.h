@@ -249,7 +249,7 @@ public:
   {
     auto calldata = trait_meta_t::template make_calldata<Name>(
         std::forward<decltype(args)>(args)...);
-    trace("Invoke calldata: {}", calldata);
+    trace("Invoke calldata: {}", x23::show(calldata));
     auto res =
         handler.invoke(contract_address_,
                        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
