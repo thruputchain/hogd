@@ -37,6 +37,24 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
   GCC_RELEASE_LOG=${BUILD_DIR}/gcc_release_build.log
   ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" > "$LLVM_LOG" 2>&1 &
   LLVM_BUILD_PID=$!
+  
+  # Launch LLVM tests in background, waiting for build to complete first
+  (
+    wait $LLVM_BUILD_PID
+    LLVM_STATUS=$?
+    if [ $LLVM_STATUS -ne 0 ]; then
+        printf "llvm build failed!\n"
+        printf "\n===== llvm build log =====\n"
+        cat "$LLVM_LOG"
+        printf "===== end llvm build log =====\n\n"
+        exit 1
+    fi
+    LLVM_TEST_LOG=${BUILD_DIR}/llvm_test.log
+    printf "${COLOR}Step 4: Check tests (llvm)\n${NC}"
+    ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100 > "$LLVM_TEST_LOG" 2>&1
+  ) &
+  LLVM_TEST_PID=$!
+  
   ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/gcc_release -t Release -c gcc > "$GCC_RELEASE_LOG" 2>&1 &
   GCC_RELEASE_BUILD_PID=$!
 fi
@@ -54,17 +72,17 @@ if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/gcc --output-on-failure ${PARALLE
 fi
 
 if [ "$BUILD_PARALLEL" = "yes" ]; then
-    printf "${COLOR}Waiting for Step 3 (llvm) build to finish...\n${NC}"
-    wait $LLVM_BUILD_PID
-    LLVM_STATUS=$?
-    if [ $LLVM_STATUS -ne 0 ]; then
-        printf "llvm build failed!\n"
-        printf "\n===== llvm build log =====\n"
-        cat "$LLVM_LOG"
-        printf "===== end llvm build log =====\n\n"
+    printf "${COLOR}Waiting for Step 4 (llvm) tests to finish...\n${NC}"
+    wait $LLVM_TEST_PID
+    LLVM_TEST_STATUS=$?
+    if [ $LLVM_TEST_STATUS -ne 0 ]; then
+        printf "llvm tests failed!\n"
+        printf "\n===== llvm test log =====\n"
+        cat "$LLVM_TEST_LOG"
+        printf "===== end llvm test log =====\n\n"
         exit 1
     fi
-    printf "${COLOR}Step 3 (llvm) build finished\n${NC}"
+    printf "${COLOR}Step 4 (llvm) tests finished\n${NC}"
 
     printf "${COLOR}STEP 5: Check linter\n${NC}"
     TIDY_LOG=${BUILD_DIR}/tidy.log
@@ -76,14 +94,15 @@ else
         printf "build failed!\n"
         exit 1
     fi
+    
+    printf "${COLOR}\nSTEP 4: Check tests (llvm)\n${NC}"
+    if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100; then
+        printf "tests failed!\n"
+        exit 1
+    fi
 fi
 
-printf "${COLOR}\nSTEP 4: Check tests (llvm)\n${NC}"
-if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALLEL} --timeout 100; then
-    printf "tests failed!\n"
-    exit 1
-fi
-
+# Tidy
 if [ $BUILD_PARALLEL = "yes" ]; then
     wait $TIDY_PID
     TIDY_STATUS=$?
