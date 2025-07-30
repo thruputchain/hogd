@@ -12,7 +12,7 @@ function(add_wasm_contract target_name)
         -p ${target_name}
         --target wasm32-unknown-unknown
         --release
-        --locked
+       # --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
@@ -41,6 +41,7 @@ endfunction()
 
 add_wasm_contract(fibonacci)
 add_wasm_contract(cxs_roundtrip)
+add_wasm_contract(read_only_test)
 
 add_xdr_rs(
 	roundtrip_rs 

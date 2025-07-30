@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_meta.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
@@ -158,6 +159,15 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
     auto *handler = SyscallHandlerContext::get_context();
     if (!handler) {
       return unrecoverable_error();
+    }
+
+    using SyscallMeta = SyscallMeta<Syscall>;
+
+    if (handler->to_handler().is_read_only()) {
+      if (!SyscallMeta::kIsReadOnlySyscall) {
+        trace("Syscall {} is not read-only, but called in read-only mode", Syscall);
+        return recoverable_error(SyscallErrorCode::kInvalidSyscallInput);
+      }
     }
 
     auto extra_args =

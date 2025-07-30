@@ -240,18 +240,20 @@ public:
                       .calldata = calldata};
   }
 
-  template<StringLiteral Name, typename... Args>
-  auto invoke(SystemCallHandler &handler, Args &&...args)
+  template<StringLiteral Name, InvokeFlagSet Flags = std::to_underlying(
+                                   InvokeFlag::kInvokeFlagNone)>
+  auto invoke(SystemCallHandler &handler, auto &&...args)
       -> std::pair<HostFnStatus<SyscallStatus<
                        typename trait_meta_t::template return_t<Name>>>,
                    uint64_t>
   {
-    auto calldata =
-        trait_meta_t::template make_calldata<Name>(std::forward<Args>(args)...);
+    auto calldata = trait_meta_t::template make_calldata<Name>(
+        std::forward<decltype(args)>(args)...);
+    trace("Invoke calldata: {}", calldata);
     auto res =
         handler.invoke(contract_address_,
                        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
-                       UINT64_MAX, calldata, 0);
+                       UINT64_MAX, calldata, Flags);
 
     HostFnStatus<SyscallErrorCode> host_fn_res = res.first;
 

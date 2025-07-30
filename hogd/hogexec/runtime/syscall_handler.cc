@@ -367,9 +367,7 @@ SyscallStatus<void>
 SystemCallHandler::log(std::span<const std::byte> message)
 {
   assert(!invocation_frame_stack_.empty());
-  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
+  assert(!is_read_only());
 
   if (message.size() > kMaxLogMessageLen) {
     // log message too long, return error
@@ -395,9 +393,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
   assert(!invocation_frame_stack_.empty());
-  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
+  assert(!is_read_only());
 
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
@@ -572,6 +568,8 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
+  assert(!is_read_only());
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
   return item_view->set(DeletedItem{});
@@ -728,9 +726,7 @@ SystemCallHandler::modify_native_token_balance(
     ContractAddress const &contract_address, int128_t transfer_amount)
 {
   assert(!invocation_frame_stack_.empty());
-  if (invocation_frame_stack_.get_active_frame().is_read_only()) {
-    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
-  }
+  assert(!is_read_only());
 
   AddressAndKey addrkey{
       .address = contract_address,
