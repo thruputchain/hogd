@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "test_contracts/integration_test_contracts/read_only_test/read_only_test.h"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 
