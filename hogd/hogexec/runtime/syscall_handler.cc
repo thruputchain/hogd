@@ -259,6 +259,10 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
+  if (is_read_only()) {
+    flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
+  }
+
   invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
 
   auto res = runtime.value()->invoke(method, gas_limit);

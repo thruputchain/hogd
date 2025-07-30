@@ -97,7 +97,7 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
                                  sha256(*native_contract_xdr));
   setup_grant_storage_token(native_contract_addr, 1'000'000'000);
 
-  /*{
+  {
     // allowed in non-read-only mode
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -116,7 +116,7 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
-  } */
+  }
 
   {
     // disallowed in non-read-only mode
@@ -127,6 +127,89 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
                     .invocation =
                         Invocation{.invoked_address = native_contract_addr,
                                    .entrypoint = entrypoint_from_method_id(1),
+                                   .gas_limit = UINT64_MAX,
+                                   .calldata = {}},
+                }},
+        multiplexed_context);
+
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res);
+  }
+}
+
+TEST_F(ReadOnlyTestRunner, ReadOnlyPropagation)
+{
+  auto native_contract_addr = make_contract_address(1);
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [&](SystemCallHandler &handler,
+               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             if (!handler.is_read_only()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }},
+          {1,
+           [&](SystemCallHandler &handler,
+               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             // call 0, with no read-only flag added.
+             if (!handler.is_read_only()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             auto [res, _gas] =
+                 handler.invoke(native_contract_addr, 0, UINT64_MAX, {},
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagNone));
+             if (!res.has_value() || res.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }},
+          {2,
+           [&](SystemCallHandler &handler,
+               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+             // call 1, with read-only flag added.
+             auto [res, _gas] =
+                 handler.invoke(native_contract_addr, 1, UINT64_MAX, {},
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagReadOnly));
+             if (!res.has_value() || res.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }},
+      });
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto native_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  auto multiplexed_context = std::make_shared<MultiplexedContext>(
+      std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
+          {ContractType::kWasmi, wasm_runtime_context_},
+          {ContractType::kNative, native_context}});
+
+  auto native_contract_xdr = make_native_contract(0);
+  in_memory_db_.write_contract(sha256(*native_contract_xdr),
+                               native_contract_xdr);
+  in_memory_db_.write_deployment(native_contract_addr,
+                                 sha256(*native_contract_xdr));
+  setup_grant_storage_token(native_contract_addr, 1'000'000'000);
+
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        Invocation{.invoked_address = native_contract_addr,
+                                   .entrypoint = entrypoint_from_method_id(2),
                                    .gas_limit = UINT64_MAX,
                                    .calldata = {}},
                 }},
