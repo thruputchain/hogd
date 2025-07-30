@@ -119,7 +119,7 @@ HogDBExecutorServer::commit_transaction(BlockID block, TransactionID tx)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
-    return RPCError::kRPCNotFound;
+    return RPCError::kRPCBadBlockID;
   itx->commit();
   ctx_.close_invoke_tx(block, tx);
   return RPCError::kRPCNone;
@@ -130,7 +130,7 @@ HogDBExecutorServer::abort_transaction(BlockID block, TransactionID tx)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
-    return RPCError::kRPCNotFound;
+    return RPCError::kRPCBadBlockID;
   itx->abort();
   ctx_.close_invoke_tx(block, tx);
   return RPCError::kRPCNone;
@@ -143,7 +143,7 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
-    return RPCError::kRPCNotFound;
+    return RPCError::kRPCBadBlockID;
   int depth = itx->create_savepoint();
 
   for (auto const &delta : batch) {
@@ -164,7 +164,7 @@ HogDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
-    return RPCError::kRPCNotFound;
+    return RPCError::kRPCBadBlockID;
 
   itx->release_savepoint(itx->get_savepoint_head() - popcount - 1);
   return RPCError::kRPCNone;
