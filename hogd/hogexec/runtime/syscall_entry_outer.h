@@ -332,7 +332,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
   using SyscallMeta = SyscallMeta<Syscall>;
 
   if (handler.is_read_only()) {
-    if (!SyscallMeta::kIsReadOnlySyscall) {
+    if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
       trace("Syscall {} is not read-only, but called in read-only mode",
             Syscall);
       return {HostFnStatus<SyscallErrorCode>{
