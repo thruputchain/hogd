@@ -20,6 +20,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
+#include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/mempool.h"
 #include "hogd/mempool/rpc_interface.h"
@@ -37,29 +38,33 @@ public:
   static constexpr uint16_t kCoordinatorPort = 10002;
   static constexpr uint16_t kExecutorPort = 10003;
 
+  static constexpr ContractAddress kContractAddress =
+      NativeContractTestFramework::make_contract_address(3);
+
   MempoolTestServer()
     : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
       cost_model_(12000, 1, 5, 100, 5), block_manager_(0, &in_memory_db_),
       coordinator_server_(kCoordinatorPort),
       executor_coord_server_(exec_card_, /*poll_threads=*/1),
       db_executor_server_(&block_manager_, kExecutorDbPort),
-      db_coordinator_server_(&block_manager_)
+      db_coordinator_server_(&block_manager_), db_proxy_(kDbIdentifier),
+      snapshot_cache_(
+          std::make_unique<StorageSnapshotCache>(/*block_number=*/1, db_proxy_))
   {
-    ContractAddress contract_addr;
     std::shared_ptr<Contract> contract =
         test::load_test_contract(kTestContractFileName);
 
     in_memory_db_.write_contract(sha256(*contract), contract);
-    in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+    in_memory_db_.write_deployment(kContractAddress, sha256(*contract));
 
-    setup_grant_storage_token(in_memory_db_, cost_model_, contract_addr,
+    setup_grant_storage_token(in_memory_db_, cost_model_, kContractAddress,
                               1'000'000'000);
 
     db_coordinator_server_.start_server(kCoordinatorDbPort);
 
     executor_coord_server_.init_from_coord(kAddress + ":" +
                                                std::to_string(kCoordinatorPort),
-                                           &db_proxy_);
+                                           &kDbIdentifier);
     executor_coord_server_.start_server(kExecutorPort);
   }
 
@@ -96,7 +101,8 @@ private:
   StorageCostModel cost_model_;
   BlockManager block_manager_;
 
-  LocalMockDB db_proxy_{.read_port_number_ = kExecutorDbPort};
+  static constexpr LocalMockDB kDbIdentifier{.read_port_number_ =
+                                                 kExecutorDbPort};
   ExecCard exec_card_ = {
       .protocol = "blah",
       .upid = {},
@@ -106,6 +112,10 @@ private:
 
   RPCDbExecutorServer db_executor_server_;
   DbCoordServer db_coordinator_server_;
+
+  // TODO(jhumphri): Need to support these?
+  DatabaseProxy db_proxy_;
+  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 };
 
 using fib_client_t = ContractTraitClient<Fibonacci>;
@@ -185,7 +195,7 @@ constexpr size_t kNumTxs = 100;
 
 TEST(Mempool, SubmitUnvetted)
 {
-  fib_client_t fib_client(ContractAddress{});
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -196,7 +206,7 @@ TEST(Mempool, SubmitUnvetted)
 
 TEST(Mempool, SubmitVetted)
 {
-  fib_client_t fib_client(ContractAddress{});
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -208,7 +218,7 @@ TEST(Mempool, SubmitVetted)
 
 TEST(Mempool, Nominate)
 {
-  fib_client_t fib_client(ContractAddress{});
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -224,7 +234,7 @@ TEST(Mempool, Nominate)
 
 TEST(Mempool, Validate)
 {
-  fib_client_t fib_client(ContractAddress{});
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
   std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;

@@ -223,7 +223,6 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
                                              Nomination const &nomination)
 {
   BlockID block_id = get_ns_since_epoch();
-  printf("validate, create snapshot for id %zu\n", block_id);
   {
     auto res = db_client_.dbcoord_create_snapshot(
         db_tip.id, block_id,
@@ -264,7 +263,6 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
     if (res != ExecResult::ExecResultOK) {
       finish_block(block_id);
       abandon_snapshot(block_id);
-      printf("A, %d\n", res);
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationInvalid);
     }
@@ -277,7 +275,6 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
         })) {
       finish_block(block_id);
       abandon_snapshot(block_id);
-      printf("B\n");
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationInvalid);
     }
@@ -287,7 +284,6 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
     CHECK(txs.empty());
     finish_block(block_id);
     abandon_snapshot(block_id);
-    printf("C\n");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -296,7 +292,6 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
   // [nomination.transaction_hashes] here because we already checked above that
   // all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
-    printf("D\n");
     finish_block(block_id);
     abandon_snapshot(block_id);
     co_return SchedulerValidationResult(

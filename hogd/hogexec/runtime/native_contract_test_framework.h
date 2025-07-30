@@ -95,7 +95,7 @@ public:
     return contract;
   }
 
-  static ContractAddress make_contract_address(uint8_t id)
+  static constexpr ContractAddress make_contract_address(uint8_t id)
   {
     ContractAddress address{};
     address[0] = id;
