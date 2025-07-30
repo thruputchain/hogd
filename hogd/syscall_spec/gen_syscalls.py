@@ -288,6 +288,7 @@ def gen_syscall_table(spec: list[dict]) -> str:
     table += "};"
     return table
 
+
 def gen_syscall_meta(syscall: dict) -> str:
     name = syscall["name"]
     read_only = "false"
@@ -298,6 +299,7 @@ struct SyscallMeta<SyscallNo::k{name}> {{
     static constexpr bool kIsReadOnlySyscall = {read_only};
 }};
 """
+
 
 def gen_syscall_meta_h(spec_full: dict) -> str:
     spec = spec_full["syscalls"]
@@ -319,6 +321,7 @@ struct SyscallMeta;
 }}
 """
 
+
 def gen_syscall_inner_h(spec_full: dict) -> str:
     inner_decls = ""
     syscall_argcount = spec_full["syscall_input_count"]
@@ -326,7 +329,7 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 
     for syscall in spec:
         inner_decls += gen_inner(syscall, syscall_argcount)
-    
+
     syscall_table = gen_syscall_table(spec)
     uint64_t_args = ", ".join(["uint64_t"] * (syscall_argcount))
 
