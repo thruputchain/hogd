@@ -313,14 +313,14 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
       }
       else if (!rpc_is_success(*msg)) {
         logger_.template log_client<ProcMeta>(*msg);
-	ret = std::unexpected{XdrCallFailed(std::move(*msg))};
+        ret = std::unexpected{XdrCallFailed(std::move(*msg))};
       }
       else
         try {
           if constexpr (std::is_void_v<typename decltype(ret)::value_type>) {
-	    if (!res.empty())
-	      throw XdrBadInput("Received bytes for void result");
-	  }
+            if (!res.empty())
+              throw XdrBadInput("Received bytes for void result");
+          }
           else
             deserialize(&ret.value(), res);
         } catch (XdrBadInput &e) {

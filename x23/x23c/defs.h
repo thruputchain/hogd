@@ -200,7 +200,7 @@ struct XdrCtx {
   string literals;
   string block_comment;
 };
-void checkliterals(XdrCtx*);
+void checkliterals(XdrCtx *);
 
 struct YYLTYPE;
 void yyerror(YYLTYPE *loc, XdrCtx *, string, bool warn_only = false);

@@ -8,7 +8,7 @@
 #include "tests/xdrtest.hh"
 
 using namespace std::string_literals;
-//using namespace x23;
+// using namespace x23;
 
 x23::ThreadPool threadpool(2);
 x23::CoroPoll cp(threadpool);
@@ -90,7 +90,7 @@ main(int argc, char **argv)
       return 0;
     }
     else if (argv[1] == "-s"s) {
-      [argv]->Async<void> {
+      [argv] -> Async<void> {
         auto lfd = x23::tcplisten(std::stoi(argv[2]));
         while (auto c = co_await cp.accept(lfd)) {
           rpc_stream_logged(cp, *c).server<myvers>(&impl, context);
