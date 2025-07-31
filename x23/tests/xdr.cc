@@ -13,7 +13,6 @@
 
 #include "tests/xdrtest.hh"
 
-
 std::default_random_engine rnd;
 
 // This causes googletest to pretty-print XDR structures
@@ -104,11 +103,12 @@ make_nnint64_set_add(int64_t set, int64_t add)
 {
   StorageDelta out;
   out.type(StorageDeltaType::kNonnegativeInt64SetAdd);
-  out.nnint64() = NonnegativeInt64SetAddArgs{.set_value=set, .add_value=add};
+  out.nnint64() =
+      NonnegativeInt64SetAddArgs{.set_value = set, .add_value = add};
   return out;
 }
 
-}
+} // namespace
 
 TEST(UnionAssign, BasicAssertion)
 {
@@ -125,11 +125,11 @@ TEST(UnionAssign, BasicAssertion)
 
 TEST(CoReturnCompile, UniquePtr)
 {
-  auto x = [] (int x) -> x23::Async<std::unique_ptr<int>> {
+  auto x = [](int x) -> x23::Async<std::unique_ptr<int>> {
     auto out = std::make_unique<int>(x);
     co_return out;
   };
 
-  auto res = x(10) ();
+  auto res = x(10)();
   ASSERT_EQ(*res, 10);
 }
