@@ -78,8 +78,6 @@ ExecCoordServer::init_from_coord(std::string const &coord_addr,
 
   auto exec_result = get_exec_result(host, port);
   assert(exec_result.exec_id < std::numeric_limits<uint16_t>::max());
-  // TODO(jhumphri): We should pass type [DatabaseIdentifier] to this method
-  // rather than a [LocalMockDB].
   if (mock_db) {
     start_rpc_service(*mock_db, exec_result.exec_id);
   }

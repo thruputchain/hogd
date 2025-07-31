@@ -25,8 +25,6 @@ ExecutorRpcInterface::start_server(uint32_t port_number)
     exit(EXIT_FAILURE);
   }
 
-  // TODO(jhumphri): Do I need to do anything to stop/free this coroutine when
-  // the process exits?
   [](x23::CoroPoll &cp, ExecutorRpcInterface *server,
      x23::UniqueFd lfd) -> x23::Detached {
     co_await cp.pool_.bg();
