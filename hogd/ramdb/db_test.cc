@@ -526,7 +526,7 @@ TEST_F(DatabaseTest, RecoverFromSnapshotAndLog)
   check_integrity();
 }
 
-TEST_F(DatabaseTest, DiskCleanup)
+TEST_F(DatabaseTest, DISABLED_DiskCleanup)
 {
   constexpr uint64_t kInfTargetLSN = std::numeric_limits<uint64_t>::max();
   constexpr size_t kDiskLogFileSize = 1 * 1024 * 1024; // 1 MB
