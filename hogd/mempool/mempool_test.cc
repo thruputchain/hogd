@@ -65,9 +65,9 @@ public:
 
     db_coordinator_server_.start_server(kCoordinatorDbPort);
 
-    executor_coord_server_.init_from_coord(kAddress + ":" +
-                                               std::to_string(kCoordinatorPort),
-                                           &kDbIdentifier);
+    executor_coord_server_.init_from_coord(
+        x23::HostPort(kAddress.c_str(), kCoordinatorPort).show(),
+        &kDbIdentifier);
     executor_coord_server_.start_server(kExecutorPort);
   }
 
@@ -109,7 +109,7 @@ private:
   ExecCard exec_card_ = {
       .protocol = "blah",
       .upid = {},
-      .address = (kAddress + ":" + std::to_string(kCoordinatorPort)).c_str()};
+      .address = x23::HostPort(kAddress.c_str(), kCoordinatorPort).show()};
   CoordinatorServer coordinator_server_;
   ExecCoordServer executor_coord_server_;
 

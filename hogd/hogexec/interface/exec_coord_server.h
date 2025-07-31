@@ -52,7 +52,7 @@ public:
 
   // Get the database information from the coordinator, and then
   // start the exec to coord RPC interface (which finishes the initialization).
-  void init_from_coord(std::string const &coord_addr, const LocalMockDB *db);
+  void init_from_coord(std::string_view coord_addr, const LocalMockDB *db);
 
 private:
   // Connects to the database and performs initialization of the executor.

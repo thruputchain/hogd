@@ -65,12 +65,13 @@ ExecCoordServer::get_exec_result(std::string const &coord_address,
 }
 
 void
-ExecCoordServer::init_from_coord(std::string const &coord_addr,
+ExecCoordServer::init_from_coord(std::string_view coord_addr,
                                  const LocalMockDB *mock_db)
 {
   x23::HostPort host_port;
   if (!host_port.parse(coord_addr)) {
-    throw std::runtime_error("Invalid coord address: " + coord_addr);
+    throw std::runtime_error(
+        std::format("Invalid coord address: {}", coord_addr));
   }
 
   std::string host = {host_port.host.begin(), host_port.host.end()};
