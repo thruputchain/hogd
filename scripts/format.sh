@@ -27,17 +27,16 @@ else
 fi
 
 CODE_DIR=${ROOT_DIR}/hogd
-X23_DIR=${ROOT_DIR}/x23
 
 # Make failures exit (for checking)
 set -euo pipefail
 
 # Run clang-format
-find "${CODE_DIR}" "${X23_DIR}" -name '*.h' -o -name '*.cc' |\
+find "${CODE_DIR}" -name '*.h' -o -name '*.cc' |\
 xargs ${CLANG_FORMAT} -i ${FFLAGS}
 
 # Rust fmt
-CARGO_DIRS=$(find "${CODE_DIR}" "${X23_DIR}" -name 'Cargo.toml')
+CARGO_DIRS=$(find "${CODE_DIR}" -name 'Cargo.toml')
 for CARGO_DIR in $CARGO_DIRS; do
     cargo fmt ${CF_FLAGS} --manifest-path=${CARGO_DIR} --message-format human
 done
