@@ -56,6 +56,7 @@ add_library(runtime_test_objects OBJECT
   interleaving_tests.cc
   instantiate_test.cc
   invoke_arity_test.cc
+  invoke_error_handling_test.cc
   item_view_test.cc
   memory_access_test.cc
   native_contract_test.cc

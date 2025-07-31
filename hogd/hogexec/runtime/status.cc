@@ -66,6 +66,9 @@ InvokeResult::to_host_fn_result() const
     case kInvokeAbortTransaction:
       return {HostFnError{HostFnErrorCode::kHostAbortTransaction},
               gas_consumed_};
+    case kInvokeValidationFailure:
+      return {HostFnError{HostFnErrorCode::kHostValidationFailure},
+              gas_consumed_};
     default:
       return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, gas_consumed_};
     }
