@@ -344,7 +344,7 @@ Gen::show_type(const StructBody &s, string t)
   }
 
   size_t nonvoid_count = 0;
-  for (auto const& decl : s) {
+  for (auto const &decl : s) {
     if (decl.qual != Declaration::kVoid)
       ++nonvoid_count;
   }
@@ -421,10 +421,13 @@ Gen::show_type(const UnionBody &b, string t)
   string first_case = b.arms[0].cases.empty() ? switch_type + "{}"
                                               : map_case(b.arms[0].cases[0]);
   // does not account for typedefs, but that's not the end of the world
-  static std::set<std::string> non_enum_switch_types = 
-    {"int", "unsigned int", "hyper", "unsigned hyper", "bool"};
+  static std::set<std::string> non_enum_switch_types = {"int", "unsigned int",
+                                                        "hyper",
+                                                        "unsigned hyper",
+                                                        "bool"};
 
-  if (non_enum_switch_types.find(b.switch_type) == non_enum_switch_types.end()) {
+  if (non_enum_switch_types.find(b.switch_type) ==
+      non_enum_switch_types.end()) {
     prtop("using enum {};", switch_type);
   }
   prtop("{0}() noexcept : {0}({1}) {{}}\n", t, first_case);
@@ -501,7 +504,7 @@ Gen::show_type(const UnionBody &b, string t)
   // print the active arm.  We tag it gnu::used so it doesn't get
   // optimized away.
   prtop("[[gnu::used]] static constexpr int __xdr_union_arm_number({});\n\n",
-	switch_type);
+        switch_type);
   top_ += string(2 * (indent_ - 1), ' ') + "private:\n"s;
   prtop("{} __xdr_union_field_{};\n", switch_type, b.switch_id);
   if (num_non_void) {
@@ -555,12 +558,11 @@ struct x23::xdr_meta<struct {0}> {{
     for (const auto &a : b.arms) {
       int armno;
       if (a.decl.qual != Declaration::kVoid)
-	armno = ++nonvoidcount;
+        armno = ++nonvoidcount;
       else
-	armno = 0;
+        armno = 0;
       for (const auto &c : a.cases)
-	bottom_ += format("    std::pair{{{}, {}}},\n",
-			  map_case(c), armno);
+        bottom_ += format("    std::pair{{{}, {}}},\n", map_case(c), armno);
     }
   }
   bottom_ += "  };\n";
