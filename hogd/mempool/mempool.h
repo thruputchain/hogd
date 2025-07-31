@@ -1,110 +1,108 @@
-// mempool
-
 #pragma once
 
-#include <algorithm>
 #include <atomic>
-#include <cassert>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <cstdlib>
-#include <future>
+#include <limits>
 #include <memory>
-#include <optional>
-#include <print>
-#include <stdexcept>
-#include <string>
-#include <unistd.h>
+#include <random>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
-#include "db_coord.hh"
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/crypto/crypto.h"
-#include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_coord_server.h"
-#include "hogd/db_interface/db_executor_server.h"
-#include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/interface/executor_state_manager.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
-#include "hogd/hogexec/runtime/execution_mode.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
-#include "hogd/init.h"
-#include "hogd/mockdb/in_memory_database.h"
-#include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
-#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/event.h"
 #include "x23/rpc.h"
-#include "x23/threadpool.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
-class Validator {
+// The coordinator uses this to access the scheduler/mempool.
+class MempoolRpcInterface {
 public:
-  static constexpr std::string kExecutorAddress = "127.0.0.1";
-  static constexpr uint16_t kExecutorPort = 10000;
-  static constexpr uint16_t kCoordinatorPort = 10001;
-  static constexpr std::string kDatabaseAddress = "127.0.0.1";
-  static constexpr uint16_t kDatabasePort = 10001;
-
-  Validator();
-  ~Validator() = default;
-
-  bool validate(const SHA256Hash &expected_root_hash,
-                const std::vector<SignedTransaction> &txs);
-
-  // Disable copy and move.
-  Validator(const Validator &) = delete;
-  Validator &operator=(const Validator &) = delete;
-  Validator(Validator &&) noexcept = delete;
-  Validator &operator=(Validator &&) noexcept = delete;
-
-private:
-  static constexpr std::string kTestContractFileName = "fibonacci.wasm";
-  static constexpr size_t kNumDbPoolThreads = 16;
-  static constexpr size_t kNumValidatorPoolThreads = 16;
+  using rpc_service = SchedulerCoord1;
 
   using coord_client_t =
       DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  SystemCallHandler make_handler(SignedTransaction const &signed_tx,
-                                 TransactionID txid);
+  using exec_client_t =
+      ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  void advance_block();
+  MempoolRpcInterface(coord_client_t &&db_client, exec_client_t &&exec_client)
+    : db_client_(std::move(db_client)), exec_client_(std::move(exec_client))
+  {}
 
-  TransactionID allocate_txid();
+  // Disable copy and move
+  MempoolRpcInterface(MempoolRpcInterface const &) = delete;
+  MempoolRpcInterface &operator=(MempoolRpcInterface const &) = delete;
+  MempoolRpcInterface(MempoolRpcInterface &&) = delete;
+  MempoolRpcInterface &operator=(MempoolRpcInterface &&) = delete;
 
-  bool execute_txs(const std::vector<SignedTransaction> &txs,
-                   MerkleTriePrefix &trie);
+  static x23::Async<void> schedulercoord_null() { co_return; }
 
-  // Server.
-  x23::ThreadPool db_pool_;
-  InMemoryDatabase in_memory_db_;
-  StorageCostModel cost_model_;
-  BlockManager block_manager_;
-  RPCDbExecutorServer db_executor_server_;
-  DbCoordServer db_coordinator_server_;
+  x23::Async<void>
+  schedulercoord_submit_unvetted(SignedTransactionBatch const &batch);
+  x23::Async<void>
+  schedulercoord_submit_vetted(ValidatorID validator_id,
+                               SignedTransactionBatch const &batch);
 
-  // Client.
-  WorkerPool validator_pool_;
-  x23::CoroPoll cp_ = x23::CoroPoll(db_pool_);
-  std::unique_ptr<DatabaseProxy> db_proxy_;
-  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
-  std::unique_ptr<coord_client_t> coord_client_;
+  x23::Async<SchedulerNominationResult>
+  schedulercoord_nominate(DbTip const &db_tip);
 
-  // New.
-  std::unique_ptr<RPCClient> db_client_;
-  std::unique_ptr<RPCClient> exec_client_;
+  x23::Async<SchedulerValidationResult>
+  schedulercoord_validate(DbTip const &db_tip, Nomination const &nomination);
+
+  // It is an error to shut down the mempool while there are transactions that
+  // are still running.
+  x23::Async<void> executorcoord_shutdown();
+
+  void await_shutdown_request() { shutdown_flag_.wait(false); }
+
+private:
+  // The maximum number of txs in a block.
+  static constexpr size_t kMaxBlockSize = 128;
+  // To compute the block hash, we insert tx hashes into a Merkle Trie. We make
+  // insertion faster with multiple threads. Using a lot of threads could cause
+  // worse performance if each thread has few hashes to insert. Thus, to
+  // calculate a reasonable number of threads to use, we ensure that each thread
+  // has at least [kMinHashesPerThread] hashes to insert.
+  static constexpr size_t kMinHashesPerThread = 16'384;
+
+  // TODO(jhumphri): We are using this function to generate unique block IDs.
+  // This will need to be reworked if/when we have multiple threads processing
+  // blocks.
+  static uint64_t get_ns_since_epoch()
+  {
+    std::chrono::time_point<std::chrono::system_clock> now =
+        std::chrono::system_clock::now();
+    std::chrono::nanoseconds ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            now.time_since_epoch());
+    return ns.count();
+  }
+
+  bool find_vetted_txs(const Nomination &nomination,
+                       x23::Vec<ProposedTransaction> &ret);
+
+  void abandon_snapshot(BlockID block_id);
+  void finish_block(BlockID block_id);
+
+  SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
+
+  coord_client_t db_client_;
+  exec_client_t exec_client_;
+
+  std::unordered_map<SHA256Hash, SignedTransaction> vetted_txs_;
+
+  std::atomic<bool> shutdown_flag_ = false;
 };
+
+static_assert(is_SchedulerCoord1<MempoolRpcInterface *, x23::Async>);
 
 } // namespace hogd

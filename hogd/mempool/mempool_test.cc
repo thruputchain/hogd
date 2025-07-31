@@ -19,11 +19,14 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/db_interface/db_coord_server.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
+#include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/mempool.h"
-#include "hogd/mempool/rpc_interface.h"
+#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "types.hh"
 
 namespace hogd {
@@ -247,18 +250,8 @@ TEST(Mempool, Validate)
   auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
-  printf("nominated block id %zu\n",
-         res_nominate.scheduler_nomination().block_id);
 
   clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
-  printf("id = %zu, hash = %s, prev hash = %s\n", db_tip.id,
-         HexArray(res_nominate.scheduler_nomination().nomination.block_hash)
-             .str()
-             .c_str(),
-         HexArray(
-             res_nominate.scheduler_nomination().nomination.prev_block_hash)
-             .str()
-             .c_str());
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),

@@ -1,7 +1,6 @@
 add_library(
   mempool
   mempool.cc
-  rpc_interface.cc
 )
 target_link_libraries(
   mempool
