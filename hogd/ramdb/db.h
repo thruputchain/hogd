@@ -43,7 +43,7 @@ public:
            size_t log_file_size_threshold = kDiskLogFileThreshold);
 
   // check checks the integrity of a database. It returns the highest valid LSN.
-  static DBStatus<uint64_t> check(const std::string &path, size_t heap_size);
+  static DBStatus<uint64_t> check(std::string_view path, size_t heap_size);
 
   Database(Directory dir, size_t heap_size, int lock_order, int bucket_order,
            int write_head_order)

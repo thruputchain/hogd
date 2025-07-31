@@ -13,6 +13,7 @@ target_link_libraries(
   hogdb
   ramdb
   hogd
+  rpc
 )
 
 # Build the backend database (hogdb) executable
