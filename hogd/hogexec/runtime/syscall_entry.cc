@@ -27,7 +27,7 @@ using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> (*)(
 
 template<size_t... Is>
 constexpr std::array<std::pair<SyscallNo, SyscallFunc>, sizeof...(Is)>
-make_syscall_array(std::index_sequence<Is...>)
+make_syscall_array(std::index_sequence<Is...> /*unused*/)
 {
   return {std::pair<SyscallNo, SyscallFunc>{
       static_cast<SyscallNo>(Is),
