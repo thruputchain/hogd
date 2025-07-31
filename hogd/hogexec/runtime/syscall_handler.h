@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -73,7 +74,7 @@ public:
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
-  std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+  [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
          Calldata calldata, InvokeFlagSet flags);
 
@@ -115,6 +116,12 @@ public:
   deploy_contract(SHA256Hash const &nonce, SHA256Hash const &contract_hash);
 
   ProposalModeData const &get_proposal_data() const;
+
+  bool is_read_only() const
+  {
+    assert(!invocation_frame_stack_.empty());
+    return invocation_frame_stack_.get_active_frame().is_read_only();
+  }
 
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
