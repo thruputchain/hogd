@@ -262,33 +262,6 @@ def gen_frame(syscall: dict, syscall_input_count: int) -> str:
     return gen_inner_outer(syscall, syscall_input_count)[1]
 
 
-def gen_syscall_table_entry(syscall: dict) -> str:
-    name = syscall["name"]
-    return f"    std::pair{{SyscallNo::k{name}, " \
-        f"&wrap_outer<SyscallNo::k{name}, &syscall_{name}_inner>}},\n"
-
-
-def gen_syscall_table(spec: list[dict]) -> str:
-    max_seen = -1
-    syscall_map: dict[int, dict] = {}
-    for syscall in spec:
-        number = syscall["number"]
-        if number >= max_seen:
-            max_seen = number + 1
-        syscall_map[number] = syscall
-
-    if max_seen != len(syscall_map):
-        raise Exception("SyscallNo Gap!")
-    table = (
-        f"constexpr static std::array<std::pair<SyscallNo, SyscallFunc>, "
-        f"{max_seen}> kSyscallTable = {{\n"
-    )
-    for i in range(0, max_seen):
-        table += gen_syscall_table_entry(syscall_map[i])
-    table += "};"
-    return table
-
-
 def gen_syscall_meta(syscall: dict) -> str:
     name = syscall["name"]
     read_only = "false"
@@ -331,9 +304,6 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 
     for syscall in spec:
         inner_decls += gen_inner(syscall, syscall_argcount)
-
-    syscall_table = gen_syscall_table(spec)
-    uint64_t_args = ", ".join(["uint64_t"] * (syscall_argcount))
 
     return f"""// -*-C++-*-
 
