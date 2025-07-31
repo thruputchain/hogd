@@ -22,6 +22,7 @@
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_meta.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
 #include "syscall_args.hh"
 #include "types.hh"
@@ -168,9 +169,6 @@ template<typename Ret, typename... Args> struct SyscallTypeParams {
 // Arguments that might be passed in as extra components to a syscall,
 // that are NOT derived from the runtime memory.
 class SystemCallHandler;
-struct WrappedGasAmount {
-  [[no_unique_address]] GasAmount gas_amount_;
-};
 
 template<typename> struct SyscallTypes;
 
@@ -331,8 +329,8 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
   using SyscallMeta = SyscallMeta<Syscall>;
 
-  if (handler.is_read_only()) {
-    if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+  if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+    if (handler.is_read_only()) {
       trace("Syscall {} is not read-only, but called in read-only mode",
             Syscall);
       return {HostFnStatus<SyscallErrorCode>{

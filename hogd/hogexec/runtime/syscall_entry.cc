@@ -1,5 +1,6 @@
 #include "hogd/hogexec/runtime/syscall_entry.h"
 
+#include <array>
 #include <cassert>
 #include <concepts>
 #include <cstdint>
@@ -11,12 +12,32 @@
 #include "hogd/hogexec/runtime/gas_cost_table.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "hogd/hogexec/runtime/syscall_meta.h"
 #include "syscall.hh"
 
 namespace hogd {
 
 namespace {
+
+using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> (*)(
+    SystemCallHandler &, Runtime &, uint64_t, uint64_t, uint64_t, uint64_t,
+    uint64_t, uint64_t, uint64_t);
+
+template<size_t... Is>
+constexpr std::array<std::pair<SyscallNo, SyscallFunc>, sizeof...(Is)>
+make_syscall_array(std::index_sequence<Is...>)
+{
+  return {std::pair<SyscallNo, SyscallFunc>{
+      static_cast<SyscallNo>(Is),
+      &wrap_outer<static_cast<SyscallNo>(Is),
+                  SyscallMeta<static_cast<SyscallNo>(Is)>::kInnerFunc>}...};
+}
+
+constexpr auto kSyscallTable =
+    make_syscall_array(std::make_index_sequence<kSyscallCount>{});
+
 // returns gas_consumed, syscall error>
 template<std::same_as<uint64_t>... Args>
 std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
