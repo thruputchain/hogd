@@ -44,18 +44,23 @@ namespace {
 
 using namespace std::chrono_literals;
 
-constexpr size_t kKeys = 1 * 1024 * 1024;
+constexpr size_t kKeys = 16 * 1024 * 1024;
 static_assert((kKeys & (kKeys - 1)) == 0, "kKeys must be a power of two");
 constexpr size_t kPuts = 16 * kKeys;
 static_assert((kPuts & (kPuts - 1)) == 0, "kPuts must be a power of two");
 constexpr size_t kValueSize = 128;
-constexpr size_t kBatchSize = 16384;
-constexpr size_t kSyncsPerSnapshot = 16;
+constexpr size_t kBatchSize = 128 * 1024;
+constexpr size_t kSyncsPerSnapshot = 8;
 constexpr auto kDurationBetweenCrashes = std::chrono::duration<double>{30};
 
 constexpr bool kOverlapPutsWithSnapshot = true;
 constexpr bool kRemoveAllFilesAtStart = false;
 constexpr bool kDumpMetrics = true;
+constexpr bool kNoFork = false;
+
+// number of incremental snapshots before next full snapshot
+// max() means always incremental, 0 means always full
+constexpr size_t kIncrementalSnapshots = 4;
 
 void
 fail(DBError err)
@@ -108,6 +113,10 @@ struct Shared {
   size_t recovery_count;
   std::atomic<size_t> watchdog;
   std::atomic<bool> starting_up;
+  uint64_t most_recent_snapshot_end_lsn{};
+  uint64_t next_snapshot_begin_lsn{};
+  size_t last_dump_recovery_count;
+  size_t snapshots_until_full{kIncrementalSnapshots};
 };
 
 void
@@ -122,6 +131,7 @@ ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
 
   std::vector<uint64_t> missing_keys{};
   bool failure = false;
+  std::string failure_cause{};
   for (size_t i = start; i < end; i++) {
     shared.watchdog++;
     uint64_t key = i & (kKeys - 1);
@@ -129,6 +139,7 @@ ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
     if (!ret) [[unlikely]] {
       missing_keys.push_back(key);
       failure = true;
+      failure_cause = std::format("missing key {}", key);
       continue;
     }
 
@@ -143,6 +154,7 @@ ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
     if (found != i && found != i + kKeys) {
       error("-> put {} for key {} expected {} found {}", i, key, i, found);
       failure = true;
+      failure_cause = std::format("unexpected value for {}", key);
     }
   }
 
@@ -168,7 +180,7 @@ ensure_recovered_keys_uptodate(hogd::Database &db, Shared &shared)
   std::println();
 
   if (failure)
-    panic("unexpected state after recovery");
+    panic("unexpected state after recovery: {}", failure_cause);
 }
 
 size_t
@@ -186,50 +198,43 @@ std::vector<Sample> prev_samples;
 time_point start;
 
 void
-dump_metrics(MetricRegistry &registry)
+dump_metrics(MetricRegistry &registry,
+             std::unordered_set<std::string_view> const &cumulative_fields,
+             Shared &shared)
 {
   if (!kDumpMetrics)
     return;
 
   std::vector<Sample> samples = registry.read();
 
-  std::vector<Sample> diff = samples;
-
-  std::vector<Metric> metrics = registry.get_metrics();
-  // this is expensive to build. should only do it once, worst case.
-  std::unordered_set<std::string_view> cumulative =
-      metrics |
-      std::views::filter([](const Metric &m) { return m.cumulative; }) |
-      std::views::transform([](const Metric &m) { return std::string_view{m.key}; }) |
-      std::ranges::to<std::unordered_set<std::string_view>>();
-
-  if (diff.size() == prev_samples.size()) {
-    for (size_t i = 0; i < diff.size(); ++i) {
-      if (cumulative.contains(diff[i].key)) {
-        diff[i].val -= prev_samples[i].val;
-      }
-    }
-  }
-
   time_point now = std::chrono::high_resolution_clock::now();
-  if (start == time_point{})
-    start = now;
-
   size_t ns = (now - start).count();
 
   info("== begin metrics ==");
-
   for (Sample &sample : samples)
     info("> {} {} {}", ns, sample.key, sample.val);
-
   info("== end metrics ==");
 
-  info("== begin delta metrics ==");
+  bool skip_diff = shared.last_dump_recovery_count != shared.recovery_count;
+  shared.last_dump_recovery_count = shared.recovery_count;
 
-  for (Sample &sample : diff)
-    info("Δ {} {} {} {}/s", ns, sample.key, sample.val, print_iec_bytes(sample.val, true));
+  if (!skip_diff) {
+    std::vector<Sample> diff = samples;
 
-  info("== end delta metrics ==");
+    if (diff.size() == prev_samples.size()) {
+      for (size_t i = 0; i < diff.size(); ++i) {
+        if (cumulative_fields.contains(diff[i].key)) {
+          diff[i].val -= prev_samples[i].val;
+        }
+      }
+    }
+
+    info("== begin delta metrics ==");
+    for (Sample &sample : diff)
+      info("Δ {} {} {} {}/s", ns, sample.key, sample.val,
+           print_iec_bytes(sample.val, true));
+    info("== end delta metrics ==");
+  }
 
   prev_samples = std::move(samples);
 }
@@ -242,10 +247,20 @@ do_child(std::string_view path, Shared &shared)
   auto db = make_db(path, kKeys, kValueSize);
 
   db->register_metrics(registry);
-  std::jthread _([&registry](std::stop_token &&stoken) {
+  std::jthread _([&registry, &shared](std::stop_token &&stoken) {
+    // this is expensive to build. should only do it once, worst case.
+    std::vector<Metric> metrics = registry.get_metrics();
+    // note cumulative_fields is borrowing views of strings in metrics.
+    std::unordered_set<std::string_view> cumulative_fields =
+        metrics |
+        std::views::filter([](const Metric &m) { return m.cumulative; }) |
+        std::views::transform(
+            [](const Metric &m) { return std::string_view{m.key}; }) |
+        std::ranges::to<std::unordered_set<std::string_view>>();
+
     while (!stoken.stop_requested()) {
       std::this_thread::sleep_for(1s);
-      dump_metrics(registry);
+      dump_metrics(registry, cumulative_fields, shared);
     }
   });
 
@@ -260,7 +275,7 @@ do_child(std::string_view path, Shared &shared)
   shared.starting_up = false;
 
   DBStatus<std::pair<uint64_t, std::future<DBStatus<void>>>> snap_start_ret;
-  auto wait_for_snapshot = [&snap_start_ret](bool blocking) {
+  auto wait_for_snapshot = [&snap_start_ret, &shared](bool blocking) {
     auto &future = snap_start_ret->second;
 
     if (!future.valid())
@@ -273,6 +288,8 @@ do_child(std::string_view path, Shared &shared)
     auto snap_end_ret = future.get();
     if (!snap_end_ret)
       fail(snap_end_ret.error());
+
+    shared.next_snapshot_begin_lsn = shared.most_recent_snapshot_end_lsn;
 
     info("sync_and_snapshot finished");
   };
@@ -303,11 +320,26 @@ do_child(std::string_view path, Shared &shared)
         // ensure we don't start two concurrent snapshots.
         wait_for_snapshot(true);
 
+        uint64_t begin_lsn = shared.next_snapshot_begin_lsn;
+        if (shared.snapshots_until_full == 0) {
+          info("taking a full snapshot");
+          begin_lsn = 0;
+        }
+        else {
+          info("taking an incremental snapshot");
+        }
+
         ElapsedTimer timer{};
-        snap_start_ret = db->sync_and_snapshot(0);
+        snap_start_ret = db->sync_and_snapshot(begin_lsn);
         if (!snap_start_ret) [[unlikely]]
           fail(snap_start_ret.error());
         lsn = snap_start_ret->first;
+
+        shared.most_recent_snapshot_end_lsn = lsn;
+        if (shared.snapshots_until_full == 0)
+          shared.snapshots_until_full = kIncrementalSnapshots;
+        else
+          shared.snapshots_until_full--;
 
         info("sync_and_snapshot start took {:.2f} ms", timer.elapsed() * 1000);
 
@@ -332,6 +364,7 @@ do_child(std::string_view path, Shared &shared)
               shared.synced_lsn, lsn);
       }
 
+      info("Updated synced_lsn to {}", lsn);
       shared.synced_lsn = lsn;
       shared.put.store(put + 1);
     }
@@ -350,6 +383,8 @@ do_parent(pid_t child_pid, Shared &shared)
     // NOLINTNEXTLINE(misc-include-cleaner)
     std::this_thread::sleep_for(1s);
 
+  info("child has started up");
+
   size_t watchdog = shared.watchdog.load();
   std::this_thread::sleep_for(kDurationBetweenCrashes);
 
@@ -363,6 +398,7 @@ do_parent(pid_t child_pid, Shared &shared)
   if (r != 0 && r == child_pid && WIFEXITED(wstatus))
     goto dead;
 
+  info("killing child");
   // child may already be dead, so ignore return.
   kill(child_pid, SIGKILL);
 
@@ -428,6 +464,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     // set this in the parent, so parent knows once false, child must have
     // entered/exited start up phase.
     shared.starting_up = true;
+
+    if (hogd::kNoFork)
+      hogd::do_child(path, shared); // never returns
 
     pid_t pid = fork();
     if (pid == -1)
