@@ -95,7 +95,7 @@ MempoolRpcInterface::get_block_hash(
   // We CHECK at the top of the method that [hashes] is not empty, so
   // [num_threads] must be at least 1. This is important since we divide by
   // [num_threads] below, so we want to make sure we do not divide by 0.
-  CHECK_GT(num_threads, 0);
+  CHECK_GT(num_threads, 0UL);
   CHECK_LE(num_threads, worker_pool.worker_count());
   std::vector<std::future<void>> futures;
   futures.reserve(num_threads);
@@ -257,7 +257,7 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
         SchedulerValidationOutcome::SchedulerValidationMissingTxs);
   }
   if (nomination.transaction_nominations.size() == 1) {
-    CHECK_EQ(txs.size(), 1);
+    CHECK_EQ(txs.size(), 1UL);
     auto res =
         exec_client_.executorcoord_validate_transaction(block_id, txs[0])();
     if (res != ExecResult::ExecResultOK) {
@@ -268,7 +268,7 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
     }
   }
   else if (nomination.transaction_nominations.size() > 1) {
-    CHECK_GT(txs.size(), 1);
+    CHECK_GT(txs.size(), 1UL);
     auto res = exec_client_.executorcoord_validate_batch(block_id, txs)();
     if (std::any_of(res.begin(), res.end(), [](const auto &r) {
           return r != ExecResult::ExecResultOK;
