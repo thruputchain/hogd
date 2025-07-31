@@ -244,6 +244,8 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
   if (!ret) [[unlikely]]
     return ret.error();
 
+  notify_wal_grew();
+
   uint64_t end_lsn = *ret;
   std::string path = std::format("{}-{}.snap", begin_lsn, end_lsn);
   info("begin snapshot from lsn {} -> lsn {} to {}", begin_lsn, end_lsn, path);
