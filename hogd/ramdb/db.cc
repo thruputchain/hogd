@@ -352,6 +352,9 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
     info("syncing snapshot file to storage took {:.3f} s",
          snap_sync_timer.elapsed());
 
+    // completing a snapshot may make some files redundant, so trigger cleanup.
+    notify_wal_grew();
+
     promise->set_value({});
   }).detach();
   // TODO(stutsman): should we keep track of the ongoing snapshot thread so

@@ -748,10 +748,9 @@ protected:
 // desires a different default length.
 //
 // To make it easy to work with a [Vec] that is formed from deserialization of
-// XDR data, we specify a type alias called [xdrvec] that is just an [x23::Vec]
+// XDR data, we specify a type alias called [XdrVec] that is just an [x23::Vec]
 // with a length of [2^32 - 1].
-template<typename T, std::uint32_t size = kMaxXdrSize>
-using xdrvec = Vec<T, size>;
+template<typename T, uint32_t Size = kMaxXdrSize> using XdrVec = Vec<T, Size>;
 
 template<typename IterIn>
 Vec(IterIn, IterIn) -> Vec<typename std::iterator_traits<IterIn>::value_type>;
