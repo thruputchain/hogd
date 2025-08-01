@@ -159,44 +159,12 @@ public:
   public:
     SharedHolder() noexcept : super(nullptr) {}
     SharedHolder(SharedLock &sl) noexcept
-<<<<<<< HEAD
       : super(sl.inhibitors_[sl.map_.bucket()])
     {}
     SharedHolder(SharedHolder &&) noexcept = default;
     using super::operator=;
     using super::reset;
     friend detail::RefOps<super>;
-=======
-      : inh_(&sl.inhibitors_[ThreadPool::bucket_index(sl.nshared_)])
-    {
-      inh_->inc(&sl);
-    }
-    SharedHolder(SharedHolder &&other) noexcept
-      : inh_(std::exchange(other.inh_, nullptr))
-    {}
-    ~SharedHolder() { reset(); }
-
-    SharedHolder &operator=(SharedHolder &&other) noexcept
-    {
-      if (&other != this) {
-        reset();
-        inh_ = std::exchange(other.inh_, nullptr);
-      }
-      return *this;
-    }
-
-    // Release the lock immediately (if Holder contains one)
-    void reset() noexcept
-    {
-      if (inh_) {
-        inh_->dec();
-        inh_ = nullptr;
-      }
-    }
-
-  private:
-    struct Inhibitor *inh_{};
->>>>>>> origin/main
   };
 
   // Don't call it lock_shared() because the interface is different
