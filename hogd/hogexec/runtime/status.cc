@@ -60,9 +60,12 @@ InvokeResult::to_host_fn_result() const
       return {HostFnError{HostFnErrorCode::kHostUnrecoverable}, gas_consumed_};
     case kInvokeDeterministic:
       // i.e. trap within Wasmi
-      return {SyscallErrorCode::kDeterministicWasm, gas_consumed_};
     case kInvokeOutOfGas:
-      return {HostFnError{HostFnErrorCode::kHostOutOfGas}, gas_consumed_};
+      // child frame ran out of the gas that was allocated to it
+      // Note that that does not mean that the entire transaction is out of gas.
+      // The amount of gas consumed will be checked against the parent's gas
+      // limit in the syscall_entry
+      return {SyscallErrorCode::kDeterministicWasm, gas_consumed_};
     case kInvokeAbortTransaction:
       return {HostFnError{HostFnErrorCode::kHostAbortTransaction},
               gas_consumed_};

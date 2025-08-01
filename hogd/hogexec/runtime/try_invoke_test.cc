@@ -1900,13 +1900,18 @@ TEST_F(TryInvokeTest, InvokeErrorHandling)
              // 3. try_invoke on error_contract, correct method, but with gas
              // limit 50 (not enough)
              {
-               auto [res, _gas] = syscall_Invoke_inner(
+               auto [res, gas] = syscall_Invoke_inner(
                    handler, remaining_gas, error_contract_addr, 0, 50,
                    calldata_span,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
                    output_return_buffer_len);
-               if (res.has_value() ||
-                   res.error().code() != HostFnErrorCode::kHostOutOfGas) {
+               // This should return as a deterministic error (handleable), with
+               // 50 gas consumed
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kDeterministicWasm) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               if (gas != 50) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
              }

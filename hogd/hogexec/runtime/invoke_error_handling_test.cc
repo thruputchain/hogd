@@ -1,12 +1,20 @@
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
+#include <utility>
+
 #include "ffi_enums.hh"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "syscall.hh"
-#include <cstdint>
-#include <gtest/gtest.h>
+#include "transaction.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -97,10 +105,12 @@ TEST_F(InvokeErrorHandlingTest, InvokeErrorCodes)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
+             // Out of gas in child becomes deterministic (handleable) error in
+             // caller
              auto [r3, _gas3] =
                  handler.invoke(native_contract_address, 2, UINT64_MAX, {}, 0);
-             if (r3.has_value() ||
-                 r3.error() != HostFnError{HostFnErrorCode::kHostOutOfGas}) {
+             if (!r3.has_value() ||
+                 r3.value() != SyscallErrorCode::kDeterministicWasm) {
                ADD_FAILURE() << "Invoke 2 did not return out of gas";
                return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
              }
