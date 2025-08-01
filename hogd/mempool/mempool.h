@@ -23,8 +23,9 @@
 
 namespace hogd {
 
-// The coordinator uses this to access the scheduler/mempool.
-class MempoolRpcInterface {
+// The mempool accepts transactions from the coordinator along with block
+// nomination and validation requests.
+class Mempool {
 public:
   using rpc_service = SchedulerCoord1;
 
@@ -34,27 +35,34 @@ public:
   using exec_client_t =
       ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  MempoolRpcInterface(coord_client_t &&db_client, exec_client_t &&exec_client)
+  Mempool(coord_client_t &&db_client, exec_client_t &&exec_client)
     : db_client_(std::move(db_client)), exec_client_(std::move(exec_client))
   {}
 
-  // Disable copy and move
-  MempoolRpcInterface(MempoolRpcInterface const &) = delete;
-  MempoolRpcInterface &operator=(MempoolRpcInterface const &) = delete;
-  MempoolRpcInterface(MempoolRpcInterface &&) = delete;
-  MempoolRpcInterface &operator=(MempoolRpcInterface &&) = delete;
+  // Disable copy and move.
+  Mempool(Mempool const &) = delete;
+  Mempool &operator=(Mempool const &) = delete;
+  Mempool(Mempool &&) = delete;
+  Mempool &operator=(Mempool &&) = delete;
 
   static x23::Async<void> schedulercoord_null() { co_return; }
 
+  // Submit an unvetted tx.
   x23::Async<void>
   schedulercoord_submit_unvetted(SignedTransactionBatch const &batch);
+
+  // Submit a vetted tx.
   x23::Async<void>
   schedulercoord_submit_vetted(ValidatorID validator_id,
                                SignedTransactionBatch const &batch);
 
+  // Have the mempool put together a block of transactions and nominate the
+  // block. [db_tip] specifies the last committed block.
   x23::Async<SchedulerNominationResult>
   schedulercoord_nominate(DbTip const &db_tip);
 
+  // Have the mempool validate a block. [nomination] holds the block to
+  // validate. [db_tip] specifies the last committed block.
   x23::Async<SchedulerValidationResult>
   schedulercoord_validate(DbTip const &db_tip, Nomination const &nomination);
 
@@ -103,6 +111,6 @@ private:
   std::atomic<bool> shutdown_flag_ = false;
 };
 
-static_assert(is_SchedulerCoord1<MempoolRpcInterface *, x23::Async>);
+static_assert(is_SchedulerCoord1<Mempool *, x23::Async>);
 
 } // namespace hogd

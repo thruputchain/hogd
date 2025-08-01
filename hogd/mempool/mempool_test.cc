@@ -148,7 +148,7 @@ struct Clients {
   std::unique_ptr<x23::ThreadPool> exec_pool;
   std::unique_ptr<x23::CoroPoll> exec_cp;
 
-  std::unique_ptr<MempoolRpcInterface> interface;
+  std::unique_ptr<Mempool> interface;
 };
 
 Clients
@@ -156,8 +156,7 @@ create_clients()
 {
   auto db_pool = std::make_unique<x23::ThreadPool>(1);
   auto db_cp = std::make_unique<x23::CoroPoll>(*db_pool);
-  MempoolRpcInterface::coord_client_t coord_client =
-      [&] -> MempoolRpcInterface::coord_client_t {
+  Mempool::coord_client_t coord_client = [&] -> Mempool::coord_client_t {
     auto fd = db_cp->tcpconnect(MempoolTestServer::kAddress,
                                 std::to_string(
                                     MempoolTestServer::kCoordinatorDbPort))();
@@ -170,8 +169,7 @@ create_clients()
 
   auto exec_pool = std::make_unique<x23::ThreadPool>(1);
   auto exec_cp = std::make_unique<x23::CoroPoll>(*exec_pool);
-  MempoolRpcInterface::exec_client_t exec_client =
-      [&] -> MempoolRpcInterface::exec_client_t {
+  Mempool::exec_client_t exec_client = [&] -> Mempool::exec_client_t {
     auto fd =
         exec_cp->tcpconnect(MempoolTestServer::kAddress,
                             std::to_string(MempoolTestServer::kExecutorPort))();
@@ -182,9 +180,8 @@ create_clients()
     return client_config.template client<ExecutorCoord1>();
   }();
 
-  auto interface =
-      std::make_unique<MempoolRpcInterface>(std::move(coord_client),
-                                            std::move(exec_client));
+  auto interface = std::make_unique<Mempool>(std::move(coord_client),
+                                             std::move(exec_client));
   return {.db_pool = std::move(db_pool),
           .db_cp = std::move(db_cp),
           .exec_pool = std::move(exec_pool),

@@ -19,8 +19,7 @@
 namespace hogd {
 
 x23::Async<void>
-MempoolRpcInterface::schedulercoord_submit_unvetted(
-    SignedTransactionBatch const &batch)
+Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch const &batch)
 {
   // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
   // vetted.
@@ -31,8 +30,8 @@ MempoolRpcInterface::schedulercoord_submit_unvetted(
 }
 
 x23::Async<void>
-MempoolRpcInterface::schedulercoord_submit_vetted(
-    ValidatorID validator_id, SignedTransactionBatch const &batch)
+Mempool::schedulercoord_submit_vetted(ValidatorID validator_id,
+                                      SignedTransactionBatch const &batch)
 {
   for (const SignedTransaction &tx : batch) {
     vetted_txs_[sha256(tx)] = tx;
@@ -41,8 +40,8 @@ MempoolRpcInterface::schedulercoord_submit_vetted(
 }
 
 bool
-MempoolRpcInterface::find_vetted_txs(const Nomination &nomination,
-                                     x23::Vec<ProposedTransaction> &ret)
+Mempool::find_vetted_txs(const Nomination &nomination,
+                         x23::Vec<ProposedTransaction> &ret)
 {
   CHECK_EQ(nomination.transaction_hashes.size(),
            nomination.transaction_nominations.size());
@@ -65,7 +64,7 @@ MempoolRpcInterface::find_vetted_txs(const Nomination &nomination,
 }
 
 void
-MempoolRpcInterface::abandon_snapshot(BlockID block_id)
+Mempool::abandon_snapshot(BlockID block_id)
 {
   auto res = db_client_.dbcoord_abandon_snapshot(block_id)();
   if (res != DbResult::DbResultOK) {
@@ -74,14 +73,13 @@ MempoolRpcInterface::abandon_snapshot(BlockID block_id)
 }
 
 void
-MempoolRpcInterface::finish_block(BlockID block_id)
+Mempool::finish_block(BlockID block_id)
 {
   exec_client_.executorcoord_finish_block(block_id)();
 }
 
 SHA256Hash
-MempoolRpcInterface::get_block_hash(
-    const x23::Vec<SignedTransactionHash> &hashes)
+Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
 {
   CHECK(!hashes.empty());
 
@@ -122,7 +120,7 @@ MempoolRpcInterface::get_block_hash(
 }
 
 x23::Async<SchedulerNominationResult>
-MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
+Mempool::schedulercoord_nominate(DbTip const &db_tip)
 {
   BlockID block_id = get_ns_since_epoch();
   {
@@ -219,8 +217,8 @@ MempoolRpcInterface::schedulercoord_nominate(DbTip const &db_tip)
 }
 
 x23::Async<SchedulerValidationResult>
-MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
-                                             Nomination const &nomination)
+Mempool::schedulercoord_validate(DbTip const &db_tip,
+                                 Nomination const &nomination)
 {
   BlockID block_id = get_ns_since_epoch();
   {
@@ -316,7 +314,7 @@ MempoolRpcInterface::schedulercoord_validate(DbTip const &db_tip,
 }
 
 x23::Async<void>
-MempoolRpcInterface::executorcoord_shutdown()
+Mempool::executorcoord_shutdown()
 {
   shutdown_flag_.store(true, std::memory_order_release);
   co_return;
