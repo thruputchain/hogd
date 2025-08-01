@@ -29,10 +29,16 @@ InvocationFrame::InvocationFrame(ContractAddress const &address,
     flags_(flags)
 {}
 
+void InvocationFrame::commit_manually_reverted_frame(InvocationFrame&& frame)
+{
+  assert(frame.should_revert());
+  child_return_buffer_ = std::move(frame.to_return_);
+}
+
 void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
-  child_return_buffer_ = frame.to_return_;
+  child_return_buffer_ = std::move(frame.to_return_);
   logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
                std::make_move_iterator(frame.logs_.end()));
 
@@ -168,11 +174,14 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     // otherwise nothing to do here with try_invoke
   }
 
-  if (frame_result.should_frame_revert()) {
+  if (frame_result.should_frame_revert() || frame_stack_.back().should_revert()) {
     auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {
       return st.error();
     }
+  }
+
+  if (frame_result.should_frame_revert()) {
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {
@@ -188,10 +197,15 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
   size_t stack_size = frame_stack_.size();
   if (stack_size >= 2) {
     // Commit the frame to it's parent
-    frame_stack_[stack_size - 2].commit_successful_child_frame(
-        std::move(frame_stack_.back()));
+    // Accounts for whether or not the frame is set to manually revert
+    if (frame_stack_.back().should_revert()) {
+      frame_stack_[stack_size - 2].commit_manually_reverted_frame(std::move(frame_stack_.back()));
+    } else {
+      frame_stack_[stack_size - 2].commit_successful_child_frame(std::move(frame_stack_.back()));
+    }
   }
-  else if (stack_size == 1) {
+  else {
+    assert(stack_size == 1);
     // last frame -- push frame contents to external caller
     // (SystemCallHandler), via the supplied lambda
     last_frame_action_(std::move(frame_stack_.back()));

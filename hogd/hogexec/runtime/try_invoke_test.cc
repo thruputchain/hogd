@@ -89,7 +89,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
              std::memcpy(out.data(), res.value().value().data(),
                          res.value().value().size());
 
-             handler.set_return_buffer(std::move(out));
+             handler.set_return_buffer(std::move(out), false);
              return {};
            }},
           {2,

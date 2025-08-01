@@ -185,6 +185,17 @@ SystemCallHandler::try_commit_transaction()
   }
   assert(last_frame_.has_value());
 
+  // If the last frame was set to manually revert, then we commit the transaction
+  // as a no-op.
+  if (last_frame_.value().should_revert()) {
+    auto res = db_proxy_.commit_transaction();
+    if (!res.has_value()) {
+      return res.error();
+    }
+    transaction_committed_or_aborted_ = true;
+    return true;
+  }
+
   auto r = last_frame_.value().try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
     return r.error();
@@ -310,11 +321,15 @@ SystemCallHandler::get_return_buffer() const
 }
 
 void
-SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
+SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame)
 {
   assert(!invocation_frame_stack_.empty());
   invocation_frame_stack_.get_active_frame().set_frame_return(
       std::move(returned_buffer));
+
+  if (revert_frame) {
+    invocation_frame_stack_.get_active_frame().set_should_revert();
+  }
 }
 
 SystemStatus<std::unique_ptr<Runtime>>

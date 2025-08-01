@@ -103,7 +103,7 @@ public:
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.
-  void set_return_buffer(ReturnBuffer &&returned_buffer);
+  void set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame);
 
   SyscallStatus<void> log(std::span<const std::byte> message);
 

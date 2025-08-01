@@ -109,7 +109,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
 
 std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 syscall_Return_inner(SystemCallHandler &syscall_handler,
-                     std::span<const std::byte> input_buffer)
+                     std::span<const std::byte> input_buffer,
+                     bool input_revert_frame)
 {
   if (input_buffer.size() > kMaxReturnBufferLen) {
     return {HostFnError{HostFnErrorCode::kHostExit},
@@ -121,7 +122,7 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
   std::memcpy(buffer.data(),
               reinterpret_cast<const uint8_t *>(input_buffer.data()),
               input_buffer.size());
-  syscall_handler.set_return_buffer(std::move(buffer));
+  syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame);
 
   return {HostFnError{HostFnErrorCode::kHostReturn}, 0};
 }
