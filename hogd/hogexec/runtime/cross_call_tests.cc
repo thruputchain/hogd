@@ -153,6 +153,8 @@ TEST_F(CrossCallTests, ExpectOutOfGas)
 {
   initialize_fibonacci_caller();
 
+  uint64_t gas_consumed_1 = 0, gas_consumed_2 = 0;
+
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
@@ -167,7 +169,29 @@ TEST_F(CrossCallTests, ExpectOutOfGas)
     auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
+    ASSERT_GE(res.gas_consumed_, 1000);
+    gas_consumed_1 = res.gas_consumed_;
   }
+
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{.invocation =
+                                fibonacci_caller_client_.make_invocation<
+                                    "call_fibonacci_expect_out_of_gas">(
+                                    UINT64_MAX, uint32_t{20}, uint64_t{1010})}},
+        wasm_runtime_context_);
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success());
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res);
+    ASSERT_GE(res.gas_consumed_, 1010);
+    gas_consumed_2 = res.gas_consumed_;
+  }
+
+  ASSERT_EQ(gas_consumed_1 + 10, gas_consumed_2);
 }
 
 } // namespace hogd
