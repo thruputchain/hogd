@@ -4,6 +4,7 @@
 
 namespace hogd {
 
+// This is a fake coordinator server used by the tests.
 class CoordinatorServer {
 public:
   using rpc_service = Coordinator1;
