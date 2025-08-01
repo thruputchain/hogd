@@ -237,8 +237,6 @@ TEST(Mempool, Nominate)
 
 TEST(Mempool, NominateBatch)
 {
-  // x23::RpcLogger::default_logfd = 1;
-
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
@@ -280,7 +278,6 @@ TEST(Mempool, ValidateBatch)
 {
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
-  printf("here, txs size is %zu\n", txs.size());
 
   MempoolTestServer server;
   Clients clients = create_clients();
@@ -296,6 +293,32 @@ TEST(Mempool, ValidateBatch)
   clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+}
+
+TEST(Mempool, ValidateBatchMissingTx)
+{
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients();
+
+  ValidatorID validator_id{};
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  // Remove a transaction.
+  txs.pop_back();
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+  auto res_validate = clients.interface->schedulercoord_validate(
+      db_tip, res_nominate.scheduler_nomination().nomination)();
+  // TODO(jhumphri): Fix.
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 }
