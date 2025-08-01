@@ -18,6 +18,8 @@
 
 namespace hogd {
 
+// TODO(jhumphri): When should we remove txs from [vetted_txs_]?
+
 x23::Async<void>
 Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch const &batch)
 {
