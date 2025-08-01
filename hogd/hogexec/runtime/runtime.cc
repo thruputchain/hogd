@@ -2,10 +2,12 @@
 
 #include <cassert>
 #include <memory>
+#include <print>
 #include <string_view>
 #include <unordered_map>
 
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -52,16 +54,32 @@ make_hogexec_context()
 InvokeResult
 Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
 {
-  uint64_t prev_gas_limit = get_available_gas();
+  // Push the previous gas limit onto the stack.
+  const uint64_t prev_gas_limit = get_available_gas();
   set_available_gas(gas_limit);
 
   auto res = invoke_internal(method_name);
 
-  uint64_t gas_remaining = get_available_gas();
-  assert(gas_remaining <= gas_limit);
+  // Interpreters that perform metering on a basic block level, instead of instruction
+  // by instruction, might not actually charge for the last block.
+  // (The "consume fuel" operation is generally placed at the top of a basic block.
+  // As far as I can tell, this is the case for wasmi).
+  // We hide this detail by charging for the entire gas limit,
+  // if we reach an OutOfGas error.
+  //
+  // This makes the behavior of the wasm runtime consistent with the behavior of
+  // consume_gas (defined in this file), which is what we use to consume gas within
+  // syscalls.
 
+  uint64_t gas_remaining = get_available_gas();
+  if (!res.has_value() && res.error().code() == InvokeErrorCode::kInvokeOutOfGas) {
+    gas_remaining = 0;
+  }
+
+  assert(gas_remaining <= gas_limit);
   uint64_t gas_consumed = gas_limit - gas_remaining;
 
+  // Restore previous gas limit.
   set_available_gas(prev_gas_limit);
 
   return InvokeResult{.result_ = res, .gas_consumed_ = gas_consumed};
@@ -76,6 +94,8 @@ Runtime::consume_gas(uint64_t gas) noexcept
     set_available_gas(current_gas - gas);
     return true;
   }
+  // If there is insufficient gas to consume the target amount,
+  // we consume all remaining gas.
   set_available_gas(0);
   return false;
 }

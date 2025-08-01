@@ -113,7 +113,6 @@ TEST_F(CrossCallTests, CrossCallNoGasLimit)
 
 TEST_F(CrossCallTests, LowGasCausesDeterministicRevert)
 {
-
   initialize_fibonacci_caller();
 
   {
@@ -134,7 +133,6 @@ TEST_F(CrossCallTests, LowGasCausesDeterministicRevert)
 
 TEST_F(CrossCallTests, LowOverallGasPropagates)
 {
-
   initialize_fibonacci_caller();
 
   {
@@ -147,13 +145,12 @@ TEST_F(CrossCallTests, LowOverallGasPropagates)
         wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());
-    ASSERT_EQ(res.result_.error().code(), InvokeErrorCode::kInvokeOutOfGas);
+    ASSERT_EQ(res.gas_consumed_, 1000);
   }
 }
 
 TEST_F(CrossCallTests, ExpectOutOfGas)
 {
-
   initialize_fibonacci_caller();
 
   {

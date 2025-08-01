@@ -114,46 +114,41 @@ SystemCallHandler::root_invoke()
     return cumulative_invoke_result_;
   }
 
-  // TODO(geoff): gas costs for failed lookup of runtime?
-  auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
-  if (!runtime) {
-    // some system error when resolving the runtime
-    cumulative_invoke_result_.result_ = runtime.error().to_invoke_error();
-    return cumulative_invoke_result_;
-  }
-  if (!runtime.value()) {
-    cumulative_invoke_result_.result_ =
-        InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    return cumulative_invoke_result_;
-  }
-
   GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ <
                                     signed_tx_.tx.invocation.gas_limit
                                 ? signed_tx_.tx.invocation.gas_limit -
                                       cumulative_invoke_result_.gas_consumed_
                                 : 0;
 
-  invocation_frame_stack_.start_frame(
-      signed_tx_.tx.invocation.invoked_address,
-      Calldata(signed_tx_.tx.invocation.calldata),
-      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+  auto [res, gas_consumed] = invoke(signed_tx_.tx.invocation.invoked_address,
+                              sdk_method_id(signed_tx_.tx.invocation.entrypoint),
+                              available_gas,
+                              Calldata(signed_tx_.tx.invocation.calldata),
+                              std::to_underlying(InvokeFlag::kInvokeFlagNone));
+                              
+  auto handle_root_host_fn_status = [](HostFnStatus<SyscallErrorCode> status) -> InvokeStatus<void> {
+    if (status.has_value()) {
+      return (status.value() == SyscallErrorCode::kNone) ? InvokeStatus<void>{} : InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    switch(status.error().code()) {
+      case HostFnErrorCode::kHostOutOfGas:
+        return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+      case HostFnErrorCode::kHostReturn:
+        return InvokeStatus<void>{};
+      case HostFnErrorCode::kHostExit:
+        return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+      case HostFnErrorCode::kHostValidationFailure:
+        return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+      case HostFnErrorCode::kHostAbortTransaction:
+        return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+      default:
+        return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    }
+  };
+  
+  cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
+  cumulative_invoke_result_.gas_consumed_ += gas_consumed;
 
-  cumulative_invoke_result_ += runtime.value()->invoke(sdk_method_id(
-                                         signed_tx_.tx.invocation.entrypoint),
-                                     available_gas);
-
-  // finish_status takes res as input and shortcircuits if res is an error
-  auto finish_status =
-      invocation_frame_stack_.finish_frame(cumulative_invoke_result_.result_, execution_mode_data_);
-  if (!finish_status.has_value()) {
-    // TODO(geoff): This status will result in ending execution of the whole block.
-    // We can add gas consumption here, but that would only affect the state of the local
-    // scheduler, not the canonical chain.
-    cumulative_invoke_result_.result_ = finish_status.error().to_invoke_error();
-    return cumulative_invoke_result_;
-  }
-
-  cumulative_invoke_result_ += finish_status.value();
   if (!cumulative_invoke_result_.is_root_success()) {
     return cumulative_invoke_result_;
   }
@@ -259,7 +254,7 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  if (is_read_only()) {
+  if (!invocation_frame_stack_.empty() && is_read_only()) {
     flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
   }
 
