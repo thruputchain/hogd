@@ -5,7 +5,6 @@
 #include <cstring>
 #include <limits>
 #include <memory>
-#include <string>
 #include <tuple>
 #include <unistd.h>
 #include <utility>
@@ -16,10 +15,10 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
-#include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_meta.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/test_bindings.h"
@@ -163,8 +162,8 @@ mock_syscall_parser(uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4,
 
     using SyscallMeta = SyscallMeta<Syscall>;
 
-    if (handler->to_handler().is_read_only()) {
-      if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+    if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+      if (!handler->to_handler().is_read_only()) {
         trace("Syscall {} is not read-only, but called in read-only mode",
               Syscall);
         return recoverable_error(SyscallErrorCode::kInvalidSyscallInput);
