@@ -531,7 +531,7 @@ TEST_F(DatabaseTest, DiskCleanup)
   constexpr uint64_t kInfTargetLSN = std::numeric_limits<uint64_t>::max();
   constexpr size_t kDiskLogFileSize = 1 * 1024 * 1024; // 1 MB
   constexpr size_t kItemSize = kKeySize + kValueSize;
-  constexpr size_t kEntriesPerLogFile = kDiskLogFileSize / kItemSize;
+  constexpr size_t kEntriesPerLogFile = (2 * kDiskLogFileSize) / kItemSize;
   constexpr size_t kBatchSize = 1024;
   constexpr size_t kBatches = kEntriesPerLogFile / kBatchSize;
 
@@ -551,7 +551,8 @@ TEST_F(DatabaseTest, DiskCleanup)
         remove_every_n(1);
       }
 
-      check_file_exists(std::format("{}.log", lsn));
+      if (lsn > 0)
+        check_file_exists(std::format("{}.log", lsn - 1));
 
       DBStatus<uint64_t> r = db_->sync();
       ASSERT_TRUE(r);
@@ -560,13 +561,16 @@ TEST_F(DatabaseTest, DiskCleanup)
   };
 
   // create enough log files that we exceed the cleaning threshold.
-  fill_file_and_sync(kDiskLogCleanupRatio);
+  fill_file_and_sync(2);
+
+  check_file_exists("0.log");
+  check_file_exists("1.log");
 
   // manually trigger a snapshot so some of the wal files become redundant.
   auto sync_ret = db_->sync_and_snapshot(0);
   EXPECT_TRUE(sync_ret);
   auto &[new_lsn, snapshot_future] = *sync_ret;
-  EXPECT_EQ(new_lsn, 5);
+  EXPECT_EQ(new_lsn, 3);
   DBStatus<void> snap_ret = snapshot_future.get();
   EXPECT_TRUE(snap_ret);
 
@@ -589,10 +593,7 @@ TEST_F(DatabaseTest, DiskCleanup)
   // all but the newest wal file should get cleaned up eventually.
   wait_for_deletion("0.log");
   wait_for_deletion("1.log");
-  wait_for_deletion("2.log");
-  wait_for_deletion("3.log");
-
-  check_file_exists("4.log");
+  check_file_exists("2.log");
 
   ret = open_db(kInfTargetLSN, kDiskLogFileSize);
   ASSERT_TRUE(static_cast<bool>(ret));
