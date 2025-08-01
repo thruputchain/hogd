@@ -49,6 +49,7 @@ add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
 
 add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
+  cross_call_tests.cc
   error_handling_test.cc
   execution_mode_test.cc
   fibonacci_test.cc
@@ -56,6 +57,7 @@ add_library(runtime_test_objects OBJECT
   interleaving_tests.cc
   instantiate_test.cc
   invoke_arity_test.cc
+  invoke_error_handling_test.cc
   item_view_test.cc
   memory_access_test.cc
   native_contract_test.cc

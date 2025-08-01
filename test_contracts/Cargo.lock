@@ -14,7 +14,7 @@ dependencies = [
 [[package]]
 name = "bcs"
 version = "0.2.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#1b35e1d43f75231cc2a30916948a18b908cf7132"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
 dependencies = [
  "serde",
  "thiserror",
@@ -196,6 +196,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fibonacci_call"
+version = "0.1.0"
+dependencies = [
+ "fibonacci",
+ "fibonacci_call",
+ "sdk_rs",
+ "serde",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -220,7 +230,7 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 [[package]]
 name = "groundhog_xdr"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#1b35e1d43f75231cc2a30916948a18b908cf7132"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
 dependencies = [
  "serde",
  "serde_arrays",
@@ -239,6 +249,20 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
+
+[[package]]
+name = "iface"
+version = "0.1.0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
+dependencies = [
+ "darling",
+ "groundhog_xdr",
+ "proc-macro2",
+ "quote",
+ "sha2",
+ "syn",
+ "xdrs",
+]
 
 [[package]]
 name = "indexmap"
@@ -290,10 +314,11 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 [[package]]
 name = "macros"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#1b35e1d43f75231cc2a30916948a18b908cf7132"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
 dependencies = [
  "darling",
  "groundhog_xdr",
+ "iface",
  "proc-macro2",
  "quote",
  "serde",
@@ -318,7 +343,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 [[package]]
 name = "native_exec"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#1b35e1d43f75231cc2a30916948a18b908cf7132"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
 dependencies = [
  "bindgen",
  "cmake",
@@ -421,7 +446,7 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 [[package]]
 name = "sdk_rs"
 version = "0.0.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#1b35e1d43f75231cc2a30916948a18b908cf7132"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
 dependencies = [
  "bcs",
  "groundhog_xdr",
@@ -446,7 +471,7 @@ dependencies = [
 [[package]]
 name = "serde_arrays"
 version = "0.2.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#1b35e1d43f75231cc2a30916948a18b908cf7132"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
 dependencies = [
  "serde",
 ]
@@ -563,11 +588,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "windows-targets"
-version = "0.53.2"
+name = "windows-link"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c66f69fcc9ce11da9966ddb31a40968cad001c5bedeb5c2b82ede4253ab48aef"
+checksum = "5e6ad25900d524eaabdbbb96d20b4311e1e7ae1699af4fb28c17ae66c80d798a"
+
+[[package]]
+name = "windows-targets"
+version = "0.53.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5fe6031c4041849d7c496a8ded650796e7b6ecc19df1a431c1a363342e5dc91"
 dependencies = [
+ "windows-link",
  "windows_aarch64_gnullvm",
  "windows_aarch64_msvc",
  "windows_i686_gnu",
