@@ -46,8 +46,7 @@ public:
 
   MempoolTestServer()
     : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
-      cost_model_(12000, 1, 5, 100, 5), block_manager_(0, &in_memory_db_),
-      coordinator_server_(kCoordinatorPort),
+      block_manager_(0, &in_memory_db_), coordinator_server_(kCoordinatorPort),
       executor_coord_server_(exec_card_, /*poll_threads=*/1),
       db_executor_server_(&block_manager_, kExecutorDbPort),
       db_coordinator_server_(&block_manager_), db_proxy_(kDbIdentifier),
@@ -60,8 +59,7 @@ public:
     in_memory_db_.write_contract(sha256(*contract), contract);
     in_memory_db_.write_deployment(kContractAddress, sha256(*contract));
 
-    setup_grant_storage_token(in_memory_db_, cost_model_, kContractAddress,
-                              1'000'000'000);
+    set_up_grant_storage_token();
 
     db_coordinator_server_.start_server(kCoordinatorDbPort);
 
@@ -81,27 +79,29 @@ public:
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr size_t kNumDbPoolThreads = 16;
+  static constexpr StorageCostModel kCostModel{
+      /*base_item_cost=*/12000, /*bytestring_cost_per_byte=*/1,
+      /*rcq_cost_per_entry=*/5, /*rcq_cost_per_block=*/100,
+      /*replay_cache_cost_per_entry=*/5};
+  static constexpr int128_t kStorageTokenAmount = 1'000'000'000;
 
-  static void setup_grant_storage_token(InMemoryDatabase &in_memory_db,
-                                        StorageCostModel const &cost_model,
-                                        ContractAddress const &address,
-                                        int128_t amount)
+  void set_up_grant_storage_token()
   {
-    CHECK_GE(amount, 0);
-    CHECK_LE(amount, int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
+    static_assert(kStorageTokenAmount >= 0);
+    static_assert(kStorageTokenAmount <=
+                  int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
 
     AddressAndKey addrkey = {
-        .address = address,
+        .address = kContractAddress,
         .key =
             StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
-
-    in_memory_db.write_item(addrkey, std::make_shared<const StorageItemWrapper>(
-                                         amount, &cost_model));
+    in_memory_db_.write_item(
+        addrkey, std::make_shared<const StorageItemWrapper>(kStorageTokenAmount,
+                                                            &kCostModel));
   }
 
   x23::ThreadPool db_pool_;
   InMemoryDatabase in_memory_db_;
-  StorageCostModel cost_model_;
   BlockManager block_manager_;
 
   static constexpr LocalMockDB kDbIdentifier{.read_port_number_ =
