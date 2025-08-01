@@ -144,9 +144,17 @@ SystemCallHandler::root_invoke()
       return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
     case HostFnErrorCode::kHostAbortTransaction:
       return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-    default:
+    case HostFnErrorCode::kHostUnrecoverable:
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    case HostFnErrorCode::kHostNoneOrRecoverable:
+      // This case should never happen, as it is instead handled by
+      // the status.has_value() check above.
+      assert(false);
       return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
     }
+    // Leaving the default arm out of the switch, so that the compiler
+    // will raise a warning later if we add additional InvokeError codes.
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
   };
 
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
