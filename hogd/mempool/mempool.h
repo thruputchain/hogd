@@ -112,9 +112,13 @@ private:
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
                 x23::xdrvec<NominatedTransaction> &transaction_nominations);
 
+  bool open_proposal_block(BlockID block_id);
+
   bool validate_tx(BlockID block_id, const ProposedTransaction &tx);
   bool validate_batch(BlockID block_id,
                       const x23::Vec<ProposedTransaction> &txs);
+
+  bool open_validation_block(BlockID block_id);
 
   coord_client_t db_client_;
   exec_client_t exec_client_;

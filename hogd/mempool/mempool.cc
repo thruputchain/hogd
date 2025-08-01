@@ -181,6 +181,13 @@ Mempool::propose_batch(
   return true;
 }
 
+bool
+Mempool::open_proposal_block(BlockID block_id)
+{
+  auto res = exec_client_.executorcoord_open_proposal_block(block_id)();
+  return res == ExecResult::ExecResultOK;
+}
+
 x23::Async<SchedulerNominationResult>
 Mempool::schedulercoord_nominate(DbTip const &db_tip)
 {
@@ -191,13 +198,10 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
-  {
-    auto res = exec_client_.executorcoord_open_proposal_block(block_id)();
-    if (res != ExecResult::ExecResultOK) {
-      abandon_snapshot(block_id);
-      co_return SchedulerNominationResult(
-          SchedulerNominationOutcome::SchedulerNominationError);
-    }
+  if (!open_proposal_block(block_id)) {
+    abandon_snapshot(block_id);
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   SchedulerNominationResult result(
@@ -279,6 +283,13 @@ Mempool::validate_batch(BlockID block_id,
   return true;
 }
 
+bool
+Mempool::open_validation_block(BlockID block_id)
+{
+  auto res = exec_client_.executorcoord_open_validation_block(block_id)();
+  return res == ExecResult::ExecResultOK;
+}
+
 x23::Async<SchedulerValidationResult>
 Mempool::schedulercoord_validate(DbTip const &db_tip,
                                  Nomination const &nomination)
@@ -291,14 +302,11 @@ Mempool::schedulercoord_validate(DbTip const &db_tip,
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
 
-  {
-    auto res = exec_client_.executorcoord_open_validation_block(block_id)();
-    if (res != ExecResult::ExecResultOK) {
-      abandon_snapshot(block_id);
-      // TODO(jhumphri): Maybe we should have an ExecutorFailed status, too?
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationDbFailed);
-    }
+  if (!open_validation_block(block_id)) {
+    abandon_snapshot(block_id);
+    // TODO(jhumphri): Maybe we should have an ExecutorFailed status, too?
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
 
   // [nomination] includes the the tx hashes and the nondeterministic proposal
