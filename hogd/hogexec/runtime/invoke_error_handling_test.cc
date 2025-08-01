@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
@@ -48,6 +49,9 @@ TEST_F(InvokeErrorHandlingTest, InvokeErrorCodes)
     case InvokeErrorCode::kInvokeUnrecoverable:
       return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
     }
+
+    // GCC with -Werror in CI doesn't recognize the above switch as exhaustive,
+    throw std::runtime_error("Unhandled enum value");
   };
 
   auto native_contract_xdr = make_native_contract(0);
