@@ -225,6 +225,7 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
     txs.push_back(it->second);
     it = vetted_txs_.erase(it);
   }
+  printf("num nominated txs: %zu\n", nomination.transaction_hashes.size());
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
 
   if (txs.size() == 1) {

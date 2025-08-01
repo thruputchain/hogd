@@ -123,13 +123,13 @@ private:
 
 using fib_client_t = ContractTraitClient<Fibonacci>;
 
-std::vector<SignedTransaction>
+SignedTransactionBatch
 generate_txs(fib_client_t &fib_client, size_t num_txs)
 {
   constexpr char kProgramName[] = "slow_fibonacci";
   constexpr uint32_t kFibonacciN = 10;
 
-  std::vector<SignedTransaction> txs;
+  SignedTransactionBatch txs;
   txs.reserve(num_txs);
   for (size_t i = 0; i < num_txs; i++) {
     SignedTransaction tx{
@@ -196,7 +196,7 @@ constexpr size_t kNumTxs = 100;
 TEST(Mempool, SubmitUnvetted)
 {
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
-  std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
   Clients clients = create_clients();
@@ -207,7 +207,7 @@ TEST(Mempool, SubmitUnvetted)
 TEST(Mempool, SubmitVetted)
 {
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
-  std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
   Clients clients = create_clients();
@@ -219,7 +219,7 @@ TEST(Mempool, SubmitVetted)
 TEST(Mempool, Nominate)
 {
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
-  std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
   Clients clients = create_clients();
@@ -232,10 +232,26 @@ TEST(Mempool, Nominate)
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
 }
 
+TEST(Mempool, NominateBatch)
+{
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients();
+
+  ValidatorID validator_id{};
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res = clients.interface->schedulercoord_nominate(db_tip)();
+  EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
+}
+
 TEST(Mempool, Validate)
 {
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
-  std::vector<SignedTransaction> txs = generate_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
   Clients clients = create_clients();
@@ -249,6 +265,29 @@ TEST(Mempool, Validate)
             SchedulerNominationOutcome::SchedulerNominationOK);
 
   clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
+  auto res_validate = clients.interface->schedulercoord_validate(
+      db_tip, res_nominate.scheduler_nomination().nomination)();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+}
+
+TEST(Mempool, ValidateBatch)
+{
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients();
+
+  ValidatorID validator_id{};
+  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationOK);
+
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
