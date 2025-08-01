@@ -179,7 +179,7 @@ public:
   // can be invoked within wasm.
   constexpr static std::string invoke_name(MethodID method)
   {
-    return std::format("{:X}", method);
+    return std::format("{:016X}", method);
   }
   // WASM name -> Method ID (inverse of invoke_name)
   constexpr static std::optional<MethodID>
