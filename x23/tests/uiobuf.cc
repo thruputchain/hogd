@@ -8,8 +8,8 @@
 namespace {
 
 std::default_random_engine rnd;
-std::uniform_int_distribution<std::size_t> sizegen(
-    0, 2 * x23::BufVec::kCopyThreshold);
+std::uniform_int_distribution<std::size_t>
+    sizegen(0, 2 * x23::BufVec::kCopyThreshold);
 
 x23::Buf
 random_buf()

@@ -12,7 +12,7 @@ function(add_wasm_contract target_name)
         -p ${target_name}
         --target wasm32-unknown-unknown
         --release
-        --locked
+       # --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
@@ -28,7 +28,11 @@ function(add_wasm_contract target_name)
     COMMENT "Building ${target_name}.wasm_unoptimized"
   )
 
-  wasmopt_target(${target_name}_optimized ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm -mvp --enable-bulk-memory -Oz)
+  wasmopt_target(
+    ${target_name}_optimized 
+    ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized 
+    ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm 
+    -mvp --enable-bulk-memory --enable-sign-ext --enable-mutable-globals -Oz)
 
   add_custom_target(${target_name}_wasm ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm)
 
@@ -36,5 +40,20 @@ function(add_wasm_contract target_name)
 endfunction()
 
 add_wasm_contract(fibonacci)
+add_wasm_contract(fibonacci_call)
+add_wasm_contract(cxs_roundtrip)
+add_wasm_contract(read_only_test)
+
+add_xdr_rs(
+	roundtrip_rs 
+	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
+	./integration_test_contracts/cxs_roundtrip/roundtrip.x)
+
+add_xdr(roundtrip_hh
+  ./integration_test_contracts/cxs_roundtrip/roundtrip.x
+)
+
+add_dependencies(cxs_roundtrip_wasm roundtrip_rs)
+add_dependencies(all_wasm_contracts roundtrip_hh)
 
 endif()

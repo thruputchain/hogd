@@ -65,6 +65,11 @@ if [ "$BUILD_PARALLEL" = "yes" ]; then
         exit 1
     fi
     printf "${COLOR}Step 3 (llvm) build finished\n${NC}"
+
+    printf "${COLOR}STEP 5: Check linter\n${NC}"
+    TIDY_LOG=${BUILD_DIR}/tidy.log
+    ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm > "$TIDY_LOG" 2>&1 &
+    TIDY_PID=$!
 else
     printf "${COLOR}STEP 3: Check build (llvm)\n${NC}"
     if ! ${SCRIPT_DIR}/build.sh -d ${BUILD_DIR}/llvm -t Debug -c clang -f "-Werror" ; then
@@ -79,10 +84,23 @@ if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm --output-on-failure ${PARALL
     exit 1
 fi
 
-printf "${COLOR}\nSTEP 5: Check linter\n${NC}"
-if ! ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm; then
-    printf "linter failed!\n"
-    exit 1
+if [ $BUILD_PARALLEL = "yes" ]; then
+    wait $TIDY_PID
+    TIDY_STATUS=$?
+    if [ $TIDY_STATUS -ne 0 ]; then
+        printf "tidy failed!\n"
+        printf "\n===== tidy log =====\n"
+        cat "$TIDY_LOG"
+        printf "===== end tidy log =====\n\n"
+        exit 1
+    fi
+    printf "${COLOR}Step 5 (tidy) finished\n${NC}"
+else
+    printf "${COLOR}\nSTEP 5: Check linter\n${NC}"
+    if ! ${SCRIPT_DIR}/tidy.sh -d ${BUILD_DIR}/llvm; then
+        printf "linter failed!\n"
+        exit 1
+    fi
 fi
 
 printf "${COLOR}\nSTEP 6: Check format\n${NC}"

@@ -163,14 +163,6 @@ InvocationFrameStack::finish_frame(InvokeResult result,
     // otherwise nothing to do here with try_invoke
   }
 
-  // If a contract has the REVERT_SAFE flag set, then it can be called again
-  // after it has been reverted. A contract might not be REVERT_SAFE because
-  // reversion does NOT reset a wasm's internal memory or other internal state.
-  // We could do that, it's just expensive,
-  // and would require fairly close integration with the wasm runtime and some
-  // fairly invasive changes (We need to restore the entirety of the wasm
-  // module's internal state -- not just memory, but also tables and globals.
-  // The wasm stack is reset automatically).
   if (result.should_frame_revert()) {
     auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {

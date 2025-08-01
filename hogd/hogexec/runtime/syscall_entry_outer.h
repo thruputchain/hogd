@@ -21,6 +21,8 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "hogd/hogexec/runtime/syscall_meta.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
 #include "syscall_args.hh"
 #include "types.hh"
@@ -167,9 +169,6 @@ template<typename Ret, typename... Args> struct SyscallTypeParams {
 // Arguments that might be passed in as extra components to a syscall,
 // that are NOT derived from the runtime memory.
 class SystemCallHandler;
-struct WrappedGasAmount {
-  [[no_unique_address]] GasAmount gas_amount_;
-};
 
 template<typename> struct SyscallTypes;
 
@@ -250,9 +249,9 @@ arg_to_xdr(auto arg)
         .reinterpret<x23::Vec<uint8_t>>();
   }
   else if constexpr (std::is_pointer_v<T>) {
-    using base_t = std::remove_const_t<std::remove_pointer_t<T>>;
+    using base_t = std::remove_cvref_t<decltype(arg_to_xdr(*arg))>;
     if (arg) {
-      return x23::Ptr<base_t>(new base_t(*arg));
+      return x23::Ptr<base_t>(new base_t(arg_to_xdr(*arg)));
     }
     return x23::Ptr<base_t>(nullptr);
   }
@@ -328,6 +327,18 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
       std::remove_reference_t<decltype(get<std::to_underlying(Syscall) + 1>(
           SyscallOutput{}))>;
 
+  using SyscallMeta = SyscallMeta<Syscall>;
+
+  if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+    if (handler.is_read_only()) {
+      trace("Syscall {} is not read-only, but called in read-only mode",
+            Syscall);
+      return {HostFnStatus<SyscallErrorCode>{
+                  SyscallErrorCode::kInvalidSyscallInput},
+              0};
+    }
+  }
+
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
   return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
@@ -350,7 +361,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
 
     // Once the syscall inputs are parsed, we can print them in a formatted log
     // message.
-    trace("{}",
+    trace("Syscall {} Input: {}", Syscall,
           x23::show(make_syscall_input_struct<SyscallInputType>(std::tuple{
               SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
                   std::get<Is>(parsed_args))...})));
@@ -382,7 +393,7 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
     // be written to if the syscall succeeds.
     bool is_syscall_error =
         !res.first.has_value() || res.first.value() != SyscallErrorCode::kNone;
-    trace("{}",
+    trace("Syscall {} Output: {}", Syscall,
           is_syscall_error
               ? syscall_error_message(res.first)
               : x23::show(make_syscall_output_struct<

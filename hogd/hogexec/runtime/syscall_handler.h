@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -73,7 +74,7 @@ public:
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
-  std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+  [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
          Calldata calldata, InvokeFlagSet flags);
 
@@ -116,6 +117,12 @@ public:
 
   ProposalModeData const &get_proposal_data() const;
 
+  bool is_read_only() const
+  {
+    assert(!invocation_frame_stack_.empty());
+    return invocation_frame_stack_.get_active_frame().is_read_only();
+  }
+
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
   SystemStatus<SyscallStatus<std::span<const std::byte>>>
@@ -125,13 +132,16 @@ public:
                  std::span<const std::byte> input_bytestring);
 
   // === Nonnegative Integer syscalls ===
-  SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
-  get_nnint(StorageKeyContractData const &storage_key);
+  // get_nnint returns the base value and the add value.
+  // Returns the base value from the snapshot if load_from_snapshot is true.
+  // Otherwise, returns a tx-local written set value, if one exists,
+  // or nullopt if not.
+  SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
+  get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
+
   SystemStatus<SyscallStatus<void>>
-  set_nnint(StorageKeyContractData const &storage_key, int128_t set_value,
-            int128_t add_value);
-  SystemStatus<SyscallStatus<void>>
-  add_nnint(StorageKeyContractData const &storage_key, int128_t add_value);
+  set_nnint(StorageKeyContractData const &storage_key,
+            std::optional<int128_t> set_value, int128_t add_value);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>

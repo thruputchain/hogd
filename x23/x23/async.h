@@ -729,12 +729,14 @@ template<typename T, typename E> struct ExpectAwait {
 } // namespace x23
 
 template<typename T, typename E>
-x23::detail::ExpectAwait<T, E> operator co_await(std::expected<T, E> &&r)
+x23::detail::ExpectAwait<T, E>
+operator co_await(std::expected<T, E> &&r)
 {
   return x23::detail::ExpectAwait{std::move(r)};
 }
 template<typename T, typename E>
-x23::detail::ExpectAwait<T, E> operator co_await(const std::expected<T, E> &r)
+x23::detail::ExpectAwait<T, E>
+operator co_await(const std::expected<T, E> &r)
 {
   return x23::detail::ExpectAwait{r};
 }

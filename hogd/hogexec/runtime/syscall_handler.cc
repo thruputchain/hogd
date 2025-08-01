@@ -259,6 +259,10 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
+  if (is_read_only()) {
+    flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
+  }
+
   invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
 
   auto res = runtime.value()->invoke(method, gas_limit);
@@ -367,6 +371,7 @@ SyscallStatus<void>
 SystemCallHandler::log(std::span<const std::byte> message)
 {
   assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
 
   if (message.size() > kMaxLogMessageLen) {
     // log message too long, return error
@@ -392,6 +397,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
   assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
 
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
@@ -488,8 +494,9 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   return item_view->set(BytestringItem(std::move(new_string)));
 }
 
-SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
-SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
+SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
+SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
+                             bool load_from_snapshot)
 {
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
@@ -498,6 +505,12 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
     if (nnint_item->base_value_.has_value()) {
       return {std::make_pair(*nnint_item->base_value_, nnint_item->add_value_)};
     }
+    // If we're not loading from the snapshot, we can return nullopt for the
+    // base value.
+    if (!load_from_snapshot) {
+      return {std::make_pair(std::nullopt, nnint_item->add_value_)};
+    }
+
     auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
     auto snapshot_value = snapshot_cache_.try_get_snapshot_item(addrkey);
     if (!snapshot_value.has_value()) {
@@ -515,6 +528,10 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (!load_from_snapshot) {
+      return {std::make_pair(std::nullopt, 0)};
+    }
+
     if (!unmodified_item->is_loaded()) {
       auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
       auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
@@ -538,31 +555,27 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
 
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
-                             int128_t set_value, int128_t add_value)
-{
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
-  assert(item_view);
-
-  return item_view->set(
-      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
-}
-
-SystemStatus<SyscallStatus<void>>
-SystemCallHandler::add_nnint(StorageKeyContractData const &storage_key,
+                             std::optional<int128_t> set_value,
                              int128_t add_value)
 {
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
+  // Writing to an nnint, without explicitly defining the set value,
+  // is defined as equivalent to outputting set_add with set equal to
+  // whatever the current database snapshot value is.  As such, it is correct to
+  // overwrite the set value here with nullopt, in such a case.
   return item_view->set(
-      NNIntItem{.base_value_ = std::nullopt, .add_value_ = add_value});
+      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
 }
+
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
+  assert(!is_read_only());
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-
   return item_view->set(DeletedItem{});
 }
 
@@ -716,6 +729,9 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::modify_native_token_balance(
     ContractAddress const &contract_address, int128_t transfer_amount)
 {
+  assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
+
   AddressAndKey addrkey{
       .address = contract_address,
       .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};

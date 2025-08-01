@@ -170,8 +170,9 @@ struct BufVec {
   }
 
   template<std::ranges::forward_range R>
-  void move_append_range(R &&r)
-    requires requires { { std::move(*r.begin()) } -> std::same_as<Buf &&>; }
+  void move_append_range(R &&r) requires requires {
+    { std::move(*r.begin()) } -> std::same_as<Buf &&>;
+  }
   {
     auto it = r.begin();
     while (it != r.end() && !backfull(r.size())) {
@@ -182,24 +183,24 @@ struct BufVec {
 
     while (it != r.end()) {
       if ((*it).size() >= kCopyThreshold) {
-	bufs_.emplace_back(std::move(*it++));
-	continue;
+        bufs_.emplace_back(std::move(*it++));
+        continue;
       }
 
       size_t n = 0;
       auto eit = it;
       while (eit != r.end() && (*eit).size() < kCopyThreshold) {
-	n += (*eit).size();
-	++eit;
+        n += (*eit).size();
+        ++eit;
       }
       if (eit == r.end())
-	n = std::max(n, kChunkSize);
+        n = std::max(n, kChunkSize);
       Buf &back = bufs_.emplace_back();
       back.reserve(n);
       while (it != eit) {
-	back.append_range(*it);
-	(*it).clear();
-	++it;
+        back.append_range(*it);
+        (*it).clear();
+        ++it;
       }
     }
   }
@@ -246,7 +247,7 @@ struct BufVec {
       trim(n);
       return !empty();
     }
-    if (errno == EAGAIN)	// XXX not appropriate for srpc
+    if (errno == EAGAIN) // XXX not appropriate for srpc
       return true;
     Errno ret;
     clear();

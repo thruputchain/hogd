@@ -97,7 +97,8 @@ public:
 
       AwaitAcquire(Self &lk, LockerState *ls) : lk_(lk), next_(ls) {}
       bool await_ready() { return !(prev_ = lk_.last_.exchange(next_)); }
-      void await_suspend(std::coroutine_handle<> h SLOC_PARM) {
+      void await_suspend(std::coroutine_handle<> h SLOC_PARM)
+      {
 #if X23_CORO_TRACE
         corotrace.set_suspend(h, sloc, "CoroLock",
                               static_cast<const void *>(&lk_));

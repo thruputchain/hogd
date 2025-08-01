@@ -40,6 +40,7 @@ Each syscall is specified in the following (example) format:
     - list of outputs
   returns: yes/no (default: yes)
   number: 0
+  read_only: yes/no (default: no)
 
 Syscall yaml specification is as follows.
 
@@ -69,6 +70,13 @@ returns:
     default: no
   description: Defines whether or not the function returns to the caller
   or terminates the caller runtime instance.
+
+read_only:
+  type: boolean
+  required: no
+    default: no
+  description: Defines whether or not the syscall is read-only.
+  If false, the syscall will fail if the current invocation is read-only.
 
 inputs and outputs are lists of parameters, of the following yaml type. The
 inputs and outputs are lists of parameters. The logic is largely the same,
@@ -254,31 +262,39 @@ def gen_frame(syscall: dict, syscall_input_count: int) -> str:
     return gen_inner_outer(syscall, syscall_input_count)[1]
 
 
-def gen_syscall_table_entry(syscall: dict) -> str:
+def gen_syscall_meta(syscall: dict) -> str:
     name = syscall["name"]
-    return f"    std::pair{{SyscallNo::k{name}, " \
-        f"&wrap_outer<SyscallNo::k{name}, &syscall_{name}_inner>}},\n"
+    read_only = "false"
+    if "read_only" in syscall and syscall["read_only"]:
+        read_only = "true"
+    return f"""template<>
+struct SyscallMeta<SyscallNo::k{name}> {{
+    constexpr static bool kIsReadOnlySyscall = {read_only};
+    constexpr static auto kInnerFunc = &syscall_{name}_inner;
+}};
+"""
 
 
-def gen_syscall_table(spec: list[dict]) -> str:
-    max_seen = -1
-    syscall_map: dict[int, dict] = {}
+def gen_syscall_meta_h(spec_full: dict) -> str:
+    spec = spec_full["syscalls"]
+    syscall_meta = ""
     for syscall in spec:
-        number = syscall["number"]
-        if number >= max_seen:
-            max_seen = number + 1
-        syscall_map[number] = syscall
+        syscall_meta += gen_syscall_meta(syscall)
+    return f"""// -*-C++-*-
+#pragma once
 
-    if max_seen != len(syscall_map):
-        raise Exception("SyscallNo Gap!")
-    table = (
-        f"constexpr static std::array<std::pair<SyscallNo, SyscallFunc>, "
-        f"{max_seen}> kSyscallTable = {{\n"
-    )
-    for i in range(0, max_seen):
-        table += gen_syscall_table_entry(syscall_map[i])
-    table += "};"
-    return table
+#include "syscall.hh"
+#include "hogd/hogexec/runtime/syscall_inner.h"
+
+namespace hogd {{
+
+template<SyscallNo Syscall>
+struct SyscallMeta;
+
+{syscall_meta}
+
+}}
+"""
 
 
 def gen_syscall_inner_h(spec_full: dict) -> str:
@@ -288,9 +304,6 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 
     for syscall in spec:
         inner_decls += gen_inner(syscall, syscall_argcount)
-        syscall_table = gen_syscall_table(spec)
-
-    uint64_t_args = ", ".join(["uint64_t"] * (syscall_argcount))
 
     return f"""// -*-C++-*-
 
@@ -299,13 +312,15 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 
 #pragma once
 
-#include <array>
+#include <cstddef>
+#include <span>
 #include <utility>
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/syscall_entry_outer.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {{
@@ -313,12 +328,9 @@ namespace hogd {{
 class SystemCallHandler;
 class Runtime;
 
+// NOLINTBEGIN(readability-identifier-naming)
 {inner_decls}
-
-using SyscallFunc = std::pair<HostFnStatus<SyscallErrorCode>, uint64_t> (*)(
-    SystemCallHandler&, Runtime&, {uint64_t_args});
-
-{syscall_table}
+// NOLINTEND(readability-identifier-naming)
 
 }}// namespace hogd
 """
@@ -497,61 +509,6 @@ namespace hogd {{
 }}"""
 
 
-# ===== Mock syscall entry =====
-def gen_mock_switch_case(syscall: dict, syscall_argcount: int) -> str:
-    name = syscall["name"]
-    args = []
-    for i in range(0, syscall_argcount):
-        args.append(f"arg{i + 1}")
-    args_str = ", ".join(args)
-    return f"""  case SyscallNo::k{name}:
-  return mock_syscall_parser<SyscallNo::k{name}, {name}_input, {name}_output,
-                               &syscall_{name}_inner>({args_str});
-"""
-
-
-def gen_mock_syscall_entry_cc(spec_full: dict) -> str:
-    spec = spec_full["syscalls"]
-    syscall_argcount = spec_full["syscall_input_count"]
-    switch_body = ""
-    for call in spec:
-        switch_body += gen_mock_switch_case(call, syscall_argcount)
-
-    args = []
-    for i in range(0, syscall_argcount):
-        args.append(f"uint64_t arg{i + 1}")
-    args_str = ", ".join(args)
-
-    return f"""#include "hogd/test_ffi/mock_syscall_entry.h"
-
-#include <span>
-
-#include "hogd/base/types.h"
-#include "syscall.hh"
-#include "syscall_args.hh"
-#include "hogd/test_ffi/syscall_handler_wrapper.h"
-#include "hogd/hogexec/runtime/syscall_inner.h"
-
-namespace hogd {{
-
-ForeignHostFnResult
-mock_syscall_entrypoint(uint64_t syscall,
-                        {args_str}) noexcept
-{{
-  auto syscall_no = static_cast<SyscallNo>(syscall);
-
-  switch (syscall_no) {{
-{switch_body}
-  default:
-    return recoverable_error(SyscallErrorCode::kNoSyscall);
-  }}
-}}
-
-}}
-"""
-# ===== end mock syscall entry =====
-
-
 parser = argparse.ArgumentParser(description="syscall generator")
 
 parser.add_argument(
@@ -572,10 +529,6 @@ parser.add_argument(
     required=True,
     help="input yaml")
 parser.add_argument(
-    '--syscall_rs',
-    action='store_true',
-    help='gen rust syscall bindings')
-parser.add_argument(
     '--output_dir',
     type=str,
     default=".",
@@ -586,9 +539,9 @@ parser.add_argument(
     type=int,
     help="syscall nos")
 parser.add_argument(
-    '--mock_syscall_entry_cc',
+    '--syscall_meta_h',
     action='store_true',
-    help="gen mock_syscall_entry_cc")
+    help="gen syscall_meta.h")
 
 args = parser.parse_args()
 
@@ -615,10 +568,10 @@ if args.syscall_inner_h:
     with open(filename, "w") as f:
         f.write(gen_syscall_inner_h(spec_full))
 
+if args.syscall_meta_h:
+    filename = args.output_dir + "/syscall_meta.h"
+    with open(filename, "w") as f:
+        f.write(gen_syscall_meta_h(spec_full))
+
 if args.syscall_frame is not None and len(args.syscall_frame) > 0:
     print(gen_syscall_frame(spec, args.syscall_frame))
-
-if args.mock_syscall_entry_cc:
-    filename = args.output_dir + "/mock_syscall_entry.cc"
-    with open(filename, "w") as f:
-        f.write(gen_mock_syscall_entry_cc(spec_full))
