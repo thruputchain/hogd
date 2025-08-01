@@ -151,12 +151,15 @@ Mempool::propose_tx(BlockID block_id, const SignedTransaction &tx,
     transaction_nominations.push_back(
         {.nondeterministic_proposal_data = res.proposal_data()});
     return true;
+    break;
   case ExecResult::ExecResultOK:
     transaction_nominations.push_back(
         {.nondeterministic_proposal_data = NondeterministicProposalData{}});
     return true;
+    break;
   default:
     return false;
+    break;
   }
 }
 
@@ -171,13 +174,16 @@ Mempool::propose_batch(
     case ExecResult::ExecResultTxDeterministicError:
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = result.proposal_data()});
+      break;
     case ExecResult::ExecResultOK:
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = NondeterministicProposalData{}});
+      break;
     default:
       // TODO(jhumphri): Some of the other txs may have succeeded. Do we need
       // to undo them?
       return false;
+      break;
     }
   }
   return true;

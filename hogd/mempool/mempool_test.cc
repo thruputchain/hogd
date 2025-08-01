@@ -241,9 +241,6 @@ TEST(Mempool, NominateBatch)
 
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
-  for (const SignedTransaction &tx : txs) {
-    printf("check size %zu\n", tx.tx.contracts_to_deploy.size());
-  }
 
   MempoolTestServer server;
   Clients clients = create_clients();
