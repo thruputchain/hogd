@@ -98,10 +98,18 @@ private:
   bool find_vetted_txs(const Nomination &nomination,
                        x23::Vec<ProposedTransaction> &ret);
 
+  bool create_snapshot(BlockID prev_block_id, BlockID block_id,
+                       BlockExecutionMode);
   void abandon_snapshot(BlockID block_id);
   void finish_block(BlockID block_id);
 
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
+
+  bool propose_tx(BlockID block_id, const SignedTransaction &tx,
+                  x23::xdrvec<NominatedTransaction> &transaction_nominations);
+  bool
+  propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
+                x23::xdrvec<NominatedTransaction> &transaction_nominations);
 
   coord_client_t db_client_;
   exec_client_t exec_client_;

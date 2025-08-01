@@ -63,6 +63,15 @@ Mempool::find_vetted_txs(const Nomination &nomination,
   return true;
 }
 
+bool
+Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
+                         BlockExecutionMode mode)
+{
+  auto res =
+      db_client_.dbcoord_create_snapshot(prev_block_id, block_id, mode)();
+  return res == DbResult::DbResultOK;
+}
+
 void
 Mempool::abandon_snapshot(BlockID block_id)
 {
@@ -78,6 +87,9 @@ Mempool::finish_block(BlockID block_id)
   exec_client_.executorcoord_finish_block(block_id)();
 }
 
+// We add each tx hash to the Merkle trie as a key with an empty value. So in
+// essence, we are using the Merkle trie as a set. We then compute the root hash
+// of the trie and return it.
 SHA256Hash
 Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
 {
@@ -90,9 +102,6 @@ Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
   if (!num_threads) {
     num_threads = 1;
   }
-  // We CHECK at the top of the method that [hashes] is not empty, so
-  // [num_threads] must be at least 1. This is important since we divide by
-  // [num_threads] below, so we want to make sure we do not divide by 0.
   CHECK_GT(num_threads, 0UL);
   CHECK_LE(num_threads, worker_pool.worker_count());
   std::vector<std::future<void>> futures;
@@ -105,6 +114,8 @@ Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
     size_t start = base;
     size_t end = base + chunk_size + (i < remainder ? 1 : 0);
     base = end;
+    CHECK_GE(start, 0UL);
+    CHECK_LT(end, hashes.size());
 
     futures.push_back(worker_pool.submit([start, end, &trie, &hashes] {
       for (size_t j = start; j < end; j++) {
@@ -119,17 +130,56 @@ Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
   return trie.get_root_hash();
 }
 
+bool
+Mempool::propose_tx(BlockID block_id, const SignedTransaction &tx,
+                    x23::xdrvec<NominatedTransaction> &transaction_nominations)
+{
+  auto res = exec_client_.executorcoord_propose_transaction(block_id, tx)();
+  switch (res.result()) {
+  case ExecResult::ExecResultTxDeterministicError:
+    transaction_nominations.push_back(
+        {.nondeterministic_proposal_data = res.proposal_data()});
+    return true;
+  case ExecResult::ExecResultOK:
+    transaction_nominations.push_back(
+        {.nondeterministic_proposal_data = NondeterministicProposalData{}});
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool
+Mempool::propose_batch(
+    BlockID block_id, const x23::Vec<SignedTransaction> &txs,
+    x23::xdrvec<NominatedTransaction> &transaction_nominations)
+{
+  auto res = exec_client_.executorcoord_propose_batch(block_id, txs)();
+  for (const ExecProposeResult &result : res) {
+    switch (result.result()) {
+    case ExecResult::ExecResultTxDeterministicError:
+      transaction_nominations.push_back(
+          {.nondeterministic_proposal_data = result.proposal_data()});
+    case ExecResult::ExecResultOK:
+      transaction_nominations.push_back(
+          {.nondeterministic_proposal_data = NondeterministicProposalData{}});
+    default:
+      // TODO(jhumphri): Some of the other txs may have succeeded. Do we need
+      // to undo them?
+      return false;
+    }
+  }
+  return true;
+}
+
 x23::Async<SchedulerNominationResult>
 Mempool::schedulercoord_nominate(DbTip const &db_tip)
 {
   BlockID block_id = get_ns_since_epoch();
-  {
-    auto res = db_client_.dbcoord_create_snapshot(
-        db_tip.id, block_id, BlockExecutionMode::kBlockExecutionModeProposal)();
-    if (res != DbResult::DbResultOK) {
-      co_return SchedulerNominationResult(
-          SchedulerNominationOutcome::SchedulerNominationError);
-    }
+  if (!create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
+                       BlockExecutionMode::kBlockExecutionModeProposal)) {
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   {
@@ -164,39 +214,19 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
 
   if (txs.size() == 1) {
-    auto res =
-        exec_client_.executorcoord_propose_transaction(block_id, txs[0])();
-    if (res.result() == ExecResult::ExecResultTxDeterministicError) {
-      nomination.transaction_nominations.push_back(
-          {.nondeterministic_proposal_data = res.proposal_data()});
-    }
-    else if (res.result() == ExecResult::ExecResultOK) {
-      nomination.transaction_nominations.push_back(
-          {.nondeterministic_proposal_data = NondeterministicProposalData{}});
-    }
-    else {
+    if (!propose_tx(block_id, txs[0], nomination.transaction_nominations)) {
       co_return SchedulerNominationResult(
           SchedulerNominationOutcome::SchedulerNominationError);
     }
   }
   else if (txs.size() > 1) {
-    auto res = exec_client_.executorcoord_propose_batch(block_id, txs)();
-    for (const ExecProposeResult &result : res) {
-      if (result.result() == ExecResult::ExecResultTxDeterministicError) {
-        nomination.transaction_nominations.push_back(
-            {.nondeterministic_proposal_data = result.proposal_data()});
-      }
-      else if (result.result() == ExecResult::ExecResultOK) {
-        nomination.transaction_nominations.push_back(
-            {.nondeterministic_proposal_data = NondeterministicProposalData{}});
-      }
-      else {
-        co_return SchedulerNominationResult(
-            SchedulerNominationOutcome::SchedulerNominationError);
-      }
+    if (!propose_batch(block_id, txs, nomination.transaction_nominations)) {
+      co_return SchedulerNominationResult(
+          SchedulerNominationOutcome::SchedulerNominationError);
     }
   }
   else {
+    CHECK(txs.empty());
     // There are no vetted txs, so we cannot propose a block.
     finish_block(block_id);
     abandon_snapshot(block_id);

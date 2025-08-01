@@ -254,6 +254,7 @@ private:
 } // namespace detail
 
 template<typename T> constexpr size_t kMaxArraySize = PTRDIFF_MAX / sizeof(T);
+constexpr size_t kMaxXdrSize = 0xffffffff;
 
 template<typename T, size_t MaxSize = kMaxArraySize<T>,
          typename Allocator = detail::merged_allocator<T>::type>
@@ -737,6 +738,11 @@ protected:
                                        tname(), max_size())};
   }
 };
+
+// TODO(jhumphri): Add a comment explaining this and another comment for
+// [kMaxXdrSize] above.
+template<typename T, std::uint32_t size = kMaxXdrSize>
+using xdrvec = Vec<T, size>;
 
 template<typename IterIn>
 Vec(IterIn, IterIn) -> Vec<typename std::iterator_traits<IterIn>::value_type>;
