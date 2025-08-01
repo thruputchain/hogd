@@ -115,7 +115,9 @@ Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
     size_t end = base + chunk_size + (i < remainder ? 1 : 0);
     base = end;
     CHECK_GE(start, 0UL);
-    CHECK_LT(end, hashes.size());
+    if (i == num_threads - 1) {
+      CHECK_EQ(end, hashes.size());
+    }
 
     futures.push_back(worker_pool.submit([start, end, &trie, &hashes] {
       for (size_t j = start; j < end; j++) {
