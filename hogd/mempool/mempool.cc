@@ -220,13 +220,16 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
   x23::Vec<SignedTransaction> txs;
   txs.reserve(kMaxBlockSize);
   auto it = vetted_txs_.begin();
+  printf("vetted txs size is %zu\n", vetted_txs_.size());
   for (size_t i = 0; i < kMaxBlockSize && it != vetted_txs_.end(); i++) {
     nomination.transaction_hashes.push_back(it->first);
     txs.push_back(it->second);
-    it = vetted_txs_.erase(it);
+    it++;
   }
   printf("num nominated txs: %zu\n", nomination.transaction_hashes.size());
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
+  printf("nomination block hash: %s\n",
+         HexArray(nomination.block_hash).str().c_str());
 
   if (txs.size() == 1) {
     if (!propose_tx(block_id, txs[0], nomination.transaction_nominations)) {
@@ -355,6 +358,11 @@ Mempool::schedulercoord_validate(DbTip const &db_tip,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
+
+  printf("validation block hash: %s\n",
+         HexArray(get_block_hash(nomination.transaction_hashes)).str().c_str());
+  printf("validation compare to: %s\n",
+         HexArray(nomination.block_hash).str().c_str());
 
   finish_block(block_id);
   if (!close_snapshot(block_id)) {

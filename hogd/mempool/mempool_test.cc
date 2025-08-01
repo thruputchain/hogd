@@ -131,11 +131,14 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
 
   SignedTransactionBatch txs;
   txs.reserve(num_txs);
-  for (size_t i = 0; i < num_txs; i++) {
+  for (int64_t i = 0; i < num_txs; i++) {
     SignedTransaction tx{
         .tx =
-            Transaction{.invocation = fib_client.make_invocation<kProgramName>(
-                            UINT64_MAX, kFibonacciN)}};
+            Transaction{.id = {},
+                        .created = i,
+                        .invocation = fib_client.make_invocation<kProgramName>(
+                            UINT64_MAX, kFibonacciN),
+                        .contracts_to_deploy = {}}};
     txs.push_back(tx);
   }
   return txs;
@@ -234,8 +237,13 @@ TEST(Mempool, Nominate)
 
 TEST(Mempool, NominateBatch)
 {
+  // x23::RpcLogger::default_logfd = 1;
+
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  for (const SignedTransaction &tx : txs) {
+    printf("check size %zu\n", tx.tx.contracts_to_deploy.size());
+  }
 
   MempoolTestServer server;
   Clients clients = create_clients();
@@ -275,12 +283,13 @@ TEST(Mempool, ValidateBatch)
 {
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+  printf("here, txs size is %zu\n", txs.size());
 
   MempoolTestServer server;
   Clients clients = create_clients();
 
   ValidatorID validator_id{};
-  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_nominate = clients.interface->schedulercoord_nominate(db_tip)();

@@ -36,7 +36,7 @@ ExecutorRpcInterface::start_server(uint32_t port_number)
 
 x23::Async<ExecProposeResult>
 ExecutorRpcInterface::executorcoord_propose_transaction(
-    BlockID block_id, SignedTransaction const &signed_tx)
+    BlockID block_id, SignedTransaction signed_tx)
 {
   auto ctx = executor_states_.get_executor_context(block_id,
                                                    ExecutionMode::kProposing);
@@ -49,7 +49,7 @@ ExecutorRpcInterface::executorcoord_propose_transaction(
 
 x23::Async<ExecResult>
 ExecutorRpcInterface::executorcoord_validate_transaction(
-    BlockID block_id, ProposedTransaction const &proposed_tx)
+    BlockID block_id, ProposedTransaction proposed_tx)
 {
   auto ctx = executor_states_.get_executor_context(block_id,
                                                    ExecutionMode::kValidating);
@@ -62,7 +62,7 @@ ExecutorRpcInterface::executorcoord_validate_transaction(
 
 x23::Async<ExecProposeBatchResult>
 ExecutorRpcInterface::executorcoord_propose_batch(
-    BlockID block_id, x23::Vec<SignedTransaction> const &signed_txs)
+    BlockID block_id, SignedTransactionBatch signed_txs)
 {
   auto ctx = executor_states_.get_executor_context(block_id,
                                                    ExecutionMode::kProposing);
@@ -74,16 +74,17 @@ ExecutorRpcInterface::executorcoord_propose_batch(
 
   x23::Vec<ExecProposeResult> results;
   results.reserve(signed_txs.size());
-  for (auto const &signed_tx : signed_txs) {
+  for (SignedTransaction const &signed_tx : signed_txs) {
     results.push_back(
         co_await ctx->propose_transaction(signed_tx, allocate_tx_id()));
   }
 
   co_return results;
 }
+
 x23::Async<ExecValidateBatchResult>
 ExecutorRpcInterface::executorcoord_validate_batch(
-    BlockID block_id, x23::Vec<ProposedTransaction> const &proposed_txs)
+    BlockID block_id, ProposedTransactionBatch proposed_txs)
 {
   auto ctx = executor_states_.get_executor_context(block_id,
                                                    ExecutionMode::kValidating);

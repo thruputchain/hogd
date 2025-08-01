@@ -42,16 +42,17 @@ public:
 
   x23::Async<ExecProposeResult>
   executorcoord_propose_transaction(BlockID block_id,
-                                    SignedTransaction const &signed_tx);
+                                    SignedTransaction signed_tx);
   x23::Async<ExecResult>
   executorcoord_validate_transaction(BlockID block_id,
-                                     ProposedTransaction const &proposed_tx);
+                                     ProposedTransaction proposed_tx);
 
   x23::Async<ExecProposeBatchResult>
   executorcoord_propose_batch(BlockID block_id,
-                              x23::Vec<SignedTransaction> const &signed_txs);
-  x23::Async<ExecValidateBatchResult> executorcoord_validate_batch(
-      BlockID block_id, x23::Vec<ProposedTransaction> const &proposed_txs);
+                              SignedTransactionBatch signed_txs);
+  x23::Async<ExecValidateBatchResult>
+  executorcoord_validate_batch(BlockID block_id,
+                               ProposedTransactionBatch proposed_txs);
 
   x23::Async<ExecResult> executorcoord_open_proposal_block(BlockID id);
   x23::Async<ExecResult> executorcoord_open_validation_block(BlockID id);
