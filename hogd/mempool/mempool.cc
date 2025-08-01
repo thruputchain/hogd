@@ -210,8 +210,7 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
       SchedulerNominationOutcome::SchedulerNominationOK);
   result.scheduler_nomination().block_id = block_id;
   Nomination &nomination = result.scheduler_nomination().nomination;
-  // TODO(jhumphri): What should [block_height] be?
-  nomination.block_height = 0;
+  nomination.block_height = db_tip.height + 1;
   nomination.prev_block_hash = db_tip.hash;
   // [nomination.block_hash], [nomination.transaction_hashes], and
   // [nomination.transaction_nominations] are filled in below.
@@ -306,9 +305,8 @@ Mempool::schedulercoord_validate(DbTip const &db_tip,
 
   if (!open_validation_block(block_id)) {
     abandon_snapshot(block_id);
-    // TODO(jhumphri): Maybe we should have an ExecutorFailed status, too?
     co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationDbFailed);
+        SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
 
   // [nomination] includes the the tx hashes and the nondeterministic proposal
