@@ -70,6 +70,31 @@ TEST_F(FibonacciTest, FibonacciCalls)
   }
 }
 
+TEST_F(FibonacciTest, FibonacciGasLimit)
+{
+  auto contract = test::load_test_contract("fibonacci.wasm");
+  auto contract_addr = make_contract_address(0);
+  in_memory_db_.write_contract(sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  using fib_client_t = ContractTraitClient<Fibonacci>;
+  fib_client_t client(contract_addr);
+
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx =
+                Transaction{
+                    .invocation =
+                        client.make_invocation<"slow_fibonacci">(2000, 20U)}},
+        wasm_runtime_context_);
+    auto res = handler.root_invoke();
+    ASSERT_FALSE(res.is_root_success());
+    ASSERT_EQ(res.gas_consumed_, 2000);
+  }
+}
+
 // Test whether the output of the fibonacci contract is correct.
 TEST_F(FibonacciTest, FibonacciCorrectness)
 {
