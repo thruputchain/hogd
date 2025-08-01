@@ -81,6 +81,13 @@ Mempool::abandon_snapshot(BlockID block_id)
   }
 }
 
+bool
+Mempool::close_snapshot(BlockID block_id)
+{
+  auto res = db_client_.dbcoord_close_snapshot(block_id)();
+  return res.result() == DbResult::DbResultOK;
+}
+
 void
 Mempool::finish_block(BlockID block_id)
 {
@@ -237,15 +244,39 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
   }
 
   finish_block(block_id);
-  {
-    auto res = db_client_.dbcoord_close_snapshot(block_id)();
-    if (res.result() != DbResult::DbResultOK) {
-      co_return SchedulerNominationResult(
-          SchedulerNominationOutcome::SchedulerNominationError);
-    }
+  if (!close_snapshot(block_id)) {
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   co_return result;
+}
+
+bool
+Mempool::validate_tx(BlockID block_id, const ProposedTransaction &tx)
+{
+  auto res = exec_client_.executorcoord_validate_transaction(block_id, tx)();
+  if (res != ExecResult::ExecResultOK) {
+    finish_block(block_id);
+    abandon_snapshot(block_id);
+    return false;
+  }
+  return true;
+}
+
+bool
+Mempool::validate_batch(BlockID block_id,
+                        const x23::Vec<ProposedTransaction> &txs)
+{
+  auto res = exec_client_.executorcoord_validate_batch(block_id, txs)();
+  if (std::any_of(res.begin(), res.end(), [](const auto &r) {
+        return r != ExecResult::ExecResultOK;
+      })) {
+    finish_block(block_id);
+    abandon_snapshot(block_id);
+    return false;
+  }
+  return true;
 }
 
 x23::Async<SchedulerValidationResult>
@@ -253,14 +284,11 @@ Mempool::schedulercoord_validate(DbTip const &db_tip,
                                  Nomination const &nomination)
 {
   BlockID block_id = get_ns_since_epoch();
-  {
-    auto res = db_client_.dbcoord_create_snapshot(
-        db_tip.id, block_id,
-        BlockExecutionMode::kBlockExecutionModeValidation)();
-    if (res != DbResult::DbResultOK) {
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationDbFailed);
-    }
+  if (!create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
+                       BlockExecutionMode::kBlockExecutionModeValidation)) {
+
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
 
   {
@@ -288,30 +316,21 @@ Mempool::schedulercoord_validate(DbTip const &db_tip,
   }
   if (nomination.transaction_nominations.size() == 1) {
     CHECK_EQ(txs.size(), 1UL);
-    auto res =
-        exec_client_.executorcoord_validate_transaction(block_id, txs[0])();
-    if (res != ExecResult::ExecResultOK) {
-      finish_block(block_id);
-      abandon_snapshot(block_id);
+    if (!validate_tx(block_id, txs[0])) {
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationInvalid);
     }
   }
   else if (nomination.transaction_nominations.size() > 1) {
     CHECK_GT(txs.size(), 1UL);
-    auto res = exec_client_.executorcoord_validate_batch(block_id, txs)();
-    if (std::any_of(res.begin(), res.end(), [](const auto &r) {
-          return r != ExecResult::ExecResultOK;
-        })) {
-      finish_block(block_id);
-      abandon_snapshot(block_id);
+    if (!validate_batch(block_id, txs)) {
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationInvalid);
     }
   }
   else {
-    // Empty nomination.
     CHECK(txs.empty());
+    // Empty nomination.
     finish_block(block_id);
     abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
@@ -329,12 +348,9 @@ Mempool::schedulercoord_validate(DbTip const &db_tip,
   }
 
   finish_block(block_id);
-  {
-    auto res = db_client_.dbcoord_close_snapshot(block_id)();
-    if (res.result() != DbResult::DbResultOK) {
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationDbFailed);
-    }
+  if (!close_snapshot(block_id)) {
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
 
   SchedulerValidationResult result(

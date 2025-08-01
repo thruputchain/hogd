@@ -101,6 +101,7 @@ private:
   bool create_snapshot(BlockID prev_block_id, BlockID block_id,
                        BlockExecutionMode);
   void abandon_snapshot(BlockID block_id);
+  bool close_snapshot(BlockID block_id);
   void finish_block(BlockID block_id);
 
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
@@ -110,6 +111,10 @@ private:
   bool
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
                 x23::xdrvec<NominatedTransaction> &transaction_nominations);
+
+  bool validate_tx(BlockID block_id, const ProposedTransaction &tx);
+  bool validate_batch(BlockID block_id,
+                      const x23::Vec<ProposedTransaction> &txs);
 
   coord_client_t db_client_;
   exec_client_t exec_client_;
