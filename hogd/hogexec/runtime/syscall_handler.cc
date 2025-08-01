@@ -114,6 +114,7 @@ SystemCallHandler::root_invoke()
     return cumulative_invoke_result_;
   }
 
+  // TODO(geoff): gas costs for failed lookup of runtime?
   auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
   if (!runtime) {
     // some system error when resolving the runtime
@@ -137,23 +138,22 @@ SystemCallHandler::root_invoke()
       Calldata(signed_tx_.tx.invocation.calldata),
       std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
-  auto res = runtime.value()->invoke(sdk_method_id(
+  cumulative_invoke_result_ += runtime.value()->invoke(sdk_method_id(
                                          signed_tx_.tx.invocation.entrypoint),
                                      available_gas);
-  cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
 
   // finish_status takes res as input and shortcircuits if res is an error
   auto finish_status =
-      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+      invocation_frame_stack_.finish_frame(cumulative_invoke_result_.result_, execution_mode_data_);
   if (!finish_status.has_value()) {
+    // TODO(geoff): This status will result in ending execution of the whole block.
+    // We can add gas consumption here, but that would only affect the state of the local
+    // scheduler, not the canonical chain.
     cumulative_invoke_result_.result_ = finish_status.error().to_invoke_error();
     return cumulative_invoke_result_;
   }
-  res = finish_status.value();
 
-  // should not have gotten here without being in a success state to begin with
-  assert(cumulative_invoke_result_.is_root_success());
-  cumulative_invoke_result_.result_ = res.result_;
+  cumulative_invoke_result_ += finish_status.value();
   if (!cumulative_invoke_result_.is_root_success()) {
     return cumulative_invoke_result_;
   }
@@ -263,17 +263,25 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
     flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
   }
 
+  InvokeResult cumulative_result = {
+    .result_ = InvokeStatus<void>{},
+    .gas_consumed_ = 0,
+  };
+
   invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
 
-  auto res = runtime.value()->invoke(method, gas_limit);
+  cumulative_result += runtime.value()->invoke(method, gas_limit);
   auto finish_status =
-      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+      invocation_frame_stack_.finish_frame(cumulative_result.result_, execution_mode_data_);
   if (!finish_status.has_value()) {
+    // TODO(geoff): This status will result ending execution of the whole block.
+    // We can add gas consumption here, but that would only affect the state of the local
+    // scheduler, not the canonical chain.
     return {finish_status.error().to_host_fn_error(), 0};
   }
-  res = finish_status.value();
+  cumulative_result += finish_status.value();
 
-  return res.to_host_fn_result();
+  return cumulative_result.to_host_fn_result();
 }
 
 void

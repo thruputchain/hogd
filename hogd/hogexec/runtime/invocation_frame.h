@@ -133,7 +133,7 @@ public:
   void start_frame(ContractAddress const &address, Calldata &&calldata,
                    InvokeFlagSet flags);
   SystemStatus<InvokeResult>
-  finish_frame(InvokeResult result, ExecutionModeData &execution_mode_data);
+  finish_frame(InvokeStatus<void> result, ExecutionModeData &execution_mode_data);
 
   std::optional<ContractAddress> get_msg_sender() const;
 
