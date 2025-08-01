@@ -107,10 +107,10 @@ private:
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
 
   bool propose_tx(BlockID block_id, const SignedTransaction &tx,
-                  x23::xdrvec<NominatedTransaction> &transaction_nominations);
+                  x23::XdrVec<NominatedTransaction> &transaction_nominations);
   bool
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
-                x23::xdrvec<NominatedTransaction> &transaction_nominations);
+                x23::XdrVec<NominatedTransaction> &transaction_nominations);
 
   bool open_proposal_block(BlockID block_id);
 

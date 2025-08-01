@@ -143,7 +143,7 @@ Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
 
 bool
 Mempool::propose_tx(BlockID block_id, const SignedTransaction &tx,
-                    x23::xdrvec<NominatedTransaction> &transaction_nominations)
+                    x23::XdrVec<NominatedTransaction> &transaction_nominations)
 {
   auto res = exec_client_.executorcoord_propose_transaction(block_id, tx)();
   switch (res.result()) {
@@ -163,7 +163,7 @@ Mempool::propose_tx(BlockID block_id, const SignedTransaction &tx,
 bool
 Mempool::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
-    x23::xdrvec<NominatedTransaction> &transaction_nominations)
+    x23::XdrVec<NominatedTransaction> &transaction_nominations)
 {
   auto res = exec_client_.executorcoord_propose_batch(block_id, txs)();
   for (const ExecProposeResult &result : res) {
