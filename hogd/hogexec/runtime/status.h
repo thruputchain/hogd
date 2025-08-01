@@ -143,10 +143,12 @@ struct InvokeResult {
   {
     // We can chain one InvokeResult on to another if the first was successful,
     // or they both indicate the same error.
-    return is_frame_success() || (!other.is_frame_success() && other.result_.error().code() == result_.error().code());
+    return is_frame_success() ||
+           (!other.is_frame_success() &&
+            other.result_.error().code() == result_.error().code());
   }
 
-  InvokeResult& operator+=(InvokeResult const &other)
+  InvokeResult &operator+=(InvokeResult const &other)
   {
     assert(compatible_with(other));
     gas_consumed_ += other.gas_consumed_;

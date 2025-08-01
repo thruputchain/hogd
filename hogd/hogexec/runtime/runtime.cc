@@ -60,19 +60,19 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
 
   auto res = invoke_internal(method_name);
 
-  // Interpreters that perform metering on a basic block level, instead of instruction
-  // by instruction, might not actually charge for the last block.
-  // (The "consume fuel" operation is generally placed at the top of a basic block.
-  // As far as I can tell, this is the case for wasmi).
-  // We hide this detail by charging for the entire gas limit,
-  // if we reach an OutOfGas error.
+  // Interpreters that perform metering on a basic block level, instead of
+  // instruction by instruction, might not actually charge for the last block.
+  // (The "consume fuel" operation is generally placed at the top of a basic
+  // block. As far as I can tell, this is the case for wasmi). We hide this
+  // detail by charging for the entire gas limit, if we reach an OutOfGas error.
   //
   // This makes the behavior of the wasm runtime consistent with the behavior of
-  // consume_gas (defined in this file), which is what we use to consume gas within
-  // syscalls.
+  // consume_gas (defined in this file), which is what we use to consume gas
+  // within syscalls.
 
   uint64_t gas_remaining = get_available_gas();
-  if (!res.has_value() && res.error().code() == InvokeErrorCode::kInvokeOutOfGas) {
+  if (!res.has_value() &&
+      res.error().code() == InvokeErrorCode::kInvokeOutOfGas) {
     gas_remaining = 0;
   }
 

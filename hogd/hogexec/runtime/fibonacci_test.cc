@@ -84,8 +84,10 @@ TEST_F(FibonacciTest, FibonacciGasLimit)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx = Transaction{.invocation = client.make_invocation<"slow_fibonacci">(
-                                  2000, 20U)}},
+            .tx =
+                Transaction{
+                    .invocation =
+                        client.make_invocation<"slow_fibonacci">(2000, 20U)}},
         wasm_runtime_context_);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.is_root_success());

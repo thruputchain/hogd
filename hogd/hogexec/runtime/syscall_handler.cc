@@ -120,32 +120,35 @@ SystemCallHandler::root_invoke()
                                       cumulative_invoke_result_.gas_consumed_
                                 : 0;
 
-  auto [res, gas_consumed] = invoke(signed_tx_.tx.invocation.invoked_address,
-                              sdk_method_id(signed_tx_.tx.invocation.entrypoint),
-                              available_gas,
-                              Calldata(signed_tx_.tx.invocation.calldata),
-                              std::to_underlying(InvokeFlag::kInvokeFlagNone));
-                              
-  auto handle_root_host_fn_status = [](HostFnStatus<SyscallErrorCode> status) -> InvokeStatus<void> {
+  auto [res, gas_consumed] =
+      invoke(signed_tx_.tx.invocation.invoked_address,
+             sdk_method_id(signed_tx_.tx.invocation.entrypoint), available_gas,
+             Calldata(signed_tx_.tx.invocation.calldata),
+             std::to_underlying(InvokeFlag::kInvokeFlagNone));
+
+  auto handle_root_host_fn_status =
+      [](HostFnStatus<SyscallErrorCode> status) -> InvokeStatus<void> {
     if (status.has_value()) {
-      return (status.value() == SyscallErrorCode::kNone) ? InvokeStatus<void>{} : InvokeError{InvokeErrorCode::kInvokeDeterministic};
+      return (status.value() == SyscallErrorCode::kNone)
+                 ? InvokeStatus<void>{}
+                 : InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
-    switch(status.error().code()) {
-      case HostFnErrorCode::kHostOutOfGas:
-        return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
-      case HostFnErrorCode::kHostReturn:
-        return InvokeStatus<void>{};
-      case HostFnErrorCode::kHostExit:
-        return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-      case HostFnErrorCode::kHostValidationFailure:
-        return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-      case HostFnErrorCode::kHostAbortTransaction:
-        return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
-      default:
-        return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    switch (status.error().code()) {
+    case HostFnErrorCode::kHostOutOfGas:
+      return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+    case HostFnErrorCode::kHostReturn:
+      return InvokeStatus<void>{};
+    case HostFnErrorCode::kHostExit:
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    case HostFnErrorCode::kHostValidationFailure:
+      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+    case HostFnErrorCode::kHostAbortTransaction:
+      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+    default:
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
     }
   };
-  
+
   cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
   cumulative_invoke_result_.gas_consumed_ += gas_consumed;
 
@@ -259,19 +262,20 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
   }
 
   InvokeResult cumulative_result = {
-    .result_ = InvokeStatus<void>{},
-    .gas_consumed_ = 0,
+      .result_ = InvokeStatus<void>{},
+      .gas_consumed_ = 0,
   };
 
   invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
 
   cumulative_result += runtime.value()->invoke(method, gas_limit);
   auto finish_status =
-      invocation_frame_stack_.finish_frame(cumulative_result.result_, execution_mode_data_);
+      invocation_frame_stack_.finish_frame(cumulative_result.result_,
+                                           execution_mode_data_);
   if (!finish_status.has_value()) {
     // TODO(geoff): This status will result ending execution of the whole block.
-    // We can add gas consumption here, but that would only affect the state of the local
-    // scheduler, not the canonical chain.
+    // We can add gas consumption here, but that would only affect the state of
+    // the local scheduler, not the canonical chain.
     return {finish_status.error().to_host_fn_error(), 0};
   }
   cumulative_result += finish_status.value();
