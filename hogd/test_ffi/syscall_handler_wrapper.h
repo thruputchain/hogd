@@ -6,19 +6,15 @@
 #include <limits>
 #include <memory>
 #include <tuple>
-#include <type_traits>
 #include <unistd.h>
 #include <utility>
 
 #include "ffi_enums.hh"
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/syscall_arg_params.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/syscall_meta.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
 #include "hogd/test_ffi/mock_runtime.h"
@@ -26,7 +22,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/format.h"
 
 namespace hogd {
 
