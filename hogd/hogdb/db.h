@@ -67,7 +67,7 @@ public:
                          size_t width = kDefaultParallelRangeWidth,
                          WorkerPool &pool = WorkerPool::get_default_pool())
   {
-    return db_->get_each_parallel(fn, width, pool);
+    db_->get_each_parallel(std::move(fn), width, pool);
   }
 
 private:

@@ -1,9 +1,11 @@
 // hogdb.cc - handles initialization for hogdb
 
+#include <cstddef>
 #include <cstdlib>
 #include <future>
 #include <memory>
 #include <print>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
