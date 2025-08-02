@@ -306,6 +306,77 @@ syscall_error_message(HostFnStatus<SyscallErrorCode> status)
   return std::format("Syscall Error: {}", x23::show(status.value()));
 }
 
+// This logic -- validating all of the syscall inputs, calling the inner
+// syscall, logging, read-only checks, and returning the result -- is common to
+// both the regular and mock syscall handlers.  This is split out from
+// wrap_outer so as to minimize code duplication (and reduce the chance of an
+// accidental discrepancy between the test framework and the actual runtime).
+template<SyscallNo Syscall, auto InnerSyscallFunc, typename SyscallInput,
+         typename SyscallOutput>
+constexpr std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
+wrap_after_parse(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
+                 auto &&args)
+{
+
+  using SyscallMeta = SyscallMeta<Syscall>;
+  using syscall_t = SyscallTypes<decltype(InnerSyscallFunc)>;
+
+  if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+    if (handler.is_read_only()) {
+      trace("Syscall {} is not read-only, but called in read-only mode",
+            Syscall);
+      return {HostFnStatus<SyscallErrorCode>{
+                  SyscallErrorCode::kInvalidSyscallInput},
+              0};
+    }
+  }
+
+  return [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
+    // check whether any loads failed
+    if (!((SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
+               std::get<Is>(args)) &&
+           ...))) {
+      if (auto *stats = handler.get_transaction_stats()) {
+        stats->syscall_fault_count++;
+      }
+      return kFaultResult;
+    }
+
+    // Once the syscall inputs are parsed, we can print them in a formatted log
+    // message.
+    trace("Syscall {} Input: {}", Syscall,
+          x23::show(make_syscall_input_struct<SyscallInput>(std::tuple{
+              SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                  std::get<Is>(args))...})));
+
+    auto extra_args = syscall_t::extra_args(handler, gas_remaining);
+
+    // Invoke the inner syscall
+    // template only required because we can't do auto [...handler] =
+    // handler_pack; yet.  This would be so much cleaner in c++26.
+    auto res =
+        [&]<size_t... ExtraArgs>(std::index_sequence<ExtraArgs...> /*unused*/) {
+          return InnerSyscallFunc(
+              std::get<ExtraArgs>(extra_args)...,
+              SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                  std::get<Is>(args))...);
+        }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
+
+    bool is_syscall_error =
+        !res.first.has_value() || res.first.value() != SyscallErrorCode::kNone;
+    trace(
+        "Syscall {} Output: {}", Syscall,
+        is_syscall_error
+            ? syscall_error_message(res.first)
+            : x23::show(make_syscall_output_struct<SyscallInput, SyscallOutput>(
+                  std::tuple{
+                      SyscallArgParams<typename syscall_t::template arg_i<Is>>::
+                          deref(std::get<Is>(args))...})));
+
+    return res;
+  }(std::make_index_sequence<syscall_t::kNumArgs>{});
+}
+
 // Wraps a call to an inner syscall with checks to load syscall arguments
 // from contract memory and check that all accesses into contract memory
 // are well-formed (no OOB).
@@ -327,18 +398,6 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
       std::remove_reference_t<decltype(get<std::to_underlying(Syscall) + 1>(
           SyscallOutput{}))>;
 
-  using SyscallMeta = SyscallMeta<Syscall>;
-
-  if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
-    if (handler.is_read_only()) {
-      trace("Syscall {} is not read-only, but called in read-only mode",
-            Syscall);
-      return {HostFnStatus<SyscallErrorCode>{
-                  SyscallErrorCode::kInvalidSyscallInput},
-              0};
-    }
-  }
-
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
   return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/)
@@ -349,59 +408,11 @@ wrap_outer(SystemCallHandler &handler, Runtime &runtime, uint64_t arg0,
               typename syscall_t::template arg_i<Is>>(contract_memory,
                                                       input_args)...};
 
-    // Check whether any loads failed
-    if (!((SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
-               std::get<Is>(parsed_args)) &&
-           ...))) {
-      if (auto *stats = handler.get_transaction_stats()) {
-        stats->syscall_fault_count++;
-      }
-      return kFaultResult;
-    }
-
-    // Once the syscall inputs are parsed, we can print them in a formatted log
-    // message.
-    trace("Syscall {} Input: {}", Syscall,
-          x23::show(make_syscall_input_struct<SyscallInputType>(std::tuple{
-              SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                  std::get<Is>(parsed_args))...})));
-
-    // With parameter packs as structured bindings, the annoying if constexpr
-    // disappears, and the following becomes
-    //   auto [...extra_args] = syscall_t::extra_args(handler, etc);
-    //   auto res = f(extra_args...,
-    //           SyscallArgParams<typename syscall_t::template
-    //           arg_i<Is>>::deref(
-    //               parsed_args...[Is])...);
-
-    auto extra_args =
-        syscall_t::extra_args(handler,
-                              WrappedGasAmount{runtime.get_available_gas()});
-
-    // Invoke the inner syscall
-    // template only required because we can't do auto [...handler] =
-    // handler_pack; yet
-    auto res =
-        [&]<size_t... ExtraArgs>(std::index_sequence<ExtraArgs...> /*unused*/) {
-          return InnerSyscallFunc(
-              std::get<ExtraArgs>(extra_args)...,
-              SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                  std::get<Is>(parsed_args))...);
-        }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
-
-    // Print the output of the syscall.  The outputs in parsed_args should only
-    // be written to if the syscall succeeds.
-    bool is_syscall_error =
-        !res.first.has_value() || res.first.value() != SyscallErrorCode::kNone;
-    trace("Syscall {} Output: {}", Syscall,
-          is_syscall_error
-              ? syscall_error_message(res.first)
-              : x23::show(make_syscall_output_struct<
-                          SyscallInputType, SyscallOutputType>(std::tuple{
-                    SyscallArgParams<typename syscall_t::template arg_i<Is>>::
-                        deref(std::get<Is>(parsed_args))...})));
-
-    return res;
+    return wrap_after_parse<Syscall, InnerSyscallFunc, SyscallInputType,
+                            SyscallOutputType>(handler,
+                                               WrappedGasAmount{
+                                                   runtime.get_available_gas()},
+                                               std::move(parsed_args));
   }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
 }
 
