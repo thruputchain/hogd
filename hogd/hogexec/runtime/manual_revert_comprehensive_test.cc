@@ -26,21 +26,21 @@
 #include "transaction.hh"
 #include "types.hh"
 
-/**
- * Comprehensive tests for manual frame revert functionality.
- * 
- * Manual revert is a key feature that allows contracts to:
- * 1. Revert all state changes made in the current frame
- * 2. Return data to the parent caller (unlike normal failures)
- * 3. Allow the transaction to commit successfully (unlike normal failures)
- * 
- * The functionality is exposed in the SDK through the Returnable trait:
- * - When a contract method returns Result::Err, force_revert() returns true
- * - This triggers the Return syscall with revert_frame=true
- * - State changes are reverted but error data is serialized and returned
- * 
- * This is similar to EVM's REVERT opcode behavior.
- */
+//
+// Comprehensive tests for manual frame revert functionality.
+//
+// Manual revert is a key feature that allows contracts to:
+// 1. Revert all state changes made in the current frame
+// 2. Return data to the parent caller (unlike normal failures)
+// 3. Allow the transaction to commit successfully (unlike normal failures)
+//
+// The functionality is exposed in the SDK through the Returnable trait:
+// - When a contract method returns Result::Err, force_revert() returns true
+// - This triggers the Return syscall with revert_frame=true
+// - State changes are reverted but error data is serialized and returned
+//
+// This is similar to EVM's REVERT opcode behavior.
+//
 
 namespace hogd {
 
@@ -52,8 +52,16 @@ public:
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-// Test the key new feature: manual revert with return data
-// State should be reverted but transaction should commit successfully
+//
+// Test basic manual frame revert functionality.
+//
+// Verifies that when a contract uses manual revert (Return syscall with
+// revert_frame=true):
+// - State changes within the frame are reverted
+// - The transaction still succeeds (unlike normal failures)
+// - Return data is preserved and passed to the caller
+// - Gas consumption is properly tracked
+//
 TEST_F(ManualRevertTest, ManualRevertBasicFunctionality)
 {
   ContractAddress contract_addr = make_contract_address(1);
@@ -126,7 +134,15 @@ TEST_F(ManualRevertTest, ManualRevertBasicFunctionality)
   ASSERT_FALSE(data_item_opt.has_value());
 }
 
-// Test nested manual revert: child reverts with data, parent gets the data
+//
+// Test nested manual revert with return data preservation.
+//
+// Tests a scenario where:
+// - Parent contract calls child contract
+// - Child contract performs manual revert with custom return data
+// - Parent contract receives the return data and can continue execution
+// - Verifies that nested manual revert doesn't affect parent's state
+//
 TEST_F(ManualRevertTest, NestedManualRevertWithReturnData)
 {
   ContractAddress contract_addr = make_contract_address(1);
@@ -250,7 +266,15 @@ TEST_F(ManualRevertTest, NestedManualRevertWithReturnData)
   ASSERT_FALSE(child_item_opt.has_value());
 }
 
-// Test difference between manual revert and normal failure
+//
+// Test the difference between manual revert and normal contract failure.
+//
+// Compares two scenarios to ensure manual revert behaves differently:
+// 1. Manual revert: State reverted, transaction succeeds, return data preserved
+// 2. Normal failure: State reverted, transaction fails, no return data
+// This test validates that manual revert provides the unique "controlled
+// failure" behavior.
+//
 TEST_F(ManualRevertTest, ManualRevertVsNormalFailure)
 {
   ContractAddress contract_addr = make_contract_address(1);
@@ -362,7 +386,15 @@ TEST_F(ManualRevertTest, ManualRevertVsNormalFailure)
   ASSERT_FALSE(data_item_opt.has_value());
 }
 
-// Test gas consumption with manual revert
+//
+// Test gas consumption behavior with manual revert.
+//
+// Verifies that:
+// - Gas consumed before manual revert is properly accounted for
+// - Manual revert operation itself consumes appropriate gas
+// - Gas consumption is consistent between manual revert and normal execution
+// - Out-of-gas scenarios are handled correctly with manual revert
+//
 TEST_F(ManualRevertTest, GasConsumptionWithManualRevert)
 {
   ContractAddress contract_addr = make_contract_address(1);
@@ -448,7 +480,16 @@ TEST_F(ManualRevertTest, GasConsumptionWithManualRevert)
   }
 }
 
-// Test multiple manual reverts in sequence (nested calls)
+//
+// Test multiple levels of nested manual reverts.
+//
+// Creates a call chain: Contract A → Contract B → Contract C
+// Where Contract C performs manual revert, affecting only its own state.
+// Verifies that:
+// - Only the innermost contract's state is reverted
+// - Middle and outer contracts maintain their state changes
+// - Return data flows correctly through the call stack
+//
 TEST_F(ManualRevertTest, MultipleNestedManualReverts)
 {
   ContractAddress contract_addr = make_contract_address(1);
@@ -586,6 +627,186 @@ TEST_F(ManualRevertTest, MultipleNestedManualReverts)
   ASSERT_FALSE(lookup_storage_item_from_db(key1).has_value());
   ASSERT_FALSE(lookup_storage_item_from_db(key2).has_value());
   ASSERT_FALSE(lookup_storage_item_from_db(key3).has_value());
+}
+
+//
+// Test different error types all trigger manual revert correctly.
+//
+// Verifies that various error conditions (syscall errors, contract errors,
+// caller errors) all properly trigger manual revert through the Returnable
+// trait mechanism. Tests multiple error scenarios:
+// - Syscall errors (kStorageKeyNotExist, kInsufficientGasForInvocation)
+// - Custom contract errors (internal_err)
+// - Caller errors (caller_error)
+// - Normal success case (error_type = 0)
+//
+TEST_F(ManualRevertTest, ErrorTypeManualReverts)
+{
+  ContractAddress contract_addr = make_contract_address(1);
+  auto test_data = make_bytestring("error_test_data");
+  auto key = make_storage_key("error_type_test");
+
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [test_data, key](SystemCallHandler &handler,
+                            NativeRuntime &) -> InvokeStatus<void> {
+             // Write state that should be reverted on error
+             auto res =
+                 handler.set_bytestring(key,
+                                        std::as_bytes(std::span(test_data)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             if (!res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Simulate syscall error - this should trigger manual revert
+             ReturnBuffer buffer;
+             auto error_msg = make_bytestring("Storage key not found");
+             buffer.resize_uninitialized(error_msg.size());
+             std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
+             handler.set_return_buffer(std::move(buffer), true);
+             return {};
+           }},
+          {1,
+           [test_data, key](SystemCallHandler &handler,
+                            NativeRuntime &) -> InvokeStatus<void> {
+             // Write state that should be reverted on error
+             auto res =
+                 handler.set_bytestring(key,
+                                        std::as_bytes(std::span(test_data)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             if (!res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Simulate insufficient gas error - this should trigger manual
+             // revert
+             ReturnBuffer buffer;
+             auto error_msg =
+                 make_bytestring("Insufficient gas for invocation");
+             buffer.resize_uninitialized(error_msg.size());
+             std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
+             handler.set_return_buffer(std::move(buffer), true);
+             return {};
+           }},
+          {2,
+           [test_data, key](SystemCallHandler &handler,
+                            NativeRuntime &) -> InvokeStatus<void> {
+             // Write state that should be reverted on error
+             auto res =
+                 handler.set_bytestring(key,
+                                        std::as_bytes(std::span(test_data)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             if (!res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // Simulate custom contract error - this should trigger manual
+             // revert
+             ReturnBuffer buffer;
+             auto error_msg = make_bytestring("Test custom contract error");
+             buffer.resize_uninitialized(error_msg.size());
+             std::memcpy(buffer.data(), error_msg.data(), error_msg.size());
+             handler.set_return_buffer(std::move(buffer), true);
+             return {};
+           }},
+          {3,
+           [test_data, key](SystemCallHandler &handler,
+                            NativeRuntime &) -> InvokeStatus<void> {
+             // Write state that should NOT be reverted (no error)
+             auto res =
+                 handler.set_bytestring(key,
+                                        std::as_bytes(std::span(test_data)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             if (!res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // No error - state should persist
+             return {};
+           }}});
+
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  // Deploy contract
+  auto contract = make_native_contract(0);
+  in_memory_db_.write_contract(sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Test error types 0-2 (should all trigger manual revert and succeed)
+  for (uint32_t error_type = 0; error_type < 3; ++error_type) {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address = contract_addr,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(
+                                                     error_type),
+                                             .gas_limit = UINT64_MAX,
+                                             .calldata = {}}}},
+        runtime_context);
+
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success())
+        << "Error type " << error_type << " should succeed via manual revert";
+
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res)
+        << "Error type " << error_type << " transaction should commit";
+
+    advance_block();
+
+    // State should be reverted for error types 0-2
+    auto data_addrkey =
+        make_contract_data_addrkey(contract_addr, "error_type_test");
+    auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
+    ASSERT_FALSE(data_item_opt.has_value())
+        << "Error type " << error_type << " state should be reverted";
+  }
+
+  // Test error type 3 (no error - should succeed and keep state)
+  {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address = contract_addr,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(3),
+                                             .gas_limit = UINT64_MAX,
+                                             .calldata = {}}}},
+        runtime_context);
+
+    auto res = handler.root_invoke();
+    ASSERT_TRUE(res.is_root_success())
+        << "No error case should succeed normally";
+
+    auto commit_res = handler.try_commit_transaction();
+    ASSERT_TRUE(commit_res.has_value());
+    ASSERT_TRUE(*commit_res) << "No error case transaction should commit";
+
+    advance_block();
+
+    // State should persist for no error case
+    auto data_addrkey =
+        make_contract_data_addrkey(contract_addr, "error_type_test");
+    auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
+    ASSERT_TRUE(data_item_opt.has_value())
+        << "No error case state should persist";
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

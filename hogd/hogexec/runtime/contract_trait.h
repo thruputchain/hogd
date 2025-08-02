@@ -249,7 +249,9 @@ public:
   {
     auto calldata = trait_meta_t::template make_calldata<Name>(
         std::forward<decltype(args)>(args)...);
-    trace("Invoke calldata: {}", x23::show(calldata));
+    trace("Invoke method {} (Name {}) calldata: {}",
+          sdk_method_id(trait_meta_t::template entrypoint<Name>()), Name.get(),
+          x23::show(calldata));
     auto res =
         handler.invoke(contract_address_,
                        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
@@ -268,14 +270,21 @@ public:
 
     auto return_buffer = handler.get_return_buffer();
     if (!return_buffer.has_value()) {
+      trace("No return buffer available: {}", return_buffer.error());
       return std::pair{return_buffer.error(), res.second};
     }
     assert(*return_buffer);
     std::span<const std::byte> return_span = std::as_bytes(
         std::span((*return_buffer)->data(), (*return_buffer)->size()));
 
+    trace("Received return buffer: {}",
+          std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
+                                       return_span.data()),
+                                   return_span.size()));
+
     auto return_value = trait_meta_t::template decode_return<Name>(return_span);
     if (!return_value.has_value()) {
+      trace("Invoke Error: Decode Return Failed: {}", return_value.error());
       return std::pair{return_value.error(), res.second};
     }
     return std::pair{return_value.value(), res.second};

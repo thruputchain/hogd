@@ -14,7 +14,7 @@ dependencies = [
 [[package]]
 name = "bcs"
 version = "0.2.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#dd14f449111ad29fcccdcb8865d8d9c713dc7dd9"
 dependencies = [
  "serde",
  "thiserror",
@@ -57,9 +57,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.30"
+version = "1.2.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "deec109607ca693028562ed836a5f1c4b8bd77755c4e132fc5ce11b0b6211ae7"
+checksum = "c3a42d84bb6b69d3a8b3eaacf0d88f179e1929695e1ad012b6cf64d9caaa5fd2"
 dependencies = [
  "shlex",
 ]
@@ -230,7 +230,7 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 [[package]]
 name = "groundhog_xdr"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#dd14f449111ad29fcccdcb8865d8d9c713dc7dd9"
 dependencies = [
  "serde",
  "serde_arrays",
@@ -253,7 +253,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "iface"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#dd14f449111ad29fcccdcb8865d8d9c713dc7dd9"
 dependencies = [
  "darling",
  "groundhog_xdr",
@@ -314,7 +314,7 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 [[package]]
 name = "macros"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#dd14f449111ad29fcccdcb8865d8d9c713dc7dd9"
 dependencies = [
  "darling",
  "groundhog_xdr",
@@ -351,7 +351,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 [[package]]
 name = "native_exec"
 version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#dd14f449111ad29fcccdcb8865d8d9c713dc7dd9"
 dependencies = [
  "bindgen",
  "cmake",
@@ -454,7 +454,7 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 [[package]]
 name = "sdk_rs"
 version = "0.0.1"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#dd14f449111ad29fcccdcb8865d8d9c713dc7dd9"
 dependencies = [
  "bcs",
  "groundhog_xdr",
@@ -479,7 +479,7 @@ dependencies = [
 [[package]]
 name = "serde_arrays"
 version = "0.2.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#b74425a45dbfe5cf50321a46131a13ae8e103460"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#dd14f449111ad29fcccdcb8865d8d9c713dc7dd9"
 dependencies = [
  "serde",
 ]
