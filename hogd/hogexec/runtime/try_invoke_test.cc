@@ -2036,10 +2036,10 @@ TEST_F(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
 
              // assert that we can actually get a ReturnBuffer back
              auto return_buf = handler.get_return_buffer();
-             if (!return_buf.has_value()) {
+             if (!return_buf.has_value() || !return_buf.value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             if (return_buf.value()->size() != 0) {
+             if (!return_buf.value()->empty()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
