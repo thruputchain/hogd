@@ -4,6 +4,11 @@ if(ENABLE_TEST_CONTRACTS)
 
 function(add_wasm_contract target_name)
 
+  # If you update the contracts (i.e. add new contracts, or change dependencies)
+  # then Cargo.lock will change, and the build will fail.  If that happens,
+  # just comment out the --locked flag, and the Cargo.lock will be regenerated.
+  # The --locked flag forces the CI to build with the correct version of the sdk
+  # (not just whatever the latest version it has cached is).
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true
@@ -12,7 +17,7 @@ function(add_wasm_contract target_name)
         -p ${target_name}
         --target wasm32-unknown-unknown
         --release
-       # --locked
+        --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
