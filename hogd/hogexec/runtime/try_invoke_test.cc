@@ -1984,6 +1984,135 @@ TEST_F(TryInvokeTest, InvokeErrorHandling)
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 }
+
+TEST_F(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
+{
+  // Assert that if a try_invoke frame successfully acquires locks but then its
+  // parent frame does a manual revert, then the locks are released. This test
+  // creates one native contract with three methods. The first method is a
+  // try_invoke on the second method. The second method does a try_invoke on the
+  // third method, and then manually reverts. The third method performs a
+  // bytestring write, and then return success. This test invokes the first
+  // method.  Afterwards, it asserts that the bytestring was not written.
+
+  // Contract address
+  ContractAddress contract_addr = make_contract_address(47);
+
+  // Bytestring to write
+  auto str_hello = make_bytestring("hello");
+  auto key = make_storage_key("test");
+
+  // Deploy contract with three methods:
+  // 0: try_invoke method 1
+  // 1: try_invoke method 2, then manually revert
+  // 2: Write "hello" to storage and return success
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [key](SystemCallHandler &handler,
+                 NativeRuntime &runtime) -> InvokeStatus<void> {
+             // Try invoke method 1
+             auto [r1, _g1] = handler.invoke(
+                 handler.get_current_address(), 1, runtime.get_available_gas(),
+                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r1.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Method 1 should succeed, but state changes are gone because of
+             // the manual revert
+             if (r1.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             auto res = handler.get_bytestring(key);
+             if (!res.has_value()) {
+               // assert no system error
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (res.value().has_value()) {
+               // assert no bytestring returned
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // assert that we can actually get a ReturnBuffer back
+             auto return_buf = handler.get_return_buffer();
+             if (!return_buf.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (return_buf.value()->size() != 0) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }},
+          {1,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<void> {
+             // Try invoke method 2
+             auto [r2, _g2] = handler.invoke(
+                 handler.get_current_address(), 2, runtime.get_available_gas(),
+                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r2.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Method 2 should succeed in the try_invoke frame
+             if (r2.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Now manually revert this frame, which should undo the locks
+             // acquired by method 2
+             handler.set_return_buffer(ReturnBuffer{}, true);
+             return {};
+           }},
+          {2,
+           [str_hello, key](SystemCallHandler &handler,
+                            NativeRuntime &) -> InvokeStatus<void> {
+             auto res =
+                 handler.set_bytestring(key,
+                                        std::as_bytes(std::span(str_hello)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             if (!res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  // Deploy contract and grant storage tokens
+  auto contract = make_native_contract(0);
+  in_memory_db_.write_contract(sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Invoke method 0
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
+
+  advance_block();
+
+  // Check that the bytestring was NOT written (locks were released due to
+  // manual revert)
+  auto data_addrkey = make_contract_data_addrkey(contract_addr, "test");
+  auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
+  ASSERT_FALSE(data_item_opt.has_value());
+}
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
