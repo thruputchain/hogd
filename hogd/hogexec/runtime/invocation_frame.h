@@ -51,7 +51,7 @@ public:
   void commit_successful_child_frame(InvocationFrame &&frame);
 
   // merge child invocation frame into self
-  void commit_manually_reverted_frame(InvocationFrame&& frame);
+  void commit_manually_reverted_frame(InvocationFrame &&frame);
 
   // revert the child invocation frame.
   // Does not clean up the child frame, but is responsible for handling the
