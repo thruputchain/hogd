@@ -84,6 +84,8 @@ private:
       /*rcq_cost_per_entry=*/5, /*rcq_cost_per_block=*/100,
       /*replay_cache_cost_per_entry=*/5};
   static constexpr int128_t kStorageTokenAmount = 1'000'000'000;
+  static constexpr LocalMockDB kDbIdentifier{.read_port_number_ =
+                                                 kExecutorDbPort};
 
   void set_up_grant_storage_token()
   {
@@ -101,22 +103,30 @@ private:
   }
 
   x23::ThreadPool db_pool_;
+  // The database used by [db_executor_server_] and [db_coordinator_server_]
+  // (via [block_manager_]).
   InMemoryDatabase in_memory_db_;
   BlockManager block_manager_;
 
-  static constexpr LocalMockDB kDbIdentifier{.read_port_number_ =
-                                                 kExecutorDbPort};
   ExecCard exec_card_ = {
       .protocol = "blah",
       .upid = {},
       .address = x23::HostPort(kAddress.c_str(), kCoordinatorPort).show()};
+  // This is a fake coordinator server that the executor registers itself with
+  // via RPC.
   CoordinatorServer coordinator_server_;
+  // The executor server.
   ExecCoordServer executor_coord_server_;
 
+  // The database server that the executor accesses.
   RPCDbExecutorServer db_executor_server_;
+  // The database server that the mempool accesses.
+  // TODO(jhumphri): This class was originally meant to be used by the
+  // coordinator, but the mempool has now taken over this responsibility. We
+  // should probably rename [DbCoordServer] to something else.
   DbCoordServer db_coordinator_server_;
 
-  // TODO(jhumphri): Need to support these?
+  // A wrapper around [db_executor_server_].
   DatabaseProxy db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 };
