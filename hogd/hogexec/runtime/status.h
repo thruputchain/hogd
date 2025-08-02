@@ -139,6 +139,23 @@ struct InvokeResult {
   InvokeStatus<void> result_;
   uint64_t gas_consumed_;
 
+  constexpr bool compatible_with(InvokeResult const &other) const
+  {
+    // We can chain one InvokeResult on to another if the first was successful,
+    // or they both indicate the same error.
+    return is_frame_success() ||
+           (!other.is_frame_success() &&
+            other.result_.error().code() == result_.error().code());
+  }
+
+  InvokeResult &operator+=(InvokeResult const &other)
+  {
+    assert(compatible_with(other));
+    gas_consumed_ += other.gas_consumed_;
+    result_ = other.result_;
+    return *this;
+  }
+
   constexpr bool is_frame_success() const { return (result_.has_value()); }
   constexpr bool should_frame_revert() const { return !is_frame_success(); }
 

@@ -103,7 +103,7 @@ lex(XdrCtx *xc)
     }
     else {
       if (!xc->block_comment.empty() && loc.first_line > comment_end_line)
-	xc->block_comment += '\n';
+        xc->block_comment += '\n';
       xc->syms.push_back(TerminalInfo{
           .id = sym,
           .sym =
@@ -187,17 +187,16 @@ main(int argc, char **argv)
     if (outfile.extension() == ".x")
       if (rust_module) {
         outfile.replace_extension(".rs");
-      } 
+      }
       else {
         outfile.replace_extension(".hh");
       }
-    else
-      if (rust_module) {
-        outfile += ".rs";
-      }
-      else {
-        outfile += ".hh";
-      }
+    else if (rust_module) {
+      outfile += ".rs";
+    }
+    else {
+      outfile += ".hh";
+    }
   }
 
   XdrCtx ctx{.file = infile};
@@ -218,7 +217,8 @@ main(int argc, char **argv)
 
   if (rust_module) {
     res = gen_rs(&ctx.defs);
-  } else {
+  }
+  else {
     res = gen_hh(&ctx.defs);
   }
 

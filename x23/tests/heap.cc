@@ -34,7 +34,7 @@ delete_test(auto &h)
   auto rng = std::mt19937{std::random_device{}()};
   print_heap(h);
   while (!h.empty()) {
-    size_t i = std::uniform_int_distribution{0, int(h.size())-1}(rng);
+    size_t i = std::uniform_int_distribution{0, int(h.size()) - 1}(rng);
     std::println("  removing element {}, which is {}", i, h.index(i));
     h.remove_index(i);
     print_heap(h);
@@ -65,7 +65,7 @@ index_test(size_t sz = 20)
 
   for (size_t i = 0; i < sz; ++i) {
     std::println("  removing index entry {}, index {}, value {}", i,
-		 is[i]->get(), h[*is[i]]);
+                 is[i]->get(), h[*is[i]]);
     h.remove(*is[i]);
     print_indices();
     assert(is[i]->get() == -1);

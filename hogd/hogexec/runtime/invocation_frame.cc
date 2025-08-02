@@ -117,15 +117,20 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
 }
 
 SystemStatus<InvokeResult>
-InvocationFrameStack::finish_frame(InvokeResult result,
+InvocationFrameStack::finish_frame(InvokeStatus<void> result,
                                    ExecutionModeData &execution_mode_data)
 {
+  InvokeResult frame_result = {
+      .result_ = result,
+      .gas_consumed_ = 0,
+  };
+
   // handle the try_invoke data
   assert(!frame_stack_.empty());
   if (frame_stack_.back().is_try_invoke()) {
     // Only relevant in the case where the deterministic part of the frame
     // succeeds.
-    if (result.is_frame_success()) {
+    if (frame_result.is_frame_success()) {
       bool acq_success = false;
 
       // If we're in proposal mode, we need to acquire the frame locks.
@@ -154,24 +159,16 @@ InvocationFrameStack::finish_frame(InvokeResult result,
       // the entire frame as failing.
       if (!acq_success) {
         // TODO(geoff): perhaps add additional gas consumption
-        result = InvokeResult{
+        frame_result = InvokeResult{
             .result_ = InvokeError{InvokeErrorCode::kInvokeDeterministic},
-            .gas_consumed_ = result.gas_consumed_,
+            .gas_consumed_ = 0,
         };
       }
     }
     // otherwise nothing to do here with try_invoke
   }
 
-  // If a contract has the REVERT_SAFE flag set, then it can be called again
-  // after it has been reverted. A contract might not be REVERT_SAFE because
-  // reversion does NOT reset a wasm's internal memory or other internal state.
-  // We could do that, it's just expensive,
-  // and would require fairly close integration with the wasm runtime and some
-  // fairly invasive changes (We need to restore the entirety of the wasm
-  // module's internal state -- not just memory, but also tables and globals.
-  // The wasm stack is reset automatically).
-  if (result.should_frame_revert()) {
+  if (frame_result.should_frame_revert()) {
     auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {
       return st.error();
@@ -182,11 +179,11 @@ InvocationFrameStack::finish_frame(InvokeResult result,
       frame_stack_.back().commit_failed_child_frame();
     }
 
-    return result;
+    return frame_result;
   }
 
   // commit child invocation frame successfully
-  assert(result.is_frame_success());
+  assert(frame_result.is_frame_success());
 
   size_t stack_size = frame_stack_.size();
   if (stack_size >= 2) {
@@ -202,7 +199,7 @@ InvocationFrameStack::finish_frame(InvokeResult result,
 
   frame_stack_.pop_back();
 
-  return result;
+  return frame_result;
 }
 
 std::optional<ContractAddress>

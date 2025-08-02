@@ -222,10 +222,10 @@ SRpcFd::write_worker(RefPtr<SRpcFd> _selfref) noexcept
     for (;;) {
       auto res = wrbuf.write(fd_.get());
       if (!res) {
-	if (res.error() == ECONNRESET || res.error() == EPIPE)
-	  stop();
-	else
-	  fail("write_worker: {}", res.error());
+        if (res.error() == ECONNRESET || res.error() == EPIPE)
+          stop();
+        else
+          fail("write_worker: {}", res.error());
         return;
       }
       if (!*res)

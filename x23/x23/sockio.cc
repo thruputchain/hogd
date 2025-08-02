@@ -200,9 +200,9 @@ HostPort::parse(std::string_view s)
     return false;
 
   if (s[0] == '[' && s[colon - 1] == ']')
-    host = Str(std::from_range, s.substr(1, colon - 2));
+    host = Str(std::from_range, s.substr(1, colon - 1));
   else
-    host = Str(std::from_range, s.substr(0, colon - 1));
+    host = Str(std::from_range, s.substr(0, colon));
   port = Str(std::from_range, s.substr(colon + 1));
   return true;
 }

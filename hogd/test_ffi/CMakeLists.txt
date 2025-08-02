@@ -1,12 +1,7 @@
-set_source_files_properties(
-    ${CMAKE_CURRENT_BINARY_DIR}/mock_syscall_entry.cc
-    PROPERTIES GENERATED TRUE)
-
 add_library(
     test_ffi
     SHARED
     db_context_wrapper.cc
-    mock_syscall_entry.cc
     mock_contract.cc
     mock_runtime.cc
     syscall_handler_wrapper.cc
@@ -15,7 +10,8 @@ add_library(
 
 add_dependencies(
   test_ffi
-  generate_mock_syscall_entry_cc
+  generate_syscall_meta_h
+  generate_syscall_inner_h
 )
 
 target_include_directories(
@@ -34,6 +30,13 @@ add_executable(
   test_ffi_test
   mock_syscall_test.cc
 )
+
+target_include_directories(
+  test_ffi_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
 
 target_link_libraries(
   test_ffi_test

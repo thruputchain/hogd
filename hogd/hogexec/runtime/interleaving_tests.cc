@@ -6,11 +6,9 @@
 
 #include <memory>
 #include <stdexcept>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
 
-#include "bcs/encode.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -19,6 +17,7 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
@@ -52,8 +51,8 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
   // perform a set_add_nnint
   builder.add(0,
-              [&](SystemCallHandler &handler, int128_t set_amount,
-                  int128_t add_amount) -> InvokeStatus<void> {
+              [&](SystemCallHandler &handler, int64_t set_amount,
+                  int64_t add_amount) -> InvokeStatus<void> {
                 auto r = handler.set_nnint(key, set_amount, add_amount);
                 if (!r.has_value() || !r.value().has_value()) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -118,47 +117,50 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
     model::RunnableActionSet actions(work_queue);
 
-    auto add_set_add_action =
-        [this, &runtime_context]<int128_t SetAmount, int128_t AddAmount>(
-            model::RunnableActionSet &actions, bool &action_result) {
-          actions.add_action(
-              [](model::RunnableActionSet &set, auto self,
-                 auto &runtime_context, bool &action_result) -> model::Async {
-                // set_amount
-                co_await set.bg();
+    auto add_set_add_action = [this, &runtime_context]<int64_t SetAmount,
+                                                       int64_t AddAmount>(
+                                  model::RunnableActionSet &actions,
+                                  bool &action_result) {
+      actions.add_action(
+          [](model::RunnableActionSet &set, auto self, auto &runtime_context,
+             bool &action_result) -> model::Async {
+            // set_amount
+            co_await set.bg();
 
-                auto calldata = bcs::encode_to<Calldata>(
-                    std::tuple<int128_t, int128_t>{SetAmount, AddAmount});
-                assert(calldata.has_value());
+            auto calldata =
+                Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                    serialize<int64_t, int64_t>(SetAmount, AddAmount);
+            if (!calldata.has_value()) {
+              throw std::runtime_error("Failed to serialize calldata");
+            }
 
-                auto handler = self->make_new_system_call_handler(
-                    SignedTransaction{
-                        .tx =
-                            Transaction{
-                                .invocation =
-                                    Invocation{.invoked_address =
-                                                   ContractAddress{},
-                                               .entrypoint =
-                                                   entrypoint_from_method_id(0),
-                                               .gas_limit = UINT64_MAX,
-                                               .calldata = calldata.value()}}},
-                    runtime_context);
-                auto res = handler.root_invoke();
-                if (!res.is_root_success()) {
-                  throw std::runtime_error("root invoke failed");
-                }
-                auto commit_res = handler.try_commit_transaction();
-                if (!commit_res.has_value()) {
-                  throw std::runtime_error("try_commit_transaction error");
-                }
-                if (!commit_res.value()) {
-                  action_result = false;
-                  co_return;
-                }
-                co_return;
-              },
-              this, runtime_context, action_result);
-        };
+            auto handler = self->make_new_system_call_handler(
+                SignedTransaction{
+                    .tx =
+                        Transaction{
+                            .invocation =
+                                Invocation{.invoked_address = ContractAddress{},
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = *calldata}}},
+                runtime_context);
+            auto res = handler.root_invoke();
+            if (!res.is_root_success()) {
+              throw std::runtime_error("root invoke failed");
+            }
+            auto commit_res = handler.try_commit_transaction();
+            if (!commit_res.has_value()) {
+              throw std::runtime_error("try_commit_transaction error");
+            }
+            if (!commit_res.value()) {
+              action_result = false;
+              co_return;
+            }
+            co_return;
+          },
+          this, runtime_context, action_result);
+    };
 
     bool action_1 = true;
     add_set_add_action.template operator()<100, 10>(actions, action_1);

@@ -59,9 +59,10 @@ public:
       }
     }
 
-    void wait(std::condition_variable &c) {
+    void wait(std::condition_variable &c)
+    {
       std::unique_lock ul(mv_->m_, std::adopt_lock);
-      Defer _rel([&ul]{ ul.release(); });
+      Defer _rel([&ul] { ul.release(); });
       c.wait(ul);
     }
 
@@ -105,9 +106,10 @@ public:
 
   // Invoke a callable with a reference to the object protected by the
   // MVar, while holding the lock for the duration of the call.
-  template<typename F> decltype(auto) with(F &&f)
-    requires std::invocable<F, T&> &&
-    (!std::invocable<F, T&, std::unique_lock<std::mutex>>)
+  template<typename F>
+  decltype(auto) with(F &&f)
+      requires std::invocable<F, T &> &&
+               (!std::invocable<F, T &, std::unique_lock<std::mutex>>)
   {
     std::lock_guard _g(m_);
     return std::invoke(std::forward<F>(f), t_);
@@ -117,8 +119,9 @@ public:
   // std::unique_lock<std::mutex> as a second argument, it will be
   // passed one holding the lock.  This can be useful in conjunction
   // with condition variables, but see Ptr::wait.
-  template<typename F> decltype(auto) with(F &&f)
-    requires std::invocable<F, T&, std::unique_lock<std::mutex>>
+  template<typename F>
+  decltype(auto) with(F &&f)
+      requires std::invocable<F, T &, std::unique_lock<std::mutex>>
   {
     return std::invoke(std::forward<F>(f), t_, std::unique_lock(m_));
   }
@@ -163,9 +166,10 @@ public:
       }
     }
 
-    void wait(std::condition_variable &c) {
+    void wait(std::condition_variable &c)
+    {
       std::unique_lock ul(mv_->m_, std::adopt_lock);
-      Defer _rel([&ul]{ ul.release(); });
+      Defer _rel([&ul] { ul.release(); });
       c.wait(ul);
     }
 
@@ -178,14 +182,14 @@ public:
   Ptr take() { return *this; }
   Ptr try_take() { return {*this, std::try_to_lock}; }
 
-  template<typename F> decltype(auto) with(F &&f)
-    requires std::invocable<F>
+  template<typename F> decltype(auto) with(F &&f) requires std::invocable<F>
   {
     std::lock_guard _g(m_);
     return std::invoke(std::forward<F>(f));
   }
-  template<typename F> decltype(auto) with(F &&f)
-    requires std::invocable<F, std::unique_lock<std::mutex>>
+  template<typename F>
+  decltype(auto) with(F &&f)
+      requires std::invocable<F, std::unique_lock<std::mutex>>
   {
     return std::invoke(std::forward<F>(f), std::unique_lock(m_));
   }

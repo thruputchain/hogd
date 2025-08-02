@@ -254,6 +254,10 @@ private:
 } // namespace detail
 
 template<typename T> constexpr size_t kMaxArraySize = PTRDIFF_MAX / sizeof(T);
+// The XDR spec requires that vectors with an unspecified length default to a
+// length of [2^32 - 1], which is also the maximum size permitted by XDR for a
+// vector.
+constexpr size_t kMaxXdrSize = 0xffffffff;
 
 template<typename T, size_t MaxSize = kMaxArraySize<T>,
          typename Allocator = detail::merged_allocator<T>::type>
@@ -737,6 +741,16 @@ protected:
                                        tname(), max_size())};
   }
 };
+
+// The XDR spec requires that vectors with an unspecified length default to a
+// length of [2^32 - 1]. For [Vec] above, we specify a different default length,
+// since [x23::Vec] is used in code beyond x23 serialization and this code
+// desires a different default length.
+//
+// To make it easy to work with a [Vec] that is formed from deserialization of
+// XDR data, we specify a type alias called [XdrVec] that is just an [x23::Vec]
+// with a length of [2^32 - 1].
+template<typename T, uint32_t Size = kMaxXdrSize> using XdrVec = Vec<T, Size>;
 
 template<typename IterIn>
 Vec(IterIn, IterIn) -> Vec<typename std::iterator_traits<IterIn>::value_type>;

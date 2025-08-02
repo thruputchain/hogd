@@ -32,7 +32,7 @@ DBStatus<File>
 DiskWriter::create_next_file()
 {
   std::string filename =
-      std::vformat(filename_format_, std::make_format_args(cur_lsn_));
+      std::vformat(filename_format_, std::make_format_args(synced_lsn_));
 
   // create the new log file.
   DBStatus<File> f = dir_.openat(filename, O_WRONLY | O_CREAT | O_TRUNC)
