@@ -26,6 +26,22 @@
 #include "transaction.hh"
 #include "types.hh"
 
+/**
+ * Comprehensive tests for manual frame revert functionality.
+ * 
+ * Manual revert is a key feature that allows contracts to:
+ * 1. Revert all state changes made in the current frame
+ * 2. Return data to the parent caller (unlike normal failures)
+ * 3. Allow the transaction to commit successfully (unlike normal failures)
+ * 
+ * The functionality is exposed in the SDK through the Returnable trait:
+ * - When a contract method returns Result::Err, force_revert() returns true
+ * - This triggers the Return syscall with revert_frame=true
+ * - State changes are reverted but error data is serialized and returned
+ * 
+ * This is similar to EVM's REVERT opcode behavior.
+ */
+
 namespace hogd {
 
 class ManualRevertTest : public ::testing::Test,

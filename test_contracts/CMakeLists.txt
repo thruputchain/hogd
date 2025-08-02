@@ -43,6 +43,7 @@ add_wasm_contract(fibonacci)
 add_wasm_contract(fibonacci_call)
 add_wasm_contract(cxs_roundtrip)
 add_wasm_contract(read_only_test)
+add_wasm_contract(manual_revert_test)
 
 add_xdr_rs(
 	roundtrip_rs 

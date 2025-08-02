@@ -329,6 +329,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "manual_revert_test"
+version = "0.1.0"
+dependencies = [
+ "manual_revert_test",
+ "sdk_rs",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
