@@ -267,7 +267,6 @@ TEST(Mempool, Validate)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
-  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -290,14 +289,13 @@ TEST(Mempool, ValidateBatch)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
-  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
 }
 
-TEST(Mempool, ValidateBatchMissingTx)
+TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 {
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
   SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
@@ -313,14 +311,55 @@ TEST(Mempool, ValidateBatchMissingTx)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
-  // Remove a transaction.
-  txs.pop_back();
-  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+  // Remove a transaction from the nomination.
+  res_nominate.scheduler_nomination().nomination.transaction_hashes.pop_back();
+  res_nominate.scheduler_nomination()
+      .nomination.transaction_nominations.pop_back();
+
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
-  // TODO(jhumphri): Fix.
   EXPECT_EQ(res_validate.outcome(),
-            SchedulerValidationResult::SchedulerValidationOK);
+            SchedulerValidationResult::SchedulerValidationInvalid);
+}
+
+TEST(Mempool, ValidateBatchMissingTx)
+{
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  SchedulerNominationResult res_nominate;
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  {
+    MempoolTestServer server;
+    Clients clients = create_clients();
+
+    ValidatorID validator_id{};
+    clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+
+    res_nominate = clients.interface->schedulercoord_nominate(db_tip)();
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerNominationOutcome::SchedulerNominationOK);
+  }
+
+  {
+    // We reconstruct [server] because we need it to forget about the vetted txs
+    // we gave it above. If we did not reconstruct [server], then removing a
+    // transaction below from [txs] will have no effect because [server] will
+    // still have the removed transaction as a vetted transaction.
+    MempoolTestServer server;
+    Clients clients = create_clients();
+
+    // Remove a transaction.
+    txs.pop_back();
+
+    ValidatorID validator_id{};
+    clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
+
+    auto res_validate = clients.interface->schedulercoord_validate(
+        db_tip, res_nominate.scheduler_nomination().nomination)();
+    EXPECT_EQ(res_validate.outcome(),
+              SchedulerValidationResult::SchedulerValidationMissingTxs);
+  }
 }
 
 } // namespace hogd
