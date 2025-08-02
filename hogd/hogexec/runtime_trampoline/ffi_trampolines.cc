@@ -24,14 +24,6 @@ success(int32_t result)
 }
 
 constexpr TrampolineResult
-host_exit()
-{
-  return TrampolineResult{.result = 1,
-                          .panic =
-                              std::to_underlying(HostFnErrorCode::kHostExit)};
-}
-
-constexpr TrampolineResult
 error(HostFnErrorCode error_code)
 {
   return TrampolineResult{.result = 0, .panic = std::to_underlying(error_code)};
@@ -54,9 +46,8 @@ handle_result(HostFnStatus<SyscallErrorCode> const &res)
   case HostFnErrorCode::kHostReturn:
   case HostFnErrorCode::kHostValidationFailure:
   case HostFnErrorCode::kHostAbortTransaction:
-    return error(res.error().code());
   case HostFnErrorCode::kHostExit:
-    return host_exit();
+    return error(res.error().code());
   default:
     return unrecoverable();
   }
