@@ -57,6 +57,13 @@ hogdb_init(std::string_view path, size_t ram_bytes)
   HogDatabase db(std::move(*ramdb));
   RPCContext ctx(db);
 
+  // insert each item in the database into the merkle trie.
+  ctx.get_db().get_each_parallel([](std::span<const std::byte> key,
+                                    uint8_t type,
+                                    std::span<const std::byte> value) {
+    // TODO(jhumphries): your code here.
+  });
+
   // start the coordinator server.
   info("starting coordinator server.");
   HogDBCoordServer coord_server(ctx);

@@ -63,6 +63,13 @@ public:
     return db_->sync().transform_error(to_hogdb_error);
   }
 
+  void get_each_parallel(GetEachCallback fn,
+                         size_t width = kDefaultParallelRangeWidth,
+                         WorkerPool &pool = WorkerPool::get_default_pool())
+  {
+    return db_->get_each_parallel(fn, width, pool);
+  }
+
 private:
   std::unique_ptr<Database> db_;
 };
