@@ -34,7 +34,7 @@ namespace hogd {
 class ManualRevertWasmTest : public ::testing::Test,
                              public NativeContractTestFramework {
 public:
-  ManualRevertWasmTest() : NativeContractTestFramework(false) {}
+  ManualRevertWasmTest() : NativeContractTestFramework(true) {}
 
 protected:
   void SetUp() override

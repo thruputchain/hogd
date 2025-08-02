@@ -24,6 +24,7 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -277,10 +278,7 @@ public:
     std::span<const std::byte> return_span = std::as_bytes(
         std::span((*return_buffer)->data(), (*return_buffer)->size()));
 
-    trace("Received return buffer: {}",
-          std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
-                                       return_span.data()),
-                                   return_span.size()));
+    trace("Received return buffer: {}", x23::show(**return_buffer));
 
     auto return_value = trait_meta_t::template decode_return<Name>(return_span);
     if (!return_value.has_value()) {
