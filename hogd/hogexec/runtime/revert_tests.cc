@@ -31,6 +31,10 @@ public:
   RevertTest() : NativeContractTestFramework(false) {}
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+// Check on how a root frame reverts,
+// when the reverting frame is the root frame.
 TEST_F(RevertTest, RootFrameReverts)
 {
   // Native contract with one method.  The method performs a bytestring write,
@@ -106,6 +110,8 @@ TEST_F(RevertTest, RootFrameReverts)
   ASSERT_FALSE(data_item_opt.has_value());
 }
 
+// Check on how nested frames revert,
+// when the reverting frame is not the root frame.
 TEST_F(RevertTest, NestedFrameWithTryInvokeReverts)
 {
   // Native contract with two methods.  The first method performs a try_invoke
@@ -278,5 +284,6 @@ TEST_F(RevertTest, NestedFrameWithTryInvokeReverts)
   auto data_item2_opt = lookup_storage_item_from_db(data_addrkey2);
   ASSERT_FALSE(data_item2_opt.has_value());
 }
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
