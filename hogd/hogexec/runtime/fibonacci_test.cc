@@ -28,7 +28,7 @@ namespace hogd {
 class FibonacciTest : public ::testing::Test,
                       public NativeContractTestFramework {
 public:
-  FibonacciTest() : NativeContractTestFramework(true) {}
+  FibonacciTest() : NativeContractTestFramework(false) {}
 
 protected:
   void SetUp() override

@@ -50,6 +50,9 @@ public:
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &&frame);
 
+  // merge child invocation frame into self
+  void commit_manually_reverted_frame(InvocationFrame &&frame);
+
   // revert the child invocation frame.
   // Does not clean up the child frame, but is responsible for handling the
   // parent frame's response to the child frame's failure.
@@ -94,6 +97,9 @@ public:
   SystemStatus<bool>
   try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
 
+  void set_should_revert() { manual_revert_ = true; }
+  bool should_revert() const { return manual_revert_; }
+
 private:
   const ContractAddress address_;
   const Calldata calldata_;
@@ -109,6 +115,10 @@ private:
   std::vector<LogEntry> logs_;
 
   uint32_t try_invoke_frame_count_ = 0;
+
+  // Whether the frame is set to revert by an explicit call from a contract
+  // (i.e. via the Return syscall).
+  bool manual_revert_ = false;
 
   // elements modified during the current call frame (and child frames)
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
