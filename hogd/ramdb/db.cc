@@ -81,7 +81,7 @@ create_db(std::string_view path, size_t heap_size, int bucket_order)
 } // namespace
 
 DBStatus<uint64_t>
-Database::check(const std::string &path, size_t heap_size)
+Database::check(std::string_view path, size_t heap_size)
 {
   DBStatus<std::unique_ptr<Database>> ret = create_db(path, heap_size, 0);
   if (!ret)
