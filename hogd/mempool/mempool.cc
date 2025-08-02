@@ -231,7 +231,6 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
     txs.push_back(it->second);
     it++;
   }
-  nomination.block_hash = get_block_hash(nomination.transaction_hashes);
 
   if (txs.size() == 1) {
     if (!propose_tx(block_id, txs[0], nomination.transaction_nominations)) {
@@ -254,6 +253,7 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
+  nomination.block_hash = get_block_hash(nomination.transaction_hashes);
   finish_block(block_id);
   if (!close_snapshot(block_id)) {
     co_return SchedulerNominationResult(

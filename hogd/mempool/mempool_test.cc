@@ -251,6 +251,19 @@ TEST(Mempool, NominateBatch)
   EXPECT_EQ(res.outcome(), SchedulerNominationOutcome::SchedulerNominationOK);
 }
 
+TEST(Mempool, NominateEmpty)
+{
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+
+  MempoolTestServer server;
+  Clients clients = create_clients();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res = clients.interface->schedulercoord_nominate(db_tip)();
+  EXPECT_EQ(res.outcome(),
+            SchedulerNominationOutcome::SchedulerNominationError);
+}
+
 TEST(Mempool, Validate)
 {
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
@@ -293,6 +306,20 @@ TEST(Mempool, ValidateBatch)
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
+}
+
+TEST(Mempool, ValidateEmpty)
+{
+  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+
+  MempoolTestServer server;
+  Clients clients = create_clients();
+
+  DbTip db_tip{.height = 0, .hash = {}, .id = 0};
+  auto res_validate =
+      clients.interface->schedulercoord_validate(db_tip, Nomination{})();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationInvalid);
 }
 
 TEST(Mempool, ValidateBatchRemoveTxFromNomination)
