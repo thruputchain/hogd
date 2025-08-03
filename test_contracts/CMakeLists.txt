@@ -55,11 +55,17 @@ add_xdr_rs(
 	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
 	./integration_test_contracts/cxs_roundtrip/roundtrip.x)
 
+add_xdr_rs(
+	contract_error_rs 
+	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
+	../../protocol/contract_error.x)
+
 add_xdr(roundtrip_hh
   ./integration_test_contracts/cxs_roundtrip/roundtrip.x
 )
 
 add_dependencies(cxs_roundtrip_wasm roundtrip_rs)
+add_dependencies(cxs_roundtrip_wasm contract_error_rs)
 add_dependencies(all_wasm_contracts roundtrip_hh)
 
 endif()

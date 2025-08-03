@@ -28,6 +28,7 @@
 #include "test_contracts/integration_test_contracts/cxs_roundtrip/cxs_roundtrip.h"
 #include "test_contracts/roundtrip.hh"
 #include "types.hh"
+#include "contract_error.hh"
 
 namespace hogd {
 
@@ -234,6 +235,127 @@ protected:
 
                    return {};
                  }},
+                {8,
+                 [&](SystemCallHandler &handler,
+                     NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+                   bool success = false;
+                   
+                   // Test ErrorXDR - Caller branch
+                   hogd::ErrorXDR error_caller(hogd::ErrorType::kErrorTypeCaller);
+                   roundtrip_test<"roundtrip_error_xdr">(error_caller, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   // Test ErrorXDR - Contract branch with Custom
+                   hogd::ErrorXDR error_contract_custom(hogd::ErrorType::kErrorTypeContract);
+                   error_contract_custom.contract_err().error_type(hogd::ContractErrorType::kContractErrorTypeCustom);
+                   roundtrip_test<"roundtrip_error_xdr">(error_contract_custom, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   // Test ErrorXDR - Contract branch with Syscall
+                   hogd::ErrorXDR error_contract_syscall(hogd::ErrorType::kErrorTypeContract);
+                   error_contract_syscall.contract_err().error_type(hogd::ContractErrorType::kContractErrorTypeSyscall);
+                   error_contract_syscall.contract_err().syscall_err() = 42;
+                   roundtrip_test<"roundtrip_error_xdr">(error_contract_syscall, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   // Test ErrorXDR - Contract branch with Storage
+                   hogd::ErrorXDR error_contract_storage(hogd::ErrorType::kErrorTypeContract);
+                   error_contract_storage.contract_err().error_type(hogd::ContractErrorType::kContractErrorTypeStorage);
+                   error_contract_storage.contract_err().storage_err().error_type(hogd::StorageErrorType::kStorageErrorTypeSyscall);
+                   error_contract_storage.contract_err().storage_err().syscall_err() = 123;
+                   roundtrip_test<"roundtrip_error_xdr">(error_contract_storage, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   return {};
+                 }},
+                {9,
+                 [&](SystemCallHandler &handler,
+                     NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+                   bool success = false;
+                   
+                   // Test ContractErrorXDR - Custom branch
+                   hogd::ContractErrorXDR contract_error_custom(hogd::ContractErrorType::kContractErrorTypeCustom);
+                   roundtrip_test<"roundtrip_contract_error_xdr">(contract_error_custom, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   // Test ContractErrorXDR - Syscall branch
+                   hogd::ContractErrorXDR contract_error_syscall(hogd::ContractErrorType::kContractErrorTypeSyscall);
+                   contract_error_syscall.syscall_err() = 99;
+                   roundtrip_test<"roundtrip_contract_error_xdr">(contract_error_syscall, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   // Test ContractErrorXDR - Storage branch with Syscall
+                   hogd::ContractErrorXDR contract_error_storage_syscall(hogd::ContractErrorType::kContractErrorTypeStorage);
+                   contract_error_storage_syscall.storage_err().error_type(hogd::StorageErrorType::kStorageErrorTypeSyscall);
+                   contract_error_storage_syscall.storage_err().syscall_err() = 456;
+                   roundtrip_test<"roundtrip_contract_error_xdr">(contract_error_storage_syscall, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   // Test ContractErrorXDR - Storage branch with Serialization
+                   hogd::ContractErrorXDR contract_error_storage_serialization(hogd::ContractErrorType::kContractErrorTypeStorage);
+                   contract_error_storage_serialization.storage_err().error_type(hogd::StorageErrorType::kStorageErrorTypeSerialization);
+                   roundtrip_test<"roundtrip_contract_error_xdr">(contract_error_storage_serialization, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   // Test ContractErrorXDR - Storage branch with IndexOutOfBounds
+                   hogd::ContractErrorXDR contract_error_storage_index(hogd::ContractErrorType::kContractErrorTypeStorage);
+                   contract_error_storage_index.storage_err().error_type(hogd::StorageErrorType::kStorageErrorTypeIndexOutOfBounds);
+                   contract_error_storage_index.storage_err().index_out_of_bounds_err().len = 1000;
+                   contract_error_storage_index.storage_err().index_out_of_bounds_err().access = 1500;
+                   roundtrip_test<"roundtrip_contract_error_xdr">(contract_error_storage_index, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   return {};
+                 }},
+                {10,
+                 [&](SystemCallHandler &handler,
+                     NativeRuntime & /*unused*/) -> InvokeStatus<void> {
+                   bool success = false;
+                   
+                   // Test StorageErrXDR - Syscall branch
+                   hogd::StorageErrXDR storage_err_syscall(hogd::StorageErrorType::kStorageErrorTypeSyscall);
+                   storage_err_syscall.syscall_err() = 789;
+                   roundtrip_test<"roundtrip_storage_err_xdr">(storage_err_syscall, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   // Test StorageErrXDR - Serialization branch
+                   hogd::StorageErrXDR storage_err_serialization(hogd::StorageErrorType::kStorageErrorTypeSerialization);
+                   roundtrip_test<"roundtrip_storage_err_xdr">(storage_err_serialization, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   // Test StorageErrXDR - IndexOutOfBounds branch
+                   hogd::StorageErrXDR storage_err_index(hogd::StorageErrorType::kStorageErrorTypeIndexOutOfBounds);
+                   storage_err_index.index_out_of_bounds_err().len = 2000;
+                   storage_err_index.index_out_of_bounds_err().access = 2500;
+                   roundtrip_test<"roundtrip_storage_err_xdr">(storage_err_index, handler, client_, success);
+                   if (!success) {
+                     return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+                   }
+
+                   return {};
+                 }},
             });
 
     auto contract = test::load_test_contract("cxs_roundtrip.wasm");
@@ -433,6 +555,63 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripTestRecursive)
                   .invocation =
                       Invocation{.invoked_address = native_contract_addr_,
                                  .entrypoint = entrypoint_from_method_id(7),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      multiplexed_context_);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
+}
+
+TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripErrorXDR)
+{
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = native_contract_addr_,
+                                 .entrypoint = entrypoint_from_method_id(8),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      multiplexed_context_);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
+}
+
+TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripContractErrorXDR)
+{
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = native_contract_addr_,
+                                 .entrypoint = entrypoint_from_method_id(9),
+                                 .gas_limit = UINT64_MAX,
+                                 .calldata = {}}}},
+      multiplexed_context_);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
+}
+
+TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripStorageErrXDR)
+{
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{.invoked_address = native_contract_addr_,
+                                 .entrypoint = entrypoint_from_method_id(10),
                                  .gas_limit = UINT64_MAX,
                                  .calldata = {}}}},
       multiplexed_context_);
