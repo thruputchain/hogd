@@ -11,12 +11,12 @@
 
 #include "bcs/decode.h"
 #include "bcs/encode.h"
+#include "contract_error.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "transaction.hh"
 #include "x23/serialize.h"
 #include "x23/serialize_cxs.h"
-#include "contract_error.hh"
 #include "x23/utility.h"
 #include "x23/x23.h"
 
@@ -24,31 +24,36 @@ namespace hogd {
 
 namespace detail {
 
-template<typename T, typename E>
-struct Result {
+template<typename T, typename E> struct Result {
   Result() noexcept : Result(false) {}
-  explicit Result(bool d) noexcept {
-      using ops = x23::union_ops<struct Result<T, E>>;
-      ops::construct(*this, d);
+  explicit Result(bool d) noexcept
+  {
+    using ops = x23::union_ops<struct Result<T, E>>;
+    ops::construct(*this, d);
   }
-  Result(Result && other) noexcept {
+  Result(Result &&other) noexcept
+  {
     using ops = x23::union_ops<struct Result<T, E>>;
     ops::construct(*this, std::move(other));
   }
-  Result(const Result & other) {
+  Result(const Result &other)
+  {
     using ops = x23::union_ops<struct Result<T, E>>;
     ops::construct(*this, other);
   }
-  ~Result() {
+  ~Result()
+  {
     using ops = x23::union_ops<struct Result<T, E>>;
     ops::destroy(*this);
   }
-  Result &operator=(Result &&other) noexcept {
+  Result &operator=(Result &&other) noexcept
+  {
     using ops = x23::union_ops<struct Result<T, E>>;
     ops::assign(*this, std::move(other));
     return *this;
   }
-  Result &operator=(const Result &other) {
+  Result &operator=(const Result &other)
+  {
     using ops = x23::union_ops<struct Result<T, E>>;
     ops::assign(*this, other);
     return *this;
@@ -77,23 +82,24 @@ struct Result {
     return get<1>(std::forward<Self>(self));
   }
 
-  friend bool operator==(const Result & a, const Result & b) {
+  friend bool operator==(const Result &a, const Result &b)
+  {
     return x23::union_ops<struct Result<T, E>>::eq(a, b);
   }
-  friend std::partial_ordering
-  operator<=>(const Result & a, const Result & b) {
+  friend std::partial_ordering operator<=>(const Result &a, const Result &b)
+  {
     return x23::union_ops<struct Result<T, E>>::cmp(a, b);
   }
   // NOLINTBEGIN(bugprone-reserved-identifier)
   // NOLINTBEGIN(readability-identifier-naming)
   [[gnu::used]] static constexpr int __xdr_union_arm_number(bool discriminant)
-   {  
-      if (discriminant) {
-        return 2;
-      }
-      return 1;
+  {
+    if (discriminant) {
+      return 2;
     }
-  
+    return 1;
+  }
+
 private:
   bool __xdr_union_field_is_ok;
   union {
@@ -115,7 +121,8 @@ private:
   template<x23::is_xdr_union U> friend struct x23::union_ops;
 
   template<std::size_t I, x23::references<Result<T, E>> U> requires (I <= 2)
-  friend decltype(auto) get(U &&u) {
+  friend decltype(auto) get(U &&u)
+  {
     using ops = x23::union_ops<struct Result<T, E>>;
     if constexpr (I == 0)
       return ops::get_discriminant(u);
@@ -126,7 +133,8 @@ private:
 } // namespace detail
 
 template<typename T, typename E = ErrorXDR>
-using Result = detail::Result<std::conditional_t<std::is_same_v<T, void>, VoidXDR, T>, E>;
+using Result =
+    detail::Result<std::conditional_t<std::is_same_v<T, void>, VoidXDR, T>, E>;
 
 // NOLINTEND(readability-identifier-naming)
 // NOLINTEND(bugprone-reserved-identifier)
@@ -142,17 +150,16 @@ struct xdr_meta<struct hogd::detail::Result<T, E>> {
   static constexpr int default_field = -1;
   static constexpr bool has_void = false;
   static constexpr std::array field_names{
-    "is_ok", // discriminant
-    "x",
-    "err",
+      "is_ok", // discriminant
+      "x",
+      "err",
   };
   using discriminant_type =
-    decltype(std::declval<struct hogd::detail::Result<T, E>>().is_ok());
+      decltype(std::declval<struct hogd::detail::Result<T, E>>().is_ok());
 
-  static constexpr
-  std::array<std::pair<discriminant_type, int>, 2> cases{
-    std::pair{false, 1},
-    std::pair{true, 2},
+  static constexpr std::array<std::pair<discriminant_type, int>, 2> cases{
+      std::pair{false, 1},
+      std::pair{true, 2},
   };
 };
 // NOLINTEND(readability-identifier-naming)
