@@ -25,6 +25,7 @@ set_property(TARGET hogdb_exec PROPERTY OUTPUT_NAME hogdb)
 target_link_libraries(
   hogdb_exec
   hogdb
+  merkle
 )
 
 # Build the hogdb_bench executable

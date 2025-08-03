@@ -19,6 +19,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/db.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
@@ -60,11 +61,14 @@ hogdb_init(std::string_view path, size_t ram_bytes)
   RPCContext ctx(db);
 
   // insert each item in the database into the merkle trie.
-  ctx.get_db().get_each_parallel([](std::span<const std::byte> key,
-                                    uint8_t type,
-                                    std::span<const std::byte> value) {
-    // TODO(jhumphries): your code here.
+  MerkleTriePrefix trie;
+  ctx.get_db().get_each_parallel([&trie](std::span<const std::byte> key,
+                                         uint8_t type,
+                                         std::span<const std::byte> value) {
+    // TODO(jhumphri): Do I need to do anything with [type]?
+    CHECK(trie.insert(key, value));
   });
+  trie.generate_top_level_hashes();
 
   // start the coordinator server.
   info("starting coordinator server.");
