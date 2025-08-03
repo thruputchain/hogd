@@ -22,6 +22,11 @@
 
 namespace hogd {
 
+// The following piece of code only exists because
+// XDR doesn't have generics.
+// It's mostly copy-pasted from the generated code,
+// and would be much better to have it be generated
+// directly by x23.
 namespace detail {
 
 template<typename T, typename E> struct Result {
