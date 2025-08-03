@@ -3,6 +3,7 @@ add_xdr(
 	../../protocol/batch.x
 	../../protocol/catchup.x
 	../../protocol/contract.x
+	../../protocol/contract_error.x
 	../../protocol/coord.x
 	../../protocol/db_coord.x
 	../../protocol/discovery.x
