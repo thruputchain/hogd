@@ -409,7 +409,7 @@ protected:
 
            return {};
          }},
-         
+
     });
 
     auto contract = test::load_test_contract("cxs_roundtrip.wasm");
