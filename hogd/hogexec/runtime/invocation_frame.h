@@ -81,6 +81,11 @@ public:
     return (flags_ & std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)) != 0;
   }
 
+  bool is_delegate_call() const
+  {
+    return (flags_ & std::to_underlying(InvokeFlag::kInvokeFlagDelegateCall)) != 0;
+  }
+
   // returned pointer is invalidated by any call to add_item_view
   // Does not create a new view if it does not exist
   auto *get_item_view(this auto &self, AddressAndKey const &addrkey)
