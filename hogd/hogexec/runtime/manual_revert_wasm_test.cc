@@ -83,6 +83,10 @@ TEST_F(ManualRevertWasmTest, BasicManualRevert)
              if (!res.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
+             if (!res.value().has_value()) {
+                ADD_FAILURE() << "Manual revert should have succeeded";
+                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
 
              // The manual revert should have succeeded (no error)
              // and storage should be reverted (tested by check_storage_exists)
