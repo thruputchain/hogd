@@ -63,7 +63,7 @@ hogdb_init(std::string_view path, size_t ram_bytes)
   // insert each item in the database into the merkle trie.
   MerkleTriePrefix trie;
   ctx.get_db().get_each_parallel([&trie](std::span<const std::byte> key,
-                                         uint8_t type,
+                                         uint8_t /*type*/,
                                          std::span<const std::byte> value) {
     // TODO(jhumphri): Do I need to do anything with [type]?
     CHECK(trie.insert(key, value));
