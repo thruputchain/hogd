@@ -65,7 +65,6 @@ hogdb_init(std::string_view path, size_t ram_bytes)
   ctx.get_db().get_each_parallel([&trie](std::span<const std::byte> key,
                                          uint8_t /*type*/,
                                          std::span<const std::byte> value) {
-    // TODO(jhumphri): Do I need to do anything with [type]?
     CHECK(trie.insert(key, value));
   });
   trie.generate_top_level_hashes();
