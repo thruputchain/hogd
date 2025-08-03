@@ -139,7 +139,8 @@ private:
 
 template<typename T, typename E = ErrorXDR>
 using Result =
-    detail::Result<std::conditional_t<std::is_same_v<T, void>, VoidXDR, T>, E>;
+    detail::Result<std::conditional_t<std::is_same_v<T, void>, std::tuple<>, T>,
+                   E>;
 
 // NOLINTEND(readability-identifier-naming)
 // NOLINTEND(bugprone-reserved-identifier)
