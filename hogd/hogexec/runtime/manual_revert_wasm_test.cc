@@ -34,7 +34,7 @@ namespace hogd {
 class ManualRevertWasmTest : public ::testing::Test,
                              public NativeContractTestFramework {
 public:
-  ManualRevertWasmTest() : NativeContractTestFramework(true) {}
+  ManualRevertWasmTest() : NativeContractTestFramework(false) {}
 
 protected:
   void SetUp() override
@@ -84,7 +84,7 @@ TEST_F(ManualRevertWasmTest, BasicManualRevert)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              if (!res.value().has_value()) {
-                ADD_FAILURE() << "Manual revert should have succeeded";
+                ADD_FAILURE() << "Function call should have succeeded";
                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -170,6 +170,10 @@ TEST_F(ManualRevertWasmTest, BasicNoRevert)
              if (!res.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
+             if (!res.value().has_value()) {
+               ADD_FAILURE() << "Function call should have succeeded";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
 
              // Storage should exist because no revert occurred
              auto [storage_check, _gas2] =
@@ -250,6 +254,10 @@ TEST_F(ManualRevertWasmTest, NestedManualRevert)
              if (!res.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
+             if (!res.value().has_value()) {
+               ADD_FAILURE() << "Function call should have succeeded";
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
 
              return {};
            }}});
@@ -319,6 +327,10 @@ TEST_F(ManualRevertWasmTest, ErrorTypeManualReverts)
                auto [res, _gas] =
                    client.invoke<"test_error_type_revert">(handler, error_type);
                if (!res.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               if (!res.value().has_value()) {
+                 ADD_FAILURE() << "Function call should have succeeded";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 
@@ -466,6 +478,10 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
                if (!res.has_value()) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
+               if (!res.value().has_value()) {
+                 ADD_FAILURE() << "Function call should have succeeded";
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
 
                // Should succeed via manual revert
                return {};
@@ -521,6 +537,10 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
                auto [res, _gas] =
                    client.invoke<"test_storage_manual_revert">(handler, false);
                if (!res.has_value()) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               if (!res.value().has_value()) {
+                 ADD_FAILURE() << "Function call should have succeeded";
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
 

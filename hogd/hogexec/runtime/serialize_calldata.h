@@ -1,53 +1,55 @@
 #pragma once
 
+#include <array>
+#include <compare>
 #include <cstddef>
-#include <cstdint>
 #include <optional>
 #include <span>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 #include "bcs/decode.h"
 #include "bcs/encode.h"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "transaction.hh"
 #include "x23/serialize.h"
 #include "x23/serialize_cxs.h"
 #include "contract_error.hh"
 #include "x23/utility.h"
-#include "x23/vec.h"
 #include "x23/x23.h"
 
 namespace hogd {
 
 namespace detail {
 
-template<typename T>
+template<typename T, typename E>
 struct Result {
   Result() noexcept : Result(false) {}
   explicit Result(bool d) noexcept {
-      using ops = x23::union_ops<struct Result<T>>;
+      using ops = x23::union_ops<struct Result<T, E>>;
       ops::construct(*this, d);
   }
   Result(Result && other) noexcept {
-    using ops = x23::union_ops<struct Result<T>>;
+    using ops = x23::union_ops<struct Result<T, E>>;
     ops::construct(*this, std::move(other));
   }
   Result(const Result & other) {
-    using ops = x23::union_ops<struct Result<T>>;
+    using ops = x23::union_ops<struct Result<T, E>>;
     ops::construct(*this, other);
   }
   ~Result() {
-    using ops = x23::union_ops<struct Result<T>>;
+    using ops = x23::union_ops<struct Result<T, E>>;
     ops::destroy(*this);
   }
   Result &operator=(Result &&other) noexcept {
-    using ops = x23::union_ops<struct Result<T>>;
+    using ops = x23::union_ops<struct Result<T, E>>;
     ops::assign(*this, std::move(other));
     return *this;
   }
   Result &operator=(const Result &other) {
-    using ops = x23::union_ops<struct Result<T>>;
+    using ops = x23::union_ops<struct Result<T, E>>;
     ops::assign(*this, other);
     return *this;
   }
@@ -56,7 +58,7 @@ struct Result {
   bool is_ok() const noexcept { return __xdr_union_field_is_ok; }
   Result &is_ok(bool d) noexcept
   {
-    using ops = x23::union_ops<struct Result<T>>;
+    using ops = x23::union_ops<struct Result<T, E>>;
     ops::set_discriminant(*this, d);
     return *this;
   }
@@ -76,11 +78,11 @@ struct Result {
   }
 
   friend bool operator==(const Result & a, const Result & b) {
-    return x23::union_ops<struct Result<T>>::eq(a, b);
+    return x23::union_ops<struct Result<T, E>>::eq(a, b);
   }
   friend std::partial_ordering
   operator<=>(const Result & a, const Result & b) {
-    return x23::union_ops<struct Result<T>>::cmp(a, b);
+    return x23::union_ops<struct Result<T, E>>::cmp(a, b);
   }
   // NOLINTBEGIN(bugprone-reserved-identifier)
   // NOLINTBEGIN(readability-identifier-naming)
@@ -95,7 +97,7 @@ struct Result {
 private:
   bool __xdr_union_field_is_ok;
   union {
-    ErrorXDR __xdr_union_field_err;
+    E __xdr_union_field_err;
     T __xdr_union_field_x;
   };
 
@@ -103,18 +105,18 @@ private:
   static constexpr auto __xdr_union_fieldptr()
   {
     if constexpr (I == 0)
-      return &Result<T>::__xdr_union_field_is_ok;
+      return &Result<T, E>::__xdr_union_field_is_ok;
     else if constexpr (I == 1)
-      return &Result<T>::__xdr_union_field_x;
+      return &Result<T, E>::__xdr_union_field_x;
     else if constexpr (I == 2)
-      return &Result<T>::__xdr_union_field_err;
+      return &Result<T, E>::__xdr_union_field_err;
   }
 
   template<x23::is_xdr_union U> friend struct x23::union_ops;
 
-  template<std::size_t I, x23::references<Result<T>> U> requires (I <= 2)
+  template<std::size_t I, x23::references<Result<T, E>> U> requires (I <= 2)
   friend decltype(auto) get(U &&u) {
-    using ops = x23::union_ops<struct Result<T>>;
+    using ops = x23::union_ops<struct Result<T, E>>;
     if constexpr (I == 0)
       return ops::get_discriminant(u);
     else
@@ -123,8 +125,8 @@ private:
 };
 } // namespace detail
 
-template<typename T>
-using Result = detail::Result<std::conditional_t<std::is_same_v<T, void>, VoidXDR, T>>;
+template<typename T, typename E = ErrorXDR>
+using Result = detail::Result<std::conditional_t<std::is_same_v<T, void>, VoidXDR, T>, E>;
 
 // NOLINTEND(readability-identifier-naming)
 // NOLINTEND(bugprone-reserved-identifier)
@@ -132,10 +134,11 @@ using Result = detail::Result<std::conditional_t<std::is_same_v<T, void>, VoidXD
 
 namespace x23 {
 
-template<typename T>
-struct xdr_meta<struct hogd::detail::Result<T>> {
+// NOLINTBEGIN(readability-identifier-naming)
+template<typename T, typename E>
+struct xdr_meta<struct hogd::detail::Result<T, E>> {
   static constexpr x23::XdrCategory category = x23::XdrCategory::kUnion;
-  static constexpr const char *type_name = "Result_T";
+  static constexpr const char *type_name = "Result_T_E";
   static constexpr int default_field = -1;
   static constexpr bool has_void = false;
   static constexpr std::array field_names{
@@ -144,68 +147,15 @@ struct xdr_meta<struct hogd::detail::Result<T>> {
     "err",
   };
   using discriminant_type =
-    decltype(std::declval<struct hogd::detail::Result<T>>().is_ok());
-  //using enum x23::AlwaysEnum<discriminant_type>::type;
+    decltype(std::declval<struct hogd::detail::Result<T, E>>().is_ok());
+
   static constexpr
   std::array<std::pair<discriminant_type, int>, 2> cases{
     std::pair{false, 1},
     std::pair{true, 2},
   };
 };
-  /*
-
-template<typename T>
-struct CxsSerializer<std::variant<T, hogd::ErrorXDR>> {
-
-  static void store(Buf &buf, hogd::Result<T> value)
-  {
-    if (std::holds_alternative<T>(value)) {
-      CxsSerializer<bool>::store(buf, true);
-      CxsSerializer<T>::store(buf, std::get<T>(value));
-    } else {
-      CxsSerializer<bool>::store(buf, false);
-      CxsSerializer<hogd::ErrorXDR>::store(buf, std::get<hogd::ErrorXDR>(value));
-    }
-  }
-  static void load(std::span<const uint8_t> &data, hogd::Result<T> &value)
-  {
-    bool is_ok;
-    CxsSerializer<bool>::load(data, is_ok);
-    if (is_ok) {
-      T t;
-      CxsSerializer<T>::load(data, t);
-      value = t;
-    } else {
-      hogd::ErrorXDR err;
-      CxsSerializer<hogd::ErrorXDR>::load(data, err);
-      value = err;
-    }
-  }
-};
-
-template<typename T>
-struct xdr_meta<std::variant<T, hogd::ErrorXDR>> {
-  static constexpr x23::XdrCategory category = x23::XdrCategory::kUnion;
-  static constexpr const char *type_name = "Result_Generic";
-  static constexpr int default_field = -1;
-  static constexpr bool has_void = false;
-  static constexpr std::array field_names{
-    "ok", // discriminant
-    "err"
-  };
-  using discriminant_type = bool;
-  using enum x23::AlwaysEnum<discriminant_type>::type;
-  static constexpr
-  std::array<std::pair<discriminant_type, int>, 2> cases{
-    std::pair{false, 1},
-    std::pair{true, 2},
-  };
-};
-
-static_assert(category<hogd::Result<int>> == x23::XdrCategory::kUnion);
-static_assert(is_xdr_union<hogd::Result<void>>);
-static_assert(!is_xdr_struct<hogd::Result<void>>);
-*/
+// NOLINTEND(readability-identifier-naming)
 
 } // namespace x23
 
