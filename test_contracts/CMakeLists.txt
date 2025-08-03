@@ -58,7 +58,7 @@ add_xdr_rs(
 add_xdr_rs(
 	contract_error_rs 
 	${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/cxs_roundtrip/src
-	../../protocol/contract_error.x)
+	../protocol/contract_error.x)
 
 add_xdr(roundtrip_hh
   ./integration_test_contracts/cxs_roundtrip/roundtrip.x
