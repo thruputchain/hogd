@@ -165,6 +165,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "delegate_call_test"
+version = "0.1.0"
+dependencies = [
+ "delegate_call_test",
+ "sdk_rs",
+ "serde",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

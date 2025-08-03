@@ -285,7 +285,13 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
       .gas_consumed_ = 0,
   };
 
-  invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
+  ContractAddress new_frame_address = address;
+
+  if (flags & std::to_underlying(InvokeFlag::kInvokeFlagDelegateCall)) {
+    new_frame_address = get_current_address();
+  }
+
+  invocation_frame_stack_.start_frame(new_frame_address, std::move(calldata), flags);
 
   cumulative_result += runtime.value()->invoke(method, gas_limit);
   auto finish_status =

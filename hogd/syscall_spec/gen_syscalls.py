@@ -25,6 +25,20 @@ def load_cpp_to_xdr_map(spec: dict) -> dict[str, str]:
     return cpp_to_xdr_typenames
 
 
+def validate_syscall_order(syscalls: list[dict]) -> None:
+    """Validate that syscalls are defined in increasing numerical order."""
+    prev_number = -1
+    for i, syscall in enumerate(syscalls):
+        number = syscall["number"]
+        if number <= prev_number:
+            raise ValueError(
+                f"Syscalls must be defined in increasing numerical order. "
+                f"Syscall '{syscall['name']}' at index {i} has number {number}, "
+                f"but previous syscall had number {prev_number}"
+            )
+        prev_number = number
+
+
 """
 Each syscall generates a
 syscall_{callname}_inner(...); declaration.
@@ -549,6 +563,8 @@ spec = spec_full["syscalls"]
 
 cpp_to_rust_typenames = load_cpp_to_rust_map(spec_full)
 cpp_to_xdr_typenames = load_cpp_to_xdr_map(spec_full)
+
+validate_syscall_order(spec)
 
 os.makedirs(args.output_dir, exist_ok=True)
 
