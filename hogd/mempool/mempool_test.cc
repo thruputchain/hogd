@@ -121,9 +121,6 @@ private:
   // The database server that the executor accesses.
   RPCDbExecutorServer db_executor_server_;
   // The database server that the mempool accesses.
-  // TODO(jhumphri): This class was originally meant to be used by the
-  // coordinator, but the mempool has now taken over this responsibility. We
-  // should probably rename [DbCoordServer] to something else.
   DbCoordServer db_coordinator_server_;
 
   // A wrapper around [db_executor_server_].
