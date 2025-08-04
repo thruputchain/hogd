@@ -189,6 +189,9 @@ public:
     static PerThread<std::vector<std::byte>> backing_store;
 
     backing_store->clear();
+    // We expect many other keys to have values of the same type. Thus, by
+    // placing [type] first in the key, we benefit from the prefix optimization
+    // in [MerkleTriePrefix].
     backing_store->push_back(static_cast<std::byte>(type));
     backing_store->insert(backing_store->end(), key.begin(), key.end());
     return std::span<const std::byte>(*backing_store);
