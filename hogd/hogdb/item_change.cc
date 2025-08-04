@@ -52,9 +52,9 @@ NNInt128::commit(HogDatabase &db, MerkleTriePrefix &trie,
   if (ret) {
     std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&v),
                                     sizeof(v));
-    ret = update_kv_pair_in_trie(trie, key, value_span);
-    // TODO(jhumphri): If [ret] is an error, do we need to remove the item from
-    // the db?
+    // [update_kv_pair_in_trie] will always succeed as [trie.insert_or_update()]
+    // only fails if we attempt to insert an empty key.
+    CHECK(update_kv_pair_in_trie(trie, key, value_span).has_value());
   }
   return ret;
 }
@@ -143,9 +143,9 @@ Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
   std::span<const std::byte> v = std::as_bytes(std::span(buf_));
   HogDBStatus<void> ret = write_bytes(db, key, v);
   if (ret) {
-    ret = update_kv_pair_in_trie(trie, key, v);
-    // TODO(jhumphri): If [ret] is an error, do we need to remove the item from
-    // the db?
+    // [update_kv_pair_in_trie] will always succeed as [trie.insert_or_update()]
+    // only fails if we attempt to insert an empty key.
+    CHECK(update_kv_pair_in_trie(trie, key, v).has_value());
   }
   return ret;
 }
@@ -155,9 +155,9 @@ Deletion::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key)
 {
   HogDBStatus<void> ret = remove_item(db, key);
   if (ret) {
-    ret = remove_kv_pair_from_trie(trie, key);
-    // TODO(jhumphri): If [ret] is an error, do we need to add the item back to
-    // the db?
+    // [remove_kv_pair_from_trie] will always succeed as we will never attempt
+    // to remove a key that does not exist.
+    CHECK(remove_kv_pair_from_trie(trie, key).has_value());
   }
   return ret;
 }
