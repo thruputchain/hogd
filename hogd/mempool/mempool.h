@@ -101,7 +101,7 @@ private:
   bool create_snapshot(BlockID prev_block_id, BlockID block_id,
                        BlockExecutionMode);
   void abandon_snapshot(BlockID block_id);
-  bool close_snapshot(BlockID block_id);
+  void close_snapshot(BlockID block_id);
   void finish_block(BlockID block_id);
 
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);

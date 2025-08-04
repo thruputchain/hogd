@@ -69,7 +69,7 @@ bool
 Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
                          BlockExecutionMode mode)
 {
-  auto res =
+  DbResult res =
       db_client_.dbcoord_create_snapshot(prev_block_id, block_id, mode)();
   return res == DbResult::DbResultOK;
 }
@@ -77,17 +77,20 @@ Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
 void
 Mempool::abandon_snapshot(BlockID block_id)
 {
-  auto res = db_client_.dbcoord_abandon_snapshot(block_id)();
-  if (res != DbResult::DbResultOK) {
-    // TODO(jhumphri): Any db cleanup needed?
-  }
+  DbResult res = db_client_.dbcoord_abandon_snapshot(block_id)();
+  // TODO(jhumphri): Geoff currently always returns [DbResultOK], but this could
+  // change in the future. In the case of a failure, we need to clean up db
+  // state.
+  CHECK_EQ(res, DbResult::DbResultOK);
 }
 
-bool
+void
 Mempool::close_snapshot(BlockID block_id)
 {
-  auto res = db_client_.dbcoord_close_snapshot(block_id)();
-  return res.result() == DbResult::DbResultOK;
+  DbBlockResult res = db_client_.dbcoord_close_snapshot(block_id)();
+  // [dbcoord_close_snapshot] will always succeed as long as we provide a valid
+  // block ID.
+  CHECK_EQ(res.result(), DbResult::DbResultOK);
 }
 
 void
@@ -106,6 +109,10 @@ Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
 
   MerkleTriePrefix trie;
   WorkerPool &worker_pool = WorkerPool::get_default_pool();
+  // The optimal number of threads to use varies with the number of hashes we
+  // are adding to the trie. For example, if we are adding 128 hashes to the
+  // trie, it is probably slower to use 128 threads rather than 1-2 threads due
+  // to lock contention.
   size_t num_threads =
       std::min(hashes.size() / kMinHashesPerThread, worker_pool.worker_count());
   if (!num_threads) {
@@ -145,7 +152,8 @@ bool
 Mempool::propose_tx(BlockID block_id, const SignedTransaction &tx,
                     x23::XdrVec<NominatedTransaction> &transaction_nominations)
 {
-  auto res = exec_client_.executorcoord_propose_transaction(block_id, tx)();
+  ExecProposeResult res =
+      exec_client_.executorcoord_propose_transaction(block_id, tx)();
   switch (res.result()) {
   case ExecResult::ExecResultTxDeterministicError:
     transaction_nominations.push_back(
@@ -168,7 +176,8 @@ Mempool::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations)
 {
-  auto res = exec_client_.executorcoord_propose_batch(block_id, txs)();
+  ExecProposeBatchResult res =
+      exec_client_.executorcoord_propose_batch(block_id, txs)();
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
@@ -192,7 +201,7 @@ Mempool::propose_batch(
 bool
 Mempool::open_proposal_block(BlockID block_id)
 {
-  auto res = exec_client_.executorcoord_open_proposal_block(block_id)();
+  ExecResult res = exec_client_.executorcoord_open_proposal_block(block_id)();
   return res == ExecResult::ExecResultOK;
 }
 
@@ -255,10 +264,7 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
 
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
   finish_block(block_id);
-  if (!close_snapshot(block_id)) {
-    co_return SchedulerNominationResult(
-        SchedulerNominationOutcome::SchedulerNominationError);
-  }
+  close_snapshot(block_id);
 
   co_return result;
 }
@@ -266,7 +272,8 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
 bool
 Mempool::validate_tx(BlockID block_id, const ProposedTransaction &tx)
 {
-  auto res = exec_client_.executorcoord_validate_transaction(block_id, tx)();
+  ExecResult res =
+      exec_client_.executorcoord_validate_transaction(block_id, tx)();
   if (res != ExecResult::ExecResultOK) {
     finish_block(block_id);
     abandon_snapshot(block_id);
@@ -279,8 +286,9 @@ bool
 Mempool::validate_batch(BlockID block_id,
                         const x23::Vec<ProposedTransaction> &txs)
 {
-  auto res = exec_client_.executorcoord_validate_batch(block_id, txs)();
-  if (std::any_of(res.begin(), res.end(), [](const auto &r) {
+  ExecValidateBatchResult res =
+      exec_client_.executorcoord_validate_batch(block_id, txs)();
+  if (std::any_of(res.begin(), res.end(), [](const ExecResult &r) {
         return r != ExecResult::ExecResultOK;
       })) {
     finish_block(block_id);
@@ -293,7 +301,7 @@ Mempool::validate_batch(BlockID block_id,
 bool
 Mempool::open_validation_block(BlockID block_id)
 {
-  auto res = exec_client_.executorcoord_open_validation_block(block_id)();
+  ExecResult res = exec_client_.executorcoord_open_validation_block(block_id)();
   return res == ExecResult::ExecResultOK;
 }
 
@@ -362,10 +370,7 @@ Mempool::schedulercoord_validate(DbTip const &db_tip,
   }
 
   finish_block(block_id);
-  if (!close_snapshot(block_id)) {
-    co_return SchedulerValidationResult(
-        SchedulerValidationOutcome::SchedulerValidationDbFailed);
-  }
+  close_snapshot(block_id);
 
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
