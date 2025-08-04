@@ -1,6 +1,7 @@
 #include "hogd/hogdb/rpc_context.h"
 
 #include <mutex>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 

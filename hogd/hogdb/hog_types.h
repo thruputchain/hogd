@@ -10,6 +10,7 @@
 #include <functional>
 #include <span>
 #include <string_view>
+#include <utility>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/span.h"

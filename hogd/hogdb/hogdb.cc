@@ -13,7 +13,8 @@
 // TODO(abelay): there is apparently a header dependency problem inside x23
 // where x23/vec.h cannot be included first.  These generated headers are not
 // needed, but included as a hack to avoid it.
-#include "db_coord.hh"  // NOLINT
+#include "db_coord.hh" // NOLINT
+#include "hogd/container/merkle/merkle_trie.h"
 #include "rpc_types.hh" // NOLINT
 
 #include "hogd/base/log.h"

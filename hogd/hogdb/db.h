@@ -11,11 +11,14 @@
 #include <utility>
 
 #include "hogd/base/bits.h"
+#include "hogd/base/os.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
+#include "hogd/ramdb/db_status.h"
 #include "types.hh"
 
 namespace hogd {
