@@ -159,14 +159,20 @@ Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
 inline HogDBStatus<void>
 Deletion::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key)
 {
-  HogDBStatus<void> ret = remove_item(db, key);
-  if (ret) {
-    // [remove_kv_pair_from_trie] will always succeed as we will never attempt
-    // to remove a key that does not exist.
-    // TODO(jhumphri): Fix [type].
-    CHECK(remove_kv_pair_from_trie(trie, key, /*type=*/0).has_value());
+  HogDBStatus<int8_t> type_ret = get_item_type(db, key);
+  if (!type_ret) {
+    return type_ret.error();
   }
-  return ret;
+
+  HogDBStatus<void> remove_ret = remove_item(db, key);
+  if (!remove_ret) {
+    return remove_ret;
+  }
+  // [remove_kv_pair_from_trie] will always succeed as we will never attempt to
+  // remove a key that does not exist. We already checked above that the key
+  // exists when we removed it from the database.
+  CHECK(remove_kv_pair_from_trie(trie, key, type_ret.value()).has_value());
+  return {};
 }
 
 namespace {

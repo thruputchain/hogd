@@ -188,6 +188,12 @@ get_item_size(HogDatabase &db, const ItemKey &key)
   return db.get_size(key.as_bytes());
 }
 
+inline HogDBStatus<int8_t>
+get_item_type(HogDatabase &db, const ItemKey &key)
+{
+  return db.get_type(key.as_bytes());
+}
+
 inline HogDBStatus<void>
 remove_item(HogDatabase &db, const ItemKey &key)
 {
