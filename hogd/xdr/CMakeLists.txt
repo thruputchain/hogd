@@ -5,6 +5,7 @@ add_xdr(
 	../../protocol/contract.x
 	../../protocol/contract_error.x
 	../../protocol/coord.x
+	../../protocol/coord_sched.x
 	../../protocol/db_coord.x
 	../../protocol/discovery.x
 	../../protocol/exec_coord.x

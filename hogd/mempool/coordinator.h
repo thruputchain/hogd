@@ -1,15 +1,17 @@
 #pragma once
 
 #include "coord.hh"
+#include "coord_sched.hh"
 
 namespace hogd {
 
-// This is a fake coordinator server used by the tests.
-class CoordinatorServer {
+// These are fake coordinator servers used by the tests.
+
+class Coordinator {
 public:
   using rpc_service = Coordinator1;
 
-  CoordinatorServer(uint16_t port_number) : pool_(/*nthreads=*/4), cp_(pool_)
+  Coordinator(uint16_t port_number) : pool_(/*nthreads=*/4), cp_(pool_)
   {
     start_server(port_number);
   }
@@ -23,7 +25,7 @@ public:
         exit(EXIT_FAILURE);
       }
 
-      [](x23::CoroPoll &cp, CoordinatorServer *server,
+      [](x23::CoroPoll &cp, Coordinator *server,
          x23::UniqueFd lfd) -> x23::Detached {
         co_await cp.pool_.bg();
         while (auto c = co_await cp.accept(lfd)) {
@@ -35,12 +37,12 @@ public:
 
   x23::Async<void> coordinator_null() { co_return; }
 
-  x23::Async<IntroShardResult> coordinator_intro_shard(ShardCard card)
+  x23::Async<IntroShardResult> coordinator_intro_shard(const ShardCard &card)
   {
     co_return IntroShardResult{};
   }
 
-  x23::Async<IntroExecResult> coordinator_intro_exec(ExecCard card)
+  x23::Async<IntroExecResult> coordinator_intro_exec(const ExecCard &card)
   {
     co_return IntroExecResult{};
   }
@@ -49,5 +51,48 @@ private:
   x23::ThreadPool pool_;
   x23::CoroPoll cp_;
 };
+static_assert(is_Coordinator1<Coordinator *, x23::Async>);
+
+class CoordinatorSched {
+public:
+  using rpc_service = CoordScheduler1;
+
+  CoordinatorSched(uint16_t port_number) : pool_(/*nthreads=*/4), cp_(pool_)
+  {
+    start_server(port_number);
+  }
+
+  void start_server(uint32_t port_number)
+  {
+    {
+      auto lfd = x23::tcplisten(port_number);
+      if (!lfd) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+      }
+
+      [](x23::CoroPoll &cp, CoordinatorSched *server,
+         x23::UniqueFd lfd) -> x23::Detached {
+        co_await cp.pool_.bg();
+        while (auto c = co_await cp.accept(lfd)) {
+          x23::rpc_stream_logged(cp, *c).server(server);
+        }
+      }(cp_, this, std::move(lfd));
+    }
+  }
+
+  x23::Async<void> coordscheduler_null() { co_return; }
+
+  x23::Async<void>
+  coordscheduler_notify_vetted(const SignedTransactionBatch &txs)
+  {
+    co_return;
+  }
+
+private:
+  x23::ThreadPool pool_;
+  x23::CoroPoll cp_;
+};
+static_assert(is_CoordScheduler1<CoordinatorSched *, x23::Async>);
 
 } // namespace hogd

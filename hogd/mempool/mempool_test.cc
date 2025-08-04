@@ -39,7 +39,8 @@ public:
   static constexpr uint16_t kExecutorDbPort = 10000;
   static constexpr uint16_t kCoordinatorDbPort = 10001;
   static constexpr uint16_t kCoordinatorPort = 10002;
-  static constexpr uint16_t kExecutorPort = 10003;
+  static constexpr uint16_t kCoordinatorSchedPort = 10003;
+  static constexpr uint16_t kExecutorPort = 10004;
 
   static constexpr ContractAddress kContractAddress =
       NativeContractTestFramework::make_contract_address(3);
@@ -47,6 +48,7 @@ public:
   MempoolTestServer()
     : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
       block_manager_(0, &in_memory_db_), coordinator_server_(kCoordinatorPort),
+      coordinator_sched_server_(kCoordinatorSchedPort),
       executor_coord_server_(exec_card_, /*poll_threads=*/1),
       db_executor_server_(&block_manager_, kExecutorDbPort),
       db_coordinator_server_(&block_manager_), db_proxy_(kDbIdentifier),
@@ -114,7 +116,10 @@ private:
       .address = x23::HostPort(kAddress.c_str(), kCoordinatorPort).show()};
   // This is a fake coordinator server that the executor registers itself with
   // via RPC.
-  CoordinatorServer coordinator_server_;
+  Coordinator coordinator_server_;
+  // This is a fake coordinator server that the mempool notifies when txs become
+  // vetted.
+  CoordinatorSched coordinator_sched_server_;
   // The executor server.
   ExecCoordServer executor_coord_server_;
 
@@ -152,6 +157,9 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
 }
 
 struct Clients {
+  std::unique_ptr<x23::ThreadPool> coord_pool;
+  std::unique_ptr<x23::CoroPoll> coord_cp;
+
   std::unique_ptr<x23::ThreadPool> db_pool;
   std::unique_ptr<x23::CoroPoll> db_cp;
 
@@ -164,6 +172,20 @@ struct Clients {
 Clients
 create_clients()
 {
+  auto coord_pool = std::make_unique<x23::ThreadPool>(1);
+  auto coord_cp = std::make_unique<x23::CoroPoll>(*coord_pool);
+  Mempool::coord_client_t coord_client = [&] -> Mempool::coord_client_t {
+    auto fd =
+        coord_cp->tcpconnect(MempoolTestServer::kAddress,
+                             std::to_string(
+                                 MempoolTestServer::kCoordinatorSchedPort))();
+    if (!fd) {
+      throw std::runtime_error("Failed to connect to coord server");
+    }
+    auto client_config = x23::rpc_stream_logged(*coord_cp, *fd);
+    return client_config.template client<CoordScheduler1>();
+  }();
+
   auto db_pool = std::make_unique<x23::ThreadPool>(1);
   auto db_cp = std::make_unique<x23::CoroPoll>(*db_pool);
   Mempool::db_client_t db_client = [&] -> Mempool::db_client_t {
@@ -171,7 +193,7 @@ create_clients()
                                 std::to_string(
                                     MempoolTestServer::kCoordinatorDbPort))();
     if (!fd) {
-      throw std::runtime_error("Failed to connect to coord server");
+      throw std::runtime_error("Failed to connect to db server");
     }
     auto client_config = x23::rpc_stream_logged(*db_cp, *fd);
     return client_config.template client<DbCoord1>();
@@ -191,8 +213,11 @@ create_clients()
   }();
 
   auto interface =
-      std::make_unique<Mempool>(std::move(db_client), std::move(exec_client));
-  return {.db_pool = std::move(db_pool),
+      std::make_unique<Mempool>(std::move(coord_client), std::move(db_client),
+                                std::move(exec_client));
+  return {.coord_pool = std::move(coord_pool),
+          .coord_cp = std::move(coord_cp),
+          .db_pool = std::move(db_pool),
           .db_cp = std::move(db_cp),
           .exec_pool = std::move(exec_pool),
           .exec_cp = std::move(exec_cp),

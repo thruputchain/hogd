@@ -28,6 +28,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch const &batch)
   for (const SignedTransaction &tx : batch) {
     vetted_txs_[sha256(tx)] = tx;
   }
+  coord_client_.coordscheduler_notify_vetted(batch)();
   co_return;
 }
 
