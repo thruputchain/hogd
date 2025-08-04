@@ -93,8 +93,7 @@ private:
   // blocks.
   static uint64_t get_ns_since_epoch()
   {
-    std::chrono::time_point<std::chrono::system_clock> now =
-        std::chrono::system_clock::now();
+    auto now = std::chrono::system_clock::now();
     std::chrono::nanoseconds ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             now.time_since_epoch());
@@ -112,15 +111,12 @@ private:
 
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
 
-  bool propose_tx(BlockID block_id, const SignedTransaction &tx,
-                  x23::XdrVec<NominatedTransaction> &transaction_nominations);
-  bool
+  x23::Async<bool>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations);
 
   bool open_proposal_block(BlockID block_id);
 
-  bool validate_tx(BlockID block_id, const ProposedTransaction &tx);
   bool validate_batch(BlockID block_id,
                       const x23::Vec<ProposedTransaction> &txs);
 

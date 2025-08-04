@@ -149,30 +149,7 @@ Mempool::get_block_hash(const x23::Vec<SignedTransactionHash> &hashes)
   return trie.get_root_hash();
 }
 
-bool
-Mempool::propose_tx(BlockID block_id, const SignedTransaction &tx,
-                    x23::XdrVec<NominatedTransaction> &transaction_nominations)
-{
-  ExecProposeResult res =
-      exec_client_.executorcoord_propose_transaction(block_id, tx)();
-  switch (res.result()) {
-  case ExecResult::ExecResultTxDeterministicError:
-    transaction_nominations.push_back(
-        {.nondeterministic_proposal_data = res.proposal_data()});
-    return true;
-    break;
-  case ExecResult::ExecResultOK:
-    transaction_nominations.push_back(
-        {.nondeterministic_proposal_data = NondeterministicProposalData{}});
-    return true;
-    break;
-  default:
-    return false;
-    break;
-  }
-}
-
-bool
+x23::Async<bool>
 Mempool::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations)
@@ -192,11 +169,11 @@ Mempool::propose_batch(
     default:
       // TODO(jhumphri): Some of the other txs may have succeeded. Do we need
       // to undo them?
-      return false;
+      co_return false;
       break;
     }
   }
-  return true;
+  co_return true;
 }
 
 bool
@@ -242,23 +219,15 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
     it++;
   }
 
-  if (txs.size() == 1) {
-    if (!propose_tx(block_id, txs[0], nomination.transaction_nominations)) {
-      co_return SchedulerNominationResult(
-          SchedulerNominationOutcome::SchedulerNominationError);
-    }
-  }
-  else if (txs.size() > 1) {
-    if (!propose_batch(block_id, txs, nomination.transaction_nominations)) {
-      co_return SchedulerNominationResult(
-          SchedulerNominationOutcome::SchedulerNominationError);
-    }
-  }
-  else {
-    CHECK(txs.empty());
+  if (txs.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     finish_block(block_id);
     abandon_snapshot(block_id);
+    co_return SchedulerNominationResult(
+        SchedulerNominationOutcome::SchedulerNominationError);
+  }
+  else if (!propose_batch(block_id, txs,
+                          nomination.transaction_nominations)()) {
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -268,19 +237,6 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
   close_snapshot(block_id);
 
   co_return result;
-}
-
-bool
-Mempool::validate_tx(BlockID block_id, const ProposedTransaction &tx)
-{
-  ExecResult res =
-      exec_client_.executorcoord_validate_transaction(block_id, tx)();
-  if (res != ExecResult::ExecResultOK) {
-    finish_block(block_id);
-    abandon_snapshot(block_id);
-    return false;
-  }
-  return true;
 }
 
 bool
@@ -337,27 +293,20 @@ Mempool::schedulercoord_validate(DbTip const &db_tip,
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationMissingTxs);
   }
-  if (nomination.transaction_nominations.size() == 1) {
-    CHECK_EQ(txs.size(), 1UL);
-    if (!validate_tx(block_id, txs[0])) {
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationInvalid);
-    }
-  }
-  else if (nomination.transaction_nominations.size() > 1) {
-    CHECK_GT(txs.size(), 1UL);
-    if (!validate_batch(block_id, txs)) {
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationInvalid);
-    }
-  }
-  else {
+  if (nomination.transaction_nominations.empty()) {
     CHECK(txs.empty());
     // Empty nomination.
     finish_block(block_id);
     abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
+  }
+  else {
+    CHECK(!txs.empty());
+    if (!validate_batch(block_id, txs)) {
+      co_return SchedulerValidationResult(
+          SchedulerValidationOutcome::SchedulerValidationInvalid);
+    }
   }
 
   // Verify the block hash. It is safe to directly use
