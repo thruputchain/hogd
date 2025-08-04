@@ -428,7 +428,7 @@ Gen::show_type(const UnionBody &b, string t)
 
   if (non_enum_switch_types.find(b.switch_type) ==
       non_enum_switch_types.end()) {
-    prtop("using enum {};", switch_type);
+    prtop("using enum {};\n", switch_type);
   }
   prtop("{0}() noexcept : {0}({1}) {{}}\n", t, first_case);
   prtop("inline explicit {0}({1}) noexcept;\n", t, switch_type);
