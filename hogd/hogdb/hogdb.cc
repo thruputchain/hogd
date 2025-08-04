@@ -62,11 +62,14 @@ hogdb_init(std::string_view path, size_t ram_bytes)
   RPCContext ctx(db, trie);
 
   // insert each item in the database into the merkle trie.
-  ctx.get_db().get_each_parallel([](std::span<const std::byte> key,
-                                    uint8_t type,
-                                    std::span<const std::byte> value) {
-    // TODO(jhumphries): your code here.
+  ctx.get_db().get_each_parallel([&trie](std::span<const std::byte> key,
+                                         uint8_t type,
+                                         std::span<const std::byte> value) {
+    std::span<const std::byte> k =
+        ItemChange::add_type_to_merkle_key(key, type);
+    CHECK(trie.insert(k, value));
   });
+  trie.generate_top_level_hashes();
 
   // start the coordinator server.
   info("starting coordinator server.");

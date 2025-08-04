@@ -22,10 +22,12 @@ namespace hogd {
 namespace {
 
 HogDBStatus<void>
-update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key,
+update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key, uint8_t type,
                        const std::span<const std::byte> &value)
 {
-  HexArray k(key.get_address().as_bytes());
+  std::span<const std::byte> raw_key = key.get_address().as_bytes();
+  std::span<const std::byte> k =
+      ItemChange::add_type_to_merkle_key(raw_key, type);
   if (!trie.insert_or_update(k, value)) {
     return HogDBError(HogDBCode::kInternal);
   }
@@ -33,9 +35,12 @@ update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key,
 }
 
 HogDBStatus<void>
-remove_kv_pair_from_trie(MerkleTriePrefix &trie, const ItemKey &key)
+remove_kv_pair_from_trie(MerkleTriePrefix &trie, const ItemKey &key,
+                         uint8_t type)
 {
-  HexArray k(key.get_address().as_bytes());
+  std::span<const std::byte> raw_key = key.get_address().as_bytes();
+  std::span<const std::byte> k =
+      ItemChange::add_type_to_merkle_key(raw_key, type);
   if (!trie.remove(k)) {
     return HogDBError(HogDBCode::kNotFound);
   }
@@ -55,7 +60,7 @@ NNInt128::commit(HogDatabase &db, MerkleTriePrefix &trie,
                                     sizeof(v));
     // [update_kv_pair_in_trie] will always succeed as [trie.insert_or_update()]
     // only fails if we attempt to insert an empty key.
-    CHECK(update_kv_pair_in_trie(trie, key, value_span).has_value());
+    CHECK(update_kv_pair_in_trie(trie, key, kNNInt128, value_span).has_value());
   }
   return ret;
 }
@@ -146,7 +151,7 @@ Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
   if (ret) {
     // [update_kv_pair_in_trie] will always succeed as [trie.insert_or_update()]
     // only fails if we attempt to insert an empty key.
-    CHECK(update_kv_pair_in_trie(trie, key, v).has_value());
+    CHECK(update_kv_pair_in_trie(trie, key, kBytes, v).has_value());
   }
   return ret;
 }
@@ -158,7 +163,8 @@ Deletion::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key)
   if (ret) {
     // [remove_kv_pair_from_trie] will always succeed as we will never attempt
     // to remove a key that does not exist.
-    CHECK(remove_kv_pair_from_trie(trie, key).has_value());
+    // TODO(jhumphri): Fix [type].
+    CHECK(remove_kv_pair_from_trie(trie, key, /*type=*/0).has_value());
   }
   return ret;
 }
