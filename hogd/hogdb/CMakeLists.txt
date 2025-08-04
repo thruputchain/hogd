@@ -4,6 +4,9 @@ add_library(
   block_tx.cc
   invoke_tx.cc
   item_change.cc
+  rpc_context.cc
+  rpc_from_coord.cc
+  rpc_from_exec.cc
   status.cc
 )
 target_link_libraries(
@@ -11,6 +14,7 @@ target_link_libraries(
   ramdb
   hogd
   merkle
+  rpc
 )
 
 # Build the backend database (hogdb) executable

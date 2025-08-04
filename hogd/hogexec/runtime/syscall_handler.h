@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -16,11 +17,11 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/transaction_stats.h"
+#include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "retrocausal_queue.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -61,16 +62,19 @@ public:
 
   // Root invocation of a transaction.  Cannot be called from within a syscall.
   // Starts the invocation that is specified within signed_tx_.
+  // Must only be called once per transaction.
   InvokeResult root_invoke();
 
   // Attempt to commit the current transaction to the database.
-  // Requirement: root_invoke() must be called first, and
-  // that must have returned successfully.
-  x23::Async<SystemStatus<bool>> try_commit_transaction();
+  // Requirement: root_invoke() must be called first.
+  // Returns true if the transaction commits, false otherwise.
+  // Calls abort_transaction if either the commit fails or
+  // the root_invoke earlier had an error.
+  SystemStatus<bool> try_commit_transaction();
 
   // Create and run a child call frame.
   // Should be called from within a syscall.
-  std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+  [[nodiscard]] std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
   invoke(ContractAddress const &address, MethodID method, GasAmount gas_limit,
          Calldata calldata, InvokeFlagSet flags);
 
@@ -99,7 +103,7 @@ public:
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.
-  void set_return_buffer(ReturnBuffer &&returned_buffer);
+  void set_return_buffer(ReturnBuffer &&returned_buffer, bool revert_frame);
 
   SyscallStatus<void> log(std::span<const std::byte> message);
 
@@ -113,6 +117,12 @@ public:
 
   ProposalModeData const &get_proposal_data() const;
 
+  bool is_read_only() const
+  {
+    assert(!invocation_frame_stack_.empty());
+    return invocation_frame_stack_.get_active_frame().is_read_only();
+  }
+
   // === Bytestring syscalls ===
   // The returned span is only valid until another storage item is accessed.
   SystemStatus<SyscallStatus<std::span<const std::byte>>>
@@ -122,13 +132,16 @@ public:
                  std::span<const std::byte> input_bytestring);
 
   // === Nonnegative Integer syscalls ===
-  SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
-  get_nnint(StorageKeyContractData const &storage_key);
+  // get_nnint returns the base value and the add value.
+  // Returns the base value from the snapshot if load_from_snapshot is true.
+  // Otherwise, returns a tx-local written set value, if one exists,
+  // or nullopt if not.
+  SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
+  get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
+
   SystemStatus<SyscallStatus<void>>
-  set_nnint(StorageKeyContractData const &storage_key, int128_t set_value,
-            int128_t add_value);
-  SystemStatus<SyscallStatus<void>>
-  add_nnint(StorageKeyContractData const &storage_key, int128_t add_value);
+  set_nnint(StorageKeyContractData const &storage_key,
+            std::optional<int128_t> set_value, int128_t add_value);
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
@@ -167,13 +180,19 @@ private:
   std::optional<InvocationFrame> last_frame_;
   InvokeResult cumulative_invoke_result_ =
       InvokeResult{.result_ = {}, .gas_consumed_ = 0};
-  bool transaction_committed_ = false;
+  bool transaction_committed_or_aborted_ = false;
 
   StorageSnapshotCache &snapshot_cache_;
 
   // Validate that the transaction can be run safely.
   // Ensures, for example, that the wasms are valid.
-  InvokeResult perform_initial_validation();
+  // Sets cumulative_invoke_result_ to the appropriate error if validation
+  // fails.
+  void perform_initial_validation();
+
+  // check the validation data at the end of a transaction, if in validation
+  // mode
+  void check_final_validation_data();
 
   // Resolve the WasmiRuntime associated with the queried address.
   // Creates a new runtime if contract is deployed at

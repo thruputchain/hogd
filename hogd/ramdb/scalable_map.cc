@@ -269,6 +269,7 @@ ScalableMap::apply_change(ItemHeader *hdr)
         // Is the item size unchanged? Update in place.
         if ((*bu)->get_value().size() == hdr->get_value().size()) {
           (*bu)->type = hdr->type;
+          (*bu)->lsn = hdr->lsn;
           std::ranges::copy(hdr->get_value(), (*bu)->get_value().begin());
           return {};
         }
@@ -287,6 +288,7 @@ ScalableMap::apply_change(ItemHeader *hdr)
       return DBError(DBCode::kNoMemory);
     std::ranges::copy(hdr->get_key_and_value(),
                       item->get_key_and_value().begin());
+    item->lsn = hdr->lsn;
     item->next = *bu;
     *bu = item;
     counter_inc(cnt);

@@ -33,7 +33,7 @@ set_true3(bool *b)
 Defer<>
 set_once(bool *b)
 {
-  return Defer([b,ran=false]() mutable {
+  return Defer([b, ran = false]() mutable {
     assert(!ran);
     ran = true;
     *b = true;
@@ -104,7 +104,8 @@ basic()
     rvalue_only() = default;
     rvalue_only(rvalue_only &&) = default;
 
-    void operator()() && {
+    void operator()() &&
+    {
       ++val;
       assert(val == 1);
     }
@@ -120,6 +121,6 @@ int
 main()
 {
   basic();
-  //Defer([]() { std::cout << "discarded\n"; });
+  // Defer([]() { std::cout << "discarded\n"; });
   return 0;
 }

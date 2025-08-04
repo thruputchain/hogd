@@ -10,7 +10,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/base/wide_integral.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
 #include "hogd/storage_item/replay_cache.h"

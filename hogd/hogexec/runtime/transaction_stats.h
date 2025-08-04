@@ -1,8 +1,9 @@
 #pragma once
 
+#include <array>
+
 #include "hogd/base/types.h"
 #include "syscall.hh"
-#include <array>
 
 namespace hogd {
 

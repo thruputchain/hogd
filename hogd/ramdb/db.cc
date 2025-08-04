@@ -1,7 +1,6 @@
 #include "hogd/ramdb/db.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
 #include <format>
@@ -82,7 +81,7 @@ create_db(std::string_view path, size_t heap_size, int bucket_order)
 } // namespace
 
 DBStatus<uint64_t>
-Database::check(const std::string &path, size_t heap_size)
+Database::check(std::string_view path, size_t heap_size)
 {
   DBStatus<std::unique_ptr<Database>> ret = create_db(path, heap_size, 0);
   if (!ret)
@@ -188,43 +187,16 @@ Database::background_worker(const std::stop_token &stoken)
     }
 
     if (disk_cleanup) {
-      info("triggering disk cleanup due to wal growth");
-      if (cleanup_running_.load(std::memory_order_acquire)) {
-        info("cleanup already running; skipping");
-      }
-      else {
-        if (cleanup_th_.joinable())
-          cleanup_th_.join();
+      debug("checking to see if disk cleanup is needed");
 
-        // determine how much wal data there is, see if it's "too much".
-        size_t log_bytes = DiskReader::log_bytes(dir_);
-        bool needed = log_bytes >= disk_writer_.get_file_size_threshold();
-        info("disk logs occupy {}; cleanup {}needed",
-             print_iec_bytes(log_bytes, true), needed ? "" : "not ");
+      // determine how much wal data there is, see if it's "too much".
+      size_t log_bytes = DiskReader::log_bytes(dir_);
+      bool needed = log_bytes >= (4 * disk_writer_.get_file_size_threshold());
+      info("disk logs occupy {}; cleanup {}needed",
+           print_iec_bytes(log_bytes, true), needed ? "" : "not ");
 
-        if (needed) {
-          cleanup_running_.store(true, std::memory_order_relaxed);
-
-          cleanup_th_ = std::jthread{[this]() {
-            // start a full snapshot so wal log files become prunable.
-            auto ret = sync_and_snapshot(0);
-            if (!ret) {
-              warn("failed to snapshot while attempting disk cleanup: {}",
-                   ret.error());
-            }
-            else {
-              auto snap_ret = ret->second.get();
-              if (!snap_ret)
-                warn("failed to snapshot while attempting disk cleanup: {}",
-                     snap_ret.error());
-            }
-
-            DiskReader::cleanup(dir_);
-
-            cleanup_running_.store(false, std::memory_order_release);
-          }};
-        }
-      }
+      if (needed)
+        DiskReader::cleanup(dir_);
     }
   }
 }
@@ -379,6 +351,9 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
 
     info("syncing snapshot file to storage took {:.3f} s",
          snap_sync_timer.elapsed());
+
+    // completing a snapshot may make some files redundant, so trigger cleanup.
+    notify_wal_grew();
 
     promise->set_value({});
   }).detach();

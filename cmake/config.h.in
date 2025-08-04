@@ -2,3 +2,6 @@
 
 // Set to 1 if <stacktrace> is included and enabled
 #cmakedefine01 HAVE_CXX_STACKTRACE
+
+// Set to 1 if ENABLE_TEST_CONTRACTS is defined
+#cmakedefine01 ENABLE_TEST_CONTRACTS

@@ -12,7 +12,7 @@ int
 main()
 {
   using enum color;
-  fix_4 f4 { .i = 999 };
+  fix_4 f4{.i = 999};
   std::cout << show(f4) << std::endl;
 
   static_assert(is_xdr_enum<color>);

@@ -1,10 +1,9 @@
-#include <cstddef>
 #include <gtest/gtest.h>
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
-
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -12,7 +11,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "bcs/encode.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -22,10 +20,12 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/preset_native_token.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "hogd/hogexec/runtime/syscall_types.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
@@ -89,7 +89,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
              std::memcpy(out.data(), res.value().value().data(),
                          res.value().value().size());
 
-             handler.set_return_buffer(std::move(out));
+             handler.set_return_buffer(std::move(out), false);
              return {};
            }},
           {2,
@@ -163,7 +163,7 @@ TEST_F(TryInvokeTest, ReadWriteBytestring)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction()();
+  auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
 }
@@ -235,7 +235,7 @@ TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction()();
+  auto r = handler.try_commit_transaction();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(*r);
 
@@ -368,7 +368,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
         runtime_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
 
@@ -405,7 +405,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
         runtime_context);
     auto res = handler.root_invoke();
     ASSERT_FALSE(res.result_); // Should return error
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_FALSE(*commit_res); // Transaction should not commit
     advance_block();
@@ -436,9 +436,9 @@ TEST_F(TryInvokeTest, TryInvokeHandleErrors)
         runtime_context);
     auto res = handler.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction()();
+    auto commit_res = handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res.value());
     advance_block();
     // Storage should be updated to "world"
     auto read_res = lookup_storage_item_from_db(
@@ -626,7 +626,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   {
     auto res = tc1_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc1_handler2.try_commit_transaction()();
+    auto commit_res = tc1_handler2.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
   }
@@ -634,9 +634,9 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   // TC1.3: Then commit the first transaction (releasing the exclusive lock to a
   // set_typeclass lock).
   {
-    auto commit_res = tc1_handler.try_commit_transaction()();
+    auto commit_res = tc1_handler.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res.value());
   }
 
   // TC1.4: Then invoke method 2 again, with parameter [true]. This should
@@ -655,7 +655,7 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   {
     auto res = tc1_handler3.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc1_handler3.try_commit_transaction()();
+    auto commit_res = tc1_handler3.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
     ASSERT_TRUE(*commit_res);
   }
@@ -689,9 +689,9 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   {
     auto res = tc2_handler1.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc2_handler1.try_commit_transaction()();
+    auto commit_res = tc2_handler1.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res.value());
   }
 
   // Step 3 & 4: Invoke M1({false, true}) and commit.
@@ -709,9 +709,9 @@ TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
   {
     auto res = tc2_handler2.root_invoke();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = tc2_handler2.try_commit_transaction()();
+    auto commit_res = tc2_handler2.try_commit_transaction();
     ASSERT_TRUE(commit_res.has_value());
-    ASSERT_TRUE(*commit_res);
+    ASSERT_TRUE(commit_res.value());
   }
 
   advance_block();
@@ -826,9 +826,9 @@ TEST_F(TryInvokeTest, StorageCostAccounting)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
+  ASSERT_TRUE(commit_res.value());
 
   advance_block();
 
@@ -979,7 +979,7 @@ TEST_F(TryInvokeTest, MarginalCostAccounting)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1146,7 +1146,7 @@ TEST_F(TryInvokeTest, CostChangeAccounting)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1266,7 +1266,7 @@ TEST_F(TryInvokeTest, CostChangeDecreaseSuccessCase)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1411,7 +1411,7 @@ TEST_F(TryInvokeTest, CostChangeDecreaseFailCase)
       runtime_context);
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1476,7 +1476,7 @@ TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
              auto [r_transfer, g_transfer] =
                  native_token_client.invoke<"transfer">(handler, receiver_addr,
-                                                        write_cost);
+                                                        to_xdr(write_cost));
 
              if (!r_transfer.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
@@ -1494,7 +1494,11 @@ TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
              auto [r_balance, g_balance] =
                  native_token_client.invoke<"get_balance">(handler);
-             if (!r_balance.has_value() || r_balance.value() != 0) {
+             if ((!r_balance.has_value()) || !r_balance.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             if (from_xdr(r_balance.value().value()) != 0) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -1560,7 +1564,7 @@ TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
 
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
 
@@ -1601,10 +1605,14 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 
   // perform a set_add_nnint
   builder.add(0,
-              [&](SystemCallHandler &handler, int128_t set_amount,
-                  int128_t add_amount) -> InvokeStatus<void> {
-                auto r = handler.set_nnint(key, set_amount, add_amount);
-                if (!r.has_value() || !r.value().has_value()) {
+              [&](SystemCallHandler &handler, int64_t set_amount,
+                  int64_t add_amount) -> InvokeStatus<void> {
+                int128_t set_128 = set_amount;
+                auto [r, _gas] =
+                    syscall_NonnegativeIntSetAdd_inner(handler, key, &set_128,
+                                                       add_amount);
+
+                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
                 return {};
@@ -1613,51 +1621,60 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
   // perform a add_nnint
   builder.add(1,
               [&](SystemCallHandler &handler,
-                  int128_t add_amount) -> InvokeStatus<void> {
-                auto r = handler.add_nnint(key, add_amount);
-                if (!r.has_value() || !r.value().has_value()) {
+                  int64_t add_amount) -> InvokeStatus<void> {
+                auto [r, _gas] =
+                    syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
+                                                       add_amount);
+                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
                   return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                 }
                 return {};
               });
 
-  builder.add(2,
-              [&](SystemCallHandler &handler,
-                  NativeRuntime &runtime) -> InvokeStatus<void> {
-                // perform an add_nnint, then perform a set_add_nnint with the
-                // same set value in a try_invoke frame
-                auto calldata0 =
-                    bcs::encode_to<Calldata>(std::tuple<int128_t>{100});
-                assert(calldata0.has_value());
+  builder.add(
+      2,
+      [&](SystemCallHandler &handler,
+          NativeRuntime &runtime) -> InvokeStatus<void> {
+        // perform an add_nnint, then perform a set_add_nnint with the
+        // same set value in a try_invoke frame
+        auto calldata0 =
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<int64_t>(100)
+                    .value();
 
-                auto [r0, _g0] = handler.invoke(
-                    handler.get_current_address(), 1,
-                    runtime.get_available_gas(), calldata0.value(),
-                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-                if (!r0.has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                // tolerate try_invoke failure
+        auto [r0, _g0] = handler.invoke(handler.get_current_address(), 1,
+                                        runtime.get_available_gas(), calldata0,
+                                        std::to_underlying(
+                                            InvokeFlag::kInvokeFlagTryInvoke));
+        if (!r0.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        // tolerate try_invoke failure
 
-                auto calldata1 = bcs::encode_to<Calldata>(
-                    std::tuple<int128_t, int128_t>{100, -100});
-                assert(calldata1.has_value());
+        auto calldata1 =
+            Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                serialize<int64_t, int64_t>(100, -100)
+                    .value();
 
-                auto [r1, _g1] = handler.invoke(
-                    handler.get_current_address(), 0,
-                    runtime.get_available_gas(), calldata1.value(),
-                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
-                if (!r1.has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                // tolerate try_invoke failure
+        auto [r1, _g1] = handler.invoke(handler.get_current_address(), 0,
+                                        runtime.get_available_gas(), calldata1,
+                                        std::to_underlying(
+                                            InvokeFlag::kInvokeFlagTryInvoke));
+        if (!r1.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        // tolerate try_invoke failure
 
-                return {};
-              });
+        return {};
+      });
   builder.add(3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
     // reset contract state
-    auto r = handler.set_nnint(key, 35, 0);
-    if (!r.has_value() || !r.value().has_value()) {
+    int128_t set_value = 35;
+    auto [r, _gas] =
+        syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value, 0);
+    // auto r = handler.set_nnint(key, 35, 0);
+    // if (!r.has_value() || !r.value().has_value()) {
+    if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
       return InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
     return {};
@@ -1710,7 +1727,7 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
             throw std::runtime_error("root invoke 0 failed");
           }
           co_await set.bg();
-          auto commit_res = handler.try_commit_transaction()();
+          auto commit_res = handler.try_commit_transaction();
           if (!commit_res.has_value()) {
             throw std::runtime_error("try_commit_transaction error");
           }
@@ -1725,9 +1742,10 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 
           // If this one preceeds the set_add_nnint in method 2, then that will
           // succeed.
-          auto calldata = bcs::encode_to<Calldata>(
-              std::tuple<int128_t, int128_t>{100, 100});
-          assert(calldata.has_value());
+          auto calldata =
+              Serializer<NativeContractBuilder::kDefaultSerializationFormat>::
+                  serialize<int64_t, int64_t>(100, 100)
+                      .value();
           auto handler = self->make_new_system_call_handler(
               SignedTransaction{
                   .tx =
@@ -1737,14 +1755,14 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
                                          .gas_limit = UINT64_MAX,
-                                         .calldata = calldata.value()}}},
+                                         .calldata = calldata}}},
               runtime_context);
           auto res = handler.root_invoke();
           co_await set.bg();
           if (!res.is_root_success()) {
             co_return;
           }
-          auto commit_res = handler.try_commit_transaction()();
+          auto commit_res = handler.try_commit_transaction();
           if (!commit_res.has_value()) {
             throw std::runtime_error("try_commit_transaction error");
           }
@@ -1766,7 +1784,7 @@ TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 
       auto res = handler.root_invoke();
       ASSERT_TRUE(res.is_root_success());
-      auto commit_res = handler.try_commit_transaction()();
+      auto commit_res = handler.try_commit_transaction();
       ASSERT_TRUE(commit_res.has_value());
       ASSERT_TRUE(*commit_res);
     }
@@ -1882,13 +1900,18 @@ TEST_F(TryInvokeTest, InvokeErrorHandling)
              // 3. try_invoke on error_contract, correct method, but with gas
              // limit 50 (not enough)
              {
-               auto [res, _gas] = syscall_Invoke_inner(
+               auto [res, gas] = syscall_Invoke_inner(
                    handler, remaining_gas, error_contract_addr, 0, 50,
                    calldata_span,
                    std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke),
                    output_return_buffer_len);
-               if (res.has_value() ||
-                   res.error().code() != HostFnErrorCode::kHostOutOfGas) {
+               // This should return as a deterministic error (handleable), with
+               // 50 gas consumed
+               if (!res.has_value() ||
+                   res.value() != SyscallErrorCode::kDeterministicWasm) {
+                 return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+               }
+               if (gas != 50) {
                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
                }
              }
@@ -1957,9 +1980,138 @@ TEST_F(TryInvokeTest, InvokeErrorHandling)
 
   auto res = handler.root_invoke();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction()();
+  auto commit_res = handler.try_commit_transaction();
   ASSERT_TRUE(commit_res.has_value());
   ASSERT_TRUE(*commit_res);
+}
+
+TEST_F(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
+{
+  // Assert that if a try_invoke frame successfully acquires locks but then its
+  // parent frame does a manual revert, then the locks are released. This test
+  // creates one native contract with three methods. The first method is a
+  // try_invoke on the second method. The second method does a try_invoke on the
+  // third method, and then manually reverts. The third method performs a
+  // bytestring write, and then return success. This test invokes the first
+  // method.  Afterwards, it asserts that the bytestring was not written.
+
+  // Contract address
+  ContractAddress contract_addr = make_contract_address(47);
+
+  // Bytestring to write
+  auto str_hello = make_bytestring("hello");
+  auto key = make_storage_key("test");
+
+  // Deploy contract with three methods:
+  // 0: try_invoke method 1
+  // 1: try_invoke method 2, then manually revert
+  // 2: Write "hello" to storage and return success
+  auto native_contract = std::make_unique<NativeContract>(
+      std::unordered_map<MethodID, NativeContract::function_t>{
+          {0,
+           [key](SystemCallHandler &handler,
+                 NativeRuntime &runtime) -> InvokeStatus<void> {
+             // Try invoke method 1
+             auto [r1, _g1] = handler.invoke(
+                 handler.get_current_address(), 1, runtime.get_available_gas(),
+                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r1.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Method 1 should succeed, but state changes are gone because of
+             // the manual revert
+             if (r1.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             auto res = handler.get_bytestring(key);
+             if (!res.has_value()) {
+               // assert no system error
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (res.value().has_value()) {
+               // assert no bytestring returned
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             // assert that we can actually get a ReturnBuffer back
+             auto return_buf = handler.get_return_buffer();
+             if (!return_buf.has_value() || !return_buf.value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             if (!return_buf.value()->empty()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+
+             return {};
+           }},
+          {1,
+           [](SystemCallHandler &handler,
+              NativeRuntime &runtime) -> InvokeStatus<void> {
+             // Try invoke method 2
+             auto [r2, _g2] = handler.invoke(
+                 handler.get_current_address(), 2, runtime.get_available_gas(),
+                 {}, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             if (!r2.has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Method 2 should succeed in the try_invoke frame
+             if (r2.value() != SyscallErrorCode::kNone) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             // Now manually revert this frame, which should undo the locks
+             // acquired by method 2
+             handler.set_return_buffer(ReturnBuffer{}, true);
+             return {};
+           }},
+          {2,
+           [str_hello, key](SystemCallHandler &handler,
+                            NativeRuntime &) -> InvokeStatus<void> {
+             auto res =
+                 handler.set_bytestring(key,
+                                        std::as_bytes(std::span(str_hello)));
+             if (!res.has_value()) {
+               return res.error().to_invoke_error();
+             }
+             if (!res.value().has_value()) {
+               return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             }
+             return {};
+           }}});
+  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_shared<NativeContext>(std::move(contract_map));
+
+  // Deploy contract and grant storage tokens
+  auto contract = make_native_contract(0);
+  in_memory_db_.write_contract(sha256(*contract), contract);
+  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  // Invoke method 0
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = contract_addr,
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
+      runtime_context);
+  auto res = handler.root_invoke();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction();
+  ASSERT_TRUE(commit_res.has_value());
+  ASSERT_TRUE(*commit_res);
+
+  advance_block();
+
+  // Check that the bytestring was NOT written (locks were released due to
+  // manual revert)
+  auto data_addrkey = make_contract_data_addrkey(contract_addr, "test");
+  auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
+  ASSERT_FALSE(data_item_opt.has_value());
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 

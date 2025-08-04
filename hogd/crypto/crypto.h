@@ -127,6 +127,17 @@ SipHash24::operator()(x23::is_bytespan auto buf)
   return out;
 }
 
+inline bool
+ed25519_verify(std::span<const std::byte, sizeof(Ed25519PublicKey)> public_key,
+               std::span<const std::byte, sizeof(Ed25519Signature)> signature,
+               x23::is_bytespan auto msg)
+{
+  return crypto_sign_ed25519_verify_detached(
+             reinterpret_cast<const uint8_t *>(signature.data()),
+             reinterpret_cast<const uint8_t *>(msg.data()), msg.size(),
+             reinterpret_cast<const uint8_t *>(public_key.data())) == 0;
+}
+
 // ed25519_verify verifies sig for a msg and publickey.
 inline bool
 ed25519_verify(const Ed25519PublicKey &publickey, const Ed25519Signature &sig,

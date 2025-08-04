@@ -5,6 +5,7 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
@@ -21,7 +22,8 @@ protected:
     contract.wasmi_contract() =
         test::load_wasm_from_file("test_set_memory.wasm");
     WasmiContext context;
-    runtime_ = context.make_new_runtime(contract, nullptr, true);
+    runtime_ =
+        context.make_new_runtime(contract, sha256(contract), nullptr, true);
     ASSERT_TRUE(!!runtime_);
   }
 

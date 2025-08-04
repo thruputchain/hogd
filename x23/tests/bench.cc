@@ -58,7 +58,7 @@ void
 coawait_empty_async(benchmark::State &state)
 {
   static constexpr auto empty = +[] -> x23::Async<void> { co_return; };
-  [&]->x23::Async<void> {
+  [&] -> x23::Async<void> {
     for (auto _ : state)
       co_await empty();
     co_return;
@@ -71,7 +71,7 @@ void
 migrate_coro(benchmark::State &state)
 {
   [&] -> x23::Async<void> {
-    for(auto _ : state)
+    for (auto _ : state)
       co_await pool.bg();
     co_return;
   }()();

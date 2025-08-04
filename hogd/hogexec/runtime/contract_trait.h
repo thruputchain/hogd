@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -12,17 +13,18 @@
 #include <type_traits>
 #include <utility>
 
-#include "bcs/decode.h"
-#include "bcs/encode.h"
 #include "contract.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "serialize_calldata.h"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -48,6 +50,13 @@ template<typename R, typename... Args> struct CalldataArgs<R (*&&)(Args...)> {
   using return_t = std::conditional_t<std::is_same_v<R, void>, std::tuple<>, R>;
 };
 
+constexpr static std::array<std::pair<std::string_view, SerializationFormat>, 3>
+    kSerializationFormatLookup = {
+        std::pair{"txs", SerializationFormat::kTxs},
+        std::pair{"cxs", SerializationFormat::kCxs},
+        std::pair{"bcs", SerializationFormat::kBcs},
+};
+
 } // namespace detail
 
 template<typename T>
@@ -66,6 +75,38 @@ concept is_contract_trait = requires {
 };
 
 template<is_contract_trait ContractTrait> class ContractTraitMeta {
+
+  constexpr static size_t
+  get_serialization_format_index(std::string_view format)
+  {
+    for (size_t i = 0; i < detail::kSerializationFormatLookup.size(); ++i) {
+      if (detail::kSerializationFormatLookup[i].first == format) {
+        return i;
+      }
+    }
+    return std::numeric_limits<size_t>::max();
+  }
+
+  constexpr static SerializationFormat get_format_or_default()
+  {
+    if constexpr (requires {
+                    {
+                      ContractTrait::kSerializationFormat
+                    } -> std::convertible_to<std::string_view>;
+                  }) {
+      constexpr auto kIndex =
+          get_serialization_format_index(ContractTrait::kSerializationFormat);
+      static_assert(kIndex != std::numeric_limits<size_t>::max(),
+                    "Invalid serialization format");
+      return detail::kSerializationFormatLookup[kIndex].second;
+    }
+    else {
+      return SerializationFormat::kTxs;
+    }
+  }
+
+  constexpr static SerializationFormat kSerializationFormat =
+      get_format_or_default();
 
   // the type of the i'th exported function,
   // (ordered by their listing in ContractTrait::kExportNames)
@@ -112,7 +153,7 @@ public:
   }
 
   template<StringLiteral Name, typename... Args>
-  static Calldata make_calldata(Args... args) requires (
+  static Calldata make_calldata(Args const &...args) requires (
       std::same_as<
           std::tuple<Args...>,
           typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t>)
@@ -136,11 +177,13 @@ public:
     using args_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::args_t;
     return [data] -> SyscallStatus<args_type> {
-      auto r = bcs::decode_from<args_type>(data);
-      if (!r.has_value()) {
-        return SyscallStatus<args_type>(SyscallErrorCode::kCalldataParseError);
+      auto out =
+          Serializer<kSerializationFormat>::template deserialize<args_type>(
+              data);
+      if (!out.has_value()) {
+        return SyscallError{SyscallErrorCode::kCalldataParseError};
       }
-      return SyscallStatus<args_type>(r.value());
+      return *out;
     }();
   }
 
@@ -150,18 +193,13 @@ public:
     using return_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
     return [data] -> SyscallStatus<return_type> {
-      auto r = bcs::decode_from<return_type>(data);
-      if (!r.has_value()) {
+      auto out =
+          Serializer<kSerializationFormat>::template deserialize<return_type>(
+              data);
+      if (!out.has_value()) {
         return SyscallError{SyscallErrorCode::kReturnParseError};
       }
-      // if the return type is a single value, return it directly instead of as
-      // a tuple
-      if constexpr (requires { std::tuple_size_v<return_type> == 1; }) {
-        return std::get<0>(r.value());
-      }
-      else {
-        return r.value();
-      }
+      return *out;
     }();
   }
 
@@ -174,9 +212,9 @@ public:
 
 private:
   template<typename... Args>
-  static Calldata make_encoding(std::tuple<Args...> args)
+  static Calldata make_encoding(std::tuple<Args...> const &args)
   {
-    auto out = bcs::encode_to<Calldata>(args);
+    auto out = Serializer<kSerializationFormat>::serialize(args);
     if (!out.has_value()) {
       throw std::runtime_error("Failed to encode calldata");
     }
@@ -203,38 +241,48 @@ public:
                       .calldata = calldata};
   }
 
-  template<StringLiteral Name, typename... Args>
-  auto invoke(SystemCallHandler &handler, Args &&...args)
+  template<StringLiteral Name, InvokeFlagSet Flags = std::to_underlying(
+                                   InvokeFlag::kInvokeFlagNone)>
+  auto invoke(SystemCallHandler &handler, auto &&...args)
       -> std::pair<HostFnStatus<SyscallStatus<
                        typename trait_meta_t::template return_t<Name>>>,
                    uint64_t>
   {
-    auto calldata =
-        trait_meta_t::template make_calldata<Name>(std::forward<Args>(args)...);
+    auto calldata = trait_meta_t::template make_calldata<Name>(
+        std::forward<decltype(args)>(args)...);
+    trace("Invoke method {} (Name {}) calldata: {}",
+          sdk_method_id(trait_meta_t::template entrypoint<Name>()), Name.get(),
+          x23::show(calldata));
     auto res =
         handler.invoke(contract_address_,
                        sdk_method_id(trait_meta_t::template entrypoint<Name>()),
-                       UINT64_MAX, calldata, 0);
+                       UINT64_MAX, calldata, Flags);
 
     HostFnStatus<SyscallErrorCode> host_fn_res = res.first;
 
     if (!host_fn_res.has_value()) {
+      trace("Invoke HostFnStatus error: {}", host_fn_res.error());
       return std::pair{host_fn_res.error(), res.second};
     }
     if (host_fn_res.value() != SyscallErrorCode::kNone) {
+      trace("Invoke SyscallStatus error: {}", host_fn_res.value());
       return std::pair{SyscallError{host_fn_res.value()}, res.second};
     }
 
     auto return_buffer = handler.get_return_buffer();
     if (!return_buffer.has_value()) {
+      trace("No return buffer available: {}", return_buffer.error());
       return std::pair{return_buffer.error(), res.second};
     }
     assert(*return_buffer);
     std::span<const std::byte> return_span = std::as_bytes(
         std::span((*return_buffer)->data(), (*return_buffer)->size()));
 
+    trace("Received return buffer: {}", x23::show(**return_buffer));
+
     auto return_value = trait_meta_t::template decode_return<Name>(return_span);
     if (!return_value.has_value()) {
+      trace("Invoke Error: Decode Return Failed: {}", return_value.error());
       return std::pair{return_value.error(), res.second};
     }
     return std::pair{return_value.value(), res.second};

@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sched.h>
+#include <string>
 #include <sys/socket.h>
 
 #include <cassert>
@@ -23,6 +24,7 @@
 #include <stdexcept>
 #include <stop_token>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -34,6 +36,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -119,6 +122,15 @@ sys_getsockname(int sockfd, T &val)
   socklen_t len = sizeof(val);
   return make_errno_status<void>(
       getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
+}
+
+template<typename T> requires std::is_trivially_copyable_v<T>
+inline ErrnoStatus<void>
+sys_getpeername(int sockfd, T &val)
+{
+  socklen_t len = sizeof(val);
+  return make_errno_status<void>(
+      getpeername(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
 }
 
 inline ErrnoStatus<size_t>
@@ -308,11 +320,11 @@ RPCClient::dial(std::string_view addr, int flows)
   }
 
   info("rpc client connected to {} with {} flows", addr, flows);
-  return RPCClient(std::move(flow_tbl));
+  return RPCClient(std::move(flow_tbl), std::string(addr));
 }
 
 std::future<OwningSpan<const std::byte>>
-RPCClient::call(std::span<const std::byte> args)
+RPCClient::call_async(std::span<const std::byte> args)
 {
   unsigned int core;
 #if defined(__linux__)
@@ -393,7 +405,18 @@ RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
   std::vector<OwningSpan<const std::byte>> requests;
   std::optional<size_t> n;
 
-  ref->register_worker(socket);
+  std::string peer = "unknown";
+
+  sockaddr_storage addr;
+  if (!sys_getpeername(socket.get_fd(), addr)) {
+    error("could not get socket name: {}", errno);
+  }
+  else {
+    peer = x23::show_addr(addr);
+  }
+
+  if (!ref->register_worker(socket))
+    return; // already closing server
   Defer d([&ref, &socket] { ref->unregister_worker(socket); });
 
   while (true) {
@@ -426,7 +449,7 @@ RPCServer::connection_worker(std::shared_ptr<RPCServer> ref, File &&socket,
 
     // execute available requests.
     for (const auto &req : requests) {
-      OwningSpan<const std::byte> bytes = handler(req);
+      OwningSpan<const std::byte> bytes = handler(req, peer);
       size_t resp_bytes = bytes.size();
       if (ErrnoStatus<void> ret = write_full(w, byte_view(resp_bytes)); !ret) {
         error("server write size failed: {}", ret.error());
@@ -451,13 +474,33 @@ void
 RPCServer::stop()
 {
   std::scoped_lock guard(lock_);
-  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RD); !ret) {
+  closing_ = true;
+  if (ErrnoStatus<void> ret = sys_shutdown(listener_.get_fd(), SHUT_RDWR);
+      !ret) {
     error("could not shutdown listener socket: {}", ret.error());
   }
+  // mac compat: call close() on the listener fd
+  if (ErrnoStatus<void> ret = listener_.close(); !ret)
+    error("could not close listener socket: {}", ret.error());
 
   for (File *f : workers_) {
     if (ErrnoStatus<void> ret = sys_shutdown(f->get_fd(), SHUT_RD); !ret)
       error("could not shutdown worker socket: {}", ret.error());
+  }
+}
+
+std::string
+RPCResponseErrorCategory::message(int code) const
+{
+  switch (static_cast<RPCReponseErrorCode>(code)) {
+  case RPCReponseErrorCode::kRpcOk:
+    return "kRpcOk";
+  case RPCReponseErrorCode::kRpcInvalidArgument:
+    return "kRpcInvalidArgument";
+  case RPCReponseErrorCode::kRpcUnknownMethod:
+    return "kRpcUnknownMethod";
+  default:
+    return "Unknown RPCResponseError";
   }
 }
 

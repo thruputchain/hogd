@@ -1,10 +1,13 @@
-use wasmi::{Caller, Config, Engine, Error, Linker, Module, StackLimits};
+use wasmi::{
+    Caller, CompilationMode, Config, Engine, Error, Linker, Module, StackLimits,
+};
 
 use core::ffi::c_void;
 use core::slice;
 use core::str::Utf8Error;
 
 use crate::external_call;
+use crate::module_cache::{ModuleCache, ModuleCacheEntry};
 
 // A WasmiContext provides shared data structures
 // for multiple Wasmi runtimes.
@@ -47,9 +50,32 @@ use crate::external_call;
 // but not for eager compilation and validation (unclear why this choice was made).  If a module cache is used,
 // we must use CompilationMode::Eager.
 
-pub struct WasmiContext {
-    pub engine: Engine,
-    pub linker: Linker<*mut c_void>,
+pub struct LinkEntry {
+    module: String,
+    function: String,
+    nargs: u8,
+    fn_pointer: *mut c_void,
+}
+
+impl LinkEntry {
+    pub fn new(
+        module: String,
+        function: String,
+        nargs: u8,
+        fn_pointer: *mut c_void,
+    ) -> Self {
+        Self {
+            module,
+            function,
+            nargs,
+            fn_pointer,
+        }
+    }
+}
+
+pub struct WasmiContext<'a> {
+    pub entries: Vec<LinkEntry>,
+    pub module_cache: Option<&'a mut ModuleCache>,
 }
 
 // Tells rust that it is safe to send this c_void pointer
@@ -64,349 +90,219 @@ unsafe impl Sync for BorrowBypass {}
 
 fn string_from_parts(bytes: *const u8, len: u32) -> Result<String, Utf8Error> {
     let slice = unsafe { slice::from_raw_parts(bytes, len as usize) };
-    match std::str::from_utf8(slice) {
-        Ok(s) => Ok(s.to_owned()), // TODO check this is a copy and not something weird
-        Err(x) => Err(x),
-    }
+    std::str::from_utf8(slice).map(|s| s.to_owned())
 }
 
-impl WasmiContext {
-    fn new() -> WasmiContext {
-        let stack_limit = StackLimits::default();
+macro_rules! link_function_nargs {
+    ($name:ident, $cfunc:ident $(, $arg:ident)*) => {
+        fn $name(
+            linker: &mut Linker<*mut c_void>,
+            fn_pointer: *mut c_void,
+            import_name: &str,
+            fn_name: &str,
+        ) -> Result<(), Error> {
+            let x = BorrowBypass { fn_pointer };
+            linker
+                .func_wrap(import_name, fn_name, move |caller: Caller<'_, *mut c_void>, $($arg: u64),*| {
+                    let res = unsafe {
+                        external_call::$cfunc(
+                            x.clone().fn_pointer,
+                            *caller.data(),
+                            $($arg),*
+                        )
+                    };
+                    external_call::handle_trampoline_error(res)
+                })
+                .map_err(Into::into)
+                .map(|_| ())
+        }
+    };
+}
 
-        let engine = Engine::new(
+impl<'a> WasmiContext<'a> {
+    fn new(module_cache: Option<&'a mut ModuleCache>) -> WasmiContext<'a> {
+        Self {
+            entries: Vec::new(),
+            module_cache,
+        }
+    }
+
+    pub fn has_module_cache(&self) -> bool {
+        self.module_cache.is_some()
+    }
+
+    pub fn get_cached_module(
+        &mut self,
+        hash: &[u8; 32],
+    ) -> Option<ModuleCacheEntry> {
+        self.module_cache.as_mut().and_then(|cache| cache.get(hash))
+    }
+
+    pub fn put_cached_module(
+        &mut self,
+        hash: &[u8; 32],
+        module: &Module,
+        linker: &Linker<*mut c_void>,
+    ) {
+        if let Some(cache) = self.module_cache.as_mut() {
+            cache.put(hash, module, linker);
+        }
+    }
+
+    pub fn add_entry(&mut self, entry: LinkEntry) {
+        self.entries.push(entry);
+    }
+
+    fn new_engine() -> Engine {
+        Engine::new(
             Config::default()
                 .consume_fuel(true)
                 .floats(false)
-                .set_stack_limits(stack_limit),
-            // If we upgrade to later wasmi versions, we should disable
-            // simd support (relaxed_simd at least, is apparently not deterministic)
-            // .wasm_simd(false)
-            // .wasm_relaxed_simd(false),
-        );
+                .set_stack_limits(StackLimits::default())
+                // MUST BE EAGER
+                // This warning is in ALL CAPITALS because if we change that
+                // we will have NONDETERMINISM in gas measurements
+                // and THAT WOULD BE BAD if we have the module cache enabled
+                .compilation_mode(CompilationMode::Eager),
+        )
+        // WARNING:
+        // Caching is INCOMPATIBLE with wasmi's lazy compilation.
+        // If we upgrade to later wasmi versions, we should disable
+        // simd support (relaxed_simd at least, is apparently not deterministic)
+        // .wasm_simd(false)
+        // .wasm_relaxed_simd(false),
+    }
 
-        Self {
-            engine: engine.clone(),
-            linker: Linker::new(&engine),
+    pub fn linker(&self) -> Linker<*mut c_void> {
+        let engine = Self::new_engine();
+        let mut linker = Linker::new(&engine);
+
+        for entry in &self.entries {
+            match entry.nargs {
+                0 => Self::link_function_0args(
+                    &mut linker,
+                    entry.fn_pointer,
+                    &entry.module,
+                    &entry.function,
+                ),
+                1 => Self::link_function_1args(
+                    &mut linker,
+                    entry.fn_pointer,
+                    &entry.module,
+                    &entry.function,
+                ),
+                2 => Self::link_function_2args(
+                    &mut linker,
+                    entry.fn_pointer,
+                    &entry.module,
+                    &entry.function,
+                ),
+                3 => Self::link_function_3args(
+                    &mut linker,
+                    entry.fn_pointer,
+                    &entry.module,
+                    &entry.function,
+                ),
+                4 => Self::link_function_4args(
+                    &mut linker,
+                    entry.fn_pointer,
+                    &entry.module,
+                    &entry.function,
+                ),
+                5 => Self::link_function_5args(
+                    &mut linker,
+                    entry.fn_pointer,
+                    &entry.module,
+                    &entry.function,
+                ),
+                6 => Self::link_function_6args(
+                    &mut linker,
+                    entry.fn_pointer,
+                    &entry.module,
+                    &entry.function,
+                ),
+                7 => Self::link_function_7args(
+                    &mut linker,
+                    entry.fn_pointer,
+                    &entry.module,
+                    &entry.function,
+                ),
+                8 => Self::link_function_8args(
+                    &mut linker,
+                    entry.fn_pointer,
+                    &entry.module,
+                    &entry.function,
+                ),
+                _ => {
+                    panic!("Unsupported number of arguments: {}", entry.nargs);
+                }
+            }
+            .unwrap();
         }
+
+        linker
     }
 
     fn verify_contract(&self, contract_data: &[u8]) -> bool {
-        Module::validate(&self.engine, contract_data).is_ok()
+        // TODO(geoff): consider caching the engine
+        let engine = Self::new_engine();
+        Module::validate(&engine, contract_data).is_ok()
     }
 
-    fn link_function_0args(
-        &mut self,
-        fn_pointer: *mut c_void,
-        import_name: &str,
-        fn_name: &str,
-    ) -> Result<(), Error> {
-        let x = BorrowBypass { fn_pointer };
-
-        match self.linker.func_wrap(
-            import_name,
-            fn_name,
-            move |caller: Caller<'_, *mut c_void>| -> Result<i32, wasmi::Error> {
-
-                let res = unsafe {
-                    external_call::c_call_0args(x.clone().fn_pointer, *caller.data())
-                };
-
-                external_call::handle_trampoline_error(res)
-        }) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    fn link_function_1args(
-        &mut self,
-        fn_pointer: *mut c_void,
-        import_name: &str,
-        fn_name: &str,
-    ) -> Result<(), Error> {
-        let x = BorrowBypass { fn_pointer };
-
-        match self.linker.func_wrap(
-            import_name,
-            fn_name,
-            move |caller: Caller<'_, *mut c_void>,
-                  arg1: u64|
-                  -> Result<i32, wasmi::Error> {
-                let res = unsafe {
-                    external_call::c_call_1args(
-                        x.clone().fn_pointer,
-                        *caller.data(),
-                        arg1,
-                    )
-                };
-
-                external_call::handle_trampoline_error(res)
-            },
-        ) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    fn link_function_2args(
-        &mut self,
-        fn_pointer: *mut c_void,
-        import_name: &str,
-        fn_name: &str,
-    ) -> Result<(), Error> {
-        let x = BorrowBypass { fn_pointer };
-
-        match self.linker.func_wrap(
-            import_name,
-            fn_name,
-            move |caller: Caller<'_, *mut c_void>,
-                  arg1: u64,
-                  arg2: u64|
-                  -> Result<i32, wasmi::Error> {
-                let res = unsafe {
-                    external_call::c_call_2args(
-                        x.clone().fn_pointer,
-                        *caller.data(),
-                        arg1,
-                        arg2,
-                    )
-                };
-                external_call::handle_trampoline_error(res)
-            },
-        ) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    fn link_function_3args(
-        &mut self,
-        fn_pointer: *mut c_void,
-        import_name: &str,
-        fn_name: &str,
-    ) -> Result<(), Error> {
-        let x = BorrowBypass { fn_pointer };
-
-        match self.linker.func_wrap(
-            import_name,
-            fn_name,
-            move |caller: Caller<'_, *mut c_void>,
-                  arg1: u64,
-                  arg2: u64,
-                  arg3: u64|
-                  -> Result<i32, wasmi::Error> {
-                let res = unsafe {
-                    external_call::c_call_3args(
-                        x.clone().fn_pointer,
-                        *caller.data(),
-                        arg1,
-                        arg2,
-                        arg3,
-                    )
-                };
-                external_call::handle_trampoline_error(res)
-            },
-        ) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    fn link_function_4args(
-        &mut self,
-        fn_pointer: *mut c_void,
-        import_name: &str,
-        fn_name: &str,
-    ) -> Result<(), Error> {
-        let x = BorrowBypass { fn_pointer };
-
-        match self.linker.func_wrap(
-            import_name,
-            fn_name,
-            move |caller: Caller<'_, *mut c_void>,
-                  arg1: u64,
-                  arg2: u64,
-                  arg3: u64,
-                  arg4: u64|
-                  -> Result<i32, wasmi::Error> {
-                let res = unsafe {
-                    external_call::c_call_4args(
-                        x.clone().fn_pointer,
-                        *caller.data(),
-                        arg1,
-                        arg2,
-                        arg3,
-                        arg4,
-                    )
-                };
-                external_call::handle_trampoline_error(res)
-            },
-        ) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    fn link_function_5args(
-        &mut self,
-        fn_pointer: *mut c_void,
-        import_name: &str,
-        fn_name: &str,
-    ) -> Result<(), Error> {
-        let x = BorrowBypass { fn_pointer };
-
-        match self.linker.func_wrap(
-            import_name,
-            fn_name,
-            move |caller: Caller<'_, *mut c_void>,
-                  arg1: u64,
-                  arg2: u64,
-                  arg3: u64,
-                  arg4: u64,
-                  arg5: u64|
-                  -> Result<i32, wasmi::Error> {
-                let res = unsafe {
-                    external_call::c_call_5args(
-                        x.clone().fn_pointer,
-                        *caller.data(),
-                        arg1,
-                        arg2,
-                        arg3,
-                        arg4,
-                        arg5,
-                    )
-                };
-                external_call::handle_trampoline_error(res)
-            },
-        ) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    fn link_function_6args(
-        &mut self,
-        fn_pointer: *mut c_void,
-        import_name: &str,
-        fn_name: &str,
-    ) -> Result<(), Error> {
-        let x = BorrowBypass { fn_pointer };
-
-        match self.linker.func_wrap(
-            import_name,
-            fn_name,
-            move |caller: Caller<'_, *mut c_void>,
-                  arg1: u64,
-                  arg2: u64,
-                  arg3: u64,
-                  arg4: u64,
-                  arg5: u64,
-                  arg6: u64|
-                  -> Result<i32, wasmi::Error> {
-                let res = unsafe {
-                    external_call::c_call_6args(
-                        x.clone().fn_pointer,
-                        *caller.data(),
-                        arg1,
-                        arg2,
-                        arg3,
-                        arg4,
-                        arg5,
-                        arg6,
-                    )
-                };
-                external_call::handle_trampoline_error(res)
-            },
-        ) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    fn link_function_7args(
-        &mut self,
-        fn_pointer: *mut c_void,
-        import_name: &str,
-        fn_name: &str,
-    ) -> Result<(), Error> {
-        let x = BorrowBypass { fn_pointer };
-
-        match self.linker.func_wrap(
-            import_name,
-            fn_name,
-            move |caller: Caller<'_, *mut c_void>,
-                  arg1: u64,
-                  arg2: u64,
-                  arg3: u64,
-                  arg4: u64,
-                  arg5: u64,
-                  arg6: u64,
-                  arg7: u64|
-                  -> Result<i32, wasmi::Error> {
-                let res = unsafe {
-                    external_call::c_call_7args(
-                        x.clone().fn_pointer,
-                        *caller.data(),
-                        arg1,
-                        arg2,
-                        arg3,
-                        arg4,
-                        arg5,
-                        arg6,
-                        arg7,
-                    )
-                };
-                external_call::handle_trampoline_error(res)
-            },
-        ) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    fn link_function_8args(
-        &mut self,
-        fn_pointer: *mut c_void,
-        import_name: &str,
-        fn_name: &str,
-    ) -> Result<(), Error> {
-        let x = BorrowBypass { fn_pointer };
-
-        match self.linker.func_wrap(
-            import_name,
-            fn_name,
-            move |caller: Caller<'_, *mut c_void>,
-                  arg1: u64,
-                  arg2: u64,
-                  arg3: u64,
-                  arg4: u64,
-                  arg5: u64,
-                  arg6: u64,
-                  arg7: u64,
-                  arg8: u64|
-                  -> Result<i32, wasmi::Error> {
-                let res = unsafe {
-                    external_call::c_call_8args(
-                        x.clone().fn_pointer,
-                        *caller.data(),
-                        arg1,
-                        arg2,
-                        arg3,
-                        arg4,
-                        arg5,
-                        arg6,
-                        arg7,
-                        arg8,
-                    )
-                };
-                external_call::handle_trampoline_error(res)
-            },
-        ) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err.into()),
-        }
-    }
+    link_function_nargs!(link_function_0args, c_call_0args);
+    link_function_nargs!(link_function_1args, c_call_1args, arg1);
+    link_function_nargs!(link_function_2args, c_call_2args, arg1, arg2);
+    link_function_nargs!(link_function_3args, c_call_3args, arg1, arg2, arg3);
+    link_function_nargs!(
+        link_function_4args,
+        c_call_4args,
+        arg1,
+        arg2,
+        arg3,
+        arg4
+    );
+    link_function_nargs!(
+        link_function_5args,
+        c_call_5args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5
+    );
+    link_function_nargs!(
+        link_function_6args,
+        c_call_6args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6
+    );
+    link_function_nargs!(
+        link_function_7args,
+        c_call_7args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6,
+        arg7
+    );
+    link_function_nargs!(
+        link_function_8args,
+        c_call_8args,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+        arg6,
+        arg7,
+        arg8
+    );
 }
 
 /// # Safety
@@ -427,13 +323,11 @@ pub unsafe extern "C" fn wasmi_link_nargs(
         unsafe { core::mem::transmute(context_void) };
 
     debug_assert!(!context.is_null());
-
     debug_assert!(!module_name.is_null());
     debug_assert!(!method_name.is_null());
 
     // assert module name & method_name nonzero
     // WASMI (and apparently the wasm standard) will accept modules with no names,
-
     let module = match string_from_parts(module_name, module_name_len) {
         Ok(x) => x,
         _ => {
@@ -453,28 +347,30 @@ pub unsafe extern "C" fn wasmi_link_nargs(
 
     let c = unsafe { &mut *context };
 
-    let res = match nargs {
-        0 => c.link_function_0args(function_pointer, &module, &method),
-        1 => c.link_function_1args(function_pointer, &module, &method),
-        2 => c.link_function_2args(function_pointer, &module, &method),
-        3 => c.link_function_3args(function_pointer, &module, &method),
-        4 => c.link_function_4args(function_pointer, &module, &method),
-        5 => c.link_function_5args(function_pointer, &module, &method),
-        6 => c.link_function_6args(function_pointer, &module, &method),
-        7 => c.link_function_7args(function_pointer, &module, &method),
-        8 => c.link_function_8args(function_pointer, &module, &method),
-        _ => {
-            return false;
-        }
-    };
-
-    res.is_ok()
+    c.add_entry(LinkEntry::new(module, method, nargs, function_pointer));
+    true
 }
 
 // Rust FFI needs no_mangle and extern "C"
+/// # Safety
+/// module_cache can be nullptr, in which case no module cache is used.
+/// module_cache is threadsafe, so it can be safely shared across threads.
+/// module_cache must outlive WasmiContext.
 #[no_mangle]
-pub extern "C" fn new_wasmi_context() -> *mut c_void {
-    let b = Box::new(WasmiContext::new());
+pub unsafe extern "C" fn new_wasmi_context(
+    module_cache: *mut c_void,
+) -> *mut c_void {
+    let b = if module_cache.is_null() {
+        Box::new(WasmiContext::new(None))
+    } else {
+        Box::new(WasmiContext::new(unsafe {
+            Some(
+                &mut *(core::mem::transmute::<*mut c_void, *mut ModuleCache>(
+                    module_cache,
+                )),
+            )
+        }))
+    };
 
     unsafe { core::mem::transmute(Box::into_raw(b)) }
 }

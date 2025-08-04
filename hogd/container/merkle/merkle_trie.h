@@ -18,7 +18,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/container/merkle/arena.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
@@ -240,8 +239,8 @@ private:
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
-  Node *remove_branch(Node *branch, size_t num_children,
-                      std::byte remaining_child_hex);
+  static Node *remove_branch(Node *branch, size_t num_children,
+                             std::byte remaining_child_hex);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node.
@@ -299,8 +298,6 @@ private:
   // If this is false, nodes are only hashed when [generate_all_hashes()] is
   // called.
   bool should_hash_nodes_on_each_op_ = true;
-  // An arena for allocating nodes.
-  Arena<Node> arena_;
 };
 
 // This is an optimization for the [MerkleTrie]. It exposes the same exact API,

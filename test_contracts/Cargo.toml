@@ -4,12 +4,19 @@ cargo-features = ["trim-paths", "profile-rustflags"] #unstable
 members = [
     "integration_test_contracts/simple_wallet",
     "integration_test_contracts/fibonacci",
+    "integration_test_contracts/cxs_roundtrip",
+    "integration_test_contracts/read_only_test",
+    "integration_test_contracts/fibonacci_call",
+    "integration_test_contracts/manual_revert_test",
 ]
 resolver = "2"
 
 [workspace.dependencies]
 sdk = { package = "sdk_rs", git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 serde = { version = "1.0.217", default-features = false }
+xdrs = { git = "ssh://git@github.com/groundhogchain/xdrs.git" }
+xdr_common = { git = "ssh://git@github.com/groundhogchain/xdr_common.git" }
+groundhog_xdr = { git = "ssh://git@github.com/groundhogchain/sdk_rs.git" }
 
 [profile.dev]
 opt-level = "z"

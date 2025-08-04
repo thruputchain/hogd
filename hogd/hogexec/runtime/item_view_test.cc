@@ -18,7 +18,6 @@
 #include "storage_item.hh"
 #include "types.hh"
 #include "x23/event.h"
-#include "x23/sockio.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -27,9 +26,8 @@ class ItemViewTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
-    auto r = server_.start_server(0);
-    db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{x23::get_port(r)});
+    db_proxy_ = std::make_unique<DatabaseProxy>(
+        LocalMockDB{.read_port_number_ = server_.port()});
   }
 
   BlockSnapshotServer server_ = BlockSnapshotServer(1);

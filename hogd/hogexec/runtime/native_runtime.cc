@@ -29,6 +29,7 @@ NativeContract::invoke(MethodID method, SystemCallHandler &syscall_handler,
 
 std::unique_ptr<Runtime>
 NativeContext::make_new_runtime(Contract const &contract,
+                                SHA256Hash const & /*unused*/,
                                 SystemCallHandler *syscall_handler,
                                 bool /*unused*/)
 {

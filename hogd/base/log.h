@@ -331,4 +331,13 @@ log_init(std::unique_ptr<Logger> logger)
   detail::logger = std::move(logger);
 }
 
+// Replace the current logger with a new one.
+// returns the old logger (so it can be swapped back in later).
+inline std::unique_ptr<Logger>
+swap_logger(std::unique_ptr<Logger> logger)
+{
+  std::swap(detail::logger, logger);
+  return logger;
+}
+
 } // namespace hogd

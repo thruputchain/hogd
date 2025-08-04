@@ -12,11 +12,10 @@
 #include <unordered_map>
 #include <utility>
 
-#include "bcs/decode.h"
-#include "bcs/encode.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
+#include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "transaction.hh"
@@ -127,6 +126,10 @@ struct NativeContractArgs<InvokeStatus<R> (T::*)(Args...) const> {
 
 class NativeContractBuilder {
 public:
+  constexpr static SerializationFormat kDefaultSerializationFormat =
+      SerializationFormat::kTxs;
+
+  template<SerializationFormat Format = kDefaultSerializationFormat>
   void add(MethodID id, auto lambda)
   {
     using fn_t = decltype(&decltype(lambda)::operator());
@@ -136,11 +139,9 @@ public:
     auto wrapped_f = [f = std::forward<decltype(lambda)>(lambda)](
                          SystemCallHandler &handler,
                          NativeRuntime &runtime) -> InvokeStatus<void> {
-      auto args = [&]<size_t... Is>(std::index_sequence<Is...>) {
-        return bcs::decode_from<std::remove_cvref_t<decltype(std::get<Is>(
-            std::declval<args_t>()))>...>(
-            std::as_bytes(std::span(handler.get_calldata())));
-      }(std::make_index_sequence<std::tuple_size_v<args_t>>());
+      auto calldata = handler.get_calldata();
+      auto args = Serializer<Format>::template deserialize<args_t>(
+          std::as_bytes(std::span(calldata)));
       if (!args.has_value()) {
         return InvokeError{InvokeErrorCode::kInvokeDeterministic};
       }
@@ -152,8 +153,7 @@ public:
         auto extra_args =
             detail::NativeContractArgs<fn_t>::extra_args(handler, runtime);
         return [&]<size_t... ExtraIs>(std::index_sequence<ExtraIs...>) {
-          return f(std::get<ExtraIs>(extra_args)...,
-                   std::get<Is>(args.value())...);
+          return f(std::get<ExtraIs>(extra_args)..., std::get<Is>(*args)...);
         }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>());
       }(std::make_index_sequence<std::tuple_size_v<args_t>>());
       if (!return_value.has_value()) {
@@ -163,16 +163,17 @@ public:
       // otherwise, return the received value
       if constexpr (!std::is_same_v<return_t, void>) {
         auto return_buffer =
-            bcs::encode_to<ReturnBuffer, return_t>(return_value.value());
+            Serializer<Format>::serialize(return_value.value());
         if (!return_buffer.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        handler.set_return_buffer(std::move(*return_buffer));
+        handler.set_return_buffer(std::move(return_buffer.value()), false);
+        return {};
       }
       else {
-        handler.set_return_buffer(ReturnBuffer{});
+        handler.set_return_buffer(ReturnBuffer{}, false);
+        return {};
       }
-      return {};
     };
 
     auto [_, inserted] = functions_.emplace(id, std::move(wrapped_f));
@@ -200,6 +201,7 @@ public:
   ~NativeContext() override = default;
 
   std::unique_ptr<Runtime> make_new_runtime(Contract const &contract,
+                                            SHA256Hash const &hash,
                                             SystemCallHandler *syscall_handler,
                                             bool do_contract_verify) override;
 

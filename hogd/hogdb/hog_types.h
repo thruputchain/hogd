@@ -19,10 +19,28 @@
 
 namespace hogd {
 
+// a handle for a block transaction.
+using BlockTXID = uint64_t;
+// a handle for an invocation's transaction.
+using InvokeTXID = uint64_t;
+
+} // namespace hogd
+
+template<> struct std::hash<std::pair<hogd::BlockTXID, hogd::InvokeTXID>> {
+  [[nodiscard, gnu::pure]] static std::size_t
+  operator()(const std::pair<hogd::BlockTXID, hogd::InvokeTXID> &p) noexcept
+  {
+    return std::hash<hogd::BlockTXID>()(p.first) ^
+           std::hash<hogd::InvokeTXID>()(p.second);
+  }
+};
+
+namespace hogd {
+
 // storage_cost returns the cost in hogs for storage.
 //
 // WARNING: This does not necessarily reflect the real storage cost. It can't
-// easily change because it is part of the blockchain model.
+// easily be changed because it is part of the blockchain model.
 constexpr size_t
 storage_cost(size_t bytes)
 {

@@ -7,8 +7,8 @@
 #include <mutex>
 #include <utility>
 
-#include <x23/utility.h>
 #include <x23/threadpool.h>
+#include <x23/utility.h>
 
 namespace x23 {
 
@@ -163,8 +163,8 @@ public:
     SharedHolder &operator=(SharedHolder &&other) noexcept
     {
       if (&other != this) {
-	reset();
-	inh_ = std::exchange(other.inh_, nullptr);
+        reset();
+        inh_ = std::exchange(other.inh_, nullptr);
       }
       return *this;
     }

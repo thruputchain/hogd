@@ -32,11 +32,11 @@ DBStatus<File>
 DiskWriter::create_next_file()
 {
   std::string filename =
-      std::vformat(filename_format_, std::make_format_args(cur_lsn_));
+      std::vformat(filename_format_, std::make_format_args(synced_lsn_));
 
   // create the new log file.
-  DBStatus<File> f =
-      dir_.openat(filename, O_WRONLY | O_CREAT).transform_error(to_db_error);
+  DBStatus<File> f = dir_.openat(filename, O_WRONLY | O_CREAT | O_TRUNC)
+                         .transform_error(to_db_error);
   if (!f)
     return f.error();
 
@@ -83,6 +83,9 @@ DiskWriter::write_worker(const std::stop_token &stoken)
     signal_ioerror();
     return;
   }
+
+  if (wal_grew_observer_)
+    wal_grew_observer_();
 
   BufferedWriter w(*f);
   uint32_t crc = 0;

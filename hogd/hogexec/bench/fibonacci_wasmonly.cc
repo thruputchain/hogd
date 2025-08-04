@@ -64,10 +64,8 @@ struct BenchmarkState {
 
   void initialize(uint32_t exec_port, uint32_t coord_port)
   {
-
-    db_proxy_ =
-        std::make_unique<DatabaseProxy>(cp_, LocalMockDB{.read_port_number_ =
-                                                             exec_port});
+    db_proxy_ = std::make_unique<DatabaseProxy>(
+        LocalMockDB{.read_port_number_ = exec_port});
 
     coord_client_ = [&] -> std::unique_ptr<coord_client_t> {
       auto fd = cp_.tcpconnect("localhost", std::to_string(coord_port))();
@@ -243,7 +241,7 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
             throw std::runtime_error("Failed to invoke transaction");
           }
           if (do_commit) {
-            if (auto r = handler.try_commit_transaction()();
+            if (auto r = handler.try_commit_transaction();
                 !r.has_value() || !r.value()) {
               throw std::runtime_error("failed to perform commit operation");
             }
@@ -282,10 +280,9 @@ run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
                             1'000'000'000);
 
   BlockManager block_manager = BlockManager(0, &in_memory_db);
-  DbExecutorServer db_executor_server = DbExecutorServer(&block_manager);
-  x23::CoroPoll cp = x23::CoroPoll(db_pool);
   std::println("Starting executor server on port {}", exec_port);
-  db_executor_server.start_server(exec_port);
+  RPCDbExecutorServer db_executor_server =
+      RPCDbExecutorServer(&block_manager, exec_port);
 
   DbCoordServer db_coord_server = DbCoordServer(&block_manager);
   std::println("Starting coord server on port {}", coord_port);
@@ -314,7 +311,7 @@ run_fibonacci_client(uint32_t exec_port, uint32_t coord_port)
     run_bench_rep(bs, 10000, 15, nthread, false);
   }
   // weak scaling
-  for (auto nthread : {1, 4, 16, 32, 64, 128}) {
+  for (auto nthread : {1, 4, 16, 32, 64, 128, 256, 512}) {
     run_bench_rep(bs, nthread * 1000, 20, nthread, true);
     run_bench_rep(bs, nthread * 1000, 20, nthread, false);
     run_bench_rep(bs, nthread * 1000, 15, nthread, true);

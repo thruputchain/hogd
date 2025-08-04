@@ -3,6 +3,10 @@ set_source_files_properties(
     PROPERTIES GENERATED TRUE)
 
 set_source_files_properties(
+    ${CMAKE_CURRENT_BINARY_DIR}/syscall_meta.h
+    PROPERTIES GENERATED TRUE)
+
+set_source_files_properties(
     ${CMAKE_BINARY_DIR}/hogd/hogexec/wasmi/bindings.h
     PROPERTIES GENERATED TRUE)
 
@@ -31,6 +35,7 @@ add_library(runtime_objects OBJECT
   syscall_log.cc
   syscall_nnint.cc
   syscall_rcq.cc
+  syscall_stats.cc
   transaction_stats.cc
   wasmi_runtime.cc
 )
@@ -44,6 +49,7 @@ add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
 
 add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
+  cross_call_tests.cc
   error_handling_test.cc
   execution_mode_test.cc
   fibonacci_test.cc
@@ -51,11 +57,18 @@ add_library(runtime_test_objects OBJECT
   interleaving_tests.cc
   instantiate_test.cc
   invoke_arity_test.cc
+  invoke_error_handling_test.cc
   item_view_test.cc
+  manual_revert_comprehensive_test.cc
+  manual_revert_wasm_test.cc
   memory_access_test.cc
   native_contract_test.cc
+  nnint_add_test.cc
   rcq_test.cc
+  read_only_test.cc
+  revert_tests.cc
   runtime_test.cc
+  serialize_roundtrip_test.cc
   snapshot_storage_item_test.cc
   syscall_entry_outer_tests.cc
   syscall_parse_tests.cc
@@ -79,12 +92,14 @@ target_link_libraries(
   wasmi_lib
   runtime_trampoline
   protocol
+  rpc
   hogd
 )
 
 add_dependencies(
   runtime_objects
   generate_syscall_inner_h
+  generate_syscall_meta_h
   generate_wasmi_ffi_h
   protocol
 )

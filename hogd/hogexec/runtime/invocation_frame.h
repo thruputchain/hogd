@@ -11,13 +11,12 @@
 #include <vector>
 
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -51,6 +50,9 @@ public:
   // merge child invocation frame into self
   void commit_successful_child_frame(InvocationFrame &&frame);
 
+  // merge child invocation frame into self
+  void commit_manually_reverted_frame(InvocationFrame &&frame);
+
   // revert the child invocation frame.
   // Does not clean up the child frame, but is responsible for handling the
   // parent frame's response to the child frame's failure.
@@ -74,6 +76,11 @@ public:
     return (flags_ & std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke)) != 0;
   }
 
+  bool is_read_only() const
+  {
+    return (flags_ & std::to_underlying(InvokeFlag::kInvokeFlagReadOnly)) != 0;
+  }
+
   // returned pointer is invalidated by any call to add_item_view
   // Does not create a new view if it does not exist
   auto *get_item_view(this auto &self, AddressAndKey const &addrkey)
@@ -87,9 +94,11 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(AddressAndKey const &addrkey, ItemView new_view);
 
-  x23::Async<SystemStatus<bool>>
-  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy,
-                          std::vector<InvocationFrame> const &parent_frames);
+  SystemStatus<bool>
+  try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy);
+
+  void set_should_revert() { manual_revert_ = true; }
+  bool should_revert() const { return manual_revert_; }
 
 private:
   const ContractAddress address_;
@@ -106,6 +115,10 @@ private:
   std::vector<LogEntry> logs_;
 
   uint32_t try_invoke_frame_count_ = 0;
+
+  // Whether the frame is set to revert by an explicit call from a contract
+  // (i.e. via the Return syscall).
+  bool manual_revert_ = false;
 
   // elements modified during the current call frame (and child frames)
   std::unordered_map<AddressAndKey, ItemView> modified_items_;
@@ -130,7 +143,8 @@ public:
   void start_frame(ContractAddress const &address, Calldata &&calldata,
                    InvokeFlagSet flags);
   SystemStatus<InvokeResult>
-  finish_frame(InvokeResult result, ExecutionModeData &execution_mode_data);
+  finish_frame(InvokeStatus<void> result,
+               ExecutionModeData &execution_mode_data);
 
   std::optional<ContractAddress> get_msg_sender() const;
 

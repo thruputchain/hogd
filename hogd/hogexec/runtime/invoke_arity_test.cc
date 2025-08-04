@@ -9,6 +9,7 @@
 
 #include "contract.hh"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
@@ -130,7 +131,8 @@ protected:
     context.link_fn("test", "arg6", &arity6);
     context.link_fn("test", "arg7", &arity7);
     context.link_fn("test", "arg8", &arity8);
-    runtime_ = context.make_new_runtime(contract, nullptr, true);
+    runtime_ =
+        context.make_new_runtime(contract, sha256(contract), nullptr, true);
     ASSERT_TRUE(runtime_);
   }
 

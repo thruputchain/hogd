@@ -31,7 +31,6 @@
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 
 namespace hogd {
 
@@ -65,7 +64,7 @@ SystemCallHandler::SystemCallHandler(
   }
 }
 
-InvokeResult
+void
 SystemCallHandler::perform_initial_validation()
 {
   // TODO(geoff): Adjust if some assumption on the rest of the system changes
@@ -88,10 +87,21 @@ SystemCallHandler::perform_initial_validation()
     if (!res) {
       cumulative_invoke_result_.result_ =
           InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-      return cumulative_invoke_result_;
     }
   }
-  return cumulative_invoke_result_;
+}
+
+void
+SystemCallHandler::check_final_validation_data()
+{
+  assert(cumulative_invoke_result_.is_root_success());
+  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
+    auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
+    if (!validation_data.validate()) {
+      cumulative_invoke_result_.result_ =
+          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+    }
+  }
 }
 
 InvokeResult
@@ -104,121 +114,130 @@ SystemCallHandler::root_invoke()
     return cumulative_invoke_result_;
   }
 
-  auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
-  if (!runtime) {
-    // some system error when resolving the runtime
-    cumulative_invoke_result_.result_ = runtime.error().to_invoke_error();
-    return cumulative_invoke_result_;
-  }
-  if (!runtime.value()) {
-    cumulative_invoke_result_.result_ =
-        InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    return cumulative_invoke_result_;
-  }
-
   GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ <
                                     signed_tx_.tx.invocation.gas_limit
                                 ? signed_tx_.tx.invocation.gas_limit -
                                       cumulative_invoke_result_.gas_consumed_
                                 : 0;
 
-  invocation_frame_stack_.start_frame(
-      signed_tx_.tx.invocation.invoked_address,
-      Calldata(signed_tx_.tx.invocation.calldata),
-      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+  auto [res, gas_consumed] =
+      invoke(signed_tx_.tx.invocation.invoked_address,
+             sdk_method_id(signed_tx_.tx.invocation.entrypoint), available_gas,
+             Calldata(signed_tx_.tx.invocation.calldata),
+             std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
-  auto res = runtime.value()->invoke(sdk_method_id(
-                                         signed_tx_.tx.invocation.entrypoint),
-                                     available_gas);
-  // finish_status takes res as input and shortcircuits if res is an error
-  auto finish_status =
-      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
-  if (!finish_status.has_value()) {
-    cumulative_invoke_result_.result_ = finish_status.error().to_invoke_error();
-    cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
-    return cumulative_invoke_result_;
-  }
-  res = finish_status.value();
-  // should not have gotten here without being in a success state to begin with
-  assert(cumulative_invoke_result_.is_root_success());
-  cumulative_invoke_result_.result_ = res.result_;
-  cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
+  auto handle_root_host_fn_status =
+      [](HostFnStatus<SyscallErrorCode> status) -> InvokeStatus<void> {
+    if (status.has_value()) {
+      return (status.value() == SyscallErrorCode::kNone)
+                 ? InvokeStatus<void>{}
+                 : InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    switch (status.error().code()) {
+    case HostFnErrorCode::kHostOutOfGas:
+      return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+    case HostFnErrorCode::kHostReturn:
+      return InvokeStatus<void>{};
+    case HostFnErrorCode::kHostExit:
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    case HostFnErrorCode::kHostValidationFailure:
+      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+    case HostFnErrorCode::kHostAbortTransaction:
+      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+    case HostFnErrorCode::kHostUnrecoverable:
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    case HostFnErrorCode::kHostNoneOrRecoverable:
+      // This case should never happen, as it is instead handled by
+      // the status.has_value() check above.
+      assert(false);
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    }
+    // Leaving the default arm out of the switch, so that the compiler
+    // will raise a warning later if we add additional InvokeError codes.
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+  };
+
+  cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
+  cumulative_invoke_result_.gas_consumed_ += gas_consumed;
 
   if (!cumulative_invoke_result_.is_root_success()) {
     return cumulative_invoke_result_;
   }
 
-  if (std::holds_alternative<ValidationModeData>(execution_mode_data_)) {
-    auto &validation_data = std::get<ValidationModeData>(execution_mode_data_);
-    if (!validation_data.validate()) {
-      cumulative_invoke_result_.result_ =
-          InvokeError{InvokeErrorCode::kInvokeValidationFailure};
-      cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
-      return cumulative_invoke_result_;
-    }
-  }
+  // update cumulative_invoke_result_ with the final validation data
+  check_final_validation_data();
 
   return cumulative_invoke_result_;
 }
 
-x23::Async<SystemStatus<bool>>
+SystemStatus<bool>
 SystemCallHandler::try_commit_transaction()
 {
-  assert(!transaction_committed_);
+  assert(!transaction_committed_or_aborted_);
   if (!cumulative_invoke_result_.is_root_success()) {
 
-    auto st = co_await db_proxy_.abort_transaction();
+    auto st = db_proxy_.abort_transaction();
     if (!st.has_value()) {
-      co_return st.error();
+      return st.error();
     }
 
-    co_return false;
+    return false;
   }
   assert(last_frame_.has_value());
 
-  auto r = co_await last_frame_.value().try_acquire_frame_locks(db_proxy_, {});
+  // If the last frame was set to manually revert, then we commit the
+  // transaction as a no-op.
+  if (last_frame_.value().should_revert()) {
+    auto res = db_proxy_.commit_transaction();
+    if (!res.has_value()) {
+      return res.error();
+    }
+    transaction_committed_or_aborted_ = true;
+    return true;
+  }
+
+  auto r = last_frame_.value().try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
-    co_return r.error();
+    return r.error();
   }
 
   bool result = r.value();
 
-  // check if any of the 2pc database operations failed
-  if (result) {
-    auto res = co_await db_proxy_.commit_transaction();
+  if (!result) {
+    auto res = db_proxy_.abort_transaction();
     if (!res.has_value()) {
-      co_return res.error();
+      return res.error();
     }
-
-    std::unordered_set<SHA256Hash> committed_contracts;
-    for (auto const &[addr, hash] :
-         last_frame_.value().new_contract_deployments_) {
-      auto contract_entry = newly_created_contracts_.find(hash);
-      assert(contract_entry != newly_created_contracts_.end());
-
-      auto res = co_await db_proxy_.commit_contract_deploy(addr, hash);
-      if (!res.has_value()) {
-        co_return res.error();
-      }
-      if (committed_contracts.insert(hash).second) {
-        // contract that wasn't already created within the transaction
-        res =
-            co_await db_proxy_.commit_contract_create(*contract_entry->second);
-        if (!res.has_value()) {
-          co_return res.error();
-        }
-      }
-    }
-    transaction_committed_ = true;
-    co_return true;
+    transaction_committed_or_aborted_ = true;
+    return false;
   }
 
-  auto res = co_await db_proxy_.abort_transaction();
+  // check if any of the 2pc database operations failed
+  auto res = db_proxy_.commit_transaction();
   if (!res.has_value()) {
-    co_return res.error();
+    return res.error();
   }
-  transaction_committed_ = true;
-  co_return false;
+
+  std::unordered_set<SHA256Hash> committed_contracts;
+  for (auto const &[addr, hash] :
+       last_frame_.value().new_contract_deployments_) {
+    auto contract_entry = newly_created_contracts_.find(hash);
+    assert(contract_entry != newly_created_contracts_.end());
+
+    auto res = db_proxy_.commit_contract_deploy(addr, hash);
+    if (!res.has_value()) {
+      return res.error();
+    }
+    if (committed_contracts.insert(hash).second) {
+      // contract that wasn't already created within the transaction
+      res = db_proxy_.commit_contract_create(*contract_entry->second);
+      if (!res.has_value()) {
+        return res.error();
+      }
+    }
+  }
+  transaction_committed_or_aborted_ = true;
+  return true;
 }
 
 // can only be called when call_frame_stack_ is nonempty
@@ -244,7 +263,7 @@ SystemCallHandler::get_msg_sender() const
                          : SyscallError{SyscallErrorCode::kIsRootTransaction};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, uint64_t>
+std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>
 SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
                           GasAmount gas_limit, Calldata calldata,
                           InvokeFlagSet flags)
@@ -257,17 +276,30 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
+  if (!invocation_frame_stack_.empty() && is_read_only()) {
+    flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
+  }
+
+  InvokeResult cumulative_result = {
+      .result_ = InvokeStatus<void>{},
+      .gas_consumed_ = 0,
+  };
+
   invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
 
-  auto res = runtime.value()->invoke(method, gas_limit);
+  cumulative_result += runtime.value()->invoke(method, gas_limit);
   auto finish_status =
-      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+      invocation_frame_stack_.finish_frame(cumulative_result.result_,
+                                           execution_mode_data_);
   if (!finish_status.has_value()) {
+    // TODO(geoff): This status will result ending execution of the whole block.
+    // We can add gas consumption here, but that would only affect the state of
+    // the local scheduler, not the canonical chain.
     return {finish_status.error().to_host_fn_error(), 0};
   }
-  res = finish_status.value();
+  cumulative_result += finish_status.value();
 
-  return res.to_host_fn_result();
+  return cumulative_result.to_host_fn_result();
 }
 
 void
@@ -289,11 +321,16 @@ SystemCallHandler::get_return_buffer() const
 }
 
 void
-SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
+SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
+                                     bool revert_frame)
 {
   assert(!invocation_frame_stack_.empty());
   invocation_frame_stack_.get_active_frame().set_frame_return(
       std::move(returned_buffer));
+
+  if (revert_frame) {
+    invocation_frame_stack_.get_active_frame().set_should_revert();
+  }
 }
 
 SystemStatus<std::unique_ptr<Runtime>>
@@ -344,7 +381,8 @@ SystemCallHandler::resolve_runtime(ContractAddress const &addr)
   // actually make the new runtime
   // TODO(geoff): do verification when contracts are created, not each time.
   assert(load_contract);
-  return runtime_context_->make_new_runtime(*load_contract, this, false);
+  return runtime_context_->make_new_runtime(*load_contract, *deployed_hash,
+                                            this, false);
 }
 
 Calldata const &
@@ -364,6 +402,7 @@ SyscallStatus<void>
 SystemCallHandler::log(std::span<const std::byte> message)
 {
   assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
 
   if (message.size() > kMaxLogMessageLen) {
     // log message too long, return error
@@ -389,6 +428,7 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
                                    SHA256Hash const &contract_hash)
 {
   assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
 
   // check that contract_hash actually exists
   // This causes a load of the contract to the cache,
@@ -485,8 +525,9 @@ SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
   return item_view->set(BytestringItem(std::move(new_string)));
 }
 
-SystemStatus<SyscallStatus<std::pair<int128_t, int128_t>>>
-SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
+SystemStatus<SyscallStatus<std::pair<std::optional<int128_t>, int128_t>>>
+SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
+                             bool load_from_snapshot)
 {
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
@@ -495,6 +536,12 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
     if (nnint_item->base_value_.has_value()) {
       return {std::make_pair(*nnint_item->base_value_, nnint_item->add_value_)};
     }
+    // If we're not loading from the snapshot, we can return nullopt for the
+    // base value.
+    if (!load_from_snapshot) {
+      return {std::make_pair(std::nullopt, nnint_item->add_value_)};
+    }
+
     auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
     auto snapshot_value = snapshot_cache_.try_get_snapshot_item(addrkey);
     if (!snapshot_value.has_value()) {
@@ -512,6 +559,10 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
   }
 
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    if (!load_from_snapshot) {
+      return {std::make_pair(std::nullopt, 0)};
+    }
+
     if (!unmodified_item->is_loaded()) {
       auto addrkey = invocation_frame_stack_.get_addrkey(storage_key);
       auto load_status = unmodified_item->load(snapshot_cache_, addrkey);
@@ -535,31 +586,27 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key)
 
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
-                             int128_t set_value, int128_t add_value)
-{
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
-  assert(item_view);
-
-  return item_view->set(
-      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
-}
-
-SystemStatus<SyscallStatus<void>>
-SystemCallHandler::add_nnint(StorageKeyContractData const &storage_key,
+                             std::optional<int128_t> set_value,
                              int128_t add_value)
 {
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
+  // Writing to an nnint, without explicitly defining the set value,
+  // is defined as equivalent to outputting set_add with set equal to
+  // whatever the current database snapshot value is.  As such, it is correct to
+  // overwrite the set value here with nullopt, in such a case.
   return item_view->set(
-      NNIntItem{.base_value_ = std::nullopt, .add_value_ = add_value});
+      NNIntItem{.base_value_ = set_value, .add_value_ = add_value});
 }
+
 SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
+  assert(!is_read_only());
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-
   return item_view->set(DeletedItem{});
 }
 
@@ -713,6 +760,9 @@ SystemStatus<SyscallStatus<void>>
 SystemCallHandler::modify_native_token_balance(
     ContractAddress const &contract_address, int128_t transfer_amount)
 {
+  assert(!invocation_frame_stack_.empty());
+  assert(!is_read_only());
+
   AddressAndKey addrkey{
       .address = contract_address,
       .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};

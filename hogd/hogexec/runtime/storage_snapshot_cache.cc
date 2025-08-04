@@ -33,7 +33,7 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
     }
   }
 
-  auto db_res = db_proxy_.get_deployment(block_id_, addr)();
+  auto db_res = db_proxy_.get_deployment(block_id_, addr);
   if (!db_res) {
     return db_res.error();
   }
@@ -53,7 +53,7 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
     }
   }
 
-  auto db_res = db_proxy_.get_contract(block_id_, hash)();
+  auto db_res = db_proxy_.get_contract(block_id_, hash);
   if (!db_res) {
     return db_res.error();
   }
@@ -91,7 +91,7 @@ StorageSnapshotCache::try_get_snapshot_item(AddressAndKey const &addrkey)
     }
   }
 
-  auto db_res = db_proxy_.get_snapshot_item(block_id_, addrkey)();
+  auto db_res = db_proxy_.get_snapshot_item(block_id_, addrkey);
   if (!db_res) {
     return db_res.error();
   }

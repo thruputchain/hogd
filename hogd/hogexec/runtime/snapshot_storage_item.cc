@@ -84,7 +84,7 @@ SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
   }
 
   auto db_res = db_proxy.get_next_retrocausal_queue_block(block_id, addrkey,
-                                                          search_start_index)();
+                                                          search_start_index);
   if (!db_res) {
     return db_res.error();
   }
@@ -126,7 +126,7 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index)
 
   auto db_res =
       db_proxy_.get_concurrent_retrocausal_queue_entry(block_id_, addrkey_,
-                                                       index)();
+                                                       index);
   if (!db_res) {
     return db_res.error();
   }

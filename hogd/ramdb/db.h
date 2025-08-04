@@ -2,12 +2,24 @@
 
 #pragma once
 
-#include <atomic>
+#include <cassert>
+#include <condition_variable>
+#include <cstddef>
 #include <functional>
+#include <future>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <stop_token>
+#include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
 
+#include "hogd/base/io.h"
 #include "hogd/base/os.h"
+#include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/ramdb/constants.h"
@@ -43,7 +55,7 @@ public:
            size_t log_file_size_threshold = kDiskLogFileThreshold);
 
   // check checks the integrity of a database. It returns the highest valid LSN.
-  static DBStatus<uint64_t> check(const std::string &path, size_t heap_size);
+  static DBStatus<uint64_t> check(std::string_view path, size_t heap_size);
 
   Database(Directory dir, size_t heap_size, int lock_order, int bucket_order,
            int write_head_order)
@@ -134,13 +146,6 @@ private:
   // the directory that stores this database.
   Directory dir_;
 
-  // the modules of the database. Each has a shared lifetime with this object.
-  std::unique_ptr<LogletAllocator> loglet_allocator_;
-  WorkerPool pool_;
-  ItemAllocator item_allocator_;
-  DiskWriter disk_writer_;
-  ScalableMap map_;
-
   // protects cv_, active_, run_expand_, run_compact_, and run_disk_cleanup_.
   std::mutex lock_;
   std::condition_variable_any cv_;
@@ -149,8 +154,12 @@ private:
   bool run_compact_{false};
   bool run_disk_cleanup_{false};
 
-  std::atomic<bool> cleanup_running_{false};
-  std::jthread cleanup_th_;
+  // the modules of the database. Each has a shared lifetime with this object.
+  std::unique_ptr<LogletAllocator> loglet_allocator_;
+  WorkerPool pool_;
+  ItemAllocator item_allocator_;
+  DiskWriter disk_writer_;
+  ScalableMap map_;
 
   // runs background_worker().
   std::jthread bg_th_;
