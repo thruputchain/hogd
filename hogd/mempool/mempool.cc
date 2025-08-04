@@ -21,7 +21,7 @@ namespace hogd {
 // TODO(jhumphri): When should we remove txs from [vetted_txs_]?
 
 x23::Async<void>
-Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch const &batch)
+Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
 {
   // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
   // vetted.
@@ -34,7 +34,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch const &batch)
 
 x23::Async<void>
 Mempool::schedulercoord_submit_vetted(ValidatorID validator_id,
-                                      SignedTransactionBatch const &batch)
+                                      SignedTransactionBatch batch)
 {
   for (const SignedTransaction &tx : batch) {
     vetted_txs_[sha256(tx)] = tx;
@@ -94,10 +94,10 @@ Mempool::close_snapshot(BlockID block_id)
   CHECK_EQ(res.result(), DbResult::DbResultOK);
 }
 
-void
+x23::Async<void>
 Mempool::finish_block(BlockID block_id)
 {
-  exec_client_.executorcoord_finish_block(block_id)();
+  return exec_client_.executorcoord_finish_block(block_id);
 }
 
 // We add each tx hash to the Merkle trie as a key with an empty value. So in
@@ -155,7 +155,7 @@ Mempool::propose_batch(
     x23::XdrVec<NominatedTransaction> &transaction_nominations)
 {
   ExecProposeBatchResult res =
-      exec_client_.executorcoord_propose_batch(block_id, txs)();
+      co_await exec_client_.executorcoord_propose_batch(block_id, txs);
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
@@ -184,7 +184,7 @@ Mempool::open_proposal_block(BlockID block_id)
 }
 
 x23::Async<SchedulerNominationResult>
-Mempool::schedulercoord_nominate(DbTip const &db_tip)
+Mempool::schedulercoord_nominate(DbTip db_tip)
 {
   BlockID block_id = get_ns_since_epoch();
   if (!create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
@@ -219,6 +219,7 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
     it++;
   }
 
+  printf("A\n");
   if (txs.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     finish_block(block_id);
@@ -226,16 +227,20 @@ Mempool::schedulercoord_nominate(DbTip const &db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-  else if (!propose_batch(block_id, txs,
-                          nomination.transaction_nominations)()) {
+  else if (!co_await propose_batch(block_id, txs,
+                                   nomination.transaction_nominations)) {
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
+  printf("B\n");
 
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
-  finish_block(block_id);
+  printf("C\n");
+  co_await finish_block(block_id);
+  printf("D\n");
   close_snapshot(block_id);
 
+  printf("E\n");
   co_return result;
 }
 
@@ -263,8 +268,7 @@ Mempool::open_validation_block(BlockID block_id)
 }
 
 x23::Async<SchedulerValidationResult>
-Mempool::schedulercoord_validate(DbTip const &db_tip,
-                                 Nomination const &nomination)
+Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
 {
   BlockID block_id = get_ns_since_epoch();
   if (!create_snapshot(/*prev_block_id=*/db_tip.id, block_id,

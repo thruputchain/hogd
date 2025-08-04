@@ -46,31 +46,28 @@ public:
   {}
 
   // Disable copy and move.
-  Mempool(Mempool const &) = delete;
-  Mempool &operator=(Mempool const &) = delete;
+  Mempool(const Mempool &) = delete;
+  Mempool &operator=(const Mempool &) = delete;
   Mempool(Mempool &&) = delete;
   Mempool &operator=(Mempool &&) = delete;
 
   static x23::Async<void> schedulercoord_null() { co_return; }
 
   // Submit an unvetted tx.
-  x23::Async<void>
-  schedulercoord_submit_unvetted(SignedTransactionBatch const &batch);
+  x23::Async<void> schedulercoord_submit_unvetted(SignedTransactionBatch batch);
 
   // Submit a vetted tx.
-  x23::Async<void>
-  schedulercoord_submit_vetted(ValidatorID validator_id,
-                               SignedTransactionBatch const &batch);
+  x23::Async<void> schedulercoord_submit_vetted(ValidatorID validator_id,
+                                                SignedTransactionBatch batch);
 
   // Have the mempool put together a block of transactions and nominate the
   // block. [db_tip] specifies the last committed block.
-  x23::Async<SchedulerNominationResult>
-  schedulercoord_nominate(DbTip const &db_tip);
+  x23::Async<SchedulerNominationResult> schedulercoord_nominate(DbTip db_tip);
 
   // Have the mempool validate a block. [nomination] holds the block to
   // validate. [db_tip] specifies the last committed block.
   x23::Async<SchedulerValidationResult>
-  schedulercoord_validate(DbTip const &db_tip, Nomination const &nomination);
+  schedulercoord_validate(DbTip db_tip, Nomination nomination);
 
   // It is an error to shut down the mempool while there are transactions that
   // are still running.
@@ -107,7 +104,7 @@ private:
                        BlockExecutionMode);
   void abandon_snapshot(BlockID block_id);
   void close_snapshot(BlockID block_id);
-  void finish_block(BlockID block_id);
+  x23::Async<void> finish_block(BlockID block_id);
 
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
 
