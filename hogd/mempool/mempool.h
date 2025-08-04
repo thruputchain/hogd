@@ -29,13 +29,13 @@ class Mempool {
 public:
   using rpc_service = SchedulerCoord1;
 
-  using coord_client_t =
+  using db_client_t =
       DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
   using exec_client_t =
       ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
 
-  Mempool(coord_client_t &&db_client, exec_client_t &&exec_client)
+  Mempool(db_client_t &&db_client, exec_client_t &&exec_client)
     : db_client_(std::move(db_client)), exec_client_(std::move(exec_client))
   {}
 
@@ -120,7 +120,7 @@ private:
 
   bool open_validation_block(BlockID block_id);
 
-  coord_client_t db_client_;
+  db_client_t db_client_;
   exec_client_t exec_client_;
 
   std::unordered_map<SHA256Hash, SignedTransaction> vetted_txs_;
