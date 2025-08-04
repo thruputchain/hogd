@@ -117,7 +117,7 @@ public:
   // Provide the functions that are made available to wasm modules(as function
   // imports). Imports in wasm are identified by "module name" and "function
   // name". For simplicity, this API implements only u64 arguments (between 0
-  // and 5) and expects imported functions to return an i32 (i.e. an error
+  // and 8) and expects imported functions to return an i32 (i.e. an error
   // code from the syscall).
   //
   // Imported functions functions have a signature of
