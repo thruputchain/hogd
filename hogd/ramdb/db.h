@@ -97,7 +97,7 @@ public:
   DBStatus<size_t> get_size(std::span<const std::byte> key);
 
   // get_type returns the type of the item (if it exists).
-  DBStatus<size_t> get_type(std::span<const std::byte> key);
+  DBStatus<uint8_t> get_type(std::span<const std::byte> key);
 
   // put inserts an item.
   DBStatus<void> put(std::span<const std::byte> key, uint8_t type,
