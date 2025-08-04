@@ -57,7 +57,8 @@ hogdb_init(std::string_view path, size_t ram_bytes)
 
   // create the RPC context.
   HogDatabase db(std::move(*ramdb));
-  RPCContext ctx(db);
+  MerkleTriePrefix trie;
+  RPCContext ctx(db, trie);
 
   // insert each item in the database into the merkle trie.
   ctx.get_db().get_each_parallel([](std::span<const std::byte> key,
