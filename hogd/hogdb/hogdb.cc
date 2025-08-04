@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // TODO(abelay): there is apparently a header dependency problem inside x23
 // where x23/vec.h cannot be included first.  These generated headers are not
@@ -17,6 +18,7 @@
 #include "rpc_types.hh" // NOLINT
 
 #include "hogd/base/log.h"
+#include "hogd/base/perthread.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -63,9 +65,13 @@ hogdb_init(std::string_view path, size_t ram_bytes)
   // insert each item in the database into the merkle trie.
   MerkleTriePrefix trie;
   ctx.get_db().get_each_parallel([&trie](std::span<const std::byte> key,
-                                         uint8_t /*type*/,
+                                         uint8_t type,
                                          std::span<const std::byte> value) {
-    CHECK(trie.insert(key, value));
+    static PerThread<std::vector<std::byte>> new_key;
+    new_key->clear();
+    new_key->push_back(static_cast<std::byte>(type));
+    new_key->insert(new_key->end(), key.begin(), key.end());
+    CHECK(trie.insert(std::span<const std::byte>(*new_key), value));
   });
   trie.generate_top_level_hashes();
 
