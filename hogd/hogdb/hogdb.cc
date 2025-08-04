@@ -15,6 +15,7 @@
 // needed, but included as a hack to avoid it.
 #include "db_coord.hh" // NOLINT
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/item_change.h"
 #include "rpc_types.hh" // NOLINT
 
 #include "hogd/base/log.h"
