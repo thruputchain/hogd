@@ -29,6 +29,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/rpc/rpc.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -257,16 +258,11 @@ HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
       read_wasm_code(ctx_.get_db(), hash);
   if (!wasm)
     return ExpectedContract(to_rpc_error(wasm.error()));
-
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract();
-  const auto *cptr = reinterpret_cast<const char *>(wasm->data());
-  contract.wasmi_contract().append_range(
-      std::span<const char>(cptr, wasm->size()));
-
+  
   ExpectedContract out;
   out.error(RPCError::kRPCNone);
-  out.contract() = contract;
+
+  x23::deserialize(&out.contract(), *wasm);
   return out;
 }
 
