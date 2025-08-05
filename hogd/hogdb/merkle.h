@@ -11,7 +11,9 @@
 #include <variant>
 #include <vector>
 
+#include "hogd/base/status.h"
 #include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/item_change.h"
 
 namespace hogd {
 
