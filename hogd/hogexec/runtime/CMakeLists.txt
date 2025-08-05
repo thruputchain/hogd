@@ -62,6 +62,7 @@ add_library(runtime_test_objects OBJECT
   item_view_test.cc
   manual_revert_comprehensive_test.cc
   manual_revert_wasm_test.cc
+  manual_revert_caller_wasm_test.cc
   memory_access_test.cc
   native_contract_test.cc
   nnint_add_test.cc
