@@ -1,33 +1,46 @@
-#include <cstddef>
-#include <cstdio>
-#include <cstring>
-#include <future>
 #include <gtest/gtest.h>
-#include <iostream>
 
-#include <map>
+
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <memory>
-#include <print>
-#include <random>
-#include <set>
-#include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
-#include <vector>
 
+#include "contract.hh"
+#include "coord.hh"
+#include "coord_sched.hh"
+#include "db_coord.hh"
+#include "discovery.hh"
+#include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_coord_server.h"
+#include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/mempool.h"
+#include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
+#include "nomination.hh"
+#include "sched_coord.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "transaction.hh"
 #include "types.hh"
+#include "x23/event.h"
+#include "x23/rpc.h"
+#include "x23/sockio.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -143,11 +156,12 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
 
   SignedTransactionBatch txs;
   txs.reserve(num_txs);
-  for (int64_t i = 0; i < num_txs; i++) {
+  for (uint64_t i = 0; i < num_txs; i++) {
+    Timestamp created = i;
     SignedTransaction tx{
         .tx =
             Transaction{.id = {},
-                        .created = i,
+                        .created = created,
                         .invocation = fib_client.make_invocation<kProgramName>(
                             UINT64_MAX, kFibonacciN),
                         .contracts_to_deploy = {}}};

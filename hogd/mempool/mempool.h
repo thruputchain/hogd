@@ -1,19 +1,16 @@
 #pragma once
 
 #include <atomic>
-#include <limits>
-#include <memory>
-#include <random>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "coord_sched.hh"
+#include "db_coord.hh"
+#include "discovery.hh"
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
-#include "hogd/hogexec/interface/executor_state_manager.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
