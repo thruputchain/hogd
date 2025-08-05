@@ -28,8 +28,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
   for (const SignedTransaction &tx : batch) {
     vetted_txs_[sha256(tx)] = tx;
   }
-  coord_client_.coordscheduler_notify_vetted(batch)();
-  co_return;
+  co_return co_await coord_client_.coordscheduler_notify_vetted(batch);
 }
 
 x23::Async<void>
@@ -78,7 +77,7 @@ Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
 void
 Mempool::abandon_snapshot(BlockID block_id)
 {
-  DbResult res = db_client_.dbcoord_abandon_snapshot(block_id)();
+  DbResult res = co_await db_client_.dbcoord_abandon_snapshot(block_id);
   // TODO(jhumphri): Geoff currently always returns [DbResultOK], but this could
   // change in the future. In the case of a failure, we need to clean up db
   // state.
@@ -88,7 +87,7 @@ Mempool::abandon_snapshot(BlockID block_id)
 void
 Mempool::close_snapshot(BlockID block_id)
 {
-  DbBlockResult res = db_client_.dbcoord_close_snapshot(block_id)();
+  DbBlockResult res = co_await db_client_.dbcoord_close_snapshot(block_id);
   // [dbcoord_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbResult::DbResultOK);
@@ -179,7 +178,8 @@ Mempool::propose_batch(
 bool
 Mempool::open_proposal_block(BlockID block_id)
 {
-  ExecResult res = exec_client_.executorcoord_open_proposal_block(block_id)();
+  ExecResult res =
+      co_await exec_client_.executorcoord_open_proposal_block(block_id);
   return res == ExecResult::ExecResultOK;
 }
 
@@ -249,12 +249,12 @@ Mempool::validate_batch(BlockID block_id,
                         const x23::Vec<ProposedTransaction> &txs)
 {
   ExecValidateBatchResult res =
-      exec_client_.executorcoord_validate_batch(block_id, txs)();
+      co_await exec_client_.executorcoord_validate_batch(block_id, txs);
   if (std::any_of(res.begin(), res.end(), [](const ExecResult &r) {
         return r != ExecResult::ExecResultOK;
       })) {
     // TODO(jhumphri): Use co_await.
-    finish_block(block_id)();
+    co_await finish_block(block_id);
     abandon_snapshot(block_id);
     return false;
   }
@@ -264,7 +264,8 @@ Mempool::validate_batch(BlockID block_id,
 bool
 Mempool::open_validation_block(BlockID block_id)
 {
-  ExecResult res = exec_client_.executorcoord_open_validation_block(block_id)();
+  ExecResult res =
+      co_await exec_client_.executorcoord_open_validation_block(block_id);
   return res == ExecResult::ExecResultOK;
 }
 
