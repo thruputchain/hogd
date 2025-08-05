@@ -142,12 +142,15 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
                                                  TransactionID tx,
                                                  StorageDeltaBatch const &batch)
 {
+  std::println("got here 1");
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
+  std::println("got here 2");
   int depth = itx->create_savepoint();
-
+  std::println("got here 3");
   for (auto const &delta : batch) {
+    std::println("got here 4 {}", x23::show(delta));
     if (RPCError err =
             request_one(*itx, delta.addrkey, delta.delta, delta.flags);
         err != RPCError::kRPCNone) {
@@ -155,7 +158,7 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
       return err;
     }
   }
-
+  std::println("got here 5");
   return RPCError::kRPCNone;
 }
 

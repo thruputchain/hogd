@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <mutex>
+#include <print>
 #include <unordered_map>
 #include <utility>
 
@@ -72,26 +73,38 @@ private:
 inline BlockTX *
 RPCContext::get_block_tx(BlockTXID bid)
 {
+  std::println("get_block_tx: bid={}", bid);
   BlockCache &cache = *block_tx_cache_;
   std::scoped_lock g(cache.lock); // NOTE: very low contention
+  std::println("get_block_tx: cache.blocks.size={}", cache.blocks.size());  
   auto it = cache.blocks.find(bid);
-  if (it == cache.blocks.end())
+  if (it == cache.blocks.end()) {
+    std::println("get_block_tx: not found, calling get_block_tx_slow");
     return get_block_tx_slow(bid);
+  }
+  std::println("get_block_tx: found");
   return it->second;
 }
 
 inline InvokeTX *
 RPCContext::get_invoke_tx(BlockTXID bid, InvokeTXID iid)
 {
+  std::println("get_invoke_tx: bid={}, iid={}", bid, iid);
   auto key = std::make_pair(bid, iid);
   auto [tx, ul] = invoke_txes_.find(key);
+  std::println("get_invoke_tx: tx={}", tx ? "true" : "false");
   if (!tx) {
+    std::println("get_invoke_tx: creating new tx");
     BlockTX *btx = get_block_tx(bid);
+    std::println("get_invoke_tx: btx={}", btx ? "true" : "false");
     if (!btx) [[unlikely]]
       return nullptr;
+    std::println("get_invoke_tx: inserting tx");
     tx = invoke_txes_.insert(key, InvokeTX(*btx), ul);
+    std::println("get_invoke_tx: tx={}", tx ? "true" : "false");
     assert(tx != nullptr);
   }
+  std::println("get_invoke_tx: returning tx");
   return tx;
 }
 
