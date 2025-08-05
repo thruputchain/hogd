@@ -4,7 +4,9 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -12,6 +14,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -106,6 +109,25 @@ public:
     StorageKeyContractData key{};
     std::memcpy(key.data(), str.data(), str.size());
     return key;
+  }
+  static StorageKeyContractData
+  make_storage_key_matching_static_key_sdk_macro(std::string_view str)
+  {
+    // the sdk puts quotes around the string input to the static_key macro
+    std::string sdk_input = "\"" + std::string(str) + "\"";
+    return StorageKeyContractData{
+        // include the null terminator
+        sha256(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(
+                                            sdk_input.data()),
+                                        sdk_input.size()))};
+  }
+  static AddressAndKey make_contract_data_addrkey_matching_static_key_sdk_macro(
+      ContractAddress const &address, std::string_view str)
+  {
+    StorageKey key(StorageKeyType::kStorageKeyTypeContractData);
+    key.contract_data_key() =
+        make_storage_key_matching_static_key_sdk_macro(str);
+    return AddressAndKey{.address = address, .key = std::move(key)};
   }
   static AddressAndKey
   make_contract_data_addrkey(ContractAddress const &address,
