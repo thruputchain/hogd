@@ -189,7 +189,7 @@ CoroPollImpl::get_reader(BorrowedFd fd)
   auto fdp = getfd(fd);
   if (fdp->mode() == FdState::kPoisoned)
     return nullptr;
-  return getfd(fd)->reader();
+  return fdp->reader();
 }
 
 std::shared_ptr<WriteBuffer>
@@ -198,7 +198,7 @@ CoroPollImpl::get_writer(BorrowedFd fd)
   auto fdp = getfd(fd);
   if (fdp->mode() == FdState::kPoisoned)
     return nullptr;
-  return getfd(fd)->writer();
+  return fdp->writer();
 }
 
 void
