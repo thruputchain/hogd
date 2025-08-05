@@ -413,8 +413,8 @@ protected:
     });
 
     auto contract = test::load_test_contract("cxs_roundtrip.wasm");
-    in_memory_db_.write_contract(sha256(*contract), contract);
-    in_memory_db_.write_deployment(cxs_contract_addr_, sha256(*contract));
+    write_contract(contract);
+    write_deployment(cxs_contract_addr_, sha256(*contract));
     setup_grant_storage_token(cxs_contract_addr_, 1'000'000'000);
 
     std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
@@ -425,10 +425,8 @@ protected:
 
     // deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
-    in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                                 native_contract_xdr);
-    in_memory_db_.write_deployment(native_contract_addr_,
-                                   sha256(*native_contract_xdr));
+    write_contract(native_contract_xdr);
+    write_deployment(native_contract_addr_, sha256(*native_contract_xdr));
 
     multiplexed_context_ = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{

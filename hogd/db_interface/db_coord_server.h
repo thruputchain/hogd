@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <optional>
 
 #include "db_coord.hh"
 #include "hogd/base/types.h"
@@ -53,10 +54,16 @@ public:
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
 
+  uint16_t port();
+
 private:
   BlockManager *block_manager_;
   x23::ThreadPool pool_ = x23::ThreadPool(2);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
+  // protecting port_ during initialization
+  std::mutex mtx_;
+  std::condition_variable cv_;
+  std::optional<uint16_t> port_;
 };
 
 static_assert(is_DbCoord1<DbCoordServer *, x23::Async>);

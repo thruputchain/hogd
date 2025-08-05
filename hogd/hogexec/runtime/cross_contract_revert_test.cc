@@ -152,10 +152,11 @@ TEST_F(CrossContractRevertTest, BasicCrossContractRevert)
   // Deploy both contracts
   auto contract_a_obj = make_native_contract(0);
   auto contract_b_obj = make_native_contract(1);
-  in_memory_db_.write_contract(sha256(*contract_a_obj), contract_a_obj);
-  in_memory_db_.write_contract(sha256(*contract_b_obj), contract_b_obj);
-  in_memory_db_.write_deployment(contract_a_addr, sha256(*contract_a_obj));
-  in_memory_db_.write_deployment(contract_b_addr, sha256(*contract_b_obj));
+
+  write_contract(contract_a_obj);
+  write_contract(contract_b_obj);
+  write_deployment(contract_a_addr, sha256(*contract_a_obj));
+  write_deployment(contract_b_addr, sha256(*contract_b_obj));
   setup_grant_storage_token(contract_a_addr, 1'000'000'000);
   setup_grant_storage_token(contract_b_addr, 1'000'000'000);
 
@@ -359,12 +360,12 @@ TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
   auto contract_a_obj = make_native_contract(0);
   auto contract_b_obj = make_native_contract(1);
   auto contract_c_obj = make_native_contract(2);
-  in_memory_db_.write_contract(sha256(*contract_a_obj), contract_a_obj);
-  in_memory_db_.write_contract(sha256(*contract_b_obj), contract_b_obj);
-  in_memory_db_.write_contract(sha256(*contract_c_obj), contract_c_obj);
-  in_memory_db_.write_deployment(contract_a_addr, sha256(*contract_a_obj));
-  in_memory_db_.write_deployment(contract_b_addr, sha256(*contract_b_obj));
-  in_memory_db_.write_deployment(contract_c_addr, sha256(*contract_c_obj));
+  write_contract(contract_a_obj);
+  write_contract(contract_b_obj);
+  write_contract(contract_c_obj);
+  write_deployment(contract_a_addr, sha256(*contract_a_obj));
+  write_deployment(contract_b_addr, sha256(*contract_b_obj));
+  write_deployment(contract_c_addr, sha256(*contract_c_obj));
   setup_grant_storage_token(contract_a_addr, 1'000'000'000);
   setup_grant_storage_token(contract_b_addr, 1'000'000'000);
   setup_grant_storage_token(contract_c_addr, 1'000'000'000);
@@ -496,10 +497,10 @@ TEST_F(CrossContractRevertTest, RevertWithReturnData)
   // Deploy both contracts
   auto contract_a_obj = make_native_contract(0);
   auto contract_b_obj = make_native_contract(1);
-  in_memory_db_.write_contract(sha256(*contract_a_obj), contract_a_obj);
-  in_memory_db_.write_contract(sha256(*contract_b_obj), contract_b_obj);
-  in_memory_db_.write_deployment(contract_a_addr, sha256(*contract_a_obj));
-  in_memory_db_.write_deployment(contract_b_addr, sha256(*contract_b_obj));
+  write_contract(contract_a_obj);
+  write_contract(contract_b_obj);
+  write_deployment(contract_a_addr, sha256(*contract_a_obj));
+  write_deployment(contract_b_addr, sha256(*contract_b_obj));
   setup_grant_storage_token(contract_a_addr, 1'000'000'000);
   setup_grant_storage_token(contract_b_addr, 1'000'000'000);
 

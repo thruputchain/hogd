@@ -72,8 +72,8 @@ protected:
 
     // mark the contract as existing and deployed within the database
     auto contract_0 = make_native_contract(0);
-    in_memory_db_.write_contract(sha256(*contract_0), contract_0);
-    in_memory_db_.write_deployment(contract_address_, sha256(*contract_0));
+    write_contract(contract_0);
+    write_deployment(contract_address_, sha256(*contract_0));
   }
 
   ContractAddress contract_address_{
