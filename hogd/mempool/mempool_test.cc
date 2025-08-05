@@ -156,11 +156,12 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
 
   SignedTransactionBatch txs;
   txs.reserve(num_txs);
-  for (int64_t i = 0; i < num_txs; i++) {
+  for (uint64_t i = 0; i < num_txs; i++) {
+    Timestamp created = i;
     SignedTransaction tx{
         .tx =
             Transaction{.id = {},
-                        .created = i,
+                        .created = created,
                         .invocation = fib_client.make_invocation<kProgramName>(
                             UINT64_MAX, kFibonacciN),
                         .contracts_to_deploy = {}}};
