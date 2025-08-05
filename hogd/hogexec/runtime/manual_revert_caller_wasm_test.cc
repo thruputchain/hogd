@@ -56,6 +56,7 @@ protected:
   ContractAddress target_contract_addr_;
   ContractAddress caller_contract_addr_;
 };
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 //
 // Test that basic cross-contract revert functionality works
@@ -416,5 +417,7 @@ TEST_F(ManualRevertCallerWasmTest, StaticKeyMacro)
                               0x21, 0x74, 0x70, 0xe0, 0x7a, 0xb0, 0xa1, 0x16};
   ASSERT_EQ(sdk_key, native_key);
 }
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
