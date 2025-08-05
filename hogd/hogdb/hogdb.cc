@@ -16,6 +16,7 @@
 #include "db_coord.hh" // NOLINT
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/item_change.h"
+#include "hogd/hogdb/merkle.h"
 #include "rpc_types.hh" // NOLINT
 
 #include "hogd/base/log.h"
@@ -67,7 +68,7 @@ hogdb_init(std::string_view path, size_t ram_bytes)
                                          uint8_t type,
                                          std::span<const std::byte> value) {
     std::span<const std::byte> k =
-        ItemChange::add_type_to_merkle_key(key, type);
+        MerkleTrieHelpers::add_type_to_merkle_key(key, type);
     CHECK(trie.insert(k, value));
   });
   trie.generate_top_level_hashes();

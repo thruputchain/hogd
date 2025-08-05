@@ -14,39 +14,10 @@
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/merkle.h"
 #include "hogd/hogdb/status.h"
 
 namespace hogd {
-
-namespace {
-
-HogDBStatus<void>
-update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key, uint8_t type,
-                       const std::span<const std::byte> &value)
-{
-  std::span<const std::byte> raw_key = key.get_address().as_bytes();
-  std::span<const std::byte> k =
-      ItemChange::add_type_to_merkle_key(raw_key, type);
-  if (!trie.insert_or_update(k, value)) {
-    return HogDBError(HogDBCode::kInternal);
-  }
-  return {};
-}
-
-HogDBStatus<void>
-remove_kv_pair_from_trie(MerkleTriePrefix &trie, const ItemKey &key,
-                         uint8_t type)
-{
-  std::span<const std::byte> raw_key = key.get_address().as_bytes();
-  std::span<const std::byte> k =
-      ItemChange::add_type_to_merkle_key(raw_key, type);
-  if (!trie.remove(k)) {
-    return HogDBError(HogDBCode::kNotFound);
-  }
-  return {};
-}
-
-} // namespace
 
 inline HogDBStatus<void>
 NNInt128::commit(HogDatabase &db, MerkleTriePrefix &trie,
@@ -57,9 +28,12 @@ NNInt128::commit(HogDatabase &db, MerkleTriePrefix &trie,
   if (ret) {
     std::span<std::byte> value_span(reinterpret_cast<std::byte *>(&v),
                                     sizeof(v));
-    // [update_kv_pair_in_trie] will always succeed as [trie.insert_or_update()]
-    // only fails if we attempt to insert an empty key.
-    CHECK(update_kv_pair_in_trie(trie, key, kNNInt128, value_span).has_value());
+    // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
+    // [trie.insert_or_update()] only fails if we attempt to insert an empty
+    // key.
+    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, kNNInt128,
+                                                    value_span)
+              .has_value());
   }
   return ret;
 }
@@ -148,9 +122,11 @@ Bytes::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key) const
   std::span<const std::byte> v = std::as_bytes(std::span(buf_));
   HogDBStatus<void> ret = write_bytes(db, key, v);
   if (ret) {
-    // [update_kv_pair_in_trie] will always succeed as [trie.insert_or_update()]
-    // only fails if we attempt to insert an empty key.
-    CHECK(update_kv_pair_in_trie(trie, key, kBytes, v).has_value());
+    // [MerkleTrieHelpers::update_kv_pair_in_trie] will always succeed as
+    // [trie.insert_or_update()] only fails if we attempt to insert an empty
+    // key.
+    CHECK(MerkleTrieHelpers::update_kv_pair_in_trie(trie, key, kBytes, v)
+              .has_value());
   }
   return ret;
 }
@@ -167,10 +143,11 @@ Deletion::commit(HogDatabase &db, MerkleTriePrefix &trie, const ItemKey &key)
   if (!remove_ret) {
     return remove_ret;
   }
-  // [remove_kv_pair_from_trie] will always succeed as we will never attempt to
-  // remove a key that does not exist. We already checked above that the key
-  // exists when we removed it from the database.
-  CHECK(remove_kv_pair_from_trie(trie, key, type_ret.value()).has_value());
+  // [MerkleTrieHelpers::remove_kv_pair_from_trie] will always succeed as we
+  // will never attempt to remove a key that does not exist. We already checked
+  // above that the key exists when we removed it from the database.
+  CHECK(MerkleTrieHelpers::remove_kv_pair_from_trie(trie, key, type_ret.value())
+            .has_value());
   return {};
 }
 

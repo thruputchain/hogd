@@ -184,17 +184,6 @@ public:
   // needed to store the item if committed (could be negative).
   HogDBStatus<ssize_t> storage_cost_delta(HogDatabase &db, const ItemKey &key);
 
-  static std::span<const std::byte>
-  add_type_to_merkle_key(std::span<const std::byte> &key, uint8_t type)
-  {
-    static PerThread<std::vector<std::byte>> backing_store;
-
-    backing_store->clear();
-    backing_store->insert(backing_store->end(), key.begin(), key.end());
-    backing_store->push_back(static_cast<std::byte>(type));
-    return std::span<const std::byte>(*backing_store);
-  }
-
 private:
   bool exclusive_{false};
   std::optional<size_t> snapshot_cost_;
