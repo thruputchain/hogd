@@ -57,7 +57,9 @@ x23::Async<DbResult>
 DbCoordServer::dbcoord_abandon_snapshot(BlockID id)
 {
   // TODO(geoff): Implement actual abandon logic if needed
-  // For now, just return ok for stub
+  // For now, just return ok for stub. If and when this function can return a
+  // status other than [DbResultOK], the mempool will need to be updated
+  // (please coordinate with jhumphri@ on this).
   co_return DbResult::DbResultOK;
 }
 

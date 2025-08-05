@@ -334,6 +334,16 @@ class MerkleTriePrefix {
 public:
   MerkleTriePrefix() = default;
 
+  SHA256Hash get_root_hash()
+  {
+    Node root;
+    root.init_branch(/*parent=*/nullptr);
+    for (size_t i = 0; i < tries_.size(); i++) {
+      root.child[i] = &tries_[i].root_;
+    }
+    return root.compute_node_hash();
+  }
+
   std::pair<SHA256Hash, std::vector<std::byte>>
   get_proof(const MerkleTrie::Key &k)
   {

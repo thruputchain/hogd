@@ -36,10 +36,10 @@ namespace hogd {
 
 namespace {
 
-constexpr int
+constexpr size_t
 active_cores(const WorkerPool &pool)
 {
-  return std::max(pool.worker_count() / kActiveBGCoreFraction, 1);
+  return std::max(pool.worker_count() / kActiveBGCoreFraction, 1UL);
 }
 
 DBStatus<std::unique_ptr<Database>>
@@ -112,7 +112,7 @@ Database::set_active(bool yes)
   }
 
   // set the worker pool limit.
-  int cores = yes ? active_cores(pool_) : pool_.worker_count();
+  size_t cores = yes ? active_cores(pool_) : pool_.worker_count();
   pool_.adjust_workers(cores);
 }
 
