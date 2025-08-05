@@ -253,6 +253,8 @@ TEST(Mempool, SubmitVetted)
 
 TEST(Mempool, Nominate)
 {
+  x23::RpcLogger::default_logfd = 1;
+
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 

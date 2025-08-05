@@ -70,8 +70,8 @@ bool
 Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
                          BlockExecutionMode mode)
 {
-  DbResult res =
-      db_client_.dbcoord_create_snapshot(prev_block_id, block_id, mode)();
+  DbResult res = co_await db_client_.dbcoord_create_snapshot(prev_block_id,
+                                                             block_id, mode);
   return res == DbResult::DbResultOK;
 }
 
@@ -222,7 +222,7 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   printf("A\n");
   if (txs.empty()) {
     // There are no vetted txs, so we cannot propose a block.
-    finish_block(block_id);
+    co_await finish_block(block_id);
     abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
@@ -235,7 +235,7 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   printf("B\n");
 
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
-  printf("C\n");
+  printf("C on tid %d\n", gettid());
   co_await finish_block(block_id);
   printf("D\n");
   close_snapshot(block_id);
@@ -253,7 +253,8 @@ Mempool::validate_batch(BlockID block_id,
   if (std::any_of(res.begin(), res.end(), [](const ExecResult &r) {
         return r != ExecResult::ExecResultOK;
       })) {
-    finish_block(block_id);
+    // TODO(jhumphri): Use co_await.
+    finish_block(block_id)();
     abandon_snapshot(block_id);
     return false;
   }
@@ -292,7 +293,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   x23::Vec<ProposedTransaction> txs;
   txs.reserve(nomination.transaction_nominations.size());
   if (!find_vetted_txs(nomination, txs)) {
-    finish_block(block_id);
+    co_await finish_block(block_id);
     abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationMissingTxs);
@@ -300,7 +301,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   if (nomination.transaction_nominations.empty()) {
     CHECK(txs.empty());
     // Empty nomination.
-    finish_block(block_id);
+    co_await finish_block(block_id);
     abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
@@ -317,13 +318,13 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   // [nomination.transaction_hashes] here because we already checked above that
   // all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
-    finish_block(block_id);
+    co_await finish_block(block_id);
     abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
-  finish_block(block_id);
+  co_await finish_block(block_id);
   close_snapshot(block_id);
 
   SchedulerValidationResult result(
