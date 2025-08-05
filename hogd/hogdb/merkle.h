@@ -19,6 +19,8 @@ namespace hogd {
 
 class MerkleTrieHelpers {
 public:
+  // This class just contains static methods, so we do not allow you to
+  // construct an instance of the class.
   MerkleTrieHelpers() = delete;
 
   // Creates the key to insert into the Merkle trie from [key] and [type]. We
@@ -36,7 +38,7 @@ public:
     return std::span<const std::byte>(*backing_store);
   }
 
-  // Inserts or update a KV pair.
+  // Inserts or updates a KV pair.
   static HogDBStatus<void>
   update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key,
                          uint8_t type, const std::span<const std::byte> &value)
