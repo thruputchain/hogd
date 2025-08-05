@@ -30,7 +30,7 @@ ExecCoordServer::start_rpc_service(DatabaseIdentifier identifier,
                                    uint16_t self_executor_id)
 {
   auto db_proxy = connect_to_database(std::move(identifier));
-  rpc_interface_ = std::make_unique<ExecutorRpcInterface>(self_executor_id,
+  rpc_interface_ = std::make_unique<ExecutorRpcInterface>(self_executor_id, cp_,
                                                           main_worker_pool_,
                                                           std::move(db_proxy));
 }
@@ -65,11 +65,13 @@ ExecCoordServer::get_exec_result(std::string const &coord_address,
 }
 
 void
-ExecCoordServer::init_from_coord(std::string const &coord_addr)
+ExecCoordServer::init_from_coord(std::string_view coord_addr,
+                                 const LocalMockDB *mock_db)
 {
   x23::HostPort host_port;
   if (!host_port.parse(coord_addr)) {
-    throw std::runtime_error("Invalid coord address: " + coord_addr);
+    throw std::runtime_error(
+        std::format("Invalid coord address: {}", coord_addr));
   }
 
   std::string host = {host_port.host.begin(), host_port.host.end()};
@@ -77,7 +79,12 @@ ExecCoordServer::init_from_coord(std::string const &coord_addr)
 
   auto exec_result = get_exec_result(host, port);
   assert(exec_result.exec_id < std::numeric_limits<uint16_t>::max());
-  start_rpc_service(ShardedDB(exec_result), exec_result.exec_id);
+  if (mock_db) {
+    start_rpc_service(*mock_db, exec_result.exec_id);
+  }
+  else {
+    start_rpc_service(ShardedDB(exec_result), exec_result.exec_id);
+  }
 }
 
 } // namespace hogd
