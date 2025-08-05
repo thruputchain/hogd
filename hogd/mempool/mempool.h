@@ -100,10 +100,10 @@ private:
   bool find_vetted_txs(const Nomination &nomination,
                        x23::Vec<ProposedTransaction> &ret);
 
-  bool create_snapshot(BlockID prev_block_id, BlockID block_id,
-                       BlockExecutionMode);
-  void abandon_snapshot(BlockID block_id);
-  void close_snapshot(BlockID block_id);
+  x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
+                                   BlockExecutionMode);
+  x23::Async<void> abandon_snapshot(BlockID block_id);
+  x23::Async<void> close_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id);
 
   SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
@@ -112,12 +112,12 @@ private:
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,
                 x23::XdrVec<NominatedTransaction> &transaction_nominations);
 
-  bool open_proposal_block(BlockID block_id);
+  x23::Async<bool> open_proposal_block(BlockID block_id);
 
-  bool validate_batch(BlockID block_id,
-                      const x23::Vec<ProposedTransaction> &txs);
+  x23::Async<bool> validate_batch(BlockID block_id,
+                                  const x23::Vec<ProposedTransaction> &txs);
 
-  bool open_validation_block(BlockID block_id);
+  x23::Async<bool> open_validation_block(BlockID block_id);
 
   coord_client_t coord_client_;
   db_client_t db_client_;

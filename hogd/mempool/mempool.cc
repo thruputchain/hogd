@@ -65,16 +65,16 @@ Mempool::find_vetted_txs(const Nomination &nomination,
   return true;
 }
 
-bool
+x23::Async<bool>
 Mempool::create_snapshot(BlockID prev_block_id, BlockID block_id,
                          BlockExecutionMode mode)
 {
   DbResult res = co_await db_client_.dbcoord_create_snapshot(prev_block_id,
                                                              block_id, mode);
-  return res == DbResult::DbResultOK;
+  co_return res == DbResult::DbResultOK;
 }
 
-void
+x23::Async<void>
 Mempool::abandon_snapshot(BlockID block_id)
 {
   DbResult res = co_await db_client_.dbcoord_abandon_snapshot(block_id);
@@ -82,15 +82,17 @@ Mempool::abandon_snapshot(BlockID block_id)
   // change in the future. In the case of a failure, we need to clean up db
   // state.
   CHECK_EQ(res, DbResult::DbResultOK);
+  co_return;
 }
 
-void
+x23::Async<void>
 Mempool::close_snapshot(BlockID block_id)
 {
   DbBlockResult res = co_await db_client_.dbcoord_close_snapshot(block_id);
   // [dbcoord_close_snapshot] will always succeed as long as we provide a valid
   // block ID.
   CHECK_EQ(res.result(), DbResult::DbResultOK);
+  co_return;
 }
 
 x23::Async<void>
@@ -175,26 +177,27 @@ Mempool::propose_batch(
   co_return true;
 }
 
-bool
+x23::Async<bool>
 Mempool::open_proposal_block(BlockID block_id)
 {
   ExecResult res =
       co_await exec_client_.executorcoord_open_proposal_block(block_id);
-  return res == ExecResult::ExecResultOK;
+  co_return res == ExecResult::ExecResultOK;
 }
 
 x23::Async<SchedulerNominationResult>
 Mempool::schedulercoord_nominate(DbTip db_tip)
 {
   BlockID block_id = get_ns_since_epoch();
-  if (!create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
-                       BlockExecutionMode::kBlockExecutionModeProposal)) {
+  if (!co_await create_snapshot(
+          /*prev_block_id=*/db_tip.id, block_id,
+          BlockExecutionMode::kBlockExecutionModeProposal)) {
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
-  if (!open_proposal_block(block_id)) {
-    abandon_snapshot(block_id);
+  if (!co_await open_proposal_block(block_id)) {
+    co_await abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -219,11 +222,10 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
     it++;
   }
 
-  printf("A\n");
   if (txs.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
-    abandon_snapshot(block_id);
+    co_await abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -232,19 +234,15 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
-  printf("B\n");
 
   nomination.block_hash = get_block_hash(nomination.transaction_hashes);
-  printf("C on tid %d\n", gettid());
   co_await finish_block(block_id);
-  printf("D\n");
-  close_snapshot(block_id);
+  co_await close_snapshot(block_id);
 
-  printf("E\n");
   co_return result;
 }
 
-bool
+x23::Async<bool>
 Mempool::validate_batch(BlockID block_id,
                         const x23::Vec<ProposedTransaction> &txs)
 {
@@ -255,33 +253,34 @@ Mempool::validate_batch(BlockID block_id,
       })) {
     // TODO(jhumphri): Use co_await.
     co_await finish_block(block_id);
-    abandon_snapshot(block_id);
-    return false;
+    co_await abandon_snapshot(block_id);
+    co_return false;
   }
-  return true;
+  co_return true;
 }
 
-bool
+x23::Async<bool>
 Mempool::open_validation_block(BlockID block_id)
 {
   ExecResult res =
       co_await exec_client_.executorcoord_open_validation_block(block_id);
-  return res == ExecResult::ExecResultOK;
+  co_return res == ExecResult::ExecResultOK;
 }
 
 x23::Async<SchedulerValidationResult>
 Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
 {
   BlockID block_id = get_ns_since_epoch();
-  if (!create_snapshot(/*prev_block_id=*/db_tip.id, block_id,
-                       BlockExecutionMode::kBlockExecutionModeValidation)) {
+  if (!co_await create_snapshot(
+          /*prev_block_id=*/db_tip.id, block_id,
+          BlockExecutionMode::kBlockExecutionModeValidation)) {
 
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }
 
-  if (!open_validation_block(block_id)) {
-    abandon_snapshot(block_id);
+  if (!co_await open_validation_block(block_id)) {
+    co_await abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   }
@@ -295,7 +294,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   txs.reserve(nomination.transaction_nominations.size());
   if (!find_vetted_txs(nomination, txs)) {
     co_await finish_block(block_id);
-    abandon_snapshot(block_id);
+    co_await abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationMissingTxs);
   }
@@ -303,13 +302,13 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
     CHECK(txs.empty());
     // Empty nomination.
     co_await finish_block(block_id);
-    abandon_snapshot(block_id);
+    co_await abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   else {
     CHECK(!txs.empty());
-    if (!validate_batch(block_id, txs)) {
+    if (!co_await validate_batch(block_id, txs)) {
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationInvalid);
     }
@@ -320,13 +319,13 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   // all of these hashes correspond to vetted txs.
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
     co_await finish_block(block_id);
-    abandon_snapshot(block_id);
+    co_await abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 
   co_await finish_block(block_id);
-  close_snapshot(block_id);
+  co_await close_snapshot(block_id);
 
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationOK);
