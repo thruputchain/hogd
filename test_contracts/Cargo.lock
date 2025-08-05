@@ -329,6 +329,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "manual_revert_caller"
+version = "0.1.0"
+dependencies = [
+ "manual_revert_test",
+ "sdk_rs",
+ "serde",
+]
+
+[[package]]
 name = "manual_revert_test"
 version = "0.1.0"
 dependencies = [

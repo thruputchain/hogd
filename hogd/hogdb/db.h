@@ -47,6 +47,11 @@ public:
     return db_->get_size(key).transform_error(to_hogdb_error);
   }
 
+  HogDBStatus<uint8_t> get_type(std::span<const std::byte> key)
+  {
+    return db_->get_type(key).transform_error(to_hogdb_error);
+  }
+
   HogDBStatus<void> put(std::span<const std::byte> key, uint8_t type,
                         std::span<const std::byte> val)
   {

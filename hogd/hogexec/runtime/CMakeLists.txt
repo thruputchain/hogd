@@ -50,6 +50,7 @@ add_library(runtime STATIC $<TARGET_OBJECTS:runtime_objects>)
 add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
   cross_call_tests.cc
+  cross_contract_revert_test.cc
   error_handling_test.cc
   execution_mode_test.cc
   fibonacci_test.cc
@@ -61,6 +62,7 @@ add_library(runtime_test_objects OBJECT
   item_view_test.cc
   manual_revert_comprehensive_test.cc
   manual_revert_wasm_test.cc
+  manual_revert_caller_wasm_test.cc
   memory_access_test.cc
   native_contract_test.cc
   nnint_add_test.cc
