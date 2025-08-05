@@ -52,7 +52,8 @@ NativeContractTestFramework::advance_block(BlockExecutionMode mode)
       std::make_unique<StorageSnapshotCache>(block_number_, *db_proxy_);
 }
 
-void NativeContractTestFramework::enable_logging()
+void
+NativeContractTestFramework::enable_logging()
 {
   previous_logger_ =
       swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));

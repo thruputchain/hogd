@@ -4,7 +4,6 @@
 #include <cstring>
 #include <memory>
 #include <optional>
-#include <print>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -114,7 +113,6 @@ public:
     if (!r) {
       throw std::runtime_error("HogdbWrapper: start_server failed");
     }
-    std::println("finished starting servers");
   }
 
   uint16_t exec_port() const { return db_executor_server_.port(); }
@@ -321,6 +319,8 @@ public:
 private:
   void initialize(BlockExecutionMode mode)
   {
+    test::reset_module_cache();
+
     uint16_t exec_port =
         std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },
                    db_wrapper_);

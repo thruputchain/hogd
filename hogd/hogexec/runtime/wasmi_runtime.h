@@ -32,6 +32,10 @@ public:
   WasmiModuleCache(WasmiModuleCache &&) = delete;
   WasmiModuleCache &operator=(WasmiModuleCache &&) = delete;
 
+  // Not threadsafe with any transaction using the cache.
+  // should ONLY be used in test setup/teardown.
+  void test_reset_cache(size_t capacity);
+
 private:
   friend class WasmiContext;
   void *get_inner() const { return wasmi_module_cache_ptr_; }
