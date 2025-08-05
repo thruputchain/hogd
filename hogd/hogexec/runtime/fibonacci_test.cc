@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -19,16 +20,20 @@
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-class FibonacciTest : public ::testing::Test,
+class FibonacciTest : public ::testing::TestWithParam<TestDB>,
                       public NativeContractTestFramework {
 public:
-  FibonacciTest() : NativeContractTestFramework(false) {}
+  FibonacciTest()
+    : NativeContractTestFramework(
+          true, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -45,7 +50,7 @@ protected:
 };
 
 // Simple test for sdk, to verify that calls actually happen.
-TEST_F(FibonacciTest, FibonacciCalls)
+TEST_P(FibonacciTest, FibonacciCalls)
 {
   auto contract = test::load_test_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
@@ -70,7 +75,7 @@ TEST_F(FibonacciTest, FibonacciCalls)
   }
 }
 
-TEST_F(FibonacciTest, FibonacciGasLimit)
+TEST_P(FibonacciTest, FibonacciGasLimit)
 {
   auto contract = test::load_test_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
@@ -96,7 +101,7 @@ TEST_F(FibonacciTest, FibonacciGasLimit)
 }
 
 // Test whether the output of the fibonacci contract is correct.
-TEST_F(FibonacciTest, FibonacciCorrectness)
+TEST_P(FibonacciTest, FibonacciCorrectness)
 {
   // deploy the fibonacci contract
   auto contract = test::load_test_contract("fibonacci.wasm");
@@ -196,5 +201,19 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    TestDBs, FibonacciTest,
+    ::testing::Values(TestDB::kMockInMemory, TestDB::kHogDB),
+    [](const ::testing::TestParamInfo<TestDB> &info) -> std::string {
+      switch (info.param) {
+      case TestDB::kMockInMemory:
+        return "MockInMemory";
+      case TestDB::kHogDB:
+        return "HogDB";
+      default:
+        return "unknown";
+      }
+    });
 
 } // namespace hogd

@@ -2,12 +2,18 @@
 
 #include "hogd/hogdb/rpc_from_coord.h"
 
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <mutex>
+#include <netinet/in.h>
+#include <stdexcept>
+#include <sys/socket.h>
 #include <utility>
 
 // generated x23 headers
 #include "db_coord.hh"
+#include "hogd/base/status.h"
 #include "rpc_types.hh"
 
 #include "hogd/base/types.h"
@@ -132,7 +138,7 @@ HogDBCoordServer::start_server(uint16_t port)
       perror("listen");
       exit(EXIT_FAILURE);
     }
-    
+
     std::lock_guard lock(mtx_);
     port_ = get_port(lfd.get());
     cv_.notify_all();

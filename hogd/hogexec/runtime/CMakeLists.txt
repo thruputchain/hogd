@@ -65,6 +65,7 @@ add_library(runtime_test_objects OBJECT
   manual_revert_caller_wasm_test.cc
   memory_access_test.cc
   native_contract_test.cc
+  native_contract_test_framework.cc
   nnint_add_test.cc
   rcq_test.cc
   read_only_test.cc

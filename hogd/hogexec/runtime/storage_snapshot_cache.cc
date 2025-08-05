@@ -6,6 +6,9 @@
 #include <utility>
 
 #include "contract.hh"
+#include "hogd/base/compiler.h"
+#include "hogd/base/log.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/snapshot_storage_item.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -58,6 +61,14 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
     return db_res.error();
   }
   auto out = db_res.value();
+
+  if constexpr (is_debug_build()) {
+    auto received_hash = sha256(*out);
+    if (received_hash != hash) {
+      panic("Received incorrect contract hash from db: {} != {}", received_hash, hash);
+    }
+  }
+
   // TODO(geoff): If we decide to NOT reset the cache after every block,
   // then the contract cache needs to only cache positive lookups
   contract_cache_.insert(hash, std::move(db_res.value()));
