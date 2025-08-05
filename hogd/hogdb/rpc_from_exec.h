@@ -138,6 +138,8 @@ public:
   static ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
+  uint16_t port() const { return rpc_server_->get_port(); }
+
 private:
   RPCContext &ctx_;
   std::shared_ptr<RPCServer> rpc_server_;

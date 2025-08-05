@@ -9,9 +9,11 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 #include "contract.hh"
 #include "db_coord.hh"
+#include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -19,12 +21,18 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_coord_server.h"
 #include "hogd/db_interface/db_executor_server.h"
+#include "hogd/hogdb/db.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_coord.h"
+#include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
@@ -33,6 +41,7 @@
 #include "types.hh"
 #include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/serialize.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -67,6 +76,20 @@ public:
     in_memory_db_.write_deployment(addr, deployment);
   }
 
+  void grant_storage_token(ContractAddress const &address, int128_t amount)
+  {
+    assert(amount >= 0);
+    assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
+
+    AddressAndKey addrkey = {
+        .address = address,
+        .key =
+            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
+
+    write_item(addrkey, std::make_shared<const StorageItemWrapper>(
+                                        amount, get_default_cost_model()));
+  }
+
   const StorageCostModel *get_default_cost_model() const
   {
     return &block_manager_.cost_model_;
@@ -80,6 +103,107 @@ private:
       RPCDbExecutorServer(&block_manager_, 0);
 
   DbCoordServer db_coord_server_ = DbCoordServer(&block_manager_);
+};
+
+class HogdbWrapper {
+public:
+  HogdbWrapper() : db_(open_db()) {}
+
+  uint16_t exec_port() const { return db_executor_server_.port(); }
+  uint16_t coord_port() { return db_coord_server_.port(); }
+
+
+  void grant_storage_token(ContractAddress const &address, int128_t amount)
+  {
+    auto ret = write_address_balance(db_, address, amount);
+    if (!ret) {
+      throw std::runtime_error("grant_storage_token: write_address_balance failed");
+    }
+  }
+
+  void write_item(AddressAndKey const &addrkey,
+                  std::shared_ptr<const StorageItemWrapper> const& item)
+  {
+    switch(item->type()) {
+      case StorageItemType::kItemTypeBytestring:
+      {
+        auto ret = write_bytes(db_, make_item_key(addrkey), std::as_bytes(std::span(item->bytestring())));
+        if (!ret) {
+          throw std::runtime_error("write_item: write_bytes failed");
+        }
+        return;
+      }
+      case StorageItemType::kItemTypeNonnegativeInt:
+      {
+        auto ret = write_nnint128(db_, make_item_key(addrkey), item->nnint());
+        if (!ret) {
+          throw std::runtime_error("write_item: write_wasm_code failed");
+        }
+        return;
+      }
+      case StorageItemType::kItemTypeDeleted:
+      {
+        auto ret = remove_item(db_, make_item_key(addrkey));
+        if (!ret) {
+          throw std::runtime_error("write_item: remove_item failed");
+        }
+        return;
+      }
+      default:
+        throw std::runtime_error("write_item on HogdbWrapper: unsupported item type");
+    }
+  }
+
+  void write_contract(ContractAddress const &addr,
+                      std::shared_ptr<const Contract> const& contract)
+  {
+    assert(contract);
+    auto bytes = x23::serialize(*contract);
+    auto ret = write_wasm_code(db_, addr, std::as_bytes(std::span(bytes)));
+    if (!ret) {
+      throw std::runtime_error("write_contract: write_contract failed");
+    }
+  }
+
+  void write_deployment(ContractAddress const &addr,
+                        SHA256Hash const &deployment)
+  {
+    auto ret = write_address_wasm_hash(db_, addr, deployment);
+    if (!ret) {
+      throw std::runtime_error("write_deployment: write_deployment failed");
+    }
+  }
+
+  // different storage cost models unimplemented currently
+  const StorageCostModel kDefaultCostModel = StorageCostModel(0, 0, 0, 0, 0);
+
+  const StorageCostModel *get_default_cost_model() const
+  {
+    return &kDefaultCostModel;
+  }
+
+private:
+
+  static ItemKey
+  make_item_key(const AddressAndKey &addr)
+  {
+    if (addr.key.key_type() == StorageKeyType::kStorageKeyTypeContractData)
+      return ItemKey(addr.address, {}, true);
+    return ItemKey(addr.address, addr.key.contract_data_key());
+  }
+
+  static HogDatabase open_db()
+  {
+    Directory dir = Directory::open_temporary().value();
+    constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+    auto db = Database::open(dir.get_path(), kDefaultHeapSize).value();
+    return HogDatabase(std::move(db));
+  }
+
+  HogDatabase db_;
+  RPCContext ctx_ = RPCContext(db_);
+  HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);
+  HogDBCoordServer db_coord_server_ = HogDBCoordServer(ctx_);
 };
 
 class CoordWrapper {
@@ -115,12 +239,25 @@ public:
       bool enable_logging = false,
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
       TestDB test_db = TestDB::kMockInMemory)
+      : db_wrapper_(make_db_wrapper(test_db))
   {
     if (enable_logging) {
       previous_logger_ =
           swap_logger(std::make_unique<ConsoleLogger>(LogLevel::kTrace));
     }
     initialize(mode);
+  }
+
+  static std::variant<MockDBWrapper, HogdbWrapper> make_db_wrapper(TestDB test_db)
+  {
+    switch(test_db) {
+      case TestDB::kMockInMemory:
+        return std::variant<MockDBWrapper, HogdbWrapper>(std::in_place_type<MockDBWrapper>);
+      case TestDB::kHogDB:
+        return std::variant<MockDBWrapper, HogdbWrapper>(std::in_place_type<HogdbWrapper>);
+      default:
+        throw std::runtime_error("make_db_wrapper: invalid test_db");
+    }
   }
 
   ~NativeContractTestFramework()
@@ -245,42 +382,67 @@ public:
   {
     assert(amount >= 0);
     assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
-
-    AddressAndKey addrkey = {
-        .address = address,
-        .key =
-            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
-
-    db_wrapper_.write_item(addrkey, std::make_shared<const StorageItemWrapper>(
-                                        amount, get_default_cost_model()));
+    
+    std::visit(
+        [&](auto &db_wrapper) {
+          db_wrapper.grant_storage_token(address, amount);
+        },
+        db_wrapper_);
   }
 
   void write_item(AddressAndKey const &addrkey,
                   std::shared_ptr<const StorageItemWrapper> item)
   {
-    db_wrapper_.write_item(addrkey, std::move(item));
+    std::visit(
+        [&](auto &db_wrapper) {
+          db_wrapper.write_item(addrkey, std::move(item));
+        },
+        db_wrapper_);
   }
   void write_contract(std::shared_ptr<const Contract> contract)
   {
-    db_wrapper_.write_contract(sha256(*contract), std::move(contract));
+    std::visit(
+        [&](auto &db_wrapper) {
+          db_wrapper.write_contract(sha256(*contract), std::move(contract));
+        },
+        db_wrapper_);
   }
   void write_deployment(ContractAddress const &addr,
                         SHA256Hash const &deployment)
   {
-    db_wrapper_.write_deployment(addr, deployment);
+    std::visit(
+        [&](auto &db_wrapper) {
+          db_wrapper.write_deployment(addr, deployment);
+        },
+        db_wrapper_);
   }
 
   const StorageCostModel *get_default_cost_model() const
   {
-    return db_wrapper_.get_default_cost_model();
+    return std::visit(
+        [&](auto &db_wrapper) {
+          return db_wrapper.get_default_cost_model();
+        },
+        db_wrapper_);
   }
 
 private:
   void initialize(BlockExecutionMode mode)
   {
+    uint16_t exec_port = std::visit(
+        [&](auto &db_wrapper) {
+          return db_wrapper.exec_port();
+        },
+        db_wrapper_);
+    uint16_t coord_port = std::visit(
+        [&](auto &db_wrapper) {
+          return db_wrapper.coord_port();
+        },
+        db_wrapper_);
+    
     db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = db_wrapper_.exec_port()});
-    coord_wrapper_ = std::make_unique<CoordWrapper>(db_wrapper_.coord_port());
+        LocalMockDB{.read_port_number_ = exec_port});
+    coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
 
     auto r = coord_wrapper_->client().dbcoord_create_snapshot(0, 1, mode)();
     if (r != DbResult::DbResultOK) {
@@ -308,7 +470,7 @@ private:
 
   std::unique_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
-  MockDBWrapper db_wrapper_;
+  std::variant<MockDBWrapper, HogdbWrapper> db_wrapper_;
 
   x23::ThreadPool pool_ = x23::ThreadPool(1);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);

@@ -123,6 +123,7 @@ target_link_libraries(
   runtime
   runtime_test_util
   db_interface
+  hogdb
   storage_cost
   model_checker
   GTest::gtest
