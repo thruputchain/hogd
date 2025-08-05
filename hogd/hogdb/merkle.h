@@ -19,6 +19,10 @@ class MerkleTrieHelpers {
 public:
   MerkleTrieHelpers() = delete;
 
+  // Creates the key to insert into the Merkle trie from [key] and [type]. We
+  // want to include [type] in the key because values with the same key could
+  // have different types. Two tries that each contain the same KV pair, but
+  // with different value types, should have different root hashes.
   static std::span<const std::byte>
   add_type_to_merkle_key(std::span<const std::byte> &key, uint8_t type)
   {
@@ -30,6 +34,7 @@ public:
     return std::span<const std::byte>(*backing_store);
   }
 
+  // Inserts or update a KV pair.
   static HogDBStatus<void>
   update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key,
                          uint8_t type, const std::span<const std::byte> &value)
@@ -42,6 +47,7 @@ public:
     return {};
   }
 
+  // Removes a KV pair.
   static HogDBStatus<void> remove_kv_pair_from_trie(MerkleTriePrefix &trie,
                                                     const ItemKey &key,
                                                     uint8_t type)
