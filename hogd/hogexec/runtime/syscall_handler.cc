@@ -114,46 +114,52 @@ SystemCallHandler::root_invoke()
     return cumulative_invoke_result_;
   }
 
-  auto runtime = resolve_runtime(signed_tx_.tx.invocation.invoked_address);
-  if (!runtime) {
-    // some system error when resolving the runtime
-    cumulative_invoke_result_.result_ = runtime.error().to_invoke_error();
-    return cumulative_invoke_result_;
-  }
-  if (!runtime.value()) {
-    cumulative_invoke_result_.result_ =
-        InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    return cumulative_invoke_result_;
-  }
-
   GasAmount available_gas = cumulative_invoke_result_.gas_consumed_ <
                                     signed_tx_.tx.invocation.gas_limit
                                 ? signed_tx_.tx.invocation.gas_limit -
                                       cumulative_invoke_result_.gas_consumed_
                                 : 0;
 
-  invocation_frame_stack_.start_frame(
-      signed_tx_.tx.invocation.invoked_address,
-      Calldata(signed_tx_.tx.invocation.calldata),
-      std::to_underlying(InvokeFlag::kInvokeFlagNone));
+  auto [res, gas_consumed] =
+      invoke(signed_tx_.tx.invocation.invoked_address,
+             sdk_method_id(signed_tx_.tx.invocation.entrypoint), available_gas,
+             Calldata(signed_tx_.tx.invocation.calldata),
+             std::to_underlying(InvokeFlag::kInvokeFlagNone));
 
-  auto res = runtime.value()->invoke(sdk_method_id(
-                                         signed_tx_.tx.invocation.entrypoint),
-                                     available_gas);
-  cumulative_invoke_result_.gas_consumed_ += res.gas_consumed_;
+  auto handle_root_host_fn_status =
+      [](HostFnStatus<SyscallErrorCode> status) -> InvokeStatus<void> {
+    if (status.has_value()) {
+      return (status.value() == SyscallErrorCode::kNone)
+                 ? InvokeStatus<void>{}
+                 : InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    }
+    switch (status.error().code()) {
+    case HostFnErrorCode::kHostOutOfGas:
+      return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
+    case HostFnErrorCode::kHostReturn:
+      return InvokeStatus<void>{};
+    case HostFnErrorCode::kHostExit:
+      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+    case HostFnErrorCode::kHostValidationFailure:
+      return InvokeError{InvokeErrorCode::kInvokeValidationFailure};
+    case HostFnErrorCode::kHostAbortTransaction:
+      return InvokeError{InvokeErrorCode::kInvokeAbortTransaction};
+    case HostFnErrorCode::kHostUnrecoverable:
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    case HostFnErrorCode::kHostNoneOrRecoverable:
+      // This case should never happen, as it is instead handled by
+      // the status.has_value() check above.
+      assert(false);
+      return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+    }
+    // Leaving the default arm out of the switch, so that the compiler
+    // will raise a warning later if we add additional InvokeError codes.
+    return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
+  };
 
-  // finish_status takes res as input and shortcircuits if res is an error
-  auto finish_status =
-      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
-  if (!finish_status.has_value()) {
-    cumulative_invoke_result_.result_ = finish_status.error().to_invoke_error();
-    return cumulative_invoke_result_;
-  }
-  res = finish_status.value();
+  cumulative_invoke_result_.result_ = handle_root_host_fn_status(res);
+  cumulative_invoke_result_.gas_consumed_ += gas_consumed;
 
-  // should not have gotten here without being in a success state to begin with
-  assert(cumulative_invoke_result_.is_root_success());
-  cumulative_invoke_result_.result_ = res.result_;
   if (!cumulative_invoke_result_.is_root_success()) {
     return cumulative_invoke_result_;
   }
@@ -178,6 +184,17 @@ SystemCallHandler::try_commit_transaction()
     return false;
   }
   assert(last_frame_.has_value());
+
+  // If the last frame was set to manually revert, then we commit the
+  // transaction as a no-op.
+  if (last_frame_.value().should_revert()) {
+    auto res = db_proxy_.commit_transaction();
+    if (!res.has_value()) {
+      return res.error();
+    }
+    transaction_committed_or_aborted_ = true;
+    return true;
+  }
 
   auto r = last_frame_.value().try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
@@ -259,21 +276,30 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
     return std::pair{SyscallErrorCode::kContractLookupFailed, 0};
   }
 
-  if (is_read_only()) {
+  if (!invocation_frame_stack_.empty() && is_read_only()) {
     flags |= std::to_underlying(InvokeFlag::kInvokeFlagReadOnly);
   }
 
+  InvokeResult cumulative_result = {
+      .result_ = InvokeStatus<void>{},
+      .gas_consumed_ = 0,
+  };
+
   invocation_frame_stack_.start_frame(address, std::move(calldata), flags);
 
-  auto res = runtime.value()->invoke(method, gas_limit);
+  cumulative_result += runtime.value()->invoke(method, gas_limit);
   auto finish_status =
-      invocation_frame_stack_.finish_frame(res, execution_mode_data_);
+      invocation_frame_stack_.finish_frame(cumulative_result.result_,
+                                           execution_mode_data_);
   if (!finish_status.has_value()) {
+    // TODO(geoff): This status will result ending execution of the whole block.
+    // We can add gas consumption here, but that would only affect the state of
+    // the local scheduler, not the canonical chain.
     return {finish_status.error().to_host_fn_error(), 0};
   }
-  res = finish_status.value();
+  cumulative_result += finish_status.value();
 
-  return res.to_host_fn_result();
+  return cumulative_result.to_host_fn_result();
 }
 
 void
@@ -295,11 +321,16 @@ SystemCallHandler::get_return_buffer() const
 }
 
 void
-SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer)
+SystemCallHandler::set_return_buffer(ReturnBuffer &&returned_buffer,
+                                     bool revert_frame)
 {
   assert(!invocation_frame_stack_.empty());
   invocation_frame_stack_.get_active_frame().set_frame_return(
       std::move(returned_buffer));
+
+  if (revert_frame) {
+    invocation_frame_stack_.get_active_frame().set_should_revert();
+  }
 }
 
 SystemStatus<std::unique_ptr<Runtime>>

@@ -39,6 +39,9 @@ public:
   // as well.
   void release_savepoint(int depth);
 
+  // get_savepoint_head returns the depth of the most recent savepoint.
+  int get_savepoint_head() const { return tx_depth_; }
+
   //
   // All of the read_* methods below read the current value of an item in just
   // this transaction relative to the snapshot state. They will return

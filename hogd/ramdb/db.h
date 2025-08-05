@@ -55,7 +55,7 @@ public:
            size_t log_file_size_threshold = kDiskLogFileThreshold);
 
   // check checks the integrity of a database. It returns the highest valid LSN.
-  static DBStatus<uint64_t> check(const std::string &path, size_t heap_size);
+  static DBStatus<uint64_t> check(std::string_view path, size_t heap_size);
 
   Database(Directory dir, size_t heap_size, int lock_order, int bucket_order,
            int write_head_order)
@@ -95,6 +95,9 @@ public:
 
   // get_size returns the size of the item (if it exists).
   DBStatus<size_t> get_size(std::span<const std::byte> key);
+
+  // get_type returns the type of the item (if it exists).
+  DBStatus<uint8_t> get_type(std::span<const std::byte> key);
 
   // put inserts an item.
   DBStatus<void> put(std::span<const std::byte> key, uint8_t type,

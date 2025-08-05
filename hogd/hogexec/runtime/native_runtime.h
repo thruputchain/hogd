@@ -167,11 +167,11 @@ public:
         if (!return_buffer.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
-        handler.set_return_buffer(std::move(return_buffer.value()));
+        handler.set_return_buffer(std::move(return_buffer.value()), false);
         return {};
       }
       else {
-        handler.set_return_buffer(ReturnBuffer{});
+        handler.set_return_buffer(ReturnBuffer{}, false);
         return {};
       }
     };

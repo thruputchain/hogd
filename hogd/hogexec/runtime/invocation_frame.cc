@@ -30,9 +30,16 @@ InvocationFrame::InvocationFrame(ContractAddress const &address,
 {}
 
 void
+InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
+{
+  assert(frame.should_revert());
+  child_return_buffer_ = std::move(frame.to_return_);
+}
+
+void
 InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
 {
-  child_return_buffer_ = frame.to_return_;
+  child_return_buffer_ = std::move(frame.to_return_);
   logs_.insert(logs_.end(), std::make_move_iterator(frame.logs_.begin()),
                std::make_move_iterator(frame.logs_.end()));
 
@@ -117,15 +124,20 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
 }
 
 SystemStatus<InvokeResult>
-InvocationFrameStack::finish_frame(InvokeResult result,
+InvocationFrameStack::finish_frame(InvokeStatus<void> result,
                                    ExecutionModeData &execution_mode_data)
 {
+  InvokeResult frame_result = {
+      .result_ = result,
+      .gas_consumed_ = 0,
+  };
+
   // handle the try_invoke data
   assert(!frame_stack_.empty());
   if (frame_stack_.back().is_try_invoke()) {
     // Only relevant in the case where the deterministic part of the frame
     // succeeds.
-    if (result.is_frame_success()) {
+    if (frame_result.is_frame_success()) {
       bool acq_success = false;
 
       // If we're in proposal mode, we need to acquire the frame locks.
@@ -154,39 +166,51 @@ InvocationFrameStack::finish_frame(InvokeResult result,
       // the entire frame as failing.
       if (!acq_success) {
         // TODO(geoff): perhaps add additional gas consumption
-        result = InvokeResult{
+        frame_result = InvokeResult{
             .result_ = InvokeError{InvokeErrorCode::kInvokeDeterministic},
-            .gas_consumed_ = result.gas_consumed_,
+            .gas_consumed_ = 0,
         };
       }
     }
     // otherwise nothing to do here with try_invoke
   }
 
-  if (result.should_frame_revert()) {
+  if (frame_result.should_frame_revert() ||
+      frame_stack_.back().should_revert()) {
     auto st = frame_stack_.back().mark_frame_as_failed(db_proxy_);
     if (!st.has_value()) {
       return st.error();
     }
+  }
+
+  if (frame_result.should_frame_revert()) {
     frame_stack_.pop_back();
 
     if (!frame_stack_.empty()) {
       frame_stack_.back().commit_failed_child_frame();
     }
 
-    return result;
+    return frame_result;
   }
 
   // commit child invocation frame successfully
-  assert(result.is_frame_success());
+  assert(frame_result.is_frame_success());
 
   size_t stack_size = frame_stack_.size();
   if (stack_size >= 2) {
     // Commit the frame to it's parent
-    frame_stack_[stack_size - 2].commit_successful_child_frame(
-        std::move(frame_stack_.back()));
+    // Accounts for whether or not the frame is set to manually revert
+    if (frame_stack_.back().should_revert()) {
+      frame_stack_[stack_size - 2].commit_manually_reverted_frame(
+          std::move(frame_stack_.back()));
+    }
+    else {
+      frame_stack_[stack_size - 2].commit_successful_child_frame(
+          std::move(frame_stack_.back()));
+    }
   }
-  else if (stack_size == 1) {
+  else {
+    assert(stack_size == 1);
     // last frame -- push frame contents to external caller
     // (SystemCallHandler), via the supplied lambda
     last_frame_action_(std::move(frame_stack_.back()));
@@ -194,7 +218,7 @@ InvocationFrameStack::finish_frame(InvokeResult result,
 
   frame_stack_.pop_back();
 
-  return result;
+  return frame_result;
 }
 
 std::optional<ContractAddress>
