@@ -120,7 +120,7 @@ public:
     completions.reserve(divide_up(r.size(), width));
 #if defined(__cpp_lib_ranges_chunk)
     std::ranges::for_each(r | std::views::chunk(width),
-                          [&f, proj,
+                          [this, &f, proj,
                            &completions](std::ranges::viewable_range auto &&r) {
                             completions.emplace_back(submit(
                                 [proj, &f, r = std::forward<decltype(r)>(r)] {
