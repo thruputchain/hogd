@@ -1451,6 +1451,27 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
         return;
       }
       n->parent->rw_lock.lock_reader();
+
+      if (n->parent->parent->parent == &root_) {
+        // Do not rehash a node with depth 3. We cannot check this until we hold
+        // the [rw_lock] for [n->parent]. If we do not hold the lock, then
+        // [n->parent->parent] could change while we access it, resulting in us
+        // reading an invalid value for [n->parent->parent->parent] or a
+        // use-after-free bug. This is why we do the check here rather than if
+        // the if statement above.
+        //
+        // TODO(jhumphri): This is messy as it would be better to have some
+        // notion of depth. We cannot store the depth in the [Node] type as
+        // nodes can have their depth change if an ancestor in the tree is
+        // inserted/removed. So if that happens, we would need to traverse all
+        // children of the ancestor and update their depths, which is too
+        // expensive. Instead, we can likely track the depth in
+        // [traverse_to_lowest_branch] and decrement it in each iteration of
+        // this loop.
+        n->parent->rw_lock.unlock();
+        n->rw_lock.unlock();
+        return;
+      }
     }
 
     Node *parent = n->parent;
