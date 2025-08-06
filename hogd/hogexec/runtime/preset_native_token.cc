@@ -3,7 +3,6 @@
 #include <cassert>
 #include <memory>
 
-
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"

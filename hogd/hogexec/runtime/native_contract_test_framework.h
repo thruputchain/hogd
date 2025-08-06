@@ -17,6 +17,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_coord_server.h"
@@ -154,7 +155,8 @@ private:
   }
 
   HogDatabase db_;
-  RPCContext ctx_ = RPCContext(db_);
+  MerkleTriePrefix trie_;
+  RPCContext ctx_ = RPCContext(db_, trie_);
   HogDBExecutorServer db_executor_server_ = HogDBExecutorServer(ctx_);
   HogDBCoordServer db_coord_server_ = HogDBCoordServer(ctx_);
 };
