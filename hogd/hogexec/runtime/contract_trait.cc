@@ -3,7 +3,7 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
-#include <regex>
+#include <regex> // NOLINT(misc-include-cleaner)
 #include <string_view>
 
 #include "contract.hh"

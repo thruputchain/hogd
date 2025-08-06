@@ -182,12 +182,11 @@ RetrocausalQueueArgs::to_item(const StorageItemWrapper *previous_item,
 
   RetrocausalQueuePastBlockConsumeDelta consume_delta = kEmptyConsume;
   if (past_consume_delta_) {
-    if (previous_item) {
+    if (previous_item) { // NOLINT(bugprone-branch-clone)
       assert(previous_item->type() ==
              StorageItemType::kItemTypeRetrocausalQueue);
     }
     else {
-
       assert(past_consume_delta_ == kEmptyConsume);
     }
     consume_delta = *past_consume_delta_;
