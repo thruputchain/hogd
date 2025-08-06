@@ -131,11 +131,14 @@ public:
                           });
 #else  // defined(__cpp_lib_ranges_chunk)
     // LLVM doesn't support std::views::chunk yet.
-    std::ignore = width;
-    completions.reserve(r.size());
-    for (auto v : r) {
-      completions.emplace_back(
-          submit([&f, proj, v] { f(std::invoke(proj, v)); }));
+    for (size_t i = 0; i < r.size(); i += width) {
+      auto end = std::min(i + width, r.size());
+
+      completions.emplace_back(submit([this, &f, proj, begin = i, end, &r]() {
+        for (size_t j = begin; j < end; ++j) {
+          f(std::invoke(proj, r[j]));
+        }
+      }));
     }
 #endif // defined(__cpp_lib_ranges_chunk)
     for (const std::future<void> &f : completions)
