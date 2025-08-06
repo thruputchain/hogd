@@ -75,7 +75,9 @@ HogDBExecutorServer::start_server(uint16_t port)
       port,
       [this](std::span<const std::byte> args,
              std::string_view peer) -> OwningSpan<const std::byte> {
-        return server_handle_rpc_request<DatabaseToExecutorInterfaceV1>(*this, args, peer);
+        return server_handle_rpc_request<DatabaseToExecutorInterfaceV1>(*this,
+                                                                        args,
+                                                                        peer);
       });
   if (!server)
     return server.error();

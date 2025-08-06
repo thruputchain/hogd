@@ -422,7 +422,7 @@ template<typename Server> struct RpcInvoker {
 template<typename Vers>
 OwningSpan<const std::byte>
 server_handle_rpc_request(auto &server, std::span<const std::byte> args,
-                               std::string_view peer)
+                          std::string_view peer)
 {
   auto header_result = rpc_server_parse_and_strip_header(args);
   if (!header_result) {
