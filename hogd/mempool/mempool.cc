@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <cstddef>
 #include <future>
+#include <span>
 #include <vector>
 
 #include "db_coord.hh"
@@ -255,7 +257,7 @@ Mempool::validate_batch(BlockID block_id,
 {
   ExecValidateBatchResult res =
       co_await exec_client_.executorcoord_validate_batch(block_id, txs);
-  if (std::any_of(res.begin(), res.end(), [](const ExecResult &r) {
+  if (std::ranges::any_of(res, [](const ExecResult &r) {
         return r != ExecResult::ExecResultOK;
       })) {
     // TODO(jhumphri): Use co_await.

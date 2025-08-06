@@ -77,7 +77,7 @@ static_assert(is_DatabaseToExecutorInterfaceV1<SyncDBExecutorServer *,
 // Wraps the SyncDBExecutorServer in an RPC server.
 class RPCDbExecutorServer {
 public:
-  explicit RPCDbExecutorServer(BlockManager *block_manager, uint32_t port)
+  explicit RPCDbExecutorServer(BlockManager *block_manager, uint16_t port)
     : sync_server_(block_manager)
   {
     auto res = RPCServer::create(
@@ -104,7 +104,7 @@ public:
     rpc_server_->stop();
   }
 
-  uint32_t port() const { return rpc_server_->get_port(); }
+  uint16_t port() const { return rpc_server_->get_port(); }
 
 private:
   SyncDBExecutorServer sync_server_;

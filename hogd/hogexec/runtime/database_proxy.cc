@@ -2,8 +2,6 @@
 
 #include <cassert>
 #include <concepts>
-#include <cstddef>
-#include <cstring>
 #include <exception>
 #include <memory>
 #include <optional>

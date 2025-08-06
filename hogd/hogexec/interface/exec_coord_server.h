@@ -31,9 +31,9 @@ public:
 
   ~ExecCoordServer() { await_shutdown_request(); }
 
-  void start_server(uint32_t port_number)
+  uint16_t start_server(uint16_t port_number)
   {
-    rpc_interface_->start_server(port_number);
+    return rpc_interface_->start_server(port_number);
   }
 
   void shut_down()
