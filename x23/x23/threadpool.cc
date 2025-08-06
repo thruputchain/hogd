@@ -173,7 +173,7 @@ ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
   unsigned zero = 0;
   // The last thread in a bucket can only leave if the queue is empty
   if (pool_->queue_nthreads_[bucket_].fetch_sub(1) > 1 ||
-      (pool_->relock(ptr, bucket_), !ptr->q.empty()) ||
+      (pool_->relock(ptr, bucket_), ptr->q.empty()) ||
       // Oops the queue is not empty after we set the thread count to
       // zero.  We have to increase the thread count again to keep
       // servicing the queue.  But if we fail to increase the counter,
