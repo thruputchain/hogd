@@ -137,6 +137,7 @@ TEST(CoReturnCompile, UniquePtr)
 TEST(CommentParsing, MultilineComments)
 {
   // Check that multiline comments are parsed correctly
+  [[maybe_unused]]
   StellarValue sv;
   sv.value = 100;
 
