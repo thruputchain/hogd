@@ -7,7 +7,9 @@
 #include <utility>
 
 #include "hogd/base/compiler.h"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
