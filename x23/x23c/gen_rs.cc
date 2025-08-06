@@ -123,7 +123,10 @@ struct GenRs {
       prtop("{}{},\n", vis, type_name_str);
     }
     else {
-      prtop("{}{}: {},\n", vis, d.id, type_name_str);
+      // Hack: some XDR files (stellar's) use "type" as a field name.
+      // This breaks in rust, so we rename it to "type_".
+      std::string id = (d.id == "type") ? "type_" : d.id;
+      prtop("{}{}: {},\n", vis, id, type_name_str);
     }
   }
 
@@ -131,7 +134,6 @@ struct GenRs {
 
   void show_typespec(const TypeSpecifier &ts, string t)
   {
-    std::println("show_typespec {}", t);
     visit([this, &t](const auto &v) { show_type(v, t); }, ts);
   }
 
@@ -506,38 +508,41 @@ impl {0} {{
 void
 GenRs::show_type(const EnumBody &e, string const &tname)
 {
-  std::println("show_type enum {}", tname);
   prtop(R"(
 #[derive(Clone, Copy, PartialEq, Debug)]
 #[cfg_attr(feature = "xdrs", derive(ReadXDR, WriteXDR))]
 #[repr(i32)]
 pub enum {} )",
         tname);
-  // NOLINTNEXTLINE(readability-identifier-naming)
-  auto _close = open_brace();
-  scopes_.push_back(tname);
+  {
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    auto _close = open_brace();
+    scopes_.push_back(tname);
 
-  bool first = true, skip_anyway = false;
-  for (const auto &cd : e) {
-    if (!cd.comment.empty()) {
-      if (!first)
+    bool first = true, skip_anyway = false;
+    for (const auto &cd : e) {
+      if (!cd.comment.empty()) {
+        if (!first)
+          top_ += '\n';
+        skip_anyway = true;
+        show_comment(cd.comment, false);
+      }
+      else if (skip_anyway) {
         top_ += '\n';
-      skip_anyway = true;
-      show_comment(cd.comment, false);
+        skip_anyway = false;
+      }
+      first = false;
+      prtop("{} = {} as i32,\n", cd.id, cd.val);
     }
-    else if (skip_anyway) {
-      top_ += '\n';
-      skip_anyway = false;
-    }
-    first = false;
-    prtop("{} = {},\n", cd.id, cd.val);
   }
+
+  // Export the variants of the enum
+  prtop("pub use {}::*;\n", tname);
 }
 
 void
 GenRs::show_type(const UnionBody &b, string const &tname)
 {
-  std::println("show_type union {}", tname);
   for (const auto &a : b.arms) {
     auto const &d = a.decl;
     do_generations(tname + "_" + d.id, d.type);
@@ -770,7 +775,6 @@ GenRs::map_bound(const string &b)
 void
 GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
 {
-  std::println("do_generations {}", name_prefix);
   if (holds_alternative<string>(type)) {
     return;
   }

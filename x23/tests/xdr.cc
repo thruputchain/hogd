@@ -138,7 +138,7 @@ TEST(CommentParsing, MultilineComments)
 {
   // Check that multiline comments are parsed correctly
   StellarValue sv;
-  sv.value() = 100;
+  sv.value = 100;
 
   [[maybe_unused]]
   StellarValueEnum sv_enum = StellarValueEnum::kStellarValue;
