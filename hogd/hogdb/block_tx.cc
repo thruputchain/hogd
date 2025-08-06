@@ -201,7 +201,7 @@ BlockTX::unlock(const ItemKey &key, ItemChange &change)
 }
 
 HogDBStatus<void>
-BlockTX::commit()
+BlockTX::commit(WorkerPool &pool)
 {
   std::mutex lock;
   HogDBStatus<void> ret;
@@ -214,7 +214,8 @@ BlockTX::commit()
           std::scoped_lock guard(lock);
           ret = tmp;
         }
-      });
+      },
+      kDefaultParallelRangeWidth, pool);
 
   // write address balances.
   addr_balance_locks_.for_each_parallel(
@@ -226,6 +227,8 @@ BlockTX::commit()
           ret = tmp;
         }
       });
+
+  trie_.generate_top_level_hashes();
 
   return ret;
 }

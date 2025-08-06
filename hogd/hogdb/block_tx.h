@@ -28,7 +28,7 @@ public:
 
   // commit applies all changes to the database. If this fails, nothing will be
   // written to disk, but the database may be left in an inconsistent state.
-  HogDBStatus<void> commit();
+  HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
   // abort drops all changes.
   void abort()
   {

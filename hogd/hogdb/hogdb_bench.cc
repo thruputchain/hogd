@@ -264,7 +264,7 @@ Benchmark::run()
   workers_.for_each_parallel(ops_, invoke_fn, std::max(width, 1UL));
 
   // commit changes to the ramdb.
-  HogDBStatus<void> ret = block.commit().and_then(
+  HogDBStatus<void> ret = block.commit(workers_).and_then(
       [this] { return db_.commit().transform([](uint64_t lsn) {}); });
   if (!ret)
     fail(ret.error());

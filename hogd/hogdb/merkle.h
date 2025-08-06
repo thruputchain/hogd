@@ -43,7 +43,7 @@ public:
   update_kv_pair_in_trie(MerkleTriePrefix &trie, const ItemKey &key,
                          uint8_t type, const std::span<const std::byte> &value)
   {
-    std::span<const std::byte> raw_key = key.get_address().as_bytes();
+    std::span<const std::byte> raw_key = key.as_bytes();
     std::span<const std::byte> k = add_type_to_merkle_key(raw_key, type);
     if (!trie.insert_or_update(k, value)) {
       return HogDBError(HogDBCode::kInternal);
@@ -56,7 +56,7 @@ public:
                                                     const ItemKey &key,
                                                     uint8_t type)
   {
-    std::span<const std::byte> raw_key = key.get_address().as_bytes();
+    std::span<const std::byte> raw_key = key.as_bytes();
     std::span<const std::byte> k = add_type_to_merkle_key(raw_key, type);
     if (!trie.remove(k)) {
       return HogDBError(HogDBCode::kNotFound);

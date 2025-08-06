@@ -113,6 +113,7 @@ public:
 
   constexpr bool is_address_balance() const { return addr_balance_; }
   [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
+  [[nodiscard]] constexpr Address get_key() const { return item_key_.key; }
 
 private:
   friend struct std::formatter<ItemKey>;

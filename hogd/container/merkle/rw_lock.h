@@ -90,8 +90,10 @@ public:
                                      /*desired=*/kWriterLocked,
                                      /*success=*/std::memory_order_acquire,
                                      /*failure=*/std::memory_order_relaxed)) {
-      cpu_relax();
       expected = kUnlocked;
+      while (lock_.load(std::memory_order_relaxed) != expected) {
+        cpu_relax();
+      }
     }
   }
 
