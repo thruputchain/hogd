@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -22,6 +23,8 @@ using std::string_view;
 using std::string_literals::operator""s;
 
 struct GenRs {
+  std::set<std::string> const &recursive_types;
+
   string top_;
   string bottom_;
   std::size_t indent_{};
@@ -122,7 +125,10 @@ struct GenRs {
       prtop("{}{},\n", vis, type_name_str);
     }
     else {
-      prtop("{}{}: {},\n", vis, d.id, type_name_str);
+      // Hack: some XDR files (stellar's) use "type" as a field name.
+      // This breaks in rust, so we rename it to "type_".
+      std::string id = (d.id == "type") ? "type_" : d.id;
+      prtop("{}{}: {},\n", vis, id, type_name_str);
     }
   }
 
@@ -510,25 +516,30 @@ GenRs::show_type(const EnumBody &e, string const &tname)
 #[repr(i32)]
 pub enum {} )",
         tname);
-  // NOLINTNEXTLINE(readability-identifier-naming)
-  auto _close = open_brace();
-  scopes_.push_back(tname);
+  {
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    auto _close = open_brace();
+    scopes_.push_back(tname);
 
-  bool first = true, skip_anyway = false;
-  for (const auto &cd : e) {
-    if (!cd.comment.empty()) {
-      if (!first)
+    bool first = true, skip_anyway = false;
+    for (const auto &cd : e) {
+      if (!cd.comment.empty()) {
+        if (!first)
+          top_ += '\n';
+        skip_anyway = true;
+        show_comment(cd.comment, false);
+      }
+      else if (skip_anyway) {
         top_ += '\n';
-      skip_anyway = true;
-      show_comment(cd.comment, false);
+        skip_anyway = false;
+      }
+      first = false;
+      prtop("{} = {} as i32,\n", cd.id, cd.val);
     }
-    else if (skip_anyway) {
-      top_ += '\n';
-      skip_anyway = false;
-    }
-    first = false;
-    prtop("{} = {},\n", cd.id, cd.val);
   }
+
+  // Export the variants of the enum
+  prtop("pub use {}::*;\n", tname);
 }
 
 void
@@ -591,22 +602,21 @@ GenRs::show_type(const UnionBody &b, string const &tname)
     auto _close = open_brace();
     scopes_.push_back(tname);
 
+    bool double_default = false;
+    auto double_default_guard = [&double_default] {
+      if (double_default) {
+        throw std::runtime_error("Enums with multiple defaults not supported!");
+      }
+      double_default = true;
+    };
+
     for (const auto &a : b.arms) {
-      bool double_case = false;
-      auto double_case_guard = [&double_case] {
-        if (double_case) {
-          throw std::runtime_error(
-              "Enums with multiple cases per arm not supported at the moment");
-        }
-        double_case = true;
-      };
 
       for (const auto &c : a.cases) {
-        double_case_guard();
         prtop("// case {}:\n", c);
       }
       if (a.has_default) {
-        double_case_guard();
+        double_default_guard();
         prtop("// default:\n");
       }
 
@@ -660,6 +670,13 @@ GenRs::show_type(const UnionBody &b, string const &tname)
     top_ += "\n";
   }
 
+  // Rust doesn't support having methods named "type"; switch that to "type_"
+  // if we're generating from xdr that we can't patch.
+  std::string switch_id = b.switch_id;
+  if (switch_id == "type") {
+    switch_id = "type_";
+  }
+
   bottom_ += std::format(R"(impl {0} {{
     pub fn {2}(&self) -> {3} {{
         match self {{
@@ -670,7 +687,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
 }}
 
 )",
-                         tname, default_match, b.switch_id, enum_base_type());
+                         tname, default_match, switch_id, enum_base_type());
 }
 
 void
@@ -796,12 +813,15 @@ GenRs::type_name(const Declaration &d, bool generate,
     }
   }
 
+  bool needs_box = (d.comment.find(kRustBoxPtr) != std::string::npos) ||
+                   recursive_types.contains(tname);
+
   switch (d.qual) {
   case kScalar:
     return tname;
   case kPtr:
   {
-    if (d.comment.find(kRustBoxPtr) != std::string::npos) {
+    if (needs_box) {
       if (in_colon_required_setting) {
         return std::format("Option::<Box::<{}>>", tname);
       }
@@ -813,7 +833,12 @@ GenRs::type_name(const Declaration &d, bool generate,
     return std::format("Option<{}>", tname);
   }
   case kArray:
+  {
+    if (needs_box) {
+      return std::format("[Box<{}>; {}]", tname, d.bound);
+    }
     return std::format("[{}; {}]", tname, d.bound);
+  }
   case kVec:
   {
     std::string_view colons = in_colon_required_setting ? "::" : "";
@@ -825,8 +850,16 @@ GenRs::type_name(const Declaration &d, bool generate,
     }
 
     // Otherwise, vector of some non-opaque type
-    if (d.bound.empty())
+    if (d.bound.empty()) {
+      if (needs_box) {
+        return std::format("VecM{}<Box<{}>>", colons, tname);
+      }
       return std::format("VecM{}<{}>", colons, tname);
+    }
+    if (needs_box) {
+      return std::format("VecM{}<Box<{}>, {}>", colons, tname,
+                         map_bound(d.bound));
+    }
     return std::format("VecM{}<{}, {}>", colons, tname, map_bound(d.bound));
   }
   default:
@@ -835,9 +868,9 @@ GenRs::type_name(const Declaration &d, bool generate,
 }
 
 string
-gen_rs(vector<Definition> *defs)
+gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types)
 {
-  GenRs gs;
+  GenRs gs(recursive_types);
   std::string preamble = R"(// -*-Rust-*-
 // Generated Code: DO NOT CHECK IN
 
@@ -845,11 +878,13 @@ gen_rs(vector<Definition> *defs)
                          std::string(GIT_COMMIT_HASH) + R"(
 
 #![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(unused_imports)]
 #![allow(dead_code)]
 #![allow(unexpected_cfgs)]
 #![allow(unused_variables)]
+#![allow(clippy::unnecessary_cast)]
 
 use crate::*;
 use core::option::Option;

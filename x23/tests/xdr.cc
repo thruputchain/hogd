@@ -133,3 +133,14 @@ TEST(CoReturnCompile, UniquePtr)
   auto res = x(10)();
   ASSERT_EQ(*res, 10);
 }
+
+TEST(CommentParsing, MultilineComments)
+{
+  // Check that multiline comments are parsed correctly
+  [[maybe_unused]]
+  StellarValue sv;
+  sv.value = 100;
+
+  [[maybe_unused]]
+  StellarValueEnum sv_enum = StellarValueEnum::kStellarValue;
+}
