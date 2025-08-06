@@ -22,8 +22,6 @@
 #include "hogd/container/merkle/node.h"
 #include "types.hh"
 
-// Test
-
 namespace hogd {
 
 // This is a Merkle Patricia Trie. It holds KV pairs and can efficiently
