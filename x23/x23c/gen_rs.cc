@@ -4,8 +4,8 @@
 #include <iterator>
 #include <map>
 #include <optional>
-#include <set>
 #include <ranges>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -603,14 +603,12 @@ GenRs::show_type(const UnionBody &b, string const &tname)
     scopes_.push_back(tname);
 
     bool double_default = false;
-      auto double_default_guard = [&double_default] {
-        if (double_default) {
-          throw std::runtime_error(
-              "Enums with multiple defaults not supported!");
-        }
-        double_default = true;
-      };
-
+    auto double_default_guard = [&double_default] {
+      if (double_default) {
+        throw std::runtime_error("Enums with multiple defaults not supported!");
+      }
+      double_default = true;
+    };
 
     for (const auto &a : b.arms) {
 
@@ -816,7 +814,7 @@ GenRs::type_name(const Declaration &d, bool generate,
   }
 
   bool needs_box = (d.comment.find(kRustBoxPtr) != std::string::npos) ||
-                     recursive_types.contains(tname);
+                   recursive_types.contains(tname);
 
   switch (d.qual) {
   case kScalar:
@@ -834,7 +832,8 @@ GenRs::type_name(const Declaration &d, bool generate,
     }
     return std::format("Option<{}>", tname);
   }
-  case kArray: {
+  case kArray:
+  {
     if (needs_box) {
       return std::format("[Box<{}>; {}]", tname, d.bound);
     }
@@ -858,7 +857,8 @@ GenRs::type_name(const Declaration &d, bool generate,
       return std::format("VecM{}<{}>", colons, tname);
     }
     if (needs_box) {
-      return std::format("VecM{}<Box<{}>, {}>", colons, tname, map_bound(d.bound));
+      return std::format("VecM{}<Box<{}>, {}>", colons, tname,
+                         map_bound(d.bound));
     }
     return std::format("VecM{}<{}, {}>", colons, tname, map_bound(d.bound));
   }

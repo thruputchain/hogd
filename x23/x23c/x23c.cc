@@ -140,7 +140,8 @@ usage(bool error)
 // In our code, we should use the kRustBoxPtr comment to indicate that a type
 // should be wrapped in a Box<T> in rust.  However, for generating code
 // for xdr we do not control (i.e. stellar's) we cannot add those annotations,
-// and so need the --recursive_type option to indicate which types are recursive.
+// and so need the --recursive_type option to indicate which types are
+// recursive.
 
 int
 main(int argc, char **argv)
