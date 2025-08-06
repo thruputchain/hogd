@@ -1,6 +1,19 @@
-
 #include "x23/event.h"
+
+#include <algorithm>
+#include <cassert>
+#include <cerrno>
+#include <memory>
+#include <ranges>
+#include <sys/poll.h>
+#include <unistd.h>
+#include <utility>
+#include <vector>
+
+#include "x23/cleanup.h"
+#include "x23/err.h"
 #include "x23/sockio.h"
+#include "x23/threadpool.h"
 
 namespace x23::detail {
 
@@ -127,7 +140,7 @@ CoroPollImpl::poison(BorrowedFd fd)
   f.poisoned = true;
   auto work = report_badfd(f);
   s.reset();
-  pool_.go(work);
+  pool_.go(std::move(work));
 }
 
 void
@@ -145,7 +158,7 @@ CoroPollImpl::reset(BorrowedFd fd)
     // poll thread ensures closed file descriptors also close sockets.
     wake();
     ptr.reset();
-    pool_.go(work);
+    pool_.go(std::move(work));
   }
 }
 

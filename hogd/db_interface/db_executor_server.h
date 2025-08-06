@@ -41,6 +41,7 @@ handle_db_executor_rpc_request(Server &server, std::span<const std::byte> args,
   }
   auto [header, arg_span] = header_result.value();
 
+
   switch (header.method) {
   case get_rpc_method_number<DatabaseToExecutorInterfaceV1,
                              "try_push_new_subtransaction">():

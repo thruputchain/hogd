@@ -27,7 +27,7 @@ namespace hogd {
 class ManualRevertCallerWasmTest : public ::testing::Test,
                                    public NativeContractTestFramework {
 public:
-  ManualRevertCallerWasmTest() : NativeContractTestFramework(true) {}
+  ManualRevertCallerWasmTest() : NativeContractTestFramework(false) {}
 
 protected:
   void SetUp() override

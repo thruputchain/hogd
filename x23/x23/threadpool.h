@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cassert>
 #include <concepts>
 #include <condition_variable>
@@ -9,6 +10,7 @@
 #include <cstddef>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <stop_token>
 #include <thread>
