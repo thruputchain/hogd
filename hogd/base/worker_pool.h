@@ -117,8 +117,8 @@ public:
                          Proj proj = {})
   {
     std::vector<std::future<void>> completions;
-#if defined(__cpp_lib_ranges_chunk)
     completions.reserve(divide_up(r.size(), width));
+#if defined(__cpp_lib_ranges_chunk)
     std::ranges::for_each(r | std::views::chunk(width),
                           [&f, proj,
                            &completions](std::ranges::viewable_range auto &&r) {
