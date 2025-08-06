@@ -72,7 +72,7 @@ public:
     }
 
     decltype(auto) with_lock(auto &&f)
-      requires requires (std::unique_lock<Lock> ul) { f(ul); }
+        requires requires(std::unique_lock<Lock> ul) { f(ul); }
     {
       std::unique_lock ul(mv_->m_, std::adopt_lock);
       Defer _rel([&ul] { ul.release(); });
@@ -194,13 +194,12 @@ public:
     }
 
     decltype(auto) with_lock(auto &&f)
-      requires requires (std::unique_lock<Lock> ul) { f(ul); }
+        requires requires(std::unique_lock<Lock> ul) { f(ul); }
     {
       std::unique_lock ul(mv_->m_, std::adopt_lock);
       Defer _rel([&ul] { ul.release(); });
       return f(ul);
     }
-
 
     MVar *get_mvar() const { return mv_; }
 

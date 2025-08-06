@@ -414,7 +414,7 @@ private:
   // Pick a number in [0,..,skip-1,skip+1,..max)
   static uint64_t rnd_skip(uint64_t &seed, uint64_t max, uint64_t skip)
   {
-    uint64_t r = rnd(seed) % (max-1);
+    uint64_t r = rnd(seed) % (max - 1);
     r += (r >= skip);
     return r;
   }
