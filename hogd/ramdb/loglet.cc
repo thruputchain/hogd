@@ -9,6 +9,7 @@ extern "C" {
 #include <cassert>
 #include <condition_variable>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <utility>
