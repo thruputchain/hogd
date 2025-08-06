@@ -4,7 +4,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
-#include <print>
+#include <set>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -23,6 +23,8 @@ using std::string_view;
 using std::string_literals::operator""s;
 
 struct GenRs {
+  std::set<std::string> const &recursive_types;
+
   string top_;
   string bottom_;
   std::size_t indent_{};
@@ -813,12 +815,15 @@ GenRs::type_name(const Declaration &d, bool generate,
     }
   }
 
+  bool needs_box = (d.comment.find(kRustBoxPtr) != std::string::npos) ||
+                     recursive_types.contains(tname);
+
   switch (d.qual) {
   case kScalar:
     return tname;
   case kPtr:
   {
-    if (d.comment.find(kRustBoxPtr) != std::string::npos) {
+    if (needs_box) {
       if (in_colon_required_setting) {
         return std::format("Option::<Box::<{}>>", tname);
       }
@@ -829,8 +834,12 @@ GenRs::type_name(const Declaration &d, bool generate,
     }
     return std::format("Option<{}>", tname);
   }
-  case kArray:
+  case kArray: {
+    if (needs_box) {
+      return std::format("[Box<{}>; {}]", tname, d.bound);
+    }
     return std::format("[{}; {}]", tname, d.bound);
+  }
   case kVec:
   {
     std::string_view colons = in_colon_required_setting ? "::" : "";
@@ -842,8 +851,15 @@ GenRs::type_name(const Declaration &d, bool generate,
     }
 
     // Otherwise, vector of some non-opaque type
-    if (d.bound.empty())
+    if (d.bound.empty()) {
+      if (needs_box) {
+        return std::format("VecM{}<Box<{}>>", colons, tname);
+      }
       return std::format("VecM{}<{}>", colons, tname);
+    }
+    if (needs_box) {
+      return std::format("VecM{}<Box<{}>, {}>", colons, tname, map_bound(d.bound));
+    }
     return std::format("VecM{}<{}, {}>", colons, tname, map_bound(d.bound));
   }
   default:
@@ -852,9 +868,9 @@ GenRs::type_name(const Declaration &d, bool generate,
 }
 
 string
-gen_rs(vector<Definition> *defs)
+gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types)
 {
-  GenRs gs;
+  GenRs gs(recursive_types);
   std::string preamble = R"(// -*-Rust-*-
 // Generated Code: DO NOT CHECK IN
 
@@ -862,6 +878,7 @@ gen_rs(vector<Definition> *defs)
                          std::string(GIT_COMMIT_HASH) + R"(
 
 #![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(unused_imports)]
 #![allow(dead_code)]

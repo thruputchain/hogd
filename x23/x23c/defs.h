@@ -5,6 +5,7 @@
 #include <concepts>
 #include <format>
 #include <memory>
+#include <set>
 #include <string>
 #include <variant>
 #include <vector>
@@ -210,7 +211,7 @@ void yyerror(YYLTYPE *loc, XdrCtx *, string, bool warn_only = false);
                  yyscan_t yyscanner, XdrCtx *xc)
 
 std::string gen_hh(vector<Definition> *defs);
-std::string gen_rs(vector<Definition> *defs);
+std::string gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types);
 
 struct Join {
   string str_;
