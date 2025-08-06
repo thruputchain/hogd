@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <new>
 #include <ranges>
 #include <stdexcept>
@@ -16,7 +17,17 @@
 
 namespace x23 {
 
+using std::int16_t;
+using std::int32_t;
+using std::int64_t;
+using std::int8_t;
+using std::intptr_t;
 using std::size_t;
+using std::uint16_t;
+using std::uint32_t;
+using std::uint64_t;
+using std::uint8_t;
+using std::uintptr_t;
 
 // FORWARD(arg) is just std::forward<decltype(arg)>(arg), which
 // creates an expression whose type corresponds to the type with which
@@ -58,6 +69,10 @@ concept is_one_of = (std::same_as<T, Ts> || ...);
 template<typename RG, typename T>
 concept is_range_of =
     std::ranges::range<RG> && std::same_as<std::ranges::range_value_t<RG>, T>;
+
+template<typename RG, typename T>
+concept is_forward_range_of =
+    is_range_of<RG, T> && std::ranges::forward_range<RG>;
 
 // Lambda with ad-hoc polymorphism.  For example:
 //

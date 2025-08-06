@@ -1,6 +1,19 @@
-
 #include "x23/event.h"
+
+#include <algorithm>
+#include <cassert>
+#include <cerrno>
+#include <memory>
+#include <ranges>
+#include <sys/poll.h>
+#include <unistd.h>
+#include <utility>
+#include <vector>
+
+#include "x23/cleanup.h"
+#include "x23/err.h"
 #include "x23/sockio.h"
+#include "x23/threadpool.h"
 
 namespace x23::detail {
 
@@ -80,7 +93,7 @@ CoroPollImpl::check(int timeout)
   }
 
   auto ptr = state_.take();
-  std::vector<std::coroutine_handle<>> cbs;
+  std::vector<ThreadPool::Job> cbs;
   for (auto pfd = pollfds.begin() + 1; pfd != pollfds.end(); ++pfd) {
     auto it = ptr->find(pfd->fd);
     if (it == ptr->end())
@@ -90,12 +103,12 @@ CoroPollImpl::check(int timeout)
       continue;
     for (int write = 0; write < 2; ++write)
       if (f.callbacks[write] && (pfd->revents & pollflags[write]))
-        if (auto h = std::exchange(f.callbacks[write], nullptr)
+        if (auto h = std::exchange(f.callbacks[write].value, nullptr)
                          .set_result_without_resuming(0))
-          cbs.push_back(h);
+          cbs.push_back({h, f.callbacks[write].cpuhint});
   }
   ptr.reset();
-  pool_.go(cbs);
+  pool_.go(std::move(cbs));
 }
 
 int
@@ -107,15 +120,15 @@ CoroPollImpl::get_max_fd()
   return 1 + std::ranges::max(*ptr | std::views::keys);
 }
 
-std::vector<std::coroutine_handle<>>
+std::vector<ThreadPool::Job>
 CoroPollImpl::report_badfd(FdState &f)
 {
-  std::vector<std::coroutine_handle<>> ret;
+  std::vector<ThreadPool::Job> ret;
   for (unsigned write = 0; write < 2; ++write)
     if (f.callbacks[write])
-      if (auto h = std::exchange(f.callbacks[write], nullptr)
+      if (auto h = std::exchange(f.callbacks[write].value, nullptr)
                        .set_result_without_resuming(EBADF))
-        ret.push_back(h);
+        ret.push_back({h, f.callbacks[write].cpuhint});
   return ret;
 }
 
@@ -127,7 +140,7 @@ CoroPollImpl::poison(BorrowedFd fd)
   f.poisoned = true;
   auto work = report_badfd(f);
   s.reset();
-  pool_.go(work);
+  pool_.go(std::move(work));
 }
 
 void
@@ -145,7 +158,7 @@ CoroPollImpl::reset(BorrowedFd fd)
     // poll thread ensures closed file descriptors also close sockets.
     wake();
     ptr.reset();
-    pool_.go(work);
+    pool_.go(std::move(work));
   }
 }
 
@@ -181,13 +194,14 @@ CoroPollImpl::wake()
 void
 CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
 {
-  std::coroutine_handle<> h{nullptr};
+  ThreadPool::Job h{};
   {
     auto ptr = state_.take();
     auto &f = (*ptr)[fd.get()];
     if (f.callbacks[write])
-      h = std::exchange(f.callbacks[write], nullptr)
-              .set_result_without_resuming(err);
+      h = {std::exchange(f.callbacks[write], {})
+               ->set_result_without_resuming(err),
+           f.callbacks[write].cpuhint};
   }
   if (h)
     pool_.go(h);

@@ -2,11 +2,10 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdlib>
-#include <cstring>
 #include <memory>
 #include <span>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 // generated x23 headers
@@ -77,7 +76,9 @@ HogDBExecutorServer::start_server(uint16_t port)
       port,
       [this](std::span<const std::byte> args,
              std::string_view peer) -> OwningSpan<const std::byte> {
-        return hogd_from_execd_handler(*this, args, peer);
+        return server_handle_rpc_request<DatabaseToExecutorInterfaceV1>(*this,
+                                                                        args,
+                                                                        peer);
       });
   if (!server)
     return server.error();
@@ -142,15 +143,11 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
                                                  TransactionID tx,
                                                  StorageDeltaBatch const &batch)
 {
-  std::println("got here 1");
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
-  std::println("got here 2");
   int depth = itx->create_savepoint();
-  std::println("got here 3");
   for (auto const &delta : batch) {
-    std::println("got here 4 {}", x23::show(delta));
     if (RPCError err =
             request_one(*itx, delta.addrkey, delta.delta, delta.flags);
         err != RPCError::kRPCNone) {
@@ -158,7 +155,6 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
       return err;
     }
   }
-  std::println("got here 5");
   return RPCError::kRPCNone;
 }
 
@@ -261,7 +257,7 @@ HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
       read_wasm_code(ctx_.get_db(), hash);
   if (!wasm)
     return ExpectedContract(to_rpc_error(wasm.error()));
-  
+
   ExpectedContract out;
   out.error(RPCError::kRPCNone);
 

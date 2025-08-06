@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstring>
 #include <memory>
 #include <tuple>
 #include <unordered_map>

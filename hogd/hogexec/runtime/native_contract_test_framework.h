@@ -52,10 +52,10 @@ enum class TestDB : int8_t {
 
 class MockDBWrapper {
 public:
-  MockDBWrapper() { db_coord_server_.start_server(0); }
+  MockDBWrapper() { coord_port_ = db_coord_server_.start_server(0); }
 
   uint16_t exec_port() const { return db_executor_server_.port(); }
-  uint16_t coord_port() { return db_coord_server_.port(); }
+  uint16_t coord_port() const { return coord_port_; }
 
   void write_item(AddressAndKey const &addrkey,
                   std::shared_ptr<const StorageItemWrapper> item)
@@ -102,6 +102,7 @@ private:
       RPCDbExecutorServer(&block_manager_, 0);
 
   DbCoordServer db_coord_server_ = DbCoordServer(&block_manager_);
+  uint16_t coord_port_ = 0;
 };
 
 class HogdbWrapper {
@@ -253,7 +254,7 @@ public:
     return contract;
   }
 
-  static ContractAddress make_contract_address(uint8_t id)
+  static constexpr ContractAddress make_contract_address(uint8_t id)
   {
     ContractAddress address{};
     address[0] = id;

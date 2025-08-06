@@ -67,6 +67,9 @@ struct HostPort {
 
   constexpr HostPort() noexcept = default;
   HostPort(Str h, Str p) : host(std::move(h)), port(std::move(p)) {}
+  HostPort(Str h, uint16_t p)
+    : host(std::move(h)), port(std::to_string(p).c_str())
+  {}
   HostPort(const sockaddr_storage &ss)
     : host(show_ipaddr(ss)), port(uformat("{}", get_port(ss)))
   {}

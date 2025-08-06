@@ -326,7 +326,9 @@ UnmodifiedItem::get_item_type() const
 {
   assert(base_item_.has_value());
   assert(base_item_.value());
-  return base_item_.value()->type();
+  return base_item_ // NOLINT(bugprone-unchecked-optional-access)
+      .value()
+      ->type();
 }
 
 SystemStatus<void>

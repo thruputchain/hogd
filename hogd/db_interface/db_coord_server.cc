@@ -57,83 +57,34 @@ x23::Async<DbResult>
 DbCoordServer::dbcoord_abandon_snapshot(BlockID id)
 {
   // TODO(geoff): Implement actual abandon logic if needed
-  // For now, just return ok for stub
+  // For now, just return ok for stub. If and when this function can return a
+  // status other than [DbResultOK], the mempool will need to be updated
+  // (please coordinate with jhumphri@ on this).
   co_return DbResult::DbResultOK;
 }
 
-namespace {
-template<typename Result, typename T>
-ErrnoStatus<Result>
-make_errno_status(T ret)
-{
-  // first check for error.
-  if (ret == -1)
-    return Errno{};
-
-  // otherwise return the result type.
-  assert(ret >= 0);
-  if constexpr (std::is_integral_v<Result>) {
-    return static_cast<Result>(ret);
-  }
-  else if (std::is_void_v<Result>) {
-    assert(ret == 0);
-    return {};
-  }
-  else {
-    static_assert("unsupported result type");
-  }
-}
-
-template<typename T> requires std::is_trivially_copyable_v<T>
-inline ErrnoStatus<void>
-sys_getsockname(int sockfd, T &val)
-{
-  socklen_t len = sizeof(val);
-  return make_errno_status<void>(
-      getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
-}
-
 uint16_t
-get_port(int fd)
+DbCoordServer::start_server(uint16_t port_number)
 {
-  sockaddr_in saddr;
-  // retrieve the port number if it was assigned automatically.
-  ErrnoStatus<void> ret = sys_getsockname(fd, saddr);
-  if (!ret)
-    throw std::runtime_error("Failed to get socket name");
-  return ntohs(saddr.sin_port);
-}
-} // namespace
+  x23::UniqueFd lfd = x23::tcplisten(port_number);
+  if (!lfd) {
+    perror("listen");
+    exit(EXIT_FAILURE);
+  }
+  // If the [port_number] parameter is 0, then the kernel chooses the port
+  // number for us. Thus, in that case, [port_number] will be assigned a
+  // nonzero value below.
+  port_number = x23::get_port(x23::local_addr(lfd.get()));
 
-void
-DbCoordServer::start_server(uint32_t port_number)
-{
-  {
-    auto lfd = x23::tcplisten(port_number);
-    if (!lfd) {
-      perror("listen");
-      exit(EXIT_FAILURE);
+  [](x23::CoroPoll &cp, DbCoordServer *server,
+     x23::UniqueFd lfd) -> x23::Detached {
+    co_await cp.pool_.bg();
+    while (auto c = co_await cp.accept(lfd)) {
+      x23::rpc_stream_logged(cp, *c).server(server);
     }
-    std::lock_guard lock(mtx_);
-    port_ = get_port(lfd.get());
-    cv_.notify_all();
+  }(cp_, this, std::move(lfd));
 
-    [](x23::CoroPoll &cp, DbCoordServer *server,
-       x23::UniqueFd lfd) -> x23::Detached {
-      co_await cp.pool_.bg();
-      while (auto c = co_await cp.accept(lfd)) {
-        x23::rpc_stream_logged(cp, *c).server(server);
-      }
-    }(cp_, this, std::move(lfd));
-  }
-}
-
-uint16_t
-DbCoordServer::port()
-{
-  std::unique_lock lk(mtx_);
-  cv_.wait(lk, [this] { return port_.has_value(); });
-  return port_.value();
+  return port_number;
 }
 
 } // namespace hogd

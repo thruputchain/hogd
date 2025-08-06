@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -32,7 +31,7 @@ class FibonacciTest : public ::testing::TestWithParam<TestDB>,
 public:
   FibonacciTest()
     : NativeContractTestFramework(
-          true, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 
 protected:

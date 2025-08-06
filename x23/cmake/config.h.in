@@ -19,6 +19,9 @@
 // Set to 1 if your operating system supports the accept4 syscall
 #cmakedefine01 HAVE_ACCEPT4
 
+// Define to 1 if you have the sched_cpu() system call
+#cmakedefine01 HAVE_SCHED_GETCPU
+
 // Set to 1 if you can't call consteval functions from inside if consteval
 #cmakedefine01 HAVE_BROKEN_P2564R3
 
