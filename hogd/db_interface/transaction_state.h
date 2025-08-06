@@ -115,7 +115,8 @@ public:
   }
 
   // Asserts that all opened transactions have been committed or aborted.
-  void assert_all_closed() const
+  void assert_all_closed()
+      const // NOLINT(readability-convert-member-functions-to-static)
   {
     assert(new_transaction_count() == closed_transaction_count());
   }
