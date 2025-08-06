@@ -134,7 +134,7 @@ public:
     for (size_t i = 0; i < r.size(); i += width) {
       auto end = std::min(i + width, r.size());
 
-      completions.emplace_back(submit([this, &f, proj, begin = i, end, &r]() {
+      completions.emplace_back(submit([&f, proj, begin = i, end, &r]() {
         for (size_t j = begin; j < end; ++j) {
           f(std::invoke(proj, r[j]));
         }
