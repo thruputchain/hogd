@@ -227,6 +227,13 @@ Database::get_size(std::span<const std::byte> key)
   return map_.get_size(key);
 }
 
+inline DBStatus<uint8_t>
+Database::get_type(std::span<const std::byte> key)
+{
+  assert(active_);
+  return map_.get_type(key);
+}
+
 inline DBStatus<void>
 Database::put(std::span<const std::byte> key, uint8_t type,
               std::span<const std::byte> val)

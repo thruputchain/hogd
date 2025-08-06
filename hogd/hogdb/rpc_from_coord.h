@@ -4,6 +4,7 @@
 
 // generated x23 headers
 #include "db_coord.hh"
+#include "nomination.hh"
 #include "rpc_types.hh"
 
 #include "hogd/base/types.h"

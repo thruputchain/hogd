@@ -7,7 +7,6 @@
 #include <print>
 #include <span>
 #include <sstream>
-#include <stack>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1162,131 +1161,6 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
 }
 
 // static
-template<typename NodeType>
-void
-MerkleTrie::walk(
-    NodeType *root, const HexArray &root_prefix,
-    const std::function<void(const HexArray &, NodeType &, NodeType *)> &f)
-{
-  static_assert(std::is_same_v<NodeType, Node> ||
-                    std::is_same_v<NodeType, const Node>,
-                "[NodeType] must be [Node] or [const Node].");
-
-  // We perform a post-order traversal iteratively. We use iteration rather than
-  // recursion to avoid exceeding the stack size when traversing deep tries.
-
-  // We use this type along with the data structures below to track where we are
-  // in the trie.
-  struct CheckInfo {
-    // The node we are currently looking at.
-    NodeType *node;
-    // The parent of this node.
-    NodeType *parent;
-    // The path that maps to this node.
-    HexArray path;
-    // This is only relevant for branch and extension nodes. When we first
-    // encounter these nodes in an iterative loop, we cannot *immediately*
-    // "visit" them (i.e., execute [f] on them)--we need to visit all of their
-    // children first.
-    //
-    // A branch or extension node will be left in the stack until all of its
-    // children have been visited. When this node pushes one of its children
-    // onto the stack, the node waits until the child is popped off the stack
-    // before pushing the next child. Thus, the node will not enqueue the next
-    // child until a subsequent iteration, and thus we need to track this child
-    // so that the node knows which child to push at that point.
-    //
-    // We use [next_child_to_visit] to track which child should be pushed next
-    // for [node].
-    size_t next_child_to_visit;
-  };
-
-  std::stack<CheckInfo> path;
-  // Push the root node onto the stack.
-  path.push(CheckInfo{.node = root,
-                      .parent = nullptr,
-                      .path = root_prefix,
-                      .next_child_to_visit = 0});
-
-  while (!path.empty()) {
-    CheckInfo &info = path.top();
-
-    if (!info.node) {
-      path.pop();
-      continue;
-    }
-
-    switch (info.node->type) {
-    case Node::Type::kBranch:
-      CHECK_LE(info.next_child_to_visit, info.node->child.size());
-      if (info.next_child_to_visit == info.node->child.size()) {
-        // We have visited all of the branch's children, so now we can "visit"
-        // (i.e., call [f] on) the branch.
-        f(info.path, *info.node, info.parent);
-      }
-      else {
-        // Visit the next child.
-
-        // Append the branch path we are taking to [info.path] so that it holds
-        // the path to the child. For example, if [info.next_child_to_visit] is
-        // 0x3, then we know we will next visit the child at index 0x3, so we
-        // append 0x3 to [info.path].
-        info.path.append(std::byte(info.next_child_to_visit));
-        path.push({.node = info.node->child[info.next_child_to_visit],
-                   .parent = info.node,
-                   .path = info.path,
-                   .next_child_to_visit = 0});
-        // Now change [info.path] back to holding the path to the branch node.
-        info.path.remove_from_back(1);
-        info.next_child_to_visit++;
-        continue;
-      }
-      break;
-    case Node::Type::kExtension:
-      // An extension node always has exactly one child. It is not possible for
-      // an extension node to have no children.
-      CHECK_LE(info.next_child_to_visit, 1UL);
-      if (info.next_child_to_visit == 1) {
-        // We have visited the extension node's one child, so now we can visit
-        // the extension node.
-        f(info.path, *info.node, info.parent);
-      }
-      else {
-        // Append the extension node's path to [info.path] so that [info.path]
-        // holds the path to the child when we push the child.
-        info.path.append(info.node->path);
-        path.push({.node = info.node->child[0],
-                   .parent = info.node,
-                   .path = info.path,
-                   .next_child_to_visit = 0});
-        // Now change [info.path] back to holding the path to the extension
-        // node.
-        info.path.remove_from_back(info.node->path.size());
-        info.next_child_to_visit++;
-        continue;
-      }
-      break;
-    case Node::Type::kLeaf:
-      // A leaf node has no children, so we can visit a leaf immediately upon
-      // encountering it.
-      CHECK_EQ(info.next_child_to_visit, 0UL);
-
-      // Append the leaf's path to [info.path] so that the full path is passed
-      // to [f].
-      info.path.append(info.node->path);
-      NodeType &n = *info.node;
-      f(info.path, n, info.parent);
-      // No need to remove the portion of the path we just appended above
-      // because we pop the leaf anyway below, so we do not access the leaf
-      // after this point.
-      break;
-    }
-
-    path.pop();
-  }
-}
-
-// static
 Node *
 MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
                                       size_t &idx, Node *&existing_key)
@@ -1451,6 +1325,27 @@ MerkleTrie::generate_hashes_from(Node *n, Node *locked_through) const
         return;
       }
       n->parent->rw_lock.lock_reader();
+
+      if (n->parent->parent->parent == &root_) {
+        // Do not rehash a node with depth 3. We cannot check this until we hold
+        // the [rw_lock] for [n->parent]. If we do not hold the lock, then
+        // [n->parent->parent] could change while we access it, resulting in us
+        // reading an invalid value for [n->parent->parent->parent] or a
+        // use-after-free bug. This is why we do the check here rather than if
+        // the if statement above.
+        //
+        // TODO(jhumphri): This is messy as it would be better to have some
+        // notion of depth. We cannot store the depth in the [Node] type as
+        // nodes can have their depth change if an ancestor in the tree is
+        // inserted/removed. So if that happens, we would need to traverse all
+        // children of the ancestor and update their depths, which is too
+        // expensive. Instead, we can likely track the depth in
+        // [traverse_to_lowest_branch] and decrement it in each iteration of
+        // this loop.
+        n->parent->rw_lock.unlock();
+        n->rw_lock.unlock();
+        return;
+      }
     }
 
     Node *parent = n->parent;
@@ -1489,12 +1384,11 @@ MerkleTrie::generate_top_level_hashes()
   // We do not hold any locks for these nodes. It only makes sense to call this
   // function when there are no other threads mutating the trie. Otherwise, even
   // before this function returns the hashes we recompute here will be stale.
-  for (Node *child : root_.child) {
-    if (child) {
-      child->hash = child->compute_node_hash();
-    }
-  }
-  root_.hash = root_.compute_node_hash();
+  HexArray prefix;
+  auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
+    node.hash = node.compute_node_hash();
+  };
+  walk<Node>(&root_, prefix, f, /*max_depth=*/2);
 }
 
 void

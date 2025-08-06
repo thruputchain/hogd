@@ -13,7 +13,9 @@
 // TODO(abelay): there is apparently a header dependency problem inside x23
 // where x23/vec.h cannot be included first.  These generated headers are not
 // needed, but included as a hack to avoid it.
-#include "db_coord.hh"  // NOLINT
+#include "db_coord.hh" // NOLINT
+#include "hogd/container/merkle/merkle_trie.h"
+#include "hogd/hogdb/merkle.h"
 #include "rpc_types.hh" // NOLINT
 
 #include "hogd/base/log.h"
@@ -57,14 +59,18 @@ hogdb_init(std::string_view path, size_t ram_bytes)
 
   // create the RPC context.
   HogDatabase db(std::move(*ramdb));
-  RPCContext ctx(db);
+  MerkleTriePrefix trie;
+  RPCContext ctx(db, trie);
 
   // insert each item in the database into the merkle trie.
-  ctx.get_db().get_each_parallel([](std::span<const std::byte> key,
-                                    uint8_t type,
-                                    std::span<const std::byte> value) {
-    // TODO(jhumphries): your code here.
+  ctx.get_db().get_each_parallel([&trie](std::span<const std::byte> key,
+                                         uint8_t type,
+                                         std::span<const std::byte> value) {
+    std::span<const std::byte> k =
+        MerkleTrieHelpers::add_type_to_merkle_key(key, type);
+    CHECK(trie.insert(k, value));
   });
+  trie.generate_top_level_hashes();
 
   // start the coordinator server.
   info("starting coordinator server.");
