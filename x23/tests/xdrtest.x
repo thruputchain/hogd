@@ -148,9 +148,6 @@ program blank_rpc {
   } = 1;
 } = 3123124;
 
-/* Multiline comment
-Check that this parses */
-
 struct MultilineComment {
   hyper value;
 };
