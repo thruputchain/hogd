@@ -70,7 +70,7 @@ TEST(SharedLock, MutualExclusion)
 
 TEST(SharedLock, ManyReaders)
 {
-  std::atomic_uint nthreads = 0x1'0000;
+  std::atomic_uint nthreads = 0x1000'0000;
 
   SharedLock lock;
   lock.lock();
@@ -78,18 +78,19 @@ TEST(SharedLock, ManyReaders)
     usleep(50'000);
     nthreads = 0;
     lock.unlock();
-    nthreads.notify_all();
   });
 
   std::array<std::jthread, 64> readers;
   auto go = [&] {
     auto holder = lock.hold_shared();
-    ASSERT_LE(nthreads, readers.size());
-    if (++nthreads == readers.size())
+    unsigned int n = ++nthreads;
+    ASSERT_LE(n, readers.size());
+    if (n == readers.size())
       nthreads.notify_all();
-    unsigned int n;
-    while ((n = nthreads) != readers.size())
-      nthreads.wait(n);
+    else
+      do {
+        nthreads.wait(n);
+      } while ((n = nthreads) != readers.size());
   };
   for (auto &t : readers)
     t = std::jthread{go};

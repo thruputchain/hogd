@@ -61,7 +61,7 @@ public:
   WorkerPool &operator=(const WorkerPool &p) = delete;
 
   // worker_count returns the maximum number of available workers.
-  int worker_count() const { return workers_.size(); }
+  size_t worker_count() const { return workers_.size(); }
 
   // submit enqueues a job and returns a future for when the job completes.
   template<typename Func,
@@ -117,8 +117,8 @@ public:
                          Proj proj = {})
   {
     std::vector<std::future<void>> completions;
-#if defined(__cpp_lib_ranges_chunk)
     completions.reserve(divide_up(r.size(), width));
+#if defined(__cpp_lib_ranges_chunk)
     std::ranges::for_each(r | std::views::chunk(width),
                           [this, &f, proj,
                            &completions](std::ranges::viewable_range auto &&r) {
@@ -131,11 +131,14 @@ public:
                           });
 #else  // defined(__cpp_lib_ranges_chunk)
     // LLVM doesn't support std::views::chunk yet.
-    std::ignore = width;
-    completions.reserve(r.size());
-    for (auto v : r) {
-      completions.emplace_back(
-          submit([&f, proj, v] { f(std::invoke(proj, v)); }));
+    for (size_t i = 0; i < r.size(); i += width) {
+      size_t end = std::min(i + width, r.size());
+
+      completions.emplace_back(submit([proj, &f, i, end, &r]() {
+        for (size_t j = i; j < end; ++j) {
+          f(std::invoke(proj, r[j]));
+        }
+      }));
     }
 #endif // defined(__cpp_lib_ranges_chunk)
     for (const std::future<void> &f : completions)

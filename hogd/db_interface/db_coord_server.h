@@ -25,7 +25,7 @@ public:
   }
 
   // Start the server on the specified port
-  void start_server(uint32_t port_number);
+  uint16_t start_server(uint16_t port_number);
 
   static x23::Async<void> dbcoord_null() { co_return; }
 

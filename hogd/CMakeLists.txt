@@ -36,6 +36,7 @@ add_subdirectory(rpc)
 # Finally, build the hogdb, hogexec, and coord executables
 add_subdirectory(hogdb)
 add_subdirectory(hogexec)
+add_subdirectory(mempool)
 
 # Build module for mock contract tests
 if (ENABLE_TEST_FFI)

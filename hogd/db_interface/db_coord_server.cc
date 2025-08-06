@@ -57,28 +57,34 @@ x23::Async<DbResult>
 DbCoordServer::dbcoord_abandon_snapshot(BlockID id)
 {
   // TODO(geoff): Implement actual abandon logic if needed
-  // For now, just return ok for stub
+  // For now, just return ok for stub. If and when this function can return a
+  // status other than [DbResultOK], the mempool will need to be updated
+  // (please coordinate with jhumphri@ on this).
   co_return DbResult::DbResultOK;
 }
 
-void
-DbCoordServer::start_server(uint32_t port_number)
+uint16_t
+DbCoordServer::start_server(uint16_t port_number)
 {
-  {
-    auto lfd = x23::tcplisten(port_number);
-    if (!lfd) {
-      perror("listen");
-      exit(EXIT_FAILURE);
-    }
-
-    [](x23::CoroPoll &cp, DbCoordServer *server,
-       x23::UniqueFd lfd) -> x23::Detached {
-      co_await cp.pool_.bg();
-      while (auto c = co_await cp.accept(lfd)) {
-        x23::rpc_stream_logged(cp, *c).server(server);
-      }
-    }(cp_, this, std::move(lfd));
+  x23::UniqueFd lfd = x23::tcplisten(port_number);
+  if (!lfd) {
+    perror("listen");
+    exit(EXIT_FAILURE);
   }
+  // If the [port_number] parameter is 0, then the kernel chooses the port
+  // number for us. Thus, in that case, [port_number] will be assigned a
+  // nonzero value below.
+  port_number = x23::get_port(x23::local_addr(lfd.get()));
+
+  [](x23::CoroPoll &cp, DbCoordServer *server,
+     x23::UniqueFd lfd) -> x23::Detached {
+    co_await cp.pool_.bg();
+    while (auto c = co_await cp.accept(lfd)) {
+      x23::rpc_stream_logged(cp, *c).server(server);
+    }
+  }(cp_, this, std::move(lfd));
+
+  return port_number;
 }
 
 } // namespace hogd

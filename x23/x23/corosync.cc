@@ -10,7 +10,7 @@ void
 resume_in_another_thread(std::coroutine_handle<> h)
 {
   if (ThreadPool *pool = ThreadPool::get_thread_pool())
-    pool->go(h);
+    pool->go({h, cpuid()});
   else
     h();
 }

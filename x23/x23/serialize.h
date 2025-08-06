@@ -404,12 +404,11 @@ struct Deserializer {
     }
     else {
       constexpr size_t binlen = (x.size() + 3UZ) & ~3UZ;
+      static_assert(binlen > 0);
       if constexpr (Safe)
         need(binlen);
-      if constexpr (binlen > 0) {
-        memcpy(x.data(), p, size);
-        p += binlen;
-      }
+      memcpy(x.data(), p, size);
+      p += binlen;
       check_trailing_zeros(rem);
     }
   }

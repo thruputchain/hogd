@@ -8,6 +8,7 @@ members = [
     "integration_test_contracts/read_only_test",
     "integration_test_contracts/fibonacci_call",
     "integration_test_contracts/manual_revert_test",
+    "integration_test_contracts/manual_revert_caller",
 ]
 resolver = "2"
 

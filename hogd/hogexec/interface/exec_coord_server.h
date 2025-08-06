@@ -23,13 +23,24 @@ namespace hogd {
 // coordinator.
 class ExecCoordServer {
 public:
-  ExecCoordServer(ExecCard self_card, int poll_threads,
-                  std::string const &coord_addr)
+  ExecCoordServer(ExecCard self_card, int poll_threads)
     : self_card_(std::move(self_card)),
       main_worker_pool_(available_parallelism()), x23_pool_(poll_threads),
       cp_(x23_pool_)
+  {}
+
+  ~ExecCoordServer() { await_shutdown_request(); }
+
+  uint16_t start_server(uint16_t port_number)
   {
-    init_from_coord(coord_addr);
+    return rpc_interface_->start_server(port_number);
+  }
+
+  void shut_down()
+  {
+    if (rpc_interface_) {
+      rpc_interface_->shut_down();
+    }
   }
 
   void await_shutdown_request()
@@ -39,13 +50,11 @@ public:
     }
   }
 
-  ~ExecCoordServer() { await_shutdown_request(); }
-
-private:
   // Get the database information from the coordinator, and then
   // start the exec to coord RPC interface (which finishes the initialization).
-  void init_from_coord(std::string const &coord_addr);
+  void init_from_coord(std::string_view coord_addr, const LocalMockDB *db);
 
+private:
   // Connects to the database and performs initialization of the executor.
   // Then begins serving RPCs to the coordinator.
   void start_rpc_service(DatabaseIdentifier identifier,

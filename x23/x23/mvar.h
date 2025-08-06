@@ -41,11 +41,16 @@ public:
     }
     Ptr(Ptr &&other) noexcept : mv_(std::exchange(other.mv_, nullptr)) {}
     ~Ptr() { reset(); }
-    Ptr &operator=(std::nullptr_t) { reset(); }
-    Ptr &operator=(Ptr &&other)
+    Ptr &operator=(std::nullptr_t) noexcept
+    {
+      reset();
+      return *this;
+    }
+    Ptr &operator=(Ptr &&other) noexcept
     {
       reset();
       mv_ = std::exchange(other.mv_, nullptr);
+      return *this;
     }
     T *operator->() const { return &mv_->t_; }
     T &operator*() const { return mv_->t_; }
@@ -65,6 +70,16 @@ public:
       Defer _rel([&ul] { ul.release(); });
       c.wait(ul);
     }
+
+    decltype(auto) with_lock(auto &&f)
+        requires requires(std::unique_lock<Lock> ul) { f(ul); }
+    {
+      std::unique_lock ul(mv_->m_, std::adopt_lock);
+      Defer _rel([&ul] { ul.release(); });
+      return f(ul);
+    }
+
+    MVar *get_mvar() const { return mv_; }
 
   private:
     MVar *mv_{};
@@ -150,11 +165,16 @@ public:
     }
     Ptr(Ptr &&other) noexcept : mv_(std::exchange(other.mv_, nullptr)) {}
     ~Ptr() { reset(); }
-    Ptr &operator=(std::nullptr_t) { reset(); }
-    Ptr &operator=(Ptr &&other)
+    Ptr &operator=(std::nullptr_t) noexcept
+    {
+      reset();
+      return *this;
+    }
+    Ptr &operator=(Ptr &&other) noexcept
     {
       reset();
       mv_ = std::exchange(other.mv_, nullptr);
+      return *this;
     }
     explicit operator bool() const { return mv_; }
     void reset()
@@ -172,6 +192,16 @@ public:
       Defer _rel([&ul] { ul.release(); });
       c.wait(ul);
     }
+
+    decltype(auto) with_lock(auto &&f)
+        requires requires(std::unique_lock<Lock> ul) { f(ul); }
+    {
+      std::unique_lock ul(mv_->m_, std::adopt_lock);
+      Defer _rel([&ul] { ul.release(); });
+      return f(ul);
+    }
+
+    MVar *get_mvar() const { return mv_; }
 
   private:
     MVar *mv_{};

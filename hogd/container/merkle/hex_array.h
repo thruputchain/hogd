@@ -83,6 +83,16 @@ public:
     size_ = hash.size() * 2;
   }
 
+  HexArray(size_t bytes)
+  {
+    CHECK_LE(sizeof(bytes), kArrayLength);
+
+    init();
+
+    memcpy(backing_store_.data(), &bytes, sizeof(bytes));
+    size_ = sizeof(bytes) * 2;
+  }
+
   bool operator==(const HexArray &a) const
   {
     if (size_ != a.size()) {
@@ -199,6 +209,21 @@ public:
   {
     std::vector<std::byte> ret;
     to_byte_vector(ret);
+    return ret;
+  }
+
+  SHA256Hash to_sha256() const
+  {
+    SHA256Hash ret;
+
+    memcpy(ret.data(), backing_store_.data(), sizeof(SHA256Hash));
+    if (size_ % 2) {
+      // If the size is odd, zero out the last 4 bits to ensure we consistently
+      // return the same array. Otherwise, we could end up returning garbage in
+      // the last 4 bits, which could vary between invocations of
+      // [to_byte_vector()].
+      ret.back() &= 0xF0;
+    }
     return ret;
   }
 

@@ -50,6 +50,7 @@ include(cmake/accept4.cmake)
 include(cmake/atomicsharedptr.cmake)
 include(cmake/demangle.cmake)
 include(cmake/epoll.cmake)
+include(cmake/getcpu.cmake)
 include(cmake/pause.cmake)
 include(cmake/stacktrace.cmake)
 

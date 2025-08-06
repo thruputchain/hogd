@@ -12,6 +12,8 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include "x23/event.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -21,11 +23,14 @@ class ExecutorRpcInterface {
 public:
   using rpc_service = ExecutorCoord1;
 
-  ExecutorRpcInterface(uint16_t self_executor_id, WorkerPool &main_worker_pool,
+  ExecutorRpcInterface(uint16_t self_executor_id, x23::CoroPoll &cp,
+                       WorkerPool &main_worker_pool,
                        std::unique_ptr<DatabaseProxy> db_proxy)
-    : self_executor_id_(self_executor_id), main_worker_pool_(main_worker_pool),
-      executor_states_(std::move(db_proxy))
+    : self_executor_id_(self_executor_id), cp_(cp),
+      main_worker_pool_(main_worker_pool), executor_states_(std::move(db_proxy))
   {}
+
+  uint16_t start_server(uint16_t port_number);
 
   // Disable copy and move
   ExecutorRpcInterface(ExecutorRpcInterface const &) = delete;
@@ -37,16 +42,17 @@ public:
 
   x23::Async<ExecProposeResult>
   executorcoord_propose_transaction(BlockID block_id,
-                                    SignedTransaction const &signed_tx);
+                                    SignedTransaction signed_tx);
   x23::Async<ExecResult>
   executorcoord_validate_transaction(BlockID block_id,
-                                     ProposedTransaction const &proposed_tx);
+                                     ProposedTransaction proposed_tx);
 
   x23::Async<ExecProposeBatchResult>
   executorcoord_propose_batch(BlockID block_id,
-                              x23::Vec<SignedTransaction> const &signed_txs);
-  x23::Async<ExecValidateBatchResult> executorcoord_validate_batch(
-      BlockID block_id, x23::Vec<ProposedTransaction> const &proposed_txs);
+                              SignedTransactionBatch signed_txs);
+  x23::Async<ExecValidateBatchResult>
+  executorcoord_validate_batch(BlockID block_id,
+                               ProposedTransactionBatch proposed_txs);
 
   x23::Async<ExecResult> executorcoord_open_proposal_block(BlockID id);
   x23::Async<ExecResult> executorcoord_open_validation_block(BlockID id);
@@ -59,6 +65,7 @@ public:
   // that are still running.
   x23::Async<void> executorcoord_shutdown();
 
+  void shut_down();
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
@@ -67,7 +74,9 @@ private:
   std::atomic<uint64_t> self_id_ = 0;
   const uint16_t self_executor_id_;
 
+  x23::CoroPoll &cp_;
   WorkerPool &main_worker_pool_;
+
   ExecutorStateManager executor_states_;
   std::atomic<bool> shutdown_flag_ = false;
 };
