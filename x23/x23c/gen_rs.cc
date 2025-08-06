@@ -884,6 +884,7 @@ gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types)
 #![allow(dead_code)]
 #![allow(unexpected_cfgs)]
 #![allow(unused_variables)]
+#![allow(clippy::unnecessary_cast)]
 
 use crate::*;
 use core::option::Option;
