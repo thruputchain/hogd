@@ -1166,7 +1166,8 @@ template<typename NodeType>
 void
 MerkleTrie::walk(
     NodeType *root, const HexArray &root_prefix,
-    const std::function<void(const HexArray &, NodeType &, NodeType *)> &f)
+    const std::function<void(const HexArray &, NodeType &, NodeType *)> &f,
+    std::optional<size_t> max_depth)
 {
   static_assert(std::is_same_v<NodeType, Node> ||
                     std::is_same_v<NodeType, const Node>,
@@ -1199,6 +1200,7 @@ MerkleTrie::walk(
     // We use [next_child_to_visit] to track which child should be pushed next
     // for [node].
     size_t next_child_to_visit;
+    size_t depth;
   };
 
   std::stack<CheckInfo> path;
@@ -1219,9 +1221,12 @@ MerkleTrie::walk(
     switch (info.node->type) {
     case Node::Type::kBranch:
       CHECK_LE(info.next_child_to_visit, info.node->child.size());
-      if (info.next_child_to_visit == info.node->child.size()) {
+      if (info.next_child_to_visit == info.node->child.size() ||
+          (max_depth && info.depth == max_depth.value())) {
         // We have visited all of the branch's children, so now we can "visit"
-        // (i.e., call [f] on) the branch.
+        // (i.e., call [f] on) the branch. Or, we have reached the maximum depth
+        // we want to visit of the trie, so we now visit the extension node
+        // because we do not want to visit its children.
         f(info.path, *info.node, info.parent);
       }
       else {
@@ -1235,7 +1240,8 @@ MerkleTrie::walk(
         path.push({.node = info.node->child[info.next_child_to_visit],
                    .parent = info.node,
                    .path = info.path,
-                   .next_child_to_visit = 0});
+                   .next_child_to_visit = 0,
+                   .depth = info.depth + 1});
         // Now change [info.path] back to holding the path to the branch node.
         info.path.remove_from_back(1);
         info.next_child_to_visit++;
@@ -1246,9 +1252,12 @@ MerkleTrie::walk(
       // An extension node always has exactly one child. It is not possible for
       // an extension node to have no children.
       CHECK_LE(info.next_child_to_visit, 1UL);
-      if (info.next_child_to_visit == 1) {
+      if (info.next_child_to_visit == 1 ||
+          (max_depth && info.depth == max_depth.value())) {
         // We have visited the extension node's one child, so now we can visit
-        // the extension node.
+        // the extension node. Or, we have reached the maximum depth we want to
+        // visit of the trie, so we now visit the extension node because we do
+        // not want to visit its children.
         f(info.path, *info.node, info.parent);
       }
       else {
@@ -1258,7 +1267,8 @@ MerkleTrie::walk(
         path.push({.node = info.node->child[0],
                    .parent = info.node,
                    .path = info.path,
-                   .next_child_to_visit = 0});
+                   .next_child_to_visit = 0,
+                   .depth = info.depth + 1});
         // Now change [info.path] back to holding the path to the extension
         // node.
         info.path.remove_from_back(info.node->path.size());
@@ -1270,6 +1280,9 @@ MerkleTrie::walk(
       // A leaf node has no children, so we can visit a leaf immediately upon
       // encountering it.
       CHECK_EQ(info.next_child_to_visit, 0UL);
+      if (max_depth) {
+        CHECK_LE(info.depth, max_depth.value());
+      }
 
       // Append the leaf's path to [info.path] so that the full path is passed
       // to [f].
@@ -1510,12 +1523,11 @@ MerkleTrie::generate_top_level_hashes()
   // We do not hold any locks for these nodes. It only makes sense to call this
   // function when there are no other threads mutating the trie. Otherwise, even
   // before this function returns the hashes we recompute here will be stale.
-  for (Node *child : root_.child) {
-    if (child) {
-      child->hash = child->compute_node_hash();
-    }
-  }
-  root_.hash = root_.compute_node_hash();
+  HexArray prefix;
+  auto f = [&](const HexArray & /*path*/, Node &node, Node * /*parent*/) {
+    node.hash = node.compute_node_hash();
+  };
+  walk<Node>(&root_, prefix, f, /*max_depth=*/2);
 }
 
 void

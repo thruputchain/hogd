@@ -243,7 +243,9 @@ private:
                              std::byte remaining_child_hex);
 
   // Does a post-order traversal of the trie starting at [root] with path
-  // [prefix], calling [f] on each node.
+  // [prefix], calling [f] on each node. Does not traverse nodes with a depth
+  // larger than [max_depth]. If [max_depth] is [std::nullopt], then this method
+  // traverses the entire trie.
   //
   // A post-order traversal visits all of the children of a node before visiting
   // the node itself. This is useful when regenerating all of the node hashes in
@@ -253,7 +255,8 @@ private:
   template<typename NodeType>
   static void
   walk(NodeType *root, const HexArray &prefix,
-       const std::function<void(const HexArray &, NodeType &, NodeType *)> &f);
+       const std::function<void(const HexArray &, NodeType &, NodeType *)> &f,
+       std::optional<size_t> max_depth = std::nullopt);
 
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
   // of the hex digit in [path] that corresponds to the lowest branch.
