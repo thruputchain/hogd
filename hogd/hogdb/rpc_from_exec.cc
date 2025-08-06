@@ -1,6 +1,7 @@
 #include "hogd/hogdb/rpc_from_exec.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -230,10 +231,12 @@ HogDBExecutorServer::commit_contract_create(BlockID /*block*/,
                                             Contract const &contract)
 {
   // TODO(abelay): this must be included as part of BlockTX, not just written.
-
-  const auto &wasm = contract.wasmi_contract();
-  const auto *cptr = reinterpret_cast<const std::byte *>(wasm.data());
-  auto buf = std::span<const std::byte>(cptr, wasm.size());
+  // Currently the only contract types that go through this contract create workflow 
+  // are wasmi contracts.
+  assert(contract.contract_type() == ContractType::kWasmi);
+  auto data = x23::serialize(contract);
+  const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
+  auto buf = std::span<const std::byte>(cptr, data.size());
   SHA256Hash hash = sha256(buf);
   return to_rpc_error(write_wasm_code(ctx_.get_db(), hash, buf));
 }
