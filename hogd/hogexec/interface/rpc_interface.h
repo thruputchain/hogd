@@ -30,7 +30,7 @@ public:
       main_worker_pool_(main_worker_pool), executor_states_(std::move(db_proxy))
   {}
 
-  void start_server(uint32_t port_number);
+  uint16_t start_server(uint16_t port_number);
 
   // Disable copy and move
   ExecutorRpcInterface(ExecutorRpcInterface const &) = delete;

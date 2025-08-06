@@ -1,33 +1,43 @@
-#include <cstddef>
-#include <cstdio>
-#include <cstring>
-#include <future>
 #include <gtest/gtest.h>
-#include <iostream>
 
-#include <map>
+#include <cstdint>
 #include <memory>
-#include <print>
-#include <random>
-#include <set>
-#include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
-#include <vector>
 
+#include "contract.hh"
+#include "coord.hh"
+#include "coord_sched.hh"
+#include "db_coord.hh"
+#include "discovery.hh"
+#include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_coord_server.h"
+#include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/mempool.h"
+#include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
+#include "nomination.hh"
+#include "sched_coord.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "transaction.hh"
 #include "types.hh"
+#include "x23/event.h"
+#include "x23/rpc.h"
+#include "x23/sockio.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 
@@ -36,22 +46,22 @@ namespace {
 class MempoolTestServer {
 public:
   static constexpr std::string kAddress = "127.0.0.1";
-  static constexpr uint16_t kExecutorDbPort = 10000;
-  static constexpr uint16_t kCoordinatorDbPort = 10001;
-  static constexpr uint16_t kCoordinatorPort = 10002;
-  static constexpr uint16_t kCoordinatorSchedPort = 10003;
-  static constexpr uint16_t kExecutorPort = 10004;
-
   static constexpr ContractAddress kContractAddress =
       NativeContractTestFramework::make_contract_address(3);
 
   MempoolTestServer()
     : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
-      block_manager_(0, &in_memory_db_), coordinator_server_(kCoordinatorPort),
-      coordinator_sched_server_(kCoordinatorSchedPort),
+      block_manager_(0, &in_memory_db_),
+      coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
+      exec_card_{.protocol = "blah",
+                 .upid = {},
+                 .address =
+                     x23::HostPort(kAddress.c_str(), coordinator_port_).show()},
       executor_coord_server_(exec_card_, /*poll_threads=*/1),
-      db_executor_server_(&block_manager_, kExecutorDbPort),
-      db_coordinator_server_(&block_manager_), db_proxy_(kDbIdentifier),
+      db_executor_server_(&block_manager_, /*port=*/0),
+      executor_db_port_(db_executor_server_.port()),
+      db_identifier_{.read_port_number_ = executor_db_port_},
+      db_coordinator_server_(&block_manager_), db_proxy_(db_identifier_),
       snapshot_cache_(
           std::make_unique<StorageSnapshotCache>(/*block_number=*/1, db_proxy_))
   {
@@ -63,12 +73,15 @@ public:
 
     set_up_grant_storage_token();
 
-    db_coordinator_server_.start_server(kCoordinatorDbPort);
+    coordinator_sched_port_ =
+        coordinator_sched_server_.start_server(/*port_number=*/0);
+    coordinator_db_port_ =
+        db_coordinator_server_.start_server(/*port_number=*/0);
 
     executor_coord_server_.init_from_coord(
-        x23::HostPort(kAddress.c_str(), kCoordinatorPort).show(),
-        &kDbIdentifier);
-    executor_coord_server_.start_server(kExecutorPort);
+        x23::HostPort(kAddress.c_str(), coordinator_port_).show(),
+        &db_identifier_);
+    executor_port_ = executor_coord_server_.start_server(/*port_number=*/0);
   }
 
   ~MempoolTestServer()
@@ -78,6 +91,12 @@ public:
     executor_coord_server_.shut_down();
   }
 
+  uint16_t coordinator_sched_port() const { return coordinator_sched_port_; }
+  uint16_t executor_db_port() const { return executor_db_port_; }
+  uint16_t coordinator_port() const { return coordinator_port_; }
+  uint16_t coordinator_db_port() const { return coordinator_db_port_; }
+  uint16_t executor_port() const { return executor_port_; }
+
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr size_t kNumDbPoolThreads = 16;
@@ -86,8 +105,6 @@ private:
       /*rcq_cost_per_entry=*/5, /*rcq_cost_per_block=*/100,
       /*replay_cache_cost_per_entry=*/5};
   static constexpr int128_t kStorageTokenAmount = 1'000'000'000;
-  static constexpr LocalMockDB kDbIdentifier{.read_port_number_ =
-                                                 kExecutorDbPort};
 
   void set_up_grant_storage_token()
   {
@@ -110,23 +127,29 @@ private:
   InMemoryDatabase in_memory_db_;
   BlockManager block_manager_;
 
-  ExecCard exec_card_ = {
-      .protocol = "blah",
-      .upid = {},
-      .address = x23::HostPort(kAddress.c_str(), kCoordinatorPort).show()};
   // This is a fake coordinator server that the executor registers itself with
   // via RPC.
   Coordinator coordinator_server_;
+  uint16_t coordinator_port_;
+
   // This is a fake coordinator server that the mempool notifies when txs become
   // vetted.
   CoordinatorSched coordinator_sched_server_;
+  uint16_t coordinator_sched_port_;
+
   // The executor server.
+  ExecCard exec_card_;
   ExecCoordServer executor_coord_server_;
+  uint16_t executor_port_;
 
   // The database server that the executor accesses.
   RPCDbExecutorServer db_executor_server_;
+  uint16_t executor_db_port_;
+
   // The database server that the mempool accesses.
+  LocalMockDB db_identifier_;
   DbCoordServer db_coordinator_server_;
+  uint16_t coordinator_db_port_;
 
   // A wrapper around [db_executor_server_].
   DatabaseProxy db_proxy_;
@@ -143,11 +166,12 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
 
   SignedTransactionBatch txs;
   txs.reserve(num_txs);
-  for (int64_t i = 0; i < num_txs; i++) {
+  for (uint64_t i = 0; i < num_txs; i++) {
+    Timestamp created = i;
     SignedTransaction tx{
         .tx =
             Transaction{.id = {},
-                        .created = i,
+                        .created = created,
                         .invocation = fib_client.make_invocation<kProgramName>(
                             UINT64_MAX, kFibonacciN),
                         .contracts_to_deploy = {}}};
@@ -170,15 +194,14 @@ struct Clients {
 };
 
 Clients
-create_clients()
+create_clients(const MempoolTestServer &server)
 {
   auto coord_pool = std::make_unique<x23::ThreadPool>(1);
   auto coord_cp = std::make_unique<x23::CoroPoll>(*coord_pool);
   Mempool::coord_client_t coord_client = [&] -> Mempool::coord_client_t {
     auto fd =
         coord_cp->tcpconnect(MempoolTestServer::kAddress,
-                             std::to_string(
-                                 MempoolTestServer::kCoordinatorSchedPort))();
+                             std::to_string(server.coordinator_sched_port()))();
     if (!fd) {
       throw std::runtime_error("Failed to connect to coord server");
     }
@@ -190,8 +213,7 @@ create_clients()
   auto db_cp = std::make_unique<x23::CoroPoll>(*db_pool);
   Mempool::db_client_t db_client = [&] -> Mempool::db_client_t {
     auto fd = db_cp->tcpconnect(MempoolTestServer::kAddress,
-                                std::to_string(
-                                    MempoolTestServer::kCoordinatorDbPort))();
+                                std::to_string(server.coordinator_db_port()))();
     if (!fd) {
       throw std::runtime_error("Failed to connect to db server");
     }
@@ -202,9 +224,8 @@ create_clients()
   auto exec_pool = std::make_unique<x23::ThreadPool>(1);
   auto exec_cp = std::make_unique<x23::CoroPoll>(*exec_pool);
   Mempool::exec_client_t exec_client = [&] -> Mempool::exec_client_t {
-    auto fd =
-        exec_cp->tcpconnect(MempoolTestServer::kAddress,
-                            std::to_string(MempoolTestServer::kExecutorPort))();
+    auto fd = exec_cp->tcpconnect(MempoolTestServer::kAddress,
+                                  std::to_string(server.executor_port()))();
     if (!fd) {
       throw std::runtime_error("Failed to connect to executor server");
     }
@@ -234,7 +255,7 @@ TEST(Mempool, SubmitUnvetted)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients();
+  Clients clients = create_clients(server);
 
   clients.interface->schedulercoord_submit_unvetted({txs[0]})();
 }
@@ -245,7 +266,7 @@ TEST(Mempool, SubmitVetted)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients();
+  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
   clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
@@ -257,7 +278,7 @@ TEST(Mempool, Nominate)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients();
+  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
   clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
@@ -273,7 +294,7 @@ TEST(Mempool, NominateBatch)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients();
+  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
   clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
@@ -288,7 +309,7 @@ TEST(Mempool, NominateEmpty)
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
 
   MempoolTestServer server;
-  Clients clients = create_clients();
+  Clients clients = create_clients(server);
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res = clients.interface->schedulercoord_nominate(db_tip)();
@@ -302,7 +323,7 @@ TEST(Mempool, Validate)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients();
+  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
   clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
@@ -324,7 +345,7 @@ TEST(Mempool, ValidateBatch)
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients();
+  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
   clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
@@ -345,7 +366,7 @@ TEST(Mempool, ValidateEmpty)
   fib_client_t fib_client(MempoolTestServer::kContractAddress);
 
   MempoolTestServer server;
-  Clients clients = create_clients();
+  Clients clients = create_clients(server);
 
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   auto res_validate =
@@ -360,7 +381,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
-  Clients clients = create_clients();
+  Clients clients = create_clients(server);
 
   ValidatorID validator_id{};
   clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
@@ -390,7 +411,7 @@ TEST(Mempool, ValidateBatchMissingTx)
   DbTip db_tip{.height = 0, .hash = {}, .id = 0};
   {
     MempoolTestServer server;
-    Clients clients = create_clients();
+    Clients clients = create_clients(server);
 
     ValidatorID validator_id{};
     clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
@@ -406,7 +427,7 @@ TEST(Mempool, ValidateBatchMissingTx)
     // transaction below from [txs] will have no effect because [server] will
     // still have the removed transaction as a vetted transaction.
     MempoolTestServer server;
-    Clients clients = create_clients();
+    Clients clients = create_clients(server);
 
     // Remove a transaction.
     txs.pop_back();

@@ -1,18 +1,27 @@
 #include "hogd/mempool/mempool.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <cstddef>
+#include <future>
+#include <span>
+#include <vector>
 
 #include "db_coord.hh"
+#include "discovery.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
+#include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
 
@@ -248,7 +257,7 @@ Mempool::validate_batch(BlockID block_id,
 {
   ExecValidateBatchResult res =
       co_await exec_client_.executorcoord_validate_batch(block_id, txs);
-  if (std::any_of(res.begin(), res.end(), [](const ExecResult &r) {
+  if (std::ranges::any_of(res, [](const ExecResult &r) {
         return r != ExecResult::ExecResultOK;
       })) {
     // TODO(jhumphri): Use co_await.

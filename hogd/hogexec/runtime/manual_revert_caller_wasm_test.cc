@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 
-#include <cstring>
 #include <memory>
 #include <string_view>
 
@@ -27,7 +26,7 @@ namespace hogd {
 class ManualRevertCallerWasmTest : public ::testing::Test,
                                    public NativeContractTestFramework {
 public:
-  ManualRevertCallerWasmTest() : NativeContractTestFramework(true) {}
+  ManualRevertCallerWasmTest() : NativeContractTestFramework(false) {}
 
 protected:
   void SetUp() override

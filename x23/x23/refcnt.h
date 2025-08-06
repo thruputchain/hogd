@@ -46,10 +46,10 @@ public:
   RefPtr(std::nullptr_t) noexcept : p_(nullptr) {}
   RefPtr(const RefPtr &other) : RefPtr(*other) {}
   RefPtr(RefPtr &&other) noexcept : p_(std::exchange(other.p_, nullptr)) {}
-  ~RefPtr() { clear(); }
+  ~RefPtr() { reset(); }
   RefPtr &operator=(std::nullptr_t)
   {
-    clear();
+    reset();
     return *this;
   }
   RefPtr &operator=(const RefPtr &other) // NOLINT
@@ -63,26 +63,24 @@ public:
     }
     return *this;
   }
-  RefPtr &operator=(RefPtr &&other) noexcept
+  decltype(auto) operator=(this auto &&self, RefPtr &&other) noexcept
   {
-    if (this != &other) {
-      clear();
-      p_ = std::exchange(other.p_, nullptr);
+    if (&self != &other) {
+      self.reset();
+      self.p_ = std::exchange(other.p_, nullptr);
     }
-    return *this;
+    return (self);
   }
   auto get() const noexcept { return ops::get(p_); }
   decltype(auto) operator*() const noexcept { return *get(); }
   auto operator->() const noexcept { return get(); }
-  void clear()
+  void reset()
   {
     if (p_)
       ops::decref(std::exchange(p_, nullptr));
   }
 
-private:
-  T *p_;
-
+protected:
   template<std::same_as<T> U = T>
   requires (!requires { requires bool(U::kAllowRefPtrConversion); })
   RefPtr(T &t) : p_(&t)
@@ -90,8 +88,12 @@ private:
     ops::incref(p_);
   }
 
+private:
+  T *p_;
+
   friend T;
 };
+template<typename T> RefPtr(T &) -> RefPtr<T>;
 
 // Base for classes that want to be managed by a RefPtr and deleted
 // when the reference count goes to zero.

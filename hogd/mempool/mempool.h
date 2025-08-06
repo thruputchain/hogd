@@ -1,19 +1,16 @@
 #pragma once
 
 #include <atomic>
-#include <limits>
-#include <memory>
-#include <random>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "coord_sched.hh"
+#include "db_coord.hh"
+#include "discovery.hh"
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
-#include "hogd/base/worker_pool.h"
-#include "hogd/hogexec/interface/executor_state_manager.h"
-#include "hogd/hogexec/runtime/database_proxy.h"
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "transaction.hh"
@@ -91,9 +88,8 @@ private:
   static uint64_t get_ns_since_epoch()
   {
     auto now = std::chrono::system_clock::now();
-    std::chrono::nanoseconds ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch());
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        now.time_since_epoch());
     return ns.count();
   }
 
@@ -101,12 +97,13 @@ private:
                        x23::Vec<ProposedTransaction> &ret);
 
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
-                                   BlockExecutionMode);
+                                   BlockExecutionMode /*mode*/);
   x23::Async<void> abandon_snapshot(BlockID block_id);
   x23::Async<void> close_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id);
 
-  SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
+  static SHA256Hash
+  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes);
 
   x23::Async<bool>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,

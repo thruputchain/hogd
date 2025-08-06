@@ -187,7 +187,9 @@ SystemCallHandler::try_commit_transaction()
 
   // If the last frame was set to manually revert, then we commit the
   // transaction as a no-op.
-  if (last_frame_.value().should_revert()) {
+  if (last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+          .value()
+          .should_revert()) {
     auto res = db_proxy_.commit_transaction();
     if (!res.has_value()) {
       return res.error();
@@ -196,7 +198,9 @@ SystemCallHandler::try_commit_transaction()
     return true;
   }
 
-  auto r = last_frame_.value().try_acquire_frame_locks(db_proxy_);
+  auto r = last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+               .value()
+               .try_acquire_frame_locks(db_proxy_);
   if (!r.has_value()) {
     return r.error();
   }
@@ -220,7 +224,9 @@ SystemCallHandler::try_commit_transaction()
 
   std::unordered_set<SHA256Hash> committed_contracts;
   for (auto const &[addr, hash] :
-       last_frame_.value().new_contract_deployments_) {
+       last_frame_ // NOLINT(bugprone-unchecked-optional-access)
+           .value()
+           .new_contract_deployments_) {
     auto contract_entry = newly_created_contracts_.find(hash);
     assert(contract_entry != newly_created_contracts_.end());
 
