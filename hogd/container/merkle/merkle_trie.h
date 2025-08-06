@@ -5,12 +5,13 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
-#include <functional>
-
 #include <format>
+#include <functional>
+#include <optional>
 #include <ostream>
 #include <span>
 #include <sstream>
+#include <stack>
 #include <string>
 #include <utility>
 #include <vector>
@@ -256,7 +257,138 @@ private:
   static void
   walk(NodeType *root, const HexArray &prefix,
        const std::function<void(const HexArray &, NodeType &, NodeType *)> &f,
-       std::optional<size_t> max_depth = std::nullopt);
+       std::optional<size_t> max_depth = std::nullopt)
+  {
+    static_assert(std::is_same_v<NodeType, Node> ||
+                      std::is_same_v<NodeType, const Node>,
+                  "[NodeType] must be [Node] or [const Node].");
+
+    // We perform a post-order traversal iteratively. We use iteration rather
+    // than recursion to avoid exceeding the stack size when traversing deep
+    // tries.
+
+    // We use this type along with the data structures below to track where we
+    // are in the trie.
+    struct CheckInfo {
+      // The node we are currently looking at.
+      NodeType *node;
+      // The parent of this node.
+      NodeType *parent;
+      // The path that maps to this node.
+      HexArray path;
+      // This is only relevant for branch and extension nodes. When we first
+      // encounter these nodes in an iterative loop, we cannot *immediately*
+      // "visit" them (i.e., execute [f] on them)--we need to visit all of their
+      // children first.
+      //
+      // A branch or extension node will be left in the stack until all of its
+      // children have been visited. When this node pushes one of its children
+      // onto the stack, the node waits until the child is popped off the stack
+      // before pushing the next child. Thus, the node will not enqueue the next
+      // child until a subsequent iteration, and thus we need to track this
+      // child so that the node knows which child to push at that point.
+      //
+      // We use [next_child_to_visit] to track which child should be pushed next
+      // for [node].
+      size_t next_child_to_visit;
+      size_t depth;
+    };
+
+    std::stack<CheckInfo> path;
+    // Push the root node onto the stack.
+    path.push(CheckInfo{.node = root,
+                        .parent = nullptr,
+                        .path = prefix,
+                        .next_child_to_visit = 0});
+
+    while (!path.empty()) {
+      CheckInfo &info = path.top();
+
+      if (!info.node) {
+        path.pop();
+        continue;
+      }
+
+      switch (info.node->type) {
+      case Node::Type::kBranch:
+        CHECK_LE(info.next_child_to_visit, info.node->child.size());
+        if (info.next_child_to_visit == info.node->child.size() ||
+            (max_depth && info.depth == max_depth.value())) {
+          // We have visited all of the branch's children, so now we can "visit"
+          // (i.e., call [f] on) the branch. Or, we have reached the maximum
+          // depth we want to visit of the trie, so we now visit the extension
+          // node because we do not want to visit its children.
+          f(info.path, *info.node, info.parent);
+        }
+        else {
+          // Visit the next child.
+
+          // Append the branch path we are taking to [info.path] so that it
+          // holds the path to the child. For example, if
+          // [info.next_child_to_visit] is 0x3, then we know we will next visit
+          // the child at index 0x3, so we append 0x3 to [info.path].
+          info.path.append(std::byte(info.next_child_to_visit));
+          path.push({.node = info.node->child[info.next_child_to_visit],
+                     .parent = info.node,
+                     .path = info.path,
+                     .next_child_to_visit = 0,
+                     .depth = info.depth + 1});
+          // Now change [info.path] back to holding the path to the branch node.
+          info.path.remove_from_back(1);
+          info.next_child_to_visit++;
+          continue;
+        }
+        break;
+      case Node::Type::kExtension:
+        // An extension node always has exactly one child. It is not possible
+        // for an extension node to have no children.
+        CHECK_LE(info.next_child_to_visit, 1UL);
+        if (info.next_child_to_visit == 1 ||
+            (max_depth && info.depth == max_depth.value())) {
+          // We have visited the extension node's one child, so now we can visit
+          // the extension node. Or, we have reached the maximum depth we want
+          // to visit of the trie, so we now visit the extension node because we
+          // do not want to visit its children.
+          f(info.path, *info.node, info.parent);
+        }
+        else {
+          // Append the extension node's path to [info.path] so that [info.path]
+          // holds the path to the child when we push the child.
+          info.path.append(info.node->path);
+          path.push({.node = info.node->child[0],
+                     .parent = info.node,
+                     .path = info.path,
+                     .next_child_to_visit = 0,
+                     .depth = info.depth + 1});
+          // Now change [info.path] back to holding the path to the extension
+          // node.
+          info.path.remove_from_back(info.node->path.size());
+          info.next_child_to_visit++;
+          continue;
+        }
+        break;
+      case Node::Type::kLeaf:
+        // A leaf node has no children, so we can visit a leaf immediately upon
+        // encountering it.
+        CHECK_EQ(info.next_child_to_visit, 0UL);
+        if (max_depth) {
+          CHECK_LE(info.depth, max_depth.value());
+        }
+
+        // Append the leaf's path to [info.path] so that the full path is passed
+        // to [f].
+        info.path.append(info.node->path);
+        NodeType &n = *info.node;
+        f(info.path, n, info.parent);
+        // No need to remove the portion of the path we just appended above
+        // because we pop the leaf anyway below, so we do not access the leaf
+        // after this point.
+        break;
+      }
+
+      path.pop();
+    }
+  }
 
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
   // of the hex digit in [path] that corresponds to the lowest branch.
