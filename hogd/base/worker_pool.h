@@ -134,11 +134,12 @@ public:
     for (size_t i = 0; i < r.size(); i += width) {
       auto end = std::min(i + width, r.size());
 
-      completions.emplace_back(submit([&f, proj, begin = i, end, &r]() {
-        for (size_t j = begin; j < end; ++j) {
-          f(std::invoke(proj, r[j]));
-        }
-      }));
+      completions.emplace_back(
+          submit([proj, &f, r = std::forward<decltype(r)>(r), i, end]() {
+            for (size_t j = i; j < end; j++) {
+              f(std::invoke(proj, r[j]));
+            }
+          }));
     }
 #endif // defined(__cpp_lib_ranges_chunk)
     for (const std::future<void> &f : completions)
