@@ -39,7 +39,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <climits>
 #include <compare>
 #include <concepts>
 #include <cstddef>
@@ -62,6 +61,7 @@
 #include <x23/cleanup.h>
 #include <x23/config.h>
 #include <x23/typename.h>
+#include <x23/utility.h>
 
 namespace x23 {
 
