@@ -174,8 +174,8 @@ SystemStatus<std::optional<QueueEntry>>
 DatabaseProxy::get_concurrent_retrocausal_queue_entry(
     BlockID block_id, AddressAndKey const &addrkey, uint32_t index)
 {
-  auto res = client_.get_concurrent_retrocausal_queue_entry(block_id, addrkey,
-                                                            index);
+  auto res =
+      client_.get_concurrent_retrocausal_queue_entry(block_id, addrkey, index);
   return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
     return std::make_optional<QueueEntry>(std::move(x));
   });

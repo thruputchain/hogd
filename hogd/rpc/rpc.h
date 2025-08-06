@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <concepts>
 #include <condition_variable>
 #include <cstddef>
 #include <cstring>
@@ -11,7 +12,6 @@
 #include <future>
 #include <memory>
 #include <mutex>
-#include <print>
 #include <queue>
 #include <span>
 #include <stop_token>
@@ -25,7 +25,6 @@
 #include <vector>
 
 #include "hogd/base/compiler.h"
-#include "hogd/base/cpputil.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -33,6 +32,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "x23/format.h"
+#include "x23/rpc_common.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -130,7 +130,6 @@ private:
   std::vector<std::unique_ptr<rpc_detail::ClientFlow>> flows_;
   std::string peer_;
 };
-
 
 // args: request, peer
 using RPCHandler =
@@ -281,23 +280,6 @@ static_assert(std::is_trivially_copyable_v<RPCCallHeader>,
 static_assert(std::is_trivially_copyable_v<RPCResponseHeader>,
               "RPCResponseHeader must be trivially copyable");
 
-template<typename Interface, StringLiteral Name, size_t Index = 0>
-constexpr bool
-is_rpc_method()
-{
-  if constexpr (Index >= Interface::valid_procnos.size()) {
-    return false;
-  }
-  else if constexpr (Interface::template proc_meta<
-                         Interface::valid_procnos[Index]>::proc_name ==
-                     Name.get()) {
-    return true;
-  }
-  else {
-    return is_rpc_method<Interface, Name, Index + 1>();
-  }
-}
-
 namespace detail {
 
 template<typename Meta>
@@ -322,20 +304,6 @@ get_rpc_xid()
 }
 
 } // namespace detail
-
-template<typename Interface, StringLiteral Name, size_t Index = 0>
-requires (is_rpc_method<Interface, Name, Index>())
-constexpr uint32_t
-get_rpc_method_number()
-{
-  if constexpr (Interface::template proc_meta<
-                    Interface::valid_procnos[Index]>::proc_name == Name.get()) {
-    return Interface::valid_procnos[Index];
-  }
-  else {
-    return get_rpc_method_number<Interface, Name, Index + 1>();
-  }
-}
 
 template<typename Meta>
 auto
@@ -404,18 +372,15 @@ rpc_server_parse_and_strip_header(std::span<const std::byte> args)
 }
 
 // The input arg span must already have the RPCCallHeader stripped off.
-template<typename Interface, StringLiteral Name>
-requires (is_rpc_method<Interface, Name>())
+template<typename Meta>
 OwningSpan<const std::byte>
 rpc_server_dispatch_method(auto &server, std::string_view peername,
                            uint32_t xid, std::span<const std::byte> args)
 {
-  constexpr uint32_t kMethod = get_rpc_method_number<Interface, Name>();
-  using meta = Interface::template proc_meta<kMethod>;
-  typename meta::arg_type a;
+  typename Meta::arg_type a;
   try {
     x23::deserialize(&a, args);
-    detail::trace_log_message<meta>(false, peername, xid, a);
+    detail::trace_log_message<Meta>(false, peername, xid, a);
   } catch (const x23::XdrException &e) {
     error("x23 deserialization error(xid {}): {}", xid, e.what());
     return vec_as_bytes(response_header_to_buf(
@@ -423,13 +388,52 @@ rpc_server_dispatch_method(auto &server, std::string_view peername,
                           .xid = xid}));
   }
 
-  auto res = meta::dispatch(server, a);
-  detail::trace_log_message<meta>(true, peername, xid, res);
+  auto res = Meta::dispatch(server, a);
+  detail::trace_log_message<Meta>(true, peername, xid, res);
 
   auto buf_out = response_header_to_buf(
       RPCResponseHeader{.error = RPCReponseErrorCode::kRpcOk, .xid = xid});
   x23::serialize_to(&buf_out, res);
   return vec_as_bytes(buf_out);
+}
+
+namespace detail {
+
+template<typename Server> struct RpcInvoker {
+  Server &server_;
+  std::string_view peer_;
+  uint32_t xid_;
+  std::span<const std::byte> arg_span_;
+
+  template<typename Meta> OwningSpan<const std::byte> operator()()
+  {
+    if constexpr (std::same_as<void, Meta>) {
+      return vec_as_bytes(response_header_to_buf(
+          RPCResponseHeader{.error = RPCReponseErrorCode::kRpcUnknownMethod,
+                            .xid = xid_}));
+    }
+    else {
+      return rpc_server_dispatch_method<Meta>(server_, peer_, xid_, arg_span_);
+    }
+  }
+};
+} // namespace detail
+
+template<typename Vers>
+OwningSpan<const std::byte>
+server_handle_rpc_request(auto &server, std::span<const std::byte> args,
+                               std::string_view peer)
+{
+  auto header_result = rpc_server_parse_and_strip_header(args);
+  if (!header_result) {
+    return vec_as_bytes(response_header_to_buf(
+        RPCResponseHeader{.error = RPCReponseErrorCode::kRpcInvalidArgument,
+                          .xid = 0}));
+  }
+  auto [header, arg_span] = header_result.value();
+
+  return x23::with_proc_meta<Vers, OwningSpan<const std::byte>>(
+      header.method, detail::RpcInvoker{server, peer, header.xid, arg_span});
 }
 
 } // namespace hogd

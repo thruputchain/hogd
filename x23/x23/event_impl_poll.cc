@@ -199,10 +199,9 @@ CoroPollImpl::abort(BorrowedFd fd, bool write, int err)
     auto ptr = state_.take();
     auto &f = (*ptr)[fd.get()];
     if (f.callbacks[write])
-      h = {
-        std::exchange(f.callbacks[write], {})->set_result_without_resuming(err),
-	f.callbacks[write].cpuhint
-      };
+      h = {std::exchange(f.callbacks[write], {})
+               ->set_result_without_resuming(err),
+           f.callbacks[write].cpuhint};
   }
   if (h)
     pool_.go(h);

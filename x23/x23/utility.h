@@ -17,17 +17,17 @@
 
 namespace x23 {
 
-using std::size_t;
-using std::uintptr_t;
-using std::intptr_t;
-using std::uint8_t;
-using std::uint16_t;
-using std::uint32_t;
-using std::uint64_t;
-using std::int8_t;
 using std::int16_t;
 using std::int32_t;
 using std::int64_t;
+using std::int8_t;
+using std::intptr_t;
+using std::size_t;
+using std::uint16_t;
+using std::uint32_t;
+using std::uint64_t;
+using std::uint8_t;
+using std::uintptr_t;
 
 // FORWARD(arg) is just std::forward<decltype(arg)>(arg), which
 // creates an expression whose type corresponds to the type with which

@@ -6,8 +6,8 @@
 int
 main()
 {
-  //auto cpumap = x23::make_cpu_map("cache/index3/shared_cpu_map");
-  //auto cpumap = x23::make_cpu_map("topology/core_id");
+  // auto cpumap = x23::make_cpu_map("cache/index3/shared_cpu_map");
+  // auto cpumap = x23::make_cpu_map("topology/core_id");
   auto cpumap = x23::make_llc_map();
   for (size_t i = 0; i < cpumap.map_.size(); ++i)
     std::println("CPU {} -> Bucket {}", i, cpumap.map_[i]);
@@ -15,6 +15,5 @@ main()
   std::println("{} total buckets", cpumap.nbuckets_);
 
   int cpuid = x23::cpuid();
-  std::println("currently running on {} -> {}", cpuid,
-               cpumap.bucket(cpuid));
+  std::println("currently running on {} -> {}", cpuid, cpumap.bucket(cpuid));
 }
