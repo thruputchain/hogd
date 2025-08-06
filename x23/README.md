@@ -127,7 +127,7 @@ The C++ representations of XDR types should mostly be intuitive.
 | `opaque<N>` | `x23::Vec<std::uint8_t,N>` |
 | `T*` | `x23::Ptr<T>` |
 | `T[N]` | `std::array<T,N>` |
-| `T<N>` | `std::Vec<T,N>` |
+| `T<N>` | `x23::Vec<T,N>` |
 | `enum` | `enum` |
 | `struct` | `struct` |
 | `union` | `struct` (see below) |
@@ -258,11 +258,12 @@ x23::RpcLogger::default_logfd = 2;
 
 ## Coroutines and `Async<T>`
 
-The results of remote procedure calls are not available immediately on
-clients.  On the server side, the implementation of an RPC service may
-also need to contact remote machines.  Hence, when an XDR file
-declares a function to return type `T`, the X23 implementation must
-return an `x23::Async<T>`.
+X23 supports asynchronous remote procedure calls using coroutines.
+The result of an asynchronous remote procedure call is not available
+immediately on clients.  On the server side, the implementation of an
+RPC service may also need to contact remote machines.  Hence, when an
+XDR file declares a function to return type `T`, the asynchronous X23
+implementation must return an `x23::Async<T>`.
 
 Any function returning an `Async<T>` can be a coroutine, so long as it
 uses the C++ keyword `co_return` to return its result, rather than
@@ -357,7 +358,7 @@ The `rpc_service` type definition acts as a default interface in some
 cases, but is not necessary.  A single structure can implement
 multiple RPC programs and versions.
 
-## Using RPC over stream sockets
+## Using asynchronous RPC over stream sockets
 
 To invoke and serve RPC services over a stream socket, include the
 header file `<x23/rpc.h>`.  You hand a socket file descriptor to the
@@ -368,11 +369,11 @@ descriptor such as 1).  These functions return a `Configurator` object
 that can then be used to configure the stream, first by declaring
 services to be provided (if any), then by creating client objects.
 
-The RPC system requires two global objects: a `ThreadPool` and a
-`CoroPoll`.  It generally suffices to have a single global instance of
-these types, though each `CoroPoll` has a single epoll socket, so
-under extreme scalability requirements it could be useful to have
-multiple `CoroPoll` instances.
+The asynchronous RPC system requires two global objects: a
+`ThreadPool` and a `CoroPoll`.  It generally suffices to have a single
+global instance of these types, though each `CoroPoll` has a single
+epoll socket, so under extreme scalability requirements it could be
+useful to have multiple `CoroPoll` instances.
 
 Here's an example of using the client interface to invoke an RPC:
 
@@ -427,8 +428,62 @@ anything.  The reason for this requirement is to avoid a race
 condition where X23 would reject calls for services that have not yet
 been configured on the socket.
 
+## Using synchronous RPC over stream sockets
+
+If you don't want coroutines, there is also a *synchronous* rpc
+interface defined in `<x23/srpc.h>.  In the server, simply define
+methods that match the return types of RPC methods (without wrapping
+them in `Async` the way you do for asynchronous servers).  Note that
+the synchronous server RPC reads and writes RPCs in batches, and
+expects all methods to run to completion.  Methods that sleep or take
+a long time to execute will cause head-of-line blocking on the file
+descriptor.  Other than that, configuration is similar to asynchronous
+RPC except that you use `srpc_stream_logged` instead of
+`rpc_stream_logged` and access the configurator object like a pointer
+(with `->`) instead of an object (with `.`).
+
+``` cpp
+struct MyVersImpl {
+  using rpc_service = myvers;
+  void null() { return; }
+  std::int32_t add(std::int32_t a, std::int32_t b)
+  {
+    return std::int32_t(std::uint32_t(a) + std::uint32_t(b));
+  }
+};
+static_assert(is_myvers<MyVersImpl*, std::type_identity_t>);
+
+MyVersImpl impl;
+
+void
+server_example(int fd)
+{
+  // Note -> instead of . for configurator object
+  srpc_stream_logged(fd)->server(&impl);
+}
+```
+
+Here's an example of using the synchronous client interface:
+
+``` cpp
+#include <x23/srpc.h>
+#include "myfile.hh"
+
+int
+client_example(int fd)
+{
+  auto cstream = srpc_stream_logged(fd);
+  // Now X23 owns the file descriptor
+
+  myvers::client client = cstream->client(myvers{});
+  return client.add(5, 5);
+  // file descriptor will be closed on destruction of client
+}
+```
+
 [XDR]: https://datatracker.ietf.org/doc/html/rfc4506
 [RPC]: https://datatracker.ietf.org/doc/html/rfc5531
 [RPC-assignment]: https://datatracker.ietf.org/doc/html/rfc5531#section-8.3
 [RPC-language]: https://datatracker.ietf.org/doc/html/rfc5531#section-12
 [reflection]: https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p2996r0.html
+

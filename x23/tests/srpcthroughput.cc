@@ -39,6 +39,7 @@ struct Server {
     return arg;
   }
 };
+static_assert(is_blank_rpc_v1<Server*, std::type_identity_t>);
 
 Server server;
 
