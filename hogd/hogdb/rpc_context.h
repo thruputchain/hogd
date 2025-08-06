@@ -72,12 +72,14 @@ private:
 inline BlockTX *
 RPCContext::get_block_tx(BlockTXID bid)
 {
-  BlockCache &cache = *block_tx_cache_;
-  std::scoped_lock g(cache.lock); // NOTE: very low contention
-  auto it = cache.blocks.find(bid);
-  if (it == cache.blocks.end())
-    return get_block_tx_slow(bid);
-  return it->second;
+  {
+    BlockCache &cache = *block_tx_cache_;
+    std::scoped_lock g(cache.lock); // NOTE: very low contention
+    auto it = cache.blocks.find(bid);
+    if (it != cache.blocks.end())
+      return it->second;
+  }
+  return get_block_tx_slow(bid);
 }
 
 inline InvokeTX *
