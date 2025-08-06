@@ -811,6 +811,7 @@ gen_hh(vector<Definition> *defs)
 
 #include <array>
 #include <compare>
+#include <concepts>
 #include <cstdint>
 #include <cstddef>
 #include <string_view>
