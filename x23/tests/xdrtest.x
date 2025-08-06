@@ -148,4 +148,32 @@ program blank_rpc {
   } = 1;
 } = 3123124;
 
+/* Multiline comment
+Check that this parses */
+
+struct MultilineComment {
+  hyper value;
+};
+
+
+/************ Stellar's XDR parse problem ************/
+
+struct StellarValue {
+  hyper value;
+};
+
+enum StellarValueEnum {
+  kStellarValue = 0,
+  kStellarValueVec = 1,
+};
+
+/************ End Stellar's XDR parse problem ************/
+
+/* Multiline comment 2
+ end multiline comment 2 */
+
+struct MultilineCommentPost {
+  unsigned hyper value;
+};
+
 

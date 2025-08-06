@@ -4,6 +4,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <print>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -130,6 +131,7 @@ struct GenRs {
 
   void show_typespec(const TypeSpecifier &ts, string t)
   {
+    std::println("show_typespec {}", t);
     visit([this, &t](const auto &v) { show_type(v, t); }, ts);
   }
 
@@ -504,6 +506,7 @@ impl {0} {{
 void
 GenRs::show_type(const EnumBody &e, string const &tname)
 {
+  std::println("show_type enum {}", tname);
   prtop(R"(
 #[derive(Clone, Copy, PartialEq, Debug)]
 #[cfg_attr(feature = "xdrs", derive(ReadXDR, WriteXDR))]
@@ -534,6 +537,7 @@ pub enum {} )",
 void
 GenRs::show_type(const UnionBody &b, string const &tname)
 {
+  std::println("show_type union {}", tname);
   for (const auto &a : b.arms) {
     auto const &d = a.decl;
     do_generations(tname + "_" + d.id, d.type);
@@ -591,22 +595,23 @@ GenRs::show_type(const UnionBody &b, string const &tname)
     auto _close = open_brace();
     scopes_.push_back(tname);
 
-    for (const auto &a : b.arms) {
-      bool double_case = false;
-      auto double_case_guard = [&double_case] {
-        if (double_case) {
+    bool double_default = false;
+      auto double_default_guard = [&double_default] {
+        if (double_default) {
           throw std::runtime_error(
-              "Enums with multiple cases per arm not supported at the moment");
+              "Enums with multiple defaults not supported!");
         }
-        double_case = true;
+        double_default = true;
       };
 
+
+    for (const auto &a : b.arms) {
+
       for (const auto &c : a.cases) {
-        double_case_guard();
         prtop("// case {}:\n", c);
       }
       if (a.has_default) {
-        double_case_guard();
+        double_default_guard();
         prtop("// default:\n");
       }
 
@@ -660,6 +665,13 @@ GenRs::show_type(const UnionBody &b, string const &tname)
     top_ += "\n";
   }
 
+  // Rust doesn't support having methods named "type"; switch that to "type_"
+  // if we're generating from xdr that we can't patch.
+  std::string switch_id = b.switch_id;
+  if (switch_id == "type") {
+    switch_id = "type_";
+  }
+
   bottom_ += std::format(R"(impl {0} {{
     pub fn {2}(&self) -> {3} {{
         match self {{
@@ -670,7 +682,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
 }}
 
 )",
-                         tname, default_match, b.switch_id, enum_base_type());
+                         tname, default_match, switch_id, enum_base_type());
 }
 
 void
@@ -758,6 +770,7 @@ GenRs::map_bound(const string &b)
 void
 GenRs::do_generations(std::string name_prefix, const TypeSpecifier &type)
 {
+  std::println("do_generations {}", name_prefix);
   if (holds_alternative<string>(type)) {
     return;
   }

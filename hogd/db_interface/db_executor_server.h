@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <concepts>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -26,7 +25,6 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/rpc_common.h"
 
 namespace hogd {
 
