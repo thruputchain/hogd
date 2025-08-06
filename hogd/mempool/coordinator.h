@@ -15,7 +15,6 @@
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
 
-
 namespace hogd {
 
 // These are fake coordinator servers used by the tests.

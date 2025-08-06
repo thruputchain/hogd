@@ -1,34 +1,32 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
+#include <memory>
 #include <span>
+#include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
+#include "contract_error.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/config.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/multiplexed_context.h"
-#include "hogd/hogexec/runtime/runtime.h"
-#include "transaction.hh"
-
-#if ENABLE_TEST_CONTRACTS
-
-#include <memory>
-#include <unordered_map>
-
-#include "contract_error.hh"
-#include "hogd/base/cpputil.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "test_contracts/integration_test_contracts/cxs_roundtrip/cxs_roundtrip.h"
 #include "test_contracts/roundtrip.hh"
+#include "transaction.hh"
 #include "types.hh"
+
+#if ENABLE_TEST_CONTRACTS
 
 namespace hogd {
 

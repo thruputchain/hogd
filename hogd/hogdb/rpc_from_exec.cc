@@ -231,8 +231,8 @@ HogDBExecutorServer::commit_contract_create(BlockID /*block*/,
                                             Contract const &contract)
 {
   // TODO(abelay): this must be included as part of BlockTX, not just written.
-  // Currently the only contract types that go through this contract create workflow 
-  // are wasmi contracts.
+  // Currently the only contract types that go through this contract create
+  // workflow are wasmi contracts.
   assert(contract.contract_type() == ContractType::kWasmi);
   auto data = x23::serialize(contract);
   const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
