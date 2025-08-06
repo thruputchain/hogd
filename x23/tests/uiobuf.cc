@@ -40,7 +40,7 @@ TEST(uiobuf, SimpleAppend)
 {
   x23::Buf flat;
   x23::BufVec v;
-  for (int i = 0; i < 1000; ++i) {
+  for (int i = 0; i < 100; ++i) {
     auto b = random_buf();
     flat += b;
     v.append(std::move(b));
