@@ -281,22 +281,6 @@ static_assert(std::is_trivially_copyable_v<RPCCallHeader>,
 static_assert(std::is_trivially_copyable_v<RPCResponseHeader>,
               "RPCResponseHeader must be trivially copyable");
 
-template<typename Interface, StringLiteral Name, size_t Index = 0>
-constexpr bool
-is_rpc_method()
-{
-  if constexpr (Index >= Interface::valid_procnos.size()) {
-    return false;
-  }
-  else if constexpr (Interface::template proc_meta<
-                         Interface::valid_procnos[Index]>::proc_name ==
-                     Name.get()) {
-    return true;
-  }
-  else {
-    return is_rpc_method<Interface, Name, Index + 1>();
-  }
-}
 
 namespace detail {
 
@@ -322,20 +306,6 @@ get_rpc_xid()
 }
 
 } // namespace detail
-
-template<typename Interface, StringLiteral Name, size_t Index = 0>
-requires (is_rpc_method<Interface, Name, Index>())
-constexpr uint32_t
-get_rpc_method_number()
-{
-  if constexpr (Interface::template proc_meta<
-                    Interface::valid_procnos[Index]>::proc_name == Name.get()) {
-    return Interface::valid_procnos[Index];
-  }
-  else {
-    return get_rpc_method_number<Interface, Name, Index + 1>();
-  }
-}
 
 template<typename Meta>
 auto
