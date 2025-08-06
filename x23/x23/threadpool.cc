@@ -233,7 +233,7 @@ ThreadPool::Worker::getq() noexcept
     if (qt[i] != kEmpty) {
       pool_->relock(ptr, qn[i]);
       if (!ptr->q.empty())
-	return ptr;
+        return ptr;
     }
   }
 }

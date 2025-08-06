@@ -89,7 +89,7 @@ TEST(SharedLock, ManyReaders)
       nthreads.notify_all();
     else
       do {
-	nthreads.wait(n);
+        nthreads.wait(n);
       } while ((n = nthreads) != readers.size());
   };
   for (auto &t : readers)

@@ -93,7 +93,7 @@ private:
 
   friend T;
 };
-template<typename T> RefPtr(T&) -> RefPtr<T>;
+template<typename T> RefPtr(T &) -> RefPtr<T>;
 
 // Base for classes that want to be managed by a RefPtr and deleted
 // when the reference count goes to zero.

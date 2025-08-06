@@ -7,6 +7,7 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 // generated x23 headers
@@ -76,7 +77,7 @@ HogDBExecutorServer::start_server(uint16_t port)
       port,
       [this](std::span<const std::byte> args,
              std::string_view peer) -> OwningSpan<const std::byte> {
-        return hogd_from_execd_handler(*this, args, peer);
+        return server_handle_rpc_request<DatabaseToExecutorInterfaceV1>(*this, args, peer);
       });
   if (!server)
     return server.error();

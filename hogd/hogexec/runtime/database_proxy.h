@@ -85,7 +85,10 @@ public:
                                          uint32_t count);
 
 private:
-  RPCClient client_;
+  using client_t = DatabaseToExecutorInterfaceV1::client<RPCClient *>;
+
+  RPCClient base_client_;
+  client_t client_ = client_t{&base_client_};
 };
 
 class StorageDeltaBatchBuilder {
