@@ -4,18 +4,22 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <span>
 #include <utility>
 
 #include "hogd/base/bits.h"
+#include "hogd/base/os.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/base/worker_pool.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
+#include "hogd/ramdb/db_status.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -182,6 +186,12 @@ inline HogDBStatus<size_t>
 get_item_size(HogDatabase &db, const ItemKey &key)
 {
   return db.get_size(key.as_bytes());
+}
+
+inline HogDBStatus<int8_t>
+get_item_type(HogDatabase &db, const ItemKey &key)
+{
+  return db.get_type(key.as_bytes());
 }
 
 inline HogDBStatus<void>

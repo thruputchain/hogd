@@ -5,8 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <concepts>
+#include <cstddef>
 #include <format>
+#include <functional>
 #include <span>
+#include <string_view>
+#include <utility>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/span.h"
@@ -109,6 +113,7 @@ public:
 
   constexpr bool is_address_balance() const { return addr_balance_; }
   [[nodiscard]] constexpr Address get_address() const { return item_key_.addr; }
+  [[nodiscard]] constexpr Address get_key() const { return item_key_.key; }
 
 private:
   friend struct std::formatter<ItemKey>;

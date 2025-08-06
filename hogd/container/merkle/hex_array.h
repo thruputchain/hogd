@@ -18,7 +18,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "types.hh"
+#include "hogd/crypto/crypto.h"
 
 namespace hogd {
 
@@ -39,7 +39,7 @@ namespace hogd {
 // std::cout << h << std::endl;
 class HexArray {
 public:
-  static constexpr size_t kMaxNumHexDigits = 128;
+  static constexpr size_t kMaxNumHexDigits = 130;
   static_assert(kMaxNumHexDigits % 2 == 0);
 
   HexArray() { init(); }

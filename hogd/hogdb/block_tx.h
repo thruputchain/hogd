@@ -2,11 +2,12 @@
 
 #pragma once
 
-#include <utility>
+#include <mutex>
 
-#include "hogd/base/span.h"
 #include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
+#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/item_change.h"
 #include "hogd/hogdb/status.h"
@@ -18,15 +19,16 @@ namespace hogd {
 // Multiple BlockTXes can be instantiated, but only one should be committed.
 class BlockTX {
 public:
-  BlockTX(HogDatabase &db) : db_(db) {}
+  BlockTX(HogDatabase &db, MerkleTriePrefix &trie) : db_(db), trie_(trie) {}
   ~BlockTX() = default;
 
   // getters
   HogDatabase &get_db() const { return db_; }
+  MerkleTriePrefix &get_trie() const { return trie_; }
 
   // commit applies all changes to the database. If this fails, nothing will be
   // written to disk, but the database may be left in an inconsistent state.
-  HogDBStatus<void> commit();
+  HogDBStatus<void> commit(WorkerPool &pool = WorkerPool::get_default_pool());
   // abort drops all changes.
   void abort()
   {
@@ -50,6 +52,7 @@ private:
   };
 
   HogDatabase &db_;
+  MerkleTriePrefix &trie_;
   SynchronizedMap<Address, ItemLock> addr_balance_locks_;
   SynchronizedMap<ItemKey, ItemLock> item_locks_;
 

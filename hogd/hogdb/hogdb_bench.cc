@@ -14,6 +14,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
@@ -65,9 +66,11 @@ public:
   static std::unique_ptr<Benchmark> make_new_storage_benchmark(size_t n,
                                                                int workers);
 
-  Benchmark(std::unique_ptr<Database> db, int workers,
+  Benchmark(std::unique_ptr<Database> db,
+            std::unique_ptr<MerkleTriePrefix> trie, int workers,
             std::vector<Payment> &&ops)
-    : db_(std::move(db)), workers_(workers), ops_(std::move(ops))
+    : db_(std::move(db)), trie_(std::move(trie)), workers_(workers),
+      ops_(std::move(ops))
   {}
   ~Benchmark() = default;
 
@@ -77,6 +80,7 @@ public:
 
 private:
   HogDatabase db_;
+  std::unique_ptr<MerkleTriePrefix> trie_;
   WorkerPool workers_;
   std::vector<Payment> ops_;
 };
@@ -103,6 +107,12 @@ open_ramdb(size_t n)
   return std::move(*db);
 }
 
+std::unique_ptr<MerkleTriePrefix>
+create_merkle()
+{
+  return std::make_unique<MerkleTriePrefix>();
+}
+
 void
 populate_account_balances(HogDatabase &db, size_t n,
                           int128_t val = kDefaultBalance)
@@ -126,8 +136,8 @@ Benchmark::make_one_to_many_payments_benchmark(size_t n, int workers)
   }
 
   // create the benchmark.
-  auto bench =
-      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
+                                           workers, std::move(ops));
 
   // set up initial DB state.
   HogDBStatus<void> ret;
@@ -158,8 +168,8 @@ Benchmark::make_many_to_one_payments_benchmark(size_t n, int workers)
   }
 
   // create the benchmark.
-  auto bench =
-      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
+                                           workers, std::move(ops));
 
   // set up initial DB state.
   HogDBStatus<void> ret;
@@ -190,8 +200,8 @@ Benchmark::make_round_robin_payments_benchmark(size_t n, int workers)
   }
 
   // create the benchmark.
-  auto bench =
-      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
+                                           workers, std::move(ops));
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
@@ -217,8 +227,8 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers)
   }
 
   // create the benchmark.
-  auto bench =
-      std::make_unique<Benchmark>(open_ramdb(n), workers, std::move(ops));
+  auto bench = std::make_unique<Benchmark>(open_ramdb(n), create_merkle(),
+                                           workers, std::move(ops));
 
   // set up initial DB state.
   for (size_t i = 0; i < n; i++) {
@@ -236,7 +246,7 @@ Benchmark::make_new_storage_benchmark(size_t n, int workers)
 void
 Benchmark::run()
 {
-  BlockTX block(db_);
+  BlockTX block(db_, *trie_);
 
   // invoke_tx simulates DB operations from a contract invocation.
   auto invoke_fn = [&block](const Payment &p) {
@@ -254,7 +264,7 @@ Benchmark::run()
   workers_.for_each_parallel(ops_, invoke_fn, std::max(width, 1UL));
 
   // commit changes to the ramdb.
-  HogDBStatus<void> ret = block.commit().and_then(
+  HogDBStatus<void> ret = block.commit(workers_).and_then(
       [this] { return db_.commit().transform([](uint64_t lsn) {}); });
   if (!ret)
     fail(ret.error());

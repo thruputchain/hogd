@@ -8,15 +8,16 @@
 
 #pragma once
 
-#include <memory>
+#include <cassert>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
 
 #include "hogd/base/perthread.h"
-#include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/hogdb/block_tx.h"
+#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/invoke_tx.h"
 #include "hogd/hogdb/status.h"
@@ -27,10 +28,11 @@ namespace hogd {
 // by the database.
 class RPCContext {
 public:
-  RPCContext(HogDatabase &db) : db_(db) {}
+  RPCContext(HogDatabase &db, MerkleTriePrefix &trie) : db_(db), trie_(trie) {}
 
   // getters.
   HogDatabase &get_db() const { return db_; }
+  MerkleTriePrefix &get_trie() const { return trie_; }
 
   // opens a new block transaction.
   HogDBStatus<BlockTX *> open_block_tx(BlockTXID bid);
@@ -56,6 +58,8 @@ private:
 
   // the database used to persist state.
   HogDatabase &db_;
+  // the merkle trie that generates hashes for the items in the database.
+  MerkleTriePrefix &trie_;
   // pending invocation transactions.
   SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
   // protects block_txes_.
