@@ -75,14 +75,15 @@ static_assert(is_DatabaseToExecutorInterfaceV1<SyncDBExecutorServer *,
 // Wraps the SyncDBExecutorServer in an RPC server.
 class RPCDbExecutorServer {
 public:
-  explicit RPCDbExecutorServer(BlockManager *block_manager, uint32_t port)
+  explicit RPCDbExecutorServer(BlockManager *block_manager, uint16_t port)
     : sync_server_(block_manager)
   {
     auto res = RPCServer::create(
         port,
         [this](std::span<const std::byte> args,
                std::string_view peer) -> OwningSpan<const std::byte> {
-          return server_handle_rpc_request<DatabaseToExecutorInterfaceV1>(sync_server_, args, peer);
+          return server_handle_rpc_request<DatabaseToExecutorInterfaceV1>(
+              sync_server_, args, peer);
         });
     if (!res) {
       throw std::runtime_error("Failed to create RPC server");
@@ -102,7 +103,7 @@ public:
     rpc_server_->stop();
   }
 
-  uint32_t port() const { return rpc_server_->get_port(); }
+  uint16_t port() const { return rpc_server_->get_port(); }
 
 private:
   SyncDBExecutorServer sync_server_;

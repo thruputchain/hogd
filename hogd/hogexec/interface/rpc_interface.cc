@@ -2,6 +2,9 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
+#include <utility>
 
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
@@ -9,6 +12,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/sockio.h"
@@ -16,14 +20,18 @@
 
 namespace hogd {
 
-void
-ExecutorRpcInterface::start_server(uint32_t port_number)
+uint16_t
+ExecutorRpcInterface::start_server(uint16_t port_number)
 {
-  auto lfd = x23::tcplisten(port_number);
+  x23::UniqueFd lfd = x23::tcplisten(port_number);
   if (!lfd) {
     perror("listen");
     exit(EXIT_FAILURE);
   }
+  // If the [port_number] parameter is 0, then the kernel chooses the port
+  // number for us. Thus, in that case, [port_number] will be assigned a nonzero
+  // value below.
+  port_number = x23::get_port(x23::local_addr(lfd.get()));
 
   [](x23::CoroPoll &cp, ExecutorRpcInterface *server,
      x23::UniqueFd lfd) -> x23::Detached {
@@ -32,6 +40,8 @@ ExecutorRpcInterface::start_server(uint32_t port_number)
       x23::rpc_stream_logged(cp, *c).server(server);
     }
   }(cp_, this, std::move(lfd));
+
+  return port_number;
 }
 
 x23::Async<ExecProposeResult>
