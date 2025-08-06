@@ -1,6 +1,5 @@
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 
-#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 #include <vector>

@@ -2,9 +2,7 @@
 
 #include <atomic>
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <vector>
