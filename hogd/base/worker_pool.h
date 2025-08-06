@@ -120,7 +120,7 @@ public:
 #if defined(__cpp_lib_ranges_chunk)
     completions.reserve(divide_up(r.size(), width));
     std::ranges::for_each(r | std::views::chunk(width),
-                          [this, &f, proj,
+                          [&f, proj,
                            &completions](std::ranges::viewable_range auto &&r) {
                             completions.emplace_back(submit(
                                 [proj, &f, r = std::forward<decltype(r)>(r)] {
@@ -132,7 +132,7 @@ public:
 #else  // defined(__cpp_lib_ranges_chunk)
     // LLVM doesn't support std::views::chunk yet.
     for (size_t i = 0; i < r.size(); i += width) {
-      auto end = std::min(i + width, r.size());
+      size_t end = std::min(i + width, r.size());
 
       completions.emplace_back(
           submit([proj, &f, r = std::forward<decltype(r)>(r), i, end]() {
