@@ -36,14 +36,16 @@ public:
     return port_number;
   }
 
-  x23::Async<void> coordinator_null() { co_return; }
+  static x23::Async<void> coordinator_null() { co_return; }
 
-  x23::Async<IntroShardResult> coordinator_intro_shard(const ShardCard &card)
+  static x23::Async<IntroShardResult>
+  coordinator_intro_shard(const ShardCard &card)
   {
     co_return IntroShardResult{};
   }
 
-  x23::Async<IntroExecResult> coordinator_intro_exec(const ExecCard &card)
+  static x23::Async<IntroExecResult>
+  coordinator_intro_exec(const ExecCard &card)
   {
     co_return IntroExecResult{};
   }
@@ -85,9 +87,9 @@ public:
     return port_number;
   }
 
-  x23::Async<void> coordscheduler_null() { co_return; }
+  static x23::Async<void> coordscheduler_null() { co_return; }
 
-  x23::Async<void>
+  static x23::Async<void>
   coordscheduler_notify_vetted(const SignedTransactionBatch &txs)
   {
     co_return;

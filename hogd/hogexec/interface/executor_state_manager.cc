@@ -11,7 +11,8 @@
 namespace hogd {
 
 std::shared_ptr<ExecutorContext>
-ExecutorStateManager::get_executor_context(BlockID block_id, ExecutionMode mode)
+ExecutorStateManager::get_executor_context(BlockID block_id,
+                                           ExecutionMode /*mode*/)
 {
   auto active_blocks = active_blocks_.take();
 

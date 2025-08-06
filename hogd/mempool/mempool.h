@@ -88,9 +88,8 @@ private:
   static uint64_t get_ns_since_epoch()
   {
     auto now = std::chrono::system_clock::now();
-    std::chrono::nanoseconds ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            now.time_since_epoch());
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        now.time_since_epoch());
     return ns.count();
   }
 
@@ -98,12 +97,13 @@ private:
                        x23::Vec<ProposedTransaction> &ret);
 
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
-                                   BlockExecutionMode);
+                                   BlockExecutionMode /*mode*/);
   x23::Async<void> abandon_snapshot(BlockID block_id);
   x23::Async<void> close_snapshot(BlockID block_id);
   x23::Async<void> finish_block(BlockID block_id);
 
-  SHA256Hash get_block_hash(const x23::Vec<SignedTransactionHash> &txs);
+  static SHA256Hash
+  get_block_hash(const x23::Vec<SignedTransactionHash> &hashes);
 
   x23::Async<bool>
   propose_batch(BlockID block_id, const x23::Vec<SignedTransaction> &txs,

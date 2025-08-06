@@ -3,7 +3,6 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
-#include <regex>
 #include <string_view>
 
 #include "contract.hh"
