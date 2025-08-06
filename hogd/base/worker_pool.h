@@ -132,10 +132,10 @@ public:
 #else  // defined(__cpp_lib_ranges_chunk)
     // LLVM doesn't support std::views::chunk yet.
     for (size_t i = 0; i < r.size(); i += width) {
-      auto end = std::min(i + width, r.size());
+      size_t end = std::min(i + width, r.size());
 
-      completions.emplace_back(submit([this, &f, proj, begin = i, end, &r]() {
-        for (size_t j = begin; j < end; ++j) {
+      completions.emplace_back(submit([proj, &f, i, end, &r]() {
+        for (size_t j = i; j < end; ++j) {
           f(std::invoke(proj, r[j]));
         }
       }));
