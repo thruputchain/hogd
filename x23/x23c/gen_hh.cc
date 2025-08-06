@@ -809,6 +809,7 @@ gen_hh(vector<Definition> *defs)
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <compare>
 #include <concepts>

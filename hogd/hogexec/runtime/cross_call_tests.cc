@@ -1,5 +1,6 @@
-#include <cstdint>
 #include <gtest/gtest.h>
+
+#include <cstdint>
 #include <memory>
 
 #include "ffi_enums.hh"

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <memory>
 
+
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
@@ -14,6 +15,8 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "types.hh"
+
+#include "discovery.hh"
 
 namespace hogd {
 

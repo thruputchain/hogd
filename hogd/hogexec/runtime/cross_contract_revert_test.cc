@@ -8,18 +8,23 @@
 #include <unordered_map>
 #include <utility>
 
+
 #include "ffi_enums.hh"
+
+
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_interface/block_manager.h"
+
 #include "hogd/hogexec/runtime/contract_trait.h"
+
+
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
+
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/mockdb/in_memory_database.h"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
