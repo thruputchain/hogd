@@ -33,7 +33,7 @@ allowance_key(ContractAddress owner, ContractAddress spender)
 {
   auto data = Serializer<SerializationFormat::kTxs>::serialize(owner, spender);
   assert(data.has_value());
-  return sha256(*data);
+  return sha256(*data); // NOLINT(bugprone-unchecked-optional-access)
 }
 
 SystemStatus<bool>
