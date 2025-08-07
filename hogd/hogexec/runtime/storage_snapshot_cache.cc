@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <x23/x23.h>
 
 #include "contract.hh"
 #include "hogd/base/compiler.h"

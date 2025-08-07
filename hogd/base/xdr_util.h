@@ -90,16 +90,3 @@ template<> struct std::hash<hogd::AddressAndKey> {
     return seed;
   }
 };
-
-template<typename T>
-requires (x23::category<T> == x23::XdrCategory::kOpaqueArray)
-struct std::formatter<T> {
-  static constexpr auto parse(std::format_parse_context &ctx)
-  {
-    return ctx.begin();
-  }
-  static auto format(const auto &value, std::format_context &ctx)
-  {
-    return std::format_to(ctx.out(), "{}", x23::show(value));
-  }
-};
