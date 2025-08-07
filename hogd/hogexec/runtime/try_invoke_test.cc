@@ -49,6 +49,8 @@ protected:
   void SetUp() override {}
 };
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
+
 // Not really a try invoke test, but it's a convenient way to test general
 // invocation.
 TEST_P(TryInvokeTest, ReadWriteBytestring)
@@ -251,7 +253,6 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
   Bytestring expect;
   expect.resize(expect_span.size());
   std::memcpy(expect.data(), expect_span.data(), expect_span.size());
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   ASSERT_EQ(read_res.value().bytestring(), expect);
 }
 
@@ -383,7 +384,6 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
     Bytestring expect;
     expect.resize(expect_span.size());
     std::memcpy(expect.data(), expect_span.data(), expect_span.size());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ASSERT_EQ(read_res.value().bytestring(), expect);
   }
 
@@ -448,7 +448,6 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
     Bytestring expect;
     expect.resize(expect_span.size());
     std::memcpy(expect.data(), expect_span.data(), expect_span.size());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ASSERT_EQ(read_res.value().bytestring(), expect);
   }
 }
@@ -1307,7 +1306,6 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   advance_block();
 }
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
 TEST_P(TryInvokeTest, StorageCostAccounting)
 {
   if (GetParam() == TestDB::kHogDB) {
