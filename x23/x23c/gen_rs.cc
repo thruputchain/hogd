@@ -231,6 +231,7 @@ struct GenRs {
       R"(#[serde(with = "serde_arrays")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
+  static constexpr string_view kDefaultDerives = R"(#[derive(Clone, Debug, PartialEq, Eq, Hash)])";
 
   optional<Definition> convert_to_newtype(const Definition &d);
 };
@@ -319,7 +320,7 @@ GenRs::show_type(const StructBody &s, string const &tname)
   {
     optional<string> array_size;
 
-    vector<string> derive_traits = {"PartialEq", "Debug", "Clone"};
+    vector<string> derive_traits = {};
 
     if (s.transparent) {
       auto const &inner = s.front();
@@ -336,11 +337,11 @@ GenRs::show_type(const StructBody &s, string const &tname)
         derive_traits.emplace_back("Default");
       }
 
-      derive_traits.emplace_back("Eq");
-      derive_traits.emplace_back("Hash");
       derive_traits.emplace_back("Copy");
     }
-    prtop("#[derive({})]\n", join(derive_traits, ", "));
+    prtop("{}\n", kDefaultDerives);
+    if (!derive_traits.empty())
+      prtop("#[derive({})]\n", join(derive_traits, ", "));
     prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
 
     if (s.transparent) {
@@ -510,8 +511,8 @@ impl {0} {{
 void
 GenRs::show_type(const EnumBody &e, string const &tname)
 {
-  prtop(R"(
-#[derive(Clone, Copy, PartialEq, Debug)]
+  prtop("{}\n", kDefaultDerives);
+  prtop(R"(#[derive(Copy)]
 #[cfg_attr(feature = "xdrs", derive(ReadXDR, WriteXDR))]
 #[repr(i32)]
 pub enum {} )",
@@ -593,10 +594,9 @@ GenRs::show_type(const UnionBody &b, string const &tname)
     return "i32";
   };
   {
-
-    prtop("#[repr({})]\n", enum_base_type());
-    prtop("#[derive(PartialEq, Debug, Clone)]\n");
+    prtop("{}\n", kDefaultDerives);
     prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
+    prtop("#[repr({})]\n", enum_base_type());
     prtop("pub enum {} ", tname);
     // NOLINTNEXTLINE(readability-identifier-naming)
     auto _close = open_brace();
