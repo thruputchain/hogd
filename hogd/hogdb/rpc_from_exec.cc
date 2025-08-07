@@ -48,8 +48,7 @@ to_rpc_error(HogDBStatus<void> ret)
     return RPCError::kRPCNotFound;
   case HogDBCode::kOverflow:
   case HogDBCode::kConflict:
-    return RPCError::kRPCTransactionFailed;
-  //  return RPCError::kRPCStorageWriteFailed;
+    return RPCError::kRPCStorageWriteFailed;
   default:
     return RPCError::kRPCTransactionFailed;
   }

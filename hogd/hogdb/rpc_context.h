@@ -60,14 +60,14 @@ private:
   HogDatabase &db_;
   // the merkle trie that generates hashes for the items in the database.
   MerkleTriePrefix &trie_;
-  // pending invocation transactions.
-  SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
   // protects block_txes_.
   std::mutex lock_;
   // pending block transactions.
   std::unordered_map<BlockTXID, BlockTX> block_txes_;
   // used to reduce contention in get_block_tx(), which is called often.
   PerThread<BlockCache> block_tx_cache_;
+  // pending invocation transactions.
+  SynchronizedMap<std::pair<BlockTXID, InvokeTXID>, InvokeTX> invoke_txes_;
 
   // slow path for get_block_tx().
   BlockTX *get_block_tx_slow(BlockTXID bid);

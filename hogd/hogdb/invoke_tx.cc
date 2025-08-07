@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/compiler.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
@@ -125,11 +126,9 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
-    std::println("request_change: lock key: {}", key);
     HogDBStatus<void> ret = block_.lock(key, change);
     if (!ret)
       return ret.error();
-    std::println("request_change: lock success key: {}", key);
     v.emplace_back(std::move(change), tx_depth_);
     return {};
   }
@@ -148,6 +147,39 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
     v.emplace_back(std::move(change), tx_depth_);
   }
   return {};
+}
+
+HogDBStatus<void>
+InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
+{
+  std::println("request_nnint128: key: {}, base: {}, delta: {}", key, base, delta);
+  // validate the nnint128. We can't assume it's in a valid state even if there
+  // is not a conflict with another change because the executor may not know
+  // the current base value.
+  auto [sum, of] = overflowing_add(base, delta);
+  if (of) [[unlikely]] {
+    std::println("request_nnint128: key: {}, base: {}, delta: {}, overflow", key, base, delta);
+    return HogDBError(HogDBCode::kOverflow);
+  }
+  if (sum < 0) {  
+    std::println("request_nnint128: key: {}, base: {}, delta: {}, conflict", key, base, delta);
+    return HogDBError(HogDBCode::kConflict);
+  }
+
+  // nnint128 is valid; now try to request the change.
+  return request_change(key, NNInt128{base, delta});
+}
+
+HogDBStatus<void>
+InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
+{
+  HogDBStatus<int128_t> base = hogd::read_nnint128(block_.get_db(), key);
+  if (!base) {
+    if (base.error() != HogDBCode::kNotFound)
+      return base.error();
+    base = 0;
+  }
+  return request_nnint128(key, *base, delta);
 }
 
 } // namespace hogd

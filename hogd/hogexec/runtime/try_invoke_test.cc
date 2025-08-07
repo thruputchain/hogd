@@ -1082,6 +1082,8 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
     ASSERT_TRUE(commit_res.value());
   }
 
+  std::println("End of TC1.3");
+
   // TC1.4: Then invoke method 2 again, with parameter [true]. This should
   // succeed.
   SystemCallHandler tc1_handler3 = make_new_system_call_handler(
