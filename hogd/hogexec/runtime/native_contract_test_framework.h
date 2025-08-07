@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gtest/gtest.h"
 #include <cassert>
 #include <cstring>
 #include <memory>
@@ -141,7 +142,8 @@ public:
 private:
   static ItemKey make_item_key(const AddressAndKey &addr)
   {
-    if (addr.key.key_type() == StorageKeyType::kStorageKeyTypeContractData)
+    if (addr.key.key_type() ==
+        StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
       return ItemKey(addr.address, {}, true);
     return ItemKey(addr.address, addr.key.contract_data_key());
   }
@@ -367,6 +369,19 @@ private:
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
 
   std::unique_ptr<Logger> previous_logger_ = nullptr;
+};
+
+inline std::string
+test_db_to_string(const ::testing::TestParamInfo<TestDB> &info)
+{
+  switch (info.param) {
+  case TestDB::kMockInMemory:
+    return "MockInMemory";
+  case TestDB::kHogDB:
+    return "HogDB";
+  default:
+    return "unknown";
+  }
 };
 
 } // namespace hogd
