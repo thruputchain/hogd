@@ -898,7 +898,7 @@ bool
 MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
                               Node *&locked_through, size_t &num_children,
                               std::byte &remaining_child_hex,
-                              size_t &branch_depth)
+                              size_t &locked_through_depth)
 {
   if (!branch->rw_lock.try_upgrade_to_writer_if_only_one()) {
     // We need to try again. We are moving down the trie so we cannot block on
@@ -943,7 +943,7 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
     // We can block on acquiring the writer lock when moving up the trie.
     branch->parent->rw_lock.lock_writer();
     locked_through = branch->parent;
-    branch_depth--;
+    locked_through_depth--;
 
     if (branch->parent->type != Node::Type::kBranch) {
       // The parent is not a branch, so we need to lock the grandparent.
@@ -953,9 +953,9 @@ MerkleTrie::remove_grab_locks(Node *branch, Node *existing_key,
 
       branch->parent->parent->rw_lock.lock_writer();
       locked_through = branch->parent->parent;
-      // We already subtracted 1 from [branch_depth] above, so we subtract 1
-      // again to subtract 2 in total.
-      branch_depth--;
+      // We already subtracted 1 from [locked_through_depth] above, so we
+      // subtract 1 again to subtract 2 in total.
+      locked_through_depth--;
     }
   }
   return true;

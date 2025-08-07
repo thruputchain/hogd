@@ -239,6 +239,8 @@ private:
   // topmost node we acquired a lock for. [num_children] is the number of
   // children nodes of [branch]. [remaining_child_hex] is the hex digit of child
   // that will remain (if any) after the remove operation.
+  // [locked_through_depth] is the depth of the topmost node that is locked
+  // (i.e., the node that is locked with the lowest depth).
   // We do not need to pass [num_children] and [remaining_child_hex] back to the
   // calling function per se because the parent function can compute these
   // itself. However, [remove_grab_locks] needs to compute them in order to
@@ -249,7 +251,8 @@ private:
   // false. Otherwise it returns true.
   bool remove_grab_locks(Node *branch, Node *existing_key,
                          Node *&locked_through, size_t &num_children,
-                         std::byte &remaining_child_hex, size_t &branch_depth);
+                         std::byte &remaining_child_hex,
+                         size_t &locked_through_depth);
 
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
@@ -406,6 +409,7 @@ private:
 
   // Returns the lowest branch in the trie on [path]. [idx] is set to the index
   // of the hex digit in [path] that corresponds to the lowest branch.
+  // [branch_depth] is the depth of the returned branch.
   //
   // If a node for [path] already exists in the trie, [existing_key] is set to
   // the node. Thus, since a KV pair can only be placed in a branch or a leaf,
@@ -416,7 +420,7 @@ private:
   // is set to a node.
   static Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
                                          size_t &idx, Node *&existing_key,
-                                         size_t &branch_idx);
+                                         size_t &branch_depth);
 
   // Computes and writes the hash for [node] only if
   // [should_hash_nodes_on_each_op_] is true.
