@@ -308,7 +308,7 @@ public:
                                  int128_t amount);
   void write_item(AddressAndKey const &addrkey,
                   std::shared_ptr<const StorageItemWrapper> item);
-  void write_contract(std::shared_ptr<const Contract> const& contract);
+  void write_contract(std::shared_ptr<const Contract> const &contract);
   void write_deployment(ContractAddress const &addr,
                         SHA256Hash const &deployment);
 

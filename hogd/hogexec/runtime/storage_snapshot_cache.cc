@@ -5,7 +5,6 @@
 #include <memory>
 #include <optional>
 #include <utility>
-#include <x23/x23.h>
 
 #include "contract.hh"
 #include "hogd/base/compiler.h"
@@ -17,6 +16,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -67,8 +67,8 @@ StorageSnapshotCache::try_get_contract_by_hash(SHA256Hash const &hash)
   if constexpr (is_debug_build()) {
     auto received_hash = sha256(*out);
     if (received_hash != hash) {
-      panic("Received incorrect contract hash from db: {} != {}", received_hash,
-            hash);
+      panic("Received incorrect contract hash from db: {} != {}",
+            x23::show(received_hash), x23::show(hash));
     }
   }
 

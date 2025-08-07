@@ -112,7 +112,7 @@ template<typename T> requires std::is_trivially_copyable_v<T>
 inline ErrnoStatus<void>
 sys_getsockname(int sockfd, T &val)
 {
-  socklen_t len = sizeof(val);
+  socklen_t len = sizeof(val); // NOLINT(misc-include-cleaner)
   return make_errno_status<void>(
       getsockname(sockfd, reinterpret_cast<sockaddr *>(&val), &len));
 }
@@ -158,6 +158,7 @@ HogDBCoordServer::port()
 {
   std::unique_lock lk(mtx_);
   cv_.wait(lk, [this] { return port_.has_value(); });
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return port_.value();
 }
 

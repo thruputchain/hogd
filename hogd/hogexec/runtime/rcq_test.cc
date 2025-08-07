@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <memory>
+#include <span>
+#include <unordered_map>
+#include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -10,13 +14,8 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/mockdb/in_memory_database.h"
 #include "transaction.hh"
 #include "types.hh"
-#include <memory>
-#include <span>
-#include <unordered_map>
-#include <utility>
 
 namespace hogd {
 

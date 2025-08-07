@@ -15,8 +15,6 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "types.hh"
 
-#include "discovery.hh"
-
 namespace hogd {
 
 namespace {
