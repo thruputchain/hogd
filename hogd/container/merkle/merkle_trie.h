@@ -186,6 +186,20 @@ public:
   void generate_top_level_hashes();
 
 private:
+  // Any nodes at a depth less than or equal to [kNoHashDepth] are *not* hashed
+  // on any insert/update/remove operation on the trie. They are only hashed
+  // when [generate_top_level_hashes()] or [generate_all_hashes()] are called.
+  //
+  // The nodes in the topmost layers of the trie (i.e., the layers with the
+  // lowest depths relative to the root node, which has a depth of 0) are
+  // typically under heavy contention. By not hashing these nodes on every
+  // insert/update/remove operation, we significantly reduce contention and thus
+  // improve end-to-end performance. We do need to call
+  // [generate_top_level_hashes()] when we are done with all operations, but the
+  // overhead of this is much smaller than hashing these nodes on all
+  // operations.
+  static constexpr size_t kNoHashDepth = 2;
+
   // Returns a string representation of [node] and all nodes under it in the
   // trie.
   static std::string string_from_node(const Node &node);
@@ -235,7 +249,7 @@ private:
   // false. Otherwise it returns true.
   bool remove_grab_locks(Node *branch, Node *existing_key,
                          Node *&locked_through, size_t &num_children,
-                         std::byte &remaining_child_hex);
+                         std::byte &remaining_child_hex, size_t &branch_depth);
 
   // Helper function for [remove()]. When we remove a KV pair, the closest
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
@@ -401,7 +415,8 @@ private:
   // function is called so that the caller can determine whether [existing_key]
   // is set to a node.
   static Node *traverse_to_lowest_branch(const HexArray &path, Node *root,
-                                         size_t &idx, Node *&existing_key);
+                                         size_t &idx, Node *&existing_key,
+                                         size_t &branch_idx);
 
   // Computes and writes the hash for [node] only if
   // [should_hash_nodes_on_each_op_] is true.
@@ -409,7 +424,8 @@ private:
 
   // Regenerates the hashes *only* for the nodes on the path from [n] to the
   // root of the trie.
-  void generate_hashes_from(Node *n, Node *locked_through) const;
+  void generate_hashes_from(Node *n, Node *locked_through,
+                            size_t locked_through_depth) const;
 
   // Frees all of the nodes starting at [root]. Does not free [root_].
   void free_all_nodes(Node *root);
