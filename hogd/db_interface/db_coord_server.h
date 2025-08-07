@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <optional>
 
 #include "db_coord.hh"
 #include "hogd/base/types.h"
@@ -25,6 +26,7 @@ public:
   }
 
   // Start the server on the specified port
+  // Returns the port number that the server is listening on
   uint16_t start_server(uint16_t port_number);
 
   static x23::Async<void> dbcoord_null() { co_return; }

@@ -43,8 +43,8 @@ protected:
     // Load and deploy the manual_revert_test contract
     auto contract = test::load_test_contract("manual_revert_test.wasm");
     contract_addr_ = make_contract_address(0);
-    in_memory_db_.write_contract(sha256(*contract), contract);
-    in_memory_db_.write_deployment(contract_addr_, sha256(*contract));
+    write_contract(contract);
+    write_deployment(contract_addr_, sha256(*contract));
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
   }
 
@@ -112,10 +112,8 @@ TEST_F(ManualRevertWasmTest, BasicManualRevert)
   // Deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -198,10 +196,8 @@ TEST_F(ManualRevertWasmTest, BasicNoRevert)
   // Deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -270,10 +266,8 @@ TEST_F(ManualRevertWasmTest, NestedManualRevert)
   // Deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -346,10 +340,8 @@ TEST_F(ManualRevertWasmTest, ErrorTypeManualReverts)
     // Deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
     auto native_contract_addr = make_contract_address(1);
-    in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                                 native_contract_xdr);
-    in_memory_db_.write_deployment(native_contract_addr,
-                                   sha256(*native_contract_xdr));
+    write_contract(native_contract_xdr);
+    write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
     auto multiplexed_context = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -420,10 +412,8 @@ TEST_F(ManualRevertWasmTest, ErrorTypeNoError)
   // Deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -495,10 +485,8 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
     // Deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
     auto native_contract_addr = make_contract_address(1);
-    in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                                 native_contract_xdr);
-    in_memory_db_.write_deployment(native_contract_addr,
-                                   sha256(*native_contract_xdr));
+    write_contract(native_contract_xdr);
+    write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
     auto multiplexed_context = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -556,10 +544,8 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
     // Deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
     auto native_contract_addr = make_contract_address(1);
-    in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                                 native_contract_xdr);
-    in_memory_db_.write_deployment(native_contract_addr,
-                                   sha256(*native_contract_xdr));
+    write_contract(native_contract_xdr);
+    write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
     auto multiplexed_context = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{

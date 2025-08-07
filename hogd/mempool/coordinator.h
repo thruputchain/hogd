@@ -1,7 +1,19 @@
 #pragma once
 
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <utility>
+
 #include "coord.hh"
 #include "coord_sched.hh"
+#include "exec_coord.hh"
+#include "x23/async.h"
+#include "x23/cleanup.h"
+#include "x23/event.h"
+#include "x23/rpc.h"
+#include "x23/sockio.h"
+#include "x23/threadpool.h"
 
 namespace hogd {
 

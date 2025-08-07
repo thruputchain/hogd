@@ -32,8 +32,8 @@ public:
 protected:
   void SetUp() override
   {
-    in_memory_db_.write_contract(sha256(*contract_), contract_);
-    in_memory_db_.write_deployment(contract_addr_, sha256(*contract_));
+    write_contract(contract_);
+    write_deployment(contract_addr_, sha256(*contract_));
     setup_grant_storage_token(contract_addr_, 1'000'000'000);
   }
 
@@ -91,10 +91,8 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
 
   auto native_contract_addr = make_contract_address(1);
   auto native_contract_xdr = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
   setup_grant_storage_token(native_contract_addr, 1'000'000'000);
 
   {
@@ -196,10 +194,8 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyPropagation)
           {ContractType::kNative, native_context}});
 
   auto native_contract_xdr = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
   setup_grant_storage_token(native_contract_addr, 1'000'000'000);
 
   {

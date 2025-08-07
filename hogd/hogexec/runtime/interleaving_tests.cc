@@ -12,14 +12,12 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_interface/block_manager.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/mockdb/in_memory_database.h"
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
@@ -77,8 +75,8 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
   // Deploy contracts
   auto test_contract_xdr = make_native_contract(kTestContractId);
-  in_memory_db_.write_contract(sha256(*test_contract_xdr), test_contract_xdr);
-  in_memory_db_.write_deployment(ContractAddress{}, sha256(*test_contract_xdr));
+  write_contract(test_contract_xdr);
+  write_deployment(ContractAddress{}, sha256(*test_contract_xdr));
 
   // Grant initial tokens to test contract
   setup_grant_storage_token(ContractAddress{}, 1'000'000'000);

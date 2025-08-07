@@ -1,6 +1,7 @@
 #include "hogd/hogdb/rpc_from_exec.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -28,6 +29,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/rpc/rpc.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -146,7 +148,6 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
   if (!itx)
     return RPCError::kRPCBadBlockID;
   int depth = itx->create_savepoint();
-
   for (auto const &delta : batch) {
     if (RPCError err =
             request_one(*itx, delta.addrkey, delta.delta, delta.flags);
@@ -155,7 +156,6 @@ HogDBExecutorServer::try_push_new_subtransaction(BlockID block,
       return err;
     }
   }
-
   return RPCError::kRPCNone;
 }
 
@@ -231,10 +231,12 @@ HogDBExecutorServer::commit_contract_create(BlockID /*block*/,
                                             Contract const &contract)
 {
   // TODO(abelay): this must be included as part of BlockTX, not just written.
-
-  const auto &wasm = contract.wasmi_contract();
-  const auto *cptr = reinterpret_cast<const std::byte *>(wasm.data());
-  auto buf = std::span<const std::byte>(cptr, wasm.size());
+  // Currently the only contract types that go through this contract create
+  // workflow are wasmi contracts.
+  assert(contract.contract_type() == ContractType::kWasmi);
+  auto data = x23::serialize(contract);
+  const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
+  auto buf = std::span<const std::byte>(cptr, data.size());
   SHA256Hash hash = sha256(buf);
   return to_rpc_error(write_wasm_code(ctx_.get_db(), hash, buf));
 }
@@ -259,15 +261,10 @@ HogDBExecutorServer::get_contract(BlockID /*block*/, SHA256Hash const &hash)
   if (!wasm)
     return ExpectedContract(to_rpc_error(wasm.error()));
 
-  Contract contract(ContractType::kWasmi);
-  contract.wasmi_contract();
-  const auto *cptr = reinterpret_cast<const char *>(wasm->data());
-  contract.wasmi_contract().append_range(
-      std::span<const char>(cptr, wasm->size()));
-
   ExpectedContract out;
   out.error(RPCError::kRPCNone);
-  out.contract() = contract;
+
+  x23::deserialize(&out.contract(), *wasm);
   return out;
 }
 

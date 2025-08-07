@@ -36,18 +36,16 @@ protected:
     // Load and deploy the manual_revert_test contract (target)
     auto target_contract = test::load_test_contract("manual_revert_test.wasm");
     target_contract_addr_ = make_contract_address(0);
-    in_memory_db_.write_contract(sha256(*target_contract), target_contract);
-    in_memory_db_.write_deployment(target_contract_addr_,
-                                   sha256(*target_contract));
+    write_contract(target_contract);
+    write_deployment(target_contract_addr_, sha256(*target_contract));
     setup_grant_storage_token(target_contract_addr_, 1'000'000'000);
 
     // Load and deploy the manual_revert_caller contract
     auto caller_contract =
         test::load_test_contract("manual_revert_caller.wasm");
     caller_contract_addr_ = make_contract_address(1);
-    in_memory_db_.write_contract(sha256(*caller_contract), caller_contract);
-    in_memory_db_.write_deployment(caller_contract_addr_,
-                                   sha256(*caller_contract));
+    write_contract(caller_contract);
+    write_deployment(caller_contract_addr_, sha256(*caller_contract));
     setup_grant_storage_token(caller_contract_addr_, 1'000'000'000);
   }
 

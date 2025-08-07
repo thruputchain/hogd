@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <memory>
+#include <span>
+#include <unordered_map>
+#include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -10,13 +14,8 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/mockdb/in_memory_database.h"
 #include "transaction.hh"
 #include "types.hh"
-#include <memory>
-#include <span>
-#include <unordered_map>
-#include <utility>
 
 namespace hogd {
 
@@ -72,8 +71,8 @@ protected:
 
     // mark the contract as existing and deployed within the database
     auto contract_0 = make_native_contract(0);
-    in_memory_db_.write_contract(sha256(*contract_0), contract_0);
-    in_memory_db_.write_deployment(contract_address_, sha256(*contract_0));
+    write_contract(contract_0);
+    write_deployment(contract_address_, sha256(*contract_0));
   }
 
   ContractAddress contract_address_{

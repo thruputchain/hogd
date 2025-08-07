@@ -809,7 +809,22 @@ gen_hh(vector<Definition> *defs)
 
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <compare>
+#include <concepts>
+#include <cstdint>
+#include <cstddef>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+
+#include <x23/format.h>
+#include <x23/vec.h>
+#include <x23/utility.h>
 #include <x23/x23.h>
+
 )");
   gs.process(*defs);
   return gs.top_ + R"(

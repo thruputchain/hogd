@@ -1,5 +1,6 @@
-#include <cstdint>
 #include <gtest/gtest.h>
+
+#include <cstdint>
 #include <memory>
 
 #include "ffi_enums.hh"
@@ -29,14 +30,11 @@ protected:
     auto fibonacci_caller_contract =
         test::load_test_contract("fibonacci_call.wasm");
 
-    in_memory_db_.write_contract(sha256(*fibonacci_contract),
-                                 fibonacci_contract);
-    in_memory_db_.write_contract(sha256(*fibonacci_caller_contract),
-                                 fibonacci_caller_contract);
-    in_memory_db_.write_deployment(fibonacci_contract_address_,
-                                   sha256(*fibonacci_contract));
-    in_memory_db_.write_deployment(fibonacci_caller_contract_address_,
-                                   sha256(*fibonacci_caller_contract));
+    write_contract(fibonacci_contract);
+    write_contract(fibonacci_caller_contract);
+    write_deployment(fibonacci_contract_address_, sha256(*fibonacci_contract));
+    write_deployment(fibonacci_caller_contract_address_,
+                     sha256(*fibonacci_caller_contract));
 
     setup_grant_storage_token(fibonacci_contract_address_, 1'000'000'000);
     setup_grant_storage_token(fibonacci_caller_contract_address_,

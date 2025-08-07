@@ -4,8 +4,6 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
-#include <span>
-#include <string_view>
 #include <sys/socket.h>
 #include <thread>
 #include <type_traits>
@@ -53,6 +51,8 @@ public:
                                    uint64_t search_start_number);
   static ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
+
+  uint16_t port() const { return rpc_server_->get_port(); }
 
 private:
   RPCContext &ctx_;

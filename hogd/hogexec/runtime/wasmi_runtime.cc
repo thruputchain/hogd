@@ -146,4 +146,14 @@ WasmiModuleCache::~WasmiModuleCache()
   }
 }
 
+void
+WasmiModuleCache::test_reset_cache(size_t capacity)
+{
+  assert(capacity > 0);
+  if (wasmi_module_cache_ptr_ != nullptr) {
+    free_wasmi_module_cache(wasmi_module_cache_ptr_);
+  }
+  wasmi_module_cache_ptr_ = new_wasmi_module_cache(capacity);
+}
+
 } // namespace hogd

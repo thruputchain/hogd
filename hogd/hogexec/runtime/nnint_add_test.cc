@@ -11,7 +11,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_interface/block_manager.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -19,7 +18,6 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
-#include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -101,10 +99,10 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
+  write_contract(contract_0);
 
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract_0));
+  write_deployment(contract_addr, sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -176,17 +174,17 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
       std::make_shared<NativeContext>(std::move(contract_map));
 
   auto contract_0 = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
+  write_contract(contract_0);
 
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract_0));
+  write_deployment(contract_addr, sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  in_memory_db_.write_item(
-      make_contract_data_addrkey(contract_addr, "test"),
-      std::make_shared<StorageItemWrapper>(50, get_default_cost_model()));
+  write_item(make_contract_data_addrkey(contract_addr, "test"),
+             std::make_shared<StorageItemWrapper>(50,
+                                                  get_default_cost_model()));
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -264,10 +262,10 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
 
   // mark the contract as existing and deployed within the database
   auto contract_0 = make_native_contract(0);
-  in_memory_db_.write_contract(sha256(*contract_0), contract_0);
+  write_contract(contract_0);
 
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract_0));
+  write_deployment(contract_addr, sha256(*contract_0));
   // This test is not focused on storage token costs, so we just grant
   // an arbitrarily large number.
   setup_grant_storage_token(contract_addr, 1'000'000'000);

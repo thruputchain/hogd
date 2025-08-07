@@ -1,34 +1,32 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
+#include <memory>
 #include <span>
+#include <unordered_map>
 #include <utility>
 
 #include "contract.hh"
+#include "contract_error.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/config.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogexec/runtime/multiplexed_context.h"
-#include "hogd/hogexec/runtime/runtime.h"
-#include "transaction.hh"
-
-#if ENABLE_TEST_CONTRACTS
-
-#include <memory>
-#include <unordered_map>
-
-#include "contract_error.hh"
-#include "hogd/base/cpputil.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
+#include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "test_contracts/integration_test_contracts/cxs_roundtrip/cxs_roundtrip.h"
 #include "test_contracts/roundtrip.hh"
+#include "transaction.hh"
 #include "types.hh"
+
+#if ENABLE_TEST_CONTRACTS
 
 namespace hogd {
 
@@ -413,8 +411,8 @@ protected:
     });
 
     auto contract = test::load_test_contract("cxs_roundtrip.wasm");
-    in_memory_db_.write_contract(sha256(*contract), contract);
-    in_memory_db_.write_deployment(cxs_contract_addr_, sha256(*contract));
+    write_contract(contract);
+    write_deployment(cxs_contract_addr_, sha256(*contract));
     setup_grant_storage_token(cxs_contract_addr_, 1'000'000'000);
 
     std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
@@ -425,10 +423,8 @@ protected:
 
     // deploy the native contract
     auto native_contract_xdr = make_native_contract(0);
-    in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                                 native_contract_xdr);
-    in_memory_db_.write_deployment(native_contract_addr_,
-                                   sha256(*native_contract_xdr));
+    write_contract(native_contract_xdr);
+    write_deployment(native_contract_addr_, sha256(*native_contract_xdr));
 
     multiplexed_context_ = std::make_shared<MultiplexedContext>(
         std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{

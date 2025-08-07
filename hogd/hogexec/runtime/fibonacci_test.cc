@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -18,16 +19,20 @@
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-class FibonacciTest : public ::testing::Test,
+class FibonacciTest : public ::testing::TestWithParam<TestDB>,
                       public NativeContractTestFramework {
 public:
-  FibonacciTest() : NativeContractTestFramework(false) {}
+  FibonacciTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -44,12 +49,12 @@ protected:
 };
 
 // Simple test for sdk, to verify that calls actually happen.
-TEST_F(FibonacciTest, FibonacciCalls)
+TEST_P(FibonacciTest, FibonacciCalls)
 {
   auto contract = test::load_test_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  write_contract(contract);
+  write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   using fib_client_t = ContractTraitClient<Fibonacci>;
@@ -69,12 +74,12 @@ TEST_F(FibonacciTest, FibonacciCalls)
   }
 }
 
-TEST_F(FibonacciTest, FibonacciGasLimit)
+TEST_P(FibonacciTest, FibonacciGasLimit)
 {
   auto contract = test::load_test_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(contract_addr, sha256(*contract));
+  write_contract(contract);
+  write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
   using fib_client_t = ContractTraitClient<Fibonacci>;
@@ -95,13 +100,13 @@ TEST_F(FibonacciTest, FibonacciGasLimit)
 }
 
 // Test whether the output of the fibonacci contract is correct.
-TEST_F(FibonacciTest, FibonacciCorrectness)
+TEST_P(FibonacciTest, FibonacciCorrectness)
 {
   // deploy the fibonacci contract
   auto contract = test::load_test_contract("fibonacci.wasm");
   auto fib_contract_addr = make_contract_address(0);
-  in_memory_db_.write_contract(sha256(*contract), contract);
-  in_memory_db_.write_deployment(fib_contract_addr, sha256(*contract));
+  write_contract(contract);
+  write_deployment(fib_contract_addr, sha256(*contract));
   setup_grant_storage_token(fib_contract_addr, 1'000'000'000);
 
   using fib_client_t = ContractTraitClient<Fibonacci>;
@@ -134,10 +139,8 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   // deploy the native contract
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_addr = make_contract_address(1);
-  in_memory_db_.write_contract(sha256(*native_contract_xdr),
-                               native_contract_xdr);
-  in_memory_db_.write_deployment(native_contract_addr,
-                                 sha256(*native_contract_xdr));
+  write_contract(native_contract_xdr);
+  write_deployment(native_contract_addr, sha256(*native_contract_xdr));
 
   auto multiplexed_context = std::make_shared<MultiplexedContext>(
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
@@ -197,5 +200,19 @@ TEST_F(FibonacciTest, FibonacciCorrectness)
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    TestDBs, FibonacciTest,
+    ::testing::Values(TestDB::kMockInMemory, TestDB::kHogDB),
+    [](const ::testing::TestParamInfo<TestDB> &info) -> std::string {
+      switch (info.param) {
+      case TestDB::kMockInMemory:
+        return "MockInMemory";
+      case TestDB::kHogDB:
+        return "HogDB";
+      default:
+        return "unknown";
+      }
+    });
 
 } // namespace hogd
