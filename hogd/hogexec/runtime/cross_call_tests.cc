@@ -10,6 +10,7 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/fibonacci_call/fibonacci_call.h"
 #include "transaction.hh"
 #include "types.hh"
