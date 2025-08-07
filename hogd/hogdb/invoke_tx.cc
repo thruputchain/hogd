@@ -156,10 +156,12 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
   // is not a conflict with another change because the executor may not know
   // the current base value.
   auto [sum, of] = overflowing_add(base, delta);
-  if (of) [[unlikely]]
+  if (of) [[unlikely]] {
     return HogDBError(HogDBCode::kOverflow);
-  if (sum < 0)
+  }
+  if (sum < 0) {
     return HogDBError(HogDBCode::kConflict);
+  }
 
   // nnint128 is valid; now try to request the change.
   return request_change(key, NNInt128{base, delta});

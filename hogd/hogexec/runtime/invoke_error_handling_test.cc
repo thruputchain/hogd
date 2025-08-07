@@ -13,16 +13,20 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
+#include "rpc_types.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-class InvokeErrorHandlingTest : public ::testing::Test,
+class InvokeErrorHandlingTest : public ::testing::TestWithParam<TestDB>,
                                 public NativeContractTestFramework {
 public:
-  InvokeErrorHandlingTest() : NativeContractTestFramework(false) {}
+  InvokeErrorHandlingTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override {}
@@ -30,7 +34,7 @@ protected:
 
 // Tests to make sure that InvokeError codes are properly passed back to the
 // caller.
-TEST_F(InvokeErrorHandlingTest, InvokeErrorCodes)
+TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 {
   auto inner_func = [](InvokeErrorCode enum_code) -> InvokeStatus<void> {
     // Using a switch, so that the compiler will warn when an enum value is
@@ -181,5 +185,10 @@ TEST_F(InvokeErrorHandlingTest, InvokeErrorCodes)
     ASSERT_TRUE(*r);
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

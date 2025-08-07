@@ -10,16 +10,20 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/fibonacci_call/fibonacci_call.h"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-class CrossCallTests : public ::testing::Test,
+class CrossCallTests : public ::testing::TestWithParam<TestDB>,
                        public NativeContractTestFramework {
 public:
-  CrossCallTests() : NativeContractTestFramework(false) {}
+  CrossCallTests()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -70,7 +74,7 @@ protected:
   }
 };
 
-TEST_F(CrossCallTests, CrossCallNoGasLimit)
+TEST_P(CrossCallTests, CrossCallNoGasLimit)
 {
 
   initialize_fibonacci_caller();
@@ -109,7 +113,7 @@ TEST_F(CrossCallTests, CrossCallNoGasLimit)
   }
 }
 
-TEST_F(CrossCallTests, LowGasCausesDeterministicRevert)
+TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
 {
   initialize_fibonacci_caller();
 
@@ -129,7 +133,7 @@ TEST_F(CrossCallTests, LowGasCausesDeterministicRevert)
   }
 }
 
-TEST_F(CrossCallTests, LowOverallGasPropagates)
+TEST_P(CrossCallTests, LowOverallGasPropagates)
 {
   initialize_fibonacci_caller();
 
@@ -147,7 +151,7 @@ TEST_F(CrossCallTests, LowOverallGasPropagates)
   }
 }
 
-TEST_F(CrossCallTests, ExpectOutOfGas)
+TEST_P(CrossCallTests, ExpectOutOfGas)
 {
   initialize_fibonacci_caller();
 
@@ -191,5 +195,10 @@ TEST_F(CrossCallTests, ExpectOutOfGas)
 
   ASSERT_EQ(gas_consumed_1 + 10, gas_consumed_2);
 }
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, CrossCallTests,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

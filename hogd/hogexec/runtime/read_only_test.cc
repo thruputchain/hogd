@@ -17,6 +17,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "rpc_types.hh"
 #include "syscall.hh"
 #include "test_contracts/integration_test_contracts/read_only_test/read_only_test.h"
 #include "transaction.hh"
@@ -24,10 +25,13 @@
 
 namespace hogd {
 
-class ReadOnlyTestRunner : public ::testing::Test,
+class ReadOnlyTestRunner : public ::testing::TestWithParam<TestDB>,
                            public NativeContractTestFramework {
 public:
-  ReadOnlyTestRunner() : NativeContractTestFramework(false) {}
+  ReadOnlyTestRunner()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -46,7 +50,7 @@ protected:
   read_only_test_client_t client_ = read_only_test_client_t(contract_addr_);
 };
 
-TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
+TEST_P(ReadOnlyTestRunner, ReadOnlyBytestringSet)
 {
 
   auto native_contract = std::make_unique<NativeContract>(
@@ -138,7 +142,7 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyBytestringSet)
   }
 }
 
-TEST_F(ReadOnlyTestRunner, ReadOnlyPropagation)
+TEST_P(ReadOnlyTestRunner, ReadOnlyPropagation)
 {
   auto native_contract_addr = make_contract_address(1);
   auto native_contract = std::make_unique<NativeContract>(
@@ -218,5 +222,10 @@ TEST_F(ReadOnlyTestRunner, ReadOnlyPropagation)
     ASSERT_TRUE(*commit_res);
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTestRunner,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

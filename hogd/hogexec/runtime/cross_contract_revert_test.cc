@@ -9,19 +9,16 @@
 #include <utility>
 
 #include "ffi_enums.hh"
-
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-
 #include "hogd/hogexec/runtime/contract_trait.h"
-
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
-
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "rpc_types.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -40,10 +37,13 @@
 
 namespace hogd {
 
-class CrossContractRevertTest : public ::testing::Test,
+class CrossContractRevertTest : public ::testing::TestWithParam<TestDB>,
                                 public NativeContractTestFramework {
 public:
-  CrossContractRevertTest() : NativeContractTestFramework(false) {}
+  CrossContractRevertTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -58,7 +58,7 @@ public:
 // - Contract A's state changes persist
 // - Transaction succeeds despite B's revert
 //
-TEST_F(CrossContractRevertTest, BasicCrossContractRevert)
+TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 {
   ContractAddress contract_a_addr = make_contract_address(0);
   ContractAddress contract_b_addr = make_contract_address(1);
@@ -204,7 +204,7 @@ TEST_F(CrossContractRevertTest, BasicCrossContractRevert)
 // - Contract A receives B's return data
 // - Only Contract A's state persists
 //
-TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
+TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 {
   ContractAddress contract_a_addr = make_contract_address(0);
   ContractAddress contract_b_addr = make_contract_address(1);
@@ -416,7 +416,7 @@ TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
 // Scenario: Contract A calls Contract B, Contract B reverts with return data.
 // This is a simpler version of the basic test to ensure the pattern works.
 //
-TEST_F(CrossContractRevertTest, RevertWithReturnData)
+TEST_P(CrossContractRevertTest, RevertWithReturnData)
 {
   ContractAddress contract_a_addr = make_contract_address(0);
   ContractAddress contract_b_addr = make_contract_address(1);
@@ -534,5 +534,10 @@ TEST_F(CrossContractRevertTest, RevertWithReturnData)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, CrossContractRevertTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

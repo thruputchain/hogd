@@ -14,17 +14,26 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
 
-class RCQTest : public ::testing::Test, public NativeContractTestFramework {
+class RCQTest : public ::testing::TestWithParam<TestDB>,
+                public NativeContractTestFramework {
 protected:
-  RCQTest() : NativeContractTestFramework(false) {}
+  RCQTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
   void SetUp() override
   {
+    if (GetParam() == TestDB::kHogDB) {
+      GTEST_SKIP() << "Pending hogdb retrocausal queue";
+      return;
+    }
     // Setup native contract
     auto native_contract = std::make_unique<NativeContract>(
         std::unordered_map<MethodID, NativeContract::function_t>{
@@ -80,7 +89,7 @@ protected:
   std::shared_ptr<NativeContext> runtime_context_;
 };
 
-TEST_F(RCQTest, ConsumeFromPastBlock)
+TEST_P(RCQTest, ConsumeFromPastBlock)
 {
   // Creates a native contract with the following methods:
   // 0: Loads the calldata and interprets it as a sequence of uint8_t values.
@@ -189,5 +198,10 @@ TEST_F(RCQTest, ConsumeFromPastBlock)
     ASSERT_TRUE(*r);
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, RCQTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd
