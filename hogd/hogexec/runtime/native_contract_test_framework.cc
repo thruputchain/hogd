@@ -87,11 +87,11 @@ NativeContractTestFramework::write_item(
 }
 void
 NativeContractTestFramework::write_contract(
-    std::shared_ptr<const Contract> contract)
+    std::shared_ptr<const Contract> const& contract)
 {
   std::visit(
       [&](auto &db_wrapper) {
-        db_wrapper.write_contract(sha256(*contract), std::move(contract));
+        db_wrapper.write_contract(sha256(*contract), contract);
       },
       db_wrapper_);
 }
