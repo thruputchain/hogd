@@ -26,7 +26,7 @@
 
 namespace hogd {
 
-class NNIntAddTest : public ::testing::Test,
+class NNIntAddTest : public ::testing::TestWithParam<TestDB>,
                      public NativeContractTestFramework {
 public:
   NNIntAddTest() : NativeContractTestFramework(false) {}
@@ -56,7 +56,7 @@ protected:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_F(NNIntAddTest, ReadWriteAddValue)
+TEST_P(NNIntAddTest, ReadWriteAddValue)
 {
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
@@ -137,7 +137,7 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
 
 // Test to assert consistency of behavior with regard to the implementation of
 // add vs set_add.  Each one overwrites the other.
-TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
+TEST_P(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
 {
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
@@ -214,7 +214,7 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
   ASSERT_EQ(from_xdr(nnint_item), 150);
 }
 
-TEST_F(NNIntAddTest, SetAddWithAdd)
+TEST_P(NNIntAddTest, SetAddWithAdd)
 {
   // Create a native contract with two methods.  The first method calls set_add
   // on (0, 200). The second method calls add on (-100). Both methods should
@@ -368,5 +368,10 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
   ASSERT_EQ(from_xdr(nnint_item), 200);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(NNIntAddTest, NNIntAddTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd
