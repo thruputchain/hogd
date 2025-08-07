@@ -19,7 +19,7 @@ namespace {
 
 thread_local WasmiModuleCache module_cache = WasmiModuleCache(10);
 
-}
+} // namespace
 
 namespace test {
 void
