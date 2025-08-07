@@ -6,15 +6,12 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <functional>
 #include <string_view>
 #include <utility>
 
 #include "hogd/base/types.h"
 #include "types.hh"
-#include "x23/format.h"
-#include "x23/x23.h"
 
 namespace hogd {
 
