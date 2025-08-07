@@ -17,21 +17,26 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "rpc_types.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
-class RevertTest : public ::testing::Test, public NativeContractTestFramework {
+class RevertTest : public ::testing::TestWithParam<TestDB>,
+                   public NativeContractTestFramework {
 public:
-  RevertTest() : NativeContractTestFramework(false) {}
+  RevertTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 // Check on how a root frame reverts,
 // when the reverting frame is the root frame.
-TEST_F(RevertTest, RootFrameReverts)
+TEST_P(RevertTest, RootFrameReverts)
 {
   // Native contract with one method.  The method performs a bytestring write,
   // and then the contract reverts.
@@ -108,7 +113,7 @@ TEST_F(RevertTest, RootFrameReverts)
 
 // Check on how nested frames revert,
 // when the reverting frame is not the root frame.
-TEST_F(RevertTest, NestedFrameWithTryInvokeReverts)
+TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
 {
   // Native contract with two methods.  The first method performs a try_invoke
   // on the second method.  The second method performs a try_invoke on the
@@ -281,5 +286,10 @@ TEST_F(RevertTest, NestedFrameWithTryInvokeReverts)
   ASSERT_FALSE(data_item2_opt.has_value());
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(TestDBs, RevertTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

@@ -21,6 +21,7 @@
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/cxs_roundtrip/cxs_roundtrip.h"
 #include "test_contracts/roundtrip.hh"
 #include "transaction.hh"
@@ -30,10 +31,13 @@
 
 namespace hogd {
 
-class SerializeRoundtripTest : public testing::Test,
+class SerializeRoundtripTest : public ::testing::TestWithParam<TestDB>,
                                public NativeContractTestFramework {
 public:
-  SerializeRoundtripTest() : NativeContractTestFramework(false) {}
+  SerializeRoundtripTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -463,7 +467,7 @@ protected:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripFoo)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripFoo)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -482,7 +486,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripFoo)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSenum)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripSenum)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -501,7 +505,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSenum)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSunion)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripSunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -520,7 +524,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSunion)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripI32)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripI32)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -539,7 +543,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripI32)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSunionNoVoid)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripSunionNoVoid)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -558,7 +562,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripSunionNoVoid)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripUunion)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripUunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -577,7 +581,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripUunion)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripUunionBool)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripUunionBool)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -596,7 +600,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripUunionBool)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripTestRecursive)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripTestRecursive)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -615,7 +619,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripTestRecursive)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripErrorXDR)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripErrorXDR)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -634,7 +638,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripErrorXDR)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripContractErrorXDR)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripContractErrorXDR)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -653,7 +657,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripContractErrorXDR)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripStorageErrXDR)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripStorageErrXDR)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -672,7 +676,7 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripStorageErrXDR)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripResultXDR)
+TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripResultXDR)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -692,6 +696,10 @@ TEST_F(SerializeRoundtripTest, CxsSerializeRoundtripResultXDR)
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
+INSTANTIATE_TEST_SUITE_P(TestDBs, SerializeRoundtripTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 } // namespace hogd
 
 #endif

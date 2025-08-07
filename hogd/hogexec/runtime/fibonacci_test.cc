@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -201,18 +200,9 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    TestDBs, FibonacciTest,
-    ::testing::Values(TestDB::kMockInMemory, TestDB::kHogDB),
-    [](const ::testing::TestParamInfo<TestDB> &info) -> std::string {
-      switch (info.param) {
-      case TestDB::kMockInMemory:
-        return "MockInMemory";
-      case TestDB::kHogDB:
-        return "HogDB";
-      default:
-        return "unknown";
-      }
-    });
+INSTANTIATE_TEST_SUITE_P(TestDBs, FibonacciTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd
