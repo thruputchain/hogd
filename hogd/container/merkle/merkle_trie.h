@@ -198,7 +198,7 @@ private:
   // [generate_top_level_hashes()] when we are done with all operations, but the
   // overhead of this is much smaller than hashing these nodes on all
   // operations.
-  static constexpr size_t kNoHashDepth = 2;
+  static constexpr size_t kNoHashDepth = 3;
 
   // Returns a string representation of [node] and all nodes under it in the
   // trie.

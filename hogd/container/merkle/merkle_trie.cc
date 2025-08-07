@@ -1185,6 +1185,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
   const size_t original_idx = idx;
 
   Node *prev_root = nullptr;
+  branch_depth = 0;
   while (true) {
     if (!root->rw_lock.try_lock_reader()) {
       // We are conflicting with a writer that is moving up the trie, so try
