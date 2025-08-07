@@ -152,17 +152,14 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 HogDBStatus<void>
 InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
 {
-  std::println("request_nnint128: key: {}, base: {}, delta: {}", key, base, delta);
   // validate the nnint128. We can't assume it's in a valid state even if there
   // is not a conflict with another change because the executor may not know
   // the current base value.
   auto [sum, of] = overflowing_add(base, delta);
   if (of) [[unlikely]] {
-    std::println("request_nnint128: key: {}, base: {}, delta: {}, overflow", key, base, delta);
     return HogDBError(HogDBCode::kOverflow);
   }
   if (sum < 0) {  
-    std::println("request_nnint128: key: {}, base: {}, delta: {}, conflict", key, base, delta);
     return HogDBError(HogDBCode::kConflict);
   }
 
