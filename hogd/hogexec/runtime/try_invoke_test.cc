@@ -227,13 +227,12 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
 
   auto handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = ContractAddress{},
-                                 .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
+          .tx = Transaction{.invocation =
+                                Invocation{.invoked_address = ContractAddress{},
+                                           .entrypoint =
+                                               entrypoint_from_method_id(0),
+                                           .gas_limit = UINT64_MAX,
+                                           .calldata = {}}}},
       runtime_context);
 
   auto res = handler.root_invoke();
@@ -472,8 +471,9 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
   ContractAddress contract_addr = make_contract_address(48);
 
   // Deploy contract with two methods:
-  // 0: Loads calldata as two int8_t values [a, b] and performs nnint_set_add of (a, b)
-  // 1: Invokes method 0 in try_invoke frame with [5, -10], checks failure, then returns error
+  // 0: Loads calldata as two int8_t values [a, b] and performs nnint_set_add of
+  // (a, b) 1: Invokes method 0 in try_invoke frame with [5, -10], checks
+  // failure, then returns error
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
@@ -481,7 +481,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
               NativeRuntime & /*unused*/) -> InvokeStatus<void> {
              auto const &calldata = handler.get_calldata();
              if (calldata.size() != 1) {
-              ADD_FAILURE() << "calldata should have size 1";
+               ADD_FAILURE() << "calldata should have size 1";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
              auto key = make_storage_key("test");
@@ -491,15 +491,16 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
              auto system_res = handler.set_nnint(key, std::nullopt, add_value);
 
              if (!system_res.has_value()) {
-              ADD_FAILURE() << "set_nnint should have succeeded";
+               ADD_FAILURE() << "set_nnint should have succeeded";
                // System-level error during async operation
                return system_res.error().to_invoke_error();
              }
 
              auto const &syscall_res = system_res.value();
              if (!syscall_res.has_value()) {
-              ADD_FAILURE() << "set_nnint should have succeeded";
-               // Syscall itself reported an error (e.g., invalid arguments for set_nnint)
+               ADD_FAILURE() << "set_nnint should have succeeded";
+               // Syscall itself reported an error (e.g., invalid arguments for
+               // set_nnint)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -519,9 +520,10 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             // Check that the try_invoke failed (should fail because 5+ -10 is negative)
+             // Check that the try_invoke failed (should fail because 5+ -10 is
+             // negative)
              if (r0.value() == SyscallErrorCode::kNone) {
-                ADD_FAILURE() << "try_invoke should have failed";
+               ADD_FAILURE() << "try_invoke should have failed";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -572,7 +574,8 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
 {
   // Test to make sure that the system does not crash when a transaction
   // is aborted while locks are held.
-  // Asserts that bug like https://github.com/groundhogchain/hogd/commit/f7a7b0f3737627a42814cea81923322c678df518
+  // Asserts that bug like
+  // https://github.com/groundhogchain/hogd/commit/f7a7b0f3737627a42814cea81923322c678df518
   // does not occur again.
   //
   // Native contract with the following methods:
@@ -581,7 +584,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   // 1: Invoke method 0 in a try_invoke frame, with argument "hello".
   // Then invokes method 0 again in try_invoke, with argument "world".
   // Both should succeed.
-  // 
+  //
   // 2: Invoke method 0 in a try_invoke frame, with argument "foo".
   // Check that the try_invoke fails.
   // Then return a deterministic error.
@@ -598,7 +601,8 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   // Deploy contract with three methods:
   // 0: Write calldata as bytestring to storage
   // 1: Try invoke method 0 twice with "hello" and "world" (both should succeed)
-  // 2: Try invoke method 0 with "foo" (should fail due to exclusive lock), then return error
+  // 2: Try invoke method 0 with "foo" (should fail due to exclusive lock), then
+  // return error
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
@@ -622,18 +626,22 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
               NativeRuntime &runtime) -> InvokeStatus<void> {
              // Try invoke method 0 with "hello"
              Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 args_hello, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             auto [r0, _g0] =
+                 handler.invoke(handler.get_current_address(), 0,
+                                runtime.get_available_gas(), args_hello,
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value() || r0.value() != SyscallErrorCode::kNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Try invoke method 0 with "world"
              Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
-             auto [r1, _g1] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 args_world, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             auto [r1, _g1] =
+                 handler.invoke(handler.get_current_address(), 0,
+                                runtime.get_available_gas(), args_world,
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r1.has_value() || r1.value() != SyscallErrorCode::kNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -643,11 +651,14 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
           {2,
            [](SystemCallHandler &handler,
               NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Try invoke method 0 with "foo" (should fail due to exclusive lock)
+             // Try invoke method 0 with "foo" (should fail due to exclusive
+             // lock)
              Calldata args_foo = {'f', 'o', 'o'};
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 args_foo, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             auto [r0, _g0] =
+                 handler.invoke(handler.get_current_address(), 0,
+                                runtime.get_available_gas(), args_foo,
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value()) {
                ADD_FAILURE() << "shoudl not have system error";
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
@@ -674,7 +685,8 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  // First transaction: invoke method 1 (should succeed and acquire exclusive lock)
+  // First transaction: invoke method 1 (should succeed and acquire exclusive
+  // lock)
   auto handler1 = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
@@ -714,15 +726,15 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   // 1: Invoke method 0 in a try_invoke frame, with argument "hello".
   // Then invokes method 0 again in try_invoke, with argument "world".
   // Both should succeed.
-  // 
+  //
   // 2: Invoke method 0 in a try_invoke frame, with argument "foo".
   // Check that the try_invoke fails.
   // Then return a deterministic error.
   //
   // The test invokes method 1, but does not immediately commit the transaction.
   // Then it starts another transaction that invokes method 2.
-  // That second transaction should fail.  We then commit the first transaction, which
-  // should succeed.
+  // That second transaction should fail.  We then commit the first transaction,
+  // which should succeed.
 
   // Contract address
   ContractAddress contract_addr = make_contract_address(53);
@@ -730,7 +742,8 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   // Deploy contract with three methods:
   // 0: Write calldata as bytestring to storage
   // 1: Try invoke method 0 twice with "hello" and "world" (both should succeed)
-  // 2: Try invoke method 0 with "foo" (should fail due to exclusive lock), then return error
+  // 2: Try invoke method 0 with "foo" (should fail due to exclusive lock), then
+  // return error
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
@@ -754,18 +767,22 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
               NativeRuntime &runtime) -> InvokeStatus<void> {
              // Try invoke method 0 with "hello"
              Calldata args_hello = {'h', 'e', 'l', 'l', 'o'};
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 args_hello, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             auto [r0, _g0] =
+                 handler.invoke(handler.get_current_address(), 0,
+                                runtime.get_available_gas(), args_hello,
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value() || r0.value() != SyscallErrorCode::kNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
              // Try invoke method 0 with "world"
              Calldata args_world = {'w', 'o', 'r', 'l', 'd'};
-             auto [r1, _g1] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 args_world, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             auto [r1, _g1] =
+                 handler.invoke(handler.get_current_address(), 0,
+                                runtime.get_available_gas(), args_world,
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r1.has_value() || r1.value() != SyscallErrorCode::kNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -775,11 +792,14 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
           {2,
            [](SystemCallHandler &handler,
               NativeRuntime &runtime) -> InvokeStatus<void> {
-             // Try invoke method 0 with "foo" (should fail due to exclusive lock)
+             // Try invoke method 0 with "foo" (should fail due to exclusive
+             // lock)
              Calldata args_foo = {'f', 'o', 'o'};
-             auto [r0, _g0] = handler.invoke(
-                 handler.get_current_address(), 0, runtime.get_available_gas(),
-                 args_foo, std::to_underlying(InvokeFlag::kInvokeFlagTryInvoke));
+             auto [r0, _g0] =
+                 handler.invoke(handler.get_current_address(), 0,
+                                runtime.get_available_gas(), args_foo,
+                                std::to_underlying(
+                                    InvokeFlag::kInvokeFlagTryInvoke));
              if (!r0.has_value()) {
                ADD_FAILURE() << "shoudl not have system error";
                return InvokeError{InvokeErrorCode::kInvokeUnrecoverable};
@@ -806,7 +826,8 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   write_deployment(contract_addr, sha256(*contract));
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  // First transaction: invoke method 1 (should succeed and acquire exclusive lock)
+  // First transaction: invoke method 1 (should succeed and acquire exclusive
+  // lock)
   auto handler1 = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation =
@@ -846,11 +867,12 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
 
   advance_block();
 
-  // Check that the storage item was written with "world" (the last write from method 1)
+  // Check that the storage item was written with "world" (the last write from
+  // method 1)
   auto data_addrkey = make_contract_data_addrkey(contract_addr, "test");
   auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
   ASSERT_TRUE(data_item_opt.has_value());
-  
+
   std::vector<uint8_t> world_data = {'w', 'o', 'r', 'l', 'd'};
   auto expect_span = std::as_bytes(std::span(world_data));
   Bytestring expect;
@@ -875,16 +897,16 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
   //
   // The text invokes method 2, but does not immediately commit the transaction.
   // Then it starts another transaction that invokes method 1.
-  // That second transaction should fail.  We then commit the first transaction, which
-  // should succeed.
-  
+  // That second transaction should fail.  We then commit the first transaction,
+  // which should succeed.
+
   // Contract address
   ContractAddress contract_addr = make_contract_address(49);
 
   // Deploy contract with three methods:
   // 0: Loads calldata as one int8_t value [a] and performs nnint_add of (a)
-  // 1: Invokes method 0 in try_invoke frame with [-5], checks failure, then returns error
-  // 2: Invokes method 0 with [1], checks success
+  // 1: Invokes method 0 in try_invoke frame with [-5], checks failure, then
+  // returns error 2: Invokes method 0 with [1], checks success
   auto native_contract = std::make_unique<NativeContract>(
       std::unordered_map<MethodID, NativeContract::function_t>{
           {0,
@@ -907,7 +929,8 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
 
              auto const &syscall_res = system_res.value();
              if (!syscall_res.has_value()) {
-               // Syscall itself reported an error (e.g., invalid arguments for set_nnint)
+               // Syscall itself reported an error (e.g., invalid arguments for
+               // set_nnint)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
@@ -926,7 +949,8 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
-             // Check that the try_invoke failed (should fail because -5 is negative)
+             // Check that the try_invoke failed (should fail because -5 is
+             // negative)
              if (r0.value() == SyscallErrorCode::kNone) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
@@ -1010,7 +1034,8 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
   auto data_addrkey = make_contract_data_addrkey(contract_addr, "test");
   auto data_item_opt = lookup_storage_item_from_db(data_addrkey);
   ASSERT_TRUE(data_item_opt.has_value());
-  ASSERT_EQ(data_item_opt.value().type(), StorageItemType::kItemTypeNonnegativeInt);
+  ASSERT_EQ(data_item_opt.value().type(),
+            StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(data_item_opt.value().nnint()), 1);
 }
 

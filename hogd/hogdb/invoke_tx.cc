@@ -159,7 +159,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
   if (of) [[unlikely]] {
     return HogDBError(HogDBCode::kOverflow);
   }
-  if (sum < 0) {  
+  if (sum < 0) {
     return HogDBError(HogDBCode::kConflict);
   }
 
