@@ -168,7 +168,8 @@ HogDBExecutorServer::pop_subtransactions(BlockID block, TransactionID tx,
   if (!itx)
     return RPCError::kRPCBadBlockID;
 
-  itx->release_savepoint(itx->get_savepoint_head() - popcount - 1);
+  itx->rollback_to_savepoint(itx->get_savepoint_head() - popcount);
+
   return RPCError::kRPCNone;
 }
 
@@ -194,6 +195,7 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*block*/,
     ret.item() = out;
     return ret;
   }
+
 
   HogDBStatus<DBItem> item = ctx_.get_db().get(key.as_bytes());
   if (!item)

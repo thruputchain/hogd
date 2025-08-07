@@ -16,6 +16,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/manual_revert_test/manual_revert_test.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -30,10 +31,10 @@
 
 namespace hogd {
 
-class ManualRevertWasmTest : public ::testing::Test,
+class ManualRevertWasmTest : public ::testing::TestWithParam<TestDB>,
                              public NativeContractTestFramework {
 public:
-  ManualRevertWasmTest() : NativeContractTestFramework(false) {}
+  ManualRevertWasmTest() : NativeContractTestFramework(false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam()) {}
 
 protected:
   void SetUp() override
@@ -65,7 +66,7 @@ protected:
 // false)
 // - Ensures the transaction commits successfully despite the revert
 //
-TEST_F(ManualRevertWasmTest, BasicManualRevert)
+TEST_P(ManualRevertWasmTest, BasicManualRevert)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -150,7 +151,7 @@ TEST_F(ManualRevertWasmTest, BasicManualRevert)
 // - This validates that the manual revert behavior is intentional, not a side
 // effect
 //
-TEST_F(ManualRevertWasmTest, BasicNoRevert)
+TEST_P(ManualRevertWasmTest, BasicNoRevert)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -232,7 +233,7 @@ TEST_F(ManualRevertWasmTest, BasicNoRevert)
 // - Ensures the outer method can handle the reverted inner call
 // - Validates that the SDK properly handles nested Result::Err scenarios
 //
-TEST_F(ManualRevertWasmTest, NestedManualRevert)
+TEST_P(ManualRevertWasmTest, NestedManualRevert)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -303,7 +304,7 @@ TEST_F(ManualRevertWasmTest, NestedManualRevert)
 // - Error type 0 (no error) succeeds normally without revert
 // - Validates the end-to-end flow: SDK error → Returnable trait → manual revert
 //
-TEST_F(ManualRevertWasmTest, ErrorTypeManualReverts)
+TEST_P(ManualRevertWasmTest, ErrorTypeManualReverts)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -380,7 +381,7 @@ TEST_F(ManualRevertWasmTest, ErrorTypeManualReverts)
 // - Transaction succeeds normally
 // - This serves as a control to confirm error types 1-4 behavior is intentional
 //
-TEST_F(ManualRevertWasmTest, ErrorTypeNoError)
+TEST_P(ManualRevertWasmTest, ErrorTypeNoError)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -449,7 +450,7 @@ TEST_F(ManualRevertWasmTest, ErrorTypeNoError)
 // - Validates that manual revert properly handles multiple storage operations
 // - Confirms end-to-end storage revert functionality through WASM
 //
-TEST_F(ManualRevertWasmTest, StorageManualRevert)
+TEST_P(ManualRevertWasmTest, StorageManualRevert)
 {
   using client_t = ContractTraitClient<ManualRevertTest>;
   client_t client(contract_addr_);
@@ -572,5 +573,10 @@ TEST_F(ManualRevertWasmTest, StorageManualRevert)
         << "Storage no revert transaction should commit successfully";
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    TestDBs, ManualRevertWasmTest,
+    ::testing::Values(TestDB::kMockInMemory, TestDB::kHogDB),
+    test_db_to_string);
 
 } // namespace hogd

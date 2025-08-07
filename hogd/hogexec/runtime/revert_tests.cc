@@ -115,12 +115,13 @@ TEST_P(RevertTest, RootFrameReverts)
 // when the reverting frame is not the root frame.
 TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
 {
-  // Native contract with two methods.  The first method performs a try_invoke
+  // Native contract with four methods.  The first method performs a try_invoke
   // on the second method.  The second method performs a try_invoke on the
   // third, and then reverts.  The third method performs a bytestring write,
   // then performs a try_invoke on the fourth method, and then returns success.
   // The fourth method performs a bytestring write, and then returns success.
   // returns success.
+  //
   // Test should check that the contract executes successfully, and the
   // transaction commits successfully, but neither of the bytestrings are
   // written.

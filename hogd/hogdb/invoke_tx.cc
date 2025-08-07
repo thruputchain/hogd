@@ -71,7 +71,7 @@ InvokeTX::rollback_to_savepoint(int depth)
 {
   assert_is_valid();
 
-  tx_depth_ = std::max(depth - 1, 0);
+  tx_depth_ = depth;
   for (auto &[key, vec] : changes_) {
     // skip if no changes made after savepoint.
     if (vec.empty() || vec.back().tx_depth <= tx_depth_)

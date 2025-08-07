@@ -19,6 +19,7 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
+#include "rpc_types.hh"
 #include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -41,10 +42,10 @@
 
 namespace hogd {
 
-class ManualRevertTest : public ::testing::Test,
+class ManualRevertTest : public ::testing::TestWithParam<TestDB>,
                          public NativeContractTestFramework {
 public:
-  ManualRevertTest() : NativeContractTestFramework(false) {}
+  ManualRevertTest() : NativeContractTestFramework(false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam()) {}
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -59,7 +60,7 @@ public:
 // - Return data is preserved and passed to the caller
 // - Gas consumption is properly tracked
 //
-TEST_F(ManualRevertTest, ManualRevertBasicFunctionality)
+TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto str_hello = make_bytestring("hello");
@@ -140,7 +141,7 @@ TEST_F(ManualRevertTest, ManualRevertBasicFunctionality)
 // - Parent contract receives the return data and can continue execution
 // - Verifies that nested manual revert doesn't affect parent's state
 //
-TEST_F(ManualRevertTest, NestedManualRevertWithReturnData)
+TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto parent_data = make_bytestring("parent_state");
@@ -272,7 +273,7 @@ TEST_F(ManualRevertTest, NestedManualRevertWithReturnData)
 // This test validates that manual revert provides the unique "controlled
 // failure" behavior.
 //
-TEST_F(ManualRevertTest, ManualRevertVsNormalFailure)
+TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto test_data = make_bytestring("test_state");
@@ -392,7 +393,7 @@ TEST_F(ManualRevertTest, ManualRevertVsNormalFailure)
 // - Gas consumption is consistent between manual revert and normal execution
 // - Out-of-gas scenarios are handled correctly with manual revert
 //
-TEST_F(ManualRevertTest, GasConsumptionWithManualRevert)
+TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto test_data = make_bytestring("gas_test");
@@ -487,7 +488,7 @@ TEST_F(ManualRevertTest, GasConsumptionWithManualRevert)
 // - Middle and outer contracts maintain their state changes
 // - Return data flows correctly through the call stack
 //
-TEST_F(ManualRevertTest, MultipleNestedManualReverts)
+TEST_P(ManualRevertTest, MultipleNestedManualReverts)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto data1 = make_bytestring("level1");
@@ -637,7 +638,7 @@ TEST_F(ManualRevertTest, MultipleNestedManualReverts)
 // - Caller errors (caller_error)
 // - Normal success case (error_type = 0)
 //
-TEST_F(ManualRevertTest, ErrorTypeManualReverts)
+TEST_P(ManualRevertTest, ErrorTypeManualReverts)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto test_data = make_bytestring("error_test_data");
@@ -807,5 +808,10 @@ TEST_F(ManualRevertTest, ErrorTypeManualReverts)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
+
+INSTANTIATE_TEST_SUITE_P(
+    TestDBs, ManualRevertTest,
+    ::testing::Values(TestDB::kMockInMemory, TestDB::kHogDB),
+    test_db_to_string);
 
 } // namespace hogd

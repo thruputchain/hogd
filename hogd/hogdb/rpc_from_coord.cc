@@ -55,11 +55,12 @@ HogDBCoordServer::dbcoord_create_snapshot(BlockID parent_id, BlockID new_id,
 x23::Async<DbBlockResult>
 HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 {
-  HogDBStatus<BlockTX *> ret = ctx_.open_block_tx(id);
-  if (!ret)
-    co_return DbBlockResult(to_db_result(ret));
+  auto* ret = ctx_.get_block_tx(id);
+  if (!ret) {
+    co_return DbBlockResult(DbResult::DbResultError);
+  }
 
-  BlockTX &btx = **ret;
+  BlockTX &btx = *ret;
   co_return DbBlockResult(to_db_result(btx.commit()));
 }
 
@@ -76,12 +77,12 @@ HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 }
 
 x23::Async<DbBlockResult>
-HogDBCoordServer::dbcoord_close_snapshot(BlockID id)
+HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
 {
   // TODO(abelay): Get rid of this. This should not be a separate RPC method.
   // Instead both commit and abort should implicitly close.
 
-  ctx_.close_block_tx(id);
+  //ctx_.close_block_tx(id);
   co_return DbBlockResult(DbResult::DbResultOK);
 }
 
