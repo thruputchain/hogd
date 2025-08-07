@@ -49,8 +49,9 @@ to_rpc_error(HogDBStatus<void> ret)
   case HogDBCode::kOverflow:
   case HogDBCode::kConflict:
     return RPCError::kRPCTransactionFailed;
+  //  return RPCError::kRPCStorageWriteFailed;
   default:
-    return RPCError::kRPCStorageWriteFailed;
+    return RPCError::kRPCTransactionFailed;
   }
 }
 
@@ -106,7 +107,7 @@ HogDBExecutorServer::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
         tx.request_bytes(make_item_key(addrkey), to_span(delta.bytestring())));
   case StorageDeltaType::kDeltaTypeNonnegativeIntAdd:
     return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
-                                            from_xdr(delta.nnint().add_value)));
+                                            from_xdr(delta.nnint_add())));
   case StorageDeltaType::kDeltaTypeNonnegativeIntSetAdd:
     return to_rpc_error(tx.request_nnint128(make_item_key(addrkey),
                                             from_xdr(delta.nnint().set_value),

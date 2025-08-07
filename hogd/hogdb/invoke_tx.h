@@ -134,13 +134,16 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta)
 inline HogDBStatus<void>
 InvokeTX::request_nnint128(const ItemKey &key, int128_t delta)
 {
+  std::println("request_nnint128: key: {}, delta: {}", key, delta);
   return hogd::read_nnint128(block_.get_db(), key)
       .and_then([this, key, delta](int128_t base) {
         return request_change(key, NNInt128{base, delta});
       })
       .or_else([this, key, delta](HogDBError err) -> HogDBStatus<void> {
-        if (err == HogDBCode::kNotFound)
+        if (err == HogDBCode::kNotFound) {
+          std::println("request_nnint128: key: {}, delta: {}, not found", key, delta);
           return request_change(key, NNInt128{0, delta});
+        }
         return err;
       });
 }

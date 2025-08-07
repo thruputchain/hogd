@@ -125,9 +125,11 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
+    std::println("request_change: lock key: {}", key);
     HogDBStatus<void> ret = block_.lock(key, change);
     if (!ret)
       return ret.error();
+    std::println("request_change: lock success key: {}", key);
     v.emplace_back(std::move(change), tx_depth_);
     return {};
   }

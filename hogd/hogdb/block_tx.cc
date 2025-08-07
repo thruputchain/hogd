@@ -147,6 +147,7 @@ BlockTX::lock(const ItemKey &key, ItemChange &change)
     if (!ret)
       return ret.error();
   }
+  std::println("doing lock: key: {}, ref: {}", key, lock.ref);
   return do_lock(ul, lock, change);
 }
 
