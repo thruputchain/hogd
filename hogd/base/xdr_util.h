@@ -91,7 +91,9 @@ template<> struct std::hash<hogd::AddressAndKey> {
   }
 };
 
-template<size_t N> struct std::formatter<std::array<uint8_t, N>> {
+template<typename T>
+requires (x23::category<T> == x23::XdrCategory::kOpaqueArray)
+struct std::formatter<T> {
   static constexpr auto parse(std::format_parse_context &ctx)
   {
     return ctx.begin();

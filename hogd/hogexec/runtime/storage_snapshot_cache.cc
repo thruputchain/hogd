@@ -1,10 +1,10 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 
 #include <cassert>
+#include <format>
 #include <memory>
 #include <optional>
 #include <utility>
-#include <format>
 
 #include "contract.hh"
 #include "hogd/base/compiler.h"
