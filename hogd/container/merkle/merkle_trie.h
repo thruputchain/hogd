@@ -240,7 +240,7 @@ private:
   // children nodes of [branch]. [remaining_child_hex] is the hex digit of child
   // that will remain (if any) after the remove operation.
   // [locked_through_depth] is the depth of the topmost node that is locked
-  // (i.e., the node that is locked with the lowest depth).
+  // (i.e., the node with the lowest depth that is locked).
   // We do not need to pass [num_children] and [remaining_child_hex] back to the
   // calling function per se because the parent function can compute these
   // itself. However, [remove_grab_locks] needs to compute them in order to
