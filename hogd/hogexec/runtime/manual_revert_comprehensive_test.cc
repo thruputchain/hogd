@@ -45,7 +45,10 @@ namespace hogd {
 class ManualRevertTest : public ::testing::TestWithParam<TestDB>,
                          public NativeContractTestFramework {
 public:
-  ManualRevertTest() : NativeContractTestFramework(false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam()) {}
+  ManualRevertTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -809,9 +812,9 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-INSTANTIATE_TEST_SUITE_P(
-    TestDBs, ManualRevertTest,
-    ::testing::Values(TestDB::kMockInMemory, TestDB::kHogDB),
-    test_db_to_string);
+INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

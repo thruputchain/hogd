@@ -27,7 +27,10 @@ namespace hogd {
 class ManualRevertCallerWasmTest : public ::testing::TestWithParam<TestDB>,
                                    public NativeContractTestFramework {
 public:
-  ManualRevertCallerWasmTest() : NativeContractTestFramework(false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam()) {}
+  ManualRevertCallerWasmTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -416,10 +419,10 @@ TEST_P(ManualRevertCallerWasmTest, StaticKeyMacro)
   ASSERT_EQ(sdk_key, native_key);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    TestDBs, ManualRevertCallerWasmTest,
-    ::testing::Values(TestDB::kMockInMemory, TestDB::kHogDB),
-    test_db_to_string);
+INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertCallerWasmTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 

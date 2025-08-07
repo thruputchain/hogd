@@ -34,7 +34,10 @@ namespace hogd {
 class ManualRevertWasmTest : public ::testing::TestWithParam<TestDB>,
                              public NativeContractTestFramework {
 public:
-  ManualRevertWasmTest() : NativeContractTestFramework(false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam()) {}
+  ManualRevertWasmTest()
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+  {}
 
 protected:
   void SetUp() override
@@ -574,9 +577,9 @@ TEST_P(ManualRevertWasmTest, StorageManualRevert)
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    TestDBs, ManualRevertWasmTest,
-    ::testing::Values(TestDB::kMockInMemory, TestDB::kHogDB),
-    test_db_to_string);
+INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertWasmTest,
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
+                         test_db_to_string);
 
 } // namespace hogd

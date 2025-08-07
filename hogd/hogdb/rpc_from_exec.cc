@@ -196,7 +196,6 @@ HogDBExecutorServer::get_snapshot_item(BlockID /*block*/,
     return ret;
   }
 
-
   HogDBStatus<DBItem> item = ctx_.get_db().get(key.as_bytes());
   if (!item)
     return ExpectedStorageItem(to_rpc_error(item.error()));
