@@ -25,6 +25,7 @@ target_link_libraries(
   runtime
   exec_interface
   db_interface
+  hogdb
 )
 
 set_property(TARGET fibonacci_wasmonly PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
