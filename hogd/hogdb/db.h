@@ -93,13 +93,25 @@ enum {
 
 namespace detail {
 
+namespace {
+
+constexpr char kAddressKeyPrefix = 'A';
+// Address suffixes.
+constexpr char kAddressBalanceSuffix = 'A';
+constexpr char kAddressAverageHogAgeSuffix = 'B';
+constexpr char kAddressWasmHashSuffix = 'C';
+
+constexpr char kCodeKeyPrefix = 'C';
+
+} // namespace
+
 constexpr auto
 make_address_key(const Address &addr, char c)
 {
   std::array<uint8_t, kAddressSize + 2> ret;
   std::ranges::copy(addr.as_bytes(),
                     std::begin(std::as_writable_bytes(std::span(ret))) + 2);
-  ret[0] = 'A';
+  ret[0] = kAddressKeyPrefix;
   ret[1] = c;
   return ret;
 }
@@ -109,7 +121,7 @@ make_code_key(const SHA256Hash &hash)
 {
   std::array<uint8_t, hash.size() + 1> ret;
   std::ranges::copy(hash, std::begin(std::span(ret)) + 1);
-  ret[0] = 'C';
+  ret[0] = kCodeKeyPrefix;
   return ret;
 }
 
@@ -123,7 +135,7 @@ inline HogDBStatus<int128_t>
 read_address_balance(HogDatabase &db, const Address &addr)
 {
   int128_t val;
-  auto key = detail::make_address_key(addr, 'B');
+  auto key = detail::make_address_key(addr, detail::kAddressBalanceSuffix);
   HogDBStatus<void> ret = db.get_if_type(std::as_bytes(std::span(key)),
                                          kNNInt128, writable_byte_view(val));
   if (!ret)
@@ -134,7 +146,30 @@ read_address_balance(HogDatabase &db, const Address &addr)
 inline HogDBStatus<void>
 write_address_balance(HogDatabase &db, const Address &addr, int128_t val)
 {
-  auto key = detail::make_address_key(addr, 'B');
+  auto key = detail::make_address_key(addr, detail::kAddressBalanceSuffix);
+  return db.put(std::as_bytes(std::span(key)), kNNInt128,
+                byte_view(cpu_to_le(val)));
+}
+
+inline HogDBStatus<int128_t>
+read_address_average_hog_age(HogDatabase &db, const Address &addr)
+{
+  int128_t val;
+  auto key =
+      detail::make_address_key(addr, detail::kAddressAverageHogAgeSuffix);
+  HogDBStatus<void> ret = db.get_if_type(std::as_bytes(std::span(key)),
+                                         kNNInt128, writable_byte_view(val));
+  if (!ret)
+    return ret.error();
+  return le_to_cpu(val);
+}
+
+inline HogDBStatus<void>
+write_address_average_hog_age(HogDatabase &db, const Address &addr,
+                              int128_t val)
+{
+  auto key =
+      detail::make_address_key(addr, detail::kAddressAverageHogAgeSuffix);
   return db.put(std::as_bytes(std::span(key)), kNNInt128,
                 byte_view(cpu_to_le(val)));
 }
@@ -143,7 +178,7 @@ inline HogDBStatus<SHA256Hash>
 read_address_wasm_hash(HogDatabase &db, const Address &addr)
 {
   SHA256Hash val;
-  auto key = detail::make_address_key(addr, 'C');
+  auto key = detail::make_address_key(addr, detail::kAddressWasmHashSuffix);
   HogDBStatus<void> ret = db.get_if_type(std::as_bytes(std::span(key)),
                                          kSHA256Hash, writable_byte_view(val));
   if (!ret)
@@ -155,7 +190,7 @@ inline HogDBStatus<void>
 write_address_wasm_hash(HogDatabase &db, const Address &addr,
                         const SHA256Hash &hash)
 {
-  auto key = detail::make_address_key(addr, 'C');
+  auto key = detail::make_address_key(addr, detail::kAddressWasmHashSuffix);
   return db.put(std::as_bytes(std::span(key)), kSHA256Hash, byte_view(hash));
 }
 
