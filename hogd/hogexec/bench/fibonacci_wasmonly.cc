@@ -33,7 +33,6 @@
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
-#include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
