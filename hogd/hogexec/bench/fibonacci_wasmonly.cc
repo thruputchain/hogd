@@ -7,18 +7,24 @@
 #include <memory>
 #include <optional>
 #include <print>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include "db_coord.hh"
+#include "hogd/base/io.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_coord_server.h"
-#include "hogd/db_interface/db_executor_server.h"
+#include "hogd/hogdb/db.h"
+#include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/rpc_context.h"
+#include "hogd/hogdb/rpc_from_coord.h"
+#include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -26,9 +32,8 @@
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/init.h"
-#include "hogd/mockdb/in_memory_database.h"
+#include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
@@ -36,6 +41,7 @@
 #include "x23/async.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
+#include "x23/serialize.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -130,19 +136,19 @@ struct BenchmarkState {
 };
 
 void
-setup_grant_storage_token(InMemoryDatabase &in_memory_db,
-                          StorageCostModel const &cost_model,
+setup_grant_storage_token(HogDatabase &db,
+                   
                           ContractAddress const &address, int128_t amount)
 {
   assert(amount >= 0);
   assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
 
-  AddressAndKey addrkey = {
-      .address = address,
-      .key = StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
-
-  in_memory_db.write_item(
-      addrkey, std::make_shared<const StorageItemWrapper>(amount, &cost_model));
+  // Convert ContractAddress to Address - both are std::array<uint8_t, 32>
+  Address addr(address);
+  auto ret = write_address_balance(db, addr, amount);
+  if (!ret) {
+    throw std::runtime_error("Failed to grant storage token");
+  }
 }
 
 void
@@ -265,26 +271,53 @@ run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
 {
   x23::ThreadPool db_pool = x23::ThreadPool(nthreads);
 
-  InMemoryDatabase in_memory_db = InMemoryDatabase();
-  StorageCostModel cost_model = StorageCostModel(12000, 1, 5, 100, 5);
+  // Create a temporary directory for the database
+  Directory dir = Directory::open_temporary().value();
+  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+  
+  // Open the database
+  auto db_result = Database::open(dir.get_path(), kDefaultHeapSize);
+  if (!db_result) {
+    throw std::runtime_error("Failed to open database");
+  }
+  
+  HogDatabase db(std::move(*db_result));
+  MerkleTriePrefix trie;
+  RPCContext ctx(db, trie);
+
+  //StorageCostModel cost_model = StorageCostModel(12000, 1, 5, 100, 5);
   ContractAddress contract_addr{};
 
   auto contract = test::load_test_contract("fibonacci.wasm");
 
-  in_memory_db.write_contract(sha256(*contract), contract);
-  in_memory_db.write_deployment(contract_addr, sha256(*contract));
+  // Write contract to hogdb
+  auto bytes = x23::serialize(*contract);
+  auto contract_hash = sha256(*contract);
+  auto ret = write_wasm_code(db, contract_hash, std::as_bytes(std::span(bytes)));
+  if (!ret) {
+    throw std::runtime_error("Failed to write contract");
+  }
 
-  setup_grant_storage_token(in_memory_db, cost_model, contract_addr,
-                            1'000'000'000);
+  // Write deployment
+  ret = write_address_wasm_hash(db, contract_addr, contract_hash);
+  if (!ret) {
+    throw std::runtime_error("Failed to write deployment");
+  }
 
-  BlockManager block_manager = BlockManager(0, &in_memory_db);
-  std::println("Starting executor server on port {}", exec_port);
-  RPCDbExecutorServer db_executor_server =
-      RPCDbExecutorServer(&block_manager, exec_port);
+  setup_grant_storage_token(db, contract_addr, 1'000'000'000);
 
-  DbCoordServer db_coord_server = DbCoordServer(&block_manager);
-  std::println("Starting coord server on port {}", coord_port);
+  // Start the coordinator server
+  std::println("Starting coordinator server on port {}", coord_port);
+  HogDBCoordServer db_coord_server(ctx);
   db_coord_server.start_server(coord_port);
+
+  // Start the executor server
+  std::println("Starting executor server on port {}", exec_port);
+  HogDBExecutorServer db_executor_server(ctx);
+  auto exec_ret = db_executor_server.start_server(exec_port);
+  if (!exec_ret) {
+    throw std::runtime_error("Failed to start executor server");
+  }
 
   // Wait for a byte from stdin (blocking)
   char buf;
