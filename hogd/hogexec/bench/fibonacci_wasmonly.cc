@@ -136,7 +136,7 @@ struct BenchmarkState {
 
 void
 setup_grant_storage_token(HogDatabase &db,
-                   
+
                           ContractAddress const &address, int128_t amount)
 {
   assert(amount >= 0);
@@ -273,18 +273,18 @@ run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
   // Create a temporary directory for the database
   Directory dir = Directory::open_temporary().value();
   constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
-  
+
   // Open the database
   auto db_result = Database::open(dir.get_path(), kDefaultHeapSize);
   if (!db_result) {
     throw std::runtime_error("Failed to open database");
   }
-  
+
   HogDatabase db(std::move(*db_result));
   MerkleTriePrefix trie;
   RPCContext ctx(db, trie);
 
-  //StorageCostModel cost_model = StorageCostModel(12000, 1, 5, 100, 5);
+  // StorageCostModel cost_model = StorageCostModel(12000, 1, 5, 100, 5);
   ContractAddress contract_addr{};
 
   auto contract = test::load_test_contract("fibonacci.wasm");
@@ -292,7 +292,8 @@ run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
   // Write contract to hogdb
   auto bytes = x23::serialize(*contract);
   auto contract_hash = sha256(*contract);
-  auto ret = write_wasm_code(db, contract_hash, std::as_bytes(std::span(bytes)));
+  auto ret =
+      write_wasm_code(db, contract_hash, std::as_bytes(std::span(bytes)));
   if (!ret) {
     throw std::runtime_error("Failed to write contract");
   }
