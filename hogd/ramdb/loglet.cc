@@ -64,8 +64,14 @@ unmap_segment(void *addr, size_t len)
 inline void
 dont_need_segment(void *addr, size_t len)
 {
-  if (madvise(addr, len, MADV_DONTNEED) == -1) {
-    warn("madvise w/ MADV_DONTNEED failed: {}", Errno());
+  // Previously we used DONTNEED here, but with DONTNEED there doesn't seem to
+  // be a defined way to synchronize with the kernel zeroer. After we've started
+  // reusing a page, we've seen the kernel zero the page.
+  // MADV_FREE avoids this by clearing the dirty bit on the page and then
+  // canceling the any replacement/zeroing of the page if the dirty bit gets
+  // reset.
+  if (madvise(addr, len, MADV_FREE) == -1) {
+    warn("madvise w/ MADV_FREE failed: {}", Errno());
     info("madvise {} {}", addr, len);
   }
 }
