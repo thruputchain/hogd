@@ -19,6 +19,7 @@
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "nomination.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -101,6 +102,28 @@ constexpr char kAddressBalanceSuffix = 'A';
 constexpr char kAddressAverageHogAgeSuffix = 'B';
 constexpr char kAddressWasmHashSuffix = 'C';
 
+struct AverageHogAge {
+  enum Group {
+    kGroupToSchedule,
+    kGroupAlreadyScheduled,
+    kGroupReceived,
+    kNumGroups
+  };
+
+  void cpu_to_le()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
+  void le_to_cpu()
+  {
+    // TODO(jhumphri): Implement.
+  }
+
+  int128_t num_hogs[Group::kNumGroups];
+  BlockHeight average_ages[Group::kNumGroups];
+};
+
 constexpr char kCodeKeyPrefix = 'C';
 
 } // namespace
@@ -151,14 +174,14 @@ write_address_balance(HogDatabase &db, const Address &addr, int128_t val)
                 byte_view(cpu_to_le(val)));
 }
 
-inline HogDBStatus<int128_t>
+inline HogDBStatus<detail::AverageHogAge>
 read_address_average_hog_age(HogDatabase &db, const Address &addr)
 {
-  int128_t val;
+  detail::AverageHogAge val;
   auto key =
       detail::make_address_key(addr, detail::kAddressAverageHogAgeSuffix);
-  HogDBStatus<void> ret = db.get_if_type(std::as_bytes(std::span(key)),
-                                         kNNInt128, writable_byte_view(val));
+  HogDBStatus<void> ret = db.get_if_type(std::as_bytes(std::span(key)), kBytes,
+                                         writable_byte_view(val));
   if (!ret)
     return ret.error();
   return le_to_cpu(val);
@@ -166,11 +189,11 @@ read_address_average_hog_age(HogDatabase &db, const Address &addr)
 
 inline HogDBStatus<void>
 write_address_average_hog_age(HogDatabase &db, const Address &addr,
-                              int128_t val)
+                              detail::AverageHogAge val)
 {
   auto key =
       detail::make_address_key(addr, detail::kAddressAverageHogAgeSuffix);
-  return db.put(std::as_bytes(std::span(key)), kNNInt128,
+  return db.put(std::as_bytes(std::span(key)), kBytes,
                 byte_view(cpu_to_le(val)));
 }
 
