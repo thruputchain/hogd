@@ -15,10 +15,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <format>
 #include <future>
 #include <memory>
 #include <print>
+#include <ranges>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -42,7 +45,7 @@ namespace hogd {
 
 namespace {
 
-using namespace std::chrono_literals;
+using namespace std::chrono_literals; // NOLINT(misc-include-cleaner)
 
 constexpr size_t kKeys = 16 * 1024 * 1024;
 static_assert((kKeys & (kKeys - 1)) == 0, "kKeys must be a power of two");
@@ -259,7 +262,7 @@ do_child(std::string_view path, Shared &shared)
         std::ranges::to<std::unordered_set<std::string_view>>();
 
     while (!stoken.stop_requested()) {
-      std::this_thread::sleep_for(1s);
+      std::this_thread::sleep_for(1s); // NOLINT(misc-include-cleaner)
       dump_metrics(registry, cumulative_fields, shared);
     }
   });
