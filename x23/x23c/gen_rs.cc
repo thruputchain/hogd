@@ -231,7 +231,8 @@ struct GenRs {
       R"(#[serde(with = "serde_arrays")])";
   static constexpr string_view kConstU32 = R"(#[rust(const=u32)])";
   static constexpr string_view kConstU64 = R"(#[rust(const=u64)])";
-  static constexpr string_view kDefaultDerives = R"(#[derive(Clone, Debug, PartialEq, Eq, Hash)])";
+  static constexpr string_view kDefaultDerives =
+      R"(#[derive(Clone, Debug, PartialEq, Eq, Hash)])";
 
   optional<Definition> convert_to_newtype(const Definition &d);
 };
