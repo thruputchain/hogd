@@ -142,7 +142,9 @@ public:
 
   void start_frame(ContractAddress const &address, Calldata &&calldata,
                    InvokeFlagSet flags);
-  SystemStatus<InvokeResult>
+  // Returns a pair of the InvokeResult and a bool indicating whether the frame
+  // was manually reverted.
+  SystemStatus<std::pair<InvokeResult, bool>>
   finish_frame(InvokeStatus<void> result,
                ExecutionModeData &execution_mode_data);
 

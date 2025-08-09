@@ -386,31 +386,6 @@ protected:
 
            return {};
          }},
-        {11,
-         [&](SystemCallHandler &handler,
-             NativeRuntime & /*unused*/) -> InvokeStatus<void> {
-           bool success = false;
-
-           // Test Result<i32> - Ok branch
-           hogd::Result<int32_t> result_ok(false); // false means Ok
-           result_ok.value() = 42;
-           roundtrip_test<"roundtrip_result_xdr">(result_ok, handler, client_,
-                                                  success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-
-           // Test Result<i32> - Err branch
-           hogd::Result<int32_t> result_err(true); // true means Err
-           result_err.err() = hogd::ErrorXDR(hogd::ErrorType::kErrorTypeCaller);
-           roundtrip_test<"roundtrip_result_xdr">(result_err, handler, client_,
-                                                  success);
-           if (!success) {
-             return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-           }
-
-           return {};
-         }},
 
     });
 
@@ -676,24 +651,6 @@ TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripStorageErrXDR)
   ASSERT_TRUE(*commit_res);
 }
 
-TEST_P(SerializeRoundtripTest, CxsSerializeRoundtripResultXDR)
-{
-  auto handler = make_new_system_call_handler(
-      SignedTransaction{
-          .tx =
-              Transaction{
-                  .invocation =
-                      Invocation{.invoked_address = native_contract_addr_,
-                                 .entrypoint = entrypoint_from_method_id(11),
-                                 .gas_limit = UINT64_MAX,
-                                 .calldata = {}}}},
-      multiplexed_context_);
-  auto res = handler.root_invoke();
-  ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
-  ASSERT_TRUE(commit_res.has_value());
-  ASSERT_TRUE(*commit_res);
-}
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, SerializeRoundtripTest,

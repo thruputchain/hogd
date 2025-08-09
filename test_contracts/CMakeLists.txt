@@ -10,7 +10,8 @@ function(add_wasm_contract target_name)
   # The --locked flag forces the CI to build with the correct version of the sdk
   # (not just whatever the latest version it has cached is).
   # Remember to put the --locked flag back in when you're done.
-  # Alternatively, you can run cargo +nightly update to update the lockfile manually.
+  # 
+  # The better alternative is to run cargo +nightly update to update the lockfile manually.
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.wasm_unoptimized
     COMMAND CARGO_NET_GIT_FETCH_WITH_CLI=true

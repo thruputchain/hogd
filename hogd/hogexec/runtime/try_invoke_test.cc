@@ -2626,7 +2626,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
              }
              // Method 1 should succeed, but state changes are gone because of
              // the manual revert
-             if (r1.value() != SyscallErrorCode::kNone) {
+             if (r1.value() != SyscallErrorCode::kFrameReverted) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
 
