@@ -7,6 +7,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -14,6 +15,7 @@
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
 #include "hogd/hogexec/wasmi/bindings.h"
 #include "types.hh"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -103,6 +105,8 @@ WasmiRuntime::invoke_internal(std::string_view method_name)
                    method_name.size());
 
   InvokeErrorCode wasmi_error{res.error};
+  trace("Wasmi Invoke Result: {}",
+        x23::show(static_cast<InvokeErrorCode>(res.error)));
   if (wasmi_error != InvokeErrorCode::kInvokeNone) {
     return InvokeError{wasmi_error};
   }

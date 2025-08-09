@@ -36,7 +36,7 @@ class ManualRevertWasmTest : public ::testing::TestWithParam<TestDB>,
 public:
   ManualRevertWasmTest()
     : NativeContractTestFramework(
-          true, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
   {}
 
 protected:
@@ -86,10 +86,12 @@ TEST_P(ManualRevertWasmTest, BasicManualRevert)
              if (!res.has_value()) {
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }
-             //if (res.value().error().code() != SyscallErrorCode::kFrameReverted) {
-             //  ADD_FAILURE() << "Function call should have succeeded and reverted";
-             //  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-             //}
+             // if (res.value().error().code() !=
+             // SyscallErrorCode::kFrameReverted) {
+             //   ADD_FAILURE() << "Function call should have succeeded and
+             //   reverted"; return
+             //   InvokeError{InvokeErrorCode::kInvokeDeterministic};
+             // }
              if (!res.value().has_value()) {
                ADD_FAILURE() << "Function call should have succeeded";
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
