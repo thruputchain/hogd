@@ -129,7 +129,9 @@ SystemCallHandler::root_invoke()
   auto handle_root_host_fn_status =
       [](HostFnStatus<SyscallErrorCode> status) -> InvokeStatus<void> {
     if (status.has_value()) {
-      return (status.value() == SyscallErrorCode::kNone)
+      // TODO(geoff): Consider whether we want to have "frame reverted" on the root frame
+      // as a "transaction failed" or "transaction succeeded"
+      return (status.value() == SyscallErrorCode::kNone || status.value() == SyscallErrorCode::kFrameReverted)
                  ? InvokeStatus<void>{}
                  : InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }

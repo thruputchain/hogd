@@ -8,6 +8,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include "bcs/decode.h"
 #include "bcs/encode.h"
@@ -27,6 +28,27 @@ namespace hogd {
 // It's mostly copy-pasted from the generated code,
 // and would be much better to have it be generated
 // directly by x23.
+namespace detail {
+
+  template<typename T, typename E> class Result {
+    public:
+
+    Result(T const &t) : variant_(t) {}
+    Result(E const &e) : variant_(e) {}
+
+    auto const& ok() const { return std::get<T>(variant_); }
+    auto const& err() const { return std::get<E>(variant_); }
+
+    bool is_ok() const { return std::holds_alternative<T>(variant_); }
+    bool is_err() const { return std::holds_alternative<E>(variant_); }
+
+  private:
+    std::variant<T, E> variant_;
+  };
+}
+
+
+#if 0
 namespace detail {
 
 template<typename T, typename E> struct Result {
@@ -173,6 +195,8 @@ struct xdr_meta<struct hogd::detail::Result<T, E>> {
 } // namespace x23
 
 namespace hogd {
+
+#endif
 
 // Group methods for de/serializing calldata into once location, with a common
 // interface.

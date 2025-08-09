@@ -17,6 +17,7 @@
 #include "hogd/base/cpputil.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
@@ -188,11 +189,33 @@ public:
   }
 
   template<StringLiteral Name>
-  static auto decode_return(std::span<const std::byte> data)
+  static auto decode_return(std::span<const std::byte> data, bool manually_reverted)
   {
     using return_type =
         typename detail::CalldataArgs<signature<kLookupIndex<Name>>>::return_t;
-    return [data] -> SyscallStatus<return_type> {
+    return [data, manually_reverted] -> SyscallStatus<return_type> {
+      if constexpr (is_contract_result_type<return_type>) {
+        if (manually_reverted) {
+          auto out = Serializer<kSerializationFormat>::template deserialize<typename return_type::err_type>(data);
+          if (!out.has_value()) {
+            return SyscallError{SyscallErrorCode::kReturnParseError};
+          }
+          return *out;
+        }
+        // ok type
+        auto out = Serializer<kSerializationFormat>::template deserialize<typename return_type::ok_type>(data);
+        if (!out.has_value()) {
+          return SyscallError{SyscallErrorCode::kReturnParseError};
+        }
+        return *out;
+      }  else {
+
+      // not using the manual revert path
+
+      if (manually_reverted) {
+        return SyscallError{SyscallErrorCode::kFrameReverted};
+      }
+      
       auto out =
           Serializer<kSerializationFormat>::template deserialize<return_type>(
               data);
@@ -200,6 +223,7 @@ public:
         return SyscallError{SyscallErrorCode::kReturnParseError};
       }
       return *out;
+      }
     }();
   }
 
@@ -264,7 +288,8 @@ public:
       trace("Invoke HostFnStatus error: {}", host_fn_res.error());
       return std::pair{host_fn_res.error(), res.second};
     }
-    if (host_fn_res.value() != SyscallErrorCode::kNone) {
+
+    if (host_fn_res.value() != SyscallErrorCode::kNone && host_fn_res.value() != SyscallErrorCode::kFrameReverted) {
       trace("Invoke SyscallStatus error: {}", host_fn_res.value());
       return std::pair{SyscallError{host_fn_res.value()}, res.second};
     }
@@ -280,7 +305,9 @@ public:
 
     trace("Received return buffer: {}", x23::show(**return_buffer));
 
-    auto return_value = trait_meta_t::template decode_return<Name>(return_span);
+    bool manually_reverted = host_fn_res.value() == SyscallErrorCode::kFrameReverted;
+
+    auto return_value = trait_meta_t::template decode_return<Name>(return_span, manually_reverted);
     if (!return_value.has_value()) {
       trace("Invoke Error: Decode Return Failed: {}", return_value.error());
       return std::pair{return_value.error(), res.second};
