@@ -23,7 +23,9 @@ init_cpumaps()
   static std::atomic_int state = 0; // 1 = initializing, 2 = initialized
   if (state < 2) {
     if (int zero = 0; state.compare_exchange_strong(zero, 1)) {
+#if HAVE_SCHED_SETAFFINITY
       allowed_cpus = new auto{get_allowed_cpus()};
+#endif // HAVE_SCHED_SETAFFINITY
       core_map = new auto{make_cpu_map("topology/core_id")};
       llc_map = new auto{make_llc_map()};
       state = 2;
@@ -220,12 +222,12 @@ try {
 CpuMap
 make_cpu_map(std::string_view path)
 {
-  return {{0}};
+  return CpuMap{Vec{0}};
 }
 CpuMap
 make_llc_map()
 {
-  return {{0}};
+  return CpuMap{Vec{0}};
 }
 #endif // !HAVE_SCHED_GETCPU
 

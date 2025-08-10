@@ -161,7 +161,17 @@ get_allowed_cpus()
   return parse_cpuset(get_field("Cpus_allowed_list", "/proc/self/status"));
 }
 
-#endif // HAVE_SCHED_SETAFFINITY
+#else // !HAVE_SCHED_SETAFFINITY
+
+// Dummy version if we don't have CPU sets
+class CpuSet {
+public:
+  static constexpr unsigned kNCPUs = 1;
+  bool valid() const { return true; }
+  Errno set_affinity() const { return 0; }
+};
+
+#endif // !HAVE_SCHED_SETAFFINITY
 
 class CpuMap {
 public:
@@ -185,13 +195,16 @@ public:
     return map_[size_t(n) % map_.size()];
   }
 
-#if HAVE_SCHED_GETCPU
   const CpuSet &cpuset(int i) const
   {
     assert(i >= 0 && i < nbuckets_);
+#if HAVE_SCHED_SETAFFINITY
     return cpusets_[i];
+#else // !HAVE_SCHED_SETAFFINITY
+    static const CpuSet dummy;
+    return dummy;
+#endif // !HAVE_SCHED_SETAFFINITY
   }
-#endif // HAVE_SCHED_GETCPU
 
 private:
   Vec<int> map_;
