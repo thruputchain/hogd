@@ -8,6 +8,22 @@
 
 #include "x23/threadpool.h"
 
+void
+llc_migrate()
+{
+#if HAVE_SCHED_SETAFFINITY
+  const auto &cpumap = *x23::llc_map;
+  for (int i = 0; i < cpumap.nbuckets(); ++i) {
+    if (const auto &s = cpumap.cpuset(i); s.valid())
+      if (!s.set_affinity()) {
+        int cpuid = x23::cpuid();
+        std::println("migrated to bucket {}: currently running on {} -> {}", i,
+                     cpuid, cpumap.bucket(cpuid));
+      }
+  }
+#endif // HAVE_SCHED_SETAFFINITY
+}
+
 int
 main()
 {
@@ -20,11 +36,11 @@ main()
 #if HAVE_SCHED_SETAFFINITY
   for (int i = 0; i < cpumap.nbuckets(); ++i) {
     auto allowed = cpumap.cpuset(i) & *x23::allowed_cpus;
-    //auto allowed{*x23::allowed_cpus};
-    //allowed &= cpumap.cpuset(i);
+    // auto allowed{*x23::allowed_cpus};
+    // allowed &= cpumap.cpuset(i);
     if (allowed.count())
       std::println("Bucket {} -> CpuSet {} [{} allowed]", i, cpumap.cpuset(i),
-		   allowed);
+                   allowed);
     else
       std::println("Bucket {} -> CpuSet {} [prohibited]", i, cpumap.cpuset(i));
   }
@@ -33,4 +49,5 @@ main()
 
   int cpuid = x23::cpuid();
   std::println("currently running on {} -> {}", cpuid, cpumap.bucket(cpuid));
+  llc_migrate();
 }

@@ -7,10 +7,10 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
-#include <new>
 #include <string_view>
 
 #include <x23/config.h>
+#include <x23/err.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
 
@@ -43,10 +43,12 @@ std::string get_field(std::string_view field, std::filesystem::path file);
 
 #if HAVE_SCHED_SETAFFINITY
 
+extern const class CpuSet *allowed_cpus;
+
 class CpuSet {
 public:
   static constexpr unsigned kNCPUs =
-    X23_CPUSET_NCPUS ? X23_CPUSET_NCPUS : CPU_SETSIZE;
+      X23_CPUSET_NCPUS ? X23_CPUSET_NCPUS : CPU_SETSIZE;
   static constexpr auto kSize = CPU_ALLOC_SIZE(kNCPUs);
   struct uninitialized {};
 
@@ -80,17 +82,17 @@ public:
   }
   int count() const { return CPU_COUNT_S(kSize, set()); }
 
-#define MAKE_BITOP(op, text)					\
-  CpuSet &operator op##=(const CpuSet &o)			\
-  {								\
-    CPU_##text##_S(kSize, set(), set(), o.set());		\
-    return *this;						\
-  }								\
-  friend CpuSet operator op(const CpuSet &a, const CpuSet &b)	\
-  {								\
-    CpuSet ret{uninitialized{}};				\
-    CPU_##text##_S(kSize, ret.set(), a.set(), b.set());		\
-    return ret;							\
+#define MAKE_BITOP(op, text)                                                   \
+  CpuSet &operator op##=(const CpuSet & o)                                     \
+  {                                                                            \
+    CPU_##text##_S(kSize, set(), set(), o.set());                              \
+    return *this;                                                              \
+  }                                                                            \
+  friend CpuSet operator op(const CpuSet &a, const CpuSet &b)                  \
+  {                                                                            \
+    CpuSet ret{uninitialized{}};                                               \
+    CPU_##text##_S(kSize, ret.set(), a.set(), b.set());                        \
+    return ret;                                                                \
   }
   MAKE_BITOP(&, AND)
   MAKE_BITOP(|, OR)
@@ -101,6 +103,19 @@ public:
   {
     return CPU_EQUAL_S(kSize, a.set(), b.set());
   }
+
+  // True if the set contains at least one CPU we are allowed to run
+  // on in our cgroup.
+  bool valid(const CpuSet *allowed = allowed_cpus) const
+  {
+    return allowed ? (*this & *allowed).count() : count();
+  }
+
+  // Set thread to run in a particular CpuSet.  If pid == 0 affects
+  // the current thread.  Otherwise, pid must be the value returned by
+  // gettid() in the thread, which you might not be able to obtain
+  // from a std::thread.
+  Errno set_affinity(pid_t pid = 0) const;
 
 private:
   alignas(cpu_set_t) char buf_[kSize];
@@ -146,7 +161,6 @@ get_allowed_cpus()
   return parse_cpuset(get_field("Cpus_allowed_list", "/proc/self/status"));
 }
 
-extern const CpuSet *allowed_cpus;
 #endif // HAVE_SCHED_SETAFFINITY
 
 class CpuMap {
@@ -172,7 +186,11 @@ public:
   }
 
 #if HAVE_SCHED_GETCPU
-  const CpuSet &cpuset(int i) const { return cpusets_[i]; }
+  const CpuSet &cpuset(int i) const
+  {
+    assert(i >= 0 && i < nbuckets_);
+    return cpusets_[i];
+  }
 #endif // HAVE_SCHED_GETCPU
 
 private:

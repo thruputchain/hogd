@@ -62,6 +62,16 @@ get_field(std::string_view field, std::filesystem::path file)
 }
 
 #if HAVE_SCHED_SETAFFINITY
+Errno
+CpuSet::set_affinity(pid_t pid) const
+{
+  if (sched_setaffinity(pid, size(), set()) == 0)
+    return 0;
+  Errno err;
+  std::println(stderr, "sched_setaffinity({}): {}", *this, err);
+  return err;
+}
+
 CpuSet
 parse_cpuset(std::string_view list)
 {
