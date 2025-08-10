@@ -2,6 +2,14 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cassert>
+#include <cstring>
+#include <filesystem>
+#include <format>
+#include <new>
+#include <string_view>
+
 #include <x23/config.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
@@ -29,12 +37,128 @@ cpuid() noexcept
 #endif // !HAVE_SCHED_GETCPU
 }
 
+// If field is MyField, then returns "Value" from the first line
+// of the form "MyField: Value" in file.
+std::string get_field(std::string_view field, std::filesystem::path file);
+
+#if HAVE_SCHED_SETAFFINITY
+
+class CpuSet {
+public:
+  static constexpr unsigned kNCPUs =
+    X23_CPUSET_NCPUS ? X23_CPUSET_NCPUS : CPU_SETSIZE;
+  static constexpr auto kSize = CPU_ALLOC_SIZE(kNCPUs);
+  struct uninitialized {};
+
+  constexpr CpuSet(uninitialized) {}
+  constexpr CpuSet() : CpuSet(uninitialized{}) { zero(); }
+
+  cpu_set_t *set() { return reinterpret_cast<cpu_set_t *>(buf_); }
+  const cpu_set_t *set() const
+  {
+    return reinterpret_cast<const cpu_set_t *>(buf_);
+  }
+
+  static constexpr size_t size() { return kSize; }
+  static constexpr unsigned num_cpus() { return kNCPUs; }
+
+  void zero() { CPU_ZERO_S(kSize, set()); }
+  void set(unsigned cpu)
+  {
+    assert(cpu < kNCPUs);
+    CPU_SET_S(cpu, kSize, set());
+  }
+  void clr(unsigned cpu)
+  {
+    assert(cpu < kNCPUs);
+    CPU_CLR_S(cpu, kSize, set());
+  }
+  bool isset(unsigned cpu) const
+  {
+    assert(cpu < kNCPUs);
+    return CPU_ISSET_S(cpu, kSize, set());
+  }
+  int count() const { return CPU_COUNT_S(kSize, set()); }
+
+#define MAKE_BITOP(op, text)					\
+  CpuSet &operator op##=(const CpuSet &o)			\
+  {								\
+    CPU_##text##_S(kSize, set(), set(), o.set());		\
+    return *this;						\
+  }								\
+  friend CpuSet operator op(const CpuSet &a, const CpuSet &b)	\
+  {								\
+    CpuSet ret{uninitialized{}};				\
+    CPU_##text##_S(kSize, ret.set(), a.set(), b.set());		\
+    return ret;							\
+  }
+  MAKE_BITOP(&, AND)
+  MAKE_BITOP(|, OR)
+  MAKE_BITOP(^, XOR)
+#undef MAKE_BITOP
+
+  friend bool operator==(const CpuSet &a, const CpuSet &b)
+  {
+    return CPU_EQUAL_S(kSize, a.set(), b.set());
+  }
+
+private:
+  alignas(cpu_set_t) char buf_[kSize];
+};
+}
+
+template<> struct std::formatter<x23::CpuSet> {
+  constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
+
+  auto format(const x23::CpuSet &cs, auto &ctx) const
+  {
+    auto out = ctx.out();
+    bool first = true;
+    for (int i = 0, n = cs.num_cpus(); i < n;) {
+      if (!cs.isset(i)) {
+        ++i;
+        continue;
+      }
+      int start = i;
+      do {
+        ++i;
+      } while (i < n && cs.isset(i));
+      if (first)
+        first = false;
+      else
+        *out++ = ',';
+      if (start == i - 1)
+        out = std::format_to(out, "{}", start);
+      else
+        out = std::format_to(out, "{}-{}", start, i - 1);
+    }
+    return out;
+  }
+};
+
+namespace x23 {
+
+CpuSet parse_cpuset(std::string_view list);
+
+inline CpuSet
+get_allowed_cpus()
+{
+  return parse_cpuset(get_field("Cpus_allowed_list", "/proc/self/status"));
+}
+
+extern const CpuSet *allowed_cpus;
+#endif // HAVE_SCHED_SETAFFINITY
+
 class CpuMap {
 public:
-  CpuMap(Vec<int> map) noexcept
+  explicit CpuMap(Vec<int> map) noexcept
     : map_(std::move(map)), nbuckets_(1 + std::ranges::max(map_))
-  {}
-  constexpr CpuMap(std::nullptr_t) : map_(), nbuckets_(-1) {}
+  {
+#if HAVE_SCHED_SETAFFINITY
+    compute_cpusets();
+#endif // HAVE_SCHED_SETAFFINITY
+  }
+  explicit constexpr CpuMap(std::nullptr_t) : nbuckets_(-1) {}
 
   int nbuckets() const { return nbuckets_; }
   const Vec<int> &get_map() const { return map_; }
@@ -47,9 +171,18 @@ public:
     return map_[size_t(n) % map_.size()];
   }
 
+#if HAVE_SCHED_GETCPU
+  const CpuSet &cpuset(int i) const { return cpusets_[i]; }
+#endif // HAVE_SCHED_GETCPU
+
 private:
   Vec<int> map_;
   int nbuckets_;
+#if HAVE_SCHED_SETAFFINITY
+  Vec<CpuSet> cpusets_;
+
+  void compute_cpusets();
+#endif // HAVE_SCHED_SETAFFINITY
 };
 
 // Return a mapping of CPU numbers to buckets on linux.  For a given
@@ -78,8 +211,8 @@ CpuMap make_cpu_map(std::string_view path);
 // cache/index3/shared_cpu_map or cache/index2/shared_cpu_map.
 CpuMap make_llc_map();
 
-extern CpuMap core_map;
-extern CpuMap llc_map;
+extern const CpuMap *core_map;
+extern const CpuMap *llc_map;
 
 // Call this function to ensure core_map and llc_map are initialized
 // during static initialization.  Once main starts, they will be

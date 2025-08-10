@@ -1,8 +1,8 @@
 
+#include <algorithm>
 #include <array>
-#include <filesystem>
+#include <cctype>
 #include <print>
-#include <regex>
 #include <thread>
 #include <unordered_map>
 
@@ -11,17 +11,21 @@
 
 namespace x23 {
 
-constinit CpuMap core_map(nullptr);
-constinit CpuMap llc_map(nullptr);
+#if HAVE_SCHED_SETAFFINITY
+const CpuSet *allowed_cpus;
+#endif // HAVE_SCHED_SETAFFINITY
+const CpuMap *core_map;
+const CpuMap *llc_map;
 
 void
 init_cpumaps()
 {
-  static std::atomic_int state = 0;
+  static std::atomic_int state = 0; // 1 = initializing, 2 = initialized
   if (state < 2) {
     if (int zero = 0; state.compare_exchange_strong(zero, 1)) {
-      core_map = make_cpu_map("topology/core_id");
-      llc_map = make_llc_map();
+      allowed_cpus = new auto{get_allowed_cpus()};
+      core_map = new auto{make_cpu_map("topology/core_id")};
+      llc_map = new auto{make_llc_map()};
       state = 2;
       state.notify_all();
     }
@@ -30,6 +34,84 @@ init_cpumaps()
   }
 }
 static const bool _init = (init_cpumaps(), false);
+
+std::string
+get_field(std::string_view field, std::filesystem::path file)
+{
+  auto fieldsize = field.size();
+  auto contents = readfile<std::string>(std::move(file));
+  if (!contents)
+    return {};
+  for (std::string_view tail{*contents}; !tail.empty();) {
+    auto pos = tail.find('\n');
+    std::string_view head = tail.substr(0, pos);
+
+    if (head.size() > fieldsize && head.starts_with(field) &&
+        head[fieldsize] == ':') {
+      auto i = fieldsize + 1;
+      while (i < head.size() && std::isspace(head[i]))
+        ++i;
+      return std::string{head.substr(i)};
+    }
+
+    if (pos == std::string_view::npos)
+      break;
+    tail.remove_prefix(pos + 1);
+  }
+  return {};
+}
+
+#if HAVE_SCHED_SETAFFINITY
+CpuSet
+parse_cpuset(std::string_view list)
+{
+  const char *p = list.data();
+  auto lex = [&p, e = p + list.size()] -> std::optional<long> {
+    while (p < e && (*p == ',' || isspace(*p)))
+      ++p;
+    if (p < e) {
+      char *nextp;
+      auto ret = strtol(p, &nextp, 10);
+      if (p != nextp) {
+        p = nextp;
+        return ret;
+      }
+    }
+    return std::nullopt;
+  };
+
+  long num_cpu = 0;
+  std::vector<std::pair<unsigned, unsigned>> elems;
+  while (auto token = lex()) {
+    unsigned int val = std::min<unsigned>(std::labs(*token), CpuSet::kNCPUs-1);
+    if (val >= num_cpu)
+      num_cpu = val + 1;
+    if (*token >= 0)
+      elems.emplace_back(val, val);
+    else if (elems.empty())
+      return CpuSet{};
+    else
+      elems.back().second = std::max(elems.back().first, val);
+  }
+
+  CpuSet ret;
+  for (auto [i, last] : elems)
+    for (;; ++i) {
+      ret.set(i);
+      if (i == last)
+        break;
+    }
+  return ret;
+}
+
+void
+CpuMap::compute_cpusets()
+{
+  cpusets_.resize(nbuckets_);
+  for (size_t i = 0; i < map_.size(); ++i)
+    cpusets_[bucket(i)].set(i);
+}
+#endif // HAVE_SCHED_SETAFFINITY
 
 unsigned
 nproc()
@@ -42,19 +124,13 @@ nproc()
       counts[c] = counts[c | 0x20] = std::popcount(c - 'A' + 10);
     return counts;
   }();
-  static const std::regex allowed_rx(R"(^Cpus_allowed:\s+([0-9a-f,]+)$)",
-                                     std::regex::multiline);
 
-  std::smatch matches;
-  if (auto allowed = readfile<std::string>("/proc/self/status");
-      allowed && regex_search(*allowed, matches, allowed_rx)) {
-    unsigned sum = 0;
-    for (char c : matches.str(1))
-      sum += hex_nibble_popcount[c];
-    if (sum > 0)
-      return sum;
-  }
-
+  auto allowed = get_field("Cpus_allowed", "/proc/self/status");
+  unsigned sum = 0;
+  for (char c : allowed)
+    sum += hex_nibble_popcount[c];
+  if (sum)
+    return sum;
   return std::thread::hardware_concurrency();
 }
 
@@ -63,11 +139,11 @@ CpuMap
 make_cpu_map(std::string_view path)
 try {
   // The buckets are unique numbers but not always contiguous, so map
-  // them to contiguous range of integers in [0,N).
+  // them to a contiguous range of integers in [0,N).
   int nextbucket = 0;
   std::unordered_map<std::string, int> bucketmap;
   auto bucket = [&](std::string b) {
-    if (auto [it, ok] = bucketmap.try_emplace(b, nextbucket); !ok)
+    if (auto [it, ok] = bucketmap.try_emplace(std::move(b), nextbucket); !ok)
       return it->second;
     return nextbucket++;
   };
@@ -96,13 +172,13 @@ try {
       // "efficiency cores" missing an L3 cache.  That's not the kind
       // of high-core-count or multi-socket machine where L3-cache
       // affinity really helps, so just return a single bucket.
-      return {{0}};
+      return CpuMap{Vec{0}};
     }
-    ret[cpu] = bucket(*idstr);
+    ret[cpu] = bucket(std::move(*idstr));
   }
-  return ret;
+  return CpuMap{ret};
 } catch (...) {
-  return {{0}};
+  return CpuMap{Vec{0}};
 }
 
 CpuMap
@@ -125,9 +201,9 @@ try {
 
   if (last >= 0)
     return make_cpu_map(std::format("cache/index{}/shared_cpu_map", last));
-  return {{0}};
+  return CpuMap{Vec{0}};
 } catch (...) {
-  return {{0}};
+  return CpuMap{Vec{0}};
 }
 
 #else  // !HAVE_SCHED_GETCPU

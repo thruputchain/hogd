@@ -9,7 +9,7 @@
 namespace x23 {
 
 ThreadPool::ThreadPool(size_t nthreads)
-  : nthreads_(nthreads), nqueues_((init_cpumaps(), llc_map.nbuckets())),
+  : nthreads_(nthreads), nqueues_((init_cpumaps(), llc_map->nbuckets())),
     queue_nthreads_(new std::atomic_uint[nqueues_]{}),
     runqueues_(std::make_unique<RunQueue[]>(nqueues_)),
     tstate_(std::make_unique<ThreadState[]>(nthreads))
@@ -50,7 +50,7 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
     return;
   }
 
-  int affinity_queue = llc_map.bucket(cpuhint);
+  int affinity_queue = llc_map->bucket(cpuhint);
   if (qno(*lq) == affinity_queue)
     return;
 
@@ -88,7 +88,7 @@ ThreadPool::go(std::vector<Job> &&jobs)
   assert(!ss_.stop_requested());
 
   std::ranges::stable_sort(jobs, [](const Job &a, const Job &b) {
-    return llc_map.bucket(a.cpuhint) < llc_map.bucket(b.cpuhint);
+    return llc_map->bucket(a.cpuhint) < llc_map->bucket(b.cpuhint);
   });
 
   uint64_t now = fastclock::get_ns();
@@ -161,7 +161,7 @@ ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
   Defer _relock{[this, &ptr] { pool_->relock(ptr, bucket_); }};
 
   cpu_ = cpuid();
-  auto newbucket = llc_map.bucket(cpu_);
+  auto newbucket = llc_map->bucket(cpu_);
   if (newbucket == bucket_)
     return;
 
@@ -238,16 +238,16 @@ ThreadPool::Worker::qpop(QPtr &ptr)
 {
   assert(!ptr->q.empty());
 
-  const auto mycore = core_map.bucket(cpu_);
+  const auto mycore = core_map->bucket(cpu_);
   const auto qi = ptr->q.front();
   const auto qt = qi.qtime;
 
-  if (core_map.bucket(qi.job.cpuhint) != mycore) {
+  if (core_map->bucket(qi.job.cpuhint) != mycore) {
     // Try to find work on the same core without going forward more
     // than 5 microseconds from the oldest job.
     for (auto it = ptr->q.begin() + 1;
          it != ptr->q.end() && it->qtime < qt + 5'000; ++it)
-      if (core_map.bucket(it->job.cpuhint) == mycore) {
+      if (core_map->bucket(it->job.cpuhint) == mycore) {
         auto ret = it->job.value;
         ptr->q.erase(it);
         return ret;
@@ -272,7 +272,7 @@ ThreadPool::Worker::work()
   my_thread_pool = pool_;
   my_thread_no = threadno_;
   cpu_ = cpuid();
-  bucket_ = llc_map.bucket(cpu_);
+  bucket_ = llc_map->bucket(cpu_);
   pool_->queue_nthreads_[bucket_]++;
 
   auto &ts = pool_->tstate_[threadno_];

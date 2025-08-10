@@ -271,7 +271,7 @@ private:
 
   UniqueFd epollfd_;
 
-  SharedLock resize_lock_{core_map};
+  SharedLock resize_lock_{*core_map};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
   std::atomic_uint numcoro_{0};

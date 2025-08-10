@@ -133,7 +133,7 @@ class SharedLock : public TestLock {
 public:
   const CpuMap &map_;
 
-  explicit SharedLock(const CpuMap &map = llc_map)
+  explicit SharedLock(const CpuMap &map = *llc_map)
     : map_(map), inhibitors_(std::make_unique<Inhibitor[]>(nshared()))
   {
     assert(nshared() > 0);
