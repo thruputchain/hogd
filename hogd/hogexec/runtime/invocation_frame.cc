@@ -123,7 +123,7 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
   frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags);
 }
 
-SystemStatus<InvokeResult>
+SystemStatus<std::pair<InvokeResult, bool>>
 InvocationFrameStack::finish_frame(InvokeStatus<void> result,
                                    ExecutionModeData &execution_mode_data)
 {
@@ -183,6 +183,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     }
   }
 
+  bool manually_reverted = frame_stack_.back().should_revert();
+
   if (frame_result.should_frame_revert()) {
     frame_stack_.pop_back();
 
@@ -190,7 +192,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       frame_stack_.back().commit_failed_child_frame();
     }
 
-    return frame_result;
+    return {{frame_result, manually_reverted}};
   }
 
   // commit child invocation frame successfully
@@ -218,7 +220,7 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
 
   frame_stack_.pop_back();
 
-  return frame_result;
+  return {{frame_result, manually_reverted}};
 }
 
 std::optional<ContractAddress>

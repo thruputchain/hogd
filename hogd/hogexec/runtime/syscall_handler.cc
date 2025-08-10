@@ -129,7 +129,10 @@ SystemCallHandler::root_invoke()
   auto handle_root_host_fn_status =
       [](HostFnStatus<SyscallErrorCode> status) -> InvokeStatus<void> {
     if (status.has_value()) {
-      return (status.value() == SyscallErrorCode::kNone)
+      // TODO(geoff): Consider whether we want to have "frame reverted" on the
+      // root frame as a "transaction failed" or "transaction succeeded"
+      return (status.value() == SyscallErrorCode::kNone ||
+              status.value() == SyscallErrorCode::kFrameReverted)
                  ? InvokeStatus<void>{}
                  : InvokeError{InvokeErrorCode::kInvokeDeterministic};
     }
@@ -303,9 +306,17 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
     // the local scheduler, not the canonical chain.
     return {finish_status.error().to_host_fn_error(), 0};
   }
-  cumulative_result += finish_status.value();
+  auto [frame_result, manually_reverted] = finish_status.value();
+  cumulative_result += frame_result;
 
-  return cumulative_result.to_host_fn_result();
+  auto out = cumulative_result.to_host_fn_result();
+  if (out.first.has_value() && out.first.value() == SyscallErrorCode::kNone) {
+    if (manually_reverted) {
+      out.first = SyscallErrorCode::kFrameReverted;
+    }
+  }
+
+  return out;
 }
 
 void
