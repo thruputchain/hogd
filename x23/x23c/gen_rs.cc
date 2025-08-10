@@ -343,7 +343,7 @@ GenRs::show_type(const StructBody &s, string const &tname)
     prtop("{}\n", kDefaultDerives);
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
-    prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
+    prtop("#[cfg_attr(feature = \"xdrs\", derive(XDR, ReadXDR, WriteXDR))]\n");
 
     if (s.transparent) {
       needs_serde_imports = true; // for Serialize, Deserialize
@@ -514,7 +514,7 @@ GenRs::show_type(const EnumBody &e, string const &tname)
 {
   prtop("{}\n", kDefaultDerives);
   prtop(R"(#[derive(Copy)]
-#[cfg_attr(feature = "xdrs", derive(ReadXDR, WriteXDR))]
+#[cfg_attr(feature = "xdrs", derive(XDR, ReadXDR, WriteXDR))]
 #[repr(i32)]
 pub enum {} )",
         tname);
@@ -609,7 +609,7 @@ GenRs::show_type(const UnionBody &b, string const &tname)
   };
   {
     prtop("{}\n", kDefaultDerives);
-    prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
+    prtop("#[cfg_attr(feature = \"xdrs\", derive(XDR, ReadXDR, WriteXDR))]\n");
     prtop("#[repr({})]\n", enum_base_type());
     prtop("pub enum {} ", tname);
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -908,7 +908,10 @@ use core::ops::{Deref, DerefMut};
 use std::io::{Read, Write};
 
 #[cfg(feature="xdrs")]
-use ::xdrs::{ReadXDR, WriteXDR};
+use ::xdrs::{XDR, ReadXDR, WriteXDR};
+
+#[cfg(feature="xdrs")]
+use ::xdr_repr::*;
 
 )";
 
