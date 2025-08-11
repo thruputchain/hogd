@@ -19,8 +19,7 @@ div_round_up(int128_t numerator, int128_t denominator)
 } // namespace
 
 bool
-Scheduler::add_vetted_tx(const AccountID &account_id,
-                         const SignedTransaction &tx)
+Scheduler::add_vetted_tx(const SignedTransaction &tx)
 {
   if (!tx_hashes_.insert(sha256(tx)).second) {
     // The transaction is already present in the runqueue.
@@ -28,7 +27,7 @@ Scheduler::add_vetted_tx(const AccountID &account_id,
   }
 
   HogDBStatus<detail::AverageHogAge> ret =
-      read_address_average_hog_age(db_, Address({}));
+      read_address_average_hog_age(*db_, Address({}));
   if (!ret.has_value()) {
     return false;
   }
@@ -47,7 +46,7 @@ bool
 Scheduler::update_groups(const AccountID &account_id)
 {
   HogDBStatus<detail::AverageHogAge> ret =
-      read_address_average_hog_age(db_, Address({}));
+      read_address_average_hog_age(*db_, Address({}));
   if (!ret.has_value()) {
     return false;
   }
@@ -91,7 +90,7 @@ Scheduler::update_groups(const AccountID &account_id)
   new_averages.num_hogs[detail::AverageHogAge::kGroupReceived] = 0;
   new_averages.average_ages[detail::AverageHogAge::kGroupReceived] = 0;
 
-  return write_address_average_hog_age(db_, Address({}), new_averages)
+  return write_address_average_hog_age(*db_, Address({}), new_averages)
       .has_value();
 }
 
@@ -101,7 +100,7 @@ Scheduler::process_received_hogs(const AccountID &account_id,
                                  BlockHeight current_block)
 {
   HogDBStatus<detail::AverageHogAge> ret =
-      read_address_average_hog_age(db_, Address({}));
+      read_address_average_hog_age(*db_, Address({}));
   if (!ret.has_value()) {
     return false;
   }
@@ -124,7 +123,7 @@ Scheduler::process_received_hogs(const AccountID &account_id,
         div_round_up(numerator, denominator);
   }
 
-  return write_address_average_hog_age(db_, Address({}), new_averages)
+  return write_address_average_hog_age(*db_, Address({}), new_averages)
       .has_value();
 }
 

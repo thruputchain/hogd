@@ -41,7 +41,7 @@ public:
   Mempool(coord_client_t &&coord_client, db_client_t &&db_client,
           exec_client_t &&exec_client)
     : coord_client_(std::move(coord_client)), db_client_(std::move(db_client)),
-      exec_client_(std::move(exec_client))
+      exec_client_(std::move(exec_client)), scheduler_(nullptr)
   {}
 
   // Disable copy and move.
@@ -125,6 +125,7 @@ private:
   // TODO(jhumphri): Make the mempool work with multiple threads. e.g., we will
   // need to synchronize accesses to [vetted_txs_].
   std::unordered_map<SHA256Hash, SignedTransaction> vetted_txs_;
+  Scheduler scheduler_;
 
   std::atomic<bool> shutdown_flag_ = false;
 };

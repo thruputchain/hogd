@@ -36,7 +36,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
   // vetted. This vetting logic will include the authentication logic from
   // Geoff's proposal.
   for (const SignedTransaction &tx : batch) {
-    vetted_txs_[sha256(tx)] = tx;
+    scheduler_.add_vetted_tx(tx);
   }
   co_return co_await coord_client_.coordscheduler_notify_vetted(batch);
 }
@@ -46,7 +46,7 @@ Mempool::schedulercoord_submit_vetted(ValidatorID validator_id,
                                       SignedTransactionBatch batch)
 {
   for (const SignedTransaction &tx : batch) {
-    vetted_txs_[sha256(tx)] = tx;
+    scheduler_.add_vetted_tx(tx);
   }
   co_return;
 }
@@ -280,6 +280,9 @@ Mempool::open_validation_block(BlockID block_id)
 x23::Async<SchedulerValidationResult>
 Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
 {
+  // TODO(jhumphri): Need to ensure that the node that proposed the block is
+  // following the expected scheduling policy.
+
   BlockID block_id = get_ns_since_epoch();
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
