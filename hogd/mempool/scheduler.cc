@@ -79,10 +79,35 @@ Scheduler::update_groups(const AccountID &account_id)
   return true;
 }
 
-x23::Vec<SignedTransaction>
-schedule()
+bool
+Scheduler::process_received_hogs(const AccountID &account_id,
+                                 int128_t num_received,
+                                 BlockHeight current_block)
 {
-  return {};
+  return true;
+}
+
+x23::Vec<SignedTransaction>
+Scheduler::schedule(size_t block_size)
+{
+  x23::Vec<SignedTransaction> ret;
+  size_t num_scheduled = 0;
+  while (num_scheduled < block_size && !txs_.empty()) {
+    const size_t num_remaining = block_size - num_scheduled;
+
+    auto &[average_age, txs] = *txs_.begin();
+    if (txs.size() <= num_remaining) {
+      ret.append(txs.begin(), txs.end());
+      CHECK_EQ(txs_.erase(average_age), 1);
+      num_scheduled += txs.size();
+    }
+    else {
+      ret.append(txs.begin(), txs.begin() + num_remaining);
+      txs.erase(txs.begin(), txs.begin() + num_remaining);
+      num_scheduled += num_remaining;
+    }
+  }
+  return ret;
 }
 
 } // namespace hogd

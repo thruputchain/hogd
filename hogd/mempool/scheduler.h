@@ -15,13 +15,15 @@ public:
 
   bool add_vetted_tx(const AccountID &account_id, const SignedTransaction &tx);
   bool update_groups(const AccountID &account_id);
-  x23::Vec<SignedTransaction> schedule();
+  bool process_received_hogs(const AccountID &account_id, int128_t num_received,
+                             BlockHeight current_block);
+  x23::Vec<SignedTransaction> schedule(size_t block_size);
 
 private:
   HogDatabase &db_;
 
   std::unordered_set<SHA256Hash> tx_hashes_;
-  std::map<BlockHeight, std::vector<SignedTransaction>> txs_;
+  std::map<BlockHeight, x23::Vec<SignedTransaction>> txs_;
 };
 
 } // namespace hogd
