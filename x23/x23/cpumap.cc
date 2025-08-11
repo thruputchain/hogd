@@ -95,7 +95,8 @@ parse_cpuset(std::string_view list)
   long num_cpu = 0;
   std::vector<std::pair<unsigned, unsigned>> elems;
   while (auto token = lex()) {
-    unsigned int val = std::min<unsigned>(std::labs(*token), CpuSet::kNCPUs-1);
+    unsigned int val =
+        std::min<unsigned>(std::labs(*token), CpuSet::kNCPUs - 1);
     if (val >= num_cpu)
       num_cpu = val + 1;
     if (*token >= 0)

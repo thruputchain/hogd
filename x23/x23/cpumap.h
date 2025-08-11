@@ -227,14 +227,14 @@ template<typename T> struct PerCpuSet {
   PerCpuSet(const CpuMap &map) : map_(&map) {}
 
   void populate(auto &&f)
-    requires requires (const CpuSet s) { nullable_type{f(s)}; }
+      requires requires(const CpuSet s) { nullable_type{f(s)}; }
   {
     vals_.clear();
     valid_.clear();
     for (int i = 0; i < map_->nbuckets(); ++i)
       if (const auto &s = map_->cpuset(i); s.valid()) {
-	valid_.emplace_back(vals_.size());
-	vals_.emplace_back(f(s));
+        valid_.emplace_back(vals_.size());
+        vals_.emplace_back(f(s));
       }
   }
 
