@@ -76,7 +76,8 @@ Scheduler::update_groups(const AccountID &account_id)
   new_averages.num_hogs[detail::AverageHogAge::kGroupReceived] = 0;
   new_averages.average_ages[detail::AverageHogAge::kGroupReceived] = 0;
 
-  return true;
+  return write_address_average_hog_age(db_, Address({}), new_averages)
+      .has_value();
 }
 
 bool
@@ -84,7 +85,29 @@ Scheduler::process_received_hogs(const AccountID &account_id,
                                  int128_t num_received,
                                  BlockHeight current_block)
 {
-  return true;
+  HogDBStatus<detail::AverageHogAge> ret =
+      read_address_average_hog_age(db_, Address({}));
+  if (!ret.has_value()) {
+    return false;
+  }
+  const detail::AverageHogAge &averages = ret.value();
+  detail::AverageHogAge new_averages = averages;
+
+  int128_t received_hogs =
+      averages.num_hogs[detail::AverageHogAge::kGroupReceived];
+  BlockHeight received_age =
+      averages.average_ages[detail::AverageHogAge::kGroupReceived];
+
+  new_averages.num_hogs[detail::AverageHogAge::kGroupReceived] =
+      received_hogs + num_received;
+  // TODO(jhumphri): We need to deal with the lack of precision somehow.
+  // Otherwise, errors will be carried forward.
+  new_averages.average_ages[detail::AverageHogAge::kGroupReceived] =
+      ((received_hogs * received_age) + (num_received * current_block)) /
+      (received_hogs + num_received);
+
+  return write_address_average_hog_age(db_, Address({}), new_averages)
+      .has_value();
 }
 
 x23::Vec<SignedTransaction>
