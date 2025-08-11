@@ -52,7 +52,7 @@ public:
     reset();
     return *this;
   }
-  decltype (auto) operator=(this auto &&self, const RefPtr &other) // NOLINT
+  decltype(auto) operator=(this auto &&self, const RefPtr &other) // NOLINT
   {
     if (self.p_ != other.p_) {
       if (self.p_)
