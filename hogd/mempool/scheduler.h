@@ -6,12 +6,13 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/db.h"
+#include "types.h"
 
 namespace hogd {
 
 class Scheduler {
 public:
-  Scheduler(HogDatabase *db) : db_(db) {}
+  Scheduler(db_client_t &db_client) : db_client_(db_client) {}
 
   bool add_vetted_tx(const SignedTransaction &tx);
   bool update_groups(const AccountID &account_id);
@@ -20,7 +21,7 @@ public:
   x23::Vec<SignedTransaction> schedule(size_t block_size);
 
 private:
-  HogDatabase *db_;
+  db_client_t &db_client_;
 
   std::unordered_set<SHA256Hash> tx_hashes_;
   std::map<BlockHeight, x23::Vec<SignedTransaction>> txs_;

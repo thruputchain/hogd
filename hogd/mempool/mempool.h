@@ -16,6 +16,7 @@
 #include "sched_coord.hh"
 #include "scheduler.h"
 #include "transaction.hh"
+#include "types.h"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/rpc.h"
@@ -29,19 +30,10 @@ class Mempool {
 public:
   using rpc_service = SchedulerCoord1;
 
-  using coord_client_t =
-      CoordScheduler1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
-  using db_client_t =
-      DbCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
-  using exec_client_t =
-      ExecutorCoord1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
-
   Mempool(coord_client_t &&coord_client, db_client_t &&db_client,
           exec_client_t &&exec_client)
     : coord_client_(std::move(coord_client)), db_client_(std::move(db_client)),
-      exec_client_(std::move(exec_client)), scheduler_(nullptr)
+      exec_client_(std::move(exec_client)), scheduler_(db_client_)
   {}
 
   // Disable copy and move.

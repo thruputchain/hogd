@@ -53,19 +53,19 @@ Scheduler::update_groups(const AccountID &account_id)
   const detail::AverageHogAge &averages = ret.value();
   detail::AverageHogAge new_averages;
 
-  int128_t to_schedule_hogs =
+  const int128_t to_schedule_hogs =
       averages.num_hogs[detail::AverageHogAge::kGroupToSchedule];
-  BlockHeight to_schedule_age =
+  const BlockHeight to_schedule_age =
       averages.average_ages[detail::AverageHogAge::kGroupToSchedule];
 
-  int128_t already_scheduled_hogs =
+  const int128_t already_scheduled_hogs =
       averages.num_hogs[detail::AverageHogAge::kGroupAlreadyScheduled];
-  BlockHeight already_scheduled_age =
+  const BlockHeight already_scheduled_age =
       averages.average_ages[detail::AverageHogAge::kGroupAlreadyScheduled];
 
-  int128_t received_hogs =
+  const int128_t received_hogs =
       averages.num_hogs[detail::AverageHogAge::kGroupReceived];
-  BlockHeight received_age =
+  const BlockHeight received_age =
       averages.average_ages[detail::AverageHogAge::kGroupReceived];
 
   // Update [kGroupToSchedule].
@@ -107,9 +107,9 @@ Scheduler::process_received_hogs(const AccountID &account_id,
   const detail::AverageHogAge &averages = ret.value();
   detail::AverageHogAge new_averages = averages;
 
-  int128_t received_hogs =
+  const int128_t received_hogs =
       averages.num_hogs[detail::AverageHogAge::kGroupReceived];
-  BlockHeight received_age =
+  const BlockHeight received_age =
       averages.average_ages[detail::AverageHogAge::kGroupReceived];
 
   new_averages.num_hogs[detail::AverageHogAge::kGroupReceived] =
