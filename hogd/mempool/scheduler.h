@@ -3,6 +3,8 @@
 #include <map>
 #include <unordered_set>
 
+#include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/db.h"
 
 namespace hogd {
