@@ -79,4 +79,10 @@ Scheduler::update_groups(const AccountID &account_id)
   return true;
 }
 
+x23::Vec<SignedTransaction>
+schedule()
+{
+  return {};
+}
+
 } // namespace hogd

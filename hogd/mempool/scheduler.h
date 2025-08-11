@@ -15,6 +15,7 @@ public:
 
   bool add_vetted_tx(const AccountID &account_id, const SignedTransaction &tx);
   bool update_groups(const AccountID &account_id);
+  x23::Vec<SignedTransaction> schedule();
 
 private:
   HogDatabase &db_;
