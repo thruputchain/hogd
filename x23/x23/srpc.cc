@@ -110,13 +110,13 @@ SRpcFd::read_worker(const CpuSet *cpus) noexcept
   VecQ<std::uint8_t> rdbuf;
   while (!ss_.stop_requested()) {
     size_t rdsz = kReadSize;
-    if (rdbuf.size() > 4) {
+    if (rdbuf.size() >= 4) {
       std::uint32_t msglen = getbe<std::uint32_t>(rdbuf.data()) & 0x7fffffff;
       msglen = std::min<std::uint32_t>(msglen, max_message_size_);
       if (msglen > rdbuf.size())
         rdsz = std::max(rdsz, msglen - rdbuf.size());
     }
-    rdsz = std::max(rdsz, rdbuf.capacity());
+    rdsz = std::max(rdsz, rdbuf.capacity() - rdbuf.size());
     auto res = read(fd_, &rdbuf, rdsz);
     if (!res || !*res) {
       if (!res && res.error() != ECONNRESET)
