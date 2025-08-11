@@ -33,7 +33,8 @@ x23::Async<void>
 Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
 {
   // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
-  // vetted.
+  // vetted. This vetting logic will include the authentication logic from
+  // Geoff's proposal.
   for (const SignedTransaction &tx : batch) {
     vetted_txs_[sha256(tx)] = tx;
   }

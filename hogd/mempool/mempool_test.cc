@@ -170,7 +170,8 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
     Timestamp created = i;
     SignedTransaction tx{
         .tx =
-            Transaction{.id = {},
+            Transaction{.account_id = {},
+                        .origin_id = {},
                         .created = created,
                         .invocation = fib_client.make_invocation<kProgramName>(
                             UINT64_MAX, kFibonacciN),
