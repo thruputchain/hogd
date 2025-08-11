@@ -89,6 +89,7 @@
 #include <x23/event.h>
 #include <x23/fileio.h>
 #include <x23/mvar.h>
+#include <x23/refcnt.h>
 #include <x23/rpc_common.h> // IWYU pragma: export
 #include <x23/x23.h>
 
@@ -218,7 +219,7 @@ template<typename T, typename VersMeta, typename... ExtraArgs>
 concept implements_async_rpc = implements_rpc<T, VersMeta, Async, ExtraArgs...>;
 
 namespace detail {
-class RpcStreamImpl : public std::enable_shared_from_this<RpcStreamImpl> {
+class RpcStreamImpl : public RefCount {
 public:
   size_t max_record_size = 1UZ << 24;
   RefPtr<CoroPoll> cp_;
@@ -253,14 +254,21 @@ private:
   Async<std::expected<Buf, Errno>> read_record(SLOC_PARM0);
 
   Detached serve_call(const rpc_msg &call, BufView args SLOC_PARM);
+
+  friend class RefCount;
 };
 } // namespace detail
 
 template<typename Logger = RpcNoLogger>
 struct RpcStream : public detail::RpcStreamImpl {
   using super = detail::RpcStreamImpl;
+  static constexpr bool kAllowRefPtrConversion = true;
 
   Logger logger_;
+
+  RpcStream(CoroPoll &cp, UniqueFd fd, Logger logger)
+    : super(cp, std::move(fd)), logger_(std::move(logger))
+  {}
 
   template<typename ProcMeta>
   Async<typename ProcMeta::return_type>
@@ -302,14 +310,9 @@ struct RpcStream : public detail::RpcStreamImpl {
       co_return ret;
   }
 
-  std::shared_ptr<RpcStream> get_ref()
-  {
-    return static_pointer_cast<RpcStream>(shared_from_this());
-  }
-
-  struct ClientRef : std::shared_ptr<RpcStream> {
-    using super = std::shared_ptr<RpcStream>;
-    ClientRef(RpcStream &s) : super(s.get_ref())
+  struct ClientRef : RefPtr<RpcStream> {
+    using super = RefPtr<RpcStream>;
+    ClientRef(RpcStream &s) : super(s)
     {
       this->get()->nclients_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -324,16 +327,8 @@ struct RpcStream : public detail::RpcStreamImpl {
     }
   };
 
-  /*
-  template<typename VersMeta> requires requires { typename VersMeta::client; }
-  typename VersMeta::template client<ClientRef> client(VersMeta = {})
-  {
-    return typename VersMeta::client{ClientRef{*this}};
-  }
-  */
-
   struct Configurator {
-    Configurator(std::shared_ptr<RpcStream> s) noexcept : s_(std::move(s)) {}
+    Configurator(RpcStream &s) noexcept : s_(s) {}
     Configurator(const Configurator &) = delete;
     ~Configurator() { go(); }
 
@@ -377,23 +372,13 @@ struct RpcStream : public detail::RpcStreamImpl {
 
   private:
     bool reader_running_{false};
-    std::shared_ptr<RpcStream> s_;
+    RefPtr<RpcStream> s_;
   };
 
   static Configurator make(CoroPoll &cp, UniqueFd fd, Logger logger = {})
   {
-    return std::make_shared<RpcStream>(cp, std::move(fd), std::move(logger),
-                                       ConstructorKey{});
+    return *new RpcStream(cp, std::move(fd), std::move(logger));
   }
-
-protected:
-  struct ConstructorKey {};
-
-public:
-  using super::super;
-  RpcStream(CoroPoll &cp, UniqueFd fd, Logger logger, ConstructorKey)
-    : super(cp, std::move(fd)), logger_(std::move(logger))
-  {}
 };
 
 // The return type of RpcStream<Logger>::client<VersMeta>, for

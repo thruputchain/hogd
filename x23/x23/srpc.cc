@@ -59,7 +59,7 @@ SRpcFd::stop() noexcept
 }
 
 void
-SRpcFd::go()
+SRpcFd::go(const CpuSet *cpus)
 {
   // If this fails, you have neither clients nor servers.
   assert(refcount() || !srvmap_.empty());
@@ -79,9 +79,9 @@ SRpcFd::go()
     RefPtr<SRpcFd> selfref{nullptr};
     if (refcount() == 0)
       selfref = RefPtr{*this};
-    read_thread_ = std::thread{&SRpcFd::read_worker, this};
+    read_thread_ = std::thread{&SRpcFd::read_worker, this, cpus};
     write_thread_ =
-        std::thread{&SRpcFd::write_worker, this, std::move(selfref)};
+        std::thread{&SRpcFd::write_worker, this, cpus, std::move(selfref)};
   }
 }
 
@@ -103,8 +103,10 @@ SRpcFd::write_call(Buf record, CallCB cb)
 }
 
 void
-SRpcFd::read_worker() noexcept
+SRpcFd::read_worker(const CpuSet *cpus) noexcept
 {
+  if (cpus)
+    cpus->set_affinity();
   VecQ<std::uint8_t> rdbuf;
   while (!ss_.stop_requested()) {
     size_t rdsz = kReadSize;
@@ -185,8 +187,10 @@ SRpcFd::input(BufView bytes) noexcept
 }
 
 void
-SRpcFd::write_worker(RefPtr<SRpcFd> _selfref) noexcept
+SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
 {
+  if (cpus)
+    cpus->set_affinity();
   Defer _join([this] { read_thread_.join(); });
   BufVec wrbuf;
   for (;;) {

@@ -200,7 +200,7 @@ public:
     assert(i >= 0 && i < nbuckets_);
 #if HAVE_SCHED_SETAFFINITY
     return cpusets_[i];
-#else // !HAVE_SCHED_SETAFFINITY
+#else  // !HAVE_SCHED_SETAFFINITY
     static const CpuSet dummy;
     return dummy;
 #endif // !HAVE_SCHED_SETAFFINITY
@@ -214,6 +214,41 @@ private:
 
   void compute_cpusets();
 #endif // HAVE_SCHED_SETAFFINITY
+};
+
+template<typename T> struct PerCpuSet {
+  using value_type = T;
+  using nullable_type = std::conditional_t<is_nullable<T>, T, std::optional<T>>;
+
+  const CpuMap *map_{};
+  Vec<nullable_type> vals_;
+  Vec<unsigned> valid_;
+
+  PerCpuSet(const CpuMap &map) : map_(&map) {}
+
+  void populate(auto &&f)
+    requires requires (const CpuSet s) { nullable_type{f(s)}; }
+  {
+    vals_.clear();
+    valid_.clear();
+    for (int i = 0; i < map_->nbuckets(); ++i)
+      if (const auto &s = map_->cpuset(i); s.valid()) {
+	valid_.emplace_back(vals_.size());
+	vals_.emplace_back(f(s));
+      }
+  }
+
+  value_type &lookup() { return lookup(map_->bucket()); }
+  value_type &lookup(int bucket)
+  {
+    auto *res = &vals_[bucket];
+    if (!*res)
+      res = &vals_[valid_[cpuid() % valid_.size()]];
+    if constexpr (std::same_as<value_type, nullable_type>)
+      return *res;
+    else
+      return **res;
+  }
 };
 
 // Return a mapping of CPU numbers to buckets on linux.  For a given
