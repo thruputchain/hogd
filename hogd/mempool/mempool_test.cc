@@ -14,10 +14,11 @@
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/test.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
-#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/db_interface/db_executor_server.h"
+#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -49,7 +50,7 @@ public:
   static constexpr ContractAddress kContractAddress =
       NativeContractTestFramework::make_contract_address(3);
 
-  MempoolTestServer()
+  MempoolTestServer(std::string_view path)
     : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
       block_manager_(0, &in_memory_db_),
       coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
@@ -65,6 +66,30 @@ public:
       snapshot_cache_(
           std::make_unique<StorageSnapshotCache>(/*block_number=*/1, db_proxy_))
   {
+    {
+      // check the database's integrity and find the highest valid LSN.
+      DBStatus<uint64_t> lsn = Database::check(path, kRamDbBytes);
+      if (!lsn) {
+        critical("Database check failed: path '{}', {}", path, lsn.error());
+        return EXIT_FAILURE;
+      }
+      info("database '{}' passed integrity check; current LSN is {}", path,
+           *lsn);
+
+      // create the database, loading up to the highest valid LSN.
+      // TODO(abelay): When sharding is supported, this will become a separate
+      // step.
+      std::unique_ptr<Database> ramdb =
+          Database::open_lsn(db_dir_, *lsn, kRamDbBytes);
+      CHECK(ramdb.has_value());
+
+      db_ = std::make_unique<HogDatabase>(std::move(*ramdb));
+      ctx_ = std::make_unique<RPCContext>(*db_, trie_);
+      db_coordinator_server_ = std::make_unique<HogDBCoordServer>(ctx_);
+      coordinator_db_port_ =
+          db_coordinator_server_->start_server(/*port_number=*/0);
+    }
+
     std::shared_ptr<Contract> contract =
         test::load_test_contract(kTestContractFileName);
 
@@ -75,8 +100,6 @@ public:
 
     coordinator_sched_port_ =
         coordinator_sched_server_.start_server(/*port_number=*/0);
-    coordinator_db_port_ =
-        db_coordinator_server_.start_server(/*port_number=*/0);
 
     executor_coord_server_.init_from_coord(
         x23::HostPort(kAddress.c_str(), coordinator_port_).show(),
@@ -105,6 +128,7 @@ private:
       /*rcq_cost_per_entry=*/5, /*rcq_cost_per_block=*/100,
       /*replay_cache_cost_per_entry=*/5};
   static constexpr int128_t kStorageTokenAmount = 1'000'000'000;
+  static constexpr size_t kRamDbBytes = 1024 * 1024 * 8; // 8 MiB.
 
   void set_up_grant_storage_token()
   {
@@ -148,11 +172,11 @@ private:
 
   // The database server that the mempool accesses.
   LocalMockDB db_identifier_;
-  std::unique_ptr<Database> ramdb_;
-  HogDatabase db_;
+  TmpDir db_dir_;
+  std::unique_ptr<HogDatabase> db_;
   MerklePrefixTrie trie_;
-  RPCContext ctx_;
-  HogDBCoordServer db_coordinator_server_;
+  std::unique_ptr<RPCContext> ctx_;
+  std::unique_ptr<HogDBCoordServer> db_coordinator_server_;
   uint16_t coordinator_db_port_;
 
   // A wrapper around [db_executor_server_].
