@@ -16,7 +16,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_coord_server.h"
+#include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
@@ -148,7 +148,11 @@ private:
 
   // The database server that the mempool accesses.
   LocalMockDB db_identifier_;
-  DbCoordServer db_coordinator_server_;
+  std::unique_ptr<Database> ramdb_;
+  HogDatabase db_;
+  MerklePrefixTrie trie_;
+  RPCContext ctx_;
+  HogDBCoordServer db_coordinator_server_;
   uint16_t coordinator_db_port_;
 
   // A wrapper around [db_executor_server_].
