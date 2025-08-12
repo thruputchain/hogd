@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <utility>
 
 #include "coord.hh"
 #include "coord_sched.hh"
@@ -11,7 +10,6 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"
-#include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
 
@@ -23,7 +21,7 @@ class Coordinator {
 public:
   using rpc_service = Coordinator1;
 
-  Coordinator() : pool_(/*nthreads=*/4), cp_(pool_) {}
+  Coordinator() : pool_(/*nthreads=*/4), cp_(pool_) = default;
 
   uint16_t start_server(uint16_t port_number)
   {
@@ -72,7 +70,7 @@ class CoordinatorSched {
 public:
   using rpc_service = CoordScheduler1;
 
-  CoordinatorSched() : pool_(/*nthreads=*/4), cp_(pool_) {}
+  CoordinatorSched() : pool_(/*nthreads=*/4), cp_(pool_) = default;
 
   uint16_t start_server(uint16_t port_number)
   {

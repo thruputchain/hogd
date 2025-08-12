@@ -2,8 +2,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <unordered_map>
-#include <utility>
 
 #include "coord_sched.hh"
 #include "db_coord.hh"
@@ -17,8 +15,6 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/rpc.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
