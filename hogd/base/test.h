@@ -16,7 +16,7 @@ public:
   std::string directory() const { return directory_; }
 
 private:
-  std::string create_tmp_directory()
+  static std::string create_tmp_directory()
   {
     std::string dir = "/tmp/" + time_string_with_ns();
     CHECK(std::filesystem::create_directory(dir));
