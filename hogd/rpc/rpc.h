@@ -335,7 +335,6 @@ rpc_client_call(RPCClient &client, x23::is_xdr_type auto &&...args)
     std::memcpy(&response_header, res.data(), sizeof(RPCResponseHeader));
     if (response_header.error != RPCReponseErrorCode::kRpcOk) {
       error("RPC error: {}", response_header.error);
-      printf("abort A\n");
       return SystemStatus<return_type>{
           SystemError{SystemErrorCode::kAbortTransaction}};
     }
