@@ -21,7 +21,7 @@ class Coordinator {
 public:
   using rpc_service = Coordinator1;
 
-  Coordinator() : pool_(/*nthreads=*/4), cp_(pool_) = default;
+  Coordinator() : pool_(/*nthreads=*/4), cp_(pool_) {}
 
   uint16_t start_server(uint16_t port_number)
   {
@@ -70,7 +70,7 @@ class CoordinatorSched {
 public:
   using rpc_service = CoordScheduler1;
 
-  CoordinatorSched() : pool_(/*nthreads=*/4), cp_(pool_) = default;
+  CoordinatorSched() : pool_(/*nthreads=*/4), cp_(pool_) {}
 
   uint16_t start_server(uint16_t port_number)
   {
