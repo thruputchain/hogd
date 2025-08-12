@@ -25,7 +25,6 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
-#include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/mempool.h"
@@ -52,8 +51,7 @@ public:
       NativeContractTestFramework::make_contract_address(3);
 
   MempoolTestServer()
-    : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
-      coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
+    : coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
       exec_card_{.protocol = "blah",
                  .upid = {},
                  .address =
@@ -87,38 +85,38 @@ public:
       coordinator_db_port_ = db_coordinator_server_->port();
     }
 
-    db_identifier_ = {.read_port_number_ = executor_db_port_};
-    db_proxy_ = std::make_unique<DatabaseProxy>(db_identifier_);
-    snapshot_cache_ =
-        std::make_unique<StorageSnapshotCache>(/*block_number=*/1, *db_proxy_);
+    {
+      std::shared_ptr<Contract> contract =
+          test::load_test_contract(kTestContractFileName);
 
-    std::shared_ptr<Contract> contract =
-        test::load_test_contract(kTestContractFileName);
+      // Write contract to hogdb
+      auto bytes = x23::serialize(*contract);
+      auto contract_hash = sha256(*contract);
+      auto ret =
+          write_wasm_code(*db_, contract_hash, std::as_bytes(std::span(bytes)));
+      if (!ret) {
+        throw std::runtime_error("Failed to write contract");
+      }
 
-    // Write contract to hogdb
-    auto bytes = x23::serialize(*contract);
-    auto contract_hash = sha256(*contract);
-    auto ret =
-        write_wasm_code(*db_, contract_hash, std::as_bytes(std::span(bytes)));
-    if (!ret) {
-      throw std::runtime_error("Failed to write contract");
+      // Write deployment
+      ret = write_address_wasm_hash(*db_, kContractAddress, contract_hash);
+      if (!ret) {
+        throw std::runtime_error("Failed to write deployment");
+      }
+
+      set_up_grant_storage_token();
     }
-
-    // Write deployment
-    ret = write_address_wasm_hash(*db_, kContractAddress, contract_hash);
-    if (!ret) {
-      throw std::runtime_error("Failed to write deployment");
-    }
-
-    set_up_grant_storage_token();
 
     coordinator_sched_port_ =
         coordinator_sched_server_.start_server(/*port_number=*/0);
 
-    executor_coord_server_.init_from_coord(
-        x23::HostPort(kAddress.c_str(), coordinator_port_).show(),
-        &db_identifier_);
-    executor_port_ = executor_coord_server_.start_server(/*port_number=*/0);
+    {
+      LocalMockDB db_identifier{.read_port_number_ = executor_db_port_};
+      executor_coord_server_.init_from_coord(
+          x23::HostPort(kAddress.c_str(), coordinator_port_).show(),
+          &db_identifier);
+      executor_port_ = executor_coord_server_.start_server(/*port_number=*/0);
+    }
   }
 
   ~MempoolTestServer()
@@ -136,7 +134,6 @@ public:
 
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
-  static constexpr size_t kNumDbPoolThreads = 16;
   static constexpr int128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 1024 * 1024 * 400; // 400 MiB.
 
@@ -153,8 +150,6 @@ private:
       throw std::runtime_error("Failed to grant storage token");
     }
   }
-
-  x23::ThreadPool db_pool_;
 
   // This is a fake coordinator server that the executor registers itself with
   // via RPC.
@@ -176,17 +171,12 @@ private:
   uint16_t executor_db_port_;
 
   // The database server that the mempool accesses.
-  LocalMockDB db_identifier_;
   TmpDir db_dir_;
   std::unique_ptr<HogDatabase> db_;
   MerkleTriePrefix trie_;
   std::unique_ptr<RPCContext> ctx_;
   std::unique_ptr<HogDBCoordServer> db_coordinator_server_;
   uint16_t coordinator_db_port_;
-
-  // A wrapper around [db_executor_server_].
-  std::unique_ptr<DatabaseProxy> db_proxy_;
-  std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 };
 
 using fib_client_t = ContractTraitClient<Fibonacci>;
