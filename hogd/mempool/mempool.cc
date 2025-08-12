@@ -90,6 +90,7 @@ Mempool::abandon_snapshot(BlockID block_id)
   // TODO(jhumphri): Geoff currently always returns [DbResultOK], but this could
   // change in the future. In the case of a failure, we need to clean up db
   // state.
+  printf("res is %zu\n", res);
   CHECK_EQ(res, DbResult::DbResultOK);
   co_return;
 }
@@ -209,8 +210,8 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   }
 
   if (!co_await open_proposal_block(block_id)) {
-    co_await abandon_snapshot(block_id);
     printf("B\n");
+    co_await abandon_snapshot(block_id);
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -237,9 +238,9 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
 
   if (txs.empty()) {
     // There are no vetted txs, so we cannot propose a block.
+    printf("C\n");
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
-    printf("C\n");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
