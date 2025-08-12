@@ -69,7 +69,7 @@ HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 {
   BlockTX *ret = ctx_.get_block_tx(id);
   if (!ret)
-    co_return  DbResult::DbResultError;
+    co_return DbResult::DbResultError;
 
   BlockTX &btx = *ret;
   btx.abort();
