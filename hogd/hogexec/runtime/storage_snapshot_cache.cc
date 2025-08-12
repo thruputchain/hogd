@@ -38,7 +38,6 @@ StorageSnapshotCache::try_get_deployed_contract_hash(
     }
   }
 
-  printf("yeah here, block id is %zu\n", block_id_);
   auto db_res = db_proxy_.get_deployment(block_id_, addr);
   if (!db_res) {
     return db_res.error();

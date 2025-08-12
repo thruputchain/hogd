@@ -277,7 +277,6 @@ SystemCallHandler::invoke(ContractAddress const &address, MethodID method,
                           GasAmount gas_limit, Calldata calldata,
                           InvokeFlagSet flags)
 {
-  printf("yep\n");
   auto runtime = resolve_runtime(address);
   if (!runtime) {
     return std::pair{runtime.error().to_host_fn_error(), 0};
@@ -355,7 +354,6 @@ SystemStatus<std::unique_ptr<Runtime>>
 SystemCallHandler::resolve_runtime(ContractAddress const &addr)
 {
   // check if the address has a deployed contract hash
-  printf("hmm A\n");
   auto deployed_hash_expect =
       snapshot_cache_.try_get_deployed_contract_hash(addr);
   if (!deployed_hash_expect) {
@@ -473,7 +471,6 @@ SystemCallHandler::deploy_contract(SHA256Hash const &nonce,
   auto deploy_addr =
       static_get_deploy_address(get_current_address(), nonce, contract_hash);
 
-  printf("hmm B\n");
   auto deploy_check_status =
       snapshot_cache_.try_get_deployed_contract_hash(deploy_addr);
   if (!deploy_check_status) {

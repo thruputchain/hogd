@@ -27,7 +27,6 @@ make_exec_result(InvokeErrorCode error_code)
   case InvokeErrorCode::kInvokeNone:
     return ExecResult::ExecResultOK;
   case InvokeErrorCode::kInvokeAbortTransaction:
-    printf("ugh A\n");
     return ExecResult::ExecResultSystemError;
   case InvokeErrorCode::kInvokeDeterministic:
   case InvokeErrorCode::kInvokeOutOfGas:
@@ -48,7 +47,6 @@ make_exec_result(SystemErrorCode error_code)
   case SystemErrorCode::kUnrecoverable:
     return ExecResult::ExecResultUnrecoverable;
   case SystemErrorCode::kAbortTransaction:
-    printf("ugh B\n");
     return ExecResult::ExecResultSystemError;
   case SystemErrorCode::kValidationFailure:
     return ExecResult::ExecResultTxValidationFailure;
