@@ -1,15 +1,19 @@
 #pragma once
 
 #include <chrono>
-#include <string>
 #include <filesystem>
+#include <string>
 
 #include "log.h"
+
+namespace hogd {
 
 class TmpDir {
 public:
   TmpDir() : directory_(create_tmp_directory()) {}
-  TmpDir() { CHECK_GT(std::filesystem::remove_all(directory_), 0); }
+  ~TmpDir() { CHECK_GT(std::filesystem::remove_all(directory_), 0); }
+
+  std::string directory() const { return directory_; }
 
 private:
   std::string create_tmp_directory()
@@ -23,11 +27,10 @@ private:
   {
     std::chrono::time_point<std::chrono::system_clock> now =
         std::chrono::system_clock::now();
-    std::chrono::seconds sec =
-        std::chrono::time_point_cast<std::chrono::seconds>(now);
-    std::chrono::nanoseconds ns =
+    auto sec = std::chrono::time_point_cast<std::chrono::seconds>(now);
+    auto ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec).count();
-    std::time_t t = system_clock::to_time_t(now);
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
 
     std::ostringstream oss;
     oss << std::put_time(std::localtime(&t), "%Y-%m-%d %H:%M:%S") << '.'
@@ -37,3 +40,5 @@ private:
 
   const std::filesystem::path directory_;
 };
+
+} // namespace hogd

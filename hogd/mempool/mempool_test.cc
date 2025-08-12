@@ -13,8 +13,9 @@
 #include "discovery.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/types.h"
 #include "hogd/base/test.h"
+#include "hogd/base/types.h"
+#include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
@@ -50,7 +51,7 @@ public:
   static constexpr ContractAddress kContractAddress =
       NativeContractTestFramework::make_contract_address(3);
 
-  MempoolTestServer(std::string_view path)
+  MempoolTestServer()
     : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
       block_manager_(0, &in_memory_db_),
       coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
@@ -62,32 +63,30 @@ public:
       db_executor_server_(&block_manager_, /*port=*/0),
       executor_db_port_(db_executor_server_.port()),
       db_identifier_{.read_port_number_ = executor_db_port_},
-      db_coordinator_server_(&block_manager_), db_proxy_(db_identifier_),
+      db_proxy_(db_identifier_),
       snapshot_cache_(
           std::make_unique<StorageSnapshotCache>(/*block_number=*/1, db_proxy_))
   {
     {
       // check the database's integrity and find the highest valid LSN.
-      DBStatus<uint64_t> lsn = Database::check(path, kRamDbBytes);
-      if (!lsn) {
-        critical("Database check failed: path '{}', {}", path, lsn.error());
-        return EXIT_FAILURE;
-      }
-      info("database '{}' passed integrity check; current LSN is {}", path,
-           *lsn);
+      DBStatus<uint64_t> lsn =
+          Database::check(db_dir_.directory(), kRamDbBytes);
+      CHECK(lsn.has_value());
+      info("database '{}' passed integrity check; current LSN is {}",
+           db_dir_.directory(), *lsn);
 
       // create the database, loading up to the highest valid LSN.
       // TODO(abelay): When sharding is supported, this will become a separate
       // step.
-      std::unique_ptr<Database> ramdb =
-          Database::open_lsn(db_dir_, *lsn, kRamDbBytes);
+      DBStatus<std::unique_ptr<Database>> ramdb =
+          Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
       CHECK(ramdb.has_value());
 
       db_ = std::make_unique<HogDatabase>(std::move(*ramdb));
       ctx_ = std::make_unique<RPCContext>(*db_, trie_);
-      db_coordinator_server_ = std::make_unique<HogDBCoordServer>(ctx_);
-      coordinator_db_port_ =
-          db_coordinator_server_->start_server(/*port_number=*/0);
+      db_coordinator_server_ = std::make_unique<HogDBCoordServer>(*ctx_);
+      db_coordinator_server_->start_server(/*port_number=*/0);
+      coordinator_db_port_ = db_coordinator_server_->port();
     }
 
     std::shared_ptr<Contract> contract =
@@ -174,7 +173,7 @@ private:
   LocalMockDB db_identifier_;
   TmpDir db_dir_;
   std::unique_ptr<HogDatabase> db_;
-  MerklePrefixTrie trie_;
+  MerkleTriePrefix trie_;
   std::unique_ptr<RPCContext> ctx_;
   std::unique_ptr<HogDBCoordServer> db_coordinator_server_;
   uint16_t coordinator_db_port_;
