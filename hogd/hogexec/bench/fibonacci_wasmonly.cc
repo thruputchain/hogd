@@ -136,7 +136,6 @@ struct BenchmarkState {
 
 void
 setup_grant_storage_token(HogDatabase &db,
-
                           ContractAddress const &address, int128_t amount)
 {
   assert(amount >= 0);
