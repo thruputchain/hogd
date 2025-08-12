@@ -67,11 +67,11 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 x23::Async<DbResult>
 HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 {
-  HogDBStatus<BlockTX *> ret = ctx_.open_block_tx(id);
+  BlockTX *ret = ctx_.get_block_tx(id);
   if (!ret)
-    co_return to_db_result(ret);
+    co_return DbResult::DbResultError;
 
-  BlockTX &btx = **ret;
+  BlockTX &btx = *ret;
   btx.abort();
   co_return DbResult::DbResultOK;
 }

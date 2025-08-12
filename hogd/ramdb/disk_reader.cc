@@ -221,6 +221,9 @@ struct FileMetadata {
     if (begin_lsn_ < b.begin_lsn_)
       return true;
 
+    if (begin_lsn_ > b.begin_lsn_)
+      return false;
+
     // Prioritize files that cover "longer" lsn ranges.
     return end_lsn_exclusive_ > b.end_lsn_exclusive_;
   }
@@ -298,14 +301,15 @@ load_log_file(
     case kNormal:
     case kTombstone:
     {
-      struct ItemHeader *dst = buf.push_item(&hdr);
+      ItemHeader *dst = buf.push_item(&hdr);
       if (!dst) {
         debug("out of memory in recovery buffer");
         return DBError(DBCode::kNoMemory);
       }
       ret = read_full(r, dst->get_all());
       if (!ret) {
-        debug("couldn't read item");
+        debug("couldn't read item: {}", ret.error());
+        // Need to return to load() -> if another file, then fail.
         return to_db_error(ret.error());
       }
       break;
@@ -390,10 +394,12 @@ log_files(const std::vector<FileMetadata> &files)
 }
 
 std::optional<FileMetadata>
-longest_full_snapshot(const std::vector<FileMetadata> &files)
+longest_snapshot(const std::vector<FileMetadata> &files, uint64_t max_begin_lsn)
 {
-  auto candidates = files | std::views::filter([](auto &f) {
-                      return f.snapshot_file_ && f.begin_lsn_ == 0;
+  auto candidates = files | std::views::filter([max_begin_lsn](auto &f) {
+                      return f.snapshot_file_ &&
+                             f.begin_lsn_ <= max_begin_lsn &&
+                             f.end_lsn_exclusive_ > max_begin_lsn;
                     }) |
                     std::ranges::to<std::vector<FileMetadata>>();
 
@@ -413,7 +419,7 @@ DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn)
                             info("recovery took {:.2f}", timer.elapsed());
                           }};
 
-  uint64_t lsn;
+  uint64_t lsn = 0;
   DBStatus<void> ret = load_database(
       dir,
       [this](std::vector<UniqueLoglet> &&log) {
@@ -429,7 +435,7 @@ DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn)
 DBStatus<uint64_t>
 DiskReader::verify(Directory &dir)
 {
-  uint64_t lsn;
+  uint64_t lsn = 0;
   DBStatus<void> ret = load_database(
       dir,
       [](std::vector<UniqueLoglet> && /*log*/) -> DBStatus<void> { return {}; },
@@ -473,11 +479,17 @@ DiskReader::cleanup(const Directory &dir)
   uint64_t missing_lsn = 0;
   std::unordered_set<std::string> needed{};
 
-  auto snapshot = longest_full_snapshot(*files);
-  if (snapshot) {
-    needed.emplace(snapshot->path_);
-    missing_lsn = snapshot->end_lsn_exclusive_;
-  }
+  std::optional<FileMetadata> snapshot{};
+  do {
+    snapshot = longest_snapshot(*files, missing_lsn);
+    if (snapshot) {
+      info("... {}", snapshot->path_);
+      needed.emplace(snapshot->path_);
+      missing_lsn = snapshot->end_lsn_exclusive_;
+    }
+  } while (snapshot);
+  for (const auto &fn : needed)
+    info("snapshot retained {}", fn);
 
   auto all_log_files = log_files(*files);
 
@@ -520,18 +532,15 @@ DiskReader::load_database(
   if (!filenames)
     return filenames.error();
 
-  std::vector<FileMetadata> files{};
-  for (auto &fn : *filenames) {
-    auto file = FileMetadata::from_path(dir, fn);
-    if (file)
-      files.emplace_back(*file);
+  auto files = find_files(dir);
+  if (!files) {
+    warn("couldn't find files for cleanup in {}", dir.get_path());
+    return DBError{DBCode::kNotFound};
   }
-  std::ranges::sort(files, &FileMetadata::operator<);
 
-  for (FileMetadata &file : files) {
-    if (target_lsn && cur_lsn == *target_lsn)
-      break;
+  DBStatus<void> prev_ret{};
 
+  for (FileMetadata &file : *files) {
     if (file.snapshot_file_) {
       if (file.end_lsn_exclusive_ < cur_lsn) {
         info("skipping unneeded snapshot file {}", file.path_);
@@ -550,10 +559,22 @@ DiskReader::load_database(
     uint64_t tmp = cur_lsn;
     ret = load_log_file(allocator_, dir, file, cur_lsn, target_lsn, func);
     if (!ret) {
-      warn("couldn't completely load logfile {} : {}", file.path_, ret.error());
+      warn("couldn't completely load logfile {}: {}", file.path_, ret.error());
       if (ret.error() == DBCode::kCorruption)
-        break;
+        return ret;
+      break;
     }
+
+    if (!prev_ret && tmp != cur_lsn) {
+      info("prior file failed to load successfully and {} contained committed "
+           "records; database corrupted, aborting recovery",
+           file.path_);
+      ret = DBError{DBCode::kCorruption};
+      break;
+    }
+
+    prev_ret = ret;
+    ret = DBStatus<void>{};
 
     // file contained no useful records
     if (tmp == cur_lsn)

@@ -1,6 +1,7 @@
 #include "hogd/ramdb/db.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
 #include <format>
@@ -26,6 +27,7 @@
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_reader.h"
@@ -114,6 +116,16 @@ Database::set_active(bool yes)
   // set the worker pool limit.
   size_t cores = yes ? active_cores(pool_) : pool_.worker_count();
   pool_.adjust_workers(cores);
+}
+
+void
+Database::register_metrics(MetricRegistry &registry)
+{
+  registry.add("ramdb_snap_bytes_out",
+               "Number of bytes written to all snapshot files "
+               "since the last database recovery.",
+               true, metrics_.snap_bytes_out_);
+  disk_writer_.register_metrics(registry);
 }
 
 void
@@ -232,6 +244,8 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
   if (!ret) [[unlikely]]
     return ret.error();
 
+  notify_wal_grew();
+
   uint64_t end_lsn = *ret;
   std::string path = std::format("{}-{}.snap", begin_lsn, end_lsn);
   info("begin snapshot from lsn {} -> lsn {} to {}", begin_lsn, end_lsn, path);
@@ -349,8 +363,12 @@ Database::sync_and_snapshot(uint64_t begin_lsn)
       return;
     }
 
-    info("syncing snapshot file to storage took {:.3f} s",
-         snap_sync_timer.elapsed());
+    size_t bytes_out = snap_writer.get_bytes_out();
+    seconds = timer.elapsed();
+    info("snapshot wrote {} to storage took {:.3f} s, {}/s",
+         print_iec_bytes(bytes_out, true), snap_sync_timer.elapsed(),
+         print_iec_bytes(bytes_out / seconds, true));
+    metrics_.snap_bytes_out_.fetch_add(bytes_out, std::memory_order_relaxed);
 
     // completing a snapshot may make some files redundant, so trigger cleanup.
     notify_wal_grew();

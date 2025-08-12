@@ -526,6 +526,57 @@ TEST_F(DatabaseTest, RecoverFromSnapshotAndLog)
   check_integrity();
 }
 
+TEST_F(DatabaseTest, RecoverFromIncrementalSnapshots)
+{
+  uint64_t lsn = 0;
+  auto sync_n = [this, &lsn](uint64_t end_lsn_exclusive) {
+    while (lsn < end_lsn_exclusive) {
+      insert_n(1);
+      DBStatus<uint64_t> r = db_->sync();
+      ASSERT_TRUE(r);
+      ASSERT_EQ(*r, lsn + 1);
+      lsn = *r;
+    }
+    check_integrity();
+  };
+
+  // wal contains 1 record with lsn 0 and 1 record with lsn 1.
+  sync_n(2);
+  check_file_exists("0.log");
+  // 1.log doesn't yet exist because sync() doesn't create a new
+  // log file unless the log file is over a certain size.
+
+  // snapshot the two records
+  auto r = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(r);
+  lsn = r->first;
+  ASSERT_EQ(lsn, 3);
+  DBStatus<void> ret = r->second.get();
+  ASSERT_TRUE(ret);
+
+  // add a record in lsn 2.
+  sync_n(3);
+
+  // incremental snapshot that includes the new record
+  r = db_->sync_and_snapshot(3);
+  ASSERT_TRUE(r);
+  lsn = r->first;
+  ASSERT_EQ(lsn, 4);
+  ret = r->second.get();
+  ASSERT_TRUE(ret);
+
+  // add a record in lsn 4 that is in WAL only.
+  sync_n(5);
+
+  // make sure the db wasn't affected.
+  check_integrity();
+
+  // record and ensure all records are recovered.
+  ret = open_db();
+  ASSERT_TRUE(static_cast<bool>(ret));
+  check_integrity();
+}
+
 TEST_F(DatabaseTest, DiskCleanup)
 {
   constexpr uint64_t kInfTargetLSN = std::numeric_limits<uint64_t>::max();
