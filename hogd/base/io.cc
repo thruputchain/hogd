@@ -116,6 +116,12 @@ sys_rename(const std::string &old_path, const std::string &new_path)
   return make_errno_status<void>(rename(old_path.c_str(), new_path.c_str()));
 }
 
+inline ErrnoStatus<void>
+sys_ftruncate(int fd, off_t length)
+{
+  return make_errno_status<void>(ftruncate(fd, length));
+}
+
 inline std::string
 get_tmp_dir()
 {
@@ -249,6 +255,12 @@ ErrnoStatus<void>
 File::sync() const
 {
   return sys_fsync(fd_);
+}
+
+ErrnoStatus<void>
+File::ftruncate(off_t length) const
+{
+  return sys_ftruncate(fd_, length);
 }
 
 ErrnoStatus<void>

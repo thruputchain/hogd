@@ -75,7 +75,9 @@ protected:
   DBError insert_until_failure();
   void remove_every_n(int n);
   void check_integrity();
-  void check_file_exists(const std::string &filename);
+  void sync_n(uint64_t end_lsn_exclusive, uint64_t &lsn);
+  void check_file_exists(std::string_view filename);
+  void wait_for_deletion(std::string_view path);
 
   Directory dir_;
   std::unique_ptr<Database> db_;
@@ -205,11 +207,42 @@ DatabaseTest::check_integrity()
 }
 
 void
-DatabaseTest::check_file_exists(const std::string &filename)
+DatabaseTest::sync_n(uint64_t end_lsn_exclusive, uint64_t &lsn)
+{
+  while (lsn < end_lsn_exclusive) {
+    insert_n(1);
+    DBStatus<uint64_t> r = db_->sync();
+    ASSERT_TRUE(r);
+    ASSERT_EQ(*r, lsn + 1);
+    lsn = *r;
+  }
+  check_integrity();
+}
+
+void
+DatabaseTest::check_file_exists(std::string_view filename)
 {
   ErrnoStatus<File> f = dir_.openat(filename, O_RDONLY);
   if (!f)
     FAIL() << "file does not exist: " << filename;
+}
+
+void
+DatabaseTest::wait_for_deletion(std::string_view path)
+{
+  ElapsedTimer timer{};
+  constexpr double kTimeout = 2.0;
+
+  while (timer.elapsed() < kTimeout) {
+    ErrnoStatus<File> f = dir_.openat(path, O_RDONLY);
+    if (!f)
+      return;
+
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(10ms);
+  }
+
+  FAIL() << "file did not get deleted as expected: " << path;
 }
 
 TEST_F(DatabaseTest, SimpleInsertions)
@@ -485,19 +518,9 @@ TEST_F(DatabaseTest, SnapshotOngoingRemoves)
 TEST_F(DatabaseTest, RecoverFromSnapshotAndLog)
 {
   uint64_t lsn = 0;
-  auto sync_n = [this, &lsn](uint64_t end_lsn_exclusive) {
-    while (lsn < end_lsn_exclusive) {
-      insert_n(1);
-      DBStatus<uint64_t> r = db_->sync();
-      ASSERT_TRUE(r);
-      ASSERT_EQ(*r, lsn + 1);
-      lsn = *r;
-    }
-    check_integrity();
-  };
 
   // wal contains 1 record with lsn 0 and 1 record with lsn 1.
-  sync_n(2);
+  sync_n(2, lsn);
   check_file_exists("0.log");
   // 1.log doesn't yet exist because sync() doesn't create a new
   // log file unless the log file is over a certain size.
@@ -518,7 +541,7 @@ TEST_F(DatabaseTest, RecoverFromSnapshotAndLog)
 
   // add a new record in lsn 3 and sync it.
   insert_n(1);
-  sync_n(4);
+  sync_n(4, lsn);
 
   // record and ensure all 4 records are recovered.
   ret = open_db();
@@ -529,19 +552,9 @@ TEST_F(DatabaseTest, RecoverFromSnapshotAndLog)
 TEST_F(DatabaseTest, RecoverFromIncrementalSnapshots)
 {
   uint64_t lsn = 0;
-  auto sync_n = [this, &lsn](uint64_t end_lsn_exclusive) {
-    while (lsn < end_lsn_exclusive) {
-      insert_n(1);
-      DBStatus<uint64_t> r = db_->sync();
-      ASSERT_TRUE(r);
-      ASSERT_EQ(*r, lsn + 1);
-      lsn = *r;
-    }
-    check_integrity();
-  };
 
   // wal contains 1 record with lsn 0 and 1 record with lsn 1.
-  sync_n(2);
+  sync_n(2, lsn);
   check_file_exists("0.log");
   // 1.log doesn't yet exist because sync() doesn't create a new
   // log file unless the log file is over a certain size.
@@ -555,7 +568,7 @@ TEST_F(DatabaseTest, RecoverFromIncrementalSnapshots)
   ASSERT_TRUE(ret);
 
   // add a record in lsn 2.
-  sync_n(3);
+  sync_n(3, lsn);
 
   // incremental snapshot that includes the new record
   r = db_->sync_and_snapshot(3);
@@ -566,7 +579,7 @@ TEST_F(DatabaseTest, RecoverFromIncrementalSnapshots)
   ASSERT_TRUE(ret);
 
   // add a record in lsn 4 that is in WAL only.
-  sync_n(5);
+  sync_n(5, lsn);
 
   // make sure the db wasn't affected.
   check_integrity();
@@ -574,6 +587,61 @@ TEST_F(DatabaseTest, RecoverFromIncrementalSnapshots)
   // record and ensure all records are recovered.
   ret = open_db();
   ASSERT_TRUE(static_cast<bool>(ret));
+  check_integrity();
+}
+
+TEST_F(DatabaseTest, RecoverSkipsUncommittedLSNs)
+{
+  // This tests a specific case. In it, one record is synced and a second
+  // record is added, both in the same WAL file. Then, the db is recovered,
+  // which should only recover the first record. Then, a new record is
+  // added/synced, which should be written to a new WAL file with a higher lsn
+  // name. Then, the db is recovered. The db should recover even though there
+  // are uncommitted entries in the middle of the log so long as the second
+  // file's commit record has the same lsn as the records that were skipped in
+  // the first file.
+
+  uint64_t lsn = 0;
+
+  // commit one record in lsn 0 and one in lsn 1
+  sync_n(2, lsn);
+  // commit one record in lsn 2 and one in lsn 3
+  sync_n(3, lsn);
+  auto oracle = oracle_;
+  sync_n(4, lsn);
+
+  check_file_exists("0.log");
+  wait_for_deletion("1.log");
+  wait_for_deletion("2.log");
+  wait_for_deletion("3.log");
+
+  // remove lsn 3 commit record from end of 0.log to "uncommit" lsn 3.
+  {
+    ErrnoStatus<File> f = dir_.openat("0.log", O_WRONLY | O_APPEND);
+    ASSERT_TRUE(f);
+    auto len = f->lseek(0, SEEK_END);
+    ASSERT_TRUE(len);
+    auto r = f->ftruncate(*len - (sizeof(ItemHeader) * 2));
+    ASSERT_TRUE(r);
+    lsn--;
+  }
+
+  DBStatus<void> ret = open_db();
+  ASSERT_TRUE(static_cast<bool>(ret));
+
+  // reset oracle to state at end of lsn 1 commit.
+  oracle_ = oracle;
+  check_integrity();
+
+  // add 1 record with lsn 3
+  sync_n(4, lsn);
+  wait_for_deletion("1.log");
+  wait_for_deletion("2.log");
+  check_file_exists("3.log");
+
+  ret = open_db();
+  ASSERT_TRUE(static_cast<bool>(ret));
+
   check_integrity();
 }
 
@@ -624,22 +692,6 @@ TEST_F(DatabaseTest, DiskCleanup)
   EXPECT_EQ(new_lsn, 3);
   DBStatus<void> snap_ret = snapshot_future.get();
   EXPECT_TRUE(snap_ret);
-
-  auto wait_for_deletion = [this](const std::string &path) {
-    ElapsedTimer timer{};
-    constexpr double kTimeout = 2.0;
-
-    while (timer.elapsed() < kTimeout) {
-      ErrnoStatus<File> f = dir_.openat(path, O_RDONLY);
-      if (!f)
-        return;
-
-      using namespace std::chrono_literals;
-      std::this_thread::sleep_for(10ms);
-    }
-
-    FAIL() << "file did not get deleted as expected: " << path;
-  };
 
   // all but the newest wal file should get cleaned up eventually.
   wait_for_deletion("0.log");
