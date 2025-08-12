@@ -78,6 +78,8 @@ public:
   ErrnoStatus<off_t> lseek(off_t offset, int whence) const;
   // sync flushes all modified file data to the storage device.
   ErrnoStatus<void> sync() const;
+  // ftruncate() system call. Truncate or extend the file.
+  ErrnoStatus<void> ftruncate(off_t length) const;
 
   // close closes the file.
   ErrnoStatus<void> close();
