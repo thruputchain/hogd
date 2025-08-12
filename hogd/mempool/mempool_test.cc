@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -17,7 +18,9 @@
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogdb/db.h"
 #include "hogd/hogdb/hog_types.h"
+#include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
@@ -28,12 +31,16 @@
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/mempool.h"
+#include "hogd/ramdb/db.h"
+#include "hogd/ramdb/db_status.h"
 #include "nomination.hh"
 #include "sched_coord.hh"
 #include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"
+#include "x23/rpc.h"
+#include "x23/serialize.h"
 #include "x23/threadpool.h"
 
 namespace hogd {
@@ -77,7 +84,7 @@ public:
       executor_db_port_ = db_executor_server_->port();
 
       db_coordinator_server_ = std::make_unique<HogDBCoordServer>(*ctx_);
-      db_coordinator_server_->start_server(/*port_number=*/0);
+      db_coordinator_server_->start_server(/*port=*/0);
       coordinator_db_port_ = db_coordinator_server_->port();
     }
 
