@@ -23,7 +23,7 @@ private:
     return dir;
   }
 
-  std::string time_string_with_ns()
+  static std::string time_string_with_ns()
   {
     std::chrono::time_point<std::chrono::system_clock> now =
         std::chrono::system_clock::now();
