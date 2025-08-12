@@ -260,7 +260,7 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
 
   template<typename Server,
            typename VersMeta = typename std::remove_cvref_t<
-               decltype(*std::declval<Server>())>::rpc_service,
+               decltype(*declval<Server>())>::rpc_service,
            typename... ExtraArgs>
   requires implements_srpc<Server, VersMeta, ExtraArgs...>
   SRpcStream &server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)

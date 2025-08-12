@@ -115,21 +115,8 @@ void_to_empty(Async<R> a)
 inline auto
 void_to_empty(Async<void> a)
 {
-  struct VoidToEmpty {
-    Async<void> a_;
-    Awaitable<void> &a() { return a_.operator co_await(); }
-    bool await_ready() noexcept { return a().await_ready(); }
-    void await_suspend(std::coroutine_handle<> h SLOC_PARM) noexcept
-    {
-      a().await_suspend(h X23_IFTRACE(, sloc));
-    }
-    std::array<std::uint8_t, 0> await_resume()
-    {
-      a().await_resume();
-      return {};
-    }
-  };
-  return VoidToEmpty{std::move(a)};
+  return MapAwait{.func = [] { return std::array<std::uint8_t, 0>{}; },
+                  .awaitable = std::move(a)};
 }
 
 template<typename VersMeta, typename Impl, typename Logger = RpcNoLogger,
@@ -253,8 +240,6 @@ private:
   Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_PARM0);
   Async<std::expected<Buf, Errno>> read_record(SLOC_PARM0);
 
-  Detached serve_call(const rpc_msg &call, BufView args SLOC_PARM);
-
   friend class RefCount;
 };
 } // namespace detail
@@ -334,7 +319,7 @@ struct RpcStream : public detail::RpcStreamImpl {
 
     template<typename Server,
              typename VersMeta = typename std::remove_cvref_t<
-                 decltype(*std::declval<Server>())>::rpc_service,
+                 decltype(*declval<Server>())>::rpc_service,
              typename... ExtraArgs>
     requires implements_async_rpc<Server, VersMeta, ExtraArgs...>
     Configurator &server(Server srvr, VersMeta = {}, ExtraArgs &&...extra_args)

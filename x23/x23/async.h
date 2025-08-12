@@ -142,7 +142,7 @@ template<typename F> requires requires(F f) { f(); }
 Callback(F) -> Callback<void>;
 template<typename F> requires requires(F f) {
   requires FnTraits<F>::num_args == 1;
-  f(std::declval<typename FnTraits<F>::template arg_type<0>>());
+  f(declval<typename FnTraits<F>::template arg_type<0>>());
 }
 Callback(F) -> Callback<typename FnTraits<F>::template arg_type<0>>;
 
@@ -273,12 +273,7 @@ public:
     // result_ or exception_, so use acquire semantics to access it.
     return resume_lock_.test_and_set(std::memory_order_acquire);
   }
-  void await_suspend(std::coroutine_handle<> h
-#if X23_CORO_TRACE
-                     ,
-                     source_location sloc = source_location::current()
-#endif // X23_CORO_TRACE
-                         ) noexcept
+  void await_suspend(std::coroutine_handle<> h SLOC_PARM) noexcept
   {
 #if X23_CORO_TRACE
     corotrace.set_suspend(h, sloc, "Awaitable", type_name<R>());
@@ -620,7 +615,7 @@ make_async(SLOC_PARM0)
 
 template<typename R>
 auto
-async_map(auto f, Async<R> a) -> Async<decltype(f(std::declval<R>()))>
+async_map(auto f, Async<R> a) -> Async<decltype(f(declval<R>()))>
 {
   co_return f(co_await a);
 }
@@ -665,21 +660,102 @@ private:
   Detached() noexcept = default;
 };
 
-// A concept that's 99% likely to determine whether a type is
-// awaitable.  You could have types that are awaitable but only with
-// specific promise types not including Detached::promise_type, in
-// which case this will fail even if the type is awaitable in other
-// types of coroutine.
+namespace detail {
+// A concept that's 99% likely to determine whether a type is an
+// awaiter.  You could have awaiters that work only with specific
+// promise types not including Detached::promise_type, in which case
+// this will fail even if the type is an awaiter accepting other types
+// of coroutine.
 template<typename A>
-concept is_awaitable =
+concept is_awaiter =
     requires(A a, std::coroutine_handle<Detached::promise_type> h) {
       { a.await_ready() } -> std::same_as<bool>;
       a.await_suspend(h);
       a.await_resume();
     };
 
-namespace detail {
+// Get an awaiter from an awaitable (calling operator co_await if
+// there is one).
+template<typename T> requires (
+    !requires { operator co_await(declval<T>()); } &&
+    !requires { declval<T>().operator co_await(); })
+inline decltype(auto)
+get_awaiter(T &&t) noexcept
+{
+  return t;
+}
+template<typename T> requires (
+    requires { operator co_await(declval<T>()); } &&
+    !requires { declval<T>().operator co_await(); })
+inline decltype(auto)
+get_awaiter(T &&t) noexcept(noexcept(operator co_await(declval<T>())))
+{
+  return operator co_await(std::forward<T>(t));
+}
+template<typename T> requires (requires { declval<T>().operator co_await(); })
+inline decltype(auto)
+get_awaiter(T &&t) noexcept(noexcept(declval<T>().operator co_await()))
+{
+  return std::forward<T>(t).operator co_await();
+}
 
+// A type you can call co_await on in a generic coroutine.  Does not
+// account for the effects of any await_tranform() methods, and does
+// not work for specialized awaitables that only work with specific
+// promise types.
+template<typename A>
+concept is_awaitable = is_awaiter<decltype(get_awaiter(declval<A>()))>;
+
+template<is_awaitable A>
+using resume_type = decltype(get_awaiter(declval<A>()).await_resume());
+
+template<typename A>
+concept resume_noexcept =
+    is_awaitable<A> && noexcept(get_awaiter(declval<A>()).await_resume());
+
+} // namespace detail
+
+using detail::is_awaitable;
+
+// Apply a function to the result of co_awaiting an awaitable.  If the
+// co_await returns void, then the function takes no arguments.
+// Otherwise, the function takes one argument which is the result of
+// the co_await.
+template<typename F, typename A>
+requires is_awaitable<A> && void_invocable<F, detail::resume_type<A>>
+struct MapAwait {
+  [[no_unique_address]] F func;
+  [[no_unique_address]] A awaitable;
+
+  decltype(auto) a() { return detail::get_awaiter(awaitable); }
+
+  bool await_ready() noexcept(noexcept(a().await_ready()))
+  {
+    return a().await_ready();
+  }
+
+  auto await_suspend(auto h SLOC_PARM) noexcept
+  {
+#if X23_CORO_TRACE
+    if constexpr (requires { a().await_suspend(h, sloc); })
+      return a().await_suspend(h, sloc);
+    corotrace.set_suspend(h, sloc, "MapAwaiter", type_name<A>());
+#endif // X23_CORO_TRACE
+    return a().await_suspend(h);
+  }
+
+  decltype(auto) await_resume()
+      noexcept(noexcept_invocable<F, detail::resume_type<A>> &&
+               detail::resume_noexcept<A>)
+  {
+    return compose(func,
+                   [this] -> decltype(auto) { return a().await_resume(); });
+  }
+};
+template<typename F, typename A>
+MapAwait(F &&, A &&) -> MapAwait<std::decay_t<F>, std::decay_t<A>>;
+
+namespace detail {
 // If final_suspend doesn't suspend a coroutine, then the coroutine
 // state is implicitly destroyed.  We emulate this behavior.  In the
 // event that final_suspend().await_suspend() returns a
@@ -688,7 +764,7 @@ template<typename Promise>
 auto // either void or coroutine_handle<>
 emulate_final_suspend(std::coroutine_handle<Promise> h)
 {
-  auto a = h.promise().final_suspend();
+  auto a = get_awaiter(h.promise().final_suspend());
   using suspend_type = decltype(a.await_suspend(h));
 
   if constexpr (std::is_void_v<suspend_type>) {

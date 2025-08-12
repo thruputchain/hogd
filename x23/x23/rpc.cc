@@ -110,11 +110,20 @@ RpcStreamImpl::reader(SLOC_ARG0)
       cs.reset();
       cb(std::move(b));
     }
-    else if (msg.body.mtype() == CALL)
-      serve_call(msg, b.subspan(hdrbytes));
+    else if (msg.body.mtype() == CALL) {
+      // serve_call(msg, b.subspan(hdrbytes));
+      rpc_msg res;
+      if (RpcService *s = srvmap_.lookup(msg, &res)) {
+	Buf resp = co_await s->serve(msg, b.subspan(hdrbytes));
+	write_record(resp);
+      }
+      else
+	send_msg(res);
+    }
   }
 }
 
+/*
 Detached
 RpcStreamImpl::serve_call(const rpc_msg &call, BufView args SLOC_ARG)
 {
@@ -128,5 +137,6 @@ RpcStreamImpl::serve_call(const rpc_msg &call, BufView args SLOC_ARG)
     send_msg(res);
   co_return;
 }
+*/
 
 } // namespace x23::detail
