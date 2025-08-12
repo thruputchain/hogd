@@ -29,7 +29,6 @@
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/mempool.h"
-#include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "nomination.hh"
@@ -54,7 +53,6 @@ public:
 
   MempoolTestServer()
     : db_pool_(x23::ThreadPool(kNumDbPoolThreads)),
-      block_manager_(0, &in_memory_db_),
       coordinator_port_(coordinator_server_.start_server(/*port_number=*/0)),
       exec_card_{.protocol = "blah",
                  .upid = {},
@@ -97,8 +95,20 @@ public:
     std::shared_ptr<Contract> contract =
         test::load_test_contract(kTestContractFileName);
 
-    in_memory_db_.write_contract(sha256(*contract), contract);
-    in_memory_db_.write_deployment(kContractAddress, sha256(*contract));
+    // Write contract to hogdb
+    auto bytes = x23::serialize(*contract);
+    auto contract_hash = sha256(*contract);
+    auto ret =
+        write_wasm_code(*db_, contract_hash, std::as_bytes(std::span(bytes)));
+    if (!ret) {
+      throw std::runtime_error("Failed to write contract");
+    }
+
+    // Write deployment
+    ret = write_address_wasm_hash(*db_, kContractAddress, contract_hash);
+    if (!ret) {
+      throw std::runtime_error("Failed to write deployment");
+    }
 
     set_up_grant_storage_token();
 
@@ -127,12 +137,8 @@ public:
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
   static constexpr size_t kNumDbPoolThreads = 16;
-  static constexpr StorageCostModel kCostModel{
-      /*base_item_cost=*/12000, /*bytestring_cost_per_byte=*/1,
-      /*rcq_cost_per_entry=*/5, /*rcq_cost_per_block=*/100,
-      /*replay_cache_cost_per_entry=*/5};
   static constexpr int128_t kStorageTokenAmount = 1'000'000'000;
-  static constexpr size_t kRamDbBytes = 1024 * 1024 * 8; // 8 MiB.
+  static constexpr size_t kRamDbBytes = 1024 * 1024 * 400; // 400 MiB.
 
   void set_up_grant_storage_token()
   {
@@ -140,20 +146,15 @@ private:
     static_assert(kStorageTokenAmount <=
                   int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
 
-    AddressAndKey addrkey = {
-        .address = kContractAddress,
-        .key =
-            StorageKey(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)};
-    in_memory_db_.write_item(
-        addrkey, std::make_shared<const StorageItemWrapper>(kStorageTokenAmount,
-                                                            &kCostModel));
+    // Convert ContractAddress to Address - both are std::array<uint8_t, 32>
+    Address addr(kContractAddress);
+    auto ret = write_address_balance(*db_, addr, kStorageTokenAmount);
+    if (!ret) {
+      throw std::runtime_error("Failed to grant storage token");
+    }
   }
 
   x23::ThreadPool db_pool_;
-  // The database used by [db_executor_server_] and [db_coordinator_server_]
-  // (via [block_manager_]).
-  InMemoryDatabase in_memory_db_;
-  BlockManager block_manager_;
 
   // This is a fake coordinator server that the executor registers itself with
   // via RPC.
