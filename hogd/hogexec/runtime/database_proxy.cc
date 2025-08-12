@@ -96,6 +96,7 @@ to_system_error_code(auto sys_err, auto &&f)
         return SystemError{SystemErrorCode::kUnrecoverable};
       }
     case RPCError::kRPCBadBlockID:
+      printf("abort B\n");
       return SystemError{SystemErrorCode::kAbortTransaction};
     default:
       return SystemError{SystemErrorCode::kUnrecoverable};

@@ -51,6 +51,7 @@ ExecutorRpcInterface::executorcoord_propose_transaction(
   auto ctx = executor_states_.get_executor_context(block_id,
                                                    ExecutionMode::kProposing);
   if (!ctx) {
+    printf("ugh C\n");
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
@@ -64,6 +65,7 @@ ExecutorRpcInterface::executorcoord_validate_transaction(
   auto ctx = executor_states_.get_executor_context(block_id,
                                                    ExecutionMode::kValidating);
   if (!ctx) {
+    printf("ugh D\n");
     co_return ExecResult::ExecResultSystemError;
   }
 
@@ -77,6 +79,7 @@ ExecutorRpcInterface::executorcoord_propose_batch(
   auto ctx = executor_states_.get_executor_context(block_id,
                                                    ExecutionMode::kProposing);
   if (!ctx) {
+    printf("ugh E\n");
     co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
                                          ExecResult::ExecResultSystemError));
@@ -99,6 +102,7 @@ ExecutorRpcInterface::executorcoord_validate_batch(
   auto ctx = executor_states_.get_executor_context(block_id,
                                                    ExecutionMode::kValidating);
   if (!ctx) {
+    printf("ugh F\n");
     co_return ExecValidateBatchResult(proposed_txs.size(),
                                       ExecResult::ExecResultSystemError);
   }

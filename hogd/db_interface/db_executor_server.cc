@@ -155,7 +155,9 @@ SyncDBExecutorServer::get_deployment(BlockID block,
                                      ContractAddress const &contract_address)
 {
   auto block_data = block_manager_->get_block_data(block);
+  printf("get block data for block id %zu\n", block);
   if (!block_data) {
+    printf("nope\n");
     return ExpectedDeployment(RPCError::kRPCBadBlockID);
   }
 

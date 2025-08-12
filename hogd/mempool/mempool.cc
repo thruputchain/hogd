@@ -164,6 +164,7 @@ Mempool::propose_batch(
     BlockID block_id, const x23::Vec<SignedTransaction> &txs,
     x23::XdrVec<NominatedTransaction> &transaction_nominations)
 {
+  printf("propose batch, block id is %zu\n", block_id);
   ExecProposeBatchResult res =
       co_await exec_client_.executorcoord_propose_batch(block_id, txs);
   for (const ExecProposeResult &result : res) {
@@ -177,6 +178,7 @@ Mempool::propose_batch(
           {.nondeterministic_proposal_data = NondeterministicProposalData{}});
       break;
     default:
+      printf("yikes here, result is %d\n", result.result());
       // TODO(jhumphri): Some of the other txs may have succeeded. Do we need
       // to undo them?
       co_return false;
@@ -201,12 +203,14 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
           BlockExecutionMode::kBlockExecutionModeProposal)) {
+    printf("A\n");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
 
   if (!co_await open_proposal_block(block_id)) {
     co_await abandon_snapshot(block_id);
+    printf("B\n");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
@@ -235,11 +239,13 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
+    printf("C\n");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }
   else if (!co_await propose_batch(block_id, txs,
                                    nomination.transaction_nominations)) {
+    printf("D\n");
     co_return SchedulerNominationResult(
         SchedulerNominationOutcome::SchedulerNominationError);
   }

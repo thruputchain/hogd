@@ -20,6 +20,7 @@
 #include "hogd/db_interface/block_manager.h"
 #include "hogd/db_interface/db_executor_server.h"
 #include "hogd/hogdb/rpc_from_coord.h"
+#include "hogd/hogdb/rpc_from_exec.h"
 #include "hogd/hogexec/interface/exec_coord_server.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
@@ -59,13 +60,7 @@ public:
                  .upid = {},
                  .address =
                      x23::HostPort(kAddress.c_str(), coordinator_port_).show()},
-      executor_coord_server_(exec_card_, /*poll_threads=*/1),
-      db_executor_server_(&block_manager_, /*port=*/0),
-      executor_db_port_(db_executor_server_.port()),
-      db_identifier_{.read_port_number_ = executor_db_port_},
-      db_proxy_(db_identifier_),
-      snapshot_cache_(
-          std::make_unique<StorageSnapshotCache>(/*block_number=*/1, db_proxy_))
+      executor_coord_server_(exec_card_, /*poll_threads=*/1)
   {
     {
       // check the database's integrity and find the highest valid LSN.
@@ -84,10 +79,20 @@ public:
 
       db_ = std::make_unique<HogDatabase>(std::move(*ramdb));
       ctx_ = std::make_unique<RPCContext>(*db_, trie_);
+
+      db_executor_server_ = std::make_unique<HogDBExecutorServer>(*ctx_);
+      CHECK(db_executor_server_->start_server(/*port=*/0).has_value());
+      executor_db_port_ = db_executor_server_->port();
+
       db_coordinator_server_ = std::make_unique<HogDBCoordServer>(*ctx_);
       db_coordinator_server_->start_server(/*port_number=*/0);
       coordinator_db_port_ = db_coordinator_server_->port();
     }
+
+    db_identifier_ = {.read_port_number_ = executor_db_port_};
+    db_proxy_ = std::make_unique<DatabaseProxy>(db_identifier_);
+    snapshot_cache_ =
+        std::make_unique<StorageSnapshotCache>(/*block_number=*/1, *db_proxy_);
 
     std::shared_ptr<Contract> contract =
         test::load_test_contract(kTestContractFileName);
@@ -166,7 +171,7 @@ private:
   uint16_t executor_port_;
 
   // The database server that the executor accesses.
-  RPCDbExecutorServer db_executor_server_;
+  std::unique_ptr<HogDBExecutorServer> db_executor_server_;
   uint16_t executor_db_port_;
 
   // The database server that the mempool accesses.
@@ -179,7 +184,7 @@ private:
   uint16_t coordinator_db_port_;
 
   // A wrapper around [db_executor_server_].
-  DatabaseProxy db_proxy_;
+  std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
 };
 
