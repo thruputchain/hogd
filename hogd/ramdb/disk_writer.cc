@@ -19,10 +19,10 @@
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
-#include "hogd/base/status.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
 
@@ -213,6 +213,15 @@ DiskWriter::print_stats()
 
   prev_bytes_out_ = out;
   prev_stats_time_ = now;
+}
+
+void
+DiskWriter::register_metrics(MetricRegistry &registry)
+{
+  registry.add("ramdb_disk_writer_bytes_out",
+               "Number of bytes written to log files "
+               "since the last database recovery.",
+               true, bytes_out_);
 }
 
 void
