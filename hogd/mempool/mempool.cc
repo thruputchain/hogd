@@ -260,7 +260,6 @@ Mempool::validate_batch(BlockID block_id,
   if (std::ranges::any_of(res, [](const ExecResult &r) {
         return r != ExecResult::ExecResultOK;
       })) {
-    // TODO(jhumphri): Use co_await.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
     co_return false;
@@ -283,7 +282,6 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   if (!co_await create_snapshot(
           /*prev_block_id=*/db_tip.id, block_id,
           BlockExecutionMode::kBlockExecutionModeValidation)) {
-
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationDbFailed);
   }

@@ -9,6 +9,7 @@ target_link_libraries(
   db_interface
   exec_interface
   hogd
+  hogdb
   merkle
   protocol
   runtime
