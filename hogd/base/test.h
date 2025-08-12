@@ -11,7 +11,7 @@ namespace hogd {
 class TmpDir {
 public:
   TmpDir() : directory_(create_tmp_directory()) {}
-  ~TmpDir() { CHECK_GT(std::filesystem::remove_all(directory_), 0); }
+  ~TmpDir() { CHECK_GT(std::filesystem::remove_all(directory_), 0UL); }
 
   std::string directory() const { return directory_; }
 
