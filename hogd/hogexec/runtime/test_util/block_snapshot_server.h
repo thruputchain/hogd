@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cerrno>
 #include <memory>
 #include <set>
 #include <span>
@@ -26,6 +27,7 @@
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
 #include "x23/mvar.h"
 #include "x23/srpc.h"
 
@@ -78,6 +80,12 @@ public:
         socklen_t sslen = sizeof(ss);
         x23::UniqueFd fd{accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
         if (!fd) {
+          if (errno == EINTR)
+            continue;
+          // If the listening socket was closed, accept will fail with EBADF/EINVAL
+          // Break the loop so the thread can exit.
+          if (errno == EBADF || errno == EINVAL)
+            break;
           std::println(stderr, "accept: {}", Errno{});
         }
         else {
@@ -85,6 +93,15 @@ public:
         }
       }
     });
+  }
+
+  ~BlockSnapshotServer()
+  {
+    // Request the thread to stop and close the listening socket to unblock accept.
+    listen_thread_.request_stop();
+    shutdown(lfd_.get(), SHUT_RDWR);
+    lfd_.reset();
+    // jthread destructor will join in member destruction.
   }
 
   //~BlockSnapshotServer() { rpc_server_->stop(); }
