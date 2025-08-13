@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <exception>
+#include <format>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -22,6 +23,10 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/rpc_common.h"
+#include "x23/sockio.h"
+#include "x23/srpc.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -31,13 +36,13 @@ struct VoidMarker {};
 
 template<auto NullValue>
 constexpr auto
-to_system_error_code(auto sys_err, auto &&f)
+to_system_error_code(auto err, auto &&f)
 {
   constexpr bool kHasReturnType =
-      requires { f(std::move(get<1>(sys_err.value()))); };
+      requires { f(std::move(get<1>(err))); };
   auto type_lambda = [&] {
     if constexpr (kHasReturnType) {
-      return f(std::move(get<1>(sys_err.value())));
+      return f(std::move(get<1>(err)));
     }
     else if constexpr (std::same_as<decltype(f()), void>) {
       return;
@@ -50,11 +55,6 @@ to_system_error_code(auto sys_err, auto &&f)
   using ret_t = decltype(type_lambda());
 
   return [&] -> SystemStatus<ret_t> {
-    if (!sys_err.has_value()) [[unlikely]] {
-      return SystemStatus<ret_t>{sys_err.error()};
-    }
-
-    auto err = sys_err.value();
 
     RPCError err_code;
     if constexpr (kHasReturnType) {
@@ -103,10 +103,37 @@ to_system_error_code(auto sys_err, auto &&f)
   }();
 }
 
+template<auto NullValue>
+constexpr auto 
+remove_syserr_from_call(auto syserr, auto&& f)
+{
+  using overall_ret_t = decltype(to_system_error_code(syserr.value(), std::forward(f)));
+  if (!syserr.has_value()) [[unlikely]] {
+    return overall_ret_t{syserr.error()};
+  }
+
+  auto err = syserr.value();
+  return to_system_error_code<NullValue>(syserr, std::forward(f));
+}
+
 } // namespace
 
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
-  : base_client_([&] -> RPCClient {
+  : client_ ([&] -> client_t {
+    if (std::holds_alternative<LocalMockDB>(db_identifier)) {
+      auto mock_db = std::get<LocalMockDB>(db_identifier);
+      auto server_addr = x23::HostPort{"localhost", x23::uformat("{}", mock_db.read_port_number_)}.to_addr(
+          true);
+      std::println("got here");
+      if (!server_addr) {
+        throw std::runtime_error(std::format("failed server error: {}", server_addr.error()));
+      }
+      std::println("got here 2");
+      return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())->client(DatabaseToExecutorInterfaceV1{});
+    }
+    throw std::runtime_error("unimplemented");
+  }())
+ /* : base_client_([&] -> RPCClient {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
         auto res = RPCClient::dial("127.0.0.1:" +
@@ -126,8 +153,10 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         return std::move(*res);
       }
       std::terminate();
-    }())
-{}
+    }()) */
+{
+  std::println("got here 3");
+}
 
 SystemStatus<std::optional<StorageItem>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)

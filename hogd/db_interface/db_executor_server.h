@@ -3,8 +3,10 @@
 #include <atomic>
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <memory>
+#include <print>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -12,6 +14,7 @@
 #include <thread>
 #include <type_traits>
 #include <utility>
+#include <stop_token>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
@@ -25,12 +28,17 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/cleanup.h"
+#include "x23/sockio.h"
+#include "x23/srpc.h"
 
 namespace hogd {
 
 // Core logic handler for the db rpc server.
 class SyncDBExecutorServer {
 public:
+  using rpc_service = DatabaseToExecutorInterfaceV1;
+
   explicit SyncDBExecutorServer(BlockManager *block_manager)
     : block_manager_(block_manager)
   {
@@ -110,6 +118,46 @@ private:
   std::shared_ptr<RPCServer> rpc_server_;
   std::jthread server_listener_;
   std::atomic<bool> stopped_ = false;
+};
+
+class SrpcDbExecutorServer {
+public:
+
+  explicit SrpcDbExecutorServer(BlockManager *block_manager, uint16_t port)
+    : sync_server_(block_manager)
+  {
+    lfd_ = x23::stcplisten(port);
+    if (!lfd_) {
+      perror("listen");
+      exit(EXIT_FAILURE);
+    }
+    // If the [port_number] parameter is 0, then the kernel chooses the port
+    // number for us. Thus, in that case, [port_number] will be assigned a
+    // nonzero value below.
+    port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
+
+    server_listener_ = std::jthread([this](std::stop_token&& stop) {
+      while (!stop.stop_requested()) {
+
+        sockaddr_storage ss;
+        socklen_t sslen = sizeof(ss);
+        x23::UniqueFd fd{accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
+        if (!fd) {
+          std::println(stderr, "accept: {}", Errno{});
+        }
+        else {
+          x23::srpc_stream_logged(fd.release())->server(&sync_server_);
+        }
+      }
+    });
+  }
+
+private:
+  uint16_t port_number_ = 0;
+  x23::UniqueFd lfd_;
+
+  SyncDBExecutorServer sync_server_;
+  std::jthread server_listener_;
 };
 
 } // namespace hogd

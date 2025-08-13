@@ -16,6 +16,7 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/srpc.h"
 
 namespace hogd {
 
@@ -85,10 +86,13 @@ public:
                                          uint32_t count);
 
 private:
-  using client_t = DatabaseToExecutorInterfaceV1::client<RPCClient *>;
+  using base_client_t = x23::SRpcMulticlient<x23::RpcLogger>::ClientRef;
+  using client_t = DatabaseToExecutorInterfaceV1::client<base_client_t>;
+  client_t client_;
+  //using client_t = DatabaseToExecutorInterfaceV1::client<RPCClient *>;
 
-  RPCClient base_client_;
-  client_t client_ = client_t{&base_client_};
+//  RPCClient base_client_;
+//  client_t client_ = client_t{&base_client_};
 };
 
 class StorageDeltaBatchBuilder {
