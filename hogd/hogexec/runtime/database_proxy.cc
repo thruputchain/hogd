@@ -124,11 +124,9 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
       auto mock_db = std::get<LocalMockDB>(db_identifier);
       auto server_addr = x23::HostPort{"localhost", x23::uformat("{}", mock_db.read_port_number_)}.to_addr(
           true);
-      std::println("got here");
       if (!server_addr) {
         throw std::runtime_error(std::format("failed server error: {}", server_addr.error()));
       }
-      std::println("got here 2");
       return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())->client(DatabaseToExecutorInterfaceV1{});
     }
     throw std::runtime_error("unimplemented");
@@ -155,7 +153,6 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
       std::terminate();
     }()) */
 {
-  std::println("got here 3");
 }
 
 SystemStatus<std::optional<StorageItem>>

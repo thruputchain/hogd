@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <print>
@@ -131,9 +132,6 @@ public:
       perror("listen");
       exit(EXIT_FAILURE);
     }
-    // If the [port_number] parameter is 0, then the kernel chooses the port
-    // number for us. Thus, in that case, [port_number] will be assigned a
-    // nonzero value below.
     port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
 
     server_listener_ = std::jthread([this](std::stop_token&& stop) {
@@ -146,18 +144,23 @@ public:
           std::println(stderr, "accept: {}", Errno{});
         }
         else {
+          std::println("start server on {}", port_number_);
           x23::srpc_stream_logged(fd.release())->server(&sync_server_);
         }
       }
     });
   }
 
+  uint16_t port() const { return port_number_; }
+
+
 private:
   uint16_t port_number_ = 0;
-  x23::UniqueFd lfd_;
 
   SyncDBExecutorServer sync_server_;
   std::jthread server_listener_;
+  
+  x23::UniqueFd lfd_;
 };
 
 } // namespace hogd

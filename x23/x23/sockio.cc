@@ -1,4 +1,5 @@
 
+#include <cassert>
 #include <system_error>
 
 #include <arpa/inet.h>
@@ -8,6 +9,8 @@
 #include <sys/socket.h>
 
 #include "x23/sockio.h"
+#include "x23/cleanup.h"
+#include "x23/err.h"
 
 namespace x23 {
 
@@ -87,7 +90,17 @@ tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
     Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
   if (prep_fd)
     prep_fd(fd.get());
-  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss), sizeof(ss)) ==
+  size_t slen = sizeof(ss);
+  #if __APPLE__
+  if (ss.ss_family == AF_INET) {
+    slen = sizeof(sockaddr_in);
+  } else {
+    assert(ss.ss_family == AF_INET6);
+    slen = sizeof(sockaddr_in6);
+  }
+  #endif
+
+  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss), slen) ==
       -1)
     Errno{}.raise("connect({})", HostPort(ss));
   return fd;
