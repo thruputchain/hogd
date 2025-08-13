@@ -144,7 +144,6 @@ public:
           std::println(stderr, "accept: {}", Errno{});
         }
         else {
-          std::println("start server on {}", port_number_);
           x23::srpc_stream_logged(fd.release())->server(&sync_server_);
         }
       }
@@ -152,6 +151,12 @@ public:
   }
 
   uint16_t port() const { return port_number_; }
+
+  ~SrpcDbExecutorServer() {
+    shutdown(lfd_.get(), SHUT_RDWR);
+    server_listener_.request_stop();
+    lfd_.reset();
+  }
 
 
 private:

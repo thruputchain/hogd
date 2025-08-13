@@ -97,11 +97,9 @@ public:
 
   ~BlockSnapshotServer()
   {
-    // Request the thread to stop and close the listening socket to unblock accept.
     listen_thread_.request_stop();
     shutdown(lfd_.get(), SHUT_RDWR);
     lfd_.reset();
-    // jthread destructor will join in member destruction.
   }
 
   //~BlockSnapshotServer() { rpc_server_->stop(); }

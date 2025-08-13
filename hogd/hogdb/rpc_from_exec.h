@@ -55,6 +55,12 @@ public:
 
   uint16_t port() const { return port_number_; }
 
+  ~HogDBExecutorServer() {
+    listen_thread_.request_stop();
+    shutdown(lfd_.get(), SHUT_RDWR);
+    lfd_.reset();
+  }
+
 private:
   RPCContext &ctx_;
 
