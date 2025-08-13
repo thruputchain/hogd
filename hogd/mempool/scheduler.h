@@ -15,12 +15,17 @@ public:
   Scheduler(db_client_t &db_client) : db_client_(db_client) {}
 
   bool add_vetted_tx(const SignedTransaction &tx);
-  bool update_groups(const AccountID &account_id);
-  bool process_received_hogs(const AccountID &account_id, int128_t num_received,
+  bool update_groups(const ContractAddress &account_id);
+  bool process_received_hogs(const ContractAddress &account_id,
+                             int128_xdr num_received,
                              BlockHeight current_block);
   x23::Vec<SignedTransaction> schedule(size_t block_size);
 
 private:
+  bool read_average_hog_age(const ContractAddressBatch &addresses,
+                            HogAgeBatch &ages);
+  bool write_average_hog_age(const HogAgeBatch &ages);
+
   db_client_t &db_client_;
 
   std::unordered_set<SHA256Hash> tx_hashes_;

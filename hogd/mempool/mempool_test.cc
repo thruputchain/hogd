@@ -31,6 +31,7 @@
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/mempool/coordinator.h"
 #include "hogd/mempool/mempool.h"
+#include "hogd/mempool/types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "nomination.hh"
@@ -196,8 +197,7 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
     Timestamp created = i;
     SignedTransaction tx{
         .tx =
-            Transaction{.account_id = {},
-                        .origin_id = {},
+            Transaction{.origin_id = {},
                         .created = created,
                         .invocation = fib_client.make_invocation<kProgramName>(
                             UINT64_MAX, kFibonacciN),
@@ -225,7 +225,7 @@ create_clients(const MempoolTestServer &server)
 {
   auto coord_pool = std::make_unique<x23::ThreadPool>(1);
   auto coord_cp = std::make_unique<x23::CoroPoll>(*coord_pool);
-  Mempool::coord_client_t coord_client = [&] -> Mempool::coord_client_t {
+  coord_client_t coord_client = [&] -> coord_client_t {
     auto fd =
         coord_cp->tcpconnect(MempoolTestServer::kAddress,
                              std::to_string(server.coordinator_sched_port()))();
@@ -238,7 +238,7 @@ create_clients(const MempoolTestServer &server)
 
   auto db_pool = std::make_unique<x23::ThreadPool>(1);
   auto db_cp = std::make_unique<x23::CoroPoll>(*db_pool);
-  Mempool::db_client_t db_client = [&] -> Mempool::db_client_t {
+  db_client_t db_client = [&] -> db_client_t {
     auto fd = db_cp->tcpconnect(MempoolTestServer::kAddress,
                                 std::to_string(server.coordinator_db_port()))();
     if (!fd) {
@@ -250,7 +250,7 @@ create_clients(const MempoolTestServer &server)
 
   auto exec_pool = std::make_unique<x23::ThreadPool>(1);
   auto exec_cp = std::make_unique<x23::CoroPoll>(*exec_pool);
-  Mempool::exec_client_t exec_client = [&] -> Mempool::exec_client_t {
+  exec_client_t exec_client = [&] -> exec_client_t {
     auto fd = exec_cp->tcpconnect(MempoolTestServer::kAddress,
                                   std::to_string(server.executor_port()))();
     if (!fd) {

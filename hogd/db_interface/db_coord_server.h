@@ -55,6 +55,17 @@ public:
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
 
+  x23::Async<HogAgeResult>
+  dbcoord_get_hog_ages(const ContractAddressBatch &addresses)
+  {
+    co_return HogAgeResult(DbResult::DbResultError);
+  }
+
+  x23::Async<DbResult> dbcoord_write_hog_ages(const HogAgeBatch &ages)
+  {
+    co_return DbResult::DbResultError;
+  }
+
 private:
   BlockManager *block_manager_;
   x23::ThreadPool pool_ = x23::ThreadPool(2);

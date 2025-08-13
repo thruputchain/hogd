@@ -10,6 +10,7 @@
 #include <string_view>
 #include <utility>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/types.h"
 #include "types.hh"
 
@@ -39,6 +40,66 @@ constexpr uint128_t
 from_xdr(uint128_xdr value)
 {
   return (uint128_t{value.highbits} << 64) + value.lowbits;
+}
+
+template<typename T>
+constexpr T
+xdr_le_to_cpu(T value)
+{
+  static_assert(
+      std::is_same_v<T, int128_xdr> || std::is_same_v<T, const int128_xdr> ||
+          std::is_same_v<T, uint128_xdr> ||
+          std::is_same_v<T, const uint128_xdr>,
+      "[T] must be [int128_xdr] or [uint128_xdr] (const or non-const).");
+
+  value.highbits = le_to_cpu(value.highbits);
+  value.lowbits = le_to_cpu(value.lowbits);
+  return value;
+}
+
+template<typename T>
+constexpr T
+xdr_cpu_to_le(T value)
+{
+  static_assert(
+      std::is_same_v<T, int128_xdr> || std::is_same_v<T, const int128_xdr> ||
+          std::is_same_v<T, uint128_xdr> ||
+          std::is_same_v<T, const uint128_xdr>,
+      "[T] must be [int128_xdr] or [uint128_xdr] (const or non-const).");
+
+  value.highbits = cpu_to_le(value.highbits);
+  value.lowbits = cpu_to_le(value.lowbits);
+  return value;
+}
+
+template<typename T>
+constexpr T
+xdr_be_to_cpu(T value)
+{
+  static_assert(
+      std::is_same_v<T, int128_xdr> || std::is_same_v<T, const int128_xdr> ||
+          std::is_same_v<T, uint128_xdr> ||
+          std::is_same_v<T, const uint128_xdr>,
+      "[T] must be [int128_xdr] or [uint128_xdr] (const or non-const).");
+
+  value.highbits = be_to_cpu(value.highbits);
+  value.lowbits = be_to_cpu(value.lowbits);
+  return value;
+}
+
+template<typename T>
+constexpr T
+xdr_cpu_to_be(T value)
+{
+  static_assert(
+      std::is_same_v<T, int128_xdr> || std::is_same_v<T, const int128_xdr> ||
+          std::is_same_v<T, uint128_xdr> ||
+          std::is_same_v<T, const uint128_xdr>,
+      "[T] must be [int128_xdr] or [uint128_xdr] (const or non-const).");
+
+  value.highbits = cpu_to_be(value.highbits);
+  value.lowbits = cpu_to_be(value.lowbits);
+  return value;
 }
 
 } // namespace hogd

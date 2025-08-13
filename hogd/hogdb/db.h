@@ -10,11 +10,13 @@
 #include <span>
 #include <utility>
 
+#include "db_coord.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/os.h"
 #include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hogdb/hog_types.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db.h"
@@ -99,42 +101,32 @@ namespace {
 constexpr char kAddressKeyPrefix = 'A';
 // Address suffixes.
 constexpr char kAddressBalanceSuffix = 'A';
-constexpr char kAddressAverageHogAgeSuffix = 'B';
+constexpr char kAddressHogAgeSuffix = 'B';
 constexpr char kAddressWasmHashSuffix = 'C';
 
-struct AverageHogAge {
-  enum Group {
-    kGroupToSchedule,
-    kGroupAlreadyScheduled,
-    kGroupReceived,
-    kNumGroups
-  };
-
-  static AverageHogAge cpu_to_le(AverageHogAge average)
-  {
-    for (int128_t &n : average.num_hogs) {
-      n = hogd::cpu_to_le(n);
-    }
-    for (BlockHeight &a : average.average_ages) {
-      a = hogd::cpu_to_le(a);
-    }
-    return average;
+HogAge
+hog_age_cpu_to_le(HogAge average)
+{
+  for (hogd::int128_xdr &n : average.num_hogs) {
+    n = hogd::xdr_cpu_to_le(n);
   }
-
-  static AverageHogAge le_to_cpu(AverageHogAge average)
-  {
-    for (int128_t &n : average.num_hogs) {
-      n = hogd::le_to_cpu(n);
-    }
-    for (BlockHeight &a : average.average_ages) {
-      a = hogd::le_to_cpu(a);
-    }
-    return average;
+  for (BlockHeight &a : average.average_ages) {
+    a = hogd::cpu_to_le(a);
   }
+  return average;
+}
 
-  int128_t num_hogs[Group::kNumGroups];
-  BlockHeight average_ages[Group::kNumGroups];
-};
+HogAge
+hog_age_le_to_cpu(HogAge average)
+{
+  for (hogd::int128_xdr &n : average.num_hogs) {
+    n = hogd::xdr_le_to_cpu(n);
+  }
+  for (BlockHeight &a : average.average_ages) {
+    a = hogd::le_to_cpu(a);
+  }
+  return average;
+}
 
 constexpr char kCodeKeyPrefix = 'C';
 
@@ -186,27 +178,25 @@ write_address_balance(HogDatabase &db, const Address &addr, int128_t val)
                 byte_view(cpu_to_le(val)));
 }
 
-inline HogDBStatus<detail::AverageHogAge>
+inline HogDBStatus<HogAge>
 read_address_average_hog_age(HogDatabase &db, const Address &addr)
 {
-  detail::AverageHogAge val;
-  auto key =
-      detail::make_address_key(addr, detail::kAddressAverageHogAgeSuffix);
+  HogAge val;
+  auto key = detail::make_address_key(addr, detail::kAddressHogAgeSuffix);
   HogDBStatus<void> ret = db.get_if_type(std::as_bytes(std::span(key)), kBytes,
                                          writable_byte_view(val));
   if (!ret)
     return ret.error();
-  return detail::AverageHogAge::le_to_cpu(val);
+  return detail::hog_age_le_to_cpu(val);
 }
 
 inline HogDBStatus<void>
-write_address_average_hog_age(HogDatabase &db, const Address &addr,
-                              detail::AverageHogAge val)
+write_address_average_hog_age(HogDatabase &db, const HogAge &val)
 {
   auto key =
-      detail::make_address_key(addr, detail::kAddressAverageHogAgeSuffix);
+      detail::make_address_key(val.address, detail::kAddressHogAgeSuffix);
   return db.put(std::as_bytes(std::span(key)), kBytes,
-                byte_view(detail::AverageHogAge::cpu_to_le(val)));
+                byte_view(detail::hog_age_cpu_to_le(val)));
 }
 
 inline HogDBStatus<SHA256Hash>
