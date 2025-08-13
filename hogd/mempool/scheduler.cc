@@ -50,6 +50,7 @@ Scheduler::add_vetted_tx(const SignedTransaction &tx)
 
   HogAgeBatch ages;
   if (!read_average_hog_age({ContractAddress({})}, ages)) {
+    printf("yikes\n");
     return false;
   }
   const HogAge &averages = ages[0];

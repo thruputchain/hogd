@@ -40,6 +40,8 @@ public:
   Mempool(Mempool &&) = delete;
   Mempool &operator=(Mempool &&) = delete;
 
+  Scheduler &scheduler() { return scheduler_; }
+
   static x23::Async<void> schedulercoord_null() { co_return; }
 
   // Submit an unvetted tx.
