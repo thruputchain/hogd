@@ -55,13 +55,15 @@ HogDBCoordServer::dbcoord_create_snapshot(BlockID parent_id, BlockID new_id,
 x23::Async<DbBlockResult>
 HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
 {
-  auto *ret = ctx_.get_block_tx(id);
-  if (!ret) {
+  BlockTX *btx = ctx_.get_block_tx(id);
+  if (!btx) {
     co_return DbBlockResult(DbResult::DbResultError);
   }
 
-  BlockTX &btx = *ret;
-  co_return DbBlockResult(to_db_result(btx.commit()));
+  DbBlockResult ret(to_db_result(btx->commit()));
+  ctx_.get_trie().generate_top_level_hashes();
+  ret.block_hash() = ctx_.get_trie().get_root_hash();
+  co_return ret;
 }
 
 x23::Async<DbResult>
