@@ -27,10 +27,16 @@ WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
     std::unique_lock g(service_lock_, std::adopt_lock);
     auto ptr = writer_.take();
     auto res = ptr->write_or_append(fd.get(), std::move(buf));
-    if (res && *res)
+    if (res && !ptr->empty()) {
+      ptr.reset();
       service(cp, fd, std::move(g));
-    g.unlock();
-    return res.error_or(Errno{0});
+    }
+    else {
+      if (!res)
+	cp.poison(fd);
+      g.unlock();
+    }
+    return res.error_or(0);
   }
 
   writer_->append(std::move(buf));
@@ -45,6 +51,7 @@ WriteBuffer::service(CoroPoll &cp, BorrowedFd fd,
 {
   assert(g.owns_lock() && g.mutex() == &service_lock_);
 
+  co_await cp.pool_.bg();
   for (;;) {
     BufVec work;
     if (auto ptr = writer_.take(); work.swap(*ptr), work.empty()) {
@@ -59,8 +66,10 @@ WriteBuffer::service(CoroPoll &cp, BorrowedFd fd,
     for (;;) {
       cp.write_clear(fd);
       auto res = work.write(fd);
-      if (!res)			// write returned error
+      if (!res)	{		// write returned error
+	cp.poison(fd);
 	co_return;
+      }
       if (!*res)		// no data left to write
 	break;
       co_await cp.write_wait(fd);
@@ -145,7 +154,10 @@ CoroPoll::bgwrite(BorrowedFd fd, Buf data)
   auto w = get_writer(fd);
   if (!w)
     return EBADF;
-  return w->write(*this, fd, std::move(data));
+  Errno err = w->write(*this, fd, std::move(data));
+  if (err)
+    poison(fd);
+  return 0;
 }
 
 Async<std::expected<void, Errno>>
