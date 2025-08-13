@@ -87,8 +87,8 @@ tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
     Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
   if (prep_fd)
     prep_fd(fd.get());
-  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss), sizeof(ss)) ==
-      -1)
+  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss),
+              sockaddr_len(ss)) == -1)
     Errno{}.raise("connect({})", HostPort(ss));
   return fd;
 }
