@@ -145,6 +145,11 @@ struct BufVec {
     bufs_.clear();
     skip_ = 0;
   }
+  void swap(BufVec &other) noexcept
+  {
+    bufs_.swap(other.bufs_);
+    std::swap(skip_, other.skip_);
+  }
 
   void append(BufView b, size_t offset = 0)
   {

@@ -20,31 +20,51 @@ namespace x23 {
 
 namespace detail {
 
-Async<std::expected<void, Errno>>
+Errno
 WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
 {
-  CoroGuard g;
-  co_await g(write_lock_);
-  if (co_await writer_.write_or_append(fd.get(), std::move(buf)))
-    service(cp, fd);
-  co_return expected_void;
+  if (service_lock_.try_lock()) {
+    std::unique_lock g(service_lock_, std::adopt_lock);
+    auto ptr = writer_.take();
+    auto res = ptr->write_or_append(fd.get(), std::move(buf));
+    if (res && *res)
+      service(cp, fd, std::move(g));
+    g.unlock();
+    return res.error_or(Errno{0});
+  }
+
+  writer_->append(std::move(buf));
+  if (service_lock_.try_lock())
+    service(cp, fd, {service_lock_, std::adopt_lock});
+  return 0;
 }
 
 Detached
-WriteBuffer::service(CoroPoll &cp, BorrowedFd fd)
+WriteBuffer::service(CoroPoll &cp, BorrowedFd fd,
+                     std::unique_lock<std::mutex> g)
 {
-  // std::println("Write buffering active on fd {}", fd.get());
+  assert(g.owns_lock() && g.mutex() == &service_lock_);
+
   for (;;) {
-    CoroGuard g;
-    co_await g(write_lock_);
-    cp.write_clear(fd);
-    auto res = writer_.write(fd);
-    if (!res.value_or(false)) {
-      // std::println("Write buffering done on fd {}", fd.get());
+    BufVec work;
+    if (auto ptr = writer_.take(); work.swap(*ptr), work.empty()) {
+      // If we are here, we must guarantee that at least one thread
+      // concurrently appending to writer_ will be able to acquire
+      // service_lock_.  That means we must release service_lock_
+      // before writer_.
+      g.unlock();
       co_return;
     }
-    g.reset();
-    co_await cp.write_wait(fd);
+
+    for (;;) {
+      cp.write_clear(fd);
+      auto res = work.write(fd);
+      if (!res)			// write returned error
+	co_return;
+      if (!*res)		// no data left to write
+	break;
+      co_await cp.write_wait(fd);
+    }
   }
 }
 
@@ -119,13 +139,13 @@ CoroPoll::write(BorrowedFd fd, BufView data SLOC_ARG)
   co_return len;
 }
 
-Async<std::expected<void, Errno>>
-CoroPoll::bgwrite(BorrowedFd fd, Buf data SLOC_ARG)
+Errno
+CoroPoll::bgwrite(BorrowedFd fd, Buf data)
 {
   auto w = get_writer(fd);
   if (!w)
-    co_return Errno{EBADF};
-  co_return co_await w->write(*this, fd, std::move(data));
+    return EBADF;
+  return w->write(*this, fd, std::move(data));
 }
 
 Async<std::expected<void, Errno>>

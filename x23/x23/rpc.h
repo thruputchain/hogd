@@ -222,7 +222,6 @@ protected:
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
-  Detached write_record(Buf b SLOC_PARM);
   Detached reader(SLOC_PARM0);
 
 private:
@@ -234,7 +233,7 @@ private:
 
   void send_msg(const rpc_msg &msg, const is_xdr_type auto &...x)
   {
-    write_record(make_record(msg, x...));
+    cp_->bgwrite(fd_, make_record(msg, x...));
   }
 
   Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_PARM0);
@@ -269,7 +268,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     putbe(record.data() + 4, msg.xid = gen_call_xid(a));
 
     logger_.template log_client<ProcMeta>(msg, std::forward_as_tuple(args...));
-    write_record(std::move(record));
+    cp_->bgwrite(fd_, std::move(record));
 
     Buf rbuf = co_await a;
     BufView rv = rbuf.subspan(deserialize_from(&msg, rbuf));
