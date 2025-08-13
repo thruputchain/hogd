@@ -53,6 +53,7 @@ add_wasm_contract(cxs_roundtrip)
 add_wasm_contract(read_only_test)
 add_wasm_contract(manual_revert_test)
 add_wasm_contract(manual_revert_caller)
+add_wasm_contract(simple_wallet)
 
 add_xdr_rs(
 	roundtrip_rs 
