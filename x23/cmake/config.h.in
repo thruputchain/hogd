@@ -22,6 +22,13 @@
 // Define to 1 if you have the sched_cpu() system call
 #cmakedefine01 HAVE_SCHED_GETCPU
 
+// Define to 1 if you have the sched_setaffinity() system call
+#cmakedefine01 HAVE_SCHED_SETAFFINITY
+
+// Define to something other than 0 if CPU_SETSIZE is too small on
+// your machine
+#define X23_CPUSET_NCPUS @X23_CPUSET_NCPUS@
+
 // Set to 1 if you can't call consteval functions from inside if consteval
 #cmakedefine01 HAVE_BROKEN_P2564R3
 

@@ -74,7 +74,7 @@ private:
   atomic_shared_ptr<T> t_;
 };
 
-template<std::size_t StructSize = 4096>
+template<std::size_t StructSize>
 struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
   static constexpr size_t kStructSize = StructSize;
   using PosType = std::conditional_t<
@@ -127,7 +127,7 @@ struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
     return x23::read(fd, buf, len, this);
   }
 };
-using ReadBuffer = GenReadBuffer<4096>;
+using ReadBuffer = GenReadBuffer<0x10000>;
 
 struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
   CoroLock write_lock_;
@@ -271,7 +271,7 @@ private:
 
   UniqueFd epollfd_;
 
-  SharedLock resize_lock_{ThreadPool::core_map};
+  SharedLock resize_lock_{*core_map};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
   std::atomic_uint numcoro_{0};

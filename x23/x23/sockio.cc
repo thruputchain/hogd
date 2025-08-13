@@ -134,7 +134,7 @@ show_ipaddr(const sockaddr_storage &ss)
     Str ret;
     ret.resize_uninitialized(AF == AF_INET ? INET_ADDRSTRLEN
                                            : INET6_ADDRSTRLEN);
-    if (!inet_ntop(AF_INET, in, ret.data(), ret.size()))
+    if (!inet_ntop(AF, in, ret.data(), ret.size()))
       Errno{}.raise("inet_ntop(family {})", AF);
     ret.resize(ret.find('\0'));
     return ret;

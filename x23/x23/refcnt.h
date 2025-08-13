@@ -52,18 +52,17 @@ public:
     reset();
     return *this;
   }
-  RefPtr &operator=(const RefPtr &other) // NOLINT
+  decltype(auto) operator=(this auto &&self, const RefPtr &other) // NOLINT
   {
-    if (p_ != other.p_) {
-      if (p_)
-        ops::decref(p_);
-      p_ = other.p_;
-      if (p_)
-        ops::incref(p_);
+    if (self.p_ != other.p_) {
+      if (self.p_)
+        ops::decref(self.p_);
+      if ((self.p_ = other.p_))
+        ops::incref(self.p_);
     }
-    return *this;
+    return (self);
   }
-  decltype(auto) operator=(this auto &&self, RefPtr &&other) noexcept
+  decltype(auto) operator=(this auto &&self, RefPtr &&other) noexcept // NOLINT
   {
     if (&self != &other) {
       self.reset();
