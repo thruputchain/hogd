@@ -16,6 +16,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/db.h"
@@ -47,15 +48,29 @@
 
 namespace hogd {
 
+namespace {
+
+static constexpr ContractAddress kAccountAddress =
+    NativeContractTestFramework::make_contract_address(10);
+
+} // namespace
+
 TEST(Scheduler, AddVettedTx)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
   Scheduler scheduler = clients.interface->scheduler();
 
+  HogAge average;
+  memset(&average, 0, sizeof(average));
+  average.address = kAccountAddress;
+  average.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<int128_t>(10));
+  average.average_ages[kHogAgeGroupToSchedule] = 1;
+
+  EXPECT_TRUE(scheduler.write_average_hog_age({average}));
   EXPECT_TRUE(scheduler.add_vetted_tx({txs[0]}));
 }
 

@@ -21,11 +21,11 @@ public:
                              BlockHeight current_block);
   x23::Vec<SignedTransaction> schedule(size_t block_size);
 
-private:
   bool read_average_hog_age(const ContractAddressBatch &addresses,
                             HogAgeBatch &ages);
   bool write_average_hog_age(const HogAgeBatch &ages);
 
+private:
   db_client_t &db_client_;
 
   std::unordered_set<SHA256Hash> tx_hashes_;
