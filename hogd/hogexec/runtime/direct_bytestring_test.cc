@@ -789,17 +789,20 @@ TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
   setup_grant_storage_token(contract_addr, kInitialBalance);
 
   auto tx_block = make_new_per_tx_db_proxy();
-  tx_block.add_delta(make_addrkey(contract_addr, "test"), make_bytestring_delta("value"),
-                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  tx_block.add_delta(make_addrkey(contract_addr, "test"),
+                     make_bytestring_delta("value"),
+                     std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r_block = tx_block.try_push_current_subtransaction();
   ASSERT_TRUE(r_block.has_value());
   ASSERT_TRUE(r_block.value());
   ASSERT_TRUE(tx_block.commit_transaction().has_value());
 
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_addrkey(contract_addr, "test_nonblock"), make_bytestring_delta("value"),
+  tx1.add_delta(make_addrkey(contract_addr, "test_nonblock"),
+                make_bytestring_delta("value"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
-  tx1.add_delta(make_addrkey(contract_addr, "test"), make_bytestring_delta("value_different"),
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_different"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
@@ -811,7 +814,8 @@ TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
 TEST_P(DirectBytestringTest, RollbackAfterConcurrentWriteConflict)
 {
   if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending assertion fix in hogdb block_tx.cc line 179 (rollback path)";
+    GTEST_SKIP() << "Pending assertion fix in hogdb block_tx.cc line 179 "
+                    "(rollback path)";
     return;
   }
 
@@ -821,30 +825,36 @@ TEST_P(DirectBytestringTest, RollbackAfterConcurrentWriteConflict)
   setup_grant_storage_token(contract_addr, kInitialBalance);
   setup_grant_storage_token(reference_addr, kInitialBalance);
 
-  // tx1 stages two subtransactions on the same key: first a shorter value, then a longer value.
+  // tx1 stages two subtransactions on the same key: first a shorter value, then
+  // a longer value.
   auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_addrkey(contract_addr, "test"), make_bytestring_delta("value"),
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
-  tx1.add_delta(make_addrkey(contract_addr, "test"), make_bytestring_delta("value_longer"),
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r1_1 = tx1.try_push_current_subtransaction();
   ASSERT_TRUE(r1_1.has_value());
   ASSERT_TRUE(r1_1.value());
 
-  // tx2 reserves an identical "value_longer" write, so both txs hold the item lock.
+  // tx2 reserves an identical "value_longer" write, so both txs hold the item
+  // lock.
   auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(make_addrkey(contract_addr, "test"), make_bytestring_delta("value_longer"),
+  tx2.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r2 = tx2.try_push_current_subtransaction();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
 
-  // Now tx1 rolls back its most recent subtransaction, reverting to the shorter value.
-  // In HogDB this hits the BlockTX::modify_lock assertion when ref > 1 and storage delta changes.
+  // Now tx1 rolls back its most recent subtransaction, reverting to the shorter
+  // value. In HogDB this hits the BlockTX::modify_lock assertion when ref > 1
+  // and storage delta changes.
   auto pop_res = tx1.pop_subtransactions(1);
   ASSERT_TRUE(pop_res.has_value());
 
@@ -853,7 +863,8 @@ TEST_P(DirectBytestringTest, RollbackAfterConcurrentWriteConflict)
 
   // Reference: single write of the shorter value.
   auto tx_ref = make_new_per_tx_db_proxy();
-  tx_ref.add_delta(make_addrkey(reference_addr, "test"), make_bytestring_delta("value"),
+  tx_ref.add_delta(make_addrkey(reference_addr, "test"),
+                   make_bytestring_delta("value"),
                    std::to_underlying(StorageItemRPCFlags::kStorageNone));
   auto r_ref = tx_ref.try_push_current_subtransaction();
   ASSERT_TRUE(r_ref.has_value());
@@ -867,7 +878,8 @@ TEST_P(DirectBytestringTest, RollbackAfterConcurrentWriteConflict)
 TEST_P(DirectBytestringTest, DeleteThenSetConflict)
 {
   if (GetParam() == TestDB::kHogDB) {
-    GTEST_SKIP() << "Pending assertion fix in hogdb block_tx.cc line 179 (modify_lock under shared lock)";
+    GTEST_SKIP() << "Pending assertion fix in hogdb block_tx.cc line 179 "
+                    "(modify_lock under shared lock)";
     return;
   }
 
@@ -926,7 +938,8 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
   ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
-  check_balances(contract_addr, reference_addr, kInitialBalance, /*eq_ok=*/true);
+  check_balances(contract_addr, reference_addr, kInitialBalance,
+                 /*eq_ok=*/true);
 }
 
 TEST_P(DirectBytestringTest, DeleteMissingKeyNoOp)

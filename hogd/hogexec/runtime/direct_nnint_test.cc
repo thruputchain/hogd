@@ -33,7 +33,8 @@ public:
     return d;
   }
 
-  static auto make_nnint_add_delta(int128_t add) {
+  static auto make_nnint_add_delta(int128_t add)
+  {
     StorageDelta d(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
     d.nnint_add() = to_xdr(add);
     return d;
@@ -53,7 +54,8 @@ TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
 
   // +100
   {
-    tx.add_delta(key, make_nnint_delta(0, 100), std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    tx.add_delta(key, make_nnint_delta(0, 100),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -61,7 +63,8 @@ TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
 
   // +200
   {
-    tx.add_delta(key, make_nnint_delta(0, 200), std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    tx.add_delta(key, make_nnint_delta(0, 200),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -69,7 +72,8 @@ TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
 
   // +300
   {
-    tx.add_delta(key, make_nnint_delta(0, 300), std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    tx.add_delta(key, make_nnint_delta(0, 300),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -89,7 +93,8 @@ TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, ComplementaryReservationsAbortPositiveThenCommitNegative)
+TEST_P(DirectNNIntTest,
+       ComplementaryReservationsAbortPositiveThenCommitNegative)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -117,7 +122,8 @@ TEST_P(DirectNNIntTest, ComplementaryReservationsAbortPositiveThenCommitNegative
     ASSERT_FALSE(r.value());
   }
 
-  // Abort the positive; committing the negative is still a no-op (no reservations held)
+  // Abort the positive; committing the negative is still a no-op
+  // (no reservations held)
   ASSERT_TRUE(tx1.abort_transaction().has_value());
   ASSERT_TRUE(tx2.commit_transaction().has_value());
 
@@ -145,7 +151,8 @@ TEST_P(DirectNNIntTest, ConcurrentPositiveAddsThenAbortOne)
   // tx1: set_add base=0, +200
   auto tx1 = make_new_per_tx_db_proxy();
   {
-    tx1.add_delta(key, make_nnint_delta(0, 200), std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    tx1.add_delta(key, make_nnint_delta(0, 200),
+                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx1.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -154,7 +161,8 @@ TEST_P(DirectNNIntTest, ConcurrentPositiveAddsThenAbortOne)
   // tx2: set_add base=0, +300
   auto tx2 = make_new_per_tx_db_proxy();
   {
-    tx2.add_delta(key, make_nnint_delta(0, 300), std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    tx2.add_delta(key, make_nnint_delta(0, 300),
+                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx2.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(r.value());
@@ -192,7 +200,8 @@ TEST_P(DirectNNIntTest, SetAddDifferentBaseConflict)
     ASSERT_TRUE(r.value());
   }
 
-  // tx2: set_add base=50, +50 (different base should conflict at reservation time)
+  // tx2: set_add base=50, +50 (different base should conflict at
+  // reservation time)
   auto tx2 = make_new_per_tx_db_proxy();
   {
     tx2.add_delta(key, make_nnint_delta(50, 50),
@@ -270,7 +279,8 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
     advance_block();
   }
 
-  // Second tx: -200 then -400; since only the last delta counts, both reservations may succeed.
+  // Second tx: -200 then -400; since only the last delta counts,
+  // both reservations may succeed.
   auto tx = make_new_per_tx_db_proxy();
 
   // -200 (allowed)
@@ -403,7 +413,8 @@ TEST_P(DirectNNIntTest, TwoConcurrentAddsBothCommit)
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNNIntTest,
-                         ::testing::Values(TestDB::kMockInMemory, TestDB::kHogDB),
+                         ::testing::Values(TestDB::kMockInMemory,
+                                           TestDB::kHogDB),
                          test_db_to_string);
 
-} // namespace hogd 
+} // namespace hogd
