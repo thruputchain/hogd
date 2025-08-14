@@ -34,9 +34,7 @@ Mempool::schedulercoord_submit_unvetted(SignedTransactionBatch batch)
   // TODO(jhumphri): Implement vetting logic. For now we just mark all txs as
   // vetted. This vetting logic will include the authentication logic from
   // Geoff's proposal.
-  for (const SignedTransaction &tx : batch) {
-    scheduler_.add_vetted_tx(tx);
-  }
+  CHECK(scheduler_.add_vetted_txs(batch));
   co_return co_await coord_client_.coordscheduler_notify_vetted(batch);
 }
 
@@ -44,34 +42,8 @@ x23::Async<void>
 Mempool::schedulercoord_submit_vetted(ValidatorID validator_id,
                                       SignedTransactionBatch batch)
 {
-  for (const SignedTransaction &tx : batch) {
-    scheduler_.add_vetted_tx(tx);
-  }
+  CHECK(scheduler_.add_vetted_txs(batch));
   co_return;
-}
-
-bool
-Mempool::find_vetted_txs(const Nomination &nomination,
-                         x23::Vec<ProposedTransaction> &ret)
-{
-  CHECK_EQ(nomination.transaction_hashes.size(),
-           nomination.transaction_nominations.size());
-
-  ret.clear();
-  for (size_t i = 0; i < nomination.transaction_hashes.size(); i++) {
-    const SignedTransactionHash &hash = nomination.transaction_hashes[i];
-    const NominatedTransaction &nominated_tx =
-        nomination.transaction_nominations[i];
-
-    auto it = vetted_txs_.find(hash);
-    if (it == vetted_txs_.end()) {
-      return false;
-    }
-    ret.push_back({.signed_tx = it->second,
-                   .nondeterministic_proposal_data =
-                       nominated_tx.nondeterministic_proposal_data});
-  }
-  return true;
 }
 
 x23::Async<bool>
@@ -223,15 +195,9 @@ Mempool::schedulercoord_nominate(DbTip db_tip)
   nomination.transaction_nominations.reserve(kMaxBlockSize);
 
   x23::Vec<SignedTransaction> txs;
-  txs.reserve(kMaxBlockSize);
-  auto it = vetted_txs_.begin();
-  for (size_t i = 0; i < kMaxBlockSize && it != vetted_txs_.end(); i++) {
-    nomination.transaction_hashes.push_back(it->first);
-    txs.push_back(it->second);
-    it++;
-  }
-
-  if (txs.empty()) {
+  std::tie(nomination.transaction_hashes, txs) =
+      scheduler_.schedule(kMaxBlockSize);
+  if (nomination.transaction_hashes.empty()) {
     // There are no vetted txs, so we cannot propose a block.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
@@ -301,8 +267,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   // the nondeterminstic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
-  txs.reserve(nomination.transaction_nominations.size());
-  if (!find_vetted_txs(nomination, txs)) {
+  if (!scheduler_.find_and_remove_vetted_txs(nomination, txs)) {
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
     co_return SchedulerValidationResult(

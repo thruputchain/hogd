@@ -16,31 +16,19 @@
 
 namespace hogd {
 
-namespace {
-
-constexpr ContractAddress kAccountAddress =
-    NativeContractTestFramework::make_contract_address(10);
-
-} // namespace
-
 TEST(Scheduler, ReadAndWriteAge)
 {
-  fib_client_t fib_client(kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
-  Scheduler scheduler = clients.interface->scheduler();
+  Scheduler &scheduler = clients.interface->scheduler();
 
-  HogAge average;
-  memset(&average, 0, sizeof(average));
-  average.address = kAccountAddress;
-  average.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<int128_t>(10));
-  average.average_ages[kHogAgeGroupToSchedule] = 1;
-
-  EXPECT_TRUE(scheduler.write_average_hog_age({average}));
   HogAgeBatch ret;
-  EXPECT_TRUE(scheduler.read_average_hog_age({average.address}, ret));
+  EXPECT_TRUE(
+      scheduler.read_average_hog_age({MempoolTestServer::kAccountAddress},
+                                     ret));
   ASSERT_EQ(ret.size(), 1);
   EXPECT_EQ(ret[0].num_hogs[kHogAgeGroupToSchedule],
             to_xdr(static_cast<int128_t>(10)));
@@ -49,42 +37,57 @@ TEST(Scheduler, ReadAndWriteAge)
 
 TEST(Scheduler, AddVettedTx)
 {
-  fib_client_t fib_client(kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
-  Scheduler scheduler = clients.interface->scheduler();
+  Scheduler &scheduler = clients.interface->scheduler();
 
-  HogAge average;
-  memset(&average, 0, sizeof(average));
-  average.address = kAccountAddress;
-  average.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<int128_t>(10));
-  average.average_ages[kHogAgeGroupToSchedule] = 1;
-
-  EXPECT_TRUE(scheduler.write_average_hog_age({average}));
-  EXPECT_TRUE(scheduler.add_vetted_tx({txs[0]}));
+  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)
 {
-  fib_client_t fib_client(kAccountAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
-  Scheduler scheduler = clients.interface->scheduler();
+  Scheduler &scheduler = clients.interface->scheduler();
 
-  HogAge average;
-  memset(&average, 0, sizeof(average));
-  average.address = kAccountAddress;
-  average.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<int128_t>(10));
-  average.average_ages[kHogAgeGroupToSchedule] = 1;
-
-  EXPECT_TRUE(scheduler.write_average_hog_age({average}));
-  EXPECT_TRUE(scheduler.add_vetted_tx({txs[0]}));
+  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
   // Now add the transaction a second time.
-  EXPECT_TRUE(scheduler.add_vetted_tx({txs[0]}));
+  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+}
+
+TEST(Scheduler, ScheduleSingle)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  EXPECT_TRUE(scheduler.add_vetted_txs({txs[0]}));
+  const auto &[_, scheduled] = scheduler.schedule(/*block_size=*/100);
+  ASSERT_EQ(scheduled.size(), 1);
+  EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
+            MempoolTestServer::kAccountAddress);
+}
+
+TEST(Scheduler, ScheduleEmpty)
+{
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
+  const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
+
+  MempoolTestServer server;
+  Clients clients = create_clients(server);
+  Scheduler &scheduler = clients.interface->scheduler();
+
+  const auto &[_, scheduled] = scheduler.schedule(/*block_size=*/100);
+  EXPECT_TRUE(scheduled.empty());
 }
 
 } // namespace hogd

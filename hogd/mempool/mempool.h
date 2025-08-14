@@ -87,9 +87,6 @@ private:
     return ns.count();
   }
 
-  bool find_vetted_txs(const Nomination &nomination,
-                       x23::Vec<ProposedTransaction> &ret);
-
   x23::Async<bool> create_snapshot(BlockID prev_block_id, BlockID block_id,
                                    BlockExecutionMode /*mode*/);
   x23::Async<void> abandon_snapshot(BlockID block_id);
@@ -114,9 +111,7 @@ private:
   db_client_t db_client_;
   exec_client_t exec_client_;
 
-  // TODO(jhumphri): Make the mempool work with multiple threads. e.g., we will
-  // need to synchronize accesses to [vetted_txs_].
-  std::unordered_map<SHA256Hash, SignedTransaction> vetted_txs_;
+  // TODO(jhumphri): Make the mempool work with multiple threads.
   Scheduler scheduler_;
 
   std::atomic<bool> shutdown_flag_ = false;

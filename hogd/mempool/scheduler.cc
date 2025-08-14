@@ -47,23 +47,30 @@ Scheduler::write_average_hog_age(const HogAgeBatch &ages)
 }
 
 bool
-Scheduler::add_vetted_tx(const SignedTransaction &tx)
+Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
 {
-  if (!tx_hashes_.insert(sha256(tx)).second) {
-    // The transaction is already present in the runqueue.
-    return true;
-  }
+  // TODO(jhumphri): Optimize this with coroutines.
+  for (const SignedTransaction &tx : txs) {
+    SignedTransactionHash tx_hash = sha256(tx);
+    if (tx_hashes_.count(tx_hash)) {
+      // The transaction is already present in the runqueue.
+      return true;
+    }
 
-  HogAgeBatch ages;
-  if (!read_average_hog_age({tx.tx.invocation.invoked_address}, ages)) {
-    return false;
+    HogAgeBatch ages;
+    if (!read_average_hog_age({tx.tx.invocation.invoked_address}, ages)) {
+      return false;
+    }
+    const HogAge &averages = ages[0];
+    // [add_vetted_tx] should only be called when this condition is true.
+    CHECK_LE(tx.tx.invocation.gas_limit,
+             from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]));
+    BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
+
+    TxInfo info{.age = age, .tx_hash = tx_hash, .tx = tx};
+    CHECK(tx_hashes_.insert({tx_hash, info}).second);
+    txs_[age].push_back(info);
   }
-  const HogAge &averages = ages[0];
-  // [add_vetted_tx] should only be called when this condition is true.
-  CHECK_LE(tx.tx.invocation.gas_limit,
-           from_xdr(averages.num_hogs[kHogAgeGroupToSchedule]));
-  BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
-  txs_[age].push_back(tx);
 
   return true;
 }
@@ -147,27 +154,45 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
   return write_average_hog_age({new_averages});
 }
 
-x23::Vec<SignedTransaction>
+void
+Scheduler::add_txs_from_info(const x23::Vec<TxInfo> &info, size_t num,
+                             x23::Vec<SignedTransactionHash> &hashes,
+                             x23::Vec<SignedTransaction> &txs)
+{
+  for (const TxInfo &i : info) {
+    CHECK_EQ(tx_hashes_.count(i.tx_hash), 1);
+    hashes.push_back(i.tx_hash);
+    txs.push_back(i.tx);
+    tx_hashes_.erase(i.tx_hash);
+  }
+}
+
+std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
 Scheduler::schedule(size_t block_size)
 {
-  x23::Vec<SignedTransaction> ret;
+  printf("in here, size is %zu\n", txs_.size());
+  x23::Vec<SignedTransactionHash> hashes;
+  x23::Vec<SignedTransaction> txs;
+
   size_t num_scheduled = 0;
   while (num_scheduled < block_size && !txs_.empty()) {
     const size_t num_remaining = block_size - num_scheduled;
 
-    auto &[average_age, txs] = *txs_.begin();
-    if (txs.size() <= num_remaining) {
-      ret.append(txs.begin(), txs.end());
+    auto &[average_age, info] = *txs_.begin();
+    if (info.size() <= num_remaining) {
+      // [add_txs_from_info] removes the hashes from [tx_hashes_].
+      add_txs_from_info(info, info.size(), hashes, txs);
       CHECK_EQ(txs_.erase(average_age), 1);
-      num_scheduled += txs.size();
+      num_scheduled += info.size();
     }
     else {
-      ret.append(txs.begin(), txs.begin() + num_remaining);
-      txs.erase(txs.begin(), txs.begin() + num_remaining);
+      // [add_txs_from_info] removes the hashes from [tx_hashes_].
+      add_txs_from_info(info, num_remaining, hashes, txs);
+      info.erase(info.begin(), info.begin() + num_remaining);
       num_scheduled += num_remaining;
     }
   }
-  return ret;
+  return {hashes, txs};
 }
 
 } // namespace hogd

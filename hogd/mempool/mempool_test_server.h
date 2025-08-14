@@ -51,7 +51,7 @@ namespace hogd {
 class MempoolTestServer {
 public:
   static constexpr std::string kAddress = "127.0.0.1";
-  static constexpr ContractAddress kContractAddress =
+  static constexpr ContractAddress kAccountAddress =
       NativeContractTestFramework::make_contract_address(3);
 
   MempoolTestServer()
@@ -103,7 +103,7 @@ public:
       }
 
       // Write deployment
-      ret = write_address_wasm_hash(*db_, kContractAddress, contract_hash);
+      ret = write_address_wasm_hash(*db_, kAccountAddress, contract_hash);
       if (!ret) {
         throw std::runtime_error("Failed to write deployment");
       }
@@ -148,11 +148,19 @@ private:
                   int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
 
     // Convert ContractAddress to Address - both are std::array<uint8_t, 32>
-    Address addr(kContractAddress);
+    Address addr(kAccountAddress);
     auto ret = write_address_balance(*db_, addr, kStorageTokenAmount);
     if (!ret) {
       throw std::runtime_error("Failed to grant storage token");
     }
+
+    HogAge average;
+    memset(&average, 0, sizeof(average));
+    average.address = kAccountAddress;
+    average.num_hogs[kHogAgeGroupToSchedule] =
+        to_xdr(static_cast<int128_t>(10));
+    average.average_ages[kHogAgeGroupToSchedule] = 1;
+    EXPECT_TRUE(write_address_average_hog_age(*db_, {average}));
   }
 
   // This is a fake coordinator server that the executor registers itself with
