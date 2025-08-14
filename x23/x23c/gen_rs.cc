@@ -541,7 +541,20 @@ pub enum {} )",
   }
 
   // Export the variants of the enum
-  prtop("pub use {}::*;\n", tname);
+  prtop("\npub use {}::*;\n", tname);
+
+  // generate a TryFrom implementation for the enum
+  prtop("\nimpl TryFrom<i32> for {} {{\n", tname);
+  prtop("    type Error = ();\n");
+  prtop("    fn try_from(value: i32) -> Result<Self, Self::Error> {{\n");
+  prtop("        match value {{\n");
+  for (const auto &cd : e) {
+    prtop("            {} => Ok(Self::{}),\n", cd.val, cd.id);
+  }
+  prtop("            _ => Err(()),\n");
+  prtop("        }}\n");
+  prtop("    }}\n");
+  prtop("}}\n");
 }
 
 void

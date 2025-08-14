@@ -9,7 +9,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
-#include "syscall.hh"
+#include "syscall_error.hh"
 
 namespace hogd {
 

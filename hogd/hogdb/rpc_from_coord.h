@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cassert>
+#include <condition_variable>
+#include <mutex>
+#include <optional>
 
 // generated x23 headers
 #include "db_coord.hh"
@@ -9,6 +12,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/event.h"
 #include "x23/threadpool.h"
