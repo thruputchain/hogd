@@ -332,19 +332,19 @@ GenRs::show_type(const StructBody &s, string const &tname)
 
       array_size = get_opaque_array_size(inner);
       if (array_size) {
-          // This is a newtyped fixed-size array
+        // This is a newtyped fixed-size array
 
-          if (*array_size != "64") {
-            // arrays with size over 32 don't implement Default, so we can't
-            // derive it here
-            derive_traits.emplace_back("Default");
-          }
+        if (*array_size != "64") {
+          // arrays with size over 32 don't implement Default, so we can't
+          // derive it here
+          derive_traits.emplace_back("Default");
+        }
 
-          derive_traits.emplace_back("Copy");
+        derive_traits.emplace_back("Copy");
 
-          needs_serde_imports = true; // for Serialize, Deserialize
-          prtop(
-              "#[cfg_attr(feature = \"serde\", derive(Serialize, Deserialize))]\n");
+        needs_serde_imports = true; // for Serialize, Deserialize
+        prtop("#[cfg_attr(feature = \"serde\", derive(Serialize, "
+              "Deserialize))]\n");
       }
     }
 
