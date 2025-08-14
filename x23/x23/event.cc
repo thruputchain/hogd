@@ -67,13 +67,13 @@ WriteBuffer::service(CoroPoll &cp, BorrowedFd fd,
       cp.write_clear(fd);
       auto res = work.write(fd);
       if (!res) { // write returned error
-        std::println(stderr, "WriteBuffer::service: {}", res.error());
         cp.poison(fd);
         co_return;
       }
       if (!*res) // no data left to write
         break;
-      co_await cp.write_wait(fd);
+      if (Errno err = co_await cp.write_wait(fd))
+        co_return;
     }
   }
 }

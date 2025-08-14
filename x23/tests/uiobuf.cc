@@ -59,3 +59,35 @@ TEST(uiobuf, SimpleAppend)
     EXPECT_TRUE(buf_eq(flatview, v.to_vec()));
   }
 }
+
+TEST(uiobuf, Swap)
+{
+  x23::Buf flat;
+  x23::BufVec v, v2;
+  for (int i = 0; i < 100; ++i) {
+    auto b = random_buf();
+    flat += b;
+    v2.append(b);
+    v.append(std::move(b));
+    ASSERT_TRUE(buf_eq(flat, v.to_vec()));
+  }
+
+  x23::BufView flatview(flat);
+
+  while (!flatview.empty()) {
+    auto sz = std::min(sizegen(rnd), flatview.size());
+
+    x23::BufVec v3;
+    v3.swap(v);
+    v3.trim(sz);
+    v2.swap(v3);
+    v3.swap(v);
+    v.swap(v2);
+
+    EXPECT_TRUE(buf_eq(flatview, v2.to_vec()));
+    v2.trim(sz);
+    flatview = flatview.subspan(sz);
+    EXPECT_TRUE(buf_eq(flatview, v2.to_vec()));
+    EXPECT_TRUE(buf_eq(flatview, v.to_vec()));
+  }
+}

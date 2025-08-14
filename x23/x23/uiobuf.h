@@ -269,7 +269,7 @@ struct BufVec {
       requires requires { append(std::forward<Buf>(buf)); }
   {
     if (empty()) {
-      size_t n = ::write(fd.get(), buf.data(), buf.size());
+      auto n = ::write(fd.get(), buf.data(), buf.size());
       if (n < 0) {
         if (errno != EAGAIN) {
           Errno ret;
