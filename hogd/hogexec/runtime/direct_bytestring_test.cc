@@ -781,6 +781,131 @@ TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
   EXPECT_EQ(bal_int, 0);
 }
 
+TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
+{
+
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto tx_block = make_new_per_tx_db_proxy();
+  tx_block.add_delta(make_addrkey(contract_addr, "test"),
+                     make_bytestring_delta("value"),
+                     std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_block = tx_block.try_push_current_subtransaction();
+  ASSERT_TRUE(r_block.has_value());
+  ASSERT_TRUE(r_block.value());
+  ASSERT_TRUE(tx_block.commit_transaction().has_value());
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test_nonblock"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_different"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_FALSE(r1.value());
+
+  ASSERT_TRUE(tx1.abort_transaction().has_value());
+}
+
+TEST_P(DirectBytestringTest, DeleteThenSetConflict)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Pending assertion fix in hogdb block_tx.cc line 179 "
+                    "(modify_lock under shared lock)";
+    return;
+  }
+
+  auto contract_addr = make_contract_address(0);
+  auto reference_addr = make_contract_address(1);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+  setup_grant_storage_token(reference_addr, kInitialBalance);
+
+  // Prepopulate key
+  {
+    auto tx_init = make_new_per_tx_db_proxy();
+    tx_init.add_delta(make_addrkey(contract_addr, "test"),
+                      make_bytestring_delta("value"),
+                      std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    auto r_init = tx_init.try_push_current_subtransaction();
+    ASSERT_TRUE(r_init.has_value());
+    ASSERT_TRUE(r_init.value());
+    ASSERT_TRUE(tx_init.commit_transaction().has_value());
+    advance_block();
+  }
+
+  // Start conflict scenario: two deletes, then one tries to set
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  // Attempt to set a new value in tx1 while tx2 still holds a lock
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("new_value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1_set = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1_set.has_value());
+  ASSERT_FALSE(r1_set.value()); // cannot upgrade under shared lock in mockdb
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value()); // deletes the key
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+
+  // Reference: just a single delete on another address
+  auto tx_ref = make_new_per_tx_db_proxy();
+  tx_ref.add_delta(make_addrkey(reference_addr, "test"), make_delete_delta(),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_ref = tx_ref.try_push_current_subtransaction();
+  ASSERT_TRUE(r_ref.has_value());
+  // If key absent, delete is treated as no-op but allowed in mockdb path
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
+
+  advance_block();
+  check_balances(contract_addr, reference_addr, kInitialBalance,
+                 /*eq_ok=*/true);
+}
+
+TEST_P(DirectBytestringTest, DeleteMissingKeyNoOp)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Deletion of non-existent key gives an assertion failure";
+    return;
+  }
+
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  // No prior write to this key; deletion should be a no-op.
+  auto tx = make_new_per_tx_db_proxy();
+  tx.add_delta(make_addrkey(contract_addr, "missing_key"), make_delete_delta(),
+               std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r = tx.try_push_current_subtransaction();
+  ASSERT_TRUE(r.has_value());
+  ASSERT_TRUE(r.value());
+  ASSERT_TRUE(tx.commit_transaction().has_value());
+
+  advance_block();
+
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal.has_value());
+  EXPECT_EQ(from_xdr(bal.value().nnint()), kInitialBalance);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,
