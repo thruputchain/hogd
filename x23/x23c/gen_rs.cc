@@ -512,9 +512,10 @@ impl {0} {{
 void
 GenRs::show_type(const EnumBody &e, string const &tname)
 {
+  prtop(R"(#[cfg_attr(feature = "xdrs", derive(XDR, ReadXDR, WriteXDR))])");
+  prtop("\n");
   prtop("{}\n", kDefaultDerives);
   prtop(R"(#[derive(Copy)]
-#[cfg_attr(feature = "xdrs", derive(XDR, ReadXDR, WriteXDR))]
 #[repr(i32)]
 pub enum {} )",
         tname);
@@ -908,17 +909,18 @@ use core::ops::{Deref, DerefMut};
 use std::io::{Read, Write};
 
 #[cfg(feature="xdrs")]
-use ::xdrs::{XDR, ReadXDR, WriteXDR};
-
+use xdrs::*;
 #[cfg(feature="xdrs")]
-use ::xdr_repr::*;
+use xdrs::xdr_repr::*;
 
 )";
 
   gs.process(*defs);
 
+  // xdrs now re-exports xdr_common, so only include that here if not using xdrs
   if (gs.needs_xdr_common_imports) {
     preamble += R"(
+#[cfg(not(feature="xdrs"))]
 use xdr_common::*;
 )";
   }
