@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <print>
 #include <string_view>
 #include <utility>
 
@@ -11,6 +12,8 @@
 #include "types.hh"
 
 namespace hogd {
+  
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 class DirectBytestringTest : public ::testing::TestWithParam<TestDB>,
                              public NativeContractTestFramework {
@@ -39,9 +42,33 @@ public:
     StorageDelta delta(StorageDeltaType::kDeltaTypeDelete);
     return delta;
   }
-};
 
-// NOLINTBEGIN(bugprone-unchecked-optional-access)
+  // check that the two addresses have the same balance,
+  // and that that balance is less than or equal to
+  // the initial balance
+  void check_balances(ContractAddress contract_addr,
+                      ContractAddress reference_addr, int128_t initial_balance,
+                      bool eq_ok = false)
+  {
+    // check that costs are reflected in the balance
+    auto bal = lookup_storage_item_from_db(
+        make_free_native_token_balance_addrkey(contract_addr));
+    auto bal_ref = lookup_storage_item_from_db(
+        make_free_native_token_balance_addrkey(reference_addr));
+    ASSERT_TRUE(bal.has_value());
+    ASSERT_TRUE(bal_ref.has_value());
+    int128_t bal_int = from_xdr(bal.value().nnint());
+    int128_t bal_ref_int = from_xdr(bal_ref.value().nnint());
+
+    EXPECT_EQ(bal_int, bal_ref_int);
+    if (eq_ok) {
+      EXPECT_LE(bal_int, initial_balance);
+    }
+    else {
+      EXPECT_LT(bal_int, initial_balance);
+    }
+  }
+};
 
 TEST_P(DirectBytestringTest, ConcurrentWrites)
 {
@@ -135,18 +162,7 @@ TEST_P(DirectBytestringTest, BytestringStorageCosts)
   ASSERT_TRUE(tx2.commit_transaction().has_value());
 
   advance_block();
-  // check that costs are reflected in the balance
-  auto bal1 = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(contract_addr1));
-  auto bal2 = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(contract_addr2));
-  ASSERT_TRUE(bal1.has_value());
-  ASSERT_TRUE(bal2.has_value());
-  int128_t bal1_int = from_xdr(bal1.value().nnint());
-  int128_t bal2_int = from_xdr(bal2.value().nnint());
-
-  EXPECT_EQ(bal1_int, bal2_int);
-  EXPECT_LT(bal1_int, kInitialBalance);
+  check_balances(contract_addr1, contract_addr2, kInitialBalance);
 }
 
 TEST_P(DirectBytestringTest, RevertStorageCosts)
@@ -197,15 +213,7 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
 
   advance_block();
 
-  auto bal1 = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(contract_addr));
-  ASSERT_TRUE(bal1.has_value());
-  EXPECT_LT(from_xdr(bal1.value().nnint()), 1'000'000'000);
-
-  auto bal2 = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(reference_addr));
-  ASSERT_TRUE(bal2.has_value());
-  EXPECT_EQ(from_xdr(bal2.value().nnint()), from_xdr(bal1.value().nnint()));
+  check_balances(contract_addr, reference_addr, kInitialBalance);
 }
 
 TEST_P(DirectBytestringTest, LengthIncreaseCost)
@@ -264,16 +272,7 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
   ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
-
-  auto bal1 = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(contract_addr));
-  ASSERT_TRUE(bal1.has_value());
-  EXPECT_LT(from_xdr(bal1.value().nnint()), kInitialBalance);
-
-  auto bal2 = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(reference_addr));
-  ASSERT_TRUE(bal2.has_value());
-  EXPECT_EQ(from_xdr(bal2.value().nnint()), from_xdr(bal1.value().nnint()));
+  check_balances(contract_addr, reference_addr, kInitialBalance);
 }
 
 TEST_P(DirectBytestringTest, DecreaseLengthCost)
@@ -331,16 +330,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCost)
   ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
   advance_block();
-
-  auto bal1 = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(contract_addr));
-  ASSERT_TRUE(bal1.has_value());
-  EXPECT_LT(from_xdr(bal1.value().nnint()), kInitialBalance);
-
-  auto bal2 = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(reference_addr));
-  ASSERT_TRUE(bal2.has_value());
-  EXPECT_EQ(from_xdr(bal2.value().nnint()), from_xdr(bal1.value().nnint()));
+  check_balances(contract_addr, reference_addr, kInitialBalance);
 }
 
 TEST_P(DirectBytestringTest, DeletionCost)
@@ -385,6 +375,412 @@ TEST_P(DirectBytestringTest, DeletionCost)
   ASSERT_TRUE(bal1.has_value());
   EXPECT_EQ(from_xdr(bal1.value().nnint()), kInitialBalance);
 }
+
+TEST_P(DirectBytestringTest, TryInvokeWithDelete)
+{
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+
+  auto tx_init = make_new_per_tx_db_proxy();
+  tx_init.add_delta(make_addrkey(contract_addr, "test"),
+                    make_bytestring_delta("value"),
+                    std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_init = tx_init.try_push_current_subtransaction();
+  ASSERT_TRUE(r_init.has_value());
+  ASSERT_TRUE(r_init.value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
+  advance_block();
+
+  // Start the test
+
+  // tx1 deletes the key
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  // tx2 deletes the key
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  // tx1 deletes the key again
+  tx1.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1_1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1_1.has_value());
+  ASSERT_TRUE(r1_1.value());
+
+  // tx2 aborts
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+
+  // tx1 commits
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+
+  advance_block();
+
+  auto bal1 = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+
+  ASSERT_TRUE(bal1.has_value());
+  EXPECT_EQ(from_xdr(bal1.value().nnint()), kInitialBalance);
+}
+
+TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Pending hogdb cost sign fix";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  auto reference_addr = make_contract_address(1);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+  setup_grant_storage_token(reference_addr, kInitialBalance);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_even_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value());
+  ASSERT_TRUE(r3.value());
+
+  ASSERT_TRUE(tx1.pop_subtransactions(1).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+
+  auto tx_ref = make_new_per_tx_db_proxy();
+  tx_ref.add_delta(make_addrkey(reference_addr, "test"),
+                   make_bytestring_delta("value_longer"),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_ref = tx_ref.try_push_current_subtransaction();
+  ASSERT_TRUE(r_ref.has_value());
+  ASSERT_TRUE(r_ref.value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
+
+  advance_block();
+  check_balances(contract_addr, reference_addr, kInitialBalance);
+}
+
+TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Pending hogdb cost sign fix";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  auto reference_addr = make_contract_address(1);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+  setup_grant_storage_token(reference_addr, kInitialBalance);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_even_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value());
+  ASSERT_TRUE(r3.value());
+
+  ASSERT_TRUE(tx1.pop_subtransactions(1).has_value());
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+
+  auto tx_ref = make_new_per_tx_db_proxy();
+  tx_ref.add_delta(make_addrkey(reference_addr, "test"),
+                   make_bytestring_delta("value_longer"),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_ref = tx_ref.try_push_current_subtransaction();
+  ASSERT_TRUE(r_ref.has_value());
+  ASSERT_TRUE(r_ref.value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
+
+  advance_block();
+  check_balances(contract_addr, reference_addr, kInitialBalance);
+}
+
+TEST_P(DirectBytestringTest, TryInvokeWithRegular)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP()
+        << "Pending hogdb cost sign fix and hogdb exclusive lock release";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  auto reference_addr = make_contract_address(1);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+  setup_grant_storage_token(reference_addr, kInitialBalance);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1_1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1_1.has_value());
+  ASSERT_TRUE(r1_1.value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  auto tx_ref = make_new_per_tx_db_proxy();
+  tx_ref.add_delta(make_addrkey(reference_addr, "test"),
+                   make_bytestring_delta("value_longer"),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_ref = tx_ref.try_push_current_subtransaction();
+  ASSERT_TRUE(r_ref.has_value());
+  ASSERT_TRUE(r_ref.value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
+
+  advance_block();
+  check_balances(contract_addr, reference_addr, kInitialBalance);
+}
+
+TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Pending assertion fix in hogdb block_tx.cc line 179";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  auto reference_addr = make_contract_address(1);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+  setup_grant_storage_token(reference_addr, kInitialBalance);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value_longer"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1_1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1_1.has_value());
+  ASSERT_FALSE(r1_1.value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+
+  // reference: the first bytestring write is what commits
+  auto tx_ref = make_new_per_tx_db_proxy();
+  tx_ref.add_delta(make_addrkey(reference_addr, "test"),
+                   make_bytestring_delta("value"),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_ref = tx_ref.try_push_current_subtransaction();
+  ASSERT_TRUE(r_ref.has_value());
+  ASSERT_TRUE(r_ref.value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
+
+  advance_block();
+  check_balances(contract_addr, reference_addr, kInitialBalance);
+}
+
+TEST_P(DirectBytestringTest, TransferKeyCosts)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Pending hogdb cost sign fix";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  auto reference_addr = make_contract_address(1);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+  setup_grant_storage_token(reference_addr, kInitialBalance);
+
+  auto tx_init = make_new_per_tx_db_proxy();
+  tx_init.add_delta(make_addrkey(contract_addr, "test"),
+                    make_bytestring_delta("value"),
+                    std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_init = tx_init.try_push_current_subtransaction();
+  ASSERT_TRUE(r_init.has_value());
+  ASSERT_TRUE(r_init.value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
+
+  auto tx_init_ref = make_new_per_tx_db_proxy();
+  tx_init_ref.add_delta(make_addrkey(reference_addr, "test_new"),
+                        make_bytestring_delta("value"),
+                        std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_init_ref = tx_init_ref.try_push_current_subtransaction();
+  ASSERT_TRUE(r_init_ref.has_value());
+  ASSERT_TRUE(r_init_ref.value());
+  ASSERT_TRUE(tx_init_ref.commit_transaction().has_value());
+  advance_block();
+
+  // start the test
+
+  // tx2: just delete the key
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  // tx1: Creates the new key, then deletes the old one, in one operation
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test_new"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  tx1.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  ASSERT_TRUE(tx2.abort_transaction().has_value());
+
+  advance_block();
+  check_balances(contract_addr, reference_addr, kInitialBalance);
+}
+
+TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
+{
+  if (GetParam() == TestDB::kHogDB) {
+    GTEST_SKIP() << "Pending hogdb cost sign fix";
+    return;
+  }
+  auto contract_addr = make_contract_address(0);
+  auto reference_addr = make_contract_address(1);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(reference_addr, kInitialBalance);
+
+  auto tx_ref_init = make_new_per_tx_db_proxy();
+  tx_ref_init.add_delta(make_addrkey(reference_addr, "test_new"),
+                        make_bytestring_delta("value"),
+                        std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_init = tx_ref_init.try_push_current_subtransaction();
+  ASSERT_TRUE(r_init.has_value());
+  ASSERT_TRUE(r_init.value());
+  ASSERT_TRUE(tx_ref_init.commit_transaction().has_value());
+  advance_block();
+
+  auto ref_bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(reference_addr));
+  ASSERT_TRUE(ref_bal.has_value());
+  int128_t ref_bal_int = from_xdr(ref_bal.value().nnint());
+  EXPECT_LT(ref_bal_int, kInitialBalance);
+  int128_t required_balance = kInitialBalance - ref_bal_int;
+  std::println("required_balance: {}", required_balance);
+  setup_grant_storage_token(contract_addr, required_balance);
+
+  auto tx1 = make_new_per_tx_db_proxy();
+  tx1.add_delta(make_addrkey(contract_addr, "test"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r1 = tx1.try_push_current_subtransaction();
+  ASSERT_TRUE(r1.has_value());
+  ASSERT_TRUE(r1.value());
+
+  ASSERT_TRUE(tx1.commit_transaction().has_value());
+  advance_block();
+  auto initial_bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(initial_bal.has_value());
+  int128_t initial_bal_int = from_xdr(initial_bal.value().nnint());
+  EXPECT_EQ(initial_bal_int, 0);
+
+  // Now the test begins.
+
+  // tx2: just delete the key
+  auto tx2 = make_new_per_tx_db_proxy();
+  tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r2 = tx2.try_push_current_subtransaction();
+  ASSERT_TRUE(r2.has_value());
+  ASSERT_TRUE(r2.value());
+
+  // tx3: create a new key
+  auto tx3 = make_new_per_tx_db_proxy();
+  tx3.add_delta(make_addrkey(contract_addr, "test_new"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3 = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r3.has_value());
+  ASSERT_FALSE(r3.value()); // storage not yet available
+
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+
+  // now storage is available
+  tx3.add_delta(make_addrkey(contract_addr, "test_new"),
+                make_bytestring_delta("value"),
+                std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r3_1 = tx3.try_push_current_subtransaction();
+  ASSERT_TRUE(r3_1.has_value());
+  ASSERT_TRUE(r3_1.value());
+
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
+
+  advance_block();
+  auto bal = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal.has_value());
+  int128_t bal_int = from_xdr(bal.value().nnint());
+  EXPECT_EQ(bal_int, 0);
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,
