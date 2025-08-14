@@ -113,6 +113,7 @@ InvokeTX::release_savepoint(int depth)
               vec.end());
     if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
       vec.back().change = std::move(tmp.change);
+      //TODO(abelay): should this be continue instead of return?
       return;
     }
     vec.push_back(std::move(tmp));
