@@ -500,8 +500,8 @@ def validate_syscall_numbers_in_order(spec_full: dict) -> None:
     if numbers != expected_numbers:
         names = [syscall["name"] for syscall in syscalls_list]
         raise ValueError(
-            "Invalid syscall numbering/order. Syscalls must be defined in strictly "
-            "increasing numerical order starting at 0 with no gaps. "
+            "Invalid syscall numbering/order. Syscalls must be defined in "
+            "strictly increasing numerical order starting at 0 with no gaps."
             f"Expected: {expected_numbers}; Got: {numbers}; Names: {names}"
         )
 
