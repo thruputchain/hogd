@@ -9,6 +9,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/event.h"
 #include "x23/threadpool.h"
@@ -50,6 +51,20 @@ public:
     co_return DbTipResult{
         DbResult::DbResultError}; // TODO(geoff): unimplemented
   }
+
+  static x23::Async<HogAgeResult> dbcoord_get_hog_ages(ContractAddressBatch const & /*unused*/)
+  {
+    co_return HogAgeResult{
+        DbResult::DbResultError}; // TODO(geoff): unimplemented
+  }
+
+  static x23::Async<DbResult>
+  dbcoord_write_hog_ages(HogAgeBatch const & /*unused*/)
+  {
+    co_return DbResult::DbResultError; // TODO(geoff): unimplemented
+  }
+
+
 
   uint16_t port();
 
