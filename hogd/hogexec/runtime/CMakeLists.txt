@@ -51,6 +51,7 @@ add_library(runtime_test_objects OBJECT
   contract_trait_test.cc
   cross_call_tests.cc
   cross_contract_revert_test.cc
+  direct_bytestring_test.cc
   error_handling_test.cc
   execution_mode_test.cc
   fibonacci_test.cc
