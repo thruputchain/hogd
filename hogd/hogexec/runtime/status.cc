@@ -6,7 +6,7 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "x23/format.h"
 
 namespace hogd {

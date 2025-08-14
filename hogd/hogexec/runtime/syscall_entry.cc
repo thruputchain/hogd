@@ -15,8 +15,8 @@
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/syscall_meta.h"
-#include "syscall_error.hh"
 #include "syscall.hh"
+#include "syscall_error.hh"
 
 namespace hogd {
 
