@@ -4,15 +4,18 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 source ${SCRIPT_DIR}/env.sh
 CODE_DIR=hogd
 BUILD_DIR=build
+FIX_FLAG=""
 
 print_usage() {
   printf "usage: scripts/tidy.sh [OPTION]...\n"
   printf -- "-d sets the build directory (default is 'build')\n"
+  printf -- "-f automatically fixes clang tidy errors\n"
 }
 
-while getopts 'd:' flag; do
+while getopts 'd:f' flag; do
   case "${flag}" in
     d) BUILD_DIR="${OPTARG}" ;;
+    f) FIX_FLAG="-fix" ;;
     *) print_usage
        exit 1 ;;
     esac
@@ -28,7 +31,7 @@ CLIPPY_PID=$!
 cd ${ROOT_DIR}
 find ${CODE_DIR} -name '*.h' -o -name '*.cc' | \
 xargs ${CLANG_TIDY} -j"$NPROC" -use-color -p ${ROOT_DIR}/${BUILD_DIR} \
--header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*'
+-header-filter="${ROOT_DIR}/hogd/.*" -quiet -warnings-as-errors='*' ${FIX_FLAG}
 
 if [ $? -ne 0 ]; then
   exit 1

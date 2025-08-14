@@ -53,6 +53,7 @@ public:
 
   x23::Async<HogAgeResult>
   dbcoord_get_hog_ages(const ContractAddressBatch &addresses);
+
   x23::Async<DbResult> dbcoord_write_hog_ages(const HogAgeBatch &ages);
 
   uint16_t port();
