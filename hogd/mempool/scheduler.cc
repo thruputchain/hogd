@@ -49,8 +49,7 @@ Scheduler::add_vetted_tx(const SignedTransaction &tx)
   }
 
   HogAgeBatch ages;
-  if (!read_average_hog_age({ContractAddress({})}, ages)) {
-    printf("yikes\n");
+  if (!read_average_hog_age({tx.tx.invocation.invoked_address}, ages)) {
     return false;
   }
   const HogAge &averages = ages[0];
@@ -64,10 +63,10 @@ Scheduler::add_vetted_tx(const SignedTransaction &tx)
 }
 
 bool
-Scheduler::update_groups(const ContractAddress &account_id)
+Scheduler::update_groups(const ContractAddress &account_address)
 {
   HogAgeBatch ages;
-  if (!read_average_hog_age({ContractAddress({})}, ages)) {
+  if (!read_average_hog_age({account_address}, ages)) {
     return false;
   }
   const HogAge &averages = ages[0];
@@ -113,12 +112,12 @@ Scheduler::update_groups(const ContractAddress &account_id)
 }
 
 bool
-Scheduler::process_received_hogs(const ContractAddress &account_id,
+Scheduler::process_received_hogs(const ContractAddress &account_address,
                                  int128_xdr num_received,
                                  BlockHeight current_block)
 {
   HogAgeBatch ages;
-  if (!read_average_hog_age({ContractAddress({})}, ages)) {
+  if (!read_average_hog_age({account_address}, ages)) {
     return false;
   }
   const HogAge &averages = ages[0];

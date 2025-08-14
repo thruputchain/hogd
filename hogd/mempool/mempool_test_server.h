@@ -202,7 +202,7 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
             Transaction{.origin_id = {},
                         .created = created,
                         .invocation = fib_client.make_invocation<kProgramName>(
-                            UINT64_MAX, kFibonacciN),
+                            /*gas_amount=*/5, kFibonacciN),
                         .contracts_to_deploy = {}}};
     txs.push_back(tx);
   }
