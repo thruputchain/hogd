@@ -33,7 +33,7 @@ WriteBuffer::write(CoroPoll &cp, BorrowedFd fd, Buf buf)
     }
     else {
       if (!res)
-	cp.poison(fd);
+        cp.poison(fd);
       g.unlock();
     }
     return res.error_or(0);
@@ -66,12 +66,13 @@ WriteBuffer::service(CoroPoll &cp, BorrowedFd fd,
     for (;;) {
       cp.write_clear(fd);
       auto res = work.write(fd);
-      if (!res)	{		// write returned error
-	cp.poison(fd);
-	co_return;
+      if (!res) { // write returned error
+        std::println(stderr, "WriteBuffer::service: {}", res.error());
+        cp.poison(fd);
+        co_return;
       }
-      if (!*res)		// no data left to write
-	break;
+      if (!*res) // no data left to write
+        break;
       co_await cp.write_wait(fd);
     }
   }
@@ -154,10 +155,7 @@ CoroPoll::bgwrite(BorrowedFd fd, Buf data)
   auto w = get_writer(fd);
   if (!w)
     return EBADF;
-  Errno err = w->write(*this, fd, std::move(data));
-  if (err)
-    poison(fd);
-  return 0;
+  return w->write(*this, fd, std::move(data));
 }
 
 Async<std::expected<void, Errno>>
