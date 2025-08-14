@@ -331,25 +331,28 @@ GenRs::show_type(const StructBody &s, string const &tname)
       }
 
       array_size = get_opaque_array_size(inner);
+      if (array_size) {
+          // This is a newtyped fixed-size array
 
-      if (!(array_size && *array_size == "64")) {
-        // arrays with size over 32 don't implement Default, so we can't
-        // derive it here
-        derive_traits.emplace_back("Default");
+          if (*array_size != "64") {
+            // arrays with size over 32 don't implement Default, so we can't
+            // derive it here
+            derive_traits.emplace_back("Default");
+          }
+
+          derive_traits.emplace_back("Copy");
+
+          needs_serde_imports = true; // for Serialize, Deserialize
+          prtop(
+              "#[cfg_attr(feature = \"serde\", derive(Serialize, Deserialize))]\n");
       }
-
-      derive_traits.emplace_back("Copy");
     }
+
+    prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
+    prtop("#[cfg_attr(feature = \"spec\", derive(XDR))]\n");
     prtop("{}\n", kDefaultDerives);
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
-    prtop("#[cfg_attr(feature = \"xdrs\", derive(XDR, ReadXDR, WriteXDR))]\n");
-
-    if (s.transparent) {
-      needs_serde_imports = true; // for Serialize, Deserialize
-      prtop(
-          "#[cfg_attr(feature = \"serde\", derive(Serialize, Deserialize))]\n");
-    }
 
     if (s.transparent)
       prtop("#[repr(transparent)]\n");
@@ -512,8 +515,9 @@ impl {0} {{
 void
 GenRs::show_type(const EnumBody &e, string const &tname)
 {
-  prtop(R"(#[cfg_attr(feature = "xdrs", derive(XDR, ReadXDR, WriteXDR))])");
+  prtop(R"(#[cfg_attr(feature = "xdrs", derive(ReadXDR, WriteXDR))])");
   prtop("\n");
+  prtop("#[cfg_attr(feature = \"spec\", derive(XDR))]\n");
   prtop("{}\n", kDefaultDerives);
   prtop(R"(#[derive(Copy)]
 #[repr(i32)]
@@ -610,7 +614,8 @@ GenRs::show_type(const UnionBody &b, string const &tname)
   };
   {
     prtop("{}\n", kDefaultDerives);
-    prtop("#[cfg_attr(feature = \"xdrs\", derive(XDR, ReadXDR, WriteXDR))]\n");
+    prtop("#[cfg_attr(feature = \"xdrs\", derive(ReadXDR, WriteXDR))]\n");
+    prtop("#[cfg_attr(feature = \"spec\", derive(XDR))]\n");
     prtop("#[repr({})]\n", enum_base_type());
     prtop("pub enum {} ", tname);
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -910,7 +915,7 @@ use std::io::{Read, Write};
 
 #[cfg(feature="xdrs")]
 use xdrs::*;
-#[cfg(feature="xdrs")]
+#[cfg(feature="spec")]
 use xdrs::xdr_repr::*;
 
 )";
