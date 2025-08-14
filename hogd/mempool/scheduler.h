@@ -15,8 +15,8 @@ public:
   Scheduler(db_client_t &db_client) : db_client_(db_client) {}
 
   bool add_vetted_tx(const SignedTransaction &tx);
-  bool update_groups(const ContractAddress &account_id);
-  bool process_received_hogs(const ContractAddress &account_id,
+  bool update_groups(const ContractAddress &account_address);
+  bool process_received_hogs(const ContractAddress &account_address,
                              int128_xdr num_received,
                              BlockHeight current_block);
   x23::Vec<SignedTransaction> schedule(size_t block_size);

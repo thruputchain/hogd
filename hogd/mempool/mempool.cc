@@ -16,7 +16,6 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
-#include "hogd/crypto/crypto.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"

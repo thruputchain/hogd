@@ -1,8 +1,14 @@
 #include "scheduler.h"
 
 #include "db_coord.hh"
+#include "hogd/base/log.h"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hogdb/db.h"
+#include "nomination.hh"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/vec.h"
 
 namespace hogd {
 namespace {

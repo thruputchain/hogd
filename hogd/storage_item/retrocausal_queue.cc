@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
-#include <limits>
+#include <limits> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <utility>
 
