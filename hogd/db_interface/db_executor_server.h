@@ -98,7 +98,7 @@ public:
       throw std::runtime_error("Failed to create RPC server");
     }
     rpc_server_ = std::move(*res);
-    server_listener_ = std::jthread([this] {
+    server_listener_ = std::jthread([this]  {
       if (ErrnoStatus<void> ret = rpc_server_->listen();
           !ret && !stopped_.load(std::memory_order_relaxed)) {
         error("Database to executor server listen failed: {}", ret.error());
@@ -109,6 +109,7 @@ public:
   ~RPCDbExecutorServer()
   {
     stopped_.store(true, std::memory_order_relaxed);
+    server_listener_.request_stop();
     rpc_server_->stop();
   }
 

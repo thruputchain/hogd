@@ -3,20 +3,23 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <memory>
+#include <cstdio>
+#include <cstdlib>
+#include <print>
 #include <span>
-#include <string_view>
+#include <stop_token>
+#include <sys/_types/_socklen_t.h>
+#include <sys/socket.h>
 #include <thread>
-#include <utility>
 
 // generated x23 headers
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/log.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
-#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -28,8 +31,9 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
-#include "hogd/rpc/rpc.h"
+#include "x23/cleanup.h"
 #include "x23/serialize.h"
+#include "x23/sockio.h"
 #include "x23/srpc.h"
 
 namespace hogd {
@@ -88,7 +92,7 @@ HogDBExecutorServer::start_server(uint16_t port) {
         socklen_t sslen = sizeof(ss);
         x23::UniqueFd fd{accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
         if (!fd) {
-          std::println(stderr, "accept: {}", Errno{});
+          info("accept error: {}", Errno{});
         }
         else {
           x23::srpc_stream_logged(fd.release())->server(this);

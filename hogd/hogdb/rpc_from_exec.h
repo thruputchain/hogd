@@ -19,6 +19,7 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
@@ -67,8 +68,6 @@ private:
   uint16_t port_number_ = 0;
   std::jthread listen_thread_;
   x23::UniqueFd lfd_;
-  //std::shared_ptr<RPCServer> rpc_server_;
-  //std::jthread rpc_listener_th_;
 
   static RPCError request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,
