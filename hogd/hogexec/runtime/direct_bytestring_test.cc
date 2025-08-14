@@ -12,7 +12,7 @@
 #include "types.hh"
 
 namespace hogd {
-  
+
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 class DirectBytestringTest : public ::testing::TestWithParam<TestDB>,
