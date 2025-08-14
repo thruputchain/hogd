@@ -83,8 +83,10 @@ TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
 
   auto res = lookup_storage_item_from_db(key);
   ASSERT_TRUE(res.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_EQ(res->type(), StorageItemType::kItemTypeNonnegativeInt);
   ASSERT_EQ(from_xdr(res->nnint()), 100);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST_P(DirectNNIntTest, ComplementaryReservationsAbortPositiveThenCommitNegative)
@@ -108,7 +110,7 @@ TEST_P(DirectNNIntTest, ComplementaryReservationsAbortPositiveThenCommitNegative
   // tx2: add-only -100 (in proposal mode this must fail until +200 commits)
   auto tx2 = make_new_per_tx_db_proxy();
   {
-    tx2.add_delta(key, make_nnint_add_delta(int128_t(-100)),
+    tx2.add_delta(key, make_nnint_add_delta(-100),
                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx2.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -127,7 +129,9 @@ TEST_P(DirectNNIntTest, ComplementaryReservationsAbortPositiveThenCommitNegative
   auto bal = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(contract_addr));
   ASSERT_TRUE(bal.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   EXPECT_EQ(from_xdr(bal->nnint()), kInitialBalance);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST_P(DirectNNIntTest, ConcurrentPositiveAddsThenAbortOne)
@@ -164,8 +168,10 @@ TEST_P(DirectNNIntTest, ConcurrentPositiveAddsThenAbortOne)
 
   auto res = lookup_storage_item_from_db(key);
   ASSERT_TRUE(res.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_EQ(res->type(), StorageItemType::kItemTypeNonnegativeInt);
   ASSERT_EQ(from_xdr(res->nnint()), 300);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST_P(DirectNNIntTest, SetAddDifferentBaseConflict)
@@ -213,7 +219,7 @@ TEST_P(DirectNNIntTest, ConcurrentLargeAddsAbortOne)
   // tx1: large +A
   auto tx1 = make_new_per_tx_db_proxy();
   {
-    tx1.add_delta(key, make_nnint_delta(0, int128_t(1) << 60),
+    tx1.add_delta(key, make_nnint_delta(0, (int128_t{1} << 60)),
                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx1.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -223,7 +229,7 @@ TEST_P(DirectNNIntTest, ConcurrentLargeAddsAbortOne)
   // tx2: slightly smaller +B
   auto tx2 = make_new_per_tx_db_proxy();
   {
-    tx2.add_delta(key, make_nnint_delta(0, (int128_t(1) << 60) - 5),
+    tx2.add_delta(key, make_nnint_delta(0, (int128_t{1} << 60) - 5),
                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx2.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -238,8 +244,10 @@ TEST_P(DirectNNIntTest, ConcurrentLargeAddsAbortOne)
 
   auto res = lookup_storage_item_from_db(key);
   ASSERT_TRUE(res.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_EQ(res->type(), StorageItemType::kItemTypeNonnegativeInt);
-  ASSERT_EQ(from_xdr(res->nnint()), (int128_t(1) << 60));
+  ASSERT_EQ(from_xdr(res->nnint()), (int128_t{1} << 60));
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
@@ -268,7 +276,7 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
   // -200 (allowed)
   {
     StorageDelta d(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
-    d.nnint_add() = to_xdr(int128_t(-200));
+    d.nnint_add() = to_xdr(int128_t{-200});
     tx.add_delta(key, d, std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -278,7 +286,7 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
   // -400 (updates last delta; allowed relative to base 500)
   {
     StorageDelta d(StorageDeltaType::kDeltaTypeNonnegativeIntAdd);
-    d.nnint_add() = to_xdr(int128_t(-400));
+    d.nnint_add() = to_xdr(int128_t{-400});
     tx.add_delta(key, d, std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -293,8 +301,10 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
 
   auto res = lookup_storage_item_from_db(key);
   ASSERT_TRUE(res.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_EQ(res->type(), StorageItemType::kItemTypeNonnegativeInt);
   ASSERT_EQ(from_xdr(res->nnint()), 500);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
@@ -305,13 +315,13 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
   setup_grant_storage_token(contract_addr, kInitialBalance);
   setup_grant_storage_token(reference_addr, kInitialBalance);
 
-  auto keyA = make_addrkey(contract_addr, "nn_keyA");
-  auto keyB = make_addrkey(contract_addr, "nn_keyB");
+  auto key_a = make_addrkey(contract_addr, "nn_keyA");
+  auto key_b = make_addrkey(contract_addr, "nn_keyB");
 
   // On test address: create A (commit), create B (abort)
   auto tx1 = make_new_per_tx_db_proxy();
   {
-    tx1.add_delta(keyA, make_nnint_delta(0, 1),
+    tx1.add_delta(key_a, make_nnint_delta(0, 1),
                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx1.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -319,7 +329,7 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
   }
   auto tx2 = make_new_per_tx_db_proxy();
   {
-    tx2.add_delta(keyB, make_nnint_delta(0, 2),
+    tx2.add_delta(key_b, make_nnint_delta(0, 2),
                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx2.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -329,10 +339,10 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
   ASSERT_TRUE(tx1.commit_transaction().has_value());
 
   // On reference address: only create A
-  auto refA = make_addrkey(reference_addr, "nn_keyA");
+  auto ref_a = make_addrkey(reference_addr, "nn_keyA");
   auto tx_ref = make_new_per_tx_db_proxy();
   {
-    tx_ref.add_delta(refA, make_nnint_delta(0, 1),
+    tx_ref.add_delta(ref_a, make_nnint_delta(0, 1),
                      std::to_underlying(StorageItemRPCFlags::kStorageNone));
     auto r = tx_ref.try_push_current_subtransaction();
     ASSERT_TRUE(r.has_value());
@@ -348,7 +358,9 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
       make_free_native_token_balance_addrkey(reference_addr));
   ASSERT_TRUE(bal_test.has_value());
   ASSERT_TRUE(bal_ref.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_EQ(from_xdr(bal_test->nnint()), from_xdr(bal_ref->nnint()));
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 TEST_P(DirectNNIntTest, TwoConcurrentAddsBothCommit)
@@ -384,8 +396,10 @@ TEST_P(DirectNNIntTest, TwoConcurrentAddsBothCommit)
 
   auto res = lookup_storage_item_from_db(key);
   ASSERT_TRUE(res.has_value());
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
   ASSERT_EQ(res->type(), StorageItemType::kItemTypeNonnegativeInt);
   ASSERT_EQ(from_xdr(res->nnint()), 400);
+  // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNNIntTest,
