@@ -200,172 +200,173 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
   EXPECT_EQ(from_xdr(bal2.value().nnint()), from_xdr(bal1.value().nnint()));
 }
 
-TEST_P(DirectBytestringTest, LengthIncreaseCost) {
-    auto contract_addr = make_contract_address(0);
-    auto reference_addr = make_contract_address(1);
-    constexpr static int128_t kInitialBalance = 1'000'000'000;
-    setup_grant_storage_token(contract_addr, kInitialBalance);
-    setup_grant_storage_token(reference_addr, kInitialBalance);
+TEST_P(DirectBytestringTest, LengthIncreaseCost)
+{
+  auto contract_addr = make_contract_address(0);
+  auto reference_addr = make_contract_address(1);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+  setup_grant_storage_token(reference_addr, kInitialBalance);
 
-    auto tx_init = make_new_per_tx_db_proxy();
-    tx_init.add_delta(make_addrkey(contract_addr, "test"),
-                  make_bytestring_delta("value"),
-                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
-    auto r_init = tx_init.try_push_current_subtransaction();
-    ASSERT_TRUE(r_init.has_value());
-    ASSERT_TRUE(r_init.value());
+  auto tx_init = make_new_per_tx_db_proxy();
+  tx_init.add_delta(make_addrkey(contract_addr, "test"),
+                    make_bytestring_delta("value"),
+                    std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_init = tx_init.try_push_current_subtransaction();
+  ASSERT_TRUE(r_init.has_value());
+  ASSERT_TRUE(r_init.value());
 
-    ASSERT_TRUE(tx_init.commit_transaction().has_value());
-    advance_block();
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
+  advance_block();
 
-    // Test begins:
-    // Create a bytestring of longer length, which costs more.
-    // Three txs create this string, but the first and the third revert.
+  // Test begins:
+  // Create a bytestring of longer length, which costs more.
+  // Three txs create this string, but the first and the third revert.
 
-    auto make_test_call = [&]() {
-        auto tx = make_new_per_tx_db_proxy();
-        tx.add_delta(make_addrkey(contract_addr, "test"),
-                  make_bytestring_delta("much_longer_value"),
-                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
-        auto r = tx.try_push_current_subtransaction();
-        EXPECT_TRUE(r.has_value());
-        EXPECT_TRUE(r.value());
-        return tx;
-    };
+  auto make_test_call = [&]() {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_addrkey(contract_addr, "test"),
+                 make_bytestring_delta("much_longer_value"),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    auto r = tx.try_push_current_subtransaction();
+    EXPECT_TRUE(r.has_value());
+    EXPECT_TRUE(r.value());
+    return tx;
+  };
 
-    auto tx1 = make_test_call();
-    auto tx2 = make_test_call();
-    auto tx3 = make_test_call();
-    ASSERT_TRUE(tx1.abort_transaction().has_value());
-    ASSERT_TRUE(tx2.commit_transaction().has_value());
-    ASSERT_TRUE(tx3.abort_transaction().has_value());
+  auto tx1 = make_test_call();
+  auto tx2 = make_test_call();
+  auto tx3 = make_test_call();
+  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.abort_transaction().has_value());
 
+  // reference address
+  auto tx_ref = make_new_per_tx_db_proxy();
+  tx_ref.add_delta(make_addrkey(reference_addr, "test"),
+                   make_bytestring_delta("much_longer_value"),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_ref = tx_ref.try_push_current_subtransaction();
+  ASSERT_TRUE(r_ref.has_value());
+  ASSERT_TRUE(r_ref.value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
-    // reference address
-    auto tx_ref = make_new_per_tx_db_proxy();
-    tx_ref.add_delta(make_addrkey(reference_addr, "test"),
-                  make_bytestring_delta("much_longer_value"),
-                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
-    auto r_ref = tx_ref.try_push_current_subtransaction();
-    ASSERT_TRUE(r_ref.has_value());
-    ASSERT_TRUE(r_ref.value());
-    ASSERT_TRUE(tx_ref.commit_transaction().has_value());
+  advance_block();
 
-    advance_block();
+  auto bal1 = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal1.has_value());
+  EXPECT_LT(from_xdr(bal1.value().nnint()), kInitialBalance);
 
-    auto bal1 = lookup_storage_item_from_db(
-        make_free_native_token_balance_addrkey(contract_addr));
-    ASSERT_TRUE(bal1.has_value());
-    EXPECT_LT(from_xdr(bal1.value().nnint()), kInitialBalance);
-
-    auto bal2 = lookup_storage_item_from_db(
-        make_free_native_token_balance_addrkey(reference_addr));
-    ASSERT_TRUE(bal2.has_value());
-    EXPECT_EQ(from_xdr(bal2.value().nnint()), from_xdr(bal1.value().nnint()));
+  auto bal2 = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(reference_addr));
+  ASSERT_TRUE(bal2.has_value());
+  EXPECT_EQ(from_xdr(bal2.value().nnint()), from_xdr(bal1.value().nnint()));
 }
 
-TEST_P(DirectBytestringTest, DecreaseLengthCost) {
-    auto contract_addr = make_contract_address(0);
-    auto reference_addr = make_contract_address(1);
-    constexpr static int128_t kInitialBalance = 1'000'000'000;
-    setup_grant_storage_token(contract_addr, kInitialBalance);
-    setup_grant_storage_token(reference_addr, kInitialBalance);
+TEST_P(DirectBytestringTest, DecreaseLengthCost)
+{
+  auto contract_addr = make_contract_address(0);
+  auto reference_addr = make_contract_address(1);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
+  setup_grant_storage_token(reference_addr, kInitialBalance);
 
-    auto tx_init = make_new_per_tx_db_proxy();
-    tx_init.add_delta(make_addrkey(contract_addr, "test"),
-                  make_bytestring_delta("long_initial_value"),
-                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
-    auto r_init = tx_init.try_push_current_subtransaction();
-    ASSERT_TRUE(r_init.has_value());
-    ASSERT_TRUE(r_init.value());
-    ASSERT_TRUE(tx_init.commit_transaction().has_value());
-    advance_block();
+  auto tx_init = make_new_per_tx_db_proxy();
+  tx_init.add_delta(make_addrkey(contract_addr, "test"),
+                    make_bytestring_delta("long_initial_value"),
+                    std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_init = tx_init.try_push_current_subtransaction();
+  ASSERT_TRUE(r_init.has_value());
+  ASSERT_TRUE(r_init.value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
+  advance_block();
 
-    // Test begins:
-    // Create a bytestring of shorter length, which costs less.
-    // Three txs create this string, but the first and the third revert.
+  // Test begins:
+  // Create a bytestring of shorter length, which costs less.
+  // Three txs create this string, but the first and the third revert.
 
-    auto make_test_call = [&]() {
-        auto tx = make_new_per_tx_db_proxy();
-        tx.add_delta(make_addrkey(contract_addr, "test"),
-                  make_bytestring_delta("v"), // short value
-                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
-        auto r = tx.try_push_current_subtransaction();
-        EXPECT_TRUE(r.has_value());
-        return tx;
-    };
+  auto make_test_call = [&]() {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_addrkey(contract_addr, "test"),
+                 make_bytestring_delta("v"), // short value
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    auto r = tx.try_push_current_subtransaction();
+    EXPECT_TRUE(r.has_value());
+    return tx;
+  };
 
-    auto tx1 = make_test_call();
-    auto tx2 = make_test_call();
-    auto tx3 = make_test_call();
-    ASSERT_TRUE(tx1.abort_transaction().has_value());
-    ASSERT_TRUE(tx2.commit_transaction().has_value());
-    ASSERT_TRUE(tx3.abort_transaction().has_value());
+  auto tx1 = make_test_call();
+  auto tx2 = make_test_call();
+  auto tx3 = make_test_call();
+  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.abort_transaction().has_value());
 
-    // reference address
-    auto tx_ref = make_new_per_tx_db_proxy();
-    tx_ref.add_delta(make_addrkey(reference_addr, "test"),
-                  make_bytestring_delta("v"),
-                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
-    auto r_ref = tx_ref.try_push_current_subtransaction();
-    ASSERT_TRUE(r_ref.has_value());
-    ASSERT_TRUE(r_ref.value());
-    ASSERT_TRUE(tx_ref.commit_transaction().has_value());
+  // reference address
+  auto tx_ref = make_new_per_tx_db_proxy();
+  tx_ref.add_delta(make_addrkey(reference_addr, "test"),
+                   make_bytestring_delta("v"),
+                   std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_ref = tx_ref.try_push_current_subtransaction();
+  ASSERT_TRUE(r_ref.has_value());
+  ASSERT_TRUE(r_ref.value());
+  ASSERT_TRUE(tx_ref.commit_transaction().has_value());
 
-    advance_block();
+  advance_block();
 
-    auto bal1 = lookup_storage_item_from_db(
-        make_free_native_token_balance_addrkey(contract_addr));
-    ASSERT_TRUE(bal1.has_value());
-    EXPECT_LT(from_xdr(bal1.value().nnint()), kInitialBalance);
+  auto bal1 = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+  ASSERT_TRUE(bal1.has_value());
+  EXPECT_LT(from_xdr(bal1.value().nnint()), kInitialBalance);
 
-    auto bal2 = lookup_storage_item_from_db(
-        make_free_native_token_balance_addrkey(reference_addr));
-    ASSERT_TRUE(bal2.has_value());
-    EXPECT_EQ(from_xdr(bal2.value().nnint()), from_xdr(bal1.value().nnint()));
+  auto bal2 = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(reference_addr));
+  ASSERT_TRUE(bal2.has_value());
+  EXPECT_EQ(from_xdr(bal2.value().nnint()), from_xdr(bal1.value().nnint()));
 }
 
-TEST_P(DirectBytestringTest, DeletionCost) {
-    auto contract_addr = make_contract_address(0);
-    constexpr static int128_t kInitialBalance = 1'000'000'000;
-    setup_grant_storage_token(contract_addr, kInitialBalance);
+TEST_P(DirectBytestringTest, DeletionCost)
+{
+  auto contract_addr = make_contract_address(0);
+  constexpr static int128_t kInitialBalance = 1'000'000'000;
+  setup_grant_storage_token(contract_addr, kInitialBalance);
 
-    auto tx_init = make_new_per_tx_db_proxy();
-    tx_init.add_delta(make_addrkey(contract_addr, "test"),
-                  make_bytestring_delta("value"),
-                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
-    auto r_init = tx_init.try_push_current_subtransaction();
-    ASSERT_TRUE(r_init.has_value());
-    ASSERT_TRUE(r_init.value());
-    ASSERT_TRUE(tx_init.commit_transaction().has_value());
-    advance_block();
-    
-    // Test begins:
-    // Delete the bytestring
-    auto make_test_call = [&]() {
-        auto tx = make_new_per_tx_db_proxy();
-        tx.add_delta(make_addrkey(contract_addr, "test"),
-                  make_delete_delta(),
-                  std::to_underlying(StorageItemRPCFlags::kStorageNone));
-        auto r = tx.try_push_current_subtransaction();
-        EXPECT_TRUE(r.has_value());
-        return tx;
-    };
+  auto tx_init = make_new_per_tx_db_proxy();
+  tx_init.add_delta(make_addrkey(contract_addr, "test"),
+                    make_bytestring_delta("value"),
+                    std::to_underlying(StorageItemRPCFlags::kStorageNone));
+  auto r_init = tx_init.try_push_current_subtransaction();
+  ASSERT_TRUE(r_init.has_value());
+  ASSERT_TRUE(r_init.value());
+  ASSERT_TRUE(tx_init.commit_transaction().has_value());
+  advance_block();
 
-    auto tx1 = make_test_call();
-    auto tx2 = make_test_call();
-    auto tx3 = make_test_call();
-    ASSERT_TRUE(tx1.abort_transaction().has_value());
-    ASSERT_TRUE(tx2.commit_transaction().has_value());
-    ASSERT_TRUE(tx3.commit_transaction().has_value());
+  // Test begins:
+  // Delete the bytestring
+  auto make_test_call = [&]() {
+    auto tx = make_new_per_tx_db_proxy();
+    tx.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
+                 std::to_underlying(StorageItemRPCFlags::kStorageNone));
+    auto r = tx.try_push_current_subtransaction();
+    EXPECT_TRUE(r.has_value());
+    return tx;
+  };
 
-    advance_block();
+  auto tx1 = make_test_call();
+  auto tx2 = make_test_call();
+  auto tx3 = make_test_call();
+  ASSERT_TRUE(tx1.abort_transaction().has_value());
+  ASSERT_TRUE(tx2.commit_transaction().has_value());
+  ASSERT_TRUE(tx3.commit_transaction().has_value());
 
-    auto bal1 = lookup_storage_item_from_db(
-        make_free_native_token_balance_addrkey(contract_addr));
+  advance_block();
 
-    ASSERT_TRUE(bal1.has_value());
-    EXPECT_EQ(from_xdr(bal1.value().nnint()), kInitialBalance);
+  auto bal1 = lookup_storage_item_from_db(
+      make_free_native_token_balance_addrkey(contract_addr));
+
+  ASSERT_TRUE(bal1.has_value());
+  EXPECT_EQ(from_xdr(bal1.value().nnint()), kInitialBalance);
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
