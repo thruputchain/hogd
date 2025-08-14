@@ -299,6 +299,13 @@ public:
     return AddressAndKey{.address = address, .key = std::move(key)};
   }
 
+  static AddressAndKey
+  make_free_native_token_balance_addrkey(ContractAddress const &address)
+  {
+    StorageKey key(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+    return AddressAndKey{.address = address, .key = std::move(key)};
+  }
+
   static Bytestring make_bytestring(std::string_view str)
   {
     Bytestring bytestring;
@@ -320,6 +327,13 @@ public:
     return std::visit(
         [&](auto &db_wrapper) { return db_wrapper.get_default_cost_model(); },
         db_wrapper_);
+  }
+
+  PerTransactionDatabaseProxy make_new_per_tx_db_proxy()
+  {
+    assert(db_proxy_);
+    return PerTransactionDatabaseProxy(*db_proxy_, block_number_,
+                                       allocate_txid());
   }
 
 private:
@@ -349,12 +363,6 @@ private:
   }
 
   TransactionID allocate_txid() { return next_tx_id_++; }
-  PerTransactionDatabaseProxy make_new_per_tx_db_proxy()
-  {
-    assert(db_proxy_);
-    return PerTransactionDatabaseProxy(*db_proxy_, block_number_,
-                                       allocate_txid());
-  }
 
   TransactionID next_tx_id_ = 0;
   BlockID block_number_ = 0;

@@ -31,6 +31,7 @@
 #define SLOC_PARM0 std::source_location sloc = std::source_location::current()
 #define SLOC_PARM , SLOC_PARM0
 #define SLOC_VAR sloc
+#define SLOC_COMMA_VAR , SLOC_VAR
 
 namespace x23 {
 
@@ -156,5 +157,6 @@ inline CoroTrace corotrace;
 #define SLOC_ARG0
 #define SLOC_ARG
 #define SLOC_VAR
+#define SLOC_COMMA_VAR
 
 #endif // !X23_CORO_TRACE

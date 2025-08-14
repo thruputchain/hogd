@@ -19,6 +19,7 @@ add_xdr(
 	../../protocol/transaction.x
 	../../protocol/types.x
 	../../protocol/retrocausal_queue.x
+	../../protocol/syscall_error.x
 	syscall.x 
 	syscall_args.x
 )

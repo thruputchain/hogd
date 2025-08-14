@@ -4,6 +4,8 @@
 
 #include <string_view>
 
+#include <sys/un.h>
+
 #include <x23/err.h>
 #include <x23/fileio.h>
 
@@ -40,6 +42,22 @@ tcplisten(std::uint16_t port, int backlog = 5)
   auto fd = stcplisten(port, backlog);
   set_nonblock(fd);
   return fd;
+}
+
+constexpr socklen_t
+sockaddr_len(const sockaddr_storage &ss)
+{
+  switch (ss.ss_family) {
+  case AF_INET:
+    return sizeof(sockaddr_in);
+  case AF_INET6:
+    return sizeof(sockaddr_in6);
+  case AF_UNIX:
+    static_assert(sizeof(sockaddr_un) <= sizeof(sockaddr_storage));
+    return sizeof(sockaddr_un);
+  default:
+    return 0;
+  }
 }
 
 // Create a TCP connection.  You can make bind the socket or make the

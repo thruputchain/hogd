@@ -90,18 +90,8 @@ tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
     Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
   if (prep_fd)
     prep_fd(fd.get());
-  size_t slen = sizeof(ss);
-  #if __APPLE__
-  if (ss.ss_family == AF_INET) {
-    slen = sizeof(sockaddr_in);
-  } else {
-    assert(ss.ss_family == AF_INET6);
-    slen = sizeof(sockaddr_in6);
-  }
-  #endif
-
-  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss), slen) ==
-      -1)
+  if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss),
+              sockaddr_len(ss)) == -1)
     Errno{}.raise("connect({})", HostPort(ss));
   return fd;
 }

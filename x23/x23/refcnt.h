@@ -44,13 +44,13 @@ public:
   }
 
   RefPtr(std::nullptr_t) noexcept : p_(nullptr) {}
-  RefPtr(const RefPtr &other) : RefPtr(*other) {}
+  RefPtr(const RefPtr &other) : p_(other.p_) { ops::incref(p_); }
   RefPtr(RefPtr &&other) noexcept : p_(std::exchange(other.p_, nullptr)) {}
   ~RefPtr() { reset(); }
-  RefPtr &operator=(std::nullptr_t)
+  decltype(auto) operator=(this auto &&self, std::nullptr_t) // NOLINT
   {
-    reset();
-    return *this;
+    self.reset();
+    return (self);
   }
   decltype(auto) operator=(this auto &&self, const RefPtr &other) // NOLINT
   {

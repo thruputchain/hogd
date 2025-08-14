@@ -590,8 +590,8 @@ private:
 //       return get_record(fd);
 //   }
 template<typename R>
-Async<R>
-async_return(R &&r)
+Async<std::decay_t<R>>
+async_return(R &&r) noexcept
 {
   co_return std::forward<R>(r);
 }

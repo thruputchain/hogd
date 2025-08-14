@@ -8,6 +8,7 @@
 #include "hogd/db_interface/block_manager.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/event.h"
 #include "x23/threadpool.h"
@@ -53,6 +54,17 @@ public:
   {
     co_return DbTipResult{
         DbResult::DbResultError}; // TODO(geoff): unimplemented
+  }
+
+  static x23::Async<HogAgeResult>
+  dbcoord_get_hog_ages(const ContractAddressBatch &addresses)
+  {
+    co_return HogAgeResult(DbResult::DbResultError);
+  }
+
+  static x23::Async<DbResult> dbcoord_write_hog_ages(const HogAgeBatch &ages)
+  {
+    co_return DbResult::DbResultError;
   }
 
 private:
