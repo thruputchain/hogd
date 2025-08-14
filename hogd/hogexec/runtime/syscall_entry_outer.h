@@ -24,6 +24,7 @@
 #include "hogd/hogexec/runtime/syscall_meta.h"
 #include "hogd/hogexec/runtime/syscall_types.h"
 #include "syscall.hh"
+#include "syscall_error.hh"
 #include "syscall_args.hh"
 #include "types.hh"
 #include "x23/format.h"

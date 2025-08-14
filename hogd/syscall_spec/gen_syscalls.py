@@ -437,7 +437,6 @@ union SyscallOutput switch(SyscallNo syscall) {{
 def gen_syscall_x(spec_full: dict) -> str:
     spec = spec_full["syscalls"]
     syscalls: dict[int, str] = {}
-    errors: dict[int, dict] = {}
     for syscall in spec:
         syscalls[syscall["number"]] = syscall["name"]
 
@@ -446,18 +445,6 @@ def gen_syscall_x(spec_full: dict) -> str:
     for i in range(0, len(syscalls)):
         name = syscalls[i]
         enumdecls += f"    k{name} = {i},\n"
-
-    error_spec = spec_full["errors"]
-
-    for error in error_spec:
-        errors[error["number"]] = error
-
-    error_enumdecls = ""
-
-    for num in errors.keys():
-        name = errors[num]["name"]
-        docstring = errors[num]["doc"]
-        error_enumdecls += f"\n    // {docstring}\n    k{name} = {num},\n"
 
     return f"""// clang-format off
 %// *** Generated Code  ***
@@ -472,8 +459,6 @@ enum SyscallNo {{
 {enumdecls}}};
 
 const kSyscallCount = {len(syscalls)};
-
-enum SyscallErrorCode {{{error_enumdecls}}};
 
 }} // namespace hogd
 """
@@ -506,6 +491,19 @@ namespace hogd {{
 
 {joined}
 }}"""
+
+
+def validate_syscall_numbers_in_order(spec_full: dict) -> None:
+    syscalls_list = spec_full["syscalls"]
+    numbers = [syscall["number"] for syscall in syscalls_list]
+    expected_numbers = list(range(len(numbers)))
+    if numbers != expected_numbers:
+        names = [syscall["name"] for syscall in syscalls_list]
+        raise ValueError(
+            "Invalid syscall numbering/order. Syscalls must be defined in strictly "
+            "increasing numerical order starting at 0 with no gaps. "
+            f"Expected: {expected_numbers}; Got: {numbers}; Names: {names}"
+        )
 
 
 parser = argparse.ArgumentParser(description="syscall generator")
@@ -546,6 +544,9 @@ args = parser.parse_args()
 
 spec_full = yaml.load(open(args.syscall_yaml, 'r').read(), Loader=Loader)
 spec = spec_full["syscalls"]
+
+# Validate syscall numbering and order early to provide a clear error message
+validate_syscall_numbers_in_order(spec_full)
 
 cpp_to_rust_typenames = load_cpp_to_rust_map(spec_full)
 cpp_to_xdr_typenames = load_cpp_to_xdr_map(spec_full)
