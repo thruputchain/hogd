@@ -3,7 +3,7 @@
 #include <cassert>
 #include <chrono>
 #include <format>
-#include <limits>
+#include <limits> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <optional>
 #include <stdexcept>
