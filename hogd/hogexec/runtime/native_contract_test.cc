@@ -26,7 +26,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/hogexec/runtime/test_util/block_snapshot_server.h"
 #include "storage_item.hh"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 

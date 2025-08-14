@@ -13,7 +13,7 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "types.hh"
 
 namespace hogd {

@@ -20,7 +20,7 @@
 #include "hogd/hogexec/runtime/syscall_inner.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 

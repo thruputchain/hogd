@@ -12,7 +12,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
-#include "syscall.hh"
+#include "syscall_error.hh"
 
 namespace hogd {
 
