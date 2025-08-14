@@ -9,7 +9,7 @@ extern "C" {
 #include <cassert>
 #include <condition_variable>
 #include <functional>
-#include <limits>
+#include <limits> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <mutex>
 #include <utility>
