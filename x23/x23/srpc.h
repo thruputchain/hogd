@@ -326,8 +326,8 @@ template<typename Logger = RpcNoLogger> struct SRpcStream : public SRpcFd {
           }
           else {
             deserialize(&ret.value(), res);
-	    logger_.template log_client<ProcMeta>(*msg, ret.value());
-	  }
+            logger_.template log_client<ProcMeta>(*msg, ret.value());
+          }
         } catch (XdrBadInput &e) {
           if (logging)
             logger_.template log_client<ProcMeta>(

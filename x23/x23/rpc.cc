@@ -103,9 +103,9 @@ RpcStreamImpl::reader(SLOC_ARG0)
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
       if (RpcService *s = srvmap_.lookup(msg, &res))
-	cp_->bgwrite(fd_, co_await s->serve(msg, b.subspan(hdrbytes)));
+        cp_->bgwrite(fd_, co_await s->serve(msg, b.subspan(hdrbytes)));
       else
-	send_msg(res);
+        send_msg(res);
     }
   }
 }
