@@ -7,6 +7,8 @@ add_library(x23
   corosync.cc
   corosync.h
   corotrace.h
+  cpumap.cc
+  cpumap.h
   err.h
   event.cc
   event.h

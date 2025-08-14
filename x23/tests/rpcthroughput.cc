@@ -50,7 +50,6 @@ struct Listener : DestroyInhibit {
   CpTp::Vec &cps_;
   UniqueFd lfd_;
   sockaddr_storage addr_{};
-  std::atomic_int count_{};
 
   Listener(CpTp::Vec &cps, int port = 0)
     : cps_(cps), lfd_(tcplisten(port, opt_connections + 5))
@@ -86,11 +85,7 @@ struct Server {
   RefPtr<Listener> l_;
   Server(RefPtr<Listener> l) : l_(std::move(l)) {}
 
-  Async<void> null()
-  {
-    l_->count_++;
-    co_return;
-  }
+  Async<void> null() { co_return; }
 
   Async<Data> echo(Data arg) { co_return arg; }
 };

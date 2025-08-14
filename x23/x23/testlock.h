@@ -128,12 +128,12 @@ class SharedLock : public TestLock {
     }
   };
 
-  size_t nshared() const { return map_.nbuckets_; }
+  size_t nshared() const { return map_.nbuckets(); }
 
 public:
   const CpuMap &map_;
 
-  explicit SharedLock(const CpuMap &map = ThreadPool::llc_map)
+  explicit SharedLock(const CpuMap &map = *llc_map)
     : map_(map), inhibitors_(std::make_unique<Inhibitor[]>(nshared()))
   {
     assert(nshared() > 0);
