@@ -15,9 +15,9 @@
 #include "hogd/db_interface/block_state.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "types.hh"
 
 namespace hogd {

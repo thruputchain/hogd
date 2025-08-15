@@ -193,7 +193,7 @@ private:
 // contracts.
 class NativeContext : public RuntimeContext {
 public:
-  NativeContext(std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  NativeContext(std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
                     native_contracts)
     : contracts_(std::move(native_contracts))
   {}
@@ -217,7 +217,7 @@ private:
     return true;
   }
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contracts_;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts_;
 };
 
 // Wrapper around one instantiation of a native contract.

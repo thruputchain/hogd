@@ -9,6 +9,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
+#include "hogd/hogexec/runtime/preset_native_token.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
@@ -49,6 +50,14 @@ make_hogexec_wasm_context(RuntimeEngine engine)
     out->link_fn("marmot", "syscall", &syscall_entry);
   }
   return out;
+}
+
+std::shared_ptr<RuntimeContext>
+make_hogexec_native_contract_context()
+{
+  return std::make_shared<NativeContext>(
+      {{std::to_underlying(HogexecNativeContracts::kNativeContractToken),
+        make_native_token_contract()}});
 }
 
 std::shared_ptr<RuntimeContext>
