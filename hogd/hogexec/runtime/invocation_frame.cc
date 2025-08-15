@@ -16,7 +16,7 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -98,11 +98,10 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
 {
 
   for (auto const &[addrkey, item_view] : modified_items_) {
-    auto delta = item_view.get_delta();
+    auto [delta, flags] = item_view.get_delta();
     if (delta) {
-      // TODO(geoff): exclusive write flag not implemented yet
       db_proxy.add_delta(addrkey, *delta,
-                         std::to_underlying(StorageItemRPCFlags::kStorageNone));
+                         flags);
     }
   }
 

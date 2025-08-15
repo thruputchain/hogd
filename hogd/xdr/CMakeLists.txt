@@ -11,9 +11,11 @@ add_xdr(
 	../../protocol/exec_coord.x
 	../../protocol/executor_to_db_rpc.x
 	../../protocol/ffi_enums.x
+	../../protocol/genesis.x
 	../../protocol/nomination.x
 	../../protocol/rpc_types.x
 	../../protocol/sched_coord.x
+	../../protocol/storage_delta_flags.x
 	../../protocol/storage_item.x
 	../../protocol/storage_lock.x
 	../../protocol/transaction.x

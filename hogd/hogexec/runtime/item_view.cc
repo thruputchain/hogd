@@ -48,14 +48,14 @@ make_nnint128_add(int128_t add)
 
 } // namespace
 
-std::optional<StorageDelta>
+std::pair<std::optional<StorageDelta>, StorageItemRPCFlagSet>
 ItemView::get_delta() const
 {
-  return std::visit(
+  return {std::visit(
       [](auto const &v) -> std::optional<StorageDelta> {
         return v.get_delta();
-      },
-      delta_args_);
+      }, delta_args_),
+      flags_};
 }
 
 StorageDelta

@@ -28,11 +28,20 @@
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
+#include "storage_delta_flags.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
+
+namespace {
+template<StorageItemRPCFlags... Flags>
+constexpr bool validate_flags(StorageItemRPCFlagSet flags) {
+  constexpr StorageItemRPCFlagSet kAllowedFlags = (0 | ... | std::to_underlying(Flags));
+  return (flags & kAllowedFlags) == flags;
+}
+}
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
@@ -618,13 +627,18 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
 }
 
 SystemStatus<SyscallStatus<void>>
-SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
+SystemCallHandler::delete_object(StorageKeyContractData const &storage_key,
+                                 StorageItemRPCFlagSet flags)
 {
   assert(!is_read_only());
 
+  if (!validate_flags<StorageItemRPCFlags::kStorageExclusiveLock>(flags)) {
+    return SyscallError{SyscallErrorCode::kInvalidSyscallInput};
+  }
+
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  return item_view->set(DeletedItem{});
+  return item_view->set(DeletedItem{}, flags);
 }
 
 namespace {

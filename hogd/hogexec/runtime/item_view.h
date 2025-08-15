@@ -5,11 +5,13 @@
 #include <set>
 #include <variant>
 
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view_type.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "retrocausal_queue.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
 #include "types.hh"
@@ -218,7 +220,7 @@ public:
     }
   }
 
-  template<typename ItemType> SyscallStatus<void> set(ItemType const &type)
+  template<typename ItemType> SyscallStatus<void> set(ItemType const &type, StorageItemRPCFlagSet flags = std::to_underlying(StorageItemRPCFlags::kStorageNone))
   {
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
       if (auto validate_result = type.validate(); !validate_result) {
@@ -241,15 +243,17 @@ public:
     // as normal as possible" when running in a try_invoke/queue loop)
 
     delta_args_.emplace<ItemType>(type);
+    flags_ = flags;
     return {};
   }
 
-  std::optional<StorageDelta> get_delta() const;
+  std::pair<std::optional<StorageDelta>, StorageItemRPCFlagSet> get_delta() const;
 
 private:
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem>
       delta_args_;
+  StorageItemRPCFlagSet flags_ = std::to_underlying(StorageItemRPCFlags::kStorageNone);
 };
 
 } // namespace hogd
