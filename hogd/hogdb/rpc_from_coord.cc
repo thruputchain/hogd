@@ -215,6 +215,7 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
       });
   itx->commit();
   ctx_.close_invoke_tx(0, 0);
+  ctx_.close_block_tx(0);
 
   co_return DbResult::DbResultOK;
 }
