@@ -18,7 +18,7 @@ public:
   bool add_vetted_txs(const SignedTransactionBatch &txs);
   bool update_groups(const ContractAddress &account_address);
   bool process_received_hogs(const ContractAddress &account_address,
-                             int128_xdr num_received,
+                             uint128_xdr num_received,
                              BlockHeight current_block);
   std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
   schedule(size_t block_size);

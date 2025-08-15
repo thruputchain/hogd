@@ -138,14 +138,14 @@ public:
 
 private:
   static constexpr std::string kTestContractFileName = "fibonacci.wasm";
-  static constexpr int128_t kStorageTokenAmount = 1'000'000'000;
+  static constexpr uint128_t kStorageTokenAmount = 1'000'000'000;
   static constexpr size_t kRamDbBytes = 1024 * 1024 * 400; // 400 MiB.
 
   void set_up_grant_storage_token()
   {
     static_assert(kStorageTokenAmount >= 0);
     static_assert(kStorageTokenAmount <=
-                  int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
+                  uint128_t{kHogDivisibility} * uint128_t{kTotalHogSupply});
 
     // Convert ContractAddress to Address - both are std::array<uint8_t, 32>
     Address addr(kAccountAddress);
@@ -160,7 +160,7 @@ private:
     average.num_hogs[kHogAgeGroupToSchedule] =
         // TODO(jhumphri): Multiply by something other than 10. Or just give the
         // account unlimited hogs with UINT128_MAX.
-        to_xdr(static_cast<int128_t>(5'000'000'000 * 10));
+        to_xdr(static_cast<uint128_t>(5'000'000'000 * 10));
     average.average_ages[kHogAgeGroupToSchedule] = 1;
     EXPECT_TRUE(write_address_average_hog_age(*db_, {average}));
   }
@@ -193,11 +193,9 @@ private:
   uint16_t coordinator_db_port_;
 };
 
-namespace {
-
 using fib_client_t = ContractTraitClient<Fibonacci>;
 
-SignedTransactionBatch
+inline SignedTransactionBatch
 generate_txs(fib_client_t &fib_client, size_t num_txs)
 {
   constexpr char kProgramName[] = "slow_fibonacci";
@@ -233,7 +231,7 @@ struct Clients {
   std::unique_ptr<Mempool> interface;
 };
 
-Clients
+inline Clients
 create_clients(const MempoolTestServer &server)
 {
   auto coord_pool = std::make_unique<x23::ThreadPool>(1);
@@ -286,7 +284,5 @@ create_clients(const MempoolTestServer &server)
 }
 
 constexpr size_t kNumTxs = 100;
-
-} // namespace
 
 } // namespace hogd

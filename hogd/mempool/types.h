@@ -14,7 +14,6 @@
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
-#include "scheduler.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"

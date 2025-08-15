@@ -31,7 +31,7 @@ TEST(Scheduler, ReadAndWriteAge)
   ASSERT_EQ(ret.size(), 1);
   EXPECT_EQ(ret[0].num_hogs[kHogAgeGroupToSchedule],
             // TODO(jhumphri): Update this, too.
-            to_xdr(static_cast<int128_t>(5'000'000'000 * 10)));
+            to_xdr(static_cast<uint128_t>(5'000'000'000 * 10)));
   EXPECT_EQ(ret[0].average_ages[kHogAgeGroupToSchedule], 1);
 }
 

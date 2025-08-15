@@ -20,12 +20,12 @@ namespace {
 // always round the result up to avoid benefitting the account. This helps to
 // ensure that users are not incentivized to waste network storage or compute,
 // such as by spreading HOGs among multiple accounts.
-int128_xdr
-div_round_up(int128_xdr numerator, int128_xdr denominator)
+uint128_xdr
+div_round_up(uint128_xdr numerator, uint128_xdr denominator)
 {
-  int128_t n = from_xdr(numerator);
-  int128_t d = from_xdr(denominator);
-  int128_t result = (n / d) + ((n % d) ? 1 : 0);
+  uint128_t n = from_xdr(numerator);
+  uint128_t d = from_xdr(denominator);
+  uint128_t result = (n / d) + ((n % d) ? 1 : 0);
   return to_xdr(result);
 }
 
@@ -90,16 +90,17 @@ Scheduler::update_groups(const ContractAddress &account_address)
   HogAge new_averages;
   new_averages.address = averages.address;
 
-  const int128_xdr to_schedule_hogs = averages.num_hogs[kHogAgeGroupToSchedule];
+  const uint128_xdr to_schedule_hogs =
+      averages.num_hogs[kHogAgeGroupToSchedule];
   const BlockHeight to_schedule_age =
       averages.average_ages[kHogAgeGroupToSchedule];
 
-  const int128_xdr already_scheduled_hogs =
+  const uint128_xdr already_scheduled_hogs =
       averages.num_hogs[kHogAgeGroupAlreadyScheduled];
   const BlockHeight already_scheduled_age =
       averages.average_ages[kHogAgeGroupAlreadyScheduled];
 
-  const int128_xdr received_hogs = averages.num_hogs[kHogAgeGroupReceived];
+  const uint128_xdr received_hogs = averages.num_hogs[kHogAgeGroupReceived];
   const BlockHeight received_age = averages.average_ages[kHogAgeGroupReceived];
 
   // Update [kGroupToSchedule].
@@ -107,10 +108,10 @@ Scheduler::update_groups(const ContractAddress &account_address)
       to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
   {
     // See comment above for [div_round_up()].
-    int128_xdr numerator =
+    uint128_xdr numerator =
         to_xdr((from_xdr(to_schedule_hogs) * to_schedule_age) +
                (from_xdr(already_scheduled_hogs) * already_scheduled_age));
-    int128_xdr denominator =
+    uint128_xdr denominator =
         to_xdr(from_xdr(to_schedule_hogs) + from_xdr(already_scheduled_hogs));
     new_averages.average_ages[kHogAgeGroupToSchedule] =
         from_xdr(div_round_up(numerator, denominator));
@@ -122,7 +123,7 @@ Scheduler::update_groups(const ContractAddress &account_address)
 
   // Update [kGroupReceived].
   new_averages.num_hogs[kHogAgeGroupReceived] =
-      to_xdr(static_cast<int128_t>(0));
+      to_xdr(static_cast<uint128_t>(0));
   new_averages.average_ages[kHogAgeGroupReceived] = 0;
 
   return write_average_hog_age({new_averages});
@@ -130,7 +131,7 @@ Scheduler::update_groups(const ContractAddress &account_address)
 
 bool
 Scheduler::process_received_hogs(const ContractAddress &account_address,
-                                 int128_xdr num_received,
+                                 uint128_xdr num_received,
                                  BlockHeight current_block)
 {
   HogAgeBatch ages;
@@ -140,16 +141,16 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
   const HogAge &averages = ages[0];
   HogAge new_averages = averages;
 
-  const int128_xdr received_hogs = averages.num_hogs[kHogAgeGroupReceived];
+  const uint128_xdr received_hogs = averages.num_hogs[kHogAgeGroupReceived];
   const BlockHeight received_age = averages.average_ages[kHogAgeGroupReceived];
 
   new_averages.num_hogs[kHogAgeGroupReceived] =
       to_xdr(from_xdr(received_hogs) + from_xdr(num_received));
   {
     // See comment above for [div_round_up()].
-    int128_xdr numerator = to_xdr((from_xdr(received_hogs) * received_age) +
-                                  (from_xdr(num_received) * current_block));
-    int128_xdr denominator =
+    uint128_xdr numerator = to_xdr((from_xdr(received_hogs) * received_age) +
+                                   (from_xdr(num_received) * current_block));
+    uint128_xdr denominator =
         to_xdr(from_xdr(received_hogs) + from_xdr(num_received));
     new_averages.average_ages[kHogAgeGroupReceived] =
         from_xdr(div_round_up(numerator, denominator));
@@ -199,7 +200,7 @@ Scheduler::schedule(size_t block_size)
       add_txs_from_info(info, num_remaining, hashes, txs);
     }
     if (info.empty()) {
-      CHECK_EQ(txs_.erase(average_age), 1);
+      CHECK_EQ(txs_.erase(average_age), 1UL);
     }
   }
   return {hashes, txs};

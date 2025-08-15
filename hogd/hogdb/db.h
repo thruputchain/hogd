@@ -105,7 +105,7 @@ constexpr char kAddressWasmHashSuffix = 'C';
 inline HogAge
 hog_age_cpu_to_le(HogAge average)
 {
-  for (hogd::int128_xdr &n : average.num_hogs) {
+  for (hogd::uint128_xdr &n : average.num_hogs) {
     n = hogd::xdr_cpu_to_le(n);
   }
   for (BlockHeight &a : average.average_ages) {
@@ -117,7 +117,7 @@ hog_age_cpu_to_le(HogAge average)
 inline HogAge
 hog_age_le_to_cpu(HogAge average)
 {
-  for (hogd::int128_xdr &n : average.num_hogs) {
+  for (hogd::uint128_xdr &n : average.num_hogs) {
     n = hogd::xdr_le_to_cpu(n);
   }
   for (BlockHeight &a : average.average_ages) {
