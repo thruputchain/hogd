@@ -141,12 +141,10 @@ Mempool::propose_batch(
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
-      printf("yeah 1\n");
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = result.proposal_data()});
       break;
     case ExecResult::ExecResultOK:
-      printf("yeah 2\n");
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = NondeterministicProposalData{}});
       break;
@@ -225,6 +223,7 @@ Mempool::validate_batch(BlockID block_id,
 {
   ExecValidateBatchResult res =
       co_await exec_client_.executorcoord_validate_batch(block_id, txs);
+  printf("it is %s\n", HexArray(sha256(txs[0].nondeterministic_proposal_data)).str().c_str());
   if (std::ranges::any_of(res, [](const ExecResult &r) {
         printf("r is %d\n", r);
         return r != ExecResult::ExecResultOK;

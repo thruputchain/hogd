@@ -131,10 +131,6 @@ SystemCallHandler::root_invoke()
     if (status.has_value()) {
       // TODO(geoff): Consider whether we want to have "frame reverted" on the
       // root frame as a "transaction failed" or "transaction succeeded"
-      if (!(status.value() == SyscallErrorCode::kNone ||
-            status.value() == SyscallErrorCode::kFrameReverted)) {
-        printf("here bad\n");
-      }
       return (status.value() == SyscallErrorCode::kNone ||
               status.value() == SyscallErrorCode::kFrameReverted)
                  ? InvokeStatus<void>{}
