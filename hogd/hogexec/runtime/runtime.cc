@@ -4,12 +4,14 @@
 #include <memory>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
+#include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/preset_native_token.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
