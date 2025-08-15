@@ -96,15 +96,13 @@ enum {
 
 namespace detail {
 
-namespace {
-
 constexpr char kAddressKeyPrefix = 'A';
 // Address suffixes.
 constexpr char kAddressBalanceSuffix = 'A';
 constexpr char kAddressHogAgeSuffix = 'B';
 constexpr char kAddressWasmHashSuffix = 'C';
 
-HogAge
+inline HogAge
 hog_age_cpu_to_le(HogAge average)
 {
   for (hogd::int128_xdr &n : average.num_hogs) {
@@ -116,7 +114,7 @@ hog_age_cpu_to_le(HogAge average)
   return average;
 }
 
-HogAge
+inline HogAge
 hog_age_le_to_cpu(HogAge average)
 {
   for (hogd::int128_xdr &n : average.num_hogs) {
@@ -129,8 +127,6 @@ hog_age_le_to_cpu(HogAge average)
 }
 
 constexpr char kCodeKeyPrefix = 'C';
-
-} // namespace
 
 constexpr auto
 make_address_key(const Address &addr, char c)

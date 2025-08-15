@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <future>
 #include <span>
+#include <tuple>
 #include <vector>
 
 #include "db_coord.hh"

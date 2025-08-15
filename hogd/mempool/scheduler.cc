@@ -1,6 +1,7 @@
 #include "scheduler.h"
 
 #include "db_coord.hh"
+#include "exec_coord.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -9,6 +10,8 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
+#include <unordered_set>
+#include <utility>
 
 namespace hogd {
 namespace {
@@ -52,7 +55,7 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
   // TODO(jhumphri): Optimize this with coroutines.
   for (const SignedTransaction &tx : txs) {
     SignedTransactionHash tx_hash = sha256(tx);
-    if (tx_hashes_.count(tx_hash)) {
+    if (tx_hashes_.contains(tx_hash)) {
       // The transaction is already present in the runqueue.
       continue;
     }
@@ -166,7 +169,7 @@ Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
       break;
     }
 
-    CHECK_EQ(tx_hashes_.count(i.tx_hash), 1);
+    CHECK_EQ(tx_hashes_.count(i.tx_hash), 1UL);
     hashes.push_back(i.tx_hash);
     txs.push_back(i.tx);
     tx_hashes_.erase(i.tx_hash);

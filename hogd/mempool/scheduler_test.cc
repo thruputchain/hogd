@@ -8,7 +8,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
-#include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/mempool/mempool.h"
 #include "hogd/mempool/mempool_test_server.h"
 #include "hogd/mempool/scheduler.h"
@@ -31,7 +30,7 @@ TEST(Scheduler, ReadAndWriteAge)
                                      ret));
   ASSERT_EQ(ret.size(), 1);
   EXPECT_EQ(ret[0].num_hogs[kHogAgeGroupToSchedule],
-            // TODO(jhumphri: Update this, too.
+            // TODO(jhumphri): Update this, too.
             to_xdr(static_cast<int128_t>(5'000'000'000 * 10)));
   EXPECT_EQ(ret[0].average_ages[kHogAgeGroupToSchedule], 1);
 }

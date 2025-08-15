@@ -49,7 +49,7 @@ public:
 
       // We access [it] below, so we call [txs_.erase()] before
       // [tx_hashes_.erase()] to avoid accessing an invalidated iterator.
-      CHECK_EQ(txs_[it->second.age].erase(&it->second), 1);
+      CHECK_EQ(txs_[it->second.age].erase(&it->second), 1UL);
       tx_hashes_.erase(it);
     }
     return true;
