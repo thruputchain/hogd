@@ -87,8 +87,6 @@ TEST(Mempool, Validate)
   fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
-  printf("%s\n", HexArray(sha256(txs[0])).str().c_str());
-
   MempoolTestServer server;
   Clients clients = create_clients(server);
 
@@ -111,8 +109,6 @@ TEST(Mempool, ValidateBatch)
 {
   fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
-
-  printf("%s\n", HexArray(sha256(txs[0])).str().c_str());
 
   MempoolTestServer server;
   Clients clients = create_clients(server);

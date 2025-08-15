@@ -52,7 +52,6 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
   // TODO(jhumphri): Optimize this with coroutines.
   for (const SignedTransaction &tx : txs) {
     SignedTransactionHash tx_hash = sha256(tx);
-    printf("tx_hash is %s\n", HexArray(tx_hash).str().c_str());
     if (tx_hashes_.count(tx_hash)) {
       // The transaction is already present in the runqueue.
       continue;
@@ -166,7 +165,6 @@ Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
     if (num-- == 0) {
       break;
     }
-    printf("schedule %s\n", HexArray(i.tx_hash).str().c_str());
 
     CHECK_EQ(tx_hashes_.count(i.tx_hash), 1);
     hashes.push_back(i.tx_hash);

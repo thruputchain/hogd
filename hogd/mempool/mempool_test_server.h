@@ -158,7 +158,9 @@ private:
     memset(&average, 0, sizeof(average));
     average.address = kAccountAddress;
     average.num_hogs[kHogAgeGroupToSchedule] =
-        to_xdr(static_cast<int128_t>(10));
+        // TODO(jhumphri): Multiply by something other than 10. Or just give the
+        // account unlimited hogs with UINT128_MAX.
+        to_xdr(static_cast<int128_t>(5'000'000'000 * 10));
     average.average_ages[kHogAgeGroupToSchedule] = 1;
     EXPECT_TRUE(write_address_average_hog_age(*db_, {average}));
   }
@@ -206,12 +208,13 @@ generate_txs(fib_client_t &fib_client, size_t num_txs)
   for (uint64_t i = 0; i < num_txs; i++) {
     Timestamp created = i;
     SignedTransaction tx{
-        .tx =
-            Transaction{.origin_id = {},
-                        .created = created,
-                        .invocation = fib_client.make_invocation<kProgramName>(
-                            /*gas_amount=*/5, kFibonacciN),
-                        .contracts_to_deploy = {}}};
+        .tx = Transaction{
+            .origin_id = {},
+            .created = created,
+            .invocation = fib_client.make_invocation<kProgramName>(
+                // TODO(jhumphri): How to get this number automatically?
+                /*gas_amount=*/5'000'000'000, kFibonacciN),
+            .contracts_to_deploy = {}}};
     txs.push_back(tx);
   }
   return txs;
