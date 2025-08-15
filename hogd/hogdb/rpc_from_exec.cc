@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
-#include <print>
 #include <span>
 #include <stop_token>
 #include <sys/socket.h>

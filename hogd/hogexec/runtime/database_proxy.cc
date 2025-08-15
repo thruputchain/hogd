@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <concepts>
-#include <exception>
 #include <format>
 #include <memory>
 #include <optional>
