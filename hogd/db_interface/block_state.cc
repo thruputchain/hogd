@@ -10,6 +10,7 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
 #include "types.hh"

@@ -14,6 +14,7 @@ add_xdr(
 	../../protocol/nomination.x
 	../../protocol/rpc_types.x
 	../../protocol/sched_coord.x
+	../../protocol/storage_delta_flags.x
 	../../protocol/storage_item.x
 	../../protocol/storage_lock.x
 	../../protocol/transaction.x
