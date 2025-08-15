@@ -16,6 +16,7 @@
 // generated x23 headers
 #include "db_coord.hh"
 #include "genesis.hh"
+#include "hogd/base/log.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -81,6 +82,7 @@ HogDBCoordServer::dbcoord_commit_snapshot(BlockID id)
   DbBlockResult ret(to_db_result(btx->commit()));
   ctx_.get_trie().generate_top_level_hashes();
   ret.block_hash() = ctx_.get_trie().get_root_hash();
+  ctx_.close_block_tx(id);
   co_return ret;
 }
 
@@ -93,6 +95,7 @@ HogDBCoordServer::dbcoord_abandon_snapshot(BlockID id)
 
   BlockTX &btx = *ret;
   btx.abort();
+  ctx_.close_block_tx(id);
   co_return DbResult::DbResultOK;
 }
 
@@ -183,9 +186,12 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
 
   is_initialized_ = true;
 
-  [[maybe_unused]]
+  
   auto r = ctx_.open_block_tx(0);
-  assert(r.has_value());
+  if (!r.has_value()) {
+    error("failed to open block tx: {}", r.error());
+    co_return DbResult::DbResultError;
+  }
 
   auto *itx = ctx_.get_invoke_tx(0, 0);
   assert(itx);
@@ -213,8 +219,14 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
         auto r = write_address_wasm_hash(ctx_.get_db(), addr, hash);
         assert(r.has_value());
       });
+  
   itx->commit();
   ctx_.close_invoke_tx(0, 0);
+  auto commit_res = ctx_.get_block_tx(0)->commit();
+  if (!commit_res.has_value()) {
+    error("failed to commit genesis block: {}", commit_res.error());
+    co_return DbResult::DbResultError;
+  }
   ctx_.close_block_tx(0);
 
   co_return DbResult::DbResultOK;
