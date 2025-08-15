@@ -59,7 +59,7 @@ SRpcFd::stop() noexcept
 }
 
 void
-SRpcFd::go()
+SRpcFd::go(const CpuSet *cpus)
 {
   // If this fails, you have neither clients nor servers.
   assert(refcount() || !srvmap_.empty());
@@ -79,9 +79,9 @@ SRpcFd::go()
     RefPtr<SRpcFd> selfref{nullptr};
     if (refcount() == 0)
       selfref = RefPtr{*this};
-    read_thread_ = std::thread{&SRpcFd::read_worker, this};
+    read_thread_ = std::thread{&SRpcFd::read_worker, this, cpus};
     write_thread_ =
-        std::thread{&SRpcFd::write_worker, this, std::move(selfref)};
+        std::thread{&SRpcFd::write_worker, this, cpus, std::move(selfref)};
   }
 }
 
@@ -103,18 +103,20 @@ SRpcFd::write_call(Buf record, CallCB cb)
 }
 
 void
-SRpcFd::read_worker() noexcept
+SRpcFd::read_worker(const CpuSet *cpus) noexcept
 {
+  if (cpus)
+    cpus->set_affinity();
   VecQ<std::uint8_t> rdbuf;
   while (!ss_.stop_requested()) {
     size_t rdsz = kReadSize;
-    if (rdbuf.size() > 4) {
+    if (rdbuf.size() >= 4) {
       std::uint32_t msglen = getbe<std::uint32_t>(rdbuf.data()) & 0x7fffffff;
       msglen = std::min<std::uint32_t>(msglen, max_message_size_);
       if (msglen > rdbuf.size())
         rdsz = std::max(rdsz, msglen - rdbuf.size());
     }
-    rdsz = std::max(rdsz, rdbuf.capacity());
+    rdsz = std::max(rdsz, rdbuf.capacity() - rdbuf.size());
     auto res = read(fd_, &rdbuf, rdsz);
     if (!res || !*res) {
       if (!res && res.error() != ECONNRESET)
@@ -185,8 +187,10 @@ SRpcFd::input(BufView bytes) noexcept
 }
 
 void
-SRpcFd::write_worker(RefPtr<SRpcFd> _selfref) noexcept
+SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
 {
+  if (cpus)
+    cpus->set_affinity();
   Defer _join([this] { read_thread_.join(); });
   BufVec wrbuf;
   for (;;) {

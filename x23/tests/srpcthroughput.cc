@@ -23,6 +23,7 @@ bool opt_csv;
 unsigned opt_connections;
 unsigned opt_seconds = 1;
 unsigned opt_threads_per_connection = 1;
+bool opt_multiclient = false;
 std::optional<std::uint32_t> opt_data;
 
 std::atomic<std::uint16_t> server_port{0};
@@ -163,12 +164,89 @@ do_client(int port, const char *server)
   inh.destroy_wait();
 }
 
+void
+do_multiclient(int port, const char *server)
+{
+  auto server_addr =
+      *HostPort{server ? server : "localhost", uformat("{}", port)}.to_addr(
+          true);
+  DestroyInhibit inh;
+  std::stop_source ss;
+  std::atomic<uint64_t> counter{0};
+
+  auto client =
+      SRpcMulticlient<RpcLogger>::make(server_addr)->client(blank_rpc_v1{});
+
+  for (int n = opt_connections * opt_threads_per_connection; n > 0; --n) {
+    if (opt_data)
+      std::thread(
+          [&counter, ss = ss.get_token()](decltype(client) c,
+                                          RefPtr<DestroyInhibit> inh) {
+            try {
+              Data bytes(size_t(*opt_data), std::uint8_t(0xc7));
+              while (!ss.stop_requested()) {
+                c.echo(bytes);
+                counter.fetch_add(1, std::memory_order_relaxed);
+              }
+            } catch (std::exception &e) {
+              std::println("{}", e.what());
+            }
+          },
+          client, RefPtr(inh))
+          .detach();
+    else
+      std::thread(
+          [&counter, ss = ss.get_token()](decltype(client) c,
+                                          RefPtr<DestroyInhibit> inh) {
+            try {
+              while (!ss.stop_requested()) {
+                c.null();
+                counter.fetch_add(1, std::memory_order_relaxed);
+              }
+            } catch (std::exception &e) {
+              std::println("{}", e.what());
+            }
+          },
+          client, RefPtr(inh))
+          .detach();
+  }
+
+  // Warm up for 100 msec
+  using namespace std::chrono;
+  std::this_thread::sleep_for(milliseconds(100));
+
+  auto start = high_resolution_clock::now();
+  counter = 0;
+  std::this_thread::sleep_for(seconds(opt_seconds));
+  auto final_count = counter.load();
+  auto elapsed = high_resolution_clock::now() - start;
+
+  ss.request_stop();
+
+  double rate = double(final_count) / duration<double>(elapsed).count();
+
+  if (opt_csv)
+    std::println("{},{},{},{},{:.0f}", server ? server : "INTERNAL multi",
+                 opt_data ? std::string{} : std::to_string(*opt_data),
+                 opt_connections, opt_threads_per_connection, rate);
+  else
+    std::println("{} multi: {} {} connections, {} threads/connection\n"
+                 "    {} RPCs / {} = {} RPCs/sec",
+                 server ? server : "INTERNAL",
+                 opt_data ? std::format("{} bytes", *opt_data)
+                          : std::string("no data"),
+                 opt_connections, opt_threads_per_connection, final_count,
+                 elapsed, formatL(rate));
+
+  inh.destroy_wait();
+}
+
 [[noreturn]]
 static void
 usage(int err)
 {
   std::println(err ? stderr : stdout,
-               "usage: {0} [-C] [-q] [-c #connections] [-t #threads/conn]\n"
+               "usage: {0} [-C] [-q] [-m|-c #connections] [-t #threads/conn]\n"
                "       {1:{2}} [-s seconds] [-d bytes] [port [server]]\n"
                "       {0} -S [port]",
                progname, "", progname.size());
@@ -196,7 +274,7 @@ main(int argc, char **argv)
   const char *server{};
 
   int opt;
-  while ((opt = getopt(argc, argv, "CSqt:c:a:s:d:p:")) != -1)
+  while ((opt = getopt(argc, argv, "CSqmt:c:a:s:d:p:")) != -1)
     switch (opt) {
     case 'C':
     case 'S':
@@ -204,6 +282,9 @@ main(int argc, char **argv)
       break;
     case 'h':
       usage(0);
+      break;
+    case 'm':
+      opt_multiclient = true;
       break;
     case 'q':
       opt_csv = true;
@@ -226,6 +307,10 @@ main(int argc, char **argv)
 
   if (optind < argc)
     parse_int_opt(port, argv[optind++]);
+  if (opt_connections && opt_multiclient) {
+    std::println(stderr, "{}: -m and -c are mutually exclusive", progname);
+    usage(2);
+  }
   if (optind < argc && opt_mode == 'C')
     server = argv[optind++];
   if (optind != argc) {
@@ -233,7 +318,9 @@ main(int argc, char **argv)
     usage(2);
   }
 
-  if (!opt_connections)
+  if (opt_multiclient)
+    opt_connections = llc_map->nbuckets();
+  else if (!opt_connections)
     opt_connections = nproc();
 
   setlinebuf(stdout);
@@ -245,7 +332,10 @@ main(int argc, char **argv)
       std::println(stderr, "Must specify port number with -C");
       exit(2);
     }
-    do_client(port, server ? server : "localhost");
+    if (opt_multiclient)
+      do_multiclient(port, server ? server : "localhost");
+    else
+      do_client(port, server ? server : "localhost");
   }
   else if (opt_mode == 'S')
     do_server(port, false);
@@ -253,7 +343,10 @@ main(int argc, char **argv)
     std::thread{do_server, 0, true}.detach();
     while (!server_port.load())
       server_port.wait(0);
-    do_client(server_port.load(), nullptr);
+    if (opt_multiclient)
+      do_multiclient(server_port, server ? server : "localhost");
+    else
+      do_client(server_port, server ? server : "localhost");
   }
   else
     usage(2);

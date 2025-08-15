@@ -74,7 +74,7 @@ private:
   atomic_shared_ptr<T> t_;
 };
 
-template<std::size_t StructSize = 4096>
+template<std::size_t StructSize>
 struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
   static constexpr size_t kStructSize = StructSize;
   using PosType = std::conditional_t<
@@ -127,19 +127,16 @@ struct GenReadBuffer : std::enable_shared_from_this<GenReadBuffer<StructSize>> {
     return x23::read(fd, buf, len, this);
   }
 };
-using ReadBuffer = GenReadBuffer<4096>;
+using ReadBuffer = GenReadBuffer<0x10000>;
 
 struct WriteBuffer : std::enable_shared_from_this<WriteBuffer> {
-  CoroLock write_lock_;
-  BufVec writer_;
+  std::mutex service_lock_;
+  MVar<BufVec> writer_;
 
-  // Returns an error void on success or if the write action has been
-  // deferred.  May return an error if a write fails, but won't if the
-  // buffer is full and a write is already pending.
-  Async<std::expected<void, Errno>> write(CoroPoll &cp, BorrowedFd fd, Buf buf);
+  Errno write(CoroPoll &cp, BorrowedFd fd, Buf buf);
 
 private:
-  Detached service(CoroPoll &cp, BorrowedFd fd);
+  Detached service(CoroPoll &cp, BorrowedFd fd, std::unique_lock<std::mutex> g);
 };
 
 struct BufHolder {
@@ -271,7 +268,7 @@ private:
 
   UniqueFd epollfd_;
 
-  SharedLock resize_lock_{ThreadPool::core_map};
+  SharedLock resize_lock_{*core_map};
   std::atomic<FdState *> state_{nullptr};
   std::atomic_size_t state_size_{0};
   std::atomic_uint numcoro_{0};
@@ -350,14 +347,12 @@ public:
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
                                             BufView data SLOC_PARM);
 
-  // Write data to fd, but return immediately.  If there is an issue
-  // with the file descriptor, it might return an error or it might
-  // return void, depending on whether the buffer is clear and it can
-  // immediately attempt the write.  If there is no problem with the
-  // file descriptor, it will always return void.  Unlike write, it is
-  // safe to call this function concurrently; the writes will be
-  // sequenced one after the other.
-  Async<std::expected<void, Errno>> bgwrite(BorrowedFd fd, Buf data SLOC_PARM);
+  // Write data to fd, but return immediately.  Returns EINVAL if the
+  // file descriptor is poisoned, but otherwise doesn't guarantee to
+  // return an error if the write fails, as the write could happen
+  // after it returns.  Unlike write, it is safe to call this function
+  // concurrently; the writes will be sequenced one after the other.
+  Errno bgwrite(BorrowedFd fd, Buf data);
 
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.

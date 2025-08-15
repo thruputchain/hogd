@@ -30,16 +30,6 @@ RpcStreamImpl::fail()
     cb(Buf{});
 }
 
-Detached
-RpcStreamImpl::write_record(Buf b SLOC_ARG)
-{
-  if (ss_.stop_requested())
-    co_return;
-  auto _r = shared_from_this();
-  if (!ss_.stop_requested())
-    co_await cp_->bgwrite(fd_, b);
-}
-
 Async<std::expected<std::uint32_t, Errno>>
 RpcStreamImpl::read_uint(SLOC_ARG0)
 {
@@ -83,7 +73,7 @@ Detached
 RpcStreamImpl::reader(SLOC_ARG0)
 {
   using enum msg_type;
-  auto _r = shared_from_this();
+  RefPtr<RpcStreamImpl> _r = *this;
   Buf b;
   while (!ss_.stop_requested()) {
     if (auto r = co_await read_record(); !r) {
@@ -110,23 +100,14 @@ RpcStreamImpl::reader(SLOC_ARG0)
       cs.reset();
       cb(std::move(b));
     }
-    else if (msg.body.mtype() == CALL)
-      serve_call(msg, b.subspan(hdrbytes));
+    else if (msg.body.mtype() == CALL) {
+      rpc_msg res;
+      if (RpcService *s = srvmap_.lookup(msg, &res))
+        cp_->bgwrite(fd_, co_await s->serve(msg, b.subspan(hdrbytes)));
+      else
+        send_msg(res);
+    }
   }
-}
-
-Detached
-RpcStreamImpl::serve_call(const rpc_msg &call, BufView args SLOC_ARG)
-{
-  auto _r = shared_from_this();
-  rpc_msg res;
-  if (RpcService *s = srvmap_.lookup(call, &res)) {
-    Buf resp = co_await s->serve(call, args);
-    write_record(resp);
-  }
-  else
-    send_msg(res);
-  co_return;
 }
 
 } // namespace x23::detail
