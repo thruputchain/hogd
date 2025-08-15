@@ -16,7 +16,6 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/item_view.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "storage_delta_flags.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"

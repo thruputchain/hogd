@@ -7,6 +7,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "rpc_types.hh"
+#include "storage_delta_flags.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
