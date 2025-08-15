@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "exec_coord.hh"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -18,12 +20,10 @@
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
-#include "built_contracts/contract_loader.h"
 #include "hogd/init.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
-#include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"

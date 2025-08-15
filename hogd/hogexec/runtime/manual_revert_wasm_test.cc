@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/integration_test_contracts/manual_revert_test/manual_revert_test.h"
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
@@ -15,9 +17,7 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "built_contracts/contract_loader.h"
 #include "rpc_types.hh"
-#include "built_contracts/integration_test_contracts/manual_revert_test/manual_revert_test.h"
 #include "transaction.hh"
 #include "types.hh"
 

@@ -1,0 +1,28 @@
+name: C++ CI
+
+on:
+  push:
+    branches: [ "main" ]  
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    
+    steps:
+    - uses: actions/checkout@v4
+    - name: gcc version check
+      run: gcc --version
+    - name: clang version check
+      run: clang --version
+    - name: check format
+      run: ./scripts/format.sh -c
+    - name: install yamllint
+      run: sudo apt-get install yamllint
+    - name: install goxdr
+      run: go install github.com/xdrpp/goxdr/cmd/goxdr@latest
+    - name: check go build
+      run: $HOME/go/bin/goxdr -o generated.go *.x
+    - name: lint yaml
+      run: yamllint -s syscalls.yaml

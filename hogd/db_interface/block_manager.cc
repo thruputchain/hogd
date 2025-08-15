@@ -195,7 +195,8 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
 }
 
 void
-BlockManager::initialize_genesis_block(GenesisBlock const& config) {
+BlockManager::initialize_genesis_block(GenesisBlock const &config)
+{
   std::lock_guard lock(mtx_);
   if (initialized_genesis_) {
     throw std::runtime_error("double initialize!");
@@ -204,17 +205,23 @@ BlockManager::initialize_genesis_block(GenesisBlock const& config) {
 
   GenesisBlockLoader loader(config);
 
-  loader.load_genesis_block([&] (StorageKey const& key, Bytestring const& bytestring) {
-    auto item = std::make_shared<StorageItemWrapper>(bytestring, &cost_model_);
-    base_database_->write_item(AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
-    .key = key}, item);
-  }, [&] (std::shared_ptr<const Contract> const& contract) {
-    assert(contract);
-    auto hash = sha256(*contract);
-    base_database_->write_contract(hash, contract);
-  }, [&](const ContractAddress & addr, const SHA256Hash & hash) {
-    base_database_->write_deployment(addr, hash);
-  });
+  loader.load_genesis_block(
+      [&](StorageKey const &key, Bytestring const &bytestring) {
+        auto item =
+            std::make_shared<StorageItemWrapper>(bytestring, &cost_model_);
+        base_database_->write_item(
+            AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
+                          .key = key},
+            item);
+      },
+      [&](std::shared_ptr<const Contract> const &contract) {
+        assert(contract);
+        auto hash = sha256(*contract);
+        base_database_->write_contract(hash, contract);
+      },
+      [&](const ContractAddress &addr, const SHA256Hash &hash) {
+        base_database_->write_deployment(addr, hash);
+      });
 }
 
 } // namespace hogd

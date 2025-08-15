@@ -179,30 +179,31 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   auto r = ctx_.open_block_tx(0);
   assert(r.has_value());
 
-  auto* itx = ctx_.get_invoke_tx(0, 0);
+  auto *itx = ctx_.get_invoke_tx(0, 0);
   assert(itx);
 
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
       [&](StorageKey const &key, Bytestring const &value) {
-
-        auto item_key = make_item_key(AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress, .key = key});
-        auto r= itx->request_bytes(item_key, std::as_bytes(std::span(value)));
+        auto item_key = make_item_key(
+            AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
+                          .key = key});
+        auto r = itx->request_bytes(item_key, std::as_bytes(std::span(value)));
         assert(r.has_value());
       },
-      [&](auto const& contract) {
-          auto data = x23::serialize(*contract);
-          const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
-          auto buf = std::span<const std::byte>(cptr, data.size());
-          SHA256Hash hash = sha256(buf);
-          [[maybe_unused]]
-          auto r = write_wasm_code(ctx_.get_db(), hash, buf);
-          assert(r.has_value());
+      [&](auto const &contract) {
+        auto data = x23::serialize(*contract);
+        const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
+        auto buf = std::span<const std::byte>(cptr, data.size());
+        SHA256Hash hash = sha256(buf);
+        [[maybe_unused]]
+        auto r = write_wasm_code(ctx_.get_db(), hash, buf);
+        assert(r.has_value());
       },
-      [&](ContractAddress const& addr, SHA256Hash const& hash) {
-         [[maybe_unused]]
-          auto r = write_address_wasm_hash(ctx_.get_db(), addr, hash);
-          assert(r.has_value());
+      [&](ContractAddress const &addr, SHA256Hash const &hash) {
+        [[maybe_unused]]
+        auto r = write_address_wasm_hash(ctx_.get_db(), addr, hash);
+        assert(r.has_value());
       });
   itx->commit();
   ctx_.close_invoke_tx(0, 0);

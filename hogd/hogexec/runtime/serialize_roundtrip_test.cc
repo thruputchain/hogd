@@ -6,6 +6,9 @@
 #include <unordered_map>
 #include <utility>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/integration_test_contracts/cxs_roundtrip/cxs_roundtrip.h"
+#include "built_contracts/roundtrip.hh"
 #include "contract.hh"
 #include "contract_error.hh"
 #include "ffi_enums.hh"
@@ -19,10 +22,7 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "built_contracts/contract_loader.h"
 #include "rpc_types.hh"
-#include "built_contracts/integration_test_contracts/cxs_roundtrip/cxs_roundtrip.h"
-#include "built_contracts/roundtrip.hh"
 #include "transaction.hh"
 #include "types.hh"
 

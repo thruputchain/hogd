@@ -3,15 +3,15 @@
 #include <cstdint>
 #include <memory>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/integration_test_contracts/fibonacci_call/fibonacci_call.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "built_contracts/contract_loader.h"
 #include "rpc_types.hh"
-#include "built_contracts/integration_test_contracts/fibonacci_call/fibonacci_call.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -31,8 +31,7 @@ protected:
     wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
     auto fibonacci_contract = hogd::load_contract("fibonacci.wasm");
-    auto fibonacci_caller_contract =
-        hogd::load_contract("fibonacci_call.wasm");
+    auto fibonacci_caller_contract = hogd::load_contract("fibonacci_call.wasm");
 
     write_contract(fibonacci_contract);
     write_contract(fibonacci_caller_contract);

@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include "built_contracts/contract_loader.h"
+#include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "db_coord.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/types.h"
@@ -30,11 +32,9 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "built_contracts/contract_loader.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "rpc_types.hh"
-#include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"

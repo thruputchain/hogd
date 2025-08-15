@@ -69,7 +69,8 @@ public:
     co_return DbResult::DbResultError;
   }
 
-  x23::Async<DbResult> dbcoord_load_genesis_block(GenesisBlock const& genesis_block);
+  x23::Async<DbResult>
+  dbcoord_load_genesis_block(GenesisBlock const &genesis_block);
 
 private:
   BlockManager *block_manager_;
