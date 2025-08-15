@@ -391,7 +391,7 @@ protected:
     write_deployment(cxs_contract_addr_, sha256(*contract));
     setup_grant_storage_token(cxs_contract_addr_, 1'000'000'000);
 
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
         native_contract_map;
     native_contract_map.emplace(0, std::move(native_contract));
     auto native_runtime_context =

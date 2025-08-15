@@ -57,10 +57,12 @@ namespace {
 std::shared_ptr<RuntimeContext>
 make_hogexec_native_contract_context()
 {
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> map;
+  map.emplace(std::to_underlying(HogexecNativeContracts::kNativeContractToken),
+              make_native_token_contract());
+
   return std::make_shared<NativeContext>(
-      std::unordered_map<int32_t, std::unique_ptr<NativeContract>>{
-          {std::to_underlying(HogexecNativeContracts::kNativeContractToken),
-           make_native_token_contract()}});
+      std::move(map));
 }
 } // namespace
 std::shared_ptr<RuntimeContext>

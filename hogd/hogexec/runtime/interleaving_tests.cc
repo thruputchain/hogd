@@ -67,7 +67,7 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
 
   auto native_contract = builder.build();
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   constexpr uint32_t kTestContractId = 0;
   contract_map.emplace(kTestContractId, std::move(native_contract));
   auto runtime_context =

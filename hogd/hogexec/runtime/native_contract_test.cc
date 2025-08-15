@@ -80,7 +80,7 @@ protected:
                return InvokeError{InvokeErrorCode::kInvokeDeterministic};
              }}});
 
-    std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(contract_0));
     contract_map.emplace(1, std::move(contract_1));
 
@@ -203,7 +203,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   auto native_contract = builder.build();
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
 
   runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
@@ -282,7 +282,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
 
   auto native_contract = builder.build();
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
 
   runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
@@ -392,7 +392,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
 
   auto native_contract = builder.build();
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
 
   runtime_context_ = std::make_shared<NativeContext>(std::move(contract_map));
