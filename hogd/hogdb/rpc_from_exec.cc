@@ -3,20 +3,21 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <memory>
+#include <cstdio>
+#include <cstdlib>
 #include <span>
-#include <string_view>
+#include <stop_token>
+#include <sys/socket.h>
 #include <thread>
-#include <utility>
 
 // generated x23 headers
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/log.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
 
-#include "hogd/base/log.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -28,8 +29,10 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
 #include "hogd/ramdb/db_status.h"
-#include "hogd/rpc/rpc.h"
+#include "x23/cleanup.h"
 #include "x23/serialize.h"
+#include "x23/sockio.h"
+#include "x23/srpc.h"
 
 namespace hogd {
 
@@ -74,21 +77,29 @@ to_span(const Bytestring &bs)
 ErrnoStatus<void>
 HogDBExecutorServer::start_server(uint16_t port)
 {
-  ErrnoStatus<std::shared_ptr<RPCServer>> server = RPCServer::create(
-      port,
-      [this](std::span<const std::byte> args,
-             std::string_view peer) -> OwningSpan<const std::byte> {
-        return server_handle_rpc_request<DatabaseToExecutorInterfaceV1>(*this,
-                                                                        args,
-                                                                        peer);
-      });
-  if (!server)
-    return server.error();
-  rpc_server_ = std::move(*server);
-  rpc_listener_th_ = std::jthread([this] {
-    if (ErrnoStatus<void> ret = rpc_server_->listen(); !ret)
-      error("Database to executor server listen failed: {}", ret.error());
+  lfd_ = x23::stcplisten(port);
+  if (!lfd_) {
+    perror("listen");
+    exit(EXIT_FAILURE);
+  }
+  port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
+
+  listen_thread_ = std::jthread([this](std::stop_token &&stop) {
+    while (!stop.stop_requested()) {
+
+      sockaddr_storage ss;
+      socklen_t sslen = sizeof(ss);
+      x23::UniqueFd fd{
+          accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
+      if (!fd) {
+        info("accept error: {}", Errno{});
+      }
+      else {
+        x23::srpc_stream_logged(fd.release())->server(this);
+      }
+    }
   });
+
   return {};
 }
 

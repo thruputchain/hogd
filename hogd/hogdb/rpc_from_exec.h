@@ -19,15 +19,16 @@
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/hogdb/rpc_context.h"
-#include "hogd/rpc/rpc.h"
+#include "x23/cleanup.h"
 
 namespace hogd {
 
 // Core logic handler for the db rpc server.
 class HogDBExecutorServer {
 public:
+  using rpc_service = DatabaseToExecutorInterfaceV1;
+
   explicit HogDBExecutorServer(RPCContext &ctx) : ctx_(ctx) {}
-  ~HogDBExecutorServer() { rpc_server_->stop(); }
 
   // Start the server on the specified port
   ErrnoStatus<void> start_server(uint16_t port);
@@ -52,12 +53,21 @@ public:
   static ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  uint16_t port() const { return rpc_server_->get_port(); }
+  uint16_t port() const { return port_number_; }
+
+  ~HogDBExecutorServer()
+  {
+    listen_thread_.request_stop();
+    shutdown(lfd_.get(), SHUT_RDWR);
+    lfd_.reset();
+  }
 
 private:
   RPCContext &ctx_;
-  std::shared_ptr<RPCServer> rpc_server_;
-  std::jthread rpc_listener_th_;
+
+  uint16_t port_number_ = 0;
+  std::jthread listen_thread_;
+  x23::UniqueFd lfd_;
 
   static RPCError request_one(InvokeTX &tx, AddressAndKey const &addrkey,
                               StorageDelta const &delta,

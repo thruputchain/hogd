@@ -9,6 +9,7 @@
 #include <x23/threadpool.h> // for nproc()
 
 #include "tests/xdrtest.hh"
+#include "x23/cleanup.h"
 
 #if NDEBUG
 #define make_rpc_stream srpc_stream
