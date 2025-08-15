@@ -4,6 +4,7 @@
 #include <unordered_set>
 
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
+#include "hogd/container/merkle/hex_array.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogdb/db.h"
 #include "types.h"
@@ -48,7 +49,7 @@ public:
 
       // We access [it] below, so we call [txs_.erase()] before
       // [tx_hashes_.erase()] to avoid accessing an invalidated iterator.
-      CHECK_EQ(txs_.erase(it->second.age), 1);
+      CHECK_EQ(txs_[it->second.age].erase(&it->second), 1);
       tx_hashes_.erase(it);
     }
     return true;
@@ -61,13 +62,13 @@ private:
     SignedTransaction tx;
   };
 
-  void add_txs_from_info(const x23::Vec<TxInfo> &info, size_t num,
+  void add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
                          x23::Vec<SignedTransactionHash> &hashes,
                          x23::Vec<SignedTransaction> &txs);
-  db_client_t &db_client_;
 
+  db_client_t &db_client_;
   std::unordered_map<SignedTransactionHash, TxInfo> tx_hashes_;
-  std::map<BlockHeight, x23::Vec<TxInfo>> txs_;
+  std::map<BlockHeight, std::unordered_set<TxInfo *>> txs_;
 };
 
 } // namespace hogd

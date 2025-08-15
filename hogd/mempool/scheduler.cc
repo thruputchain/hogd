@@ -54,7 +54,7 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
     SignedTransactionHash tx_hash = sha256(tx);
     if (tx_hashes_.count(tx_hash)) {
       // The transaction is already present in the runqueue.
-      return true;
+      continue;
     }
 
     HogAgeBatch ages;
@@ -68,8 +68,9 @@ Scheduler::add_vetted_txs(const SignedTransactionBatch &txs)
     BlockHeight age = averages.average_ages[kHogAgeGroupToSchedule];
 
     TxInfo info{.age = age, .tx_hash = tx_hash, .tx = tx};
-    CHECK(tx_hashes_.insert({tx_hash, info}).second);
-    txs_[age].push_back(info);
+    const auto &[it, inserted] = tx_hashes_.insert({tx_hash, info});
+    CHECK(inserted);
+    CHECK(txs_[age].insert(&it->second).second);
   }
 
   return true;
@@ -155,22 +156,27 @@ Scheduler::process_received_hogs(const ContractAddress &account_address,
 }
 
 void
-Scheduler::add_txs_from_info(const x23::Vec<TxInfo> &info, size_t num,
+Scheduler::add_txs_from_info(std::unordered_set<TxInfo *> &info, size_t num,
                              x23::Vec<SignedTransactionHash> &hashes,
                              x23::Vec<SignedTransaction> &txs)
 {
-  for (const TxInfo &i : info) {
+  for (auto it = info.begin(); it != info.end();) {
+    const TxInfo &i = **it;
+    if (num-- == 0) {
+      break;
+    }
+
     CHECK_EQ(tx_hashes_.count(i.tx_hash), 1);
     hashes.push_back(i.tx_hash);
     txs.push_back(i.tx);
     tx_hashes_.erase(i.tx_hash);
+    it = info.erase(it);
   }
 }
 
 std::pair<x23::Vec<SignedTransactionHash>, x23::Vec<SignedTransaction>>
 Scheduler::schedule(size_t block_size)
 {
-  printf("in here, size is %zu\n", txs_.size());
   x23::Vec<SignedTransactionHash> hashes;
   x23::Vec<SignedTransaction> txs;
 
@@ -180,16 +186,17 @@ Scheduler::schedule(size_t block_size)
 
     auto &[average_age, info] = *txs_.begin();
     if (info.size() <= num_remaining) {
-      // [add_txs_from_info] removes the hashes from [tx_hashes_].
-      add_txs_from_info(info, info.size(), hashes, txs);
-      CHECK_EQ(txs_.erase(average_age), 1);
       num_scheduled += info.size();
+      // [add_txs_from_info] removes the hashes from [tx_hashes_] and [txs_].
+      add_txs_from_info(info, info.size(), hashes, txs);
     }
     else {
-      // [add_txs_from_info] removes the hashes from [tx_hashes_].
-      add_txs_from_info(info, num_remaining, hashes, txs);
-      info.erase(info.begin(), info.begin() + num_remaining);
       num_scheduled += num_remaining;
+      // [add_txs_from_info] removes the hashes from [tx_hashes_] and [txs_].
+      add_txs_from_info(info, num_remaining, hashes, txs);
+    }
+    if (info.empty()) {
+      CHECK_EQ(txs_.erase(average_age), 1);
     }
   }
   return {hashes, txs};

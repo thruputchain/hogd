@@ -98,6 +98,7 @@ TEST(Mempool, Validate)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
+  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -120,6 +121,7 @@ TEST(Mempool, ValidateBatch)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -161,6 +163,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   res_nominate.scheduler_nomination()
       .nomination.transaction_nominations.pop_back();
 
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),

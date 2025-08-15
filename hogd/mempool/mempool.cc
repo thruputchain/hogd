@@ -141,10 +141,12 @@ Mempool::propose_batch(
   for (const ExecProposeResult &result : res) {
     switch (result.result()) {
     case ExecResult::ExecResultTxDeterministicError:
+      printf("yeah 1\n");
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = result.proposal_data()});
       break;
     case ExecResult::ExecResultOK:
+      printf("yeah 2\n");
       transaction_nominations.push_back(
           {.nondeterministic_proposal_data = NondeterministicProposalData{}});
       break;
@@ -224,6 +226,7 @@ Mempool::validate_batch(BlockID block_id,
   ExecValidateBatchResult res =
       co_await exec_client_.executorcoord_validate_batch(block_id, txs);
   if (std::ranges::any_of(res, [](const ExecResult &r) {
+        printf("r is %d\n", r);
         return r != ExecResult::ExecResultOK;
       })) {
     co_await finish_block(block_id);
@@ -278,12 +281,14 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
     // Empty nomination.
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
+    printf("A\n");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   else {
     CHECK(!txs.empty());
     if (!co_await validate_batch(block_id, txs)) {
+      printf("B\n");
       co_return SchedulerValidationResult(
           SchedulerValidationOutcome::SchedulerValidationInvalid);
     }
@@ -295,6 +300,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   if (get_block_hash(nomination.transaction_hashes) != nomination.block_hash) {
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
+    printf("C\n");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
