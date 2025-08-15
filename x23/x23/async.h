@@ -577,6 +577,63 @@ private:
   Async(handle_type h) : callee_(h) { h.promise().launch(); }
 };
 
+namespace detail {
+// A concept that's 99% likely to determine whether a type is an
+// awaiter.  You could have awaiters that work only with specific
+// promise types not including Async<void>::promise_type, in which
+// case this will fail even if the type is an awaiter accepting other
+// types of coroutine.
+template<typename A>
+concept is_awaiter =
+    requires(A a, std::coroutine_handle<Async<void>::promise_type> h) {
+      { a.await_ready() } -> std::same_as<bool>;
+      a.await_suspend(h);
+      a.await_resume();
+    };
+
+// Get an awaiter from an awaitable (calling operator co_await if
+// there is one).
+template<typename T> requires (
+    !requires { operator co_await(declval<T>()); } &&
+    !requires { declval<T>().operator co_await(); })
+inline decltype(auto)
+get_awaiter(T &&t) noexcept
+{
+  return t;
+}
+template<typename T> requires (
+    requires { operator co_await(declval<T>()); } &&
+    !requires { declval<T>().operator co_await(); })
+inline decltype(auto)
+get_awaiter(T &&t) noexcept(noexcept(operator co_await(declval<T>())))
+{
+  return operator co_await(std::forward<T>(t));
+}
+template<typename T> requires (requires { declval<T>().operator co_await(); })
+inline decltype(auto)
+get_awaiter(T &&t) noexcept(noexcept(declval<T>().operator co_await()))
+{
+  return std::forward<T>(t).operator co_await();
+}
+
+// A type you can call co_await on in a generic coroutine.  Does not
+// account for the effects of any await_tranform() methods, and does
+// not work for specialized awaitables that only work with specific
+// promise types.
+template<typename A>
+concept is_awaitable = is_awaiter<decltype(get_awaiter(declval<A>()))>;
+
+template<is_awaitable A>
+using resume_type = decltype(get_awaiter(declval<A>()).await_resume());
+
+template<typename A>
+concept resume_noexcept =
+    is_awaitable<A> && noexcept(get_awaiter(declval<A>()).await_resume());
+
+} // namespace detail
+
+using detail::is_awaitable;
+
 // An Async that immediately returns its argument.  Useful in
 // non-coroutine functions that return Async by invoking a coroutine,
 // but where some cases don't need to invoke a coroutine.  E.g.,:
@@ -612,6 +669,8 @@ using void_variant =
 // value.
 template<typename T> struct MaybeAsync : void_variant<Async<T>, T> {
   using super = void_variant<Async<T>, T>;
+  using promise_type = Async<T>::promise_type;
+
   using super::super;
 
   T operator()()
@@ -635,9 +694,10 @@ template<typename T> struct MaybeAsync : void_variant<Async<T>, T> {
       return p->await_ready();
     return true;
   }
-  void await_suspend(auto h) noexcept {
+  void await_suspend(auto h) noexcept
+  {
     // Should never be called if we aren't storing an Async
-    get<Async<T>>(*this).await_suspend(h);
+    promise()->await_suspend(h);
   }
   T await_resume()
   {
@@ -657,7 +717,7 @@ template<typename T> struct MaybeAsync : void_variant<Async<T>, T> {
   Async<T>::promise_type *promise() noexcept
   {
     if (auto *a = async())
-      return &operator co_await(*a);
+      return &a->operator co_await();
     return nullptr;
   }
 };
@@ -727,63 +787,6 @@ private:
   // co_await or co_return) to avoid weird surprises.
   Detached() noexcept = default;
 };
-
-namespace detail {
-// A concept that's 99% likely to determine whether a type is an
-// awaiter.  You could have awaiters that work only with specific
-// promise types not including Detached::promise_type, in which case
-// this will fail even if the type is an awaiter accepting other types
-// of coroutine.
-template<typename A>
-concept is_awaiter =
-    requires(A a, std::coroutine_handle<Detached::promise_type> h) {
-      { a.await_ready() } -> std::same_as<bool>;
-      a.await_suspend(h);
-      a.await_resume();
-    };
-
-// Get an awaiter from an awaitable (calling operator co_await if
-// there is one).
-template<typename T> requires (
-    !requires { operator co_await(declval<T>()); } &&
-    !requires { declval<T>().operator co_await(); })
-inline decltype(auto)
-get_awaiter(T &&t) noexcept
-{
-  return t;
-}
-template<typename T> requires (
-    requires { operator co_await(declval<T>()); } &&
-    !requires { declval<T>().operator co_await(); })
-inline decltype(auto)
-get_awaiter(T &&t) noexcept(noexcept(operator co_await(declval<T>())))
-{
-  return operator co_await(std::forward<T>(t));
-}
-template<typename T> requires (requires { declval<T>().operator co_await(); })
-inline decltype(auto)
-get_awaiter(T &&t) noexcept(noexcept(declval<T>().operator co_await()))
-{
-  return std::forward<T>(t).operator co_await();
-}
-
-// A type you can call co_await on in a generic coroutine.  Does not
-// account for the effects of any await_tranform() methods, and does
-// not work for specialized awaitables that only work with specific
-// promise types.
-template<typename A>
-concept is_awaitable = is_awaiter<decltype(get_awaiter(declval<A>()))>;
-
-template<is_awaitable A>
-using resume_type = decltype(get_awaiter(declval<A>()).await_resume());
-
-template<typename A>
-concept resume_noexcept =
-    is_awaitable<A> && noexcept(get_awaiter(declval<A>()).await_resume());
-
-} // namespace detail
-
-using detail::is_awaitable;
 
 // Apply a function to the result of co_awaiting an awaitable.  If the
 // co_await returns void, then the function takes no arguments.

@@ -99,7 +99,7 @@ struct RpcService {
   virtual ~RpcService() {}
   virtual std::uint32_t program() const = 0;
   virtual std::uint32_t version() const = 0;
-  virtual Async<Buf> serve(const rpc_msg &msg, BufView args SLOC_PARM) = 0;
+  virtual MaybeAsync<Buf> serve(const rpc_msg &msg, BufView args SLOC_PARM) = 0;
   ProgVers getpv() const
   {
     return ProgVers{.prog = program(), .vers = version()};
@@ -134,15 +134,15 @@ struct RpcDispatcher : RpcService {
   std::uint32_t program() const final { return version_meta::program; }
   std::uint32_t version() const final { return version_meta::version; }
 
-  Async<Buf> serve(const rpc_msg &msg, BufView argdata SLOC_PARM) override
+  MaybeAsync<Buf> serve(const rpc_msg &msg, BufView argdata SLOC_PARM) override
   {
     using enum msg_type;
     assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
            msg.body.cbody().prog == program() &&
            msg.body.cbody().vers == version());
-    return with_proc_meta<version_meta, Async<Buf>>(msg.body.cbody().proc,
-                                                    Executor{*this, msg,
-                                                             argdata});
+    return with_proc_meta<version_meta, MaybeAsync<Buf>>(msg.body.cbody().proc,
+                                                         Executor{*this, msg,
+                                                                  argdata});
   }
 
 private:
@@ -152,17 +152,17 @@ private:
     const BufView argbytes_;
 
     template<std::same_as<void>>
-    Async<Buf> operator()(this Executor self SLOC_PARM)
+    MaybeAsync<Buf> operator()(this Executor self SLOC_PARM)
     {
       using enum accept_stat;
       rpc_msg err{.xid = self.callmsg_.xid};
       msg_set_reply_stat(&err, PROC_UNAVAIL);
       self.d_.logger_.template log_server<VersMeta>(self.callmsg_);
       self.d_.logger_.template log_server<VersMeta>(err);
-      co_return make_record(err);
+      return make_record(err);
     }
     template<typename ProcMeta>
-    Async<Buf> operator()(this Executor self SLOC_PARM)
+    MaybeAsync<Buf> operator()(this Executor self SLOC_PARM)
     {
       using enum accept_stat;
       typename ProcMeta::arg_type args;
