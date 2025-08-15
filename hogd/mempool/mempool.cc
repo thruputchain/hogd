@@ -223,7 +223,7 @@ Mempool::validate_batch(BlockID block_id,
 {
   ExecValidateBatchResult res =
       co_await exec_client_.executorcoord_validate_batch(block_id, txs);
-  printf("it is %s\n", HexArray(sha256(txs[0].nondeterministic_proposal_data)).str().c_str());
+   printf("it is %s\n", HexArray(sha256(txs[0])).str().c_str());
   if (std::ranges::any_of(res, [](const ExecResult &r) {
         printf("r is %d\n", r);
         return r != ExecResult::ExecResultOK;
