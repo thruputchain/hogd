@@ -273,10 +273,12 @@ public:
   {
     // If the test_and_set returns true, the callee already wrote
     // result_ or exception_, so use acquire semantics to access it.
-    return resume_lock_.test_and_set(std::memory_order_acquire);
+    return resume_lock_.test(std::memory_order_acquire);
   }
-  void await_suspend(std::coroutine_handle<> h SLOC_PARM) noexcept
+  bool await_suspend(std::coroutine_handle<> h SLOC_PARM) noexcept
   {
+    if (resume_lock_.test_and_set(std::memory_order_acquire))
+      return false;
 #if X23_CORO_TRACE
     corotrace.set_suspend(h, sloc, "Awaitable", type_name<R>());
 #endif // X23_CORO_TRACE
@@ -286,6 +288,7 @@ public:
     // longer touch *this.  Release semantics are to ensure any memory
     // accesses other than result_ are properly sequenced between the
     // suspend and resume.
+    return true;
   }
   auto await_resume()
   {
@@ -578,18 +581,22 @@ private:
 };
 
 namespace detail {
-// A concept that's 99% likely to determine whether a type is an
-// awaiter.  You could have awaiters that work only with specific
-// promise types not including Async<void>::promise_type, in which
-// case this will fail even if the type is an awaiter accepting other
-// types of coroutine.
+
+// The is_awaiter concept is implemented as a template type to allow
+// it to be partially specialized.
 template<typename A>
-concept is_awaiter =
-    requires(A a, std::coroutine_handle<Async<void>::promise_type> h) {
-      { a.await_ready() } -> std::same_as<bool>;
-      a.await_suspend(h);
-      a.await_resume();
-    };
+    struct is_awaiter_impl : std::conditional_t < requires(A a) {
+  {a.await_ready()}->std::same_as<bool>;
+  a.await_suspend(std::noop_coroutine());
+  a.await_resume();
+}, std::true_type, std::false_type>{};
+
+// A concept that's 99% likely to determine whether a type is an
+// awaiter.  The exception is awaiters that can be awaited only in
+// coroutines with certain promise types not including
+// std::noop_coroutine_promise.  You can fix any such failing cases by
+// partially specializing detail::awaiter_test;
+template<typename A> concept is_awaiter = is_awaiter_impl<A>::value;
 
 // Get an awaiter from an awaitable (calling operator co_await if
 // there is one).
@@ -663,43 +670,36 @@ using void_variant =
 // async_return has a lot of overhead.  Functions that might or might
 // not want to allocate a coroutine frame based on runtime conditions
 // can alternatively return a MaybeAsync<T>.  It behaves similarly to
-// an Async<T> in that you can co_await it, pass it a callback, or
-// just invoke it with no arguments, but it doesn't need dynamic
-// memory allocation in the event that you just want to return the
-// value.
-template<typename T> struct MaybeAsync : void_variant<Async<T>, T> {
-  using super = void_variant<Async<T>, T>;
-  using promise_type = Async<T>::promise_type;
+// an Async<T> in that you can co_await it or use operator() to get a
+// result from non-coroutine code.  However, MaybeAsync doesn't need
+// dynamic memory allocation in the event that you produce it with a
+// simple return value.
+template<typename T, is_awaitable Awaitable = Async<T>,
+         typename Promise = std::coroutine_traits<Awaitable>::promise_type>
+struct MaybeAsync : void_variant<Awaitable, T> {
+  using super = void_variant<Awaitable, T>;
+  using value_type = T;
+  using awaitable_type = Awaitable;
+  using promise_type = Promise;
 
   using super::super;
 
-  T operator()()
+  // Pass through any function call operators on async_type
+  template<typename... Args>
+  decltype(auto) operator()(Args &&...args)
+      noexcept(noexcept((*async())(std::declval<Args>()...)))
   {
-    if (auto *a = async())
-      return (*a)();
-    return xval();
-  }
-  template<typename CB> requires requires(Async<T> a) { a(declval<CB>()); }
-  void operator()(CB &&cb)
-  {
-    if (auto *a = async())
-      (*a)(std::forward<CB>(cb));
-    else
-      compose(std::forward<CB>(cb), &MaybeAsync::xval, this);
+    return (*async())(std::forward<Args>(args)...);
   }
 
-  bool await_ready() noexcept
+  bool await_ready() noexcept(noexcept(promise()->await_ready()))
   {
     if (auto *p = promise())
       return p->await_ready();
     return true;
   }
-  void await_suspend(auto h) noexcept
-  {
-    // Should never be called if we aren't storing an Async
-    promise()->await_suspend(h);
-  }
-  T await_resume()
+  auto await_suspend(auto h) noexcept { return promise()->await_suspend(h); }
+  T await_resume() noexcept(noexcept(promise()->await_resume()))
   {
     if (auto *p = promise())
       return p->await_resume();
@@ -709,11 +709,11 @@ template<typename T> struct MaybeAsync : void_variant<Async<T>, T> {
   T xval() noexcept
   {
     if constexpr (!std::is_void_v<T>)
-      return std::move(get<T>(*this));
+      return std::move(get<1>(*this));
     else
-      assert(holds_alternative<std::monostate>(*this));
+      assert(this->index() == 1);
   }
-  Async<T> *async() noexcept { return get_if<Async<T>>(this); }
+  Async<T> *async() noexcept { return get_if<0>(this); }
   Async<T>::promise_type *promise() noexcept
   {
     if (auto *a = async())
@@ -721,8 +721,10 @@ template<typename T> struct MaybeAsync : void_variant<Async<T>, T> {
     return nullptr;
   }
 };
-template<typename T> MaybeAsync(T) -> MaybeAsync<T>;
-template<typename T> MaybeAsync(Async<T>) -> MaybeAsync<T>;
+template<typename T> requires (!is_awaitable<T>)
+MaybeAsync(T) -> MaybeAsync<T>;
+template<is_awaitable A> requires requires { typename detail::resume_type<A>; }
+MaybeAsync(A) -> MaybeAsync<detail::resume_type<A>, A>;
 
 // Generate an Async and matching CoroCB.  This is for use in
 // low-level non-coroutine functions that want to return an Async for
