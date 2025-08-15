@@ -15,7 +15,9 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
                            const StorageKeyContractData &input_key,
                            int32_t flags)
 {
-  auto status = syscall_handler.delete_object(input_key, static_cast<StorageItemRPCFlagSet>(flags));
+  auto status =
+      syscall_handler.delete_object(input_key,
+                                    static_cast<StorageItemRPCFlagSet>(flags));
   if (!status) {
     return {status.error().to_host_fn_error(), 0};
   }

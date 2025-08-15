@@ -220,7 +220,10 @@ public:
     }
   }
 
-  template<typename ItemType> SyscallStatus<void> set(ItemType const &type, StorageItemRPCFlagSet flags = std::to_underlying(StorageItemRPCFlags::kStorageNone))
+  template<typename ItemType>
+  SyscallStatus<void> set(ItemType const &type,
+                          StorageItemRPCFlagSet flags = std::to_underlying(
+                              StorageItemRPCFlags::kStorageNone))
   {
     if constexpr (requires(ItemType const &item) { item.validate(); }) {
       if (auto validate_result = type.validate(); !validate_result) {
@@ -247,13 +250,15 @@ public:
     return {};
   }
 
-  std::pair<std::optional<StorageDelta>, StorageItemRPCFlagSet> get_delta() const;
+  std::pair<std::optional<StorageDelta>, StorageItemRPCFlagSet>
+  get_delta() const;
 
 private:
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem>
       delta_args_;
-  StorageItemRPCFlagSet flags_ = std::to_underlying(StorageItemRPCFlags::kStorageNone);
+  StorageItemRPCFlagSet flags_ =
+      std::to_underlying(StorageItemRPCFlags::kStorageNone);
 };
 
 } // namespace hogd

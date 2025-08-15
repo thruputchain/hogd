@@ -100,8 +100,7 @@ InvocationFrame::try_acquire_frame_locks(PerTransactionDatabaseProxy &db_proxy)
   for (auto const &[addrkey, item_view] : modified_items_) {
     auto [delta, flags] = item_view.get_delta();
     if (delta) {
-      db_proxy.add_delta(addrkey, *delta,
-                         flags);
+      db_proxy.add_delta(addrkey, *delta, flags);
     }
   }
 

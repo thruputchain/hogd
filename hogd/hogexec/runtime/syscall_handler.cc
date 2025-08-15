@@ -27,8 +27,8 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "retrocausal_queue.hh"
-#include "storage_item.hh"
 #include "storage_delta_flags.hh"
+#include "storage_item.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -37,11 +37,14 @@ namespace hogd {
 
 namespace {
 template<StorageItemRPCFlags... Flags>
-constexpr bool validate_flags(StorageItemRPCFlagSet flags) {
-  constexpr StorageItemRPCFlagSet kAllowedFlags = (0 | ... | std::to_underlying(Flags));
+constexpr bool
+validate_flags(StorageItemRPCFlagSet flags)
+{
+  constexpr StorageItemRPCFlagSet kAllowedFlags =
+      (0 | ... | std::to_underlying(Flags));
   return (flags & kAllowedFlags) == flags;
 }
-}
+} // namespace
 
 // TODO(geoff): Setup configuration parameters for alternative wasm engines
 // and/or shared contexts.
