@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <ranges>
 #include <vector>
 
 #include "contract.hh"
@@ -47,10 +48,10 @@ protected:
 
     // Create a test contract hash and nonce
     SHA256Hash contract_hash{};
-    std::fill(contract_hash.begin(), contract_hash.end(), 0x42);
+    std::ranges::fill(contract_hash, 0x42);
 
     SHA256Hash nonce{};
-    std::fill(nonce.begin(), nonce.end(), 0x24);
+    std::ranges::fill(nonce, 0x24);
 
     preset_entry.config.contract_hash = contract_hash;
     preset_entry.config.initial_nonce = nonce;
@@ -63,10 +64,10 @@ protected:
     InitialConfigurationEntry preset_entry2;
 
     SHA256Hash contract_hash2{};
-    std::fill(contract_hash2.begin(), contract_hash2.end(), 0x55);
+    std::ranges::fill(contract_hash2, 0x55);
 
     SHA256Hash nonce2{};
-    std::fill(nonce2.begin(), nonce2.end(), 0x66);
+    std::ranges::fill(nonce2, 0x66);
 
     preset_entry2.config.contract_hash = contract_hash2;
     preset_entry2.config.initial_nonce = nonce2;
@@ -106,13 +107,13 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
 TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
 {
   SHA256Hash contract_hash{};
-  std::fill(contract_hash.begin(), contract_hash.end(), 0x42);
+  std::ranges::fill(contract_hash, 0x42);
 
   SHA256Hash nonce{};
-  std::fill(nonce.begin(), nonce.end(), 0x24);
+  std::ranges::fill(nonce, 0x24);
 
   ContractEntrypointID entrypoint{};
-  std::fill(entrypoint.begin(), entrypoint.end(), 0x00);
+  std::ranges::fill(entrypoint, 0x00);
 
   std::vector<std::uint8_t> calldata = {0x01, 0x02, 0x03, 0x04};
 

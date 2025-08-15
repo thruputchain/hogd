@@ -3,6 +3,7 @@
 #include "hogd/hogdb/rpc_from_coord.h"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -14,9 +15,13 @@
 
 // generated x23 headers
 #include "db_coord.hh"
+#include "genesis.hh"
 #include "hogd/base/status.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_block.h"
+#include "hogd/hogdb/db.h"
 #include "rpc_types.hh"
+#include "types.hh"
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"

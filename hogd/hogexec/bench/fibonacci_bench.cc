@@ -24,7 +24,7 @@
 #include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
-#include "storage_item.hh"
+#include "hogd/storage_item/storage_item_wrapper.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"

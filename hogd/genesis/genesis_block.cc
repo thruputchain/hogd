@@ -4,7 +4,10 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <functional>
+#include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "built_contracts/contract_loader.h"
