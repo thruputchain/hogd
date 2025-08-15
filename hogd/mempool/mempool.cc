@@ -221,9 +221,9 @@ x23::Async<bool>
 Mempool::validate_batch(BlockID block_id,
                         const x23::Vec<ProposedTransaction> &txs)
 {
+  printf("it is %s\n", HexArray(sha256(txs[0].signed_tx)).str().c_str());
   ExecValidateBatchResult res =
       co_await exec_client_.executorcoord_validate_batch(block_id, txs);
-   printf("it is %s\n", HexArray(sha256(txs[0])).str().c_str());
   if (std::ranges::any_of(res, [](const ExecResult &r) {
         printf("r is %d\n", r);
         return r != ExecResult::ExecResultOK;
@@ -269,12 +269,17 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   // the nondeterminstic proposal data to form a [ProposedTransaction], which
   // is what the executors expect to receive.
   x23::Vec<ProposedTransaction> txs;
+  printf("txs.size() first = %zu\n", txs.size());
+  printf("it is (3) %s\n",
+         HexArray(nomination.transaction_hashes[0]).str().c_str());
   if (!scheduler_.find_and_remove_vetted_txs(nomination, txs)) {
     co_await finish_block(block_id);
     co_await abandon_snapshot(block_id);
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationMissingTxs);
   }
+  printf("txs.size() = %zu\n", txs.size());
+  printf("it is (7) %s\n", HexArray(sha256(txs[0].signed_tx)).str().c_str());
   if (nomination.transaction_nominations.empty()) {
     CHECK(txs.empty());
     // Empty nomination.
@@ -286,6 +291,7 @@ Mempool::schedulercoord_validate(DbTip db_tip, Nomination nomination)
   }
   else {
     CHECK(!txs.empty());
+    printf("it is (2) %s\n", HexArray(sha256(txs[0].signed_tx)).str().c_str());
     if (!co_await validate_batch(block_id, txs)) {
       printf("B\n");
       co_return SchedulerValidationResult(

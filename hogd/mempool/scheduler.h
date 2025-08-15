@@ -36,6 +36,7 @@ public:
     ret.clear();
     for (size_t i = 0; i < nomination.transaction_hashes.size(); i++) {
       const SignedTransactionHash &hash = nomination.transaction_hashes[i];
+      printf("it is (4) %s\n", HexArray(hash).str().c_str());
       const NominatedTransaction &nominated_tx =
           nomination.transaction_nominations[i];
 
@@ -43,6 +44,7 @@ public:
       if (it == tx_hashes_.end()) {
         return false;
       }
+      printf("it is (5) %s\n", HexArray(sha256(it->second.tx)).str().c_str());
       ret.push_back({.signed_tx = it->second.tx,
                      .nondeterministic_proposal_data =
                          nominated_tx.nondeterministic_proposal_data});
@@ -52,6 +54,7 @@ public:
       CHECK_EQ(txs_[it->second.age].erase(&it->second), 1);
       tx_hashes_.erase(it);
     }
+    printf("it is (6) %s\n", HexArray(sha256(ret[0].signed_tx)).str().c_str());
     return true;
   }
 
