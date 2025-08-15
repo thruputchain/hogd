@@ -2,11 +2,10 @@
 
 #include <cassert>
 #include <concepts>
-#include <exception>
+#include <format>
 #include <memory>
 #include <optional>
 #include <stdexcept>
-#include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -17,11 +16,14 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/rpc/rpc.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/rpc_common.h"
+#include "x23/sockio.h"
+#include "x23/srpc.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -31,13 +33,12 @@ struct VoidMarker {};
 
 template<auto NullValue>
 constexpr auto
-to_system_error_code(auto sys_err, auto &&f)
+to_system_error_code(auto err, auto &&f)
 {
-  constexpr bool kHasReturnType =
-      requires { f(std::move(get<1>(sys_err.value()))); };
+  constexpr bool kHasReturnType = requires { f(std::move(get<1>(err))); };
   auto type_lambda = [&] {
     if constexpr (kHasReturnType) {
-      return f(std::move(get<1>(sys_err.value())));
+      return f(std::move(get<1>(err)));
     }
     else if constexpr (std::same_as<decltype(f()), void>) {
       return;
@@ -50,12 +51,6 @@ to_system_error_code(auto sys_err, auto &&f)
   using ret_t = decltype(type_lambda());
 
   return [&] -> SystemStatus<ret_t> {
-    if (!sys_err.has_value()) [[unlikely]] {
-      return SystemStatus<ret_t>{sys_err.error()};
-    }
-
-    auto err = sys_err.value();
-
     RPCError err_code;
     if constexpr (kHasReturnType) {
       err_code = err.error();
@@ -103,29 +98,57 @@ to_system_error_code(auto sys_err, auto &&f)
   }();
 }
 
+template<auto NullValue>
+constexpr auto
+remove_syserr_from_call(auto syserr, auto &&f)
+{
+  using overall_ret_t =
+      decltype(to_system_error_code(syserr.value(), std::forward(f)));
+  if (!syserr.has_value()) [[unlikely]] {
+    return overall_ret_t{syserr.error()};
+  }
+
+  auto err = syserr.value();
+  return to_system_error_code<NullValue>(syserr, std::forward(f));
+}
+
 } // namespace
 
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
-  : base_client_([&] -> RPCClient {
+  : client_([&] -> client_t {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
-        auto res = RPCClient::dial("127.0.0.1:" +
-                                   std::to_string(mock_db.read_port_number_));
-        if (!res) {
-          throw std::runtime_error("Failed to connect to local mock database");
+        auto server_addr =
+            x23::HostPort{"localhost",
+                          x23::uformat("{}", mock_db.read_port_number_)}
+                .to_addr(true);
+        if (!server_addr) {
+          throw std::runtime_error(
+              std::format("failed server error: {}", server_addr.error()));
         }
-        return std::move(*res);
+        return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+            ->client(DatabaseToExecutorInterfaceV1{});
       }
       if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
         assert(!sharded_db.shards_.empty());
-        auto res = RPCClient::dial(sharded_db.shards_[0].address);
-        if (!res) {
-          throw std::runtime_error("Failed to connect to database shard");
+        if (sharded_db.shards_.size() > 1) {
+          throw std::runtime_error(
+              "ShardedDB with more than one shard is not yet supported");
         }
-        return std::move(*res);
+        x23::HostPort hostport;
+        if (!hostport.parse(sharded_db.shards_[0].address)) {
+          throw std::runtime_error("Failed to parse database shard address");
+        }
+        auto server_addr = hostport.to_addr(true);
+        if (!server_addr) {
+          throw std::runtime_error(
+              std::format("failed server error: {}", server_addr.error()));
+        }
+        return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+            ->client(DatabaseToExecutorInterfaceV1{});
       }
-      std::terminate();
+      throw std::runtime_error("unimplemented");
     }())
 {}
 

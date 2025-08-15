@@ -145,7 +145,8 @@ public:
 
   // === Delete syscall ===
   SystemStatus<SyscallStatus<void>>
-  delete_object(StorageKeyContractData const &storage_key);
+  delete_object(StorageKeyContractData const &storage_key,
+                StorageItemRPCFlagSet flags);
 
   // === Retrocausal Queue syscalls ===
   SystemStatus<SyscallStatus<void>>
