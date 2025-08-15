@@ -9,6 +9,7 @@ add_subdirectory(storage_item)
 add_subdirectory(storage_cost)
 add_subdirectory(syscall_spec)
 add_subdirectory(xdr)
+add_subdirectory(genesis)
 
 # Then combine them into the hogd library (used by all executables below)
 add_library(

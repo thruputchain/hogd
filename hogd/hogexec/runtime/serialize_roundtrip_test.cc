@@ -11,7 +11,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
-#include "hogd/config.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
@@ -20,14 +19,12 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "built_contracts/contract_loader.h"
 #include "rpc_types.hh"
-#include "test_contracts/integration_test_contracts/cxs_roundtrip/cxs_roundtrip.h"
-#include "test_contracts/roundtrip.hh"
+#include "built_contracts/integration_test_contracts/cxs_roundtrip/cxs_roundtrip.h"
+#include "built_contracts/roundtrip.hh"
 #include "transaction.hh"
 #include "types.hh"
-
-#if ENABLE_TEST_CONTRACTS
 
 namespace hogd {
 
@@ -389,7 +386,7 @@ protected:
 
     });
 
-    auto contract = test::load_test_contract("cxs_roundtrip.wasm");
+    auto contract = hogd::load_contract("cxs_roundtrip.wasm");
     write_contract(contract);
     write_deployment(cxs_contract_addr_, sha256(*contract));
     setup_grant_storage_token(cxs_contract_addr_, 1'000'000'000);
@@ -658,5 +655,3 @@ INSTANTIATE_TEST_SUITE_P(TestDBs, SerializeRoundtripTest,
                                            TestDB::kHogDB),
                          test_db_to_string);
 } // namespace hogd
-
-#endif

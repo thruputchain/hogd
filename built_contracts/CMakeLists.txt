@@ -1,6 +1,23 @@
-add_custom_target(all_wasm_contracts)
+# Add contract loader library
+add_library(contract_loader
+  contract_loader.cc
+)
 
-if(ENABLE_TEST_CONTRACTS)
+target_link_libraries(contract_loader
+  x23
+  protocol
+)
+
+target_include_directories(contract_loader PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_BINARY_DIR}/hogd/xdr
+)
+
+target_compile_definitions(contract_loader PRIVATE
+  CMAKE_ROOT_BINARY_DIR="${CMAKE_BINARY_DIR}"
+)
+
+add_custom_target(all_wasm_contracts)
 
 function(add_wasm_contract target_name)
 
@@ -20,7 +37,7 @@ function(add_wasm_contract target_name)
         -p ${target_name}
         --target wasm32-unknown-unknown
         --release
-        --locked
+        # --locked
         --manifest-path ${CMAKE_CURRENT_SOURCE_DIR}/integration_test_contracts/${target_name}/Cargo.toml
         --target-dir ${CMAKE_CURRENT_BINARY_DIR} 
         -Zbuild-std=core,alloc
@@ -54,6 +71,7 @@ add_wasm_contract(read_only_test)
 add_wasm_contract(manual_revert_test)
 add_wasm_contract(manual_revert_caller)
 add_wasm_contract(simple_wallet)
+add_wasm_contract(initial_token_claim)
 
 add_xdr_rs(
 	roundtrip_rs 
@@ -66,5 +84,3 @@ add_xdr(roundtrip_hh
 
 add_dependencies(cxs_roundtrip_wasm roundtrip_rs)
 add_dependencies(all_wasm_contracts roundtrip_hh)
-
-endif()

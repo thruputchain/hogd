@@ -14,6 +14,7 @@
 // generated x23 headers
 #include "db_coord.hh"
 #include "hogd/base/status.h"
+#include "hogd/genesis/genesis_block.h"
 #include "rpc_types.hh"
 
 #include "hogd/base/types.h"
@@ -29,6 +30,15 @@
 namespace hogd {
 
 namespace {
+
+ItemKey
+make_item_key(const AddressAndKey &addr)
+{
+  if (addr.key.key_type() ==
+      StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance)
+    return ItemKey(addr.address, {}, true);
+  return ItemKey(addr.address, addr.key.contract_data_key());
+}
 
 template<typename T>
 DbResult
@@ -154,6 +164,50 @@ HogDBCoordServer::start_server(uint16_t port)
       }
     }(cp_, this, std::move(lfd));
   }
+}
+
+x23::Async<DbResult>
+HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
+{
+  if (is_initialized_) {
+    co_return DbResult::DbResultError;
+  }
+
+  is_initialized_ = true;
+
+  [[maybe_unused]]
+  auto r = ctx_.open_block_tx(0);
+  assert(r.has_value());
+
+  auto* itx = ctx_.get_invoke_tx(0, 0);
+  assert(itx);
+
+  GenesisBlockLoader loader(genesis_block);
+  loader.load_genesis_block(
+      [&](StorageKey const &key, Bytestring const &value) {
+
+        auto item_key = make_item_key(AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress, .key = key});
+        auto r= itx->request_bytes(item_key, std::as_bytes(std::span(value)));
+        assert(r.has_value());
+      },
+      [&](auto const& contract) {
+          auto data = x23::serialize(*contract);
+          const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
+          auto buf = std::span<const std::byte>(cptr, data.size());
+          SHA256Hash hash = sha256(buf);
+          [[maybe_unused]]
+          auto r = write_wasm_code(ctx_.get_db(), hash, buf);
+          assert(r.has_value());
+      },
+      [&](ContractAddress const& addr, SHA256Hash const& hash) {
+         [[maybe_unused]]
+          auto r = write_address_wasm_hash(ctx_.get_db(), addr, hash);
+          assert(r.has_value());
+      });
+  itx->commit();
+  ctx_.close_invoke_tx(0, 0);
+
+  co_return DbResult::DbResultOK;
 }
 
 uint16_t

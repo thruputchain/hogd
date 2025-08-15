@@ -17,9 +17,9 @@
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "built_contracts/contract_loader.h"
 #include "rpc_types.hh"
-#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -50,7 +50,7 @@ protected:
 // Simple test for sdk, to verify that calls actually happen.
 TEST_P(FibonacciTest, FibonacciCalls)
 {
-  auto contract = test::load_test_contract("fibonacci.wasm");
+  auto contract = hogd::load_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
   write_contract(contract);
   write_deployment(contract_addr, sha256(*contract));
@@ -75,7 +75,7 @@ TEST_P(FibonacciTest, FibonacciCalls)
 
 TEST_P(FibonacciTest, FibonacciGasLimit)
 {
-  auto contract = test::load_test_contract("fibonacci.wasm");
+  auto contract = hogd::load_contract("fibonacci.wasm");
   auto contract_addr = make_contract_address(0);
   write_contract(contract);
   write_deployment(contract_addr, sha256(*contract));
@@ -102,7 +102,7 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
 TEST_P(FibonacciTest, FibonacciCorrectness)
 {
   // deploy the fibonacci contract
-  auto contract = test::load_test_contract("fibonacci.wasm");
+  auto contract = hogd::load_contract("fibonacci.wasm");
   auto fib_contract_addr = make_contract_address(0);
   write_contract(contract);
   write_deployment(fib_contract_addr, sha256(*contract));

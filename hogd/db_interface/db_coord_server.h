@@ -4,8 +4,10 @@
 #include <optional>
 
 #include "db_coord.hh"
+#include "genesis.hh"
 #include "hogd/base/types.h"
 #include "hogd/db_interface/block_manager.h"
+#include "hogd/genesis/genesis_block.h"
 #include "nomination.hh"
 #include "rpc_types.hh"
 #include "types.hh"
@@ -66,6 +68,8 @@ public:
   {
     co_return DbResult::DbResultError;
   }
+
+  x23::Async<DbResult> dbcoord_load_genesis_block(GenesisBlock const& genesis_block);
 
 private:
   BlockManager *block_manager_;

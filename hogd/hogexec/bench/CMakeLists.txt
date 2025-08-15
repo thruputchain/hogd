@@ -9,6 +9,7 @@ target_link_libraries(
   runtime
   exec_interface
   db_interface
+  contract_loader
   benchmark::benchmark
 )
 
@@ -26,6 +27,7 @@ target_link_libraries(
   exec_interface
   db_interface
   hogdb
+  contract_loader
 )
 
 set_property(TARGET fibonacci_wasmonly PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

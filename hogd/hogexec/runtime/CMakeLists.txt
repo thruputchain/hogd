@@ -129,6 +129,8 @@ target_link_libraries(
   hogdb
   storage_cost
   model_checker
+  contract_loader
+  genesis
   GTest::gtest
 )
 gtest_discover_tests(runtime_test)

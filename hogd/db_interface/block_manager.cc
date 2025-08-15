@@ -8,7 +8,9 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_state.h"
+#include "hogd/genesis/genesis_block.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
 
@@ -190,6 +192,29 @@ BlockManager::add_child(BlockID parent_id, BlockID new_id,
                          Block(parent.block_data_.get(), mode, &cost_model_));
   }
   return true;
+}
+
+void
+BlockManager::initialize_genesis_block(GenesisBlock const& config) {
+  std::lock_guard lock(mtx_);
+  if (initialized_genesis_) {
+    throw std::runtime_error("double initialize!");
+  }
+  initialized_genesis_ = true;
+
+  GenesisBlockLoader loader(config);
+
+  loader.load_genesis_block([&] (StorageKey const& key, Bytestring const& bytestring) {
+    auto item = std::make_shared<StorageItemWrapper>(bytestring, &cost_model_);
+    base_database_->write_item(AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
+    .key = key}, item);
+  }, [&] (std::shared_ptr<const Contract> const& contract) {
+    assert(contract);
+    auto hash = sha256(*contract);
+    base_database_->write_contract(hash, contract);
+  }, [&](const ContractAddress & addr, const SHA256Hash & hash) {
+    base_database_->write_deployment(addr, hash);
+  });
 }
 
 } // namespace hogd

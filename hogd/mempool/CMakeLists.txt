@@ -31,7 +31,9 @@ target_link_libraries(
   merkle
   protocol
   runtime
+  contract_loader
   GTest::gtest_main
 )
+
 set_property(TARGET mempool_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 gtest_discover_tests(mempool_test)

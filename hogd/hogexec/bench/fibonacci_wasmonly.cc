@@ -30,14 +30,13 @@
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/storage_snapshot_cache.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "built_contracts/contract_loader.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "rpc_types.hh"
-#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
-#include "x23/async.h"
 #include "x23/event.h"
 #include "x23/rpc.h"
 #include "x23/serialize.h"
@@ -286,7 +285,7 @@ run_fibonacci_server(int nthreads, uint32_t exec_port, uint32_t coord_port)
   // StorageCostModel cost_model = StorageCostModel(12000, 1, 5, 100, 5);
   ContractAddress contract_addr{};
 
-  auto contract = test::load_test_contract("fibonacci.wasm");
+  auto contract = hogd::load_contract("fibonacci.wasm");
 
   // Write contract to hogdb
   auto bytes = x23::serialize(*contract);

@@ -7,6 +7,7 @@
 
 // generated x23 headers
 #include "db_coord.hh"
+#include "genesis.hh"
 #include "nomination.hh"
 #include "rpc_types.hh"
 
@@ -24,6 +25,8 @@ class HogDBCoordServer {
 public:
   using rpc_service = DbCoord1;
 
+  // TODO(geoff): Some kind of check on ctx, to determine whether
+  // the ledger has been initialized or do we have a truly empty database
   explicit HogDBCoordServer(RPCContext &ctx) : ctx_(ctx) {}
 
   // Start the server on the specified port
@@ -66,12 +69,16 @@ public:
     co_return DbResult::DbResultError;
   }
 
+  x23::Async<DbResult> dbcoord_load_genesis_block(GenesisBlock genesis_block);
+
   uint16_t port();
 
 private:
   RPCContext &ctx_;
   x23::ThreadPool pool_ = x23::ThreadPool(2);
   x23::CoroPoll cp_ = x23::CoroPoll(pool_);
+
+  std::atomic<bool> is_initialized_ = false;
 
   // protect port_ during initialization
   std::mutex mtx_;

@@ -9,9 +9,9 @@
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/runtime.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "built_contracts/contract_loader.h"
 #include "rpc_types.hh"
-#include "test_contracts/integration_test_contracts/fibonacci_call/fibonacci_call.h"
+#include "built_contracts/integration_test_contracts/fibonacci_call/fibonacci_call.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -30,9 +30,9 @@ protected:
   {
     wasm_runtime_context_ = make_hogexec_wasm_context(RuntimeEngine::kWasmi);
 
-    auto fibonacci_contract = test::load_test_contract("fibonacci.wasm");
+    auto fibonacci_contract = hogd::load_contract("fibonacci.wasm");
     auto fibonacci_caller_contract =
-        test::load_test_contract("fibonacci_call.wasm");
+        hogd::load_contract("fibonacci_call.wasm");
 
     write_contract(fibonacci_contract);
     write_contract(fibonacci_caller_contract);

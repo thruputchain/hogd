@@ -16,10 +16,10 @@
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/hogexec/runtime/test_load_wasm.h"
+#include "built_contracts/contract_loader.h"
 #include "rpc_types.hh"
 #include "syscall_error.hh"
-#include "test_contracts/integration_test_contracts/read_only_test/read_only_test.h"
+#include "built_contracts/integration_test_contracts/read_only_test/read_only_test.h"
 #include "transaction.hh"
 #include "types.hh"
 
@@ -44,7 +44,7 @@ protected:
   std::shared_ptr<RuntimeContext> wasm_runtime_context_ =
       make_hogexec_wasm_context(RuntimeEngine::kWasmi);
   std::shared_ptr<Contract> contract_ =
-      test::load_test_contract("read_only_test.wasm");
+      hogd::load_contract("read_only_test.wasm");
   ContractAddress const contract_addr_ = make_contract_address(0);
   using read_only_test_client_t = ContractTraitClient<ReadOnlyTest>;
   read_only_test_client_t client_ = read_only_test_client_t(contract_addr_);
