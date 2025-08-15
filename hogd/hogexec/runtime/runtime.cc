@@ -7,6 +7,7 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "genesis.hh"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/preset_native_token.h"
@@ -52,14 +53,16 @@ make_hogexec_wasm_context(RuntimeEngine engine)
   return out;
 }
 
+namespace {
 std::shared_ptr<RuntimeContext>
 make_hogexec_native_contract_context()
 {
   return std::make_shared<NativeContext>(
-      {{std::to_underlying(HogexecNativeContracts::kNativeContractToken),
-        make_native_token_contract()}});
+      std::unordered_map<int32_t, std::unique_ptr<NativeContract>>{
+          {std::to_underlying(HogexecNativeContracts::kNativeContractToken),
+           make_native_token_contract()}});
 }
-
+} // namespace
 std::shared_ptr<RuntimeContext>
 make_hogexec_context()
 {
@@ -67,8 +70,7 @@ make_hogexec_context()
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
           {ContractType::kWasmi,
            make_hogexec_wasm_context(RuntimeEngine::kWasmi)},
-          // TODO(geoff): add hogexec native contracts here
-      });
+          {ContractType::kNative, make_hogexec_native_contract_context()}});
 }
 
 InvokeResult
