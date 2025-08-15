@@ -6,7 +6,6 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
-#include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -17,7 +16,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hogexec/runtime/status.h"
-#include "hogd/rpc/rpc.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -128,29 +126,24 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
       }
       return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())->client(DatabaseToExecutorInterfaceV1{});
     }
-    throw std::runtime_error("unimplemented");
-  }())
- /* : base_client_([&] -> RPCClient {
-      if (std::holds_alternative<LocalMockDB>(db_identifier)) {
-        auto mock_db = std::get<LocalMockDB>(db_identifier);
-        auto res = RPCClient::dial("127.0.0.1:" +
-                                   std::to_string(mock_db.read_port_number_));
-        if (!res) {
-          throw std::runtime_error("Failed to connect to local mock database");
-        }
-        return std::move(*res);
-      }
-      if (std::holds_alternative<ShardedDB>(db_identifier)) {
+    if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
         assert(!sharded_db.shards_.empty());
-        auto res = RPCClient::dial(sharded_db.shards_[0].address);
-        if (!res) {
-          throw std::runtime_error("Failed to connect to database shard");
+        if (sharded_db.shards_.size() > 1) {
+          throw std::runtime_error("ShardedDB with more than one shard is not yet supported");
         }
-        return std::move(*res);
+        x23::HostPort hostport;
+        if (!hostport.parse(sharded_db.shards_[0].address)) {
+          throw std::runtime_error("Failed to parse database shard address");
+        }
+        auto server_addr = hostport.to_addr(true);
+        if (!server_addr) {
+          throw std::runtime_error(std::format("failed server error: {}", server_addr.error()));
+        }
+        return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())->client(DatabaseToExecutorInterfaceV1{});
       }
-      std::terminate();
-    }()) */
+    throw std::runtime_error("unimplemented");
+  }())
 {
 }
 
