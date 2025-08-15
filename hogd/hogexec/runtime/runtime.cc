@@ -61,8 +61,7 @@ make_hogexec_native_contract_context()
   map.emplace(std::to_underlying(HogexecNativeContracts::kNativeContractToken),
               make_native_token_contract());
 
-  return std::make_shared<NativeContext>(
-      std::move(map));
+  return std::make_shared<NativeContext>(std::move(map));
 }
 } // namespace
 std::shared_ptr<RuntimeContext>
