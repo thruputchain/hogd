@@ -26,7 +26,6 @@ namespace hogd {
 // Core logic handler for the db rpc server.
 class HogDBExecutorServer {
 public:
-
   using rpc_service = DatabaseToExecutorInterfaceV1;
 
   explicit HogDBExecutorServer(RPCContext &ctx) : ctx_(ctx) {}
@@ -56,7 +55,8 @@ public:
 
   uint16_t port() const { return port_number_; }
 
-  ~HogDBExecutorServer() {
+  ~HogDBExecutorServer()
+  {
     listen_thread_.request_stop();
     shutdown(lfd_.get(), SHUT_RDWR);
     lfd_.reset();

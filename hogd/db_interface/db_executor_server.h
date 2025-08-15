@@ -10,12 +10,12 @@
 #include <print>
 #include <span>
 #include <stdexcept>
+#include <stop_token>
 #include <string_view>
 #include <sys/socket.h>
 #include <thread>
 #include <type_traits>
 #include <utility>
-#include <stop_token>
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
@@ -98,7 +98,7 @@ public:
       throw std::runtime_error("Failed to create RPC server");
     }
     rpc_server_ = std::move(*res);
-    server_listener_ = std::jthread([this]  {
+    server_listener_ = std::jthread([this] {
       if (ErrnoStatus<void> ret = rpc_server_->listen();
           !ret && !stopped_.load(std::memory_order_relaxed)) {
         error("Database to executor server listen failed: {}", ret.error());
@@ -124,7 +124,6 @@ private:
 
 class SrpcDbExecutorServer {
 public:
-
   explicit SrpcDbExecutorServer(BlockManager *block_manager, uint16_t port)
     : sync_server_(block_manager)
   {
@@ -135,12 +134,13 @@ public:
     }
     port_number_ = x23::get_port(x23::local_addr(lfd_.get()));
 
-    server_listener_ = std::jthread([this](std::stop_token&& stop) {
+    server_listener_ = std::jthread([this](std::stop_token &&stop) {
       while (!stop.stop_requested()) {
 
         sockaddr_storage ss;
         socklen_t sslen = sizeof(ss);
-        x23::UniqueFd fd{accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
+        x23::UniqueFd fd{
+            accept(lfd_.get(), reinterpret_cast<sockaddr *>(&ss), &sslen)};
         if (!fd) {
           std::println(stderr, "accept: {}", Errno{});
         }
@@ -153,19 +153,19 @@ public:
 
   uint16_t port() const { return port_number_; }
 
-  ~SrpcDbExecutorServer() {
+  ~SrpcDbExecutorServer()
+  {
     shutdown(lfd_.get(), SHUT_RDWR);
     server_listener_.request_stop();
     lfd_.reset();
   }
-
 
 private:
   uint16_t port_number_ = 0;
 
   SyncDBExecutorServer sync_server_;
   std::jthread server_listener_;
-  
+
   x23::UniqueFd lfd_;
 };
 

@@ -100,9 +100,10 @@ private:
   InMemoryDatabase in_memory_db_ = InMemoryDatabase();
   BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
 
-  SrpcDbExecutorServer db_executor_server_ = SrpcDbExecutorServer(&block_manager_, 0);
-  //RPCDbExecutorServer db_executor_server_ =
-  //    RPCDbExecutorServer(&block_manager_, 0);
+  SrpcDbExecutorServer db_executor_server_ =
+      SrpcDbExecutorServer(&block_manager_, 0);
+  // RPCDbExecutorServer db_executor_server_ =
+  //     RPCDbExecutorServer(&block_manager_, 0);
 
   DbCoordServer db_coord_server_ = DbCoordServer(&block_manager_);
   uint16_t coord_port_ = 0;

@@ -35,8 +35,7 @@ template<auto NullValue>
 constexpr auto
 to_system_error_code(auto err, auto &&f)
 {
-  constexpr bool kHasReturnType =
-      requires { f(std::move(get<1>(err))); };
+  constexpr bool kHasReturnType = requires { f(std::move(get<1>(err))); };
   auto type_lambda = [&] {
     if constexpr (kHasReturnType) {
       return f(std::move(get<1>(err)));
@@ -52,7 +51,6 @@ to_system_error_code(auto err, auto &&f)
   using ret_t = decltype(type_lambda());
 
   return [&] -> SystemStatus<ret_t> {
-
     RPCError err_code;
     if constexpr (kHasReturnType) {
       err_code = err.error();
@@ -101,10 +99,11 @@ to_system_error_code(auto err, auto &&f)
 }
 
 template<auto NullValue>
-constexpr auto 
-remove_syserr_from_call(auto syserr, auto&& f)
+constexpr auto
+remove_syserr_from_call(auto syserr, auto &&f)
 {
-  using overall_ret_t = decltype(to_system_error_code(syserr.value(), std::forward(f)));
+  using overall_ret_t =
+      decltype(to_system_error_code(syserr.value(), std::forward(f)));
   if (!syserr.has_value()) [[unlikely]] {
     return overall_ret_t{syserr.error()};
   }
@@ -116,21 +115,26 @@ remove_syserr_from_call(auto syserr, auto&& f)
 } // namespace
 
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
-  : client_ ([&] -> client_t {
-    if (std::holds_alternative<LocalMockDB>(db_identifier)) {
-      auto mock_db = std::get<LocalMockDB>(db_identifier);
-      auto server_addr = x23::HostPort{"localhost", x23::uformat("{}", mock_db.read_port_number_)}.to_addr(
-          true);
-      if (!server_addr) {
-        throw std::runtime_error(std::format("failed server error: {}", server_addr.error()));
+  : client_([&] -> client_t {
+      if (std::holds_alternative<LocalMockDB>(db_identifier)) {
+        auto mock_db = std::get<LocalMockDB>(db_identifier);
+        auto server_addr =
+            x23::HostPort{"localhost",
+                          x23::uformat("{}", mock_db.read_port_number_)}
+                .to_addr(true);
+        if (!server_addr) {
+          throw std::runtime_error(
+              std::format("failed server error: {}", server_addr.error()));
+        }
+        return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+            ->client(DatabaseToExecutorInterfaceV1{});
       }
-      return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())->client(DatabaseToExecutorInterfaceV1{});
-    }
-    if (std::holds_alternative<ShardedDB>(db_identifier)) {
+      if (std::holds_alternative<ShardedDB>(db_identifier)) {
         auto sharded_db = std::get<ShardedDB>(db_identifier);
         assert(!sharded_db.shards_.empty());
         if (sharded_db.shards_.size() > 1) {
-          throw std::runtime_error("ShardedDB with more than one shard is not yet supported");
+          throw std::runtime_error(
+              "ShardedDB with more than one shard is not yet supported");
         }
         x23::HostPort hostport;
         if (!hostport.parse(sharded_db.shards_[0].address)) {
@@ -138,14 +142,15 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier)
         }
         auto server_addr = hostport.to_addr(true);
         if (!server_addr) {
-          throw std::runtime_error(std::format("failed server error: {}", server_addr.error()));
+          throw std::runtime_error(
+              std::format("failed server error: {}", server_addr.error()));
         }
-        return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())->client(DatabaseToExecutorInterfaceV1{});
+        return x23::SRpcMulticlient<x23::RpcLogger>::make(server_addr.value())
+            ->client(DatabaseToExecutorInterfaceV1{});
       }
-    throw std::runtime_error("unimplemented");
-  }())
-{
-}
+      throw std::runtime_error("unimplemented");
+    }())
+{}
 
 SystemStatus<std::optional<StorageItem>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey const &addrkey)

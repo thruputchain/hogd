@@ -8,9 +8,9 @@
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 
-#include "x23/sockio.h"
 #include "x23/cleanup.h"
 #include "x23/err.h"
+#include "x23/sockio.h"
 
 namespace x23 {
 
