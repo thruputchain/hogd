@@ -112,6 +112,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #if HAVE_BUILTIN_ARM_YIELD
 #include <arm_acle.h>
@@ -155,10 +156,11 @@ namespace detail {
 
 template<typename CB>
 concept is_callback_like =
-    requires { typename callback_traits<CB>::argument_type; };
+    requires { typename callback_traits<std::decay_t<CB>>::argument_type; };
 
 template<is_callback_like CB>
-using CallbackArgType = typename callback_traits<CB>::argument_type;
+using CallbackArgType =
+    typename callback_traits<std::decay_t<CB>>::argument_type;
 
 template<typename CB, typename T>
 concept is_callback_of =
@@ -595,6 +597,72 @@ async_return(R &&r) noexcept
 {
   co_return std::forward<R>(r);
 }
+
+// A std::variant with void translated to std::monostate.
+template<typename... T>
+using void_variant =
+    std::variant<std::conditional_t<std::is_void_v<T>, std::monostate, T>...>;
+
+// async_return has a lot of overhead.  Functions that might or might
+// not want to allocate a coroutine frame based on runtime conditions
+// can alternatively return a MaybeAsync<T>.  It behaves similarly to
+// an Async<T> in that you can co_await it, pass it a callback, or
+// just invoke it with no arguments, but it doesn't need dynamic
+// memory allocation in the event that you just want to return the
+// value.
+template<typename T> struct MaybeAsync : void_variant<Async<T>, T> {
+  using super = void_variant<Async<T>, T>;
+  using super::super;
+
+  T operator()()
+  {
+    if (auto *a = async())
+      return (*a)();
+    return xval();
+  }
+  template<typename CB> requires requires(Async<T> a) { a(declval<CB>()); }
+  void operator()(CB &&cb)
+  {
+    if (auto *a = async())
+      (*a)(std::forward<CB>(cb));
+    else
+      compose(std::forward<CB>(cb), &MaybeAsync::xval, this);
+  }
+
+  bool await_ready() noexcept
+  {
+    if (auto *p = promise())
+      return p->await_ready();
+    return true;
+  }
+  void await_suspend(auto h) noexcept {
+    // Should never be called if we aren't storing an Async
+    get<Async<T>>(*this).await_suspend(h);
+  }
+  T await_resume()
+  {
+    if (auto *p = promise())
+      return p->await_resume();
+    return xval();
+  }
+
+  T xval() noexcept
+  {
+    if constexpr (!std::is_void_v<T>)
+      return std::move(get<T>(*this));
+    else
+      assert(holds_alternative<std::monostate>(*this));
+  }
+  Async<T> *async() noexcept { return get_if<Async<T>>(this); }
+  Async<T>::promise_type *promise() noexcept
+  {
+    if (auto *a = async())
+      return &operator co_await(*a);
+    return nullptr;
+  }
+};
+template<typename T> MaybeAsync(T) -> MaybeAsync<T>;
+template<typename T> MaybeAsync(Async<T>) -> MaybeAsync<T>;
 
 // Generate an Async and matching CoroCB.  This is for use in
 // low-level non-coroutine functions that want to return an Async for

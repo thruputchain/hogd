@@ -78,4 +78,40 @@ migrate_coro(benchmark::State &state)
 }
 BENCHMARK(migrate_coro);
 
+void
+time_async_return(benchmark::State &state)
+{
+  x23::Callback<int> dummy{[](int) {}};
+  for (auto _ : state)
+    x23::async_return(0)(dummy);
+}
+BENCHMARK(time_async_return);
+
+void
+time_sync_return(benchmark::State &state)
+{
+  x23::Callback<int> dummy{[](int) {}};
+  for (auto _ : state)
+    [](auto cb) { cb(0); }(dummy);
+}
+BENCHMARK(time_sync_return);
+
+void
+time_maybesync_return_sync(benchmark::State &state)
+{
+  x23::Callback<int> dummy{[](int) {}};
+  for (auto _ : state)
+    x23::MaybeAsync{0}(dummy);
+}
+BENCHMARK(time_maybesync_return_sync);
+
+void
+time_maybesync_return_async(benchmark::State &state)
+{
+  x23::Callback<int> dummy{[](int) {}};
+  for (auto _ : state)
+    x23::MaybeAsync{x23::async_return(0)}(dummy);
+}
+BENCHMARK(time_maybesync_return_async);
+
 BENCHMARK_MAIN();
