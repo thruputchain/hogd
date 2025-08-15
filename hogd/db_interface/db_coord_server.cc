@@ -7,7 +7,6 @@
 #include "db_coord.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
-#include "hogd/genesis/genesis_block.h"
 #include "rpc_types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"

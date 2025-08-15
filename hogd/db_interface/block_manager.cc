@@ -5,14 +5,19 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
+#include "contract.hh"
+#include "genesis.hh"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_state.h"
 #include "hogd/genesis/genesis_block.h"
 #include "hogd/mockdb/in_memory_database.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
+#include "types.hh"
 
 namespace hogd {
 

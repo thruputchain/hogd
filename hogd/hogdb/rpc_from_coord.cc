@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <netinet/in.h>
+#include <span>
 #include <stdexcept>
 #include <sys/socket.h>
 #include <utility>

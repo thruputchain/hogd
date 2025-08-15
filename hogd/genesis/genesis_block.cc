@@ -1,5 +1,8 @@
 #include "hogd/genesis/genesis_block.h"
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <cstring>
 #include <span>
 #include <vector>

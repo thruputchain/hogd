@@ -1,16 +1,17 @@
 #include "hogd/genesis/genesis_block.h"
 
-#include <unordered_map>
+#include <algorithm>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <vector>
 
 #include "contract.hh"
 #include "genesis.hh"
-#include "hogd/base/status.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "storage_item.hh"
 #include "types.hh"
-#include "x23/serialize.h"
 #include "gtest/gtest.h"
 
 namespace hogd {
@@ -183,7 +184,7 @@ TEST_F(GenesisBlockTest, MultipleEntries)
       [this](StorageKey const &key, Bytestring const &bytestring) {
         mock_write_storage(key, bytestring);
       },
-      [this](auto contract) { mock_write_contract(contract); },
+      [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,
              SHA256Hash const &contract_hash) {
         mock_write_deployment(contract_address, contract_hash);
