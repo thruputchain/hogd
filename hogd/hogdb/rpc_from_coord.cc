@@ -14,12 +14,14 @@
 // generated x23 headers
 #include "db_coord.hh"
 #include "hogd/base/status.h"
+#include "hogd/hogdb/db.h"
 #include "rpc_types.hh"
 
 #include "hogd/base/types.h"
 #include "hogd/hogdb/block_tx.h"
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/status.h"
+#include "types.hh"
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/event.h"
@@ -86,6 +88,37 @@ HogDBCoordServer::dbcoord_close_snapshot(BlockID id) // NOLINT
 
   // ctx_.close_block_tx(id);
   co_return DbBlockResult(DbResult::DbResultOK);
+}
+
+x23::Async<HogAgeResult>
+HogDBCoordServer::dbcoord_get_hog_ages(const ContractAddressBatch &addresses)
+{
+  HogDatabase &database = ctx_.get_db();
+  HogAgeResult ret(DbResult::DbResultOK);
+  ret.hog_age_batch().reserve(addresses.size());
+
+  for (const ContractAddress &address : addresses) {
+    HogDBStatus<HogAge> status =
+        read_address_average_hog_age(database, address);
+    if (!status) {
+      co_return HogAgeResult(DbResult::DbResultError);
+    }
+    // TODO(jhumphri): Include the address in each index.
+    ret.hog_age_batch().push_back(status.value());
+  }
+  co_return ret;
+}
+
+x23::Async<DbResult>
+HogDBCoordServer::dbcoord_write_hog_ages(const HogAgeBatch &ages)
+{
+  HogDatabase &database = ctx_.get_db();
+  for (const HogAge &age : ages) {
+    if (!write_address_average_hog_age(database, age)) {
+      co_return DbResult::DbResultError;
+    }
+  }
+  co_return DbResult::DbResultOK;
 }
 
 namespace {
