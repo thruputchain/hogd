@@ -167,7 +167,7 @@ concept is_{0} =)",
           R"({0}
   requires(Server __s, ExtraArgs...ea) {{
     {{ __s->{2}({3}{4}ea...) }}
-      -> std::same_as<RetTrans<{1}>>;
+      -> std::convertible_to<RetTrans<{1}>>;
   }})",
           andand.get(), map_type(proc.return_type), proc.id,
           join(proc.arg_types | std::views::transform(map_type) |

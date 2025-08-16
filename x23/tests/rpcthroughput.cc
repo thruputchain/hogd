@@ -85,11 +85,11 @@ struct Server {
   RefPtr<Listener> l_;
   Server(RefPtr<Listener> l) : l_(std::move(l)) {}
 
-  Async<void> null() { co_return; }
+  MaybeAsync<void> null() { return std::monostate{}; }
 
-  Async<Data> echo(Data arg) { co_return arg; }
+  MaybeAsync<Data> echo(Data arg) { return arg; }
 };
-static_assert(is_blank_rpc_v1<Server *, Async>);
+static_assert(is_blank_rpc_v1<Server *, MaybeAsync>);
 
 CpTp::Vec
 CpTp::make_vec(size_t nthreads, size_t ncptp)
@@ -115,7 +115,7 @@ Listener::accept_loop(this RefPtr<Listener> self SLOC_ARG)
     //    std::println("accepted fd {} TCP port {} from {}", *s,
     //                 get_port(self->addr_), HostPort(ss));
     make_rpc_stream(self->cps_.get(*s), *s)
-        .server(std::make_unique<Server>(self));
+      .server(std::make_unique<Server>(self), blank_rpc_v1{});
   }
   std::println("server stopping");
 }

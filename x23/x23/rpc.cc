@@ -102,8 +102,17 @@ RpcStreamImpl::reader(SLOC_ARG0)
     }
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
-      if (RpcService *s = srvmap_.lookup(msg, &res))
-        cp_->bgwrite(fd_, co_await s->serve(msg, b.subspan(hdrbytes)));
+      if (RpcService *s = srvmap_.lookup(msg, &res)) {
+        auto awaitable = s->serve(msg, b.subspan(hdrbytes));
+	// Only spawn another coroutine if result not already available
+        decltype(auto) awaiter = detail::get_awaiter(awaitable);
+        if (awaiter.await_ready())
+          cp_->bgwrite(fd_, awaiter.await_resume());
+        else
+          [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
+            self->cp_->bgwrite(self->fd_, co_await awaitable);
+          }(*this, std::move(awaitable));
+      }
       else
         send_msg(res);
     }
