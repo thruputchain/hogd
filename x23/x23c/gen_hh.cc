@@ -226,7 +226,7 @@ concept is_{0} =)",
     using return_wire_type = {7};
     template<typename Server, typename ...ExtraArgs>
     static decltype(auto)
-    dispatch(Server &&server, arg_type &args, ExtraArgs &&...ea) {{
+    dispatch(Server &&server, arg_type &&args, ExtraArgs &&...ea) {{
       {5}
     }}
 }};

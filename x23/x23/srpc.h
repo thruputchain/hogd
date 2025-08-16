@@ -224,7 +224,7 @@ private:
         auto res = detail::void_to_0tuple([&] {
           return std::apply(
               [&](auto &...ea) {
-                return ProcMeta::dispatch(*d_.impl_, args, ea...);
+                return ProcMeta::dispatch(*d_.impl_, std::move(args), ea...);
               },
               d_.ea_);
         });

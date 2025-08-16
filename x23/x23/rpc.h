@@ -178,8 +178,7 @@ private:
     try {
       auto retval = std::apply(
           [&](auto &...ea) {
-            auto a = args(argbytes); // XXX - fix x23c to take rvalue
-            return ProcMeta::dispatch(*d_.impl_, a, ea...);
+            return ProcMeta::dispatch(*d_.impl_, args(argbytes), ea...);
           },
           d_.ea_);
 
