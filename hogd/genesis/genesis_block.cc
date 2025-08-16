@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -59,7 +60,8 @@ GenesisBlockLoader::load_genesis_block(
 
   // write the initial token allocation
   StorageKey allocation_key(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
-
+  constexpr static int128_t kHogTokenTotalSupply = int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
+  write_storage(allocation_key, kHogTokenTotalSupply);
 }
 
 StorageKey
