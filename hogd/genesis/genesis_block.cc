@@ -17,7 +17,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {

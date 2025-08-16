@@ -8,7 +8,6 @@
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/types.h"
-#include "storage_item.hh"
 #include "types.hh"
 
 namespace hogd {

@@ -6,7 +6,6 @@ target_link_libraries(genesis
   base
   crypto
   storage_item
-  x23
   protocol
   contract_loader
 )
