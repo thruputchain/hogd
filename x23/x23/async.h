@@ -683,6 +683,9 @@ struct MaybeAsync : void_variant<Awaitable, T> {
   using promise_type = Promise;
 
   using super::super;
+  template<std::same_as<T> U = T> requires std::is_void_v<U>
+  MaybeAsync() noexcept : super{std::in_place_type<std::monostate>}
+  {}
 
   // Pass through any function call operators on async_type
   template<typename... Args>

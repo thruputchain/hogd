@@ -99,25 +99,12 @@ struct RpcService {
   virtual ~RpcService() {}
   virtual std::uint32_t program() const = 0;
   virtual std::uint32_t version() const = 0;
-  virtual MaybeAsync<Buf> serve(const rpc_msg &msg, BufView args SLOC_PARM) = 0;
+  virtual MaybeAsync<Buf> serve(const rpc_msg &msg, BufView args) = 0;
   ProgVers getpv() const
   {
     return ProgVers{.prog = program(), .vers = version()};
   }
 };
-
-template<typename R> requires (!std::is_void_v<R>)
-inline Async<R>
-void_to_empty(Async<R> a)
-{
-  return a;
-}
-inline auto
-void_to_empty(Async<void> a)
-{
-  return MapAwait{.func = [] { return std::array<std::uint8_t, 0>{}; },
-                  .awaitable = std::move(a)};
-}
 
 template<typename VersMeta, typename Impl, typename Logger = RpcNoLogger,
          typename... ExtraArgs>
@@ -134,7 +121,7 @@ struct RpcDispatcher : RpcService {
   std::uint32_t program() const final { return version_meta::program; }
   std::uint32_t version() const final { return version_meta::version; }
 
-  MaybeAsync<Buf> serve(const rpc_msg &msg, BufView argdata SLOC_PARM) override
+  MaybeAsync<Buf> serve(const rpc_msg &msg, BufView argdata) override
   {
     using enum msg_type;
     assert(msg.body.mtype() == CALL && msg.body.cbody().rpcvers == 2 &&
@@ -176,45 +163,64 @@ private:
 
     MaybeAsync<Buf> operator()(BufView argbytes)
     try {
-      auto retval = std::apply(
-          [&](auto &...ea) {
-            return ProcMeta::dispatch(*d_.impl_, args(argbytes), ea...);
-          },
-          d_.ea_);
+      constexpr bool returns_void = std::is_void_v<return_type>;
+      using dispatch_t = decltype(dispatch(argbytes));
+      rpc_msg rmsg{.xid = xid_};
+      msg_set_reply_stat(&rmsg, SUCCESS);
 
-      decltype(auto) awaiter = detail::get_awaiter(retval);
-
-      if (awaiter.await_ready()) {
-        rpc_msg rmsg{.xid = xid_};
-        msg_set_reply_stat(&rmsg, SUCCESS);
-        if constexpr (std::is_void_v<return_type>) {
-          awaiter.await_resume();
+      if constexpr (!is_awaitable<dispatch_t>) {
+        if constexpr (returns_void) {
+          dispatch(argbytes);
           return MaybeAsync<Buf>{std::in_place_type<Buf>, make_record(rmsg)};
         }
         else
           return MaybeAsync<Buf>{std::in_place_type<Buf>,
-                                 make_record(rmsg, awaiter.await_resume())};
+                                 make_record<return_type>(rmsg,
+                                                          dispatch(argbytes))};
       }
+      else {
+        auto awaitable = dispatch(argbytes);
+        decltype(auto) awaiter = detail::get_awaiter(awaitable);
+        if (awaiter.await_ready()) {
+          if constexpr (returns_void) {
+            awaiter.await_resume();
+            return MaybeAsync<Buf>{std::in_place_type<Buf>, make_record(rmsg)};
+          }
+          else
+            return MaybeAsync<Buf>{
+                std::in_place_type<Buf>,
+                make_record<return_type>(rmsg, awaiter.await_resume())};
+        }
 
-      return MaybeAsync<Buf>{std::in_place_type<Async<Buf>>,
-                             [](ProcHandler self /* copy */,
-                                auto awaitable) noexcept -> Async<Buf> {
-                               try {
-                                 rpc_msg rmsg{.xid = self.xid_};
-                                 msg_set_reply_stat(&rmsg, SUCCESS);
-                                 if constexpr (std::is_void_v<return_type>) {
-                                   co_await awaitable;
-                                   co_return make_record(rmsg);
+        return MaybeAsync<Buf>{std::in_place_type<Async<Buf>>,
+                               [](ProcHandler self /* copy */,
+                                  auto awaitable) noexcept -> Async<Buf> {
+                                 try {
+                                   rpc_msg rmsg{.xid = self.xid_};
+                                   msg_set_reply_stat(&rmsg, SUCCESS);
+                                   if constexpr (returns_void) {
+                                     co_await awaitable;
+                                     co_return make_record(rmsg);
+                                   }
+                                   else
+                                     co_return make_record<return_type>(
+                                         rmsg, co_await awaitable);
+                                 } catch (const std::exception &e) {
+                                   co_return self.error(e);
                                  }
-                                 else
-                                   co_return make_record(rmsg,
-                                                         co_await awaitable);
-                               } catch (const std::exception &e) {
-                                 co_return self.error(e);
-                               }
-                             }(*this, std::move(retval))};
+                               }(*this, std::move(awaitable))};
+      }
     } catch (std::exception &e) {
       return error(e);
+    }
+
+    decltype(auto) dispatch(BufView argbytes)
+    {
+      return std::apply(
+          [&](auto &...ea) {
+            return ProcMeta::dispatch(*d_.impl_, args(argbytes), ea...);
+          },
+          d_.ea_);
     }
 
     arg_type args(BufView argbytes)

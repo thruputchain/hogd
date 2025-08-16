@@ -85,9 +85,9 @@ struct Server {
   RefPtr<Listener> l_;
   Server(RefPtr<Listener> l) : l_(std::move(l)) {}
 
-  MaybeAsync<void> null() { return std::monostate{}; }
+  void null() {}
 
-  MaybeAsync<Data> echo(Data arg) { return arg; }
+  Data echo(Data arg) { return arg; }
 };
 static_assert(is_blank_rpc_v1<Server *, MaybeAsync>);
 
