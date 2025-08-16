@@ -27,7 +27,7 @@ GenesisBlockLoader::GenesisBlockLoader(GenesisBlock genesis_block)
 
 void
 GenesisBlockLoader::load_genesis_block(
-    std::function<void(StorageKey const &, Bytestring const &)> const
+    std::function<void(StorageKey const &, int128_t const&)> const
         &write_storage,
     std::function<void(std::shared_ptr<const Contract> contract)> const
         &write_contract,
@@ -46,10 +46,9 @@ GenesisBlockLoader::load_genesis_block(
 
     // Convert int128_xdr to int128_t and create allocation bytestring
     auto amount = from_xdr(entry.amount);
-    auto allocation_bytestring = create_allocation_bytestring(amount);
 
     // Write to storage
-    write_storage(storage_key, allocation_bytestring);
+    write_storage(storage_key, amount);
   }
 
   auto deploy_contract = load_contract("initial_token_claim.wasm");
@@ -57,6 +56,10 @@ GenesisBlockLoader::load_genesis_block(
 
   write_contract(deploy_contract);
   write_deployment(kDeployContractAddress, contract_hash);
+
+  // write the initial token allocation
+  StorageKey allocation_key(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
+
 }
 
 StorageKey
@@ -92,21 +95,6 @@ GenesisBlockLoader::calculate_storage_key(
   std::copy_n(hash_result.begin(), 32, storage_key.contract_data_key().begin());
 
   return storage_key;
-}
-
-Bytestring
-GenesisBlockLoader::create_allocation_bytestring(int128_t amount)
-{
-  // Convert amount to big-endian bytes
-  std::array<std::uint8_t, 16> amount_bytes;
-  std::memcpy(amount_bytes.data(), &amount, 16);
-
-  // Create bytestring
-  Bytestring bytestring;
-  bytestring.resize(16);
-  std::copy_n(amount_bytes.begin(), 16, bytestring.begin());
-
-  return bytestring;
 }
 
 } // namespace hogd

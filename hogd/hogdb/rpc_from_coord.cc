@@ -196,29 +196,45 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
   auto *itx = ctx_.get_invoke_tx(0, 0);
   assert(itx);
 
+  bool failure = false;
+  // If initialization fails, then the database is left in an invalid state.
+  // We should abort the entire run of the hog chain to fix if initialization doesn't work.
+
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [&](StorageKey const &key, Bytestring const &value) {
+      [&](StorageKey const &key, int128_t value) {
         auto item_key = make_item_key(
             AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
                           .key = key});
-        auto r = itx->request_bytes(item_key, std::as_bytes(std::span(value)));
-        assert(r.has_value());
+        auto r = itx->request_nnint128(item_key, value);
+        if (!r.has_value()) {
+          error("failed to write genesis block storage: {}", r.error());
+          failure = true;
+        }
       },
       [&](auto const &contract) {
         auto data = x23::serialize(*contract);
         const auto *cptr = reinterpret_cast<const std::byte *>(data.data());
         auto buf = std::span<const std::byte>(cptr, data.size());
         SHA256Hash hash = sha256(buf);
-        [[maybe_unused]]
         auto r = write_wasm_code(ctx_.get_db(), hash, buf);
-        assert(r.has_value());
+        if (!r.has_value()) {
+          error("failed to write genesis block contract: {}", r.error());
+          failure = true;
+        }
       },
       [&](ContractAddress const &addr, SHA256Hash const &hash) {
-        [[maybe_unused]]
         auto r = write_address_wasm_hash(ctx_.get_db(), addr, hash);
-        assert(r.has_value());
+        if (!r.has_value()) {
+          error("failed to write genesis block deployment: {}", r.error());
+          failure = true;
+        }
       });
+
+  if (failure) {
+    error("genesis block initialization failed");
+    co_return DbResult::DbResultError;
+  }
   
   itx->commit();
   ctx_.close_invoke_tx(0, 0);
@@ -227,6 +243,9 @@ HogDBCoordServer::dbcoord_load_genesis_block(GenesisBlock genesis_block)
     error("failed to commit genesis block: {}", commit_res.error());
     co_return DbResult::DbResultError;
   }
+
+
+
   ctx_.close_block_tx(0);
 
   co_return DbResult::DbResultOK;

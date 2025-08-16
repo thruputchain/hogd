@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <span>
@@ -33,9 +34,9 @@ public:
   explicit GenesisBlockLoader(GenesisBlock genesis_block);
 
   // Load genesis block data into storage
-  // This calculates storage keys and stores allocation amounts as bytestrings
+  // This calculates storage keys and stores allocation amounts as int128s
   void load_genesis_block(
-      std::function<void(StorageKey const &, Bytestring const &)> const
+      std::function<void(StorageKey const &, int128_t const&)> const
           &write_storage,
       std::function<void(std::shared_ptr<const Contract>)> const
           &write_contract,
@@ -50,9 +51,6 @@ public:
   calculate_storage_key(SHA256Hash const &hash, SHA256Hash const &nonce,
                         ContractEntrypointID entrypoint,
                         std::span<const std::uint8_t> calldata);
-
-  // Helper to serialize allocation amount as bytestring
-  static Bytestring create_allocation_bytestring(int128_t amount);
 
   constexpr static ContractAddress kDeployContractAddress =
       make_precompile_address(kDeployContractPrecompileIndex);

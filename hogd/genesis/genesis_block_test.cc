@@ -11,7 +11,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "storage_item.hh"
 #include "types.hh"
 #include "gtest/gtest.h"
 
@@ -22,9 +21,9 @@ protected:
   void SetUp() override {}
 
   // Mock storage write function that captures writes
-  void mock_write_storage(StorageKey const &key, Bytestring const &bytestring)
+  void mock_write_storage(StorageKey const &key, int128_t value)
   {
-    storage_map_[key] = bytestring;
+    storage_map_[key] = value;
   }
 
   void mock_write_contract(std::shared_ptr<const Contract> const &contract)
@@ -79,7 +78,7 @@ protected:
     return genesis_block;
   }
 
-  std::map<StorageKey, Bytestring> storage_map_;
+  std::map<StorageKey, int128_t> storage_map_;
   std::map<SHA256Hash, std::shared_ptr<const Contract>> contract_map_;
   std::map<ContractAddress, SHA256Hash> deployment_map_;
 };
@@ -92,8 +91,8 @@ TEST_F(GenesisBlockTest, LoadGenesisBlockSuccess)
   // Create loader and load genesis block
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [this](StorageKey const &key, Bytestring const &bytestring) {
-        mock_write_storage(key, bytestring);
+      [this](StorageKey const &key, int128_t value) {
+        mock_write_storage(key, value);
       },
       [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,
@@ -134,26 +133,6 @@ TEST_F(GenesisBlockTest, CalculateStorageKeyPresetContract)
   EXPECT_TRUE(has_non_zero);
 }
 
-TEST_F(GenesisBlockTest, CreateAllocationBytestring)
-{
-  int128_t amount = 123456789;
-
-  auto bytestring = GenesisBlockLoader::create_allocation_bytestring(amount);
-
-  // Verify the bytestring has the correct size
-  EXPECT_EQ(bytestring.size(), 16);
-
-  // Verify it's not all zeros
-  bool has_non_zero = false;
-  for (auto byte : bytestring) {
-    if (byte != 0) {
-      has_non_zero = true;
-      break;
-    }
-  }
-  EXPECT_TRUE(has_non_zero);
-}
-
 TEST_F(GenesisBlockTest, EmptyGenesisBlock)
 {
   // Create empty genesis block
@@ -162,8 +141,8 @@ TEST_F(GenesisBlockTest, EmptyGenesisBlock)
   // Create loader and load genesis block
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [this](StorageKey const &key, Bytestring const &bytestring) {
-        mock_write_storage(key, bytestring);
+      [this](StorageKey const &key, int128_t value) {
+        mock_write_storage(key, value);
       },
       [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,
@@ -182,8 +161,8 @@ TEST_F(GenesisBlockTest, MultipleEntries)
   // Create loader and load genesis block
   GenesisBlockLoader loader(genesis_block);
   loader.load_genesis_block(
-      [this](StorageKey const &key, Bytestring const &bytestring) {
-        mock_write_storage(key, bytestring);
+      [this](StorageKey const &key, int128_t value) {
+        mock_write_storage(key, value);
       },
       [this](auto const &contract) { mock_write_contract(contract); },
       [this](ContractAddress const &contract_address,

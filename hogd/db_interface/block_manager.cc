@@ -11,6 +11,7 @@
 
 #include "contract.hh"
 #include "genesis.hh"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/db_interface/block_state.h"
 #include "hogd/genesis/genesis_block.h"
@@ -212,9 +213,9 @@ BlockManager::initialize_genesis_block(GenesisBlock const &config)
   GenesisBlockLoader loader(config);
 
   loader.load_genesis_block(
-      [&](StorageKey const &key, Bytestring const &bytestring) {
+      [&](StorageKey const &key, int128_t value) {
         auto item =
-            std::make_shared<StorageItemWrapper>(bytestring, &cost_model_);
+            std::make_shared<StorageItemWrapper>(value, &cost_model_);
         base_database_->write_item(
             AddressAndKey{.address = GenesisBlockLoader::kDeployContractAddress,
                           .key = key},
