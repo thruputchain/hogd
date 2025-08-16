@@ -388,7 +388,7 @@ rpc_server_dispatch_method(auto &server, std::string_view peername,
                           .xid = xid}));
   }
 
-  auto res = Meta::dispatch(server, a);
+  auto res = Meta::dispatch(server, std::move(a));
   detail::trace_log_message<Meta>(true, peername, xid, res);
 
   auto buf_out = response_header_to_buf(
