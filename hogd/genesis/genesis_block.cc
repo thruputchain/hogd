@@ -25,6 +25,15 @@ GenesisBlockLoader::GenesisBlockLoader(GenesisBlock genesis_block)
   : genesis_block_(std::move(genesis_block))
 {}
 
+namespace {
+std::shared_ptr<const Contract> make_native_contract(HogexecNativeContracts contract_id) {
+  auto out = std::make_shared<Contract>();
+  out->contract_type(ContractType::kNative);
+  out->native_contract_id() = std::to_underlying(contract_id);
+  return out;
+}
+}
+
 void
 GenesisBlockLoader::load_genesis_block(
     std::function<void(StorageKey const &, int128_t const&)> const
@@ -52,15 +61,18 @@ GenesisBlockLoader::load_genesis_block(
   }
 
   auto deploy_contract = load_contract("initial_token_claim.wasm");
-  auto contract_hash = sha256(*deploy_contract);
-
   write_contract(deploy_contract);
-  write_deployment(kDeployContractAddress, contract_hash);
+  write_deployment(kDeployContractAddress, sha256(*deploy_contract));
 
   // write the initial token allocation
   StorageKey allocation_key(StorageKeyType::kStorageKeyTypeFreeNativeTokenBalance);
   constexpr static int128_t kHogTokenTotalSupply = int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
   write_storage(allocation_key, kHogTokenTotalSupply);
+
+  // write the precompiled token contract
+  auto precompiled_token_contract = make_native_contract(HogexecNativeContracts::kNativeContractToken);
+  write_contract(precompiled_token_contract);
+  write_deployment(kPresetNativeTokenAddress, sha256(*precompiled_token_contract));
 }
 
 StorageKey
