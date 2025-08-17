@@ -1,6 +1,7 @@
 add_library(
   mempool
   mempool.cc
+  scheduler.cc
 )
 target_link_libraries(
   mempool
@@ -37,3 +38,23 @@ target_link_libraries(
 
 set_property(TARGET mempool_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 gtest_discover_tests(mempool_test)
+
+add_executable(
+  scheduler_test
+  scheduler_test.cc
+)
+target_link_libraries(
+  scheduler_test
+  base
+  crypto
+  db_interface
+  exec_interface
+  hogd
+  mempool
+  merkle
+  protocol
+  runtime
+  GTest::gtest_main
+)
+set_property(TARGET scheduler_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+gtest_discover_tests(scheduler_test)

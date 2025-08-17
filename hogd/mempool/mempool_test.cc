@@ -1,21 +1,20 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <memory>
-#include <span>
-#include <stdexcept>
-#include <string>
-#include <utility>
 
+<<<<<<< HEAD
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/integration_test_contracts/fibonacci/fibonacci.h"
 #include "contract.hh"
 #include "coord.hh"
 #include "coord_sched.hh"
+=======
+>>>>>>> main
 #include "db_coord.hh"
 #include "discovery.hh"
 #include "exec_coord.hh"
 #include "hogd/base/log.h"
+<<<<<<< HEAD
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/container/merkle/merkle_trie.h"
@@ -31,20 +30,21 @@
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/mempool/coordinator.h"
+=======
+>>>>>>> main
 #include "hogd/mempool/mempool.h"
-#include "hogd/ramdb/db.h"
-#include "hogd/ramdb/db_status.h"
+#include "hogd/mempool/mempool_test_server.h"
 #include "nomination.hh"
 #include "sched_coord.hh"
+<<<<<<< HEAD
 #include "transaction.hh"
+=======
+>>>>>>> main
 #include "types.hh"
-#include "x23/event.h"
-#include "x23/rpc.h"
-#include "x23/serialize.h"
-#include "x23/threadpool.h"
 
 namespace hogd {
 
+<<<<<<< HEAD
 namespace {
 
 class MempoolTestServer {
@@ -274,9 +274,11 @@ constexpr size_t kNumTxs = 100;
 
 } // namespace
 
+=======
+>>>>>>> main
 TEST(Mempool, SubmitUnvetted)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -287,7 +289,7 @@ TEST(Mempool, SubmitUnvetted)
 
 TEST(Mempool, SubmitVetted)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -299,7 +301,7 @@ TEST(Mempool, SubmitVetted)
 
 TEST(Mempool, Nominate)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -315,7 +317,7 @@ TEST(Mempool, Nominate)
 
 TEST(Mempool, NominateBatch)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -331,7 +333,7 @@ TEST(Mempool, NominateBatch)
 
 TEST(Mempool, NominateEmpty)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
@@ -344,7 +346,7 @@ TEST(Mempool, NominateEmpty)
 
 TEST(Mempool, Validate)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -358,6 +360,7 @@ TEST(Mempool, Validate)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
+  clients.interface->schedulercoord_submit_vetted(validator_id, {txs[0]})();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -366,7 +369,7 @@ TEST(Mempool, Validate)
 
 TEST(Mempool, ValidateBatch)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   const SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -380,6 +383,7 @@ TEST(Mempool, ValidateBatch)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerNominationOutcome::SchedulerNominationOK);
 
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -388,7 +392,7 @@ TEST(Mempool, ValidateBatch)
 
 TEST(Mempool, ValidateEmpty)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
 
   MempoolTestServer server;
   Clients clients = create_clients(server);
@@ -402,7 +406,7 @@ TEST(Mempool, ValidateEmpty)
 
 TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   MempoolTestServer server;
@@ -421,6 +425,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
   res_nominate.scheduler_nomination()
       .nomination.transaction_nominations.pop_back();
 
+  clients.interface->schedulercoord_submit_vetted(validator_id, txs)();
   auto res_validate = clients.interface->schedulercoord_validate(
       db_tip, res_nominate.scheduler_nomination().nomination)();
   EXPECT_EQ(res_validate.outcome(),
@@ -429,7 +434,7 @@ TEST(Mempool, ValidateBatchRemoveTxFromNomination)
 
 TEST(Mempool, ValidateBatchMissingTx)
 {
-  fib_client_t fib_client(MempoolTestServer::kContractAddress);
+  fib_client_t fib_client(MempoolTestServer::kAccountAddress);
   SignedTransactionBatch txs = generate_txs(fib_client, kNumTxs);
 
   SchedulerNominationResult res_nominate;
