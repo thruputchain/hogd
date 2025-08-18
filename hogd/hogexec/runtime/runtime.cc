@@ -73,7 +73,8 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
 
   trace("Invoking method {} with gas limit {}", method_name, gas_limit);
   auto res = invoke_internal(method_name);
-  trace("Invoke result: {}", res.has_value() ? "success" : x23::show(res.error().code()));
+  trace("Invoke result: {}",
+        res.has_value() ? "success" : x23::show(res.error().code()));
 
   // Interpreters that perform metering on a basic block level, instead of
   // instruction by instruction, might not actually charge for the last block.

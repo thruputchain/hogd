@@ -145,20 +145,18 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   }();
 
 public:
-  template<StringLiteral Name>
-  static ContractEntrypointID entrypoint()
+  template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {
     constexpr auto kIndex = kExportIndex<kLookupIndex<Name>>;
 
-    auto entrypoint = sdk_entrypoint_derivation(ContractTrait::kTraitName,
-                                     ContractTrait::kVersion,
-                                     kExportIndex<kLookupIndex<Name>>);
-    if constexpr (requires {
-                    ContractTrait::kEntrypoints;
-                  }) {
+    auto entrypoint =
+        sdk_entrypoint_derivation(ContractTrait::kTraitName,
+                                  ContractTrait::kVersion,
+                                  kExportIndex<kLookupIndex<Name>>);
+    if constexpr (requires { ContractTrait::kEntrypoints; }) {
       assert(ContractTrait::kEntrypoints[kIndex] == sdk_method_id(entrypoint));
     }
-    return entrypoint;              
+    return entrypoint;
   }
 
   template<StringLiteral Name, typename... Args>

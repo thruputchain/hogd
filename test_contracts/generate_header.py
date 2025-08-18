@@ -31,7 +31,7 @@ def generate_header(json_file, output_file=None):
     function_signatures = []
     for method in methods:
         # Map JSON types to C++ types
-        return_type = map_type(method['return'])
+        return_type = map_type_from_typespec(method['return'])
         args = []
         for arg in method['args']:
             arg_type = map_type_from_typespec(arg['typespec'])
@@ -51,10 +51,17 @@ def generate_header(json_file, output_file=None):
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <tuple>
 
+#include "x23/vec.h"
+#include "types.hh"
+
 // Auto-generated from contract spec
+// DO NOT EDIT
+
+namespace hogd {{
 
 struct {interface_name} {{
     constexpr static std::string_view kTraitName = "{interface_name}";
@@ -74,6 +81,9 @@ struct {interface_name} {{
 
     using export_types = std::tuple<{signatures_str}>;
 }};
+
+}} // namespace hogd
+
 '''
     
     if output_file:
@@ -83,26 +93,6 @@ struct {interface_name} {{
     else:
         print(header_content)
 
-def map_type(json_type):
-    """Map JSON type specifications to C++ types."""
-    if json_type == "unsigned int":
-        return "uint32_t"
-    elif json_type == "int":
-        return "int32_t"
-    elif json_type == "unsigned long":
-        return "uint64_t"
-    elif json_type == "long":
-        return "int64_t"
-    elif json_type == "bool":
-        return "bool"
-    elif json_type == "string":
-        return "std::string_view"
-    elif json_type == "void":
-        return "void"
-    else:
-        # Default to uint32_t for unknown types
-        return "uint32_t"
-
 def map_type_from_typespec(typespec):
     """Map typespec JSON strings to C++ types."""
 
@@ -111,12 +101,33 @@ def map_type_from_typespec(typespec):
         return "uint32_t"
     elif t == "signed":
         return "int32_t"
+    elif t == "unsigned hyper":
+        return "uint64_t"
+    elif t == "signed hyper":
+        return "int64_t"
     elif t == "bool":
         return "bool"
-    elif t == "string":
-        return "std::string_view"
+    elif t == "variable opaque":
+        max_len = typespec["max"]
+        return f"x23::Vec<uint8_t, {max_len}>"
+    elif t == "fixed opaque":
+        max_len = typespec["max"]
+        return f"std::array<uint8_t, {max_len}>"
+    elif t == "fixed array":
+        max_len = typespec["max"]
+        elem_type = map_type_from_typespec(typespec["elt_ty"])
+        return f"std::array<{elem_type}, {max_len}>"
+    elif t == "variable array":
+        max_len = typespec["max"]
+        elem_type = map_type_from_typespec(typespec["elt_ty"])
+        return f"x23::Vec<{elem_type}, {max_len}>"
+    elif t == "optional":
+        elem_type = map_type_from_typespec(typespec["opt_ty"])
+        return f"std::optional<{elem_type}>"
+    elif t == "void":
+        return "void"
     else:
-        raise ValueError("unimplemented typespec")
+        return t
 
 def main():
     if len(sys.argv) < 2:

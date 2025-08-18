@@ -14,7 +14,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "rpc_types.hh"
-#include "test_contracts/integration_test_contracts/manual_revert_caller/manual_revert_caller.h"
+#include "test_contracts/manual_revert_caller.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -350,7 +350,7 @@ TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
 
   // Write some state to the caller contract
   std::string_view test_str = "test_persistent_data";
-  x23::Vec<uint8_t> test_data(
+  x23::Vec<uint8_t, x23::kMaxXdrSize> test_data(
       reinterpret_cast<const uint8_t *>(test_str.data()),
       reinterpret_cast<const uint8_t *>(test_str.data() + test_str.size()));
   auto write_handler = make_new_system_call_handler(
