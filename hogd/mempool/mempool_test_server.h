@@ -38,7 +38,7 @@
 #include "hogd/ramdb/db_status.h"
 #include "nomination.hh"
 #include "sched_coord.hh"
-#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "test_contracts/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/event.h"

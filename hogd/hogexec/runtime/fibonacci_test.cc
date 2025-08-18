@@ -19,7 +19,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/test_load_wasm.h"
 #include "rpc_types.hh"
-#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "test_contracts/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 

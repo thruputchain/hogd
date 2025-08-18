@@ -12,6 +12,12 @@ target_link_libraries(
   benchmark::benchmark
 )
 
+target_include_directories(
+  fibonacci_bench
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
 set_property(TARGET fibonacci_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 add_executable(
@@ -26,6 +32,12 @@ target_link_libraries(
   exec_interface
   db_interface
   hogdb
+)
+
+target_include_directories(
+  fibonacci_wasmonly
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
 )
 
 set_property(TARGET fibonacci_wasmonly PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
