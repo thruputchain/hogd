@@ -170,6 +170,11 @@ wat2wasm_target(
 )
 
 add_dependencies(
+  runtime_test_objects
+  all_wasm_headers
+)
+
+add_dependencies(
   runtime_test
   test_invoke_wasm
   test_error_handling_wasm

@@ -14,6 +14,7 @@ dependencies = [
 [[package]]
 name = "bcs"
 version = "0.2.0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#29ecae28eff2e046a24012c45574f734ee22251b"
 dependencies = [
  "serde",
  "thiserror",
@@ -215,9 +216,10 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 [[package]]
 name = "gen"
 version = "0.1.0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#29ecae28eff2e046a24012c45574f734ee22251b"
 dependencies = [
  "darling",
- "groundhog_xdr 0.1.0",
+ "groundhog_xdr",
  "proc-macro2",
  "quote",
  "sha2",
@@ -244,17 +246,10 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 [[package]]
 name = "groundhog_xdr"
 version = "0.1.0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#29ecae28eff2e046a24012c45574f734ee22251b"
 dependencies = [
  "serde",
  "serde_arrays",
- "xdrs",
-]
-
-[[package]]
-name = "groundhog_xdr"
-version = "0.1.0"
-source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#29ecae28eff2e046a24012c45574f734ee22251b"
-dependencies = [
  "xdrs",
 ]
 
@@ -320,10 +315,11 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 [[package]]
 name = "macros"
 version = "0.1.0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#29ecae28eff2e046a24012c45574f734ee22251b"
 dependencies = [
  "darling",
  "gen",
- "groundhog_xdr 0.1.0",
+ "groundhog_xdr",
  "proc-macro2",
  "quote",
  "serde",
@@ -369,10 +365,11 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 [[package]]
 name = "native_exec"
 version = "0.1.0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#29ecae28eff2e046a24012c45574f734ee22251b"
 dependencies = [
  "bindgen",
  "cmake",
- "groundhog_xdr 0.1.0",
+ "groundhog_xdr",
  "sha2",
  "xdrs",
 ]
@@ -419,7 +416,7 @@ dependencies = [
 name = "read_only_test"
 version = "0.1.0"
 dependencies = [
- "groundhog_xdr 0.1.0 (git+ssh://git@github.com/groundhogchain/sdk_rs.git)",
+ "groundhog_xdr",
  "read_only_test",
  "sdk",
  "serde",
@@ -470,9 +467,10 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 [[package]]
 name = "sdk"
 version = "0.0.1"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#29ecae28eff2e046a24012c45574f734ee22251b"
 dependencies = [
  "bcs",
- "groundhog_xdr 0.1.0",
+ "groundhog_xdr",
  "macros",
  "native_exec",
  "serde",
@@ -494,6 +492,7 @@ dependencies = [
 [[package]]
 name = "serde_arrays"
 version = "0.2.0"
+source = "git+ssh://git@github.com/groundhogchain/sdk_rs.git#29ecae28eff2e046a24012c45574f734ee22251b"
 dependencies = [
  "serde",
 ]

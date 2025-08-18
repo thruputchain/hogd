@@ -1,4 +1,6 @@
 add_custom_target(all_wasm_contracts)
+add_custom_target(all_wasm_headers)
+add_dependencies(all_wasm_contracts all_wasm_headers)
 
 if(ENABLE_TEST_CONTRACTS)
 
@@ -85,7 +87,7 @@ function(add_contract_header target_name)
 
   # make sure that other targets can depend on the generated headers,
   # not just the wasms
-  add_dependencies(all_wasm_contracts ${target_name}_header)
+  add_dependencies(all_wasm_headers ${target_name}_header)
 endfunction()
 
 function(add_wasm_contract target_name)
