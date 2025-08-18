@@ -1,7 +1,7 @@
-#include <array>
-#include <cstdint>
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstdint>
 #include <memory>
 #include <string_view>
 
