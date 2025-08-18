@@ -106,9 +106,6 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
     }
   }
 
-  constexpr static SerializationFormat kSerializationFormat =
-      get_format_or_default();
-
   // the type of the i'th exported function,
   // (ordered by their listing in ContractTrait::kExportNames)
   template<size_t I>
@@ -145,6 +142,9 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
   }();
 
 public:
+  constexpr static SerializationFormat kSerializationFormat =
+      get_format_or_default();
+
   template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {
     constexpr auto kIndex = kExportIndex<kLookupIndex<Name>>;

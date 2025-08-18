@@ -25,6 +25,7 @@
 #include "hogd/hogdb/rpc_context.h"
 #include "hogd/hogdb/rpc_from_coord.h"
 #include "hogd/hogdb/rpc_from_exec.h"
+#include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
@@ -100,7 +101,7 @@ struct BenchmarkState {
     }
     auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
     return SystemCallHandler(signed_tx, *snapshot_cache_, proxy,
-                             ProposalModeData{});
+                             ProposalModeData{}, make_hogexec_context());
   }
 
   void advance_block()

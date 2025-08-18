@@ -10,6 +10,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
@@ -112,24 +113,25 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
 
   NativeContractBuilder builder;
 
-  builder.add(0,
-              [fib_contract_addr](SystemCallHandler &handler, uint32_t input,
-                                  uint32_t expect) -> InvokeStatus<void> {
-                fib_client_t client(fib_contract_addr);
-                auto [decoded, _gas] =
-                    client.template invoke<"fibonacci">(handler, input);
-                if (!decoded.has_value() || !decoded.value().has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                if (decoded.value().value() != expect) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                return {};
-              });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0,
+      [fib_contract_addr](SystemCallHandler &handler, uint32_t input,
+                          uint32_t expect) -> InvokeStatus<void> {
+        fib_client_t client(fib_contract_addr);
+        auto [decoded, _gas] =
+            client.template invoke<"fibonacci">(handler, input);
+        if (!decoded.has_value() || !decoded.value().has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        if (decoded.value().value() != expect) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
   auto native_contract = builder.build();
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>>
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>>
       native_contract_map;
   native_contract_map.emplace(0, std::move(native_contract));
   auto native_runtime_context =

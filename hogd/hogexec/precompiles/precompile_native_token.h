@@ -88,7 +88,7 @@ struct NativeTokenTrait {
                  amount_t (*)(),                      // get_balance
                  void (*)(ContractAddress, amount_t), // mint
                  void (*)(ContractAddress, amount_t), // burn
-                 amount_t (*)(ContractAddress)        // total_supply
+                 amount_t (*)()                       // total_supply
                  >;
 };
 

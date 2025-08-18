@@ -251,7 +251,7 @@ public:
     return *r;
   }
 
-  static auto make_native_contract(uint32_t contract_id)
+  static auto make_native_contract(int32_t contract_id)
   {
     auto contract = std::make_shared<Contract>(ContractType::kNative);
     contract->native_contract_id() = contract_id;

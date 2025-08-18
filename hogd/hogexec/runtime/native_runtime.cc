@@ -47,14 +47,6 @@ NativeContext::make_new_runtime(Contract const &contract,
                                              syscall_handler));
 }
 
-std::unique_ptr<NativeContract>
-NativeContractBuilder::build()
-{
-  assert(!built_);
-  built_ = true;
-  return std::make_unique<NativeContract>(std::move(functions_));
-}
-
 NativeRuntime::NativeRuntime(NativeContract &contract,
                              std::unique_ptr<HostCallContext> host_call_context)
   : Runtime(std::move(host_call_context)), contract_(contract)

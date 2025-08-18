@@ -96,7 +96,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -225,7 +225,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -326,7 +326,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -434,7 +434,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -589,7 +589,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -736,7 +736,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));

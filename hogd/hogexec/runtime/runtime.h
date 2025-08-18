@@ -17,6 +17,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "syscall.hh"
+#include "syscall_error.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -159,9 +160,6 @@ std::shared_ptr<RuntimeContext> make_runtime_context(RuntimeEngine engine);
 // create RuntimeContext for running wasm contracts, and initialize with
 // hogexec's imported function(s)
 std::shared_ptr<RuntimeContext> make_hogexec_wasm_context(RuntimeEngine engine);
-
-// create the type of RuntimeContext that is used within Hogexec
-std::shared_ptr<RuntimeContext> make_hogexec_context();
 
 namespace test {
 void reset_module_cache();
