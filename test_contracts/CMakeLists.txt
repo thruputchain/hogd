@@ -98,13 +98,12 @@ add_wasm_contract(fibonacci)
 add_wasm_contract(fibonacci_call)
 add_wasm_contract(cxs_roundtrip)
 add_wasm_contract(read_only_test)
-#add_wasm_contract(manual_revert_test)
+#add_wasm_contract(manual_revert_test) pending error handling
 add_wasm_contract(manual_revert_caller)
 add_wasm_contract(simple_wallet)
 
 add_wasm_build(manual_revert_test)
-#add_wasm_build(manual_revert_caller)
-#add_wasm_build(simple_wallet)
+
 
 add_xdr_rs(
 	roundtrip_rs 
