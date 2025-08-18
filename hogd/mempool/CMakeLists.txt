@@ -34,6 +34,14 @@ target_link_libraries(
   runtime
   GTest::gtest_main
 )
+
+# for the generated contract headers
+target_include_directories(
+  mempool_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
 set_property(TARGET mempool_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 gtest_discover_tests(mempool_test)
 
@@ -53,6 +61,13 @@ target_link_libraries(
   protocol
   runtime
   GTest::gtest_main
+)
+
+# for the generated contract headers
+target_include_directories(
+  scheduler_test
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
 )
 set_property(TARGET scheduler_test PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 gtest_discover_tests(scheduler_test)

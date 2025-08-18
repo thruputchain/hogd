@@ -24,7 +24,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
-#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "test_contracts/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"

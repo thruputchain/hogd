@@ -34,7 +34,7 @@
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
 #include "rpc_types.hh"
-#include "test_contracts/integration_test_contracts/fibonacci/fibonacci.h"
+#include "test_contracts/fibonacci.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
