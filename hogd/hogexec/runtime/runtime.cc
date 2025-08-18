@@ -3,13 +3,10 @@
 #include <cassert>
 #include <memory>
 #include <string_view>
-#include <unordered_map>
 
-#include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"

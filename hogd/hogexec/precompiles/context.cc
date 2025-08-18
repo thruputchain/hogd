@@ -18,7 +18,10 @@ std::shared_ptr<RuntimeContext>
 make_hogexec_precompiles_context()
 {
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-  contract_map.emplace(std::to_underlying(HogexecPrecompiledNativeContracts::kNativeContractHogToken), make_native_token_contract());
+  contract_map.emplace(
+      std::to_underlying(
+          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+      make_native_token_contract());
   return std::make_shared<NativeContext>(std::move(contract_map));
 }
 
@@ -29,8 +32,7 @@ make_hogexec_context()
       std::unordered_map<ContractType, std::shared_ptr<RuntimeContext>>{
           {ContractType::kWasmi,
            make_hogexec_wasm_context(RuntimeEngine::kWasmi)},
-          {ContractType::kNative,
-           make_hogexec_precompiles_context()},
+          {ContractType::kNative, make_hogexec_precompiles_context()},
       });
 }
 
