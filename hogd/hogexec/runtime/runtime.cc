@@ -7,11 +7,13 @@
 
 #include "contract.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hogexec/runtime/multiplexed_context.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry.h"
 #include "hogd/hogexec/runtime/wasmi_runtime.h"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -69,7 +71,9 @@ Runtime::invoke(std::string_view method_name, uint64_t gas_limit)
   const uint64_t prev_gas_limit = get_available_gas();
   set_available_gas(gas_limit);
 
+  trace("Invoking method {} with gas limit {}", method_name, gas_limit);
   auto res = invoke_internal(method_name);
+  trace("Invoke result: {}", res.has_value() ? "success" : x23::show(res.error().code()));
 
   // Interpreters that perform metering on a basic block level, instead of
   // instruction by instruction, might not actually charge for the last block.

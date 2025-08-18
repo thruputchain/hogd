@@ -15,22 +15,7 @@ def generate_header(json_file, output_file=None):
     # Replace the problematic typespec patterns
     content = re.sub(r'"typespec": "([^"]*)"', r'"typespec": "\1"', content)
     
-    try:
-        spec = json.loads(content)
-    except json.JSONDecodeError as e:
-        print(f"Error parsing JSON: {e}")
-        print("Attempting to fix malformed JSON...")
-        
-        # More aggressive fix for the typespec issue
-        content = re.sub(r'"typespec": "([^"]*)"', lambda m: f'"typespec": "{m.group(1).replace('"', '\\"')}"', content)
-        
-        try:
-            spec = json.loads(content)
-        except json.JSONDecodeError as e2:
-            print(f"Still cannot parse JSON: {e2}")
-            print("Content:")
-            print(content)
-            sys.exit(1)
+    spec = json.loads(content)
     
     interface_name = spec['interface']
     version = spec['version']
@@ -38,7 +23,9 @@ def generate_header(json_file, output_file=None):
     
     # Generate export names
     export_names = [method['name'] for method in methods]
+    entrypoints = [method['entrypoint'] for method in methods]
     export_names_str = ',\n            '.join(f'"{name}"' for name in export_names)
+    entrypoints_str = ',\n            '.join(f"{ep}ULL" for ep in entrypoints)
     
     # Generate function signatures
     function_signatures = []
@@ -79,6 +66,10 @@ struct {interface_name} {{
     // These will be sorted before being passed as indices to method id derivation.
     constexpr static auto kExportNames = std::array<std::string_view, {len(export_names)}>{{
             {export_names_str}
+        }};
+
+    constexpr static auto kEntrypoints = std::array<uint64_t, {len(entrypoints)}>{{
+            {entrypoints_str}
         }};
 
     using export_types = std::tuple<{signatures_str}>;

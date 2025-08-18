@@ -22,7 +22,7 @@
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_handler.h"
 #include "serialize_calldata.h"
-#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/format.h"
@@ -146,11 +146,19 @@ template<is_contract_trait ContractTrait> class ContractTraitMeta {
 
 public:
   template<StringLiteral Name>
-  constexpr static ContractEntrypointID entrypoint()
+  static ContractEntrypointID entrypoint()
   {
-    return sdk_entrypoint_derivation(ContractTrait::kTraitName,
+    constexpr auto kIndex = kExportIndex<kLookupIndex<Name>>;
+
+    auto entrypoint = sdk_entrypoint_derivation(ContractTrait::kTraitName,
                                      ContractTrait::kVersion,
                                      kExportIndex<kLookupIndex<Name>>);
+    if constexpr (requires {
+                    ContractTrait::kEntrypoints;
+                  }) {
+      assert(ContractTrait::kEntrypoints[kIndex] == sdk_method_id(entrypoint));
+    }
+    return entrypoint;              
   }
 
   template<StringLiteral Name, typename... Args>

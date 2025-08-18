@@ -74,7 +74,9 @@ function(add_contract_header target_name)
     COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generate_header.py
         ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
         ${CMAKE_CURRENT_BINARY_DIR}/${target_name}.h
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
+    DEPENDS 
+      ${CMAKE_CURRENT_BINARY_DIR}/${target_name}_spec.json
+      ${CMAKE_CURRENT_SOURCE_DIR}/generate_header.py
     COMMENT "Generating ${target_name}.h from spec"
   )
 
