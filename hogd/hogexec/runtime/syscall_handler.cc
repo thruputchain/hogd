@@ -71,9 +71,7 @@ SystemCallHandler::SystemCallHandler(
     execution_mode_data_(std::move(execution_mode_data)),
     snapshot_cache_(snapshot_cache)
 {
-  if (!runtime_context_) {
-    runtime_context_ = make_hogexec_context();
-  }
+  assert(runtime_context_);
 }
 
 void

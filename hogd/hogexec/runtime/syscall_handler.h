@@ -52,7 +52,7 @@ public:
                     StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
                     ExecutionModeData execution_mode_data,
-                    std::shared_ptr<RuntimeContext> runtime_context = nullptr);
+                    std::shared_ptr<RuntimeContext> runtime_context);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;

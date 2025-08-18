@@ -20,7 +20,6 @@ add_library(runtime_objects OBJECT
   item_view.cc
   native_runtime.cc
   multiplexed_context.cc
-  preset_native_token.cc
   runtime.cc
   status.cc
   storage_snapshot_cache.cc
@@ -123,6 +122,7 @@ target_include_directories(
 
 target_link_libraries(
   runtime_test
+  precompiles
   runtime
   runtime_test_util
   db_interface

@@ -2,6 +2,7 @@
 
 #include "exec_coord.hh"
 #include "ffi_enums.hh"
+#include "hogd/hogexec/precompiles/context.h"
 #include "hogd/hogexec/runtime/database_proxy.h"
 #include "hogd/hogexec/runtime/execution_mode.h"
 #include "hogd/hogexec/runtime/status.h"
@@ -63,7 +64,7 @@ ExecutorContext::propose_transaction(SignedTransaction const &signed_tx,
   assert(mode_ == ExecutionMode::kProposing);
   auto proxy = make_per_tx_db_proxy(tx_id);
   SystemCallHandler syscall_handler(signed_tx, snapshot_cache_, proxy,
-                                    ProposalModeData{});
+                                    ProposalModeData{}, make_hogexec_context());
 
   auto [async, cb] = x23::make_async<InvokeResult>();
 
@@ -116,7 +117,8 @@ ExecutorContext::validate_transaction(ProposedTransaction const &proposed_tx,
 
   SystemCallHandler syscall_handler(
       proposed_tx.signed_tx, snapshot_cache_, proxy,
-      ValidationModeData{proposed_tx.nondeterministic_proposal_data});
+      ValidationModeData{proposed_tx.nondeterministic_proposal_data},
+      make_hogexec_context());
 
   auto [async, cb] = x23::make_async<InvokeResult>();
 

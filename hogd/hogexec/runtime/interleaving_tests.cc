@@ -12,6 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/precompiles/native_contract_builder.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
@@ -47,28 +48,30 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
   StorageKeyContractData key = make_storage_key("test");
 
   // perform a set_add_nnint
-  builder.add(0,
-              [&](SystemCallHandler &handler, int64_t set_amount,
-                  int64_t add_amount) -> InvokeStatus<void> {
-                auto r = handler.set_nnint(key, set_amount, add_amount);
-                if (!r.has_value() || !r.value().has_value()) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                return {};
-              });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0,
+      [&](SystemCallHandler &handler, int64_t set_amount,
+          int64_t add_amount) -> InvokeStatus<void> {
+        auto r = handler.set_nnint(key, set_amount, add_amount);
+        if (!r.has_value() || !r.value().has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
   // reset contract state
-  builder.add(1, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
-    auto r = handler.set_nnint(key, 35, 0);
-    if (!r.has_value() || !r.value().has_value()) {
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    }
-    return {};
-  });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      1, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+        auto r = handler.set_nnint(key, 35, 0);
+        if (!r.has_value() || !r.value().has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
   auto native_contract = builder.build();
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
-  constexpr uint32_t kTestContractId = 0;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kTestContractId = 0;
   contract_map.emplace(kTestContractId, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));

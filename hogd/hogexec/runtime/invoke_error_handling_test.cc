@@ -154,7 +154,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
            }},
       });
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));

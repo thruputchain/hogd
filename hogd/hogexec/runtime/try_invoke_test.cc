@@ -17,10 +17,11 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hogexec/precompiles/native_contract_builder.h"
+#include "hogd/hogexec/precompiles/precompile_native_token.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_contract_test_framework.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
-#include "hogd/hogexec/runtime/preset_native_token.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/hogexec/runtime/syscall_entry_outer.h"
@@ -139,7 +140,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
 
              return {};
            }}});
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -212,7 +213,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
              return {};
            }},
       });
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -343,7 +344,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrors)
              return {};
            }},
       });
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_0));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -530,7 +531,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -673,7 +674,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -814,7 +815,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
              return InvokeError{InvokeErrorCode::kInvokeDeterministic};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -978,7 +979,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -1163,7 +1164,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract_db_failure));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -1395,7 +1396,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
              }
              return {};
            }}});
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -1551,7 +1552,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
              }
              return {};
            }}});
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -1722,7 +1723,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
              }
              return {};
            }}});
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -1847,7 +1848,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
              }
              return {};
            }}});
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -1996,7 +1997,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
              }
              return {};
            }}});
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -2136,7 +2137,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   // Token contract
   auto token_contract = make_native_token_contract();
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(kReceiverNativeId, std::move(receiver_contract));
   contract_map.emplace(kTokenNativeId, std::move(token_contract));
@@ -2213,34 +2214,36 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
   StorageKeyContractData key = make_storage_key("test");
 
   // perform a set_add_nnint
-  builder.add(0,
-              [&](SystemCallHandler &handler, int64_t set_amount,
-                  int64_t add_amount) -> InvokeStatus<void> {
-                int128_t set_128 = set_amount;
-                auto [r, _gas] =
-                    syscall_NonnegativeIntSetAdd_inner(handler, key, &set_128,
-                                                       add_amount);
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0,
+      [&](SystemCallHandler &handler, int64_t set_amount,
+          int64_t add_amount) -> InvokeStatus<void> {
+        int128_t set_128 = set_amount;
+        auto [r, _gas] =
+            syscall_NonnegativeIntSetAdd_inner(handler, key, &set_128,
+                                               add_amount);
 
-                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                return {};
-              });
+        if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
   // perform a add_nnint
-  builder.add(1,
-              [&](SystemCallHandler &handler,
-                  int64_t add_amount) -> InvokeStatus<void> {
-                auto [r, _gas] =
-                    syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
-                                                       add_amount);
-                if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
-                  return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-                }
-                return {};
-              });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      1,
+      [&](SystemCallHandler &handler,
+          int64_t add_amount) -> InvokeStatus<void> {
+        auto [r, _gas] =
+            syscall_NonnegativeIntSetAdd_inner(handler, key, nullptr,
+                                               add_amount);
+        if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
-  builder.add(
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       2,
       [&](SystemCallHandler &handler,
           NativeRuntime &runtime) -> InvokeStatus<void> {
@@ -2276,23 +2279,24 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
 
         return {};
       });
-  builder.add(3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
-    // reset contract state
-    int128_t set_value = 35;
-    auto [r, _gas] =
-        syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value, 0);
-    // auto r = handler.set_nnint(key, 35, 0);
-    // if (!r.has_value() || !r.value().has_value()) {
-    if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
-      return InvokeError{InvokeErrorCode::kInvokeDeterministic};
-    }
-    return {};
-  });
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      3, [&](SystemCallHandler &handler) -> InvokeStatus<void> {
+        // reset contract state
+        int128_t set_value = 35;
+        auto [r, _gas] =
+            syscall_NonnegativeIntSetAdd_inner(handler, key, &set_value, 0);
+        // auto r = handler.set_nnint(key, 35, 0);
+        // if (!r.has_value() || !r.value().has_value()) {
+        if (!r.has_value() || r.value() != SyscallErrorCode::kNone) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        return {};
+      });
 
   auto native_contract = builder.build();
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
-  constexpr uint32_t kTestContractId = 0;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  constexpr int32_t kTestContractId = 0;
   contract_map.emplace(kTestContractId, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
@@ -2448,8 +2452,8 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
   // 5. try_invoke on the first contract, on the method that returns success.
   // Should succeed.
 
-  constexpr uint32_t kErrorContractId = 0;
-  constexpr uint32_t kCallerContractId = 1;
+  constexpr int32_t kErrorContractId = 0;
+  constexpr int32_t kCallerContractId = 1;
   ContractAddress error_contract_addr = make_contract_address(10);
   ContractAddress caller_contract_addr = make_contract_address(11);
   ContractAddress missing_contract_addr = make_contract_address(12);
@@ -2553,7 +2557,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
              return {};
            }}});
 
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(kErrorContractId, std::move(error_contract));
   contract_map.emplace(kCallerContractId, std::move(caller_contract));
   auto runtime_context =
@@ -2684,7 +2688,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
              }
              return {};
            }}});
-  std::unordered_map<uint32_t, std::unique_ptr<NativeContract>> contract_map;
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(native_contract));
   auto runtime_context =
       std::make_shared<NativeContext>(std::move(contract_map));
