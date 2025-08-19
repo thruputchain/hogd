@@ -17,8 +17,7 @@ public:
   using ok_type = std::conditional_t<std::is_same_v<T, void>, std::tuple<>, T>;
   using err_type = std::conditional_t<std::is_same_v<E, void>, std::tuple<>, E>;
 
-  struct OkType
-  {
+  struct OkType {
     ok_type value_;
   };
 
