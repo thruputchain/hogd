@@ -215,7 +215,8 @@ make_native_token_contract()
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        return to_xdr(ubalance);
+        return {
+            Result<amount_t, itc_erc20::ERC20Error>::make_ok(to_xdr(ubalance))};
       });
 
   // get_balance
@@ -240,7 +241,8 @@ make_native_token_contract()
         }
         assert(balance.value().value() >= 0);
         uint128_t ubalance = balance.value().value();
-        return to_xdr(ubalance);
+        return {
+            Result<amount_t, itc_erc20::ERC20Error>::make_ok(to_xdr(ubalance))};
       });
 
   // mint
@@ -259,7 +261,8 @@ make_native_token_contract()
         if (!runtime.consume_gas(1)) {
           return InvokeError{InvokeErrorCode::kInvokeOutOfGas};
         }
-        return to_xdr(uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility});
+        return {Result<amount_t, itc_erc20::ERC20Error>::make_ok(
+            to_xdr(uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility}))};
       });
 
   return builder.build();

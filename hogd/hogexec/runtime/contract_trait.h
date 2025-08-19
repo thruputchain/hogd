@@ -208,7 +208,7 @@ public:
           if (!out.has_value()) {
             return SyscallError{SyscallErrorCode::kReturnParseError};
           }
-          return *out;
+          return return_type::make_err(*out);
         }
         // ok type
         auto out = Serializer<kSerializationFormat>::template deserialize<
@@ -216,7 +216,7 @@ public:
         if (!out.has_value()) {
           return SyscallError{SyscallErrorCode::kReturnParseError};
         }
-        return *out;
+        return return_type::make_ok(*out);
       }
       else {
 

@@ -10,6 +10,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
+#include "hogd/hogexec/runtime/contract_result.h"
 #include "hogd/hogexec/runtime/contract_trait.h"
 #include "hogd/hogexec/runtime/native_runtime.h"
 #include "hogd/hogexec/runtime/serialize_calldata.h"
@@ -162,8 +163,6 @@ public:
 
       // Now we check whether the return value is a plain value,
       // or a variant of Result<T,E>
-      constexpr static bool kIsResult =
-          requires { return_t::kIsContractResultType == true; };
 
       auto do_return = [&handler](auto const &r,
                                   bool revert_frame) -> InvokeStatus<void> {
@@ -176,7 +175,7 @@ public:
         return {};
       };
 
-      if constexpr (kIsResult) {
+      if constexpr (is_contract_result_type<return_t>) {
         auto const &r = return_value.value();
 
         if (r.is_ok()) {
