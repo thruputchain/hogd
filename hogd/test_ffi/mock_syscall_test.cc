@@ -10,10 +10,6 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hogexec/precompiles/context.h"
-<<<<<<< HEAD
-=======
-#include "hogd/hogexec/runtime/runtime.h"
-    >>>>>>> main
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/init.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
