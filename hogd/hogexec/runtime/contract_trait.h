@@ -147,14 +147,14 @@ public:
 
   template<StringLiteral Name> static ContractEntrypointID entrypoint()
   {
-    constexpr auto kIndex = kExportIndex<kLookupIndex<Name>>;
 
     auto entrypoint =
         sdk_entrypoint_derivation(ContractTrait::kTraitName,
                                   ContractTrait::kVersion,
                                   kExportIndex<kLookupIndex<Name>>);
     if constexpr (requires { ContractTrait::kEntrypoints; }) {
-      assert(ContractTrait::kEntrypoints[kIndex] == sdk_method_id(entrypoint));
+      assert(ContractTrait::kEntrypoints[kLookupIndex<Name>] ==
+             sdk_method_id(entrypoint));
     }
     return entrypoint;
   }

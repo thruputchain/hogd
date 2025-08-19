@@ -7,9 +7,9 @@ fi
 
 BUILD_DIR=$1
 
-FILE="$BUILD_DIR/test_contracts/fibonacci.wasm"
+FILE="$BUILD_DIR/built_contracts/fibonacci.wasm"
 if [ ! -f "$FILE" ]; then
-    echo "File not found: $FILE"
+    echo "File not found: $FILE" >&2
     exit 2
 fi
 
@@ -18,7 +18,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
 elif [[ "$(uname)" == "Linux" ]]; then
     SIZE=$(stat -c%s "$FILE")
 else
-    echo "Unsupported OS: $(uname)"
+    echo "Unsupported OS: $(uname)" >&2
     exit 3
 fi
 echo $SIZE

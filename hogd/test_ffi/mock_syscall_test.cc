@@ -3,16 +3,21 @@
 
 #include <cstddef>
 #include <cstring>
+#include <memory>
 #include <span>
 #include <tuple>
 #include <utility>
 
 #include "hogd/base/types.h"
+#include "hogd/hogexec/precompiles/context.h"
+#include "hogd/hogexec/runtime/runtime.h"
 #include "hogd/hogexec/runtime/status.h"
 #include "hogd/init.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
+#include "hogd/test_ffi/mock_runtime.h"
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -60,7 +65,9 @@ TEST(MockSyscallTest, IntTypeTest)
 {
   DBContext db_context;
 
-  SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);
+  SyscallHandlerContext context(std::make_shared<hogd::MockRuntimeContext>(
+                                    make_hogexec_context()),
+                                SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());
 
   uint32_t inp_1 = 100;
@@ -93,7 +100,9 @@ TEST(MockSyscallTest, SpanTest)
 {
   DBContext db_context;
 
-  SyscallHandlerContext context(nullptr, SignedTransaction{}, db_context);
+  SyscallHandlerContext context(std::make_shared<hogd::MockRuntimeContext>(
+                                    make_hogexec_context()),
+                                SignedTransaction{}, db_context);
   ASSERT_TRUE(context.push_context());
 
   uint64_t inp = 0x090A;
