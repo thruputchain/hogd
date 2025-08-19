@@ -65,7 +65,8 @@ protected:
 TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
-  using caller_client_t = ContractTraitClient<ManualRevertCaller>;
+  using caller_client_t =
+      ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
 
   // Initialize the manual_revert_caller contract with the manual_revert_test
@@ -129,7 +130,8 @@ TEST_P(ManualRevertCallerWasmTest, BasicCrossContractRevert)
 TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
-  using caller_client_t = ContractTraitClient<ManualRevertCaller>;
+  using caller_client_t =
+      ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
 
   // Initialize the manual_revert_caller contract with the manual_revert_test
@@ -194,7 +196,8 @@ TEST_P(ManualRevertCallerWasmTest, NestedCrossContractRevert)
 TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
-  using caller_client_t = ContractTraitClient<ManualRevertCaller>;
+  using caller_client_t =
+      ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
 
   // Initialize the manual_revert_caller contract with the manual_revert_test
@@ -261,7 +264,8 @@ TEST_P(ManualRevertCallerWasmTest, ErrorTypeCrossContractRevert)
 TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
-  using caller_client_t = ContractTraitClient<ManualRevertCaller>;
+  using caller_client_t =
+      ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
 
   // Initialize the manual_revert_caller contract with the manual_revert_test
@@ -326,7 +330,8 @@ TEST_P(ManualRevertCallerWasmTest, StorageCrossContractRevert)
 TEST_P(ManualRevertCallerWasmTest, StatePersistenceAndCheck)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
-  using caller_client_t = ContractTraitClient<ManualRevertCaller>;
+  using caller_client_t =
+      ContractTraitClient<manual_revert_caller::ManualRevertCaller>;
   caller_client_t caller_client(caller_contract_addr_);
 
   // Initialize the manual_revert_caller contract with the manual_revert_test

@@ -129,7 +129,7 @@ bench_fibonacci(benchmark::State &state)
 
   bs.setup_grant_storage_token(contract_addr, 1'000'000'000);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
+  using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
 
   fib_client_t fib_client(contract_addr);
 

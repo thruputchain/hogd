@@ -1,12 +1,8 @@
 #pragma once
 
-#include <array>
 #include <memory>
-#include <string_view>
-#include <tuple>
 
 #include "hogd/hogexec/runtime/native_runtime.h"
-#include "types.hh"
 
 namespace hogd {
 
@@ -66,6 +62,7 @@ pub trait ERC20 {
 // initialize()/mint()/burn().  We have those as placeholders here
 // so that method IDs are calculated correctly, and return appropriate errors
 // to match the expected behavior of other tokens.
+/*
 struct NativeTokenTrait {
   constexpr static std::string_view kTraitName = "NativeToken";
   constexpr static std::string_view kVersion = "0.1.0";
@@ -90,6 +87,6 @@ struct NativeTokenTrait {
                  void (*)(ContractAddress, amount_t), // burn
                  amount_t (*)()                       // total_supply
                  >;
-};
+}; */
 
 } // namespace hogd

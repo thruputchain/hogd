@@ -46,7 +46,8 @@ protected:
   std::shared_ptr<Contract> contract_ =
       test::load_test_contract("read_only_test.wasm");
   ContractAddress const contract_addr_ = make_contract_address(0);
-  using read_only_test_client_t = ContractTraitClient<ReadOnlyTest>;
+  using read_only_test_client_t =
+      ContractTraitClient<read_only_test::ReadOnlyTest>;
   read_only_test_client_t client_ = read_only_test_client_t(contract_addr_);
 };
 

@@ -162,7 +162,7 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
   WorkerPool exec_pool(1);
   exec_pool.adjust_workers(1);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
+  using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
   fib_client_t fib_client(ContractAddress{});
   std::optional<uint64_t> gas_consumed;
 
@@ -211,7 +211,7 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
   WorkerPool exec_pool(num_exec_threads);
   exec_pool.adjust_workers(num_exec_threads);
 
-  using fib_client_t = ContractTraitClient<Fibonacci>;
+  using fib_client_t = ContractTraitClient<fibonacci::Fibonacci>;
   fib_client_t fib_client(ContractAddress{});
 
   for (int nrep = 0; nrep < 10; nrep++) {

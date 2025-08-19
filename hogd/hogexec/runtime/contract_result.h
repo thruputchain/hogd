@@ -17,6 +17,18 @@ public:
   using ok_type = std::conditional_t<std::is_same_v<T, void>, std::tuple<>, T>;
   using err_type = E;
 
+  template<typename... Args> requires std::is_constructible_v<ok_type, Args...>
+  static Result make_ok(Args &&...args)
+  {
+    return Result(std::tuple<Args...>(ok_type(std::forward<Args>(args)...)));
+  }
+
+  template<typename... Args> requires std::is_constructible_v<err_type, Args...>
+  static Result make_err(Args &&...args)
+  {
+    return Result(std::tuple<Args...>(err_type(std::forward<Args>(args)...)));
+  }
+
   Result(ok_type const &t) : variant_(t) {}
   Result(err_type const &e) : variant_(e) {}
 

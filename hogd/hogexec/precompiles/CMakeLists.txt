@@ -16,6 +16,11 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}
 )
 
+add_dependencies(
+    precompiles_objects 
+    all_wasm_headers
+)
+
 target_link_libraries(
   precompiles
   runtime

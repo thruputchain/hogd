@@ -160,19 +160,64 @@ public:
         return return_value.error();
       }
 
-      // otherwise, return the received value
-      if constexpr (!std::is_same_v<return_t, void>) {
-        auto return_buffer =
+      // Now we check whether the return value is a plain value,
+      // or a variant of Result<T,E>
+      constexpr static bool kIsResult =
+          requires { return_t::kIsContractResultType == true; };
+
+      auto do_return = [&handler](auto const &r,
+                                  bool revert_frame) -> InvokeStatus<void> {
+        auto return_buffer = Serializer<Format>::serialize(r);
+        if (!return_buffer.has_value()) {
+          return InvokeError{InvokeErrorCode::kInvokeDeterministic};
+        }
+        handler.set_return_buffer(std::move(return_buffer.value()),
+                                  revert_frame);
+        return {};
+      };
+
+      if constexpr (kIsResult) {
+        auto const &r = return_value.value();
+
+        if (r.is_ok()) {
+          // void is so annoying
+          if constexpr (std::is_same_v<decltype(r.ok()), void>) {
+            return do_return(std::tuple<>{}, false);
+          }
+          else {
+            return do_return(r.ok(), false);
+          }
+        }
+        if constexpr (std::is_same_v<decltype(r.err()), void>) {
+          return do_return(std::tuple<>{}, true);
+        }
+        else {
+          return do_return(r.err(), true);
+        }
+      }
+      else {
+        // otherwise, return the received value
+        if constexpr (std::is_same_v<decltype(return_value.value()), void>) {
+          return do_return(std::tuple<>{}, false);
+        }
+        else {
+          return do_return(return_value.value(), false);
+        }
+        // return do_return(return_value.value(), false);
+        // if constexpr (!std::is_same_v<return_t, void>) {
+        // return do_ok_return(return_value.value());
+        /*auto return_buffer =
             Serializer<Format>::serialize(return_value.value());
         if (!return_buffer.has_value()) {
           return InvokeError{InvokeErrorCode::kInvokeDeterministic};
         }
         handler.set_return_buffer(std::move(return_buffer.value()), false);
-        return {};
-      }
-      else {
-        handler.set_return_buffer(ReturnBuffer{}, false);
-        return {};
+        return {}; */
+        //  }
+        //  else {
+        //   handler.set_return_buffer(ReturnBuffer{}, false);
+        //   return {};
+        //   }
       }
     };
 
